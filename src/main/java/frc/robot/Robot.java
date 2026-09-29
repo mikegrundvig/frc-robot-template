@@ -33,6 +33,9 @@ public class Robot extends LoggedRobot {
    */
   private final Tuning<RobotConfig> tuning;
 
+  /** Every mechanism, and the controls that drive them. */
+  private final RobotContainer container;
+
   public Robot() {
     // Every log records exactly which code produced it.
     Logger.recordMetadata("ProjectName", BuildConstants.MAVEN_NAME);
@@ -87,12 +90,24 @@ public class Robot extends LoggedRobot {
     if (Constants.currentMode != Constants.Mode.REPLAY) {
       TuningServer.startOrExplain(tuning, TuningServer.PORT, System.out::println);
     }
+
+    // The drivetrain reads its configuration from tuning, so tuned values take effect at once.
+    container =
+        new RobotContainer(
+            Constants.currentMode,
+            Scheduler.getDefault(),
+            Robots.SIM.body(),
+            () -> tuning.config().drivetrain());
   }
 
-  /** Every loop, in every mode: apply tuning requests, then run the command scheduler. */
+  /**
+   * Every loop, in every mode: apply tuning requests, read the mechanisms' sensors, then run the
+   * command scheduler.
+   */
   @Override
   public void robotPeriodic() {
     tuning.periodic(RobotState.isFMSAttached());
+    container.periodic();
     Scheduler.getDefault().run();
   }
 

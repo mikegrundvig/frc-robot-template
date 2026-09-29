@@ -8,6 +8,7 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ConfigTunerTest {
@@ -21,11 +22,13 @@ class ConfigTunerTest {
             "drive.limits.current",
             "drive.limits.maxSpeed",
             "drive.gains.kP",
-            "drive.gains.lookahead");
+            "drive.gains.lookahead",
+            "travel.min",
+            "travel.max");
     assertThat(tuner.knobs())
         .extracting(ConfigTuner.Knob::unit)
         .as("measures in their committed unit; plain numbers without one")
-        .containsExactly(Amps.symbol(), MetersPerSecond.symbol(), "", Seconds.symbol());
+        .containsExactly(Amps.symbol(), MetersPerSecond.symbol(), "", Seconds.symbol(), "", "");
   }
 
   @Test
@@ -99,6 +102,41 @@ class ConfigTunerTest {
                 "0.03" + seconds,
                 "0.05" + seconds,
                 ".lookahead(Seconds.of(0.05))"));
+  }
+
+  @Test
+  void valuesThatAreValidOnlyTogetherChangeTogether() {
+    var tuner = new ConfigTuner<>(machine()); // travel from 0 to 10
+
+    // One at a time, moving the range up fails: a minimum of 12 is above the old maximum.
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> tuner.set("travel.min", 12))
+        .withMessage("min must be below max, got 12.0 and 10.0");
+
+    tuner.set(Map.of("travel.min", 12.0, "travel.max", 20.0));
+
+    assertThat(tuner.current().travel()).isEqualTo(new Fixtures.Range(12, 20));
+  }
+
+  @Test
+  void severalValuesChangeAllOrNone() {
+    var tuner = new ConfigTuner<>(machine());
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> tuner.set(Map.of("drive.gains.kP", 18.5, "drive.limits.current", -1.0)))
+        .withMessage("current must be positive");
+
+    assertThat(tuner.current()).as("kP too is unchanged").isEqualTo(machine());
+  }
+
+  @Test
+  void noValuesChangeNothing() {
+    var tuner = new ConfigTuner<>(machine());
+    Fixtures.Machine before = tuner.current();
+
+    tuner.set(Map.of());
+
+    assertThat(tuner.current()).isSameAs(before);
   }
 
   @Test

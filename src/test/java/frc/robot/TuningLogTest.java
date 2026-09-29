@@ -14,6 +14,7 @@ class TuningLogTest {
     live.kinds = new String[] {"SET", "RESET"};
     live.paths = new String[] {"drivetrain.gains.steerKp", ""};
     live.values = new double[] {18.5, 0};
+    live.requests = new int[] {0, 1};
     LogTable table = new LogTable(0);
     TuningLog log = new TuningLog();
     log.accept(live); // AdvantageKit isn't running here, so this only takes the inputs in hand
@@ -28,5 +29,6 @@ class TuningLogTest {
     assertThat(replayed.kinds).containsExactly("SET", "RESET");
     assertThat(replayed.paths).containsExactly("drivetrain.gains.steerKp", "");
     assertThat(replayed.values).containsExactly(18.5, 0);
+    assertThat(replayed.requests).containsExactly(0, 1);
   }
 }

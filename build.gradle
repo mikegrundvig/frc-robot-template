@@ -17,8 +17,9 @@ java {
     }
 }
 
-// Deploying to the robot's Systemcore. The team number is only needed to deploy: set it with
-// "WPILib: Set Team Number", in .wpilib/wpilib_preferences.json, or with -PteamNumber=NNNN.
+// Deploying to the robot's Systemcore. The team number is only needed to deploy. Store it once with
+// ./gradlew setTeamNumber -PteamNumber=NNNN (it lives in .wpilib/wpilib_preferences.json, the file
+// GradleRIO reads), or pass -PteamNumber=NNNN to a single deploy.
 deploy {
     targets {
         systemcore(getTargetTypeClass("SystemCore")) {
@@ -100,13 +101,31 @@ tasks.withType(JavaCompile).configureEach {
 gradle.taskGraph.whenReady { graph ->
     if (graph.allTasks.any { it.name.startsWith("deploy") }) {
         if (deploy.targets.systemcore.team <= 0) {
-            throw new GradleException("Set your team number before deploying: \"WPILib: Set Team"
-            + " Number\", .wpilib/wpilib_preferences.json, or -PteamNumber=NNNN")
+            throw new GradleException(
+            "Set your team number before deploying: ./gradlew setTeamNumber -PteamNumber=NNNN")
         }
     }
 }
 tasks.matching { it.name == "deploy" }.configureEach {
     dependsOn "check"
+}
+
+// Store the team number: ./gradlew setTeamNumber -PteamNumber=NNNN
+tasks.register("setTeamNumber") {
+    group = "GradleRIO"
+    description = "Store the team number used for deploying: -PteamNumber=NNNN"
+    def prefs = file(".wpilib/wpilib_preferences.json")
+    def requested = project.findProperty("teamNumber")?.toString()
+    doLast {
+        if (requested == null || !requested.isInteger() || requested.toInteger() <= 0) {
+            throw new GradleException("Usage: ./gradlew setTeamNumber -PteamNumber=NNNN")
+        }
+        def json = prefs.exists() ? new groovy.json.JsonSlurper().parse(prefs) : [:]
+        json.teamNumber = requested.toInteger()
+        prefs.parentFile.mkdirs()
+        prefs.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(json)) + "\n"
+        println "Team number ${json.teamNumber} stored in .wpilib/wpilib_preferences.json"
+    }
 }
 
 apply from: "gradle/quality.gradle"     // formatting, static analysis, coverage, the ci task

@@ -9,3 +9,7 @@ indent_size = 2
 
 [*.gradle]
 indent_size = 4
+
+# Written by WPILib's tools and ./gradlew setTeamNumber, both of which indent with 4.
+[.wpilib/*.json]
+indent_size = 4

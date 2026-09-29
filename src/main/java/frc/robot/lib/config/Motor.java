@@ -3,8 +3,10 @@ package frc.robot.lib.config;
 import org.wpilib.math.system.DCMotor;
 
 /**
- * The motors FRC robots commonly use. {@code _FOC} is CTRE's field-oriented commutation, which
- * needs a Phoenix Pro license and gives more torque at a slightly lower top speed.
+ * The motors FRC robots commonly use. {@code _FOC}: driven with field-oriented control, which CTRE
+ * sells as part of Phoenix Pro. It draws more current at the same voltage, for more torque and
+ * power at a slightly lower top speed; torque per amp is unchanged, so it adds nothing when a
+ * current limit is what caps the motor.
  */
 public enum Motor {
   KRAKEN_X60,

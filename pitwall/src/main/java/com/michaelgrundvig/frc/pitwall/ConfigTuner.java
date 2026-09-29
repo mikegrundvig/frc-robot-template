@@ -1,4 +1,4 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;

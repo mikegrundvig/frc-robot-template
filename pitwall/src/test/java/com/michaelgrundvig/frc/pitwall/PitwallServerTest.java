@@ -1,6 +1,6 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
-import static com.michaelgrundvig.frc.tuning.Fixtures.machine;
+import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
@@ -24,14 +24,14 @@ import org.junit.jupiter.api.TestInstance;
 
 /** The REST API and the page, over real HTTP, with a thread playing the robot loop. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class TuningServerTest {
+class PitwallServerTest {
   private static final String MERGE_PATCH = "application/merge-patch+json";
 
   private final HttpClient client = HttpClient.newHttpClient();
   private final AtomicBoolean fieldConnected = new AtomicBoolean(false);
   private final Tuning<Fixtures.Machine> tuning =
       new Tuning<>("test", machine(), true, inputs -> {}, view -> {});
-  private final TuningServer server = new TuningServer(tuning, 0);
+  private final PitwallServer server = new PitwallServer(tuning, 0);
   private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
 
   @BeforeAll
@@ -60,7 +60,7 @@ class TuningServerTest {
 
     assertThat(page.statusCode()).isEqualTo(200);
     assertThat(page.headers().firstValue("Content-Type")).hasValue("text/html; charset=utf-8");
-    assertThat(page.body()).contains("<title>Robot tuning</title>");
+    assertThat(page.body()).contains("<title>Pitwall</title>");
   }
 
   @Test
@@ -197,7 +197,7 @@ class TuningServerTest {
   void aChangeTheLoopHasNotReachedIsAccepted() throws Exception {
     // A robot program whose loop never runs, as if paused in a debugger.
     var idle = new Tuning<>("idle", machine(), true, inputs -> {}, view -> {});
-    try (var paused = new TuningServer(idle, 0, Duration.ofMillis(50))) {
+    try (var paused = new PitwallServer(idle, 0, Duration.ofMillis(50))) {
       paused.start();
       var accepted =
           client.send(
@@ -218,11 +218,11 @@ class TuningServerTest {
   void startOrExplainStartsThePageAndSaysWhere() throws Exception {
     List<String> said = new ArrayList<>();
 
-    Optional<TuningServer> started = TuningServer.startOrExplain(tuning, 0, said::add);
+    Optional<PitwallServer> started = PitwallServer.startOrExplain(tuning, 0, said::add);
 
     assertThat(started).isPresent();
     try {
-      assertThat(said).singleElement().asString().startsWith("Tuning page: http://localhost:");
+      assertThat(said).singleElement().asString().startsWith("Pitwall: http://localhost:");
     } finally {
       started.get().close();
     }
@@ -233,10 +233,11 @@ class TuningServerTest {
     List<String> said = new ArrayList<>();
 
     // The test's own server already holds this port.
-    Optional<TuningServer> started = TuningServer.startOrExplain(tuning, server.port(), said::add);
+    Optional<PitwallServer> started =
+        PitwallServer.startOrExplain(tuning, server.port(), said::add);
 
     assertThat(started).isEmpty();
-    assertThat(said).singleElement().asString().startsWith("The tuning page couldn't start");
+    assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");
   }
 
   private HttpResponse<String> get(String path) throws Exception {

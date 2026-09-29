@@ -1,4 +1,4 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.MetersPerSecond;

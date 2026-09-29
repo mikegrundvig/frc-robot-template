@@ -52,11 +52,12 @@ Also built in:
   version catalog (`gradle/libs.versions.toml`) holds every build and test version in one place.
 - **Every log says which code produced it:** the robot records the git SHA, branch, build time, and
   whether anything was uncommitted (`gradle/build-info.gradle`).
-- **Live tuning from any browser:** the robot program serves a tuning page (http://localhost:5800
-  in the simulator, http://robot.local:5800 on the robot) for the values marked `@Tunable`, such
-  as gains and current limits. It comes from the tuning library in `tuning/`. Each change is checked exactly like a committed value, logged so
-  replays reproduce it, and locked out while the field is connected. Nothing is saved on the
-  robot: the page lists each change as the builder call that commits it to `Robots.java`.
+- **Live tuning from any browser:** the robot program serves its own web page, Pitwall
+  (http://localhost:5800 in the simulator, http://robot.local:5800 on the robot), where the values
+  marked `@Tunable`, such as gains and current limits, can be changed while the robot runs. Each
+  change is checked exactly like a committed value, logged so replays reproduce it, and locked out
+  while the field is connected. Nothing is saved on the robot: the page lists each change as the
+  builder call that commits it to `Robots.java`. Pitwall lives in `pitwall/`.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
   without a team number.
 - **Dependency updates** for build tools and CI actions arrive as weekly pull requests (Dependabot).
@@ -72,7 +73,7 @@ Also built in:
 | `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
 | `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |
-| `tuning/` | The tuning library: its own Gradle project and package (`com.michaelgrundvig.frc.tuning`), free of robot code, so it can become a library teams pull in. `Robot.java` wires it in, and `TuningLog.java` logs it with AdvantageKit. |
+| `pitwall/` | Pitwall, the robot program's own web page and API (live tuning so far): its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` wires it in, and `TuningLog.java` logs its tuning requests with AdvantageKit. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `docs/` | Guides, starting with [editors and commands](docs/editors.md). |

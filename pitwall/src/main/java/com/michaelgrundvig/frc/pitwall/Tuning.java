@@ -1,4 +1,4 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

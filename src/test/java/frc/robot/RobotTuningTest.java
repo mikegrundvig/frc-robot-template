@@ -2,7 +2,7 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.tuning.ConfigTuner;
+import com.michaelgrundvig.frc.pitwall.ConfigTuner;
 import org.junit.jupiter.api.Test;
 
 /** Every robot's configuration works with live tuning. */

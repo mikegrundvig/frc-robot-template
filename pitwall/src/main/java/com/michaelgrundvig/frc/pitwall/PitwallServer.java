@@ -1,4 +1,4 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,9 +29,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The tuning page and its REST API, served by the robot program itself: http://localhost:5800 in
- * the simulator, http://robot.local:5800 on the robot. Any browser works, a phone's included, and
- * so does anything else that speaks HTTP.
+ * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5800 in the
+ * simulator, http://robot.local:5800 on the robot. Any browser works, a phone's included, and so
+ * does anything else that speaks HTTP. So far it serves live tuning ({@link Tuning}):
  *
  * <ul>
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected"}}. {@code
@@ -53,7 +53,7 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>The server's threads never change the robot: they read {@link Tuning#view()} and queue
  * requests for the robot loop to apply.
  */
-public final class TuningServer implements AutoCloseable {
+public final class PitwallServer implements AutoCloseable {
   /** In the range of ports the field network leaves open for teams. */
   public static final int PORT = 5800;
 
@@ -66,14 +66,14 @@ public final class TuningServer implements AutoCloseable {
   /**
    * @param port the port to serve on; 0 picks a free one
    */
-  public TuningServer(Tuning<?> tuning, int port) {
+  public PitwallServer(Tuning<?> tuning, int port) {
     this(tuning, port, WAIT);
   }
 
-  TuningServer(Tuning<?> tuning, int port, Duration wait) {
+  PitwallServer(Tuning<?> tuning, int port, Duration wait) {
     // A few threads are plenty for one page, and daemon threads never keep the program running.
     QueuedThreadPool threads = new QueuedThreadPool(8, 2);
-    threads.setName("tuning-page");
+    threads.setName("pitwall");
     threads.setDaemon(true);
     server = new Server(threads);
     connector = new ServerConnector(server, 1, 1);
@@ -89,21 +89,21 @@ public final class TuningServer implements AutoCloseable {
    * @param say prints a line where the team sees it
    * @return the running server, or empty if it couldn't start
    */
-  public static Optional<TuningServer> startOrExplain(
+  public static Optional<PitwallServer> startOrExplain(
       Tuning<?> tuning, int port, Consumer<String> say) {
-    TuningServer server = null;
+    PitwallServer server = null;
     try {
-      server = new TuningServer(tuning, port);
+      server = new PitwallServer(tuning, port);
       server.start();
       say.accept(
-          "Tuning page: http://localhost:"
+          "Pitwall: http://localhost:"
               + server.port()
               + " in the simulator, http://robot.local:"
               + server.port()
               + " on the robot");
       return Optional.of(server);
     } catch (Exception e) {
-      say.accept("The tuning page couldn't start, so it is unavailable: " + e);
+      say.accept("Pitwall's page couldn't start, so it is unavailable: " + e);
       if (server != null) {
         stopQuietly(server);
       }
@@ -111,7 +111,7 @@ public final class TuningServer implements AutoCloseable {
     }
   }
 
-  private static void stopQuietly(TuningServer server) {
+  private static void stopQuietly(PitwallServer server) {
     try {
       server.close();
     } catch (Exception e) {
@@ -134,9 +134,9 @@ public final class TuningServer implements AutoCloseable {
   }
 
   private static String page() {
-    try (InputStream in = TuningServer.class.getResourceAsStream("index.html")) {
+    try (InputStream in = PitwallServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
-        throw new IllegalStateException("the tuning page (index.html) is missing");
+        throw new IllegalStateException("Pitwall's page (index.html) is missing");
       }
       return new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException e) {

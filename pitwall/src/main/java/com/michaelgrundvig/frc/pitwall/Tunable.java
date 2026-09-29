@@ -1,4 +1,4 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;

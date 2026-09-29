@@ -1,5 +1,5 @@
-// The tuning library: live, checked tuning of typed configuration, and the page the robot program
-// serves for it. Its own project, free of robot code (Gradle keeps it so: it can't see the robot
+// Pitwall: the robot program's own web page and API, starting with live, checked tuning of typed
+// configuration. Its own project, free of robot code (Gradle keeps it so: it can't see the robot
 // program), so it can become a library teams pull in.
 
 plugins {
@@ -46,5 +46,5 @@ tasks.named("test") {
     useJUnitPlatform()
 }
 
-ext.nullSafePackages = "com.michaelgrundvig.frc.tuning"
+ext.nullSafePackages = "com.michaelgrundvig.frc.pitwall"
 apply from: rootProject.file("gradle/quality.gradle")

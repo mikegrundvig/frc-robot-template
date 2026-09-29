@@ -83,8 +83,8 @@ class SwerveConfigTest {
   void wheelsMustFitInsideTheFrame() {
     // The frame is 28 in long and 24 in wide: a 12 in inset meets in the middle side to side,
     // and a 14 in inset meets in the middle front to back.
-    var wide = new SwerveConfig(modules(), Inches.of(12), limits(), gains());
-    var deep = new SwerveConfig(modules(), Inches.of(14), limits(), gains());
+    var wide = SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(12)).build();
+    var deep = SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(14)).build();
 
     assertRejected("wheelInset", () -> wide.moduleTranslations(body()));
     assertRejected("wheelInset", () -> deep.moduleTranslations(body()));
@@ -93,69 +93,77 @@ class SwerveConfigTest {
   @Test
   void topSpeedCannotExceedTheFreeSpeed() {
     var tooFast =
-        new SwerveConfig.Limits(
-            Amps.of(40), Amps.of(60), Amps.of(30), MetersPerSecond.of(5), RotationsPerSecond.of(1));
+        SwerveConfigLimitsBuilder.builder(limits()).maxLinearSpeed(MetersPerSecond.of(5)).build();
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new SwerveConfig(modules(), Inches.of(2.625), tooFast, gains()))
+        .isThrownBy(() -> SwerveConfigBuilder.builder(swerve()).limits(tooFast).build())
         .withMessageContaining("free speed");
   }
 
   @Test
   void rejectsImpossibleModuleValues() {
-    var drive = Motor.KRAKEN_X60;
-    var steer = Motor.KRAKEN_X44;
-
-    assertRejected(
-        "wheelRadius", () -> new SwerveConfig.Modules(drive, steer, Inches.of(0), 6.75, 12.8, 1.2));
-    assertRejected(
-        "driveGearing",
-        () -> new SwerveConfig.Modules(drive, steer, Inches.of(2), -6.75, 12.8, 1.2));
-    assertRejected(
-        "steerGearing", () -> new SwerveConfig.Modules(drive, steer, Inches.of(2), 6.75, 0, 1.2));
+    assertRejected("wheelRadius", () -> changeModules().wheelRadius(Inches.of(0)).build());
+    assertRejected("driveGearing", () -> changeModules().driveGearing(-6.75).build());
+    assertRejected("steerGearing", () -> changeModules().steerGearing(0).build());
     assertRejected(
         "wheelCoefficientOfFriction",
-        () -> new SwerveConfig.Modules(drive, steer, Inches.of(2), 6.75, 12.8, Double.NaN));
+        () -> changeModules().wheelCoefficientOfFriction(Double.NaN).build());
     assertRejected(
-        "wheelInset", () -> new SwerveConfig(modules(), Inches.of(-1), limits(), gains()));
+        "wheelInset",
+        () -> SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(-1)).build());
   }
 
   @Test
   void limitsMustBePositive() {
-    var amps = Amps.of(40);
-    var speed = MetersPerSecond.of(4);
-    var spin = RotationsPerSecond.of(1);
-
     assertRejected(
-        "driveStatorCurrent", () -> new SwerveConfig.Limits(Amps.of(0), amps, amps, speed, spin));
+        "driveStatorCurrent", () -> changeLimits().driveStatorCurrent(Amps.of(0)).build());
     assertRejected(
-        "driveSupplyCurrent", () -> new SwerveConfig.Limits(amps, Amps.of(-60), amps, speed, spin));
+        "driveSupplyCurrent", () -> changeLimits().driveSupplyCurrent(Amps.of(-60)).build());
     assertRejected(
-        "steerStatorCurrent",
-        () -> new SwerveConfig.Limits(amps, amps, Amps.of(Double.NaN), speed, spin));
+        "steerStatorCurrent", () -> changeLimits().steerStatorCurrent(Amps.of(Double.NaN)).build());
     assertRejected(
-        "maxLinearSpeed",
-        () -> new SwerveConfig.Limits(amps, amps, amps, MetersPerSecond.of(0), spin));
+        "maxLinearSpeed", () -> changeLimits().maxLinearSpeed(MetersPerSecond.of(0)).build());
     assertRejected(
         "maxAngularSpeed",
         () ->
-            new SwerveConfig.Limits(
-                amps, amps, amps, speed, RotationsPerSecond.of(Double.POSITIVE_INFINITY)));
+            changeLimits()
+                .maxAngularSpeed(RotationsPerSecond.of(Double.POSITIVE_INFINITY))
+                .build());
   }
 
   @Test
   void gainsMayBeZeroButNotNegative() {
-    var none = Seconds.of(0);
-
-    assertThatNoException().isThrownBy(() -> new SwerveConfig.Gains(0, 0, 0, 0, 0, none));
-    assertRejected("driveKs", () -> new SwerveConfig.Gains(-0.1, 0, 0, 0, 0, none));
-    assertRejected("driveKv", () -> new SwerveConfig.Gains(0, Double.NaN, 0, 0, 0, none));
-    assertRejected("driveKp", () -> new SwerveConfig.Gains(0, 0, -1, 0, 0, none));
-    assertRejected("steerKp", () -> new SwerveConfig.Gains(0, 0, 0, -1, 0, none));
-    assertRejected("steerKd", () -> new SwerveConfig.Gains(0, 0, 0, 0, -1, none));
-    assertRejected("skewLookahead", () -> new SwerveConfig.Gains(0, 0, 0, 0, 0, Seconds.of(-0.01)));
+    assertThatNoException()
+        .isThrownBy(
+            () ->
+                SwerveConfig.Gains.builder()
+                    .driveKs(0)
+                    .driveKv(0)
+                    .driveKp(0)
+                    .steerKp(0)
+                    .steerKd(0)
+                    .skewLookahead(Seconds.of(0))
+                    .build());
+    assertRejected("driveKs", () -> changeGains().driveKs(-0.1).build());
+    assertRejected("driveKv", () -> changeGains().driveKv(Double.NaN).build());
+    assertRejected("driveKp", () -> changeGains().driveKp(-1).build());
+    assertRejected("steerKp", () -> changeGains().steerKp(-1).build());
+    assertRejected("steerKd", () -> changeGains().steerKd(-1).build());
+    assertRejected("skewLookahead", () -> changeGains().skewLookahead(Seconds.of(-0.01)).build());
     assertRejected(
-        "skewLookahead", () -> new SwerveConfig.Gains(0, 0, 0, 0, 0, Seconds.of(Double.NaN)));
+        "skewLookahead", () -> changeGains().skewLookahead(Seconds.of(Double.NaN)).build());
+  }
+
+  private static SwerveConfigModulesBuilder changeModules() {
+    return SwerveConfigModulesBuilder.builder(modules());
+  }
+
+  private static SwerveConfigLimitsBuilder changeLimits() {
+    return SwerveConfigLimitsBuilder.builder(limits());
+  }
+
+  private static SwerveConfigGainsBuilder changeGains() {
+    return SwerveConfigGainsBuilder.builder(gains());
   }
 
   private static void assertRejected(String field, ThrowingCallable build) {

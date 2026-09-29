@@ -22,6 +22,7 @@ import org.wpilib.units.measure.Time;
  * @param limits current and speed limits
  * @param gains control gains
  */
+@ConfigRecord
 public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, Gains gains) {
   public SwerveConfig {
     Require.positive("wheelInset", wheelInset);
@@ -32,6 +33,11 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
               + " is faster than the drivetrain's free speed of "
               + modules.freeSpeed().toShortString());
     }
+  }
+
+  /** Starts building a swerve drivetrain, one named value at a time. */
+  public static SwerveConfigBuilder.ModulesStage builder() {
+    return SwerveConfigBuilder.builder();
   }
 
   /**
@@ -45,6 +51,7 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    * @param steerGearing motor rotations per full turn of the module
    * @param wheelCoefficientOfFriction the tread's grip on carpet: about 1.0 when worn, 1.3 new
    */
+  @ConfigRecord
   public record Modules(
       Motor driveMotor,
       Motor steerMotor,
@@ -57,6 +64,11 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       Require.positive("driveGearing", driveGearing);
       Require.positive("steerGearing", steerGearing);
       Require.positive("wheelCoefficientOfFriction", wheelCoefficientOfFriction);
+    }
+
+    /** Starts building the module hardware, one named value at a time. */
+    public static SwerveConfigModulesBuilder.DriveMotorStage builder() {
+      return SwerveConfigModulesBuilder.builder();
     }
 
     /** Top wheel speed at the motor's nominal voltage, with no load. The real robot is slower. */
@@ -85,6 +97,7 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    * @param maxLinearSpeed the fastest the driver can ask the robot to move
    * @param maxAngularSpeed the fastest the driver can ask the robot to spin
    */
+  @ConfigRecord
   public record Limits(
       Current driveStatorCurrent,
       Current driveSupplyCurrent,
@@ -97,6 +110,11 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       Require.positive("steerStatorCurrent", steerStatorCurrent);
       Require.positive("maxLinearSpeed", maxLinearSpeed);
       Require.positive("maxAngularSpeed", maxAngularSpeed);
+    }
+
+    /** Starts building the limits, one named value at a time. */
+    public static SwerveConfigLimitsBuilder.DriveStatorCurrentStage builder() {
+      return SwerveConfigLimitsBuilder.builder();
     }
   }
 
@@ -112,6 +130,7 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    * @param skewLookahead field-relative commands use the heading the robot will have this far
    *     ahead, because the wheels take time to turn while the robot spins
    */
+  @ConfigRecord
   public record Gains(
       double driveKs,
       double driveKv,
@@ -126,6 +145,11 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       Require.nonNegative("steerKp", steerKp);
       Require.nonNegative("steerKd", steerKd);
       Require.nonNegative("skewLookahead", skewLookahead);
+    }
+
+    /** Starts building the gains, one named value at a time. */
+    public static SwerveConfigGainsBuilder.DriveKsStage builder() {
+      return SwerveConfigGainsBuilder.builder();
     }
   }
 

@@ -32,7 +32,10 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 1. **File > Open**, choose the repository folder, and trust the project when asked. IntelliJ reads
    the Gradle build. The first time, Gradle downloads its JDK and the libraries, which takes a few
    minutes.
-2. There is nothing to configure. IntelliJ builds, runs, and tests through Gradle by default, so
+2. Build once (**Build > Build Project**). Some code is generated when the project compiles
+   (build information, the configuration builders, AdvantageKit's logged inputs); until the first
+   build, IntelliJ shows the references to it as errors.
+3. There is nothing to configure. IntelliJ builds, runs, and tests through Gradle by default, so
    everything behaves as it does on the command line: the checks, the generated code, and the native
    libraries the simulator and tests load. (If someone changed that: Settings > Build, Execution,
    Deployment > Build Tools > Gradle, with *Build and run using* and *Run tests using* both set to

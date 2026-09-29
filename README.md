@@ -40,7 +40,7 @@ catches a kind of bug that robot code otherwise accumulates quietly until it bit
 | **Error Prone** (error level) | Code that compiles but is certainly wrong: exceptions created and never thrown, bad equality, misused APIs. |
 | **WPILib's compiler plugin** | FRC-specific mistakes, such as a Commands v3 loop that never yields and freezes the robot. |
 | **Compiler warnings as errors** (a curated set) | Unchecked casts, raw types, switch fall-through, and other near-certain bugs. |
-| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, and static mutable state that makes behavior depend on what ran before. |
+| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, static mutable state that makes behavior depend on what ran before, and configuration written by position, where two values can swap unnoticed. |
 | **Tests** (JUnit 6, [AssertJ](https://assertj.github.io/doc/)) | Behavior regressions, including simulation tests that exercise physics. |
 | **Coverage ratchet** (JaCoCo) | New code without tests. Coverage may never drop below the floors in `coverage-floor.properties`; there is no percentage target to game. |
 | **Formatting** (google-java-format via Spotless) | Diff noise and review friction. Your local build formats automatically; CI only checks. |
@@ -61,7 +61,7 @@ Also built in:
 | Path | What |
 |---|---|
 | `src/main/java/frc/robot/` | The robot program. |
-| `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, checked when built. |
+| `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
 | `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`). |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |

@@ -2,6 +2,7 @@ package frc.robot;
 
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.ConfigRecord;
 import frc.robot.lib.config.SwerveConfig;
 import java.util.HashSet;
 import java.util.List;
@@ -18,6 +19,7 @@ import org.wpilib.math.geometry.Translation2d;
  * @param drivetrain the swerve drive
  * @param cameras the AprilTag cameras
  */
+@ConfigRecord
 public record RobotConfig(
     String name, Body body, SwerveConfig drivetrain, List<CameraConfig> cameras) {
   public RobotConfig {
@@ -31,15 +33,16 @@ public record RobotConfig(
       if (!names.add(camera.name())) {
         throw new IllegalArgumentException(name + ": two cameras are named " + camera.name());
       }
-      if (!body.contains(camera.robotToCamera().getTranslation())) {
+      if (!body.contains(camera.position())) {
         throw new IllegalArgumentException(
-            name
-                + ": camera "
-                + camera.name()
-                + " is outside the robot, at "
-                + camera.robotToCamera().getTranslation());
+            name + ": camera " + camera.name() + " is outside the robot, at " + camera.position());
       }
     }
+  }
+
+  /** Starts building a robot's configuration, one named value at a time. */
+  public static RobotConfigBuilder.NameStage builder() {
+    return RobotConfigBuilder.builder();
   }
 
   /** Where each wheel touches the floor: front left, front right, back left, back right. */

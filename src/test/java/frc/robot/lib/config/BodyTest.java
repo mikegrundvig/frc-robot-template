@@ -38,42 +38,22 @@ class BodyTest {
 
   @Test
   void everyMeasurementMustBePositive() {
-    var length = Inches.of(28);
-    var width = Inches.of(24);
-    var height = Inches.of(30);
-    var bumper = Inches.of(3.5);
-    var mass = Kilograms.of(60);
-    var inertia = KilogramSquareMeters.of(6);
-    var cg = Meters.of(0.2);
     var zero = Inches.of(0);
 
-    assertRejected("frameLength", () -> new Body(zero, width, height, bumper, mass, inertia, cg));
-    assertRejected("frameWidth", () -> new Body(length, zero, height, bumper, mass, inertia, cg));
-    assertRejected("height", () -> new Body(length, width, zero, bumper, mass, inertia, cg));
-    assertRejected(
-        "bumperThickness", () -> new Body(length, width, height, zero, mass, inertia, cg));
-    assertRejected(
-        "mass", () -> new Body(length, width, height, bumper, Kilograms.of(-1), inertia, cg));
+    assertRejected("frameLength", () -> change().frameLength(zero).build());
+    assertRejected("frameWidth", () -> change().frameWidth(zero).build());
+    assertRejected("height", () -> change().height(zero).build());
+    assertRejected("bumperThickness", () -> change().bumperThickness(zero).build());
+    assertRejected("mass", () -> change().mass(Kilograms.of(-1)).build());
     assertRejected(
         "yawMomentOfInertia",
-        () ->
-            new Body(length, width, height, bumper, mass, KilogramSquareMeters.of(Double.NaN), cg));
-    assertRejected("cgHeight", () -> new Body(length, width, height, bumper, mass, inertia, zero));
+        () -> change().yawMomentOfInertia(KilogramSquareMeters.of(Double.NaN)).build());
+    assertRejected("cgHeight", () -> change().cgHeight(zero).build());
   }
 
   @Test
   void centerOfGravityMustBeBelowTheTop() {
-    assertRejected(
-        "cgHeight",
-        () ->
-            new Body(
-                Inches.of(28),
-                Inches.of(24),
-                Inches.of(30),
-                Inches.of(3.5),
-                Kilograms.of(60),
-                KilogramSquareMeters.of(6),
-                Inches.of(30)));
+    assertRejected("cgHeight", () -> change().cgHeight(Inches.of(30)).build());
   }
 
   @Test
@@ -87,6 +67,11 @@ class BodyTest {
     assertThat(body.contains(inches(0, 15.6, 10))).as("beside the bumpers").isFalse();
     assertThat(body.contains(inches(0, 0, -0.1))).as("below the floor").isFalse();
     assertThat(body.contains(inches(0, 0, 30.1))).as("above the top").isFalse();
+  }
+
+  /** A copy of the valid body, to change one value. */
+  private static BodyBuilder change() {
+    return BodyBuilder.builder(body());
   }
 
   private static Translation3d inches(double x, double y, double z) {

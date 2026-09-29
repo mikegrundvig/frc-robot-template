@@ -22,6 +22,12 @@ final class Require {
     nonNegative(name, value, Double.toString(value));
   }
 
+  static void finite(String name, Measure<?> value) {
+    if (!Double.isFinite(value.baseUnitMagnitude())) {
+      throw new IllegalArgumentException(name + " must be a number, got " + value.toShortString());
+    }
+  }
+
   static void notBlank(String name, String value) {
     if (value.isBlank()) {
       throw new IllegalArgumentException(name + " is required");

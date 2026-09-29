@@ -2,16 +2,13 @@ package frc.robot;
 
 import static frc.robot.lib.config.ConfigFixtures.body;
 import static frc.robot.lib.config.ConfigFixtures.camera;
-import static frc.robot.lib.config.ConfigFixtures.gains;
-import static frc.robot.lib.config.ConfigFixtures.limits;
-import static frc.robot.lib.config.ConfigFixtures.modules;
 import static frc.robot.lib.config.ConfigFixtures.swerve;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.wpilib.units.Units.Inches;
 
 import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.config.SwerveConfigBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -27,7 +24,7 @@ class RobotConfigTest {
 
   @Test
   void wheelPositionsComeFromTheFrameAndDrivetrain() {
-    RobotConfig robot = new RobotConfig("test", body(), swerve(), List.of());
+    RobotConfig robot = robot(List.of());
 
     assertThat(robot.moduleTranslations()).containsExactly(swerve().moduleTranslations(body()));
   }
@@ -35,16 +32,16 @@ class RobotConfigTest {
   @Test
   void aRobotNeedsAName() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new RobotConfig(" ", body(), swerve(), List.of()))
+        .isThrownBy(() -> RobotConfigBuilder.builder(robot(List.of())).name(" ").build())
         .withMessageContaining("name");
   }
 
   @Test
   void theWheelsMustFitTheFrame() {
-    var tooDeep = new SwerveConfig(modules(), Inches.of(14), limits(), gains());
+    var tooDeep = SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(14)).build();
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new RobotConfig("test", body(), tooDeep, List.of()))
+        .isThrownBy(() -> RobotConfigBuilder.builder(robot(List.of())).drivetrain(tooDeep).build())
         .withMessageContaining("wheelInset");
   }
 
@@ -53,7 +50,7 @@ class RobotConfigTest {
     var cameras = List.of(camera("front", inches(10, 0, 8)), camera("front", inches(-10, 0, 8)));
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new RobotConfig("test", body(), swerve(), cameras))
+        .isThrownBy(() -> robot(cameras))
         .withMessageContaining("two cameras are named front");
   }
 
@@ -63,18 +60,27 @@ class RobotConfigTest {
     var cameras = List.of(camera("front", new Translation3d(10, 0, 0.2)));
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new RobotConfig("test", body(), swerve(), cameras))
+        .isThrownBy(() -> robot(cameras))
         .withMessageContaining("camera front is outside the robot");
   }
 
   @Test
   void theCameraListCannotChangeAfterwards() {
     List<CameraConfig> cameras = new ArrayList<>(List.of(camera("front", inches(10, 0, 8))));
-    RobotConfig robot = new RobotConfig("test", body(), swerve(), cameras);
+    RobotConfig robot = robot(cameras);
 
     cameras.clear();
 
     assertThat(robot.cameras()).hasSize(1);
+  }
+
+  private static RobotConfig robot(List<CameraConfig> cameras) {
+    return RobotConfig.builder()
+        .name("test")
+        .body(body())
+        .drivetrain(swerve())
+        .cameras(cameras)
+        .build();
   }
 
   private static Translation3d inches(double x, double y, double z) {

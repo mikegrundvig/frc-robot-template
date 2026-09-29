@@ -24,6 +24,7 @@ import org.wpilib.units.measure.MomentOfInertia;
  * @param cgHeight the center of gravity's height above the floor; it is taken to be centered front
  *     to back and side to side
  */
+@ConfigRecord
 public record Body(
     Distance frameLength,
     Distance frameWidth,
@@ -47,6 +48,11 @@ public record Body(
               + " must be below the robot's height of "
               + height.toShortString());
     }
+  }
+
+  /** Starts building a body, one named value at a time. */
+  public static BodyBuilder.FrameLengthStage builder() {
+    return BodyBuilder.builder();
   }
 
   /** Front to back, across the outside of the bumpers. */

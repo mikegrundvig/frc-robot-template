@@ -67,6 +67,10 @@ dependencies {
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
+    compileOnly libs.recordbuilder.core
+    testCompileOnly libs.recordbuilder.core
+    annotationProcessor libs.recordbuilder.processor
+
     // Static analysis (gradle/quality.gradle).
     errorprone libs.errorprone.core
     errorprone libs.nullaway

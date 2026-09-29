@@ -97,7 +97,8 @@ class SwerveConfigTest {
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> SwerveConfigBuilder.builder(swerve()).limits(tooFast).build())
-        .withMessageContaining("free speed");
+        .withMessage(
+            "maxLinearSpeed 5 m/s is faster than the drivetrain's free speed of 4.729 m/s");
   }
 
   @Test

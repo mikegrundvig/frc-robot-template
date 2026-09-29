@@ -29,9 +29,9 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
     if (limits.maxLinearSpeed().gt(modules.freeSpeed())) {
       throw new IllegalArgumentException(
           "maxLinearSpeed "
-              + limits.maxLinearSpeed().toShortString()
+              + Require.shown(limits.maxLinearSpeed())
               + " is faster than the drivetrain's free speed of "
-              + modules.freeSpeed().toShortString());
+              + Require.shown(modules.freeSpeed()));
     }
   }
 
@@ -169,7 +169,7 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
     if (x <= 0 || y <= 0) {
       throw new IllegalArgumentException(
           "wheelInset "
-              + wheelInset.toShortString()
+              + Require.shown(wheelInset)
               + " puts the wheels at or past the center of the frame");
     }
     return new Translation2d[] {

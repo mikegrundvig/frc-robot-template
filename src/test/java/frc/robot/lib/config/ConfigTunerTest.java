@@ -57,6 +57,7 @@ class ConfigTunerTest {
     assertThat(tuner.current().modules()).as("the rest is untouched").isEqualTo(swerve().modules());
     assertThat(tuner.committed()).isEqualTo(swerve());
     assertThat(tuner.value("gains.steerKp")).isEqualTo(18.5);
+    assertThat(tuner.committedValue("gains.steerKp")).isEqualTo(16.0);
   }
 
   @Test

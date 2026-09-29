@@ -1,0 +1,184 @@
+<!doctype html>
+<!-- The tuning page, served by the robot program (frc.robot.tuning.TuningServer). Plain HTML and
+     JavaScript on purpose: nothing to build, nothing to install. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot tuning</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --panel: #f5f6f8; --fg: #1b1c1e; --muted: #5f6368; --line: #dcdfe3;
+    --accent: #0b62c4; --accent-fg: #ffffff; --changed: #fff3cd; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141517; --panel: #1e2023; --fg: #e8eaed; --muted: #9aa0a6; --line: #34373b;
+      --accent: #8ab4f8; --accent-fg: #0b1a2e; --changed: #3b3217; --bad: #f28b82;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  h1 { margin: 0; font-size: 20px; }
+  h2 { margin: 28px 0 8px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+  .controls { display: flex; gap: 10px; align-items: center; }
+  .banner { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--changed); }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { font-size: 13px; font-weight: 600; color: var(--muted); }
+  td.number { font-variant-numeric: tabular-nums; }
+  tr.group td { padding-top: 16px; font-weight: 600; border-bottom: none; }
+  tr.changed td { background: var(--changed); }
+  input { width: 8.5em; padding: 4px 6px; font: inherit; font-variant-numeric: tabular-nums;
+          color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  input:disabled { opacity: 0.6; }
+  .refused { display: block; margin-top: 2px; font-size: 13px; color: var(--bad); }
+  button { padding: 6px 12px; font: inherit; color: var(--fg); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+  button.primary { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  pre { margin: 0; padding: 12px; overflow-x: auto; background: var(--panel); border-radius: 8px;
+        font: 13px/1.5 ui-monospace, monospace; white-space: pre; }
+  @media (max-width: 560px) { .committed { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Tuning <span id="robot" class="muted"></span></h1>
+    <div class="controls">
+      <span id="status" class="muted">Connecting to the robot…</span>
+      <button id="toggle" hidden></button>
+    </div>
+  </header>
+  <div id="banner" class="banner" hidden>The field system is connected, so tuning is locked off.</div>
+
+  <table>
+    <thead>
+      <tr><th>Value</th><th class="committed">Committed</th><th>Now</th><th>Unit</th></tr>
+    </thead>
+    <tbody id="values"></tbody>
+  </table>
+
+  <h2>Changes
+    <button id="copy" disabled>Copy</button>
+    <button id="reset" disabled>Reset all</button>
+  </h2>
+  <p id="none" class="muted">Everything matches the committed configuration.</p>
+  <pre id="changes" hidden></pre>
+  <p class="muted">Nothing is saved on the robot, and a restart returns every value to its committed
+    one. To keep a change, write its builder call into <code>Robots.java</code> and commit it.</p>
+</main>
+
+<script>
+  const element = (id) => document.getElementById(id);
+  const rows = new Map(); // path -> {row, committed, input, refused}
+  let latest = null;
+
+  function shown(number) {
+    return Number.isInteger(number) ? number.toFixed(1) : String(Number(number.toPrecision(6)));
+  }
+
+  async function send(path, fields) {
+    await fetch(path, { method: "POST", body: new URLSearchParams(fields) });
+    poll();
+  }
+
+  function build(values) {
+    let group = null;
+    for (const value of values) {
+      const cut = value.path.lastIndexOf(".");
+      const heading = value.path.slice(0, cut);
+      if (heading !== group) {
+        group = heading;
+        const row = element("values").insertRow();
+        row.className = "group";
+        const cell = row.insertCell();
+        cell.colSpan = 4;
+        cell.textContent = heading.replaceAll(".", " › ");
+      }
+      const row = element("values").insertRow();
+      row.insertCell().textContent = value.path.slice(cut + 1);
+      const committed = row.insertCell();
+      committed.className = "committed number";
+      const input = document.createElement("input");
+      input.inputMode = "decimal";
+      input.setAttribute("aria-label", value.path);
+      input.addEventListener("keydown", (event) => { if (event.key === "Enter") input.blur(); });
+      input.addEventListener("change", () => send("/api/set", { path: value.path, value: input.value }));
+      const refused = document.createElement("span");
+      refused.className = "refused";
+      const now = row.insertCell();
+      now.append(input, refused);
+      row.insertCell().textContent = value.unit;
+      rows.set(value.path, { row, committed, input, refused });
+    }
+  }
+
+  function render(state) {
+    if (rows.size === 0) build(state.values);
+    element("robot").textContent = "· " + state.robot;
+    element("status").textContent = state.enabled ? "Tuning is on" : "Tuning is off";
+    const toggle = element("toggle");
+    toggle.hidden = false;
+    toggle.disabled = state.fieldConnected;
+    toggle.textContent = state.enabled ? "Switch off" : "Switch on";
+    toggle.className = state.enabled ? "" : "primary";
+    element("banner").hidden = !state.fieldConnected;
+
+    for (const value of state.values) {
+      const row = rows.get(value.path);
+      row.committed.textContent = shown(value.committed);
+      row.row.classList.toggle("changed", value.current !== value.committed);
+      row.input.disabled = !state.enabled;
+      if (document.activeElement !== row.input) row.input.value = shown(value.current);
+      row.refused.textContent = value.refused ? "Refused: " + value.refused : "";
+    }
+
+    const lines = state.changes.map(
+        (c) => `${c.path}: ${c.committed} -> ${c.tuned}   ${c.builderCall}`);
+    element("changes").textContent = lines.join("\n");
+    element("changes").hidden = lines.length === 0;
+    element("none").hidden = lines.length > 0;
+    element("copy").disabled = lines.length === 0;
+    element("reset").disabled = lines.length === 0 || !state.enabled;
+    latest = lines;
+  }
+
+  async function poll() {
+    try {
+      const response = await fetch("/api/state", { cache: "no-store" });
+      render(await response.json());
+    } catch (error) {
+      element("status").textContent = "The robot isn't answering; still trying…";
+    }
+  }
+
+  element("toggle").addEventListener("click", () =>
+      send("/api/enabled", { on: element("toggle").textContent === "Switch on" }));
+  element("reset").addEventListener("click", () => send("/api/reset", {}));
+  element("copy").addEventListener("click", async () => {
+    const text = latest.join("\n");
+    try {
+      await navigator.clipboard.writeText(text); // needs a secure page, such as localhost
+    } catch (error) {
+      const area = document.createElement("textarea"); // the fallback for http://robot.local
+      area.value = text;
+      document.body.append(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    element("copy").textContent = "Copied";
+    setTimeout(() => (element("copy").textContent = "Copy"), 1500);
+  });
+
+  poll();
+  setInterval(poll, 500);
+</script>
+</body>
+</html>

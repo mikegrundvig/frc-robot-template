@@ -102,6 +102,15 @@ public final class ConfigTuner<T extends Record> {
   }
 
   /**
+   * The committed value at a path, in its knob's unit.
+   *
+   * @throws IllegalArgumentException if no tunable value has this path
+   */
+  public double committedValue(String path) {
+    return number(slot(path), committed);
+  }
+
+  /**
    * Tunes one value, in its knob's unit.
    *
    * @throws IllegalArgumentException if the records reject the value, which leaves the

@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Caches Gradle, dependencies, and the JDK 25 toolchain Gradle downloads on first use.
       - uses: gradle/actions/setup-gradle@v4
       - name: Formatting, static analysis, tests, coverage

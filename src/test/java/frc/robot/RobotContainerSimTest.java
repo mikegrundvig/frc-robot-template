@@ -2,29 +2,27 @@ package frc.robot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import frc.robot.lib.swerve.SwerveSim;
-import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.simulation.GamepadSim;
-import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.MockTelemetryBackend;
 import org.wpilib.telemetry.TelemetryRegistry;
 
 /**
- * The whole robot, end to end, as the simulator runs it: the real composition root, the real
- * controller bindings, a simulated gamepad, and the physics. If this passes, a driver in the
+ * The whole robot as the simulator runs it: the real composition root, the real controller
+ * bindings, a simulated gamepad, and the simulated drivetrain. If this passes, a driver in the
  * simulator GUI gets the same behavior.
  */
 class RobotContainerSimTest {
   private static final int DRIVER_PORT = 0;
+  private static final Pose2d START = new Pose2d(3, 3, Rotation2d.ZERO);
 
   private Scheduler scheduler;
   private RobotContainer container;
@@ -59,7 +57,7 @@ class RobotContainerSimTest {
     return new RobotContainer(mode, scheduler, Robots.SIM.body(), Robots.SIM::drivetrain);
   }
 
-  /** One robot loop, exactly as Robot.robotPeriodic runs it. */
+  /** Robot loops, exactly as Robot.robotPeriodic runs them. */
   private void tick(int loops) {
     for (int i = 0; i < loops; i++) {
       SimTestSupport.stepLoop();
@@ -68,68 +66,53 @@ class RobotContainerSimTest {
     }
   }
 
-  private SwerveSim sim() {
-    return Objects.requireNonNull(container.swerveSim(), "physics while simulating");
+  private void pushLeftStickForward() {
+    SimTestSupport.setEnabled(true);
+    driver.setLeftY(-1.0); // gamepad Y is negative when pushed forward
+    driver.notifyNewData();
   }
 
   @Test
-  void idlesWhileDisabledOnAFullBattery() {
+  void holdsStillWhileDisabled() {
     tick(SimTestSupport.loops(1.0));
 
-    assertEquals(3.0, sim().truePose().getX(), 1e-6, "robot did not move");
-    assertEquals(sim().batteryVolts(), RobotController.getBatteryVoltage(), 1e-6);
-    assertTrue(RobotController.getBatteryVoltage() > 12.4, "only the base load on the battery");
+    assertEquals(START, container.drive().getPose());
     assertFalse(container.isNoHardwareAlertActive(), "the simulator is the drivetrain's hardware");
   }
 
   @Test
-  void driverLeftStickDrivesForwardAndWpilibSeesTheBatterySag() {
-    SimTestSupport.setEnabled(true);
-    driver.setLeftY(-1.0); // gamepad Y is negative when pushed forward
-    driver.notifyNewData();
+  void driverLeftStickDrivesForward() {
+    pushLeftStickForward();
 
-    double lowestReported = Double.POSITIVE_INFINITY;
-    for (int i = 0; i < SimTestSupport.loops(1.5); i++) {
-      tick(1);
-      lowestReported = Math.min(lowestReported, RobotController.getBatteryVoltage());
-    }
+    tick(SimTestSupport.loops(1.5));
 
-    assertTrue(sim().truePose().getX() > 5.0, "drove forward: now at x=" + sim().truePose().getX());
-    assertEquals(3.0, sim().truePose().getY(), 0.05, "straight ahead");
-    assertEquals(sim().batteryVolts(), RobotController.getBatteryVoltage(), 1e-6);
-    assertTrue(lowestReported < 11.5, "WPILib saw the sag while accelerating: " + lowestReported);
+    Pose2d pose = container.drive().getPose();
+    assertTrue(pose.getX() > 5.0, "drove forward: now at x=" + pose.getX());
+    assertEquals(3.0, pose.getY(), 0.05, "straight ahead");
   }
 
   @Test
-  void fieldViewShowsWhereOdometryAndPhysicsPutTheRobot() {
-    SimTestSupport.setEnabled(true);
-    driver.setLeftY(-1.0);
-    driver.notifyNewData();
+  void fieldViewShowsTheRobotWhereOdometryPutsIt() {
+    pushLeftStickForward();
+
     tick(SimTestSupport.loops(1.0));
 
-    Pose2d[] robot = fieldPoses("Robot");
-    Pose2d[] truePose = fieldPoses("TruePose");
-    assertEquals(container.drive().getPose(), robot[0]);
-    assertEquals(sim().truePose(), truePose[0]);
-    assertTrue(robot[0].getX() > 3.5, "the field shows the robot moving: x=" + robot[0].getX());
-  }
-
-  /** The poses of one object in the field view, as the simulator GUI receives them. */
-  private Pose2d[] fieldPoses(String object) {
-    return (Pose2d[])
-        telemetry
-            .getLastValue("/Field/" + object, MockTelemetryBackend.LogStructArrayValue.class)
-            .value();
+    Pose2d[] shown =
+        (Pose2d[])
+            telemetry
+                .getLastValue("/Field/Robot", MockTelemetryBackend.LogStructArrayValue.class)
+                .value();
+    assertEquals(container.drive().getPose(), shown[0]);
   }
 
   @Test
-  void replayRunsWithoutTheSimulatorOnlyParts() {
+  void replayRunsWithoutTheSimulator() {
     container.close();
     container = containerFor(Constants.Mode.REPLAY);
 
     tick(5);
 
-    assertNull(container.swerveSim(), "no physics in replay");
+    assertEquals(new Pose2d(), container.drive().getPose(), "nothing to replay, nothing moves");
     assertFalse(container.isNoHardwareAlertActive(), "replay's hardware is the log");
   }
 
@@ -141,13 +124,10 @@ class RobotContainerSimTest {
   void aRealRobotWithoutHardwareCodeHoldsStillAndSaysSo() {
     container.close();
     container = containerFor(Constants.Mode.REAL);
-    SimTestSupport.setEnabled(true);
-    driver.setLeftY(-1.0);
-    driver.notifyNewData();
+    pushLeftStickForward();
 
     tick(SimTestSupport.loops(0.5));
 
-    assertNull(container.swerveSim(), "no physics on a robot");
     assertTrue(container.isNoHardwareAlertActive());
     assertEquals(new Pose2d(), container.drive().getPose(), "nothing moved");
   }

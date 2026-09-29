@@ -6,16 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import frc.robot.Robots;
 import frc.robot.SimTestSupport;
-import frc.robot.lib.swerve.SwerveSim;
-import frc.robot.simlab.Maneuver;
-import frc.robot.simlab.Maneuvers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 
-/** Does the drivetrain go where the driver points it, and does it know where it went? */
+/** Does the drivetrain go where the driver points it? */
 class DriveBasicsTest {
   private DriveSimHarness harness;
 
@@ -27,7 +24,7 @@ class DriveBasicsTest {
   @BeforeEach
   void setUp() {
     SimTestSupport.pauseTimeAndDisable();
-    harness = new DriveSimHarness(Robots.SIM, SwerveSim.Battery.TYPICAL);
+    harness = new DriveSimHarness(Robots.SIM);
   }
 
   @AfterEach
@@ -37,20 +34,35 @@ class DriveBasicsTest {
   }
 
   @Test
-  void drivesStraightAndOdometryAgreesWithTruth() {
-    var report =
-        harness.run(new Maneuver("straight-half-stick", 2.0, t -> new double[] {0.5, 0.0, 0.0}));
+  void drivesStraightForward() {
+    harness.drive(2.0, 1.0, 0.0, 0.0);
 
-    Pose2d truth = harness.sim.truePose();
-    assertTrue(truth.getX() > 1.5, "moved " + truth.getX() + " m forward");
-    assertEquals(0.0, truth.getY(), 0.02, "no sideways drift");
-    assertEquals(0.0, truth.getRotation().getDegrees(), 0.5, "no turning");
-    assertEquals(0.0, report.odometryErrorMeters(), 0.02, "no slip, so odometry is accurate");
-    assertEquals(
-        harness.sim.trueFieldVelocities().vx,
-        harness.drive.getRobotRelativeVelocities().vx,
-        0.02,
-        "the wheels measure the robot's speed");
+    Pose2d pose = harness.drive.getPose();
+    assertTrue(pose.getX() > 5.0, "moved " + pose.getX() + " m forward");
+    assertEquals(0.0, pose.getY(), 0.02, "no sideways drift");
+    assertEquals(0.0, pose.getRotation().getDegrees(), 0.5, "no turning");
+    double topSpeed = Robots.SIM.drivetrain().limits().maxLinearSpeed().baseUnitMagnitude();
+    assertEquals(topSpeed, harness.drive.getRobotRelativeVelocities().vx, 0.05, "full stick");
+  }
+
+  @Test
+  void spinsInPlace() {
+    harness.drive(1.0, 0.0, 0.0, 1.0);
+
+    assertEquals(0.0, harness.drive.getPose().getTranslation().getNorm(), 0.05, "stays put");
+    assertTrue(harness.drive.getRobotRelativeVelocities().omega > 5.0, "turning at full rate");
+  }
+
+  @Test
+  void drivesStraightDownfieldWhileSpinning() {
+    // Field-relative driving: the robot spins, but its path should still run along +x. Broken
+    // field-relative driving spirals off by meters. The simulated steering updates once per loop,
+    // slower than real motor controllers, so allow some drift.
+    harness.drive(3.0, 0.7, 0.0, 0.5);
+
+    Pose2d pose = harness.drive.getPose();
+    assertTrue(pose.getX() > 2.0, "made progress downfield: " + pose.getX() + " m");
+    assertEquals(0.0, pose.getY(), 0.25, "path stayed straight");
   }
 
   @Test
@@ -67,34 +79,5 @@ class DriveBasicsTest {
                 Robots.SIM.body(),
                 Robots.SIM::drivetrain,
                 harness.scheduler));
-  }
-
-  @Test
-  void spinsInPlace() {
-    harness.run(new Maneuver("spin-in-place", 2.0, t -> new double[] {0.0, 0.0, 1.0}));
-
-    Pose2d truth = harness.sim.truePose();
-    assertEquals(0.0, truth.getTranslation().getNorm(), 0.05, "stays on the spot");
-    assertTrue(harness.sim.trueFieldVelocities().omega > 5.0, "turning at full rate");
-  }
-
-  @Test
-  void drivesStraightDownfieldWhileSpinning() {
-    // Field-relative driving: the robot spins, but its path should still run straight along +x.
-    harness.run(Maneuvers.TRANSLATE_WHILE_SPINNING);
-
-    Pose2d truth = harness.sim.truePose();
-    assertTrue(truth.getX() > 2.0, "made progress downfield: " + truth.getX() + " m");
-    assertEquals(0.0, truth.getY(), 0.05, "path stayed straight (skew compensation)");
-  }
-
-  @Test
-  void keepsDrivingOnThreeModulesWhenOneDisconnects() {
-    harness.sim.setModuleConnected(0, false);
-
-    harness.run(new Maneuver("front-left-module-lost", 2.0, t -> new double[] {0.5, 0.0, 0.0}));
-
-    assertTrue(harness.drive.isModuleDisconnectedAlertActive(0), "driver is told");
-    assertTrue(harness.sim.truePose().getX() > 1.0, "and can still drive");
   }
 }

@@ -11,7 +11,8 @@ WPILib and AdvantageKit guide apply unchanged. Use it by clicking **Use this tem
 your robot.
 
 > **Status:** early. It tracks WPILib's 2027 prereleases (currently 2027.0.0-alpha-7). The swerve
-> drivetrain drives in the simulator; code for real motor controllers is still to come.
+> drivetrain drives in the simulator; code for real motor controllers is still to come. Parts that
+> only stand in until a library ships for 2027 are listed in [docs/stand-ins.md](docs/stand-ins.md).
 
 ## Quick start
 
@@ -51,12 +52,6 @@ Also built in:
   version catalog (`gradle/libs.versions.toml`) holds every build and test version in one place.
 - **Every log says which code produced it:** the robot records the git SHA, branch, build time, and
   whether anything was uncommitted (`gradle/build-info.gradle`).
-- **A simulation that answers real questions:** the swerve physics models current limits, battery
-  sag, and traction that depends on each wheel's load, so a test can ask whether a maneuver browns
-  out the robot or slips its wheels, not just whether the code runs. The drivetrain's test plans
-  hold driver maneuvers to pass/fail limits, and one checks that the drive current limit is the
-  highest that holds up across worn tread, a tired battery, and a heavier, taller robot. The
-  physics constants are estimates until checked against a real robot's logs.
 - **Live tuning from any browser:** the robot program serves a tuning page (http://localhost:5800
   in the simulator, http://robot.local:5800 on the robot) for the values marked `@Tunable`, such
   as gains and current limits. It comes from the tuning library in `tuning/`. Each change is checked exactly like a committed value, logged so
@@ -74,10 +69,9 @@ Also built in:
 | `src/main/java/frc/robot/` | The robot program. |
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
 | `src/main/java/frc/robot/RobotContainer.java` | Builds each mechanism with the hardware for the mode (real, simulated, or replayed from a log) and binds the controls to commands. |
-| `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. |
-| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`) and the swerve physics (`lib/swerve`). |
-| `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and the drivetrain's test plans (`subsystems/drive`). |
-| `src/test/java/frc/robot/simlab/` | Tools for simulation tests: scripted driver maneuvers, the robustness scenarios, parallel runs, and a log of each run for AdvantageScope (`build/maneuvers/`). |
+| `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
+| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`). |
+| `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |
 | `tuning/` | The tuning library: its own Gradle project and package (`com.michaelgrundvig.frc.tuning`), free of robot code, so it can become a library teams pull in. `Robot.java` wires it in, and `TuningLog.java` logs it with AdvantageKit. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
@@ -86,6 +80,6 @@ Also built in:
 
 ## License
 
-[BSD 3-Clause](LICENSE). Parts of `Main.java`, `Robot.java`, and `Constants.java` derive from
+[BSD 3-Clause](LICENSE). Parts of `Main.java`, `Robot.java`, `Constants.java`, and `ModuleIOSim.java` derive from
 AdvantageKit's templates (BSD 3-Clause, Littleton Robotics); WPILib is BSD 3-Clause (FIRST and other
 WPILib contributors). Their licenses are in [`licenses/`](licenses/).

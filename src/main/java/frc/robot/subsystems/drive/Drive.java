@@ -4,6 +4,7 @@ import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import frc.robot.Constants;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import java.util.function.DoubleSupplier;
@@ -32,8 +33,7 @@ import org.wpilib.util.Alert;
  * <p>The drivetrain's configuration is read every loop, so values tuned while the robot runs take
  * effect at once: new gains and current limits go to the motor controllers the loop they change.
  *
- * <p>Nothing here reads global robot state, so independent instances can run side by side (the
- * simulation studies run many in parallel).
+ * <p>A stand-in until AdvantageKit's 2027 swerve template ships: see docs/stand-ins.md.
  */
 public class Drive implements Mechanism, AutoCloseable {
   private static final double LOOP_PERIOD_S = 0.02;
@@ -61,7 +61,7 @@ public class Drive implements Mechanism, AutoCloseable {
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
 
   /**
-   * @param name alert group name; "Drive" on the robot, unique per instance in parallel simulations
+   * @param name alert group name: "Drive" on the robot, another name for a second instance
    * @param body the robot's frame, which places the wheels
    * @param config the drivetrain's configuration, read every loop so tuned values take effect
    */
@@ -142,7 +142,8 @@ public class Drive implements Mechanism, AutoCloseable {
     lastPositions = positions;
     odometry.update(heading, positions);
 
-    gyroDisconnectedAlert.set(!gyroInputs.connected);
+    // Simulation has no gyro: its wheels never slip, so they give the heading exactly.
+    gyroDisconnectedAlert.set(!gyroInputs.connected && Constants.currentMode != Constants.Mode.SIM);
     for (int i = 0; i < 4; i++) {
       moduleDisconnectedAlerts[i].set(!modules[i].isConnected());
     }
@@ -188,16 +189,6 @@ public class Drive implements Mechanism, AutoCloseable {
   /** Measured robot-relative velocities. */
   public ChassisVelocities getRobotRelativeVelocities() {
     return kinematics.toChassisVelocities(moduleVelocities());
-  }
-
-  /** Measured module velocities (speed and angle), as the modules report them. */
-  public SwerveModuleVelocity[] measuredModuleVelocities() {
-    return moduleVelocities();
-  }
-
-  /** Whether the disconnected-module alert for module {@code index} is active. */
-  boolean isModuleDisconnectedAlertActive(int index) {
-    return moduleDisconnectedAlerts[index].get();
   }
 
   private SwerveModulePosition[] modulePositions() {

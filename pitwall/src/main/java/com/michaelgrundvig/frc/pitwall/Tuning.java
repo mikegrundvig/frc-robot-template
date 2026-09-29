@@ -105,6 +105,15 @@ public final class Tuning<T extends Record> {
     return tuner.current();
   }
 
+  /**
+   * A tunable value as it is now, in its unit. Read it in the robot loop.
+   *
+   * @throws IllegalArgumentException if no tunable value has this path
+   */
+  public double value(String path) {
+    return tuner.value(path);
+  }
+
   /** The state of tuning. Safe to call from any thread. */
   public View view() {
     return view;

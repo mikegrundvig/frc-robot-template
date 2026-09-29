@@ -61,6 +61,7 @@ Also built in:
 | Path | What |
 |---|---|
 | `src/main/java/frc/robot/` | The robot program. |
+| `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, checked when built. |
 | `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`). |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |

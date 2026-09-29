@@ -91,6 +91,8 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    * and brownouts (more current than the battery can give). Speed limits cap what the driver can
    * ask for.
    *
+   * <p>All are {@link Tunable}: dial them in on the robot, then commit what works.
+   *
    * @param driveStatorCurrent the most current through each drive motor, which caps its torque
    * @param driveSupplyCurrent the most current each drive motor draws from the battery
    * @param steerStatorCurrent the most current through each steer motor
@@ -99,11 +101,11 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    */
   @ConfigRecord
   public record Limits(
-      Current driveStatorCurrent,
-      Current driveSupplyCurrent,
-      Current steerStatorCurrent,
-      LinearVelocity maxLinearSpeed,
-      AngularVelocity maxAngularSpeed) {
+      @Tunable Current driveStatorCurrent,
+      @Tunable Current driveSupplyCurrent,
+      @Tunable Current steerStatorCurrent,
+      @Tunable LinearVelocity maxLinearSpeed,
+      @Tunable AngularVelocity maxAngularSpeed) {
     public Limits {
       Require.positive("driveStatorCurrent", driveStatorCurrent);
       Require.positive("driveSupplyCurrent", driveSupplyCurrent);
@@ -122,6 +124,8 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    * Drive: velocity control on the motor controller, with feedforward from robot code. Steer:
    * position control on the motor controller.
    *
+   * <p>All are {@link Tunable}: dial them in on the robot, then commit what works.
+   *
    * @param driveKs volts to overcome static friction
    * @param driveKv volts per meter per second
    * @param driveKp volts per meter per second of error
@@ -132,12 +136,12 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    */
   @ConfigRecord
   public record Gains(
-      double driveKs,
-      double driveKv,
-      double driveKp,
-      double steerKp,
-      double steerKd,
-      Time skewLookahead) {
+      @Tunable double driveKs,
+      @Tunable double driveKv,
+      @Tunable double driveKp,
+      @Tunable double steerKp,
+      @Tunable double steerKd,
+      @Tunable Time skewLookahead) {
     public Gains {
       Require.nonNegative("driveKs", driveKs);
       Require.nonNegative("driveKv", driveKv);

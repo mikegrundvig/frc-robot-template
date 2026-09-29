@@ -51,7 +51,8 @@ public final class Robots {
 
   /**
    * SDS MK4i modules with L2 gearing (6.75:1 drive, 150/7:1 steer) and 4 in wheels, driven by
-   * Kraken X60s without FOC (FOC needs a Phoenix Pro license). Free speed: 4.73 m/s.
+   * Kraken X60s without FOC: it needs a Phoenix Pro license, and under this drivetrain's 30 A limit
+   * it adds nothing. Free speed: 4.73 m/s.
    */
   private static final SwerveConfig.Modules MODULES =
       new SwerveConfig.Modules(

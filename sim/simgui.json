@@ -1,0 +1,14 @@
+{
+  "NTProvider": {
+    "types": {
+      "/Telemetry/Field": "Field2d"
+    },
+    "windows": {
+      "/Telemetry/Field": {
+        "window": {
+          "visible": true
+        }
+      }
+    }
+  }
+}

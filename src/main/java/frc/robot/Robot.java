@@ -8,6 +8,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.PitwallServer;
+import com.michaelgrundvig.frc.pitwall.Status;
 import com.michaelgrundvig.frc.pitwall.Tuning;
 import java.util.List;
 import org.littletonrobotics.junction.LogFileUtil;
@@ -35,6 +36,9 @@ public class Robot extends LoggedRobot {
 
   /** Every mechanism, and the controls that drive them. */
   private final RobotContainer container;
+
+  /** What the Pitwall page shows about the robot; add items in {@link RobotStatus}. */
+  private final Status status = RobotStatus.of(Robots.SIM);
 
   public Robot() {
     // Every log records exactly which code produced it.
@@ -88,7 +92,7 @@ public class Robot extends LoggedRobot {
               tuned.set(view.hasChanges());
             });
     if (Constants.currentMode != Constants.Mode.REPLAY) {
-      PitwallServer.startOrExplain(tuning, PitwallServer.PORT, System.out::println);
+      PitwallServer.startOrExplain(status, tuning, PitwallServer.PORT, System.out::println);
     }
 
     // The drivetrain reads its configuration from tuning, so tuned values take effect at once.
@@ -101,14 +105,15 @@ public class Robot extends LoggedRobot {
   }
 
   /**
-   * Every loop, in every mode: apply tuning requests, read the mechanisms' sensors, then run the
-   * command scheduler.
+   * Every loop, in every mode: apply tuning requests, read the mechanisms' sensors, run the command
+   * scheduler, then read the status the Pitwall page shows.
    */
   @Override
   public void robotPeriodic() {
     tuning.periodic(RobotState.isFMSAttached());
     container.periodic();
     Scheduler.getDefault().run();
+    status.periodic();
   }
 
   /** Every time the robot disables, print and log what tuning changed, so it can be committed. */

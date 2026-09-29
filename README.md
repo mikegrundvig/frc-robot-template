@@ -52,12 +52,13 @@ Also built in:
   version catalog (`gradle/libs.versions.toml`) holds every build and test version in one place.
 - **Every log says which code produced it:** the robot records the git SHA, branch, build time, and
   whether anything was uncommitted (`gradle/build-info.gradle`).
-- **Live tuning from any browser:** the robot program serves its own web page, Pitwall
-  (http://localhost:5820 in the simulator, http://robot.local:5820 on the robot), where the values
-  marked `@Tunable`, such as gains and current limits, can be changed while the robot runs. Each
-  change is checked exactly like a committed value, logged so replays reproduce it, and locked out
-  while the field is connected. Nothing is saved on the robot: the page lists each change as the
-  builder call that commits it to `Robots.java`. Pitwall lives in `pitwall/`.
+- **Pitwall, the robot's own web page** (http://localhost:5820 in the simulator,
+  http://robot.local:5820 on the robot): the robot's status at a glance (which robot and code, the
+  mode, the battery, and any item you add in `RobotStatus.java` with one line), and live tuning of
+  the values marked `@Tunable`, such as gains and current limits. Each tuned value is checked
+  exactly like a committed one, logged so replays reproduce it, and locked out while the field is
+  connected. Nothing is saved on the robot: the page lists each change as the builder call that
+  commits it to `Robots.java`. Pitwall lives in `pitwall/`.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
   without a team number.
 - **Dependency updates** for build tools and CI actions arrive as weekly pull requests (Dependabot).
@@ -70,6 +71,7 @@ Also built in:
 | `src/main/java/frc/robot/` | The robot program. |
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
 | `src/main/java/frc/robot/RobotContainer.java` | Builds each mechanism with the hardware for the mode (real, simulated, or replayed from a log) and binds the controls to commands. |
+| `src/main/java/frc/robot/RobotStatus.java` | What the Pitwall page shows about the robot. Add your own items, one line each. |
 | `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
 | `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |

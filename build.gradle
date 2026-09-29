@@ -67,10 +67,8 @@ dependencies {
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
-    // Pitwall (pitwall/, its own project): the robot program's web page for live tuning, and
-    // where its web server's log lines go.
+    // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
-    runtimeOnly libs.slf4j.simple
 
     compileOnly libs.recordbuilder.core
     testCompileOnly libs.recordbuilder.core

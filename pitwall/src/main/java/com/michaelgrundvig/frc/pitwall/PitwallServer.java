@@ -31,11 +31,13 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
  * simulator, http://robot.local:5820 on the robot. Any browser works, a phone's included, and so
- * does anything else that speaks HTTP. It serves the robot's status ({@link Status}) and live
- * tuning ({@link Tuning}):
+ * does anything else that speaks HTTP. It serves the robot's status ({@link Status}), actions
+ * ({@link Actions}), and live tuning ({@link Tuning}):
  *
  * <ul>
  *   <li>{@code GET /api/status}: the status items as of the last loop, {@code [{"name", "value"}]}.
+ *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
+ *       "detail"}]}. {@code POST} it {@code {"start": name}} or {@code {"cancel": name}}.
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected"}}. {@code
  *       PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
  *   <li>{@code GET /api/tunables}: what can be tuned, {@code {path: {"unit", "committed"}}}.
@@ -48,12 +50,14 @@ import tools.jackson.databind.json.JsonMapper;
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
- * when applied, 422 when the configuration's checks refuse it, 409 when tuning is off or the field
- * system is connected, and 202 when the loop didn't get to it in time (the next GET shows the
- * result). Errors are problem details (RFC 9457).
+ * when applied, 422 when the configuration's checks (or the action) refuse it, 409 when it is
+ * locked out (tuning off, not enabled in utility mode, or the field system connected), and 202 when
+ * the loop didn't get to it in time (the next GET shows the result). Errors are problem details
+ * (RFC 9457).
  *
  * <p>The server's threads never change the robot: they read what the robot loop last published
- * ({@link Status#view()}, {@link Tuning#view()}) and queue requests for the robot loop to apply.
+ * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
+ * robot loop to apply.
  */
 public final class PitwallServer implements AutoCloseable {
   /**
@@ -75,11 +79,11 @@ public final class PitwallServer implements AutoCloseable {
   /**
    * @param port the port to serve on; 0 picks a free one
    */
-  public PitwallServer(Status status, Tuning<?> tuning, int port) {
-    this(status, tuning, port, WAIT);
+  public PitwallServer(Status status, Tuning<?> tuning, Actions actions, int port) {
+    this(status, tuning, actions, port, WAIT);
   }
 
-  PitwallServer(Status status, Tuning<?> tuning, int port, Duration wait) {
+  PitwallServer(Status status, Tuning<?> tuning, Actions actions, int port, Duration wait) {
     // A few threads are plenty for one page, and daemon threads never keep the program running.
     QueuedThreadPool threads = new QueuedThreadPool(8, 2);
     threads.setName("pitwall");
@@ -88,7 +92,7 @@ public final class PitwallServer implements AutoCloseable {
     connector = new ServerConnector(server, 1, 1);
     connector.setPort(port);
     server.addConnector(connector);
-    server.setHandler(new Api(status, tuning, page(), wait));
+    server.setHandler(new Api(status, tuning, actions, page(), wait));
   }
 
   /**
@@ -99,10 +103,10 @@ public final class PitwallServer implements AutoCloseable {
    * @return the running server, or empty if it couldn't start
    */
   public static Optional<PitwallServer> startOrExplain(
-      Status status, Tuning<?> tuning, int port, Consumer<String> say) {
+      Status status, Tuning<?> tuning, Actions actions, int port, Consumer<String> say) {
     PitwallServer server = null;
     try {
-      server = new PitwallServer(status, tuning, port);
+      server = new PitwallServer(status, tuning, actions, port);
       server.start();
       say.accept(
           "Pitwall: http://localhost:"
@@ -173,6 +177,7 @@ public final class PitwallServer implements AutoCloseable {
         Map.of(
             "/", List.of("GET"),
             "/api/status", List.of("GET"),
+            "/api/actions", List.of("GET", "POST"),
             "/api/tuning", List.of("GET", "PATCH"),
             "/api/tunables", List.of("GET"),
             "/api/values", List.of("GET", "PATCH"),
@@ -180,13 +185,15 @@ public final class PitwallServer implements AutoCloseable {
 
     private final Status status;
     private final Tuning<?> tuning;
+    private final Actions actions;
     private final String page;
     private final Duration wait;
     private final JsonMapper json = JsonMapper.builder().build();
 
-    Api(Status status, Tuning<?> tuning, String page, Duration wait) {
+    Api(Status status, Tuning<?> tuning, Actions actions, String page, Duration wait) {
       this.status = status;
       this.tuning = tuning;
+      this.actions = actions;
       this.page = page;
       this.wait = wait;
     }
@@ -208,6 +215,8 @@ public final class PitwallServer implements AutoCloseable {
         switch (method + " " + path) {
           case "GET /" -> send(response, callback, 200, "text/html", page);
           case "GET /api/status" -> sendJson(response, callback, 200, status.view());
+          case "GET /api/actions" -> sendJson(response, callback, 200, actions.view());
+          case "POST /api/actions" -> postAction(request, response, callback);
           case "GET /api/tuning" -> sendJson(response, callback, 200, session());
           case "PATCH /api/tuning" -> patchTuning(request, response, callback);
           case "GET /api/tunables" -> sendJson(response, callback, 200, tunables());
@@ -240,6 +249,28 @@ public final class PitwallServer implements AutoCloseable {
         throw new Problem(400, "Not true or false", "enabled must be true or false");
       }
       answer(tuning.requestEnabled(enabled.booleanValue()), response, callback, this::session);
+    }
+
+    private void postAction(Request request, Response response, Callback callback) {
+      JsonNode body = readPatch(request);
+      JsonNode start = body.get("start");
+      JsonNode cancel = body.get("cancel");
+      JsonNode name = start != null ? start : cancel;
+      if (body.size() != 1 || name == null) {
+        throw new Problem(400, "Start or cancel", "Send {\"start\": name} or {\"cancel\": name}");
+      }
+      if (!name.isString()) {
+        throw new Problem(400, "Not a name", "An action's name is a string");
+      }
+      String action = name.stringValue();
+      if (!actions.has(action)) {
+        throw new Problem(422, "Not an action", "There is no action named " + action);
+      }
+      answer(
+          start != null ? actions.requestStart(action) : actions.requestCancel(action),
+          response,
+          callback,
+          actions::view);
     }
 
     private void patchValues(Request request, Response response, Callback callback) {
@@ -281,11 +312,11 @@ public final class PitwallServer implements AutoCloseable {
 
     /** Waits for the robot loop, then answers with what became of the request. */
     private void answer(
-        CompletableFuture<Tuning.Outcome> pending,
+        CompletableFuture<Outcome> pending,
         Response response,
         Callback callback,
         Supplier<Object> state) {
-      Tuning.Outcome outcome;
+      Outcome outcome;
       try {
         outcome = pending.get(wait.toMillis(), TimeUnit.MILLISECONDS);
       } catch (TimeoutException e) {

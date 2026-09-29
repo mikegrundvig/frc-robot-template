@@ -65,6 +65,13 @@
 
   <table class="status"><tbody id="status-items"></tbody></table>
 
+  <section id="actions-section" hidden>
+    <h2>Actions</h2>
+    <p class="muted">These run only with the robot enabled in utility mode, never on the field.</p>
+    <table class="status"><tbody id="action-items"></tbody></table>
+    <div id="action-message" class="message bad" hidden></div>
+  </section>
+
   <h2>Tuning
     <span id="status" class="muted">Connecting to the robot…</span>
     <button id="toggle" hidden></button>
@@ -260,15 +267,66 @@
     }
   }
 
+  /** Starts or cancels an action, and says why not when it is refused or locked. */
+  async function act(body) {
+    const note = element("action-message");
+    let response;
+    try {
+      response = await fetch("/api/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      note.textContent = "The robot isn't answering.";
+      note.hidden = false;
+      return;
+    }
+    if (response.ok) {
+      note.hidden = true;
+    } else {
+      const problem = await response.json().catch(() => ({ detail: response.statusText }));
+      note.textContent = problem.detail || problem.title;
+      note.hidden = false;
+    }
+    await poll();
+  }
+
+  let shownActions = "";
+
+  /** Each action with where it stands, and a button to run or cancel it. */
+  function renderActions(actions) {
+    const key = JSON.stringify(actions);
+    if (key === shownActions) return; // rebuilding the rows mid-click would lose the click
+    shownActions = key;
+    element("actions-section").hidden = actions.length === 0;
+    const body = element("action-items");
+    body.replaceChildren();
+    for (const { name, phase, detail } of actions) {
+      const row = body.insertRow();
+      row.insertCell().textContent = name;
+      const state = row.insertCell();
+      state.textContent = detail || "Ready";
+      state.className = phase === "RUNNING" ? "ok" : phase === "REFUSED" ? "bad" : "";
+      const running = phase === "RUNNING";
+      const button = document.createElement("button");
+      button.textContent = running ? "Cancel" : "Run";
+      button.className = running ? "" : "primary";
+      button.addEventListener("click", () => act(running ? { cancel: name } : { start: name }));
+      row.insertCell().append(button);
+    }
+  }
+
   async function poll() {
     try {
-      const [s, v, c, st] = await Promise.all(
-          ["/api/tuning", "/api/values", "/api/changes", "/api/status"].map((path) =>
+      const [s, v, c, st, a] = await Promise.all(
+          ["/api/tuning", "/api/values", "/api/changes", "/api/status", "/api/actions"].map((path) =>
               fetch(path, { cache: "no-store" }).then((response) => response.json())));
       session = s;
       current = v;
       render(c);
       renderStatus(st);
+      renderActions(a);
     } catch (error) {
       element("status").textContent = "The robot isn't answering; still trying…";
     }

@@ -8,6 +8,7 @@ import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.ModuleIOSim;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
+import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.button.CommandGamepad;
 import org.wpilib.driverstation.RobotState;
@@ -77,6 +78,11 @@ public final class RobotContainer implements AutoCloseable {
       field.setRobotPose(drive.getPose());
       Telemetry.log("Field", field);
     }
+  }
+
+  /** A pit check for the Pitwall page: drive forward slowly for two seconds. */
+  Command driveCheck() {
+    return drive.driveForward(0.5, 2.0);
   }
 
   Drive drive() {

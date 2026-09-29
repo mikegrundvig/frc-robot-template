@@ -7,10 +7,7 @@
 
 package frc.robot;
 
-import com.michaelgrundvig.frc.pitwall.PitwallServer;
-import com.michaelgrundvig.frc.pitwall.Status;
-import com.michaelgrundvig.frc.pitwall.Tuning;
-import java.util.List;
+import com.michaelgrundvig.frc.pitwall.Pitwall;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -18,10 +15,8 @@ import org.littletonrobotics.junction.networktables.NT4Publisher;
 import org.littletonrobotics.junction.wpilog.WPILOGReader;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 import org.wpilib.command3.Scheduler;
-import org.wpilib.driverstation.RobotState;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
-import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
 public class Robot extends LoggedRobot {
@@ -29,16 +24,13 @@ public class Robot extends LoggedRobot {
   static final String AUTO_ENABLE_PROPERTY = "frc.sim.autoEnable";
 
   /**
-   * The robot's configuration, with any values tuned from the Pitwall page. One robot for now; with
-   * several, choose its configuration by the robot's identity here.
+   * Pitwall, the robot's own web page: its status, actions, and live tuning of its configuration.
+   * One robot for now; with several, choose its configuration by the robot's identity here.
    */
-  private final Tuning<RobotConfig> tuning;
+  private final Pitwall<RobotConfig> pitwall;
 
   /** Every mechanism, and the controls that drive them. */
   private final RobotContainer container;
-
-  /** What the Pitwall page shows about the robot; add items in {@link RobotStatus}. */
-  private final Status status = RobotStatus.of(Robots.SIM);
 
   public Robot() {
     // Every log records exactly which code produced it.
@@ -77,51 +69,27 @@ public class Robot extends LoggedRobot {
 
     Logger.start();
 
-    // Tuning starts switched on in the simulator; on a robot, switch it on from the Pitwall page.
-    // While any tuned value differs from the committed one, a warning says which.
-    Alert tuned = new Alert("Tuning", "", Alert.Level.MEDIUM);
-    tuning =
-        new Tuning<>(
-            Robots.SIM.name(),
-            Robots.SIM,
-            Constants.currentMode == Constants.Mode.SIM,
-            new TuningLog(),
-            view -> {
-              tuned.setText(
-                  "Tuned values differ from the committed configuration: " + view.changedPaths());
-              tuned.set(view.hasChanges());
-            });
-    if (Constants.currentMode != Constants.Mode.REPLAY) {
-      PitwallServer.startOrExplain(status, tuning, PitwallServer.PORT, System.out::println);
-    }
+    pitwall = Pitwall.start(Robots.SIM.name(), Robots.SIM);
 
-    // The drivetrain reads its configuration from tuning, so tuned values take effect at once.
+    // The drivetrain reads its configuration through Pitwall, so tuned values take effect at once.
     container =
         new RobotContainer(
             Constants.currentMode,
             Scheduler.getDefault(),
             Robots.SIM.body(),
-            () -> tuning.config().drivetrain());
+            () -> pitwall.config().drivetrain());
+    pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
   }
 
   /**
-   * Every loop, in every mode: apply tuning requests, read the mechanisms' sensors, run the command
-   * scheduler, then read the status the Pitwall page shows.
+   * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
+   * command scheduler.
    */
   @Override
   public void robotPeriodic() {
-    tuning.periodic(RobotState.isFMSAttached());
+    pitwall.periodic();
     container.periodic();
     Scheduler.getDefault().run();
-    status.periodic();
-  }
-
-  /** Every time the robot disables, print and log what tuning changed, so it can be committed. */
-  @Override
-  public void disabledInit() {
-    List<String> report = tuning.report();
-    report.forEach(System.out::println);
-    Logger.recordOutput("Tuning/Report", report.toArray(String[]::new));
   }
 
   /**

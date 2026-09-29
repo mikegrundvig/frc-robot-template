@@ -30,6 +30,16 @@ repositories {
 dependencies {
     api libs.wpilib.units // measures appear in the tuner's API
     api libs.jspecify
+
+    // The robot program's own libraries: WPILib, plus the vendor libraries in vendordeps/ (Commands
+    // v3, AdvantageKit), exactly as GradleRIO gives them to the robot program. Every robot has them,
+    // so Pitwall compiles against them and never bundles them. AdvantageKit is optional at run time:
+    // with it, Pitwall logs its requests so replays reproduce them. Tests get the jars but no native
+    // libraries, so they stay plain Java.
+    compileOnly rootProject.wpi.java.deps.wpilib()
+    compileOnly rootProject.wpi.java.vendor.java()
+    testImplementation rootProject.wpi.java.deps.wpilib()
+    testImplementation rootProject.wpi.java.vendor.java()
     implementation libs.jetty.server
     implementation libs.jackson.databind
 

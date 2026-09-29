@@ -6,7 +6,7 @@ robot, and a build that works the same on every laptop and in CI.
 
 It builds on the standard tools rather than replacing them: [WPILib](https://docs.wpilib.org)
 (2027, Systemcore), [AdvantageKit](https://docs.advantagekit.org) for logging and replay, and
-WPILib's Commands v3. The layout is the standard WPILib project layout, so WPILib VS Code and every
+WPILib's Commands v3. The layout is the standard WPILib project layout, so WPILib's tools and every
 WPILib and AdvantageKit guide apply unchanged. Use it by clicking **Use this template**, then fill in
 your robot.
 
@@ -19,14 +19,15 @@ You need git and any Java installation (to start the Gradle wrapper). Gradle dow
 JDK the robot code needs; no WPILib installer is required to build, test, or simulate.
 
 ```bash
-./gradlew ci                            # every check CI runs; run before pushing
-./gradlew test -Pquick --continuous     # rerun tests on every save while you work
-./gradlew run                           # the simulator, enabled and drivable from the keyboard
-./gradlew deploy                        # to the robot (needs your team number; see below)
+./gradlew ci                                 # every check CI runs; run before pushing
+./gradlew test -Pquick --continuous          # rerun tests on every save while you work
+./gradlew run                                # the simulator, enabled and drivable from the keyboard
+./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
+./gradlew deploy                             # to the robot, after every check passes
 ```
 
-Set your team number with **WPILib: Set Team Number** in VS Code, in
-`.wpilib/wpilib_preferences.json`, or with `-PteamNumber=NNNN`. It is only needed to deploy.
+Every job is a Gradle command, so any editor works, or none. [docs/editors.md](docs/editors.md)
+covers IntelliJ IDEA and VS Code, and lists every command.
 
 ## The fundamentals, and why
 
@@ -64,6 +65,7 @@ Also built in:
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`). |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
+| `docs/` | Guides, starting with [editors and commands](docs/editors.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

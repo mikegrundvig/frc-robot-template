@@ -232,6 +232,22 @@ public class Drive implements Mechanism, AutoCloseable {
     runVelocity(fieldRelative.toRobotRelative(futureHeading));
   }
 
+  /**
+   * Drives straight ahead, robot-relative, at a steady speed for a while, then stops: a pit check
+   * that every wheel turns the right way.
+   */
+  public Command driveForward(double metersPerSecond, double seconds) {
+    int loops = (int) Math.round(seconds / LOOP_PERIOD_S);
+    return run(coroutine -> {
+          for (int i = 0; i < loops; i++) {
+            runVelocity(new ChassisVelocities(metersPerSecond, 0, 0));
+            coroutine.yield();
+          }
+          runVelocity(new ChassisVelocities(0, 0, 0));
+        })
+        .named("Drive forward");
+  }
+
   /** Drive with sticks until interrupted. See {@link #driveWithSticks}. */
   public Command joystickDrive(DoubleSupplier x, DoubleSupplier y, DoubleSupplier omega) {
     return run(coroutine -> {

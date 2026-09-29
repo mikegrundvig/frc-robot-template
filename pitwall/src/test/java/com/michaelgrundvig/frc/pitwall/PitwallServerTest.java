@@ -34,7 +34,30 @@ class PitwallServerTest {
   private final AtomicBoolean homed = new AtomicBoolean(false);
   private final Status status =
       new Status().add("Robot", () -> "test").add("Arm homed", homed::get);
-  private final PitwallServer server = new PitwallServer(status, tuning, 0);
+  private volatile Actions.Gate gate = new Actions.Gate(true, true, false);
+  private final AtomicBoolean homing = new AtomicBoolean(false);
+  private final Actions actions =
+      new Actions(inputs -> {})
+          .add(
+              "Home arm",
+              new Actions.Routine() {
+                @Override
+                public @Nullable String start() {
+                  homing.set(true);
+                  return null;
+                }
+
+                @Override
+                public boolean isRunning() {
+                  return homing.get();
+                }
+
+                @Override
+                public void cancel() {
+                  homing.set(false);
+                }
+              });
+  private final PitwallServer server = new PitwallServer(status, tuning, actions, 0);
   private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
 
   @BeforeAll
@@ -43,6 +66,7 @@ class PitwallServerTest {
     loop.scheduleAtFixedRate(
         () -> {
           tuning.periodic(fieldConnected.get());
+          actions.periodic(gate);
           status.periodic();
         },
         0,
@@ -59,6 +83,8 @@ class PitwallServerTest {
   @AfterEach
   void backToCommitted() throws Exception {
     fieldConnected.set(false);
+    gate = new Actions.Gate(true, true, false);
+    send("POST", "/api/actions", "application/json", "{\"cancel\": \"Home arm\"}");
     send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
     send("DELETE", "/api/changes", null, null);
   }
@@ -81,6 +107,52 @@ class PitwallServerTest {
         .isEqualTo(
             "[{\"name\":\"Robot\",\"value\":\"test\"},"
                 + "{\"name\":\"Arm homed\",\"value\":true}]");
+  }
+
+  @Test
+  void anActionStartsFromThePageAndShowsItsState() throws Exception {
+    assertThat(get("/api/actions").body()).contains("{\"name\":\"Home arm\",\"phase\":");
+
+    var started = send("POST", "/api/actions", "application/json", "{\"start\": \"Home arm\"}");
+
+    assertThat(started.statusCode()).isEqualTo(200);
+    assertThat(started.body())
+        .isEqualTo("[{\"name\":\"Home arm\",\"phase\":\"RUNNING\",\"detail\":\"Running\"}]");
+    assertThat(homing.get()).isTrue();
+
+    var canceled = send("POST", "/api/actions", "application/json", "{\"cancel\": \"Home arm\"}");
+
+    assertThat(canceled.statusCode()).isEqualTo(200);
+    assertThat(canceled.body()).contains("\"phase\":\"CANCELED\"");
+    assertThat(homing.get()).isFalse();
+  }
+
+  @Test
+  void anActionOutsideUtilityModeIsLockedAndSaysWhy() throws Exception {
+    gate = new Actions.Gate(true, false, false);
+
+    var locked = send("POST", "/api/actions", "application/json", "{\"start\": \"Home arm\"}");
+
+    assertThat(locked.statusCode()).isEqualTo(409);
+    assertThat(locked.body()).contains("enabled in utility mode");
+    assertThat(homing.get()).isFalse();
+  }
+
+  @Test
+  void onlyKnownActionsAndWellFormedRequestsAreAccepted() throws Exception {
+    var unknown = send("POST", "/api/actions", "application/json", "{\"start\": \"Fly\"}");
+    var both =
+        send(
+            "POST",
+            "/api/actions",
+            "application/json",
+            "{\"start\": \"Home arm\", \"cancel\": \"Home arm\"}");
+    var notAName = send("POST", "/api/actions", "application/json", "{\"start\": 3}");
+
+    assertThat(unknown.statusCode()).isEqualTo(422);
+    assertThat(unknown.body()).contains("There is no action named Fly");
+    assertThat(both.statusCode()).isEqualTo(400);
+    assertThat(notAName.statusCode()).isEqualTo(400);
   }
 
   @Test
@@ -217,7 +289,9 @@ class PitwallServerTest {
   void aChangeTheLoopHasNotReachedIsAccepted() throws Exception {
     // A robot program whose loop never runs, as if paused in a debugger.
     var idle = new Tuning<>("idle", machine(), true, inputs -> {}, view -> {});
-    try (var paused = new PitwallServer(new Status(), idle, 0, Duration.ofMillis(50))) {
+    try (var paused =
+        new PitwallServer(
+            new Status(), idle, new Actions(inputs -> {}), 0, Duration.ofMillis(50))) {
       paused.start();
       var accepted =
           client.send(
@@ -238,7 +312,8 @@ class PitwallServerTest {
   void startOrExplainStartsThePageAndSaysWhere() throws Exception {
     List<String> said = new ArrayList<>();
 
-    Optional<PitwallServer> started = PitwallServer.startOrExplain(status, tuning, 0, said::add);
+    Optional<PitwallServer> started =
+        PitwallServer.startOrExplain(status, tuning, actions, 0, said::add);
 
     assertThat(started).isPresent();
     try {
@@ -254,7 +329,7 @@ class PitwallServerTest {
 
     // The test's own server already holds this port.
     Optional<PitwallServer> started =
-        PitwallServer.startOrExplain(status, tuning, server.port(), said::add);
+        PitwallServer.startOrExplain(status, tuning, actions, server.port(), said::add);
 
     assertThat(started).isEmpty();
     assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");

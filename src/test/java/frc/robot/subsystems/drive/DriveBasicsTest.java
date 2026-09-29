@@ -66,6 +66,16 @@ class DriveBasicsTest {
   }
 
   @Test
+  void drivesForwardForAWhileThenStops() {
+    harness.run(harness.drive.driveForward(0.5, 1.0), 1.5);
+
+    Pose2d pose = harness.drive.getPose();
+    assertEquals(0.5, pose.getX(), 0.05, "half a meter at 0.5 m/s for a second");
+    assertEquals(0.0, pose.getY(), 0.02, "straight");
+    assertEquals(0.0, harness.drive.getRobotRelativeVelocities().vx, 0.05, "stopped");
+  }
+
+  @Test
   void needsExactlyFourModules() {
     ModuleIO[] three = {new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}};
 

@@ -42,8 +42,7 @@ class TuningTest {
 
     tuning.periodic(false);
 
-    assertThat(outcome.getNow(null))
-        .isEqualTo(new Tuning.Outcome(Tuning.Outcome.Result.APPLIED, ""));
+    assertThat(outcome.getNow(null)).isEqualTo(new Outcome(Outcome.Result.APPLIED, ""));
     assertThat(tuning.config().drive().gains().kP()).isEqualTo(18.5);
     assertThat(tuning.view().changes())
         .extracting(ConfigTuner.Change::builderCall)
@@ -58,8 +57,7 @@ class TuningTest {
     tuning.periodic(false);
 
     assertThat(outcome.getNow(null))
-        .isEqualTo(
-            new Tuning.Outcome(Tuning.Outcome.Result.REFUSED, "kP must be zero or more, got -1.0"));
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "kP must be zero or more, got -1.0"));
     assertThat(tuning.config()).isEqualTo(machine());
   }
 
@@ -84,13 +82,10 @@ class TuningTest {
     tuning.periodic(false);
 
     assertThat(tooHigh.getNow(null))
-        .isEqualTo(
-            new Tuning.Outcome(Tuning.Outcome.Result.REFUSED, "limit over 10 is not supported"));
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "limit over 10 is not supported"));
     assertThat(negative.getNow(null))
         .as("without a message, the exception names itself")
-        .isEqualTo(
-            new Tuning.Outcome(
-                Tuning.Outcome.Result.REFUSED, "java.lang.UnsupportedOperationException"));
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "java.lang.UnsupportedOperationException"));
     assertThat(tuning.config()).isEqualTo(new Fragile(5));
   }
 
@@ -102,9 +97,9 @@ class TuningTest {
     var neither = tuning.requestChanges(ordered(KP, 18.5, "drive.limits.current", -1.0));
     tuning.periodic(false);
 
-    assertThat(together.getNow(null).result()).isEqualTo(Tuning.Outcome.Result.APPLIED);
+    assertThat(together.getNow(null).result()).isEqualTo(Outcome.Result.APPLIED);
     assertThat(tuning.config().travel()).isEqualTo(new Fixtures.Range(12, 20));
-    assertThat(neither.getNow(null).result()).isEqualTo(Tuning.Outcome.Result.REFUSED);
+    assertThat(neither.getNow(null).result()).isEqualTo(Outcome.Result.REFUSED);
     assertThat(tuning.config().drive().gains().kP()).as("not applied alone").isEqualTo(16);
   }
 
@@ -126,14 +121,13 @@ class TuningTest {
     var off = tuning.requestChanges(Map.of(KP, 18.5));
     tuning.periodic(false);
     assertThat(off.getNow(null))
-        .isEqualTo(
-            new Tuning.Outcome(Tuning.Outcome.Result.LOCKED, "Tuning is locked: tuning is off"));
+        .isEqualTo(new Outcome(Outcome.Result.LOCKED, "Tuning is locked: tuning is off"));
 
     var on = tuning.requestEnabled(true);
     var change = tuning.requestChanges(Map.of(KP, 18.5));
     tuning.periodic(false);
-    assertThat(on.getNow(null).result()).isEqualTo(Tuning.Outcome.Result.APPLIED);
-    assertThat(change.getNow(null).result()).isEqualTo(Tuning.Outcome.Result.APPLIED);
+    assertThat(on.getNow(null).result()).isEqualTo(Outcome.Result.APPLIED);
+    assertThat(change.getNow(null).result()).isEqualTo(Outcome.Result.APPLIED);
 
     tuning.requestEnabled(false);
     tuning.periodic(false);
@@ -152,9 +146,8 @@ class TuningTest {
     var change = tuning.requestChanges(Map.of(KP, 18.5));
     tuning.periodic(true);
     String locked = "Tuning is locked: the field system is connected";
-    assertThat(on.getNow(null)).isEqualTo(new Tuning.Outcome(Tuning.Outcome.Result.LOCKED, locked));
-    assertThat(change.getNow(null))
-        .isEqualTo(new Tuning.Outcome(Tuning.Outcome.Result.LOCKED, locked));
+    assertThat(on.getNow(null)).isEqualTo(new Outcome(Outcome.Result.LOCKED, locked));
+    assertThat(change.getNow(null)).isEqualTo(new Outcome(Outcome.Result.LOCKED, locked));
 
     // Once the field disconnects, tuning stays off until someone switches it on.
     tuning.periodic(false);
@@ -170,7 +163,7 @@ class TuningTest {
     var reset = tuning.requestReset();
     tuning.periodic(false);
 
-    assertThat(reset.getNow(null).result()).isEqualTo(Tuning.Outcome.Result.APPLIED);
+    assertThat(reset.getNow(null).result()).isEqualTo(Outcome.Result.APPLIED);
     assertThat(tuning.config()).isEqualTo(machine());
     assertThat(tuning.view().hasChanges()).isFalse();
   }
@@ -184,7 +177,7 @@ class TuningTest {
 
     tuning.periodic(false);
 
-    assertThat(reset.getNow(null).result()).isEqualTo(Tuning.Outcome.Result.LOCKED);
+    assertThat(reset.getNow(null).result()).isEqualTo(Outcome.Result.LOCKED);
     assertThat(tuning.config().drive().gains().kP()).isEqualTo(18.5);
   }
 

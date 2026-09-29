@@ -38,6 +38,17 @@ final class DriveSimHarness implements AutoCloseable {
     scheduler.cancel(driving);
   }
 
+  /** Run a command for {@code seconds}, enabled, the way the robot loop runs it. */
+  void run(Command command, double seconds) {
+    SimTestSupport.setEnabled(true);
+    scheduler.schedule(command);
+    for (int i = 0; i < SimTestSupport.loops(seconds); i++) {
+      SimTestSupport.stepLoop();
+      drive.periodic(RobotState.isEnabled());
+      scheduler.run();
+    }
+  }
+
   @Override
   public void close() {
     drive.close();

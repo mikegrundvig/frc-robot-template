@@ -61,28 +61,6 @@ public final class Tuning<T extends Record> {
    */
   public record Value(String path, String unit, double committed, double current) {}
 
-  /**
-   * What became of a request.
-   *
-   * @param result whether it was applied, refused by the configuration's checks, or locked out
-   * @param detail why it wasn't applied; empty when it was
-   */
-  public record Outcome(Result result, String detail) {
-    /** Whether a request was applied, and if not, why not. */
-    public enum Result {
-      /** Applied, all of it. */
-      APPLIED,
-      /** Refused by the configuration's checks; nothing changed. */
-      REFUSED,
-      /** Refused because tuning is off or the field system is connected; nothing changed. */
-      LOCKED
-    }
-
-    static Outcome applied() {
-      return new Outcome(Result.APPLIED, "");
-    }
-  }
-
   /** A request from the page, waiting for the robot loop. */
   private record Request(
       TuningInputs.Kind kind, Map<String, Double> values, CompletableFuture<Outcome> outcome) {}

@@ -11,3 +11,6 @@ plugins {
 }
 
 rootProject.name = "frc-robot-template"
+
+// The tuning library: its own project, free of robot code, so it can become a library teams pull in.
+include "tuning"

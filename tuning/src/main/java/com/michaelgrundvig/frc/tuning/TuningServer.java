@@ -1,4 +1,4 @@
-package frc.robot.tuning;
+package com.michaelgrundvig.frc.tuning;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,7 +34,7 @@ public final class TuningServer implements AutoCloseable {
   /**
    * @param port the port to serve on; 0 picks a free one
    */
-  public TuningServer(Tuning tuning, int port) {
+  public TuningServer(Tuning<?> tuning, int port) {
     // A few threads are plenty for one page, and daemon threads never keep the program running.
     QueuedThreadPool threads = new QueuedThreadPool(8, 2);
     threads.setName("tuning-page");
@@ -54,7 +54,7 @@ public final class TuningServer implements AutoCloseable {
    * @return the running server, or empty if it couldn't start
    */
   public static Optional<TuningServer> startOrExplain(
-      Tuning tuning, int port, Consumer<String> say) {
+      Tuning<?> tuning, int port, Consumer<String> say) {
     TuningServer server = null;
     try {
       server = new TuningServer(tuning, port);
@@ -98,9 +98,9 @@ public final class TuningServer implements AutoCloseable {
   }
 
   private static String page() {
-    try (InputStream in = TuningServer.class.getResourceAsStream("/tuning/index.html")) {
+    try (InputStream in = TuningServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
-        throw new IllegalStateException("tuning/index.html is missing from the robot program");
+        throw new IllegalStateException("the tuning page (index.html) is missing");
       }
       return new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException e) {
@@ -110,10 +110,10 @@ public final class TuningServer implements AutoCloseable {
 
   /** The page, the state it polls, and the requests it sends. */
   private static final class Routes extends Handler.Abstract {
-    private final Tuning tuning;
+    private final Tuning<?> tuning;
     private final String page;
 
-    Routes(Tuning tuning, String page) {
+    Routes(Tuning<?> tuning, String page) {
       this.tuning = tuning;
       this.page = page;
     }

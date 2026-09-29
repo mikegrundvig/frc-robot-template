@@ -17,6 +17,8 @@ jetty = "12.1.13"
 slf4j = "2.0.17"
 
 [libraries]
+# WPILib's units, for the tuning library; always the version GradleRIO brings the robot program.
+wpilib-units = { module = "org.wpilib.wpiunits:wpiunits-java", version.ref = "gradlerio" }
 jetty-server = { module = "org.eclipse.jetty:jetty-server", version.ref = "jetty" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 recordbuilder-core = { module = "io.soabase.record-builder:record-builder-core", version.ref = "recordbuilder" }

@@ -53,7 +53,7 @@ Also built in:
   whether anything was uncommitted (`gradle/build-info.gradle`).
 - **Live tuning from any browser:** the robot program serves a tuning page (http://localhost:5800
   in the simulator, http://robot.local:5800 on the robot) for the values marked `@Tunable`, such
-  as gains and current limits. Each change is checked exactly like a committed value, logged so
+  as gains and current limits. It comes from the tuning library in `tuning/`. Each change is checked exactly like a committed value, logged so
   replays reproduce it, and locked out while the field is connected. Nothing is saved on the
   robot: the page lists each change as the builder call that commits it to `Robots.java`.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
@@ -67,9 +67,9 @@ Also built in:
 |---|---|
 | `src/main/java/frc/robot/` | The robot program. |
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
-| `src/main/java/frc/robot/tuning/` | Live tuning: the page the robot serves, and how its requests reach the robot loop. |
 | `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`). |
+| `tuning/` | The tuning library: its own Gradle project and package (`com.michaelgrundvig.frc.tuning`), free of robot code, so it can become a library teams pull in. `Robot.java` wires it in, and `TuningLog.java` logs it with AdvantageKit. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `docs/` | Guides, starting with [editors and commands](docs/editors.md). |

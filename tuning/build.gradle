@@ -1,0 +1,49 @@
+// The tuning library: live, checked tuning of typed configuration, and the page the robot program
+// serves for it. Its own project, free of robot code (Gradle keeps it so: it can't see the robot
+// program), so it can become a library teams pull in.
+
+plugins {
+    id "java-library"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// WPILib's libraries come from wherever GradleRIO finds them for the robot program: the WPILib
+// installation's own repository when there is one, and WPILib's servers.
+rootProject.repositories.withType(MavenArtifactRepository).each { source ->
+    repositories.maven {
+        name = source.name
+        url = source.url
+    }
+}
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api libs.wpilib.units // measures appear in the tuner's API
+    api libs.jspecify
+    implementation libs.jetty.server
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.tuning"
+apply from: rootProject.file("gradle/quality.gradle")

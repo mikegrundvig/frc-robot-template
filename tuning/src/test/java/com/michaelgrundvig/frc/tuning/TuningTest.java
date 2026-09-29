@@ -1,17 +1,14 @@
-package frc.robot.tuning;
+package com.michaelgrundvig.frc.tuning;
 
-import static frc.robot.lib.config.ConfigFixtures.body;
-import static frc.robot.lib.config.ConfigFixtures.swerve;
+import static com.michaelgrundvig.frc.tuning.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.RobotConfig;
-import frc.robot.lib.config.ConfigTuner;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class TuningTest {
-  private static final String STEER_KP = "drivetrain.gains.steerKp";
+  private static final String KP = "drive.gains.kP";
 
   /** What each loop logged: the request kinds, then their paths. */
   private final List<String> logged = new ArrayList<>();
@@ -21,57 +18,57 @@ class TuningTest {
 
   @Test
   void startsAtTheCommittedConfiguration() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
 
-    assertThat(tuning.config()).isEqualTo(robot());
+    assertThat(tuning.config()).isEqualTo(machine());
     assertThat(tuning.view().enabled()).isTrue();
     assertThat(tuning.view().changes()).isEmpty();
     assertThat(tuning.view().values())
         .extracting(Tuning.Value::path)
-        .contains(STEER_KP, "drivetrain.limits.driveStatorCurrent");
+        .contains(KP, "drive.limits.current");
     assertThat(tuning.report()).isEmpty();
   }
 
   @Test
   void changesWaitForTheRobotLoop() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
 
-    tuning.requestSet(STEER_KP, 18.5);
-    assertThat(tuning.config().drivetrain().gains().steerKp()).as("before the loop").isEqualTo(16);
+    tuning.requestSet(KP, 18.5);
+    assertThat(tuning.config().drive().gains().kP()).as("before the loop").isEqualTo(16);
 
     tuning.periodic(false);
-    assertThat(tuning.config().drivetrain().gains().steerKp()).isEqualTo(18.5);
+    assertThat(tuning.config().drive().gains().kP()).isEqualTo(18.5);
     assertThat(tuning.view().changes())
         .extracting(ConfigTuner.Change::builderCall)
-        .containsExactly(".steerKp(18.5)");
+        .containsExactly(".kP(18.5)");
   }
 
   @Test
   void aRefusedValueSaysWhyAndChangesNothing() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
 
-    tuning.requestSet(STEER_KP, -1);
+    tuning.requestSet(KP, -1);
     tuning.periodic(false);
-    assertThat(value(tuning, STEER_KP).refused()).startsWith("steerKp must be zero or more");
-    assertThat(tuning.config()).isEqualTo(robot());
+    assertThat(value(tuning, KP).refused()).startsWith("kP must be zero or more");
+    assertThat(tuning.config()).isEqualTo(machine());
 
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(false);
-    assertThat(value(tuning, STEER_KP).refused()).isNull();
+    assertThat(value(tuning, KP).refused()).isNull();
   }
 
   @Test
   void nothingChangesWhileTuningIsOff() {
-    Tuning tuning = tuning(false);
+    Tuning<Fixtures.Machine> tuning = tuning(false);
 
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(false);
-    assertThat(value(tuning, STEER_KP).refused()).isEqualTo("tuning is off");
+    assertThat(value(tuning, KP).refused()).isEqualTo("tuning is off");
 
     tuning.requestEnabled(true);
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(false);
-    assertThat(tuning.config().drivetrain().gains().steerKp()).isEqualTo(18.5);
+    assertThat(tuning.config().drive().gains().kP()).isEqualTo(18.5);
 
     tuning.requestEnabled(false);
     tuning.periodic(false);
@@ -80,17 +77,17 @@ class TuningTest {
 
   @Test
   void theFieldLocksTuningOff() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
 
     tuning.periodic(true);
     assertThat(tuning.view().enabled()).isFalse();
     assertThat(tuning.view().fieldConnected()).isTrue();
 
     tuning.requestEnabled(true);
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(true);
     assertThat(tuning.view().enabled()).isFalse();
-    assertThat(value(tuning, STEER_KP).refused()).isEqualTo("locked while the field is connected");
+    assertThat(value(tuning, KP).refused()).isEqualTo("locked while the field is connected");
 
     // Once the field disconnects, tuning stays off until someone switches it on.
     tuning.periodic(false);
@@ -99,71 +96,72 @@ class TuningTest {
 
   @Test
   void resetReturnsToTheCommittedConfiguration() {
-    Tuning tuning = tuning(true);
-    tuning.requestSet(STEER_KP, 18.5);
-    tuning.requestSet("drivetrain.gains.steerKd", -1); // refused
+    Tuning<Fixtures.Machine> tuning = tuning(true);
+    tuning.requestSet(KP, 18.5);
+    tuning.requestSet("drive.limits.current", -1); // refused
     tuning.periodic(false);
 
     tuning.requestReset();
     tuning.periodic(false);
 
-    assertThat(tuning.config()).isEqualTo(robot());
+    assertThat(tuning.config()).isEqualTo(machine());
     assertThat(tuning.view().changes()).isEmpty();
-    assertThat(value(tuning, "drivetrain.gains.steerKd").refused()).isNull();
+    assertThat(value(tuning, "drive.limits.current").refused()).isNull();
   }
 
   @Test
   void resetNeedsTuningOn() {
-    Tuning tuning = tuning(true);
-    tuning.requestSet(STEER_KP, 18.5);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
+    tuning.requestSet(KP, 18.5);
     tuning.requestEnabled(false);
     tuning.requestReset();
 
     tuning.periodic(false);
 
-    assertThat(tuning.config().drivetrain().gains().steerKp()).isEqualTo(18.5);
+    assertThat(tuning.config().drive().gains().kP()).isEqualTo(18.5);
   }
 
   @Test
   void everyLoopLogsTheRequestsItApplies() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
 
     tuning.periodic(false);
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.requestReset();
     tuning.periodic(false);
 
-    assertThat(logged).containsExactly("|", "SET,RESET|" + STEER_KP + ",");
+    assertThat(logged).containsExactly("|", "SET,RESET|" + KP + ",");
   }
 
   @Test
   void replayAppliesTheLoggedRequests() {
     // In replay nothing is queued: the log supplies the requests, and whether tuning was on.
-    Tuning tuning =
-        new Tuning(
-            robot(),
+    Tuning<Fixtures.Machine> tuning =
+        new Tuning<>(
+            "test",
+            machine(),
             false,
             inputs -> {
               inputs.enabled = true;
               inputs.kinds = new String[] {"SET"};
-              inputs.paths = new String[] {STEER_KP};
+              inputs.paths = new String[] {KP};
               inputs.values = new double[] {18.5};
             },
             view -> {});
 
     tuning.periodic(false);
 
-    assertThat(tuning.config().drivetrain().gains().steerKp()).isEqualTo(18.5);
+    assertThat(tuning.config().drive().gains().kP()).isEqualTo(18.5);
   }
 
   @Test
   void saysWhenWhatThePageShowsChanges() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
 
     tuning.periodic(false);
     assertThat(shown).as("nothing happened").isEmpty();
 
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(false);
     tuning.periodic(true); // the field connects
     assertThat(shown).hasSize(2);
@@ -173,49 +171,40 @@ class TuningTest {
 
   @Test
   void theViewSaysWhichValuesDiffer() {
-    Tuning tuning = tuning(true);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
     assertThat(tuning.view().hasChanges()).isFalse();
 
-    tuning.requestSet(STEER_KP, 18.5);
-    tuning.requestSet("drivetrain.limits.driveStatorCurrent", 35);
+    tuning.requestSet(KP, 18.5);
+    tuning.requestSet("drive.limits.current", 35);
     tuning.periodic(false);
 
     assertThat(tuning.view().hasChanges()).isTrue();
-    assertThat(tuning.view().changedPaths())
-        .isEqualTo("drivetrain.limits.driveStatorCurrent, " + STEER_KP);
+    assertThat(tuning.view().changedPaths()).isEqualTo("drive.limits.current, " + KP);
   }
 
   @Test
   void theReportGivesTheBuilderCallForEachChange() {
-    Tuning tuning = tuning(true);
-    tuning.requestSet(STEER_KP, 18.5);
+    Tuning<Fixtures.Machine> tuning = tuning(true);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(false);
 
     assertThat(tuning.report())
         .containsExactly(
             "Tuned values differ from the committed configuration of test. To keep them, write"
-                + " these into Robots.java:",
-            "  drivetrain.gains.steerKp: 16.0 -> 18.5   .steerKp(18.5)");
+                + " these builder calls into it:",
+            "  drive.gains.kP: 16.0 -> 18.5   .kP(18.5)");
   }
 
-  private Tuning tuning(boolean enabled) {
-    return new Tuning(
-        robot(),
+  private Tuning<Fixtures.Machine> tuning(boolean enabled) {
+    return new Tuning<>(
+        "test",
+        machine(),
         enabled,
         inputs -> logged.add(String.join(",", inputs.kinds) + "|" + String.join(",", inputs.paths)),
         shown::add);
   }
 
-  private static RobotConfig robot() {
-    return RobotConfig.builder()
-        .name("test")
-        .body(body())
-        .drivetrain(swerve())
-        .cameras(List.of())
-        .build();
-  }
-
-  private static Tuning.Value value(Tuning tuning, String path) {
+  private static Tuning.Value value(Tuning<?> tuning, String path) {
     return tuning.view().values().stream()
         .filter(value -> value.path().equals(path))
         .findFirst()

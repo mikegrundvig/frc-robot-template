@@ -1,6 +1,4 @@
-package frc.robot.tuning;
-
-import frc.robot.lib.config.ConfigTuner;
+package com.michaelgrundvig.frc.tuning;
 
 /** The tuning page's JSON, written by hand: its shape is small and fixed. */
 final class Json {
@@ -8,8 +6,8 @@ final class Json {
 
   static String view(Tuning.View view) {
     StringBuilder json = new StringBuilder(4096);
-    json.append("{\"robot\":")
-        .append(string(view.robot()))
+    json.append("{\"name\":")
+        .append(string(view.name()))
         .append(",\"enabled\":")
         .append(view.enabled())
         .append(",\"fieldConnected\":")

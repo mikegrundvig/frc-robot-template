@@ -3,6 +3,7 @@ package frc.robot.lib.config;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 
+import com.michaelgrundvig.frc.tuning.Tunable;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;

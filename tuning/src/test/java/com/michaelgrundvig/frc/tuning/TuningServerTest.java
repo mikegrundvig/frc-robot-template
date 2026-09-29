@@ -1,10 +1,8 @@
-package frc.robot.tuning;
+package com.michaelgrundvig.frc.tuning;
 
-import static frc.robot.lib.config.ConfigFixtures.body;
-import static frc.robot.lib.config.ConfigFixtures.swerve;
+import static com.michaelgrundvig.frc.tuning.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.RobotConfig;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -25,10 +23,11 @@ import org.junit.jupiter.api.TestInstance;
 /** The tuning page's web server, over real HTTP on a free port. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TuningServerTest {
-  private static final String STEER_KP = "drivetrain.gains.steerKp";
+  private static final String KP = "drive.gains.kP";
 
   private final HttpClient client = HttpClient.newHttpClient();
-  private final Tuning tuning = new Tuning(robot(), true, inputs -> {}, view -> {});
+  private final Tuning<Fixtures.Machine> tuning =
+      new Tuning<>("test", machine(), true, inputs -> {}, view -> {});
   private final TuningServer server = new TuningServer(tuning, 0);
 
   @BeforeAll
@@ -64,24 +63,23 @@ class TuningServerTest {
     assertThat(state.statusCode()).isEqualTo(200);
     assertThat(state.headers().firstValue("Content-Type"))
         .hasValue("application/json; charset=utf-8");
-    assertThat(state.body()).contains("\"robot\":\"test\"", "\"path\":\"" + STEER_KP + "\"");
+    assertThat(state.body()).contains("\"name\":\"test\"", "\"path\":\"" + KP + "\"");
   }
 
   @Test
   void changesAreQueuedForTheRobotLoop() throws Exception {
-    assertThat(post("/api/set", Map.of("path", STEER_KP, "value", "18.5")).statusCode())
-        .isEqualTo(202);
-    assertThat(tuning.config().drivetrain().gains().steerKp()).as("before the loop").isEqualTo(16);
+    assertThat(post("/api/set", Map.of("path", KP, "value", "18.5")).statusCode()).isEqualTo(202);
+    assertThat(tuning.config().drive().gains().kP()).as("before the loop").isEqualTo(16);
 
     tuning.periodic(false);
 
-    assertThat(get("/api/state").body()).contains("\"builderCall\":\".steerKp(18.5)\"");
+    assertThat(get("/api/state").body()).contains("\"builderCall\":\".kP(18.5)\"");
   }
 
   @Test
   void refusesUnknownValuesAndNonNumbers() throws Exception {
     HttpResponse<String> unknown = post("/api/set", Map.of("path", "nothing", "value", "1"));
-    HttpResponse<String> notANumber = post("/api/set", Map.of("path", STEER_KP, "value", "lots"));
+    HttpResponse<String> notANumber = post("/api/set", Map.of("path", KP, "value", "lots"));
 
     assertThat(unknown.statusCode()).isEqualTo(404);
     assertThat(unknown.body()).isEqualTo("No tunable value at nothing");
@@ -91,7 +89,7 @@ class TuningServerTest {
 
   @Test
   void switchesTuningOffAndResets() throws Exception {
-    tuning.requestSet(STEER_KP, 18.5);
+    tuning.requestSet(KP, 18.5);
     tuning.periodic(false);
 
     assertThat(post("/api/reset", Map.of()).statusCode()).isEqualTo(202);
@@ -156,14 +154,5 @@ class TuningServerTest {
 
   private URI uri(String path) {
     return URI.create("http://localhost:" + server.port() + path);
-  }
-
-  private static RobotConfig robot() {
-    return RobotConfig.builder()
-        .name("test")
-        .body(body())
-        .drivetrain(swerve())
-        .cameras(List.of())
-        .build();
   }
 }

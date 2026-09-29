@@ -31,14 +31,23 @@ class PitwallServerTest {
   private final AtomicBoolean fieldConnected = new AtomicBoolean(false);
   private final Tuning<Fixtures.Machine> tuning =
       new Tuning<>("test", machine(), true, inputs -> {}, view -> {});
-  private final PitwallServer server = new PitwallServer(tuning, 0);
+  private final AtomicBoolean homed = new AtomicBoolean(false);
+  private final Status status =
+      new Status().add("Robot", () -> "test").add("Arm homed", homed::get);
+  private final PitwallServer server = new PitwallServer(status, tuning, 0);
   private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
 
   @BeforeAll
   void start() throws Exception {
     server.start();
     loop.scheduleAtFixedRate(
-        () -> tuning.periodic(fieldConnected.get()), 0, 5, TimeUnit.MILLISECONDS);
+        () -> {
+          tuning.periodic(fieldConnected.get());
+          status.periodic();
+        },
+        0,
+        5,
+        TimeUnit.MILLISECONDS);
   }
 
   @AfterAll
@@ -61,6 +70,17 @@ class PitwallServerTest {
     assertThat(page.statusCode()).isEqualTo(200);
     assertThat(page.headers().firstValue("Content-Type")).hasValue("text/html; charset=utf-8");
     assertThat(page.body()).contains("<title>Pitwall</title>");
+  }
+
+  @Test
+  void showsTheStatusAsOfTheLastLoop() throws Exception {
+    homed.set(true);
+    Thread.sleep(50); // a few loops
+
+    assertThat(get("/api/status").body())
+        .isEqualTo(
+            "[{\"name\":\"Robot\",\"value\":\"test\"},"
+                + "{\"name\":\"Arm homed\",\"value\":true}]");
   }
 
   @Test
@@ -197,7 +217,7 @@ class PitwallServerTest {
   void aChangeTheLoopHasNotReachedIsAccepted() throws Exception {
     // A robot program whose loop never runs, as if paused in a debugger.
     var idle = new Tuning<>("idle", machine(), true, inputs -> {}, view -> {});
-    try (var paused = new PitwallServer(idle, 0, Duration.ofMillis(50))) {
+    try (var paused = new PitwallServer(new Status(), idle, 0, Duration.ofMillis(50))) {
       paused.start();
       var accepted =
           client.send(
@@ -218,7 +238,7 @@ class PitwallServerTest {
   void startOrExplainStartsThePageAndSaysWhere() throws Exception {
     List<String> said = new ArrayList<>();
 
-    Optional<PitwallServer> started = PitwallServer.startOrExplain(tuning, 0, said::add);
+    Optional<PitwallServer> started = PitwallServer.startOrExplain(status, tuning, 0, said::add);
 
     assertThat(started).isPresent();
     try {
@@ -234,7 +254,7 @@ class PitwallServerTest {
 
     // The test's own server already holds this port.
     Optional<PitwallServer> started =
-        PitwallServer.startOrExplain(tuning, server.port(), said::add);
+        PitwallServer.startOrExplain(status, tuning, server.port(), said::add);
 
     assertThat(started).isEmpty();
     assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");

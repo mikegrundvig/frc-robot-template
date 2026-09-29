@@ -12,11 +12,13 @@
     color-scheme: light dark;
     --bg: #ffffff; --panel: #f5f6f8; --fg: #1b1c1e; --muted: #5f6368; --line: #dcdfe3;
     --accent: #0b62c4; --accent-fg: #ffffff; --changed: #fff3cd; --pending: #dbe9fb; --bad: #b3261e;
+    --ok: #1e7b34;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #141517; --panel: #1e2023; --fg: #e8eaed; --muted: #9aa0a6; --line: #34373b;
       --accent: #8ab4f8; --accent-fg: #0b1a2e; --changed: #3b3217; --pending: #1c3350; --bad: #f28b82;
+      --ok: #81c995;
     }
   }
   * { box-sizing: border-box; }
@@ -34,6 +36,9 @@
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
   th { font-size: 13px; font-weight: 600; color: var(--muted); }
   td.number { font-variant-numeric: tabular-nums; }
+  table.status td:first-child { width: 40%; color: var(--muted); }
+  td.ok { color: var(--ok); font-weight: 600; }
+  td.bad { color: var(--bad); font-weight: 600; }
   tr.group td { padding-top: 16px; font-weight: 600; border-bottom: none; }
   tr.changed td { background: var(--changed); }
   tr.pending td { background: var(--pending); }
@@ -56,11 +61,14 @@
 <main>
   <header>
     <h1>Pitwall <span id="name" class="muted"></span></h1>
-    <div class="controls">
-      <span id="status" class="muted">Connecting to the robot…</span>
-      <button id="toggle" hidden></button>
-    </div>
   </header>
+
+  <table class="status"><tbody id="status-items"></tbody></table>
+
+  <h2>Tuning
+    <span id="status" class="muted">Connecting to the robot…</span>
+    <button id="toggle" hidden></button>
+  </h2>
   <div id="banner" class="banner" hidden>The field system is connected, so tuning is locked off.</div>
 
   <table>
@@ -234,14 +242,33 @@
     element("reset").disabled = lines.length === 0 || !session.enabled;
   }
 
+  /** The status items: true and false as a check and a cross, anything else as text. */
+  function renderStatus(items) {
+    const body = element("status-items");
+    body.replaceChildren();
+    for (const { name, value } of items) {
+      const row = body.insertRow();
+      row.insertCell().textContent = name;
+      const cell = row.insertCell();
+      if (typeof value === "boolean") {
+        cell.textContent = value ? "✓" : "✗";
+        cell.className = value ? "ok" : "bad";
+        cell.setAttribute("aria-label", value ? "yes" : "no");
+      } else {
+        cell.textContent = typeof value === "number" ? shown(value) : value;
+      }
+    }
+  }
+
   async function poll() {
     try {
-      const [s, v, c] = await Promise.all(
-          ["/api/tuning", "/api/values", "/api/changes"].map((path) =>
+      const [s, v, c, st] = await Promise.all(
+          ["/api/tuning", "/api/values", "/api/changes", "/api/status"].map((path) =>
               fetch(path, { cache: "no-store" }).then((response) => response.json())));
       session = s;
       current = v;
       render(c);
+      renderStatus(st);
     } catch (error) {
       element("status").textContent = "The robot isn't answering; still trying…";
     }

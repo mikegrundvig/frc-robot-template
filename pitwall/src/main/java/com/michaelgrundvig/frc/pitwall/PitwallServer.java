@@ -31,9 +31,11 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
  * simulator, http://robot.local:5820 on the robot. Any browser works, a phone's included, and so
- * does anything else that speaks HTTP. So far it serves live tuning ({@link Tuning}):
+ * does anything else that speaks HTTP. It serves the robot's status ({@link Status}) and live
+ * tuning ({@link Tuning}):
  *
  * <ul>
+ *   <li>{@code GET /api/status}: the status items as of the last loop, {@code [{"name", "value"}]}.
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected"}}. {@code
  *       PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
  *   <li>{@code GET /api/tunables}: what can be tuned, {@code {path: {"unit", "committed"}}}.
@@ -50,8 +52,8 @@ import tools.jackson.databind.json.JsonMapper;
  * system is connected, and 202 when the loop didn't get to it in time (the next GET shows the
  * result). Errors are problem details (RFC 9457).
  *
- * <p>The server's threads never change the robot: they read {@link Tuning#view()} and queue
- * requests for the robot loop to apply.
+ * <p>The server's threads never change the robot: they read what the robot loop last published
+ * ({@link Status#view()}, {@link Tuning#view()}) and queue requests for the robot loop to apply.
  */
 public final class PitwallServer implements AutoCloseable {
   /**
@@ -73,11 +75,11 @@ public final class PitwallServer implements AutoCloseable {
   /**
    * @param port the port to serve on; 0 picks a free one
    */
-  public PitwallServer(Tuning<?> tuning, int port) {
-    this(tuning, port, WAIT);
+  public PitwallServer(Status status, Tuning<?> tuning, int port) {
+    this(status, tuning, port, WAIT);
   }
 
-  PitwallServer(Tuning<?> tuning, int port, Duration wait) {
+  PitwallServer(Status status, Tuning<?> tuning, int port, Duration wait) {
     // A few threads are plenty for one page, and daemon threads never keep the program running.
     QueuedThreadPool threads = new QueuedThreadPool(8, 2);
     threads.setName("pitwall");
@@ -86,7 +88,7 @@ public final class PitwallServer implements AutoCloseable {
     connector = new ServerConnector(server, 1, 1);
     connector.setPort(port);
     server.addConnector(connector);
-    server.setHandler(new Api(tuning, page(), wait));
+    server.setHandler(new Api(status, tuning, page(), wait));
   }
 
   /**
@@ -97,10 +99,10 @@ public final class PitwallServer implements AutoCloseable {
    * @return the running server, or empty if it couldn't start
    */
   public static Optional<PitwallServer> startOrExplain(
-      Tuning<?> tuning, int port, Consumer<String> say) {
+      Status status, Tuning<?> tuning, int port, Consumer<String> say) {
     PitwallServer server = null;
     try {
-      server = new PitwallServer(tuning, port);
+      server = new PitwallServer(status, tuning, port);
       server.start();
       say.accept(
           "Pitwall: http://localhost:"
@@ -170,17 +172,20 @@ public final class PitwallServer implements AutoCloseable {
     private static final Map<String, List<String>> METHODS =
         Map.of(
             "/", List.of("GET"),
+            "/api/status", List.of("GET"),
             "/api/tuning", List.of("GET", "PATCH"),
             "/api/tunables", List.of("GET"),
             "/api/values", List.of("GET", "PATCH"),
             "/api/changes", List.of("GET", "DELETE"));
 
+    private final Status status;
     private final Tuning<?> tuning;
     private final String page;
     private final Duration wait;
     private final JsonMapper json = JsonMapper.builder().build();
 
-    Api(Tuning<?> tuning, String page, Duration wait) {
+    Api(Status status, Tuning<?> tuning, String page, Duration wait) {
+      this.status = status;
       this.tuning = tuning;
       this.page = page;
       this.wait = wait;
@@ -202,6 +207,7 @@ public final class PitwallServer implements AutoCloseable {
         }
         switch (method + " " + path) {
           case "GET /" -> send(response, callback, 200, "text/html", page);
+          case "GET /api/status" -> sendJson(response, callback, 200, status.view());
           case "GET /api/tuning" -> sendJson(response, callback, 200, session());
           case "PATCH /api/tuning" -> patchTuning(request, response, callback);
           case "GET /api/tunables" -> sendJson(response, callback, 200, tunables());

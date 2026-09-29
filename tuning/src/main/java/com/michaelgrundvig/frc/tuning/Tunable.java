@@ -1,4 +1,4 @@
-package frc.robot.lib.config;
+package com.michaelgrundvig.frc.tuning;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;

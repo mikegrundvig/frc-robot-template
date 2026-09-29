@@ -33,4 +33,6 @@ jobs:
           path: |
             build/reports/
             build/test-results/
+            tuning/build/reports/
+            tuning/build/test-results/
           if-no-files-found: warn

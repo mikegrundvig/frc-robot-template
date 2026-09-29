@@ -1,4 +1,4 @@
-package frc.robot.lib.config;
+package com.michaelgrundvig.frc.tuning;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;

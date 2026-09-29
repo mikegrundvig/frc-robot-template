@@ -67,8 +67,8 @@ dependencies {
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
-    // The tuning page's web server (src/main/java/frc/robot/tuning), and where its log lines go.
-    implementation libs.jetty.server
+    // Live tuning (tuning/, its own project), and where its web server's log lines go.
+    implementation project(":tuning")
     runtimeOnly libs.slf4j.simple
 
     compileOnly libs.recordbuilder.core

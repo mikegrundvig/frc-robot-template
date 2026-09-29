@@ -1,7 +1,5 @@
-package frc.robot.tuning;
+package com.michaelgrundvig.frc.tuning;
 
-import frc.robot.RobotConfig;
-import frc.robot.lib.config.ConfigTuner;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,9 +11,9 @@ import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Live tuning of the robot's configuration. The values marked {@code @Tunable} can be changed from
- * the tuning page while the robot runs. Nothing is saved on the robot: what differs from the
- * committed configuration is listed, ready to write into {@code Robots.java}.
+ * Live tuning of a configuration: the values marked {@link Tunable} can be changed from the tuning
+ * page while the robot runs. Nothing is saved on the robot: what differs from the committed
+ * configuration is listed as the builder calls that commit it.
  *
  * <p>Only the robot loop changes anything. The web server's threads queue requests and read a
  * snapshot ({@link #view()}); each loop, {@link #periodic} applies the queued requests and logs
@@ -23,19 +21,21 @@ import org.jspecify.annotations.Nullable;
  * the same changes at the same moments.
  *
  * <p>Changes need tuning switched on, and are refused while the field system is connected.
+ *
+ * @param <T> the configuration record at the root
  */
-public final class Tuning {
+public final class Tuning<T extends Record> {
   /**
    * What the tuning page shows. Safe to read from any thread.
    *
-   * @param robot the robot's name
+   * @param name what is being tuned, such as the robot's name
    * @param enabled whether tuning is switched on
    * @param fieldConnected whether the field system is connected, which locks tuning off
    * @param values every tunable value
    * @param changes the tuned values that differ from the committed configuration
    */
   public record View(
-      String robot,
+      String name,
       boolean enabled,
       boolean fieldConnected,
       List<Value> values,
@@ -66,7 +66,8 @@ public final class Tuning {
   /** A request from the page, waiting for the robot loop. */
   private record Request(TuningInputs.Kind kind, String path, double value) {}
 
-  private final ConfigTuner<RobotConfig> tuner;
+  private final String name;
+  private final ConfigTuner<T> tuner;
   private final Consumer<TuningInputs> logInputs;
   private final Consumer<View> onChange;
   private final Set<String> paths;
@@ -78,17 +79,20 @@ public final class Tuning {
   private volatile View view;
 
   /**
-   * @param committed the robot's committed configuration
+   * @param name what is being tuned, such as the robot's name; the page and the report show it
+   * @param committed the committed configuration
    * @param enabled whether tuning starts switched on
-   * @param logInputs logs the requests one loop applies, or in replay reads them from the log:
-   *     {@code inputs -> Logger.processInputs("Tuning", inputs)}
+   * @param logInputs logs the requests one loop applies, or in a replay replaces them with the
+   *     logged ones (with AdvantageKit, through {@code Logger.processInputs})
    * @param onChange told, in the robot loop, each time what the page shows changes
    */
   public Tuning(
-      RobotConfig committed,
+      String name,
+      T committed,
       boolean enabled,
       Consumer<TuningInputs> logInputs,
       Consumer<View> onChange) {
+    this.name = name;
     this.tuner = new ConfigTuner<>(committed);
     this.enabled = enabled;
     this.logInputs = logInputs;
@@ -99,7 +103,7 @@ public final class Tuning {
   }
 
   /** The configuration with every tuned value applied. Read it in the robot loop. */
-  public RobotConfig config() {
+  public T config() {
     return tuner.current();
   }
 
@@ -165,8 +169,8 @@ public final class Tuning {
     List<String> lines = new ArrayList<>();
     lines.add(
         "Tuned values differ from the committed configuration of "
-            + now.robot()
-            + ". To keep them, write these into Robots.java:");
+            + now.name()
+            + ". To keep them, write these builder calls into it:");
     for (ConfigTuner.Change change : now.changes()) {
       lines.add(
           "  "
@@ -236,6 +240,6 @@ public final class Tuning {
                         tuner.value(knob.path()),
                         refusals.get(knob.path())))
             .toList();
-    return new View(tuner.current().name(), enabled, fieldConnected, values, tuner.changes());
+    return new View(name, enabled, fieldConnected, values, tuner.changes());
   }
 }

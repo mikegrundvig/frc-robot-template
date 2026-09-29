@@ -1,8 +1,7 @@
-package frc.robot.tuning;
+package com.michaelgrundvig.frc.tuning;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.lib.config.ConfigTuner;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +31,7 @@ class JsonTest {
 
     assertThat(Json.view(view))
         .isEqualTo(
-            "{\"robot\":\"test\",\"enabled\":true,\"fieldConnected\":false,\"values\":["
+            "{\"name\":\"test\",\"enabled\":true,\"fieldConnected\":false,\"values\":["
                 + "{\"path\":\"a.b\",\"unit\":\"A\",\"committed\":30.0,\"current\":35.0,"
                 + "\"refused\":null},"
                 + "{\"path\":\"a.c\",\"unit\":\"\",\"committed\":1.0,\"current\":1.0,"

@@ -7,6 +7,10 @@
 // Quick mode skips the work only CI needs (static analysis, auto-formatting, the coverage report),
 // which costs seconds on every save. `ci` still enforces all of it, and refuses to run in quick mode.
 def quick = project.hasProperty("quick")
+
+// NullAway checks the project's own packages: the robot program's, unless a project (such as a
+// library) sets ext.nullSafePackages before applying this file.
+def nullSafePackages = project.findProperty("nullSafePackages") ?: "frc.robot"
 gradle.taskGraph.whenReady { graph ->
     if (quick && graph.allTasks.any { it.name == "ci" }) {
         throw new GradleException("-Pquick skips quality gates; run ci without it")
@@ -31,7 +35,7 @@ tasks.withType(JavaCompile).configureEach {
         excludedPaths = ".*/build/.*"
         errorproneArgs.addAll([
             "-Xep:NullAway:ERROR",
-            "-XepOpt:NullAway:AnnotatedPackages=frc.robot",
+            "-XepOpt:NullAway:AnnotatedPackages=" + nullSafePackages,
             "-XepOpt:NullAway:TreatGeneratedAsUnannotated=true",
         ])
     }
@@ -169,4 +173,6 @@ tasks.register("ci") {
     group = "verification"
     description = "Run every check CI runs: formatting, the gated build and tests, coverage."
     dependsOn "spotlessCheck", "build"
+    // From the top of the build, every project's checks.
+    dependsOn project.subprojects.collect { it.path + ":ci" }
 }

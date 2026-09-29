@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- The tuning page, served by the robot program (frc.robot.tuning.TuningServer). Plain HTML and
+<!-- The tuning page, served by the robot program (com.michaelgrundvig.frc.tuning.TuningServer). Plain HTML and
      JavaScript on purpose: nothing to build, nothing to install. -->
 <html lang="en">
 <head>
@@ -71,7 +71,7 @@
   <p id="none" class="muted">Everything matches the committed configuration.</p>
   <pre id="changes" hidden></pre>
   <p class="muted">Nothing is saved on the robot, and a restart returns every value to its committed
-    one. To keep a change, write its builder call into <code>Robots.java</code> and commit it.</p>
+    one. To keep a change, write its builder call into the configuration and commit it.</p>
 </main>
 
 <script>
@@ -121,7 +121,7 @@
 
   function render(state) {
     if (rows.size === 0) build(state.values);
-    element("robot").textContent = "· " + state.robot;
+    element("robot").textContent = "· " + state.name;
     element("status").textContent = state.enabled ? "Tuning is on" : "Tuning is off";
     const toggle = element("toggle");
     toggle.hidden = false;

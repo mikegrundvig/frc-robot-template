@@ -7,8 +7,8 @@
 
 package frc.robot;
 
-import frc.robot.tuning.Tuning;
-import frc.robot.tuning.TuningServer;
+import com.michaelgrundvig.frc.tuning.Tuning;
+import com.michaelgrundvig.frc.tuning.TuningServer;
 import java.util.List;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
@@ -31,7 +31,7 @@ public class Robot extends LoggedRobot {
    * The robot's configuration, with any values tuned from the tuning page. One robot for now; with
    * several, choose its configuration by the robot's identity here.
    */
-  private final Tuning tuning;
+  private final Tuning<RobotConfig> tuning;
 
   public Robot() {
     // Every log records exactly which code produced it.
@@ -74,10 +74,11 @@ public class Robot extends LoggedRobot {
     // While any tuned value differs from the committed one, a warning says which.
     Alert tuned = new Alert("Tuning", "", Alert.Level.MEDIUM);
     tuning =
-        new Tuning(
+        new Tuning<>(
+            Robots.SIM.name(),
             Robots.SIM,
             Constants.currentMode == Constants.Mode.SIM,
-            inputs -> Logger.processInputs("Tuning", inputs),
+            new TuningLog(),
             view -> {
               tuned.setText(
                   "Tuned values differ from the committed configuration: " + view.changedPaths());

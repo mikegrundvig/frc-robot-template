@@ -88,7 +88,7 @@ public record CameraConfig(
       if (diagonalFieldOfView.gte(Degrees.of(180))) {
         throw new IllegalArgumentException(
             "diagonalFieldOfView must be under 180 degrees, got "
-                + diagonalFieldOfView.toShortString());
+                + Require.shown(diagonalFieldOfView));
       }
       Require.positive("frameRate", frameRate);
       Require.nonNegative("latency", latency);

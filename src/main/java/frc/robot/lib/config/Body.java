@@ -44,9 +44,9 @@ public record Body(
     if (cgHeight.gte(height)) {
       throw new IllegalArgumentException(
           "cgHeight "
-              + cgHeight.toShortString()
+              + Require.shown(cgHeight)
               + " must be below the robot's height of "
-              + height.toShortString());
+              + Require.shown(height));
     }
   }
 

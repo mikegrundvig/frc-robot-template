@@ -7,6 +7,9 @@
 
 package frc.robot;
 
+import frc.robot.tuning.Tuning;
+import frc.robot.tuning.TuningServer;
+import java.util.List;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -14,13 +17,21 @@ import org.littletonrobotics.junction.networktables.NT4Publisher;
 import org.littletonrobotics.junction.wpilog.WPILOGReader;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
+import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
 public class Robot extends LoggedRobot {
   /** Set by {@code ./gradlew run}: start the simulator enabled in teleop. */
   static final String AUTO_ENABLE_PROPERTY = "frc.sim.autoEnable";
+
+  /**
+   * The robot's configuration, with any values tuned from the tuning page. One robot for now; with
+   * several, choose its configuration by the robot's identity here.
+   */
+  private final Tuning tuning;
 
   public Robot() {
     // Every log records exactly which code produced it.
@@ -58,12 +69,38 @@ public class Robot extends LoggedRobot {
     }
 
     Logger.start();
+
+    // Tuning starts switched on in the simulator; on a robot, switch it on from the tuning page.
+    // While any tuned value differs from the committed one, a warning says which.
+    Alert tuned = new Alert("Tuning", "", Alert.Level.MEDIUM);
+    tuning =
+        new Tuning(
+            Robots.SIM,
+            Constants.currentMode == Constants.Mode.SIM,
+            inputs -> Logger.processInputs("Tuning", inputs),
+            view -> {
+              tuned.setText(
+                  "Tuned values differ from the committed configuration: " + view.changedPaths());
+              tuned.set(view.hasChanges());
+            });
+    if (Constants.currentMode != Constants.Mode.REPLAY) {
+      TuningServer.startOrExplain(tuning, TuningServer.PORT, System.out::println);
+    }
   }
 
-  /** Every loop, in every mode: run the command scheduler. */
+  /** Every loop, in every mode: apply tuning requests, then run the command scheduler. */
   @Override
   public void robotPeriodic() {
+    tuning.periodic(RobotState.isFMSAttached());
     Scheduler.getDefault().run();
+  }
+
+  /** Every time the robot disables, print and log what tuning changed, so it can be committed. */
+  @Override
+  public void disabledInit() {
+    List<String> report = tuning.report();
+    report.forEach(System.out::println);
+    Logger.recordOutput("Tuning/Report", report.toArray(String[]::new));
   }
 
   /**

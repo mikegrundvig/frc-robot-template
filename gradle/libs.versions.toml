@@ -19,7 +19,7 @@ slf4j = "2.0.17"
 
 [libraries]
 jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
-# WPILib's units, for the tuning library; always the version GradleRIO brings the robot program.
+# WPILib's units, for Pitwall; always the version GradleRIO brings the robot program.
 wpilib-units = { module = "org.wpilib.wpiunits:wpiunits-java", version.ref = "gradlerio" }
 jetty-server = { module = "org.eclipse.jetty:jetty-server", version.ref = "jetty" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }

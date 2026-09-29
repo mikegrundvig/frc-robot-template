@@ -38,8 +38,8 @@ class ArchitectureTest {
             "org.jspecify..",
             // The annotations on generated configuration builders; nothing at run time.
             "io.soabase.recordbuilder..",
-            // The tuning library, whose @Tunable marks the values that can be dialed in.
-            "com.michaelgrundvig.frc.tuning..")
+            // Pitwall, whose @Tunable marks the values that can be dialed in.
+            "com.michaelgrundvig.frc.pitwall..")
         .because("components must work in any robot, and be testable without one")
         .allowEmptyShould(true)
         .check(PRODUCTION_CODE);

@@ -2,7 +2,7 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.tuning.TuningInputs;
+import com.michaelgrundvig.frc.pitwall.TuningInputs;
 import org.junit.jupiter.api.Test;
 import org.littletonrobotics.junction.LogTable;
 

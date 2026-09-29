@@ -1,6 +1,6 @@
 package frc.robot;
 
-import com.michaelgrundvig.frc.tuning.TuningInputs;
+import com.michaelgrundvig.frc.pitwall.TuningInputs;
 import java.util.function.Consumer;
 import org.littletonrobotics.junction.LogTable;
 import org.littletonrobotics.junction.Logger;

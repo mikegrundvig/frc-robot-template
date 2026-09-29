@@ -12,5 +12,6 @@ plugins {
 
 rootProject.name = "frc-robot-template"
 
-// The tuning library: its own project, free of robot code, so it can become a library teams pull in.
-include "tuning"
+// Pitwall, the robot program's own web page (live tuning so far): its own project, free of robot
+// code, so it can become a library teams pull in.
+include "pitwall"

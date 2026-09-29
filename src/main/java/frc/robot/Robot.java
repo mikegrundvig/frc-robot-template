@@ -7,8 +7,8 @@
 
 package frc.robot;
 
-import com.michaelgrundvig.frc.tuning.Tuning;
-import com.michaelgrundvig.frc.tuning.TuningServer;
+import com.michaelgrundvig.frc.pitwall.PitwallServer;
+import com.michaelgrundvig.frc.pitwall.Tuning;
 import java.util.List;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
@@ -28,7 +28,7 @@ public class Robot extends LoggedRobot {
   static final String AUTO_ENABLE_PROPERTY = "frc.sim.autoEnable";
 
   /**
-   * The robot's configuration, with any values tuned from the tuning page. One robot for now; with
+   * The robot's configuration, with any values tuned from the Pitwall page. One robot for now; with
    * several, choose its configuration by the robot's identity here.
    */
   private final Tuning<RobotConfig> tuning;
@@ -73,7 +73,7 @@ public class Robot extends LoggedRobot {
 
     Logger.start();
 
-    // Tuning starts switched on in the simulator; on a robot, switch it on from the tuning page.
+    // Tuning starts switched on in the simulator; on a robot, switch it on from the Pitwall page.
     // While any tuned value differs from the committed one, a warning says which.
     Alert tuned = new Alert("Tuning", "", Alert.Level.MEDIUM);
     tuning =
@@ -88,7 +88,7 @@ public class Robot extends LoggedRobot {
               tuned.set(view.hasChanges());
             });
     if (Constants.currentMode != Constants.Mode.REPLAY) {
-      TuningServer.startOrExplain(tuning, TuningServer.PORT, System.out::println);
+      PitwallServer.startOrExplain(tuning, PitwallServer.PORT, System.out::println);
     }
 
     // The drivetrain reads its configuration from tuning, so tuned values take effect at once.

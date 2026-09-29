@@ -1,6 +1,6 @@
-package com.michaelgrundvig.frc.tuning;
+package com.michaelgrundvig.frc.pitwall;
 
-import static com.michaelgrundvig.frc.tuning.Fixtures.machine;
+import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;

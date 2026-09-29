@@ -1,4 +1,4 @@
-// The robot project. The standard WPILib layout, so WPILib VS Code, GradleRIO, and every WPILib and
+// The robot project. The standard WPILib layout, so GradleRIO, WPILib's tools, and every WPILib and
 // AdvantageKit guide apply as-is. The supporting build rules live in gradle/ (see the end of file).
 
 plugins {
@@ -112,7 +112,7 @@ tasks.matching { it.name == "deploy" }.configureEach {
 
 // Store the team number: ./gradlew setTeamNumber -PteamNumber=NNNN
 tasks.register("setTeamNumber") {
-    group = "GradleRIO"
+    group = "DeployUtils" // beside deploy
     description = "Store the team number used for deploying: -PteamNumber=NNNN"
     def prefs = file(".wpilib/wpilib_preferences.json")
     def requested = project.findProperty("teamNumber")?.toString()

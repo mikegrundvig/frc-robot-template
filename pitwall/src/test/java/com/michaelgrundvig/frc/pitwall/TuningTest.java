@@ -63,6 +63,37 @@ class TuningTest {
     assertThat(tuning.config()).isEqualTo(machine());
   }
 
+  /** A configuration whose own check throws something other than IllegalArgumentException. */
+  record Fragile(@Tunable double limit) {
+    Fragile {
+      if (limit > 10) {
+        throw new IllegalStateException("limit over 10 is not supported");
+      }
+      if (limit < 0) {
+        throw new UnsupportedOperationException();
+      }
+    }
+  }
+
+  @Test
+  void anythingAConfigurationThrowsRefusesTheChangeRatherThanStoppingTheRobot() {
+    var tuning = new Tuning<>("fragile", new Fragile(5), true, inputs -> {}, view -> {});
+
+    var tooHigh = tuning.requestChanges(Map.of("limit", 20.0));
+    var negative = tuning.requestChanges(Map.of("limit", -1.0));
+    tuning.periodic(false);
+
+    assertThat(tooHigh.getNow(null))
+        .isEqualTo(
+            new Tuning.Outcome(Tuning.Outcome.Result.REFUSED, "limit over 10 is not supported"));
+    assertThat(negative.getNow(null))
+        .as("without a message, the exception names itself")
+        .isEqualTo(
+            new Tuning.Outcome(
+                Tuning.Outcome.Result.REFUSED, "java.lang.UnsupportedOperationException"));
+    assertThat(tuning.config()).isEqualTo(new Fragile(5));
+  }
+
   @Test
   void severalValuesChangeTogetherOrNotAtAll() {
     var tuning = tuning(true);

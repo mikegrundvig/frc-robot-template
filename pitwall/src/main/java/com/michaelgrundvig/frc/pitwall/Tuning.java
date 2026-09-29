@@ -302,8 +302,11 @@ public final class Tuning<T extends Record> {
     try {
       change.run();
       return Outcome.applied();
-    } catch (IllegalArgumentException refused) {
-      return new Outcome(Outcome.Result.REFUSED, String.valueOf(refused.getMessage()));
+    } catch (RuntimeException refused) {
+      // Whatever a configuration's checks throw refuses the change: a request from the page must
+      // never stop the robot loop.
+      String why = refused.getMessage();
+      return new Outcome(Outcome.Result.REFUSED, why != null ? why : refused.toString());
     }
   }
 

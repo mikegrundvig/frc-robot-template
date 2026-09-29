@@ -3,10 +3,12 @@ name: CI
 # Runs ./gradlew ci, the same command anyone runs locally before pushing. Keep the checks in Gradle,
 # not here: this file only sets up caching and uploads the results.
 
+# Paused while the template is young, to save Actions minutes: it runs only when started by hand
+# (Actions tab, "Run workflow"). To run on every push and pull request again, restore:
+#   push:
+#     branches: [main]
+#   pull_request:
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:

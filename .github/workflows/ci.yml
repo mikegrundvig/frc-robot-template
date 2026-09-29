@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Caches Gradle, dependencies, and the JDK 25 toolchain Gradle downloads on first use.
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - name: Formatting, static analysis, tests, coverage
         run: ./gradlew ci
       - name: Upload reports

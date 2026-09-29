@@ -1,0 +1,172 @@
+// Quality gates: everything here runs on every build, locally and in CI, and fails the build when a
+// rule is broken. Each rule is one that catches real robot bugs; none are style preferences.
+//
+//   ./gradlew ci                               every check CI runs; run it before pushing
+//   ./gradlew test -Pquick --continuous        fast edit-test loop (skips the CI-only work)
+
+// Quick mode skips the work only CI needs (static analysis, auto-formatting, the coverage report),
+// which costs seconds on every save. `ci` still enforces all of it, and refuses to run in quick mode.
+def quick = project.hasProperty("quick")
+gradle.taskGraph.whenReady { graph ->
+    if (quick && graph.allTasks.any { it.name == "ci" }) {
+        throw new GradleException("-Pquick skips quality gates; run ci without it")
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    // A small set of compiler warnings promoted to errors; each is almost always a real bug.
+    // Deprecation is left out while WPILib is in prerelease, or every update would fail builds.
+    options.compilerArgs.addAll([
+        "-Xlint:cast,divzero,empty,fallthrough,finally,overrides,rawtypes,unchecked",
+        "-Werror",
+    ])
+    // Error Prone (Google's bug finder) at error level only: its warnings are style advice, worth
+    // reading in review, never worth failing a build over. NullAway (Uber's null checker) proves at
+    // compile time that nothing can be null unless it is annotated @Nullable (org.jspecify).
+    options.errorprone {
+        enabled = !quick
+        disableAllWarnings = true
+        disableWarningsInGeneratedCode = true
+        excludedPaths = ".*/build/.*"
+        errorproneArgs.addAll([
+            "-Xep:NullAway:ERROR",
+            "-XepOpt:NullAway:AnnotatedPackages=frc.robot",
+            "-XepOpt:NullAway:TreatGeneratedAsUnannotated=true",
+        ])
+    }
+}
+
+// Tests produce a coverage report (JaCoCo), except in quick mode.
+tasks.named("test") {
+    if (!quick) {
+        finalizedBy "jacocoTestReport"
+    }
+}
+jacoco {
+    toolVersion = "0.8.15"
+}
+tasks.named("jacocoTestReport") {
+    dependsOn "test"
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    // Generated code is not ours to test.
+    classDirectories.setFrom(files(classDirectories.files.collect {
+        fileTree(dir: it, exclude: [
+            "**/BuildConstants*",
+            "**/*AutoLogged*"
+        ])
+    }))
+}
+
+// Coverage ratchet: the build fails if coverage drops below the floors in coverage-floor.properties.
+// Floors only go up (the build says when they can); there is no absolute target to game. Keys are
+// "line" and "branch" for everything, or "<package/path>.line" and ".branch" for one package tree.
+def coverageCheck = tasks.register("coverageCheck") {
+    group = "verification"
+    description = "Fail if test coverage drops below coverage-floor.properties."
+    dependsOn "jacocoTestReport"
+    def report = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
+    def floorFile = file("coverage-floor.properties")
+    inputs.file(floorFile)
+    inputs.files(report).optional()
+    doLast {
+        def floors = new Properties()
+        floorFile.withInputStream { floors.load(it) }
+        def reportFile = report.get().asFile
+        def xml = null
+        if (reportFile.exists()) {
+            def parser = new groovy.xml.XmlSlurper(false, false)
+            // JaCoCo's report declares a DOCTYPE; allow the declaration, never fetch the DTD.
+            parser.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false)
+            parser.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            xml = parser.parse(reportFile)
+        }
+        def coverage = { packages, String type ->
+            double missed = 0, covered = 0
+            packages.each { pkg ->
+                def c = pkg.counter.find { it.@type == type }
+                if (c.size() > 0) {
+                    missed += c.@missed.toDouble()
+                    covered += c.@covered.toDouble()
+                }
+            }
+            return missed + covered > 0 ? 100.0 * covered / (missed + covered) : null
+        }
+        def scopes = floors.stringPropertyNames().collect {
+            it.contains(".") ? it.substring(0, it.lastIndexOf(".")) : ""
+        }.unique().sort()
+        def failures = []
+        scopes.each { scope ->
+            def packages = xml == null ? [] : (scope
+            ? xml.package.findAll {
+                it.@name == scope || it.@name.text().startsWith(scope + "/")
+            }
+            : xml.package)
+            def label = scope ?: "all"
+            [line: "LINE", branch: "BRANCH"].each { key, type ->
+                def floorText = floors.getProperty(scope ? "${scope}.${key}" : key)
+                if (floorText == null) {
+                    return
+                }
+                double floor = floorText.toDouble()
+                def actual = coverage(packages, type)
+                if (actual == null) {
+                    println String.format("Coverage %-20s %-6s   no code yet (floor %5.1f%%)", label, key, floor)
+                    return
+                }
+                println String.format("Coverage %-20s %-6s %5.1f%% (floor %5.1f%%)", label, key, actual, floor)
+                if (actual < floor) {
+                    failures << String.format("%s %s coverage %.1f%% is below the floor %.1f%%", label, key, actual, floor)
+                } else if (actual >= floor + 2.0 && floor < 100.0) {
+                    println String.format("  raise the %s %s floor to %.1f", label, key, Math.floor(actual))
+                }
+            }
+        }
+        if (failures) {
+            throw new GradleException(failures.join("; ") + ". Add tests for the new code.")
+        }
+    }
+}
+tasks.named("check") {
+    dependsOn coverageCheck
+}
+
+// Formatting (google-java-format): local builds fix it automatically, so the careful path is the
+// quick path; CI sets CI=true and only checks, so unformatted code fails there. LF on every OS.
+if (System.getenv("CI") == null && !quick) {
+    tasks.named("compileJava") {
+        dependsOn "spotlessApply"
+    }
+}
+spotless {
+    lineEndings = "UNIX"
+    java {
+        target "src/**/*.java"
+        toggleOffOn()
+        googleJavaFormat()
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+    groovyGradle {
+        target "*.gradle", "gradle/*.gradle"
+        greclipse()
+        leadingTabsToSpaces(4)
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+    json {
+        target "vendordeps/*.json", "sim/*.json"
+        gson().indentWithSpaces(2)
+    }
+}
+
+// Everything CI checks. Run it before pushing.
+tasks.register("ci") {
+    group = "verification"
+    description = "Run every check CI runs: formatting, the gated build and tests, coverage."
+    dependsOn "spotlessCheck", "build"
+}

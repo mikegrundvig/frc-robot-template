@@ -1,0 +1,114 @@
+// The robot project. The standard WPILib layout, so WPILib VS Code, GradleRIO, and every WPILib and
+// AdvantageKit guide apply as-is. The supporting build rules live in gradle/ (see the end of file).
+
+plugins {
+    id "java"
+    id "application"
+    id "jacoco"
+    alias(libs.plugins.gradlerio)
+    alias(libs.plugins.spotless)
+    alias(libs.plugins.errorprone)
+}
+
+// Java 25, downloaded automatically when missing (settings.gradle). Nothing to install by hand.
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// Deploying to the robot's Systemcore. The team number is only needed to deploy: set it with
+// "WPILib: Set Team Number", in .wpilib/wpilib_preferences.json, or with -PteamNumber=NNNN.
+deploy {
+    targets {
+        systemcore(getTargetTypeClass("SystemCore")) {
+            team = project.wpilib.getTeamOrDefault(0)
+            useDefaultSystemcoreHostName()
+            debug = project.wpilib.getDebugOrDefault(false)
+            artifacts {
+                wpilibJava(getArtifactTypeClass("WPILibJavaArtifact")) {
+                    debugJni = false
+                }
+                wpilibStaticFileDeploy(getArtifactTypeClass("FileTreeArtifact")) {
+                    files = project.fileTree("src/main/deploy")
+                    directory = "/home/systemcore/deploy"
+                    deleteOldFiles = false
+                }
+            }
+        }
+    }
+}
+def deployArtifact = deploy.targets.systemcore.artifacts.wpilibJava
+wpi.java.runSimWithDebugJni = false
+
+dependencies {
+    annotationProcessor wpi.java.deps.wpilibAnnotations()
+    implementation wpi.java.deps.wpilib()
+    implementation wpi.java.vendor.java()
+
+    systemcoreDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.systemcore)
+    systemcoreDebug wpi.java.vendor.jniDebug(wpi.platforms.systemcore)
+    systemcoreRelease wpi.java.deps.wpilibJniRelease(wpi.platforms.systemcore)
+    systemcoreRelease wpi.java.vendor.jniRelease(wpi.platforms.systemcore)
+
+    nativeDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.desktop)
+    nativeDebug wpi.java.vendor.jniDebug(wpi.platforms.desktop)
+    simulationDebug wpi.sim.enableDebug()
+    nativeRelease wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
+    nativeRelease wpi.java.vendor.jniRelease(wpi.platforms.desktop)
+    simulationRelease wpi.sim.enableRelease()
+
+    // AdvantageKit's @AutoLog processor, at the version vendordeps/AdvantageKit.json pins.
+    def akit = new groovy.json.JsonSlurper().parse(file("vendordeps/AdvantageKit.json"))
+    annotationProcessor "org.littletonrobotics.akit:akit-autolog:${akit.version}"
+
+    // Null safety: JSpecify's annotations (the cross-industry standard), checked at compile time
+    // by NullAway so a null can never reach the robot unannounced.
+    implementation libs.jspecify
+
+    // Static analysis (gradle/quality.gradle).
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    testImplementation libs.archunit.junit5
+}
+
+application.mainClass = "frc.robot.Main"
+deployArtifact.configureApplication(application)
+wpi.java.configureApplication(application)
+wpi.java.configureTestTasks(test)
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+// A copy of the source travels with every deploy, so the code on a robot can always be recovered.
+tasks.named("jar") {
+    from("src") { into "backup/src" }
+    from("vendordeps") { into "backup/vendordeps" }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs.add "-XDstringConcat=inline"
+}
+
+// Nothing reaches a robot without a team number, or without passing every check.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.name.startsWith("deploy") }) {
+        if (deploy.targets.systemcore.team <= 0) {
+            throw new GradleException("Set your team number before deploying: \"WPILib: Set Team"
+            + " Number\", .wpilib/wpilib_preferences.json, or -PteamNumber=NNNN")
+        }
+    }
+}
+tasks.matching { it.name == "deploy" }.configureEach {
+    dependsOn "check"
+}
+
+apply from: "gradle/quality.gradle"     // formatting, static analysis, coverage, the ci task
+apply from: "gradle/build-info.gradle"  // git SHA and build time, logged by the robot at startup
+apply from: "gradle/simulation.gradle"  // simulator defaults for ./gradlew run

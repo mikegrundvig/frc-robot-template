@@ -1,0 +1,13 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    // Downloads the JDK the build asks for (build.gradle, java.toolchain), so ./gradlew works on any
+    // machine with any Java installed. No JDK setup and no WPILib installer needed to build.
+    id "org.gradle.toolchains.foojay-resolver-convention" version "1.0.0"
+}
+
+rootProject.name = "frc-robot-template"

@@ -1,0 +1,61 @@
+// Build metadata: generates frc.robot.BuildConstants from the git state, and the robot logs it at
+// startup, so every log says exactly which code produced it. DIRTY counts staged, unstaged, and
+// untracked changes anywhere in the repository, so a deploy of uncommitted work is never logged as
+// clean. DIRTY: 0 = clean, 1 = uncommitted changes, -1 = git unavailable.
+
+def generatedDir = layout.buildDirectory.dir("generated/sources/buildconstants/java/main")
+def buildConstants = tasks.register("generateBuildConstants") {
+    description = "Generate frc.robot.BuildConstants from the git state."
+    outputs.dir(generatedDir)
+    outputs.upToDateWhen { false }
+    def dir = projectDir
+    def name = project.name
+    doLast {
+        def git = { List<String> args ->
+            try {
+                def proc = (["git"] + args).execute(null, dir)
+                def out = new StringBuilder()
+                proc.consumeProcessOutput(out, new StringBuilder())
+                if (!proc.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                    proc.destroyForcibly()
+                    return null
+                }
+                return proc.exitValue() == 0 ? out.toString().trim() : null
+            } catch (IOException ignored) {
+                return null
+            }
+        }
+        def status = git(["status", "--porcelain"])
+        int dirty = status == null ? -1 : (status.isEmpty() ? 0 : 1)
+        def now = java.time.ZonedDateTime.now()
+        def fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
+        def gitDate = git([
+            "show",
+            "-s",
+            "--format=%cI",
+            "HEAD"
+        ])
+        def gitDateText = gitDate
+                ? java.time.OffsetDateTime.parse(gitDate).atZoneSameInstant(now.zone).format(fmt)
+                : "UNKNOWN"
+        def file = generatedDir.get().file("frc/robot/BuildConstants.java").asFile
+        file.parentFile.mkdirs()
+        file.text = """\
+package frc.robot;
+
+/** Generated from the git state at build time. Do not edit. */
+public final class BuildConstants {
+  public static final String MAVEN_NAME = "${name}";
+  public static final String GIT_SHA = "${git(["rev-parse", "HEAD"]) ?: "UNKNOWN"}";
+  public static final String GIT_DATE = "${gitDateText}";
+  public static final String GIT_BRANCH = "${git(["rev-parse", "--abbrev-ref", "HEAD"]) ?: "UNKNOWN"}";
+  public static final String BUILD_DATE = "${now.format(fmt)}";
+  public static final long BUILD_UNIX_TIME = ${now.toInstant().toEpochMilli()}L;
+  public static final int DIRTY = ${dirty};
+
+  private BuildConstants() {}
+}
+"""
+    }
+}
+sourceSets.main.java.srcDir(buildConstants)

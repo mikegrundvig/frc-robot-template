@@ -1,0 +1,73 @@
+# FRC Robot Template
+
+A starting point for FRC robot code that gets the fundamentals right from the first commit: typed
+configuration, simulation you can test against, checks that catch real bugs before they reach the
+robot, and a build that works the same on every laptop and in CI.
+
+It builds on the standard tools rather than replacing them: [WPILib](https://docs.wpilib.org)
+(2027, Systemcore), [AdvantageKit](https://docs.advantagekit.org) for logging and replay, and
+WPILib's Commands v3. The layout is the standard WPILib project layout, so WPILib VS Code and every
+WPILib and AdvantageKit guide apply unchanged. Use it by clicking **Use this template**, then fill in
+your robot.
+
+> **Status:** early. It tracks WPILib's 2027 prereleases (currently 2027.0.0-alpha-7), and the
+> robot-side pieces (drivetrain, simulation, configuration) are being added now.
+
+## Quick start
+
+You need git and any Java installation (to start the Gradle wrapper). Gradle downloads the exact
+JDK the robot code needs; no WPILib installer is required to build, test, or simulate.
+
+```bash
+./gradlew ci                            # every check CI runs; run before pushing
+./gradlew test -Pquick --continuous     # rerun tests on every save while you work
+./gradlew run                           # the simulator, enabled and drivable from the keyboard
+./gradlew deploy                        # to the robot (needs your team number; see below)
+```
+
+Set your team number with **WPILib: Set Team Number** in VS Code, in
+`.wpilib/wpilib_preferences.json`, or with `-PteamNumber=NNNN`. It is only needed to deploy.
+
+## The fundamentals, and why
+
+Every rule below runs on every build, locally and in CI, and fails the build when broken. Each one
+catches a kind of bug that robot code otherwise accumulates quietly until it bites at an event.
+
+| Check | What it catches |
+|---|---|
+| **NullAway** with [JSpecify](https://jspecify.dev) annotations | A null reaching code that doesn't expect it: the classic mid-match crash. Nothing may be null unless it is declared `@Nullable`, and the compiler proves every use is checked. |
+| **Error Prone** (error level) | Code that compiles but is certainly wrong: exceptions created and never thrown, bad equality, misused APIs. |
+| **WPILib's compiler plugin** | FRC-specific mistakes, such as a Commands v3 loop that never yields and freezes the robot. |
+| **Compiler warnings as errors** (a curated set) | Unchecked casts, raw types, switch fall-through, and other near-certain bugs. |
+| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, and static mutable state that makes behavior depend on what ran before. |
+| **Tests** (JUnit 6, [AssertJ](https://assertj.github.io/doc/)) | Behavior regressions, including simulation tests that exercise physics. |
+| **Coverage ratchet** (JaCoCo) | New code without tests. Coverage may never drop below the floors in `coverage-floor.properties`; there is no percentage target to game. |
+| **Formatting** (google-java-format via Spotless) | Diff noise and review friction. Your local build formats automatically; CI only checks. |
+
+Also built in:
+
+- **One build, everywhere:** a Gradle toolchain pins Java 25 and downloads it when missing, and the
+  version catalog (`gradle/libs.versions.toml`) holds every build and test version in one place.
+- **Every log says which code produced it:** the robot records the git SHA, branch, build time, and
+  whether anything was uncommitted (`gradle/build-info.gradle`).
+- **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
+  without a team number.
+- **Dependency updates** for build tools and CI actions arrive as weekly pull requests (Dependabot).
+  Robot libraries (WPILib, vendordeps) are updated deliberately, per WPILib release.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `src/main/java/frc/robot/` | The robot program. |
+| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). |
+| `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`). |
+| `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
+| `vendordeps/` | Vendor libraries, as in any WPILib project. |
+| `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
+
+## License
+
+[BSD 3-Clause](LICENSE). Parts of `Main.java`, `Robot.java`, and `Constants.java` derive from
+AdvantageKit's templates (BSD 3-Clause, Littleton Robotics); WPILib is BSD 3-Clause (FIRST and other
+WPILib contributors). Their licenses are in [`licenses/`](licenses/).

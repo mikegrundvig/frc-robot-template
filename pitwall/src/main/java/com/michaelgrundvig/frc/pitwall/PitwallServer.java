@@ -1,32 +1,31 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import io.avaje.json.JsonException;
+import io.avaje.jsonb.JsonType;
+import io.avaje.jsonb.Jsonb;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import org.eclipse.jetty.http.HttpHeader;
-import org.eclipse.jetty.io.Content;
-import org.eclipse.jetty.server.Handler;
-import org.eclipse.jetty.server.Request;
-import org.eclipse.jetty.server.Response;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
@@ -58,6 +57,9 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>The server's threads never change the robot: they read what the robot loop last published
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
  * robot loop to apply.
+ *
+ * <p>Nothing here is bundled: the web server is the one built into Java ({@code
+ * com.sun.net.httpserver}), and JSON is avaje-jsonb, which WPILib gives every robot program.
  */
 public final class PitwallServer implements AutoCloseable {
   /**
@@ -73,8 +75,12 @@ public final class PitwallServer implements AutoCloseable {
   /** How long a change waits for the robot loop before answering 202 Accepted. */
   static final Duration WAIT = Duration.ofSeconds(1);
 
-  private final Server server;
-  private final ServerConnector connector;
+  /** The page's requests are a few hundred bytes; anything much bigger isn't from it. */
+  private static final int MAX_BODY_BYTES = 64 * 1024;
+
+  private final HttpServer server;
+  private final ExecutorService threads;
+  private final int port;
 
   /**
    * @param port the port to serve on; 0 picks a free one
@@ -84,15 +90,24 @@ public final class PitwallServer implements AutoCloseable {
   }
 
   PitwallServer(Status status, Tuning<?> tuning, Actions actions, int port, Duration wait) {
+    this.port = port;
+    try {
+      server = HttpServer.create();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
     // A few threads are plenty for one page, and daemon threads never keep the program running.
-    QueuedThreadPool threads = new QueuedThreadPool(8, 2);
-    threads.setName("pitwall");
-    threads.setDaemon(true);
-    server = new Server(threads);
-    connector = new ServerConnector(server, 1, 1);
-    connector.setPort(port);
-    server.addConnector(connector);
-    server.setHandler(new Api(status, tuning, actions, page(), wait));
+    threads =
+        Executors.newFixedThreadPool(
+            4,
+            runnable -> {
+              Thread thread = new Thread(runnable, "pitwall");
+              thread.setDaemon(true);
+              return thread;
+            });
+    server.setExecutor(threads);
+    Api api = new Api(status, tuning, actions, page(), wait);
+    server.createContext("/", api::handle);
   }
 
   /**
@@ -118,32 +133,31 @@ public final class PitwallServer implements AutoCloseable {
     } catch (Exception e) {
       say.accept("Pitwall's page couldn't start, so it is unavailable: " + e);
       if (server != null) {
-        stopQuietly(server);
+        server.close();
       }
       return Optional.empty();
     }
   }
 
-  private static void stopQuietly(PitwallServer server) {
-    try {
-      server.close();
-    } catch (Exception e) {
-      // It never started; there is nothing more to release.
-    }
-  }
-
-  public void start() throws Exception {
+  public void start() throws IOException {
+    server.bind(new InetSocketAddress(port), 0);
     server.start();
   }
 
-  /** The port it serves on. */
+  /** The port it serves on, once started; -1 before. */
   public int port() {
-    return connector.getLocalPort();
+    InetSocketAddress address = server.getAddress();
+    return address != null ? address.getPort() : -1;
   }
 
   @Override
-  public void close() throws Exception {
-    server.stop();
+  public void close() {
+    try {
+      server.stop(0);
+    } catch (IllegalStateException neverStarted) {
+      // There is nothing to stop.
+    }
+    threads.shutdownNow();
   }
 
   private static String page() {
@@ -172,7 +186,7 @@ public final class PitwallServer implements AutoCloseable {
   }
 
   /** The page, and the resources of the API. */
-  private static final class Api extends Handler.Abstract {
+  private static final class Api {
     private static final Map<String, List<String>> METHODS =
         Map.of(
             "/", List.of("GET"),
@@ -188,7 +202,7 @@ public final class PitwallServer implements AutoCloseable {
     private final Actions actions;
     private final String page;
     private final Duration wait;
-    private final JsonMapper json = JsonMapper.builder().build();
+    private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
 
     Api(Status status, Tuning<?> tuning, Actions actions, String page, Duration wait) {
       this.status = status;
@@ -198,98 +212,96 @@ public final class PitwallServer implements AutoCloseable {
       this.wait = wait;
     }
 
-    @Override
-    public boolean handle(Request request, Response response, Callback callback) {
-      String path = Request.getPathInContext(request);
-      String method = request.getMethod();
-      try {
-        List<String> allowed = METHODS.get(path);
-        if (allowed == null) {
-          throw new Problem(404, "Not found", "There is nothing at " + path);
+    void handle(HttpExchange exchange) throws IOException {
+      try (exchange) {
+        String path = exchange.getRequestURI().getPath();
+        String method = exchange.getRequestMethod();
+        try {
+          List<String> allowed = METHODS.get(path);
+          if (allowed == null) {
+            throw new Problem(404, "Not found", "There is nothing at " + path);
+          }
+          if (!allowed.contains(method)) {
+            exchange.getResponseHeaders().set("Allow", String.join(", ", allowed));
+            throw new Problem(
+                405, "Method not allowed", path + " allows " + String.join(", ", allowed));
+          }
+          switch (method + " " + path) {
+            case "GET /" -> send(exchange, 200, "text/html", page);
+            case "GET /api/status" -> sendJson(exchange, 200, statusItems());
+            case "GET /api/actions" -> sendJson(exchange, 200, actionStates());
+            case "POST /api/actions" -> postAction(exchange);
+            case "GET /api/tuning" -> sendJson(exchange, 200, session());
+            case "PATCH /api/tuning" -> patchTuning(exchange);
+            case "GET /api/tunables" -> sendJson(exchange, 200, tunables());
+            case "GET /api/values" -> sendJson(exchange, 200, values());
+            case "PATCH /api/values" -> patchValues(exchange);
+            case "GET /api/changes" -> getChanges(exchange);
+            case "DELETE /api/changes" -> answer(exchange, tuning.requestReset(), this::changes);
+            default -> throw new IllegalStateException("unrouted: " + method + " " + path);
+          }
+        } catch (Problem problem) {
+          sendProblem(exchange, problem);
+        } catch (RuntimeException e) {
+          sendProblem(exchange, new Problem(500, "Server error", String.valueOf(e)));
         }
-        if (!allowed.contains(method)) {
-          response.getHeaders().put(HttpHeader.ALLOW, String.join(", ", allowed));
-          throw new Problem(
-              405, "Method not allowed", path + " allows " + String.join(", ", allowed));
-        }
-        switch (method + " " + path) {
-          case "GET /" -> send(response, callback, 200, "text/html", page);
-          case "GET /api/status" -> sendJson(response, callback, 200, status.view());
-          case "GET /api/actions" -> sendJson(response, callback, 200, actions.view());
-          case "POST /api/actions" -> postAction(request, response, callback);
-          case "GET /api/tuning" -> sendJson(response, callback, 200, session());
-          case "PATCH /api/tuning" -> patchTuning(request, response, callback);
-          case "GET /api/tunables" -> sendJson(response, callback, 200, tunables());
-          case "GET /api/values" -> sendJson(response, callback, 200, values());
-          case "PATCH /api/values" -> patchValues(request, response, callback);
-          case "GET /api/changes" -> getChanges(request, response, callback);
-          case "DELETE /api/changes" ->
-              answer(tuning.requestReset(), response, callback, this::changes);
-          default -> throw new IllegalStateException("unrouted: " + method + " " + path);
-        }
-      } catch (Problem problem) {
-        sendProblem(response, callback, problem);
       }
-      return true;
     }
 
-    private void patchTuning(Request request, Response response, Callback callback) {
-      JsonNode patch = readPatch(request);
-      for (String name : patch.propertyNames()) {
-        if (!name.equals("enabled")) {
-          throw new Problem(422, "Not changeable", "Only enabled can be changed, not " + name);
-        }
-      }
-      JsonNode enabled = patch.get("enabled");
-      if (enabled == null) {
-        sendJson(response, callback, 200, session()); // an empty patch changes nothing
-        return;
-      }
-      if (!enabled.isBoolean()) {
-        throw new Problem(400, "Not true or false", "enabled must be true or false");
-      }
-      answer(tuning.requestEnabled(enabled.booleanValue()), response, callback, this::session);
-    }
-
-    private void postAction(Request request, Response response, Callback callback) {
-      JsonNode body = readPatch(request);
-      JsonNode start = body.get("start");
-      JsonNode cancel = body.get("cancel");
-      JsonNode name = start != null ? start : cancel;
+    private void postAction(HttpExchange exchange) throws IOException {
+      Map<String, @Nullable Object> body = readObject(exchange);
+      Object start = body.get("start");
+      Object cancel = body.get("cancel");
+      Object name = start != null ? start : cancel;
       if (body.size() != 1 || name == null) {
         throw new Problem(400, "Start or cancel", "Send {\"start\": name} or {\"cancel\": name}");
       }
-      if (!name.isString()) {
+      if (!(name instanceof String action)) {
         throw new Problem(400, "Not a name", "An action's name is a string");
       }
-      String action = name.stringValue();
       if (!actions.has(action)) {
         throw new Problem(422, "Not an action", "There is no action named " + action);
       }
       answer(
+          exchange,
           start != null ? actions.requestStart(action) : actions.requestCancel(action),
-          response,
-          callback,
-          actions::view);
+          this::actionStates);
     }
 
-    private void patchValues(Request request, Response response, Callback callback) {
-      JsonNode patch = readPatch(request);
+    private void patchTuning(HttpExchange exchange) throws IOException {
+      Map<String, @Nullable Object> patch = readObject(exchange);
+      for (String name : patch.keySet()) {
+        if (!name.equals("enabled")) {
+          throw new Problem(422, "Not changeable", "Only enabled can be changed, not " + name);
+        }
+      }
+      if (!patch.containsKey("enabled")) {
+        sendJson(exchange, 200, session()); // an empty patch changes nothing
+        return;
+      }
+      if (!(patch.get("enabled") instanceof Boolean enabled)) {
+        throw new Problem(400, "Not true or false", "enabled must be true or false");
+      }
+      answer(exchange, tuning.requestEnabled(enabled), this::session);
+    }
+
+    private void patchValues(HttpExchange exchange) throws IOException {
+      Map<String, @Nullable Object> patch = readObject(exchange);
       Map<String, Tuning.Value> known = new LinkedHashMap<>();
       for (Tuning.Value value : tuning.view().values()) {
         known.put(value.path(), value);
       }
       Map<String, Double> values = new LinkedHashMap<>();
-      for (Map.Entry<String, JsonNode> field : patch.properties()) {
+      for (Map.Entry<String, @Nullable Object> field : patch.entrySet()) {
         Tuning.Value value = known.get(field.getKey());
         if (value == null) {
           throw new Problem(422, "Not tunable", "There is no tunable value at " + field.getKey());
         }
-        JsonNode number = field.getValue();
-        if (number.isNull()) {
+        Object number = field.getValue();
+        if (number == null) {
           values.put(value.path(), value.committed());
-        } else if (number.isNumber()) {
-          values.put(value.path(), number.doubleValue());
+        } else if (number instanceof Number n) {
+          values.put(value.path(), n.doubleValue());
         } else {
           throw new Problem(
               400,
@@ -297,32 +309,29 @@ public final class PitwallServer implements AutoCloseable {
               value.path() + " must be a number, or null to return it to its committed value");
         }
       }
-      answer(tuning.requestChanges(values), response, callback, this::values);
+      answer(exchange, tuning.requestChanges(values), this::values);
     }
 
-    private void getChanges(Request request, Response response, Callback callback) {
-      String accept = request.getHeaders().get(HttpHeader.ACCEPT);
+    private void getChanges(HttpExchange exchange) throws IOException {
+      String accept = exchange.getRequestHeaders().getFirst("Accept");
       if (accept != null && accept.contains("text/plain") && !accept.contains("json")) {
         List<String> report = tuning.report();
-        send(response, callback, 200, "text/plain", String.join("\n", report) + "\n");
+        send(exchange, 200, "text/plain", String.join("\n", report) + "\n");
       } else {
-        sendJson(response, callback, 200, changes());
+        sendJson(exchange, 200, changes());
       }
     }
 
     /** Waits for the robot loop, then answers with what became of the request. */
     private void answer(
-        CompletableFuture<Outcome> pending,
-        Response response,
-        Callback callback,
-        Supplier<Object> state) {
+        HttpExchange exchange, CompletableFuture<Outcome> pending, Supplier<Object> state)
+        throws IOException {
       Outcome outcome;
       try {
         outcome = pending.get(wait.toMillis(), TimeUnit.MILLISECONDS);
       } catch (TimeoutException e) {
         sendJson(
-            response,
-            callback,
+            exchange,
             202,
             Map.of("detail", "Queued for the robot loop; the next GET shows the result"));
         return;
@@ -333,14 +342,15 @@ public final class PitwallServer implements AutoCloseable {
         throw new IllegalStateException(e);
       }
       switch (outcome.result()) {
-        case APPLIED -> sendJson(response, callback, 200, state.get());
+        case APPLIED -> sendJson(exchange, 200, state.get());
         case REFUSED -> throw new Problem(422, "Refused", outcome.detail());
         case LOCKED -> throw new Problem(409, "Locked", outcome.detail());
       }
     }
 
-    private JsonNode readPatch(Request request) {
-      String type = request.getHeaders().get(HttpHeader.CONTENT_TYPE);
+    /** The request's body as a JSON object, or the problem with it. */
+    private Map<String, @Nullable Object> readObject(HttpExchange exchange) throws IOException {
+      String type = exchange.getRequestHeaders().getFirst("Content-Type");
       if (type == null
           || !(type.startsWith("application/merge-patch+json")
               || type.startsWith("application/json"))) {
@@ -349,17 +359,48 @@ public final class PitwallServer implements AutoCloseable {
             "Unsupported media type",
             "Send a JSON merge patch, with Content-Type: application/merge-patch+json");
       }
-      try {
-        JsonNode patch = json.readTree(Content.Source.asString(request, StandardCharsets.UTF_8));
-        if (patch == null || !patch.isObject()) {
-          throw new Problem(400, "Not an object", "A merge patch is a JSON object");
-        }
-        return patch;
-      } catch (JacksonException e) {
-        throw new Problem(400, "Not JSON", String.valueOf(e.getOriginalMessage()));
-      } catch (IOException e) {
-        throw new Problem(400, "Unreadable", String.valueOf(e.getMessage()));
+      byte[] body;
+      try (InputStream in = exchange.getRequestBody()) {
+        body = in.readNBytes(MAX_BODY_BYTES + 1);
       }
+      if (body.length > MAX_BODY_BYTES) {
+        throw new Problem(413, "Too large", "The page's requests are well under 64 KB");
+      }
+      Object parsed;
+      try {
+        parsed = json.fromJson(new String(body, StandardCharsets.UTF_8));
+      } catch (JsonException e) {
+        throw new Problem(400, "Not JSON", String.valueOf(e.getMessage()));
+      }
+      if (!(parsed instanceof Map<?, ?> map)) {
+        throw new Problem(400, "Not an object", "A merge patch is a JSON object");
+      }
+      Map<String, @Nullable Object> object = new LinkedHashMap<>();
+      map.forEach((key, value) -> object.put(String.valueOf(key), value));
+      return object;
+    }
+
+    private List<Object> statusItems() {
+      List<Object> items = new ArrayList<>();
+      for (Status.Item item : status.view()) {
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("name", item.name());
+        shown.put("value", item.value());
+        items.add(shown);
+      }
+      return items;
+    }
+
+    private List<Object> actionStates() {
+      List<Object> states = new ArrayList<>();
+      for (Actions.State state : actions.view()) {
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("name", state.name());
+        shown.put("phase", state.phase().name());
+        shown.put("detail", state.detail());
+        states.add(shown);
+      }
+      return states;
     }
 
     private Map<String, Object> session() {
@@ -390,34 +431,43 @@ public final class PitwallServer implements AutoCloseable {
       return values;
     }
 
-    private Object changes() {
-      return tuning.view().changes();
+    private List<Object> changes() {
+      List<Object> changes = new ArrayList<>();
+      for (ConfigTuner.Change change : tuning.view().changes()) {
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("path", change.path());
+        shown.put("committed", change.committed());
+        shown.put("tuned", change.tuned());
+        shown.put("builderCall", change.builderCall());
+        changes.add(shown);
+      }
+      return changes;
     }
 
-    private void sendJson(Response response, Callback callback, int status, Object body) {
-      send(response, callback, status, "application/json", json.writeValueAsString(body));
+    private void sendJson(HttpExchange exchange, int status, Object body) throws IOException {
+      send(exchange, status, "application/json", json.toJson(body));
     }
 
-    private void sendProblem(Response response, Callback callback, Problem problem) {
+    private void sendProblem(HttpExchange exchange, Problem problem) throws IOException {
       Map<String, Object> body = new LinkedHashMap<>();
       body.put("type", "about:blank");
       body.put("title", problem.title);
       body.put("status", problem.status);
-      body.put("detail", problem.getMessage());
-      send(
-          response,
-          callback,
-          problem.status,
-          "application/problem+json",
-          json.writeValueAsString(body));
+      body.put("detail", String.valueOf(problem.getMessage()));
+      send(exchange, problem.status, "application/problem+json", json.toJson(body));
     }
 
-    private static void send(
-        Response response, Callback callback, int status, String type, String body) {
-      response.setStatus(status);
-      response.getHeaders().put(HttpHeader.CONTENT_TYPE, type + "; charset=utf-8");
-      response.getHeaders().put(HttpHeader.CACHE_CONTROL, "no-store");
-      Content.Sink.write(response, true, body, callback);
+    private static void send(HttpExchange exchange, int status, String type, String body)
+        throws IOException {
+      byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
+      exchange.getResponseHeaders().set("Cache-Control", "no-store");
+      exchange.sendResponseHeaders(status, bytes.length > 0 ? bytes.length : -1);
+      if (bytes.length > 0) {
+        try (OutputStream out = exchange.getResponseBody()) {
+          out.write(bytes);
+        }
+      }
     }
   }
 }

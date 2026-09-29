@@ -66,11 +66,24 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
             () -> String.format(Locale.ROOT, "%.1f V", RobotController.getBatteryVoltage()));
     actions = new Actions(advantageKit ? AdvantageKitLog.actions() : inputs -> {});
     boolean replaying = advantageKit && AdvantageKitLog.replaying();
-    server =
-        replaying
-            ? null
-            : PitwallServer.startOrExplain(status, tuning, actions, port, System.out::println)
-                .orElse(null);
+    server = replaying ? null : startPage(status, tuning, actions, port);
+  }
+
+  /**
+   * Serves the page, or says why it can't. The web server is the one built into Java; a runtime
+   * trimmed without it (the {@code jdk.httpserver} module) only loses the page.
+   */
+  private static @Nullable PitwallServer startPage(
+      Status status, Tuning<?> tuning, Actions actions, int port) {
+    try {
+      return PitwallServer.startOrExplain(status, tuning, actions, port, System.out::println)
+          .orElse(null);
+    } catch (LinkageError e) {
+      System.out.println(
+          "Pitwall's page is unavailable: this Java has no built-in web server (jdk.httpserver): "
+              + e);
+      return null;
+    }
   }
 
   /** Starts Pitwall and its page on {@link PitwallServer#PORT}. */

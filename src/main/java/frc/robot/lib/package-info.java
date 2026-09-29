@@ -8,7 +8,7 @@
  *       any robot can use them and they can be tested without one.
  *   <li>No hardware access, clock reads, or static state inside a component: inputs come in through
  *       parameters, which is what makes them testable and replayable.
- *   <li>Every component ships with a full unit-test suite (95% line and 90% branch coverage floor).
+ *   <li>Every component ships with its unit tests.
  * </ul>
  */
 package frc.robot.lib;

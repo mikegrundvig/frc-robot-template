@@ -65,9 +65,9 @@ tasks.named("jacocoTestReport") {
     }))
 }
 
-// Coverage ratchet: the build fails if coverage drops below the floors in coverage-floor.properties.
-// Floors only go up (the build says when they can); there is no absolute target to game. Keys are
-// "line" and "branch" for everything, or "<package/path>.line" and ".branch" for one package tree.
+// Coverage floor: the build fails if coverage drops below the floors in coverage-floor.properties.
+// Keys are "line" and "branch" for everything, or "<package/path>.line" and ".branch" for one
+// package tree.
 def coverageCheck = tasks.register("coverageCheck") {
     group = "verification"
     description = "Fail if test coverage drops below coverage-floor.properties."
@@ -124,8 +124,6 @@ def coverageCheck = tasks.register("coverageCheck") {
                 println String.format("Coverage %-20s %-6s %5.1f%% (floor %5.1f%%)", label, key, actual, floor)
                 if (actual < floor) {
                     failures << String.format("%s %s coverage %.1f%% is below the floor %.1f%%", label, key, actual, floor)
-                } else if (actual >= floor + 2.0 && floor < 100.0) {
-                    println String.format("  raise the %s %s floor to %.1f", label, key, Math.floor(actual))
                 }
             }
         }

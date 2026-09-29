@@ -43,7 +43,7 @@ catches a kind of bug that robot code otherwise accumulates quietly until it bit
 | **Compiler warnings as errors** (a curated set) | Unchecked casts, raw types, switch fall-through, and other near-certain bugs. |
 | **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, static mutable state that makes behavior depend on what ran before, and configuration written by position, where two values can swap unnoticed. |
 | **Tests** (JUnit 6, [AssertJ](https://assertj.github.io/doc/)) | Behavior regressions, including simulation tests that exercise physics. |
-| **Coverage ratchet** (JaCoCo) | New code without tests. Coverage may never drop below the floors in `coverage-floor.properties`; there is no percentage target to game. |
+| **Coverage floor** (JaCoCo) | Code with no tests at all. The build fails below 50% line or branch coverage (`coverage-floor.properties`): enough to catch untested code, low enough not to slow heavy development. |
 | **Formatting** (google-java-format via Spotless) | Diff noise and review friction. Your local build formats automatically; CI only checks. |
 
 Also built in:

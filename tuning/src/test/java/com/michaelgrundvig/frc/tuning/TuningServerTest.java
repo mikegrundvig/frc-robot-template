@@ -4,52 +4,59 @@ import static com.michaelgrundvig.frc.tuning.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
-/** The tuning page's web server, over real HTTP on a free port. */
+/** The REST API and the page, over real HTTP, with a thread playing the robot loop. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TuningServerTest {
-  private static final String KP = "drive.gains.kP";
+  private static final String MERGE_PATCH = "application/merge-patch+json";
 
   private final HttpClient client = HttpClient.newHttpClient();
+  private final AtomicBoolean fieldConnected = new AtomicBoolean(false);
   private final Tuning<Fixtures.Machine> tuning =
       new Tuning<>("test", machine(), true, inputs -> {}, view -> {});
   private final TuningServer server = new TuningServer(tuning, 0);
+  private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
 
   @BeforeAll
   void start() throws Exception {
     server.start();
+    loop.scheduleAtFixedRate(
+        () -> tuning.periodic(fieldConnected.get()), 0, 5, TimeUnit.MILLISECONDS);
   }
 
   @AfterAll
   void stop() throws Exception {
+    loop.shutdownNow();
     server.close();
   }
 
   @AfterEach
-  void backToCommitted() {
-    tuning.requestEnabled(true);
-    tuning.requestReset();
-    tuning.periodic(false);
+  void backToCommitted() throws Exception {
+    fieldConnected.set(false);
+    send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
+    send("DELETE", "/api/changes", null, null);
   }
 
   @Test
   void servesThePage() throws Exception {
-    HttpResponse<String> page = get("/");
+    var page = get("/", "text/html");
 
     assertThat(page.statusCode()).isEqualTo(200);
     assertThat(page.headers().firstValue("Content-Type")).hasValue("text/html; charset=utf-8");
@@ -57,47 +64,154 @@ class TuningServerTest {
   }
 
   @Test
-  void servesTheState() throws Exception {
-    HttpResponse<String> state = get("/api/state");
-
-    assertThat(state.statusCode()).isEqualTo(200);
-    assertThat(state.headers().firstValue("Content-Type"))
-        .hasValue("application/json; charset=utf-8");
-    assertThat(state.body()).contains("\"name\":\"test\"", "\"path\":\"" + KP + "\"");
+  void describesTheSession() throws Exception {
+    assertThat(get("/api/tuning").body())
+        .isEqualTo("{\"name\":\"test\",\"enabled\":true,\"fieldConnected\":false}");
   }
 
   @Test
-  void changesAreQueuedForTheRobotLoop() throws Exception {
-    assertThat(post("/api/set", Map.of("path", KP, "value", "18.5")).statusCode()).isEqualTo(202);
-    assertThat(tuning.config().drive().gains().kP()).as("before the loop").isEqualTo(16);
-
-    tuning.periodic(false);
-
-    assertThat(get("/api/state").body()).contains("\"builderCall\":\".kP(18.5)\"");
+  void listsWhatCanBeTunedAndItsValues() throws Exception {
+    assertThat(get("/api/tunables").body())
+        .contains("\"drive.gains.kP\":{\"unit\":\"\",\"committed\":16.0}");
+    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":16.0");
   }
 
   @Test
-  void refusesUnknownValuesAndNonNumbers() throws Exception {
-    HttpResponse<String> unknown = post("/api/set", Map.of("path", "nothing", "value", "1"));
-    HttpResponse<String> notANumber = post("/api/set", Map.of("path", KP, "value", "lots"));
+  void aMergePatchChangesSeveralValuesAtOnce() throws Exception {
+    var changed =
+        send("PATCH", "/api/values", MERGE_PATCH, "{\"travel.min\": 12, \"travel.max\": 20}");
 
-    assertThat(unknown.statusCode()).isEqualTo(404);
-    assertThat(unknown.body()).isEqualTo("No tunable value at nothing");
-    assertThat(notANumber.statusCode()).isEqualTo(400);
-    assertThat(notANumber.body()).isEqualTo("Not a number: lots");
+    assertThat(changed.statusCode()).isEqualTo(200);
+    assertThat(changed.body()).contains("\"travel.min\":12.0", "\"travel.max\":20.0");
   }
 
   @Test
-  void switchesTuningOffAndResets() throws Exception {
-    tuning.requestSet(KP, 18.5);
-    tuning.periodic(false);
+  void aRefusedPatchChangesNothingAndSaysWhy() throws Exception {
+    var refused =
+        send(
+            "PATCH",
+            "/api/values",
+            MERGE_PATCH,
+            "{\"drive.gains.kP\": 18.5, \"drive.limits.current\": -1}");
 
-    assertThat(post("/api/reset", Map.of()).statusCode()).isEqualTo(202);
-    assertThat(post("/api/enabled", Map.of("on", "false")).statusCode()).isEqualTo(202);
-    tuning.periodic(false);
+    assertThat(refused.statusCode()).isEqualTo(422);
+    assertThat(refused.headers().firstValue("Content-Type"))
+        .hasValue("application/problem+json; charset=utf-8");
+    assertThat(refused.body())
+        .isEqualTo(
+            "{\"type\":\"about:blank\",\"title\":\"Refused\",\"status\":422,"
+                + "\"detail\":\"current must be positive\"}");
+    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":16.0");
+  }
 
-    assertThat(tuning.view().changes()).isEmpty();
-    assertThat(tuning.view().enabled()).isFalse();
+  @Test
+  void nullReturnsAValueToItsCommittedOne() throws Exception {
+    send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+
+    var reverted = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": null}");
+
+    assertThat(reverted.statusCode()).isEqualTo(200);
+    assertThat(reverted.body()).contains("\"drive.gains.kP\":16.0");
+  }
+
+  @Test
+  void theChangesComeAsJsonOrAsAReport() throws Exception {
+    send("PATCH", "/api/values", "application/json", "{\"drive.gains.kP\": 18.5}");
+
+    assertThat(get("/api/changes").body()).contains("\"builderCall\":\".kP(18.5)\"");
+    assertThat(get("/api/changes", "text/plain").body())
+        .contains("  drive.gains.kP: 16.0 -> 18.5   .kP(18.5)");
+  }
+
+  @Test
+  void deletingTheChangesRevertsEverything() throws Exception {
+    send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+
+    var deleted = send("DELETE", "/api/changes", null, null);
+
+    assertThat(deleted.statusCode()).isEqualTo(200);
+    assertThat(deleted.body()).isEqualTo("[]");
+    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":16.0");
+  }
+
+  @Test
+  void switchingTuningOffLocksChanges() throws Exception {
+    var off = send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": false}");
+    var locked = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+
+    assertThat(off.body()).contains("\"enabled\":false");
+    assertThat(locked.statusCode()).isEqualTo(409);
+    assertThat(locked.body()).contains("\"detail\":\"Tuning is locked: tuning is off\"");
+  }
+
+  @Test
+  void theFieldLocksTuning() throws Exception {
+    fieldConnected.set(true);
+
+    var change = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+    var on = send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
+
+    assertThat(change.statusCode()).isEqualTo(409);
+    assertThat(on.statusCode()).isEqualTo(409);
+    assertThat(on.body()).contains("the field system is connected");
+  }
+
+  @Test
+  void refusesWhatItCannotUse() throws Exception {
+    assertThat(send("PATCH", "/api/values", "text/plain", "{}").statusCode())
+        .as("not a merge patch")
+        .isEqualTo(415);
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, "not json").statusCode()).isEqualTo(400);
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, "[1, 2]").statusCode()).isEqualTo(400);
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": \"lots\"}"))
+        .extracting(HttpResponse::statusCode)
+        .isEqualTo(400);
+    var unknown = send("PATCH", "/api/values", MERGE_PATCH, "{\"nothing\": 1}");
+    assertThat(unknown.statusCode()).isEqualTo(422);
+    assertThat(unknown.body()).contains("There is no tunable value at nothing");
+    assertThat(send("PATCH", "/api/tuning", MERGE_PATCH, "{\"name\": \"other\"}").statusCode())
+        .as("only enabled can change")
+        .isEqualTo(422);
+    assertThat(send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": \"yes\"}").statusCode())
+        .isEqualTo(400);
+    assertThat(send("PATCH", "/api/tuning", MERGE_PATCH, "{}").statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  void saysWhichMethodsAResourceAllows() throws Exception {
+    var notAllowed = send("DELETE", "/api/values", null, null);
+
+    assertThat(notAllowed.statusCode()).isEqualTo(405);
+    assertThat(notAllowed.headers().firstValue("Allow")).hasValue("GET, PATCH");
+  }
+
+  @Test
+  void anythingElseIsNotFound() throws Exception {
+    var missing = get("/admin");
+
+    assertThat(missing.statusCode()).isEqualTo(404);
+    assertThat(missing.body()).contains("\"title\":\"Not found\"");
+  }
+
+  @Test
+  void aChangeTheLoopHasNotReachedIsAccepted() throws Exception {
+    // A robot program whose loop never runs, as if paused in a debugger.
+    var idle = new Tuning<>("idle", machine(), true, inputs -> {}, view -> {});
+    try (var paused = new TuningServer(idle, 0, Duration.ofMillis(50))) {
+      paused.start();
+      var accepted =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://localhost:" + paused.port() + "/api/values"))
+                  .header("Content-Type", MERGE_PATCH)
+                  .method(
+                      "PATCH", HttpRequest.BodyPublishers.ofString("{\"drive.gains.kP\": 18.5}"))
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+
+      assertThat(accepted.statusCode()).isEqualTo(202);
+      assertThat(idle.isTunable("drive.gains.kP")).isTrue();
+    }
   }
 
   @Test
@@ -125,29 +239,29 @@ class TuningServerTest {
     assertThat(said).singleElement().asString().startsWith("The tuning page couldn't start");
   }
 
-  @Test
-  void anythingElseIsNotFound() throws Exception {
-    assertThat(get("/admin").statusCode()).isEqualTo(404);
-  }
-
   private HttpResponse<String> get(String path) throws Exception {
-    return client.send(
-        HttpRequest.newBuilder(uri(path)).GET().build(), HttpResponse.BodyHandlers.ofString());
+    return get(path, "application/json");
   }
 
-  private HttpResponse<String> post(String path, Map<String, String> form) throws Exception {
-    String body =
-        form.entrySet().stream()
-            .map(
-                field ->
-                    URLEncoder.encode(field.getKey(), StandardCharsets.UTF_8)
-                        + "="
-                        + URLEncoder.encode(field.getValue(), StandardCharsets.UTF_8))
-            .collect(Collectors.joining("&"));
+  private HttpResponse<String> get(String path, String accept) throws Exception {
     return client.send(
-        HttpRequest.newBuilder(uri(path))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .POST(HttpRequest.BodyPublishers.ofString(body))
+        HttpRequest.newBuilder(uri(path)).header("Accept", accept).GET().build(),
+        HttpResponse.BodyHandlers.ofString());
+  }
+
+  private HttpResponse<String> send(
+      String method, String path, @Nullable String type, @Nullable String body) throws Exception {
+    var request = HttpRequest.newBuilder(uri(path));
+    if (type != null) {
+      request.header("Content-Type", type);
+    }
+    return client.send(
+        request
+            .method(
+                method,
+                body == null
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofString(body))
             .build(),
         HttpResponse.BodyHandlers.ofString());
   }

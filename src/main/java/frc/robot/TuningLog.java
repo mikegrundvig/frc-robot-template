@@ -27,6 +27,7 @@ final class TuningLog implements Consumer<TuningInputs>, LoggableInputs {
     table.put("Kinds", inputs.kinds);
     table.put("Paths", inputs.paths);
     table.put("Values", inputs.values);
+    table.put("Requests", inputs.requests);
   }
 
   @Override
@@ -35,5 +36,6 @@ final class TuningLog implements Consumer<TuningInputs>, LoggableInputs {
     inputs.kinds = table.get("Kinds", inputs.kinds);
     inputs.paths = table.get("Paths", inputs.paths);
     inputs.values = table.get("Values", inputs.values);
+    inputs.requests = table.get("Requests", inputs.requests);
   }
 }

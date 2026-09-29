@@ -1,6 +1,7 @@
 <!doctype html>
-<!-- The tuning page, served by the robot program (com.michaelgrundvig.frc.tuning.TuningServer). Plain HTML and
-     JavaScript on purpose: nothing to build, nothing to install. -->
+<!-- The tuning page, served by the robot program (com.michaelgrundvig.frc.tuning.TuningServer),
+     and a client of its REST API like any other. Plain HTML and JavaScript on purpose: nothing to
+     build, nothing to install. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -10,12 +11,12 @@
   :root {
     color-scheme: light dark;
     --bg: #ffffff; --panel: #f5f6f8; --fg: #1b1c1e; --muted: #5f6368; --line: #dcdfe3;
-    --accent: #0b62c4; --accent-fg: #ffffff; --changed: #fff3cd; --bad: #b3261e;
+    --accent: #0b62c4; --accent-fg: #ffffff; --changed: #fff3cd; --pending: #dbe9fb; --bad: #b3261e;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #141517; --panel: #1e2023; --fg: #e8eaed; --muted: #9aa0a6; --line: #34373b;
-      --accent: #8ab4f8; --accent-fg: #0b1a2e; --changed: #3b3217; --bad: #f28b82;
+      --accent: #8ab4f8; --accent-fg: #0b1a2e; --changed: #3b3217; --pending: #1c3350; --bad: #f28b82;
     }
   }
   * { box-sizing: border-box; }
@@ -25,22 +26,27 @@
   h1 { margin: 0; font-size: 20px; }
   h2 { margin: 28px 0 8px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .muted { color: var(--muted); }
-  .controls { display: flex; gap: 10px; align-items: center; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .banner { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--changed); }
+  .message { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel); }
+  .message.bad { color: var(--bad); }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
   th { font-size: 13px; font-weight: 600; color: var(--muted); }
   td.number { font-variant-numeric: tabular-nums; }
   tr.group td { padding-top: 16px; font-weight: 600; border-bottom: none; }
   tr.changed td { background: var(--changed); }
+  tr.pending td { background: var(--pending); }
   input { width: 8.5em; padding: 4px 6px; font: inherit; font-variant-numeric: tabular-nums;
           color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
   input:disabled { opacity: 0.6; }
-  .refused { display: block; margin-top: 2px; font-size: 13px; color: var(--bad); }
+  input.invalid { border-color: var(--bad); }
   button { padding: 6px 12px; font: inherit; color: var(--fg); background: var(--panel);
            border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
   button.primary { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+  button.small { padding: 2px 8px; }
   button:disabled { opacity: 0.5; cursor: default; }
+  button[hidden] { display: none; }
   pre { margin: 0; padding: 12px; overflow-x: auto; background: var(--panel); border-radius: 8px;
         font: 13px/1.5 ui-monospace, monospace; white-space: pre; }
   @media (max-width: 560px) { .committed { display: none; } }
@@ -49,7 +55,7 @@
 <body>
 <main>
   <header>
-    <h1>Tuning <span id="robot" class="muted"></span></h1>
+    <h1>Tuning <span id="name" class="muted"></span></h1>
     <div class="controls">
       <span id="status" class="muted">Connecting to the robot…</span>
       <button id="toggle" hidden></button>
@@ -59,10 +65,17 @@
 
   <table>
     <thead>
-      <tr><th>Value</th><th class="committed">Committed</th><th>Now</th><th>Unit</th></tr>
+      <tr><th>Value</th><th class="committed">Committed</th><th>Now</th><th>Unit</th><th></th></tr>
     </thead>
     <tbody id="values"></tbody>
   </table>
+
+  <div class="controls" style="margin-top: 12px">
+    <button id="apply" class="primary" disabled>Apply</button>
+    <button id="discard" disabled>Discard</button>
+    <span class="muted">Edits wait here until you apply them, then all change at once, or none do.</span>
+  </div>
+  <div id="message" class="message" hidden></div>
 
   <h2>Changes
     <button id="copy" disabled>Copy</button>
@@ -76,98 +89,184 @@
 
 <script>
   const element = (id) => document.getElementById(id);
-  const rows = new Map(); // path -> {row, committed, input, refused}
-  let latest = null;
+  const rows = new Map(); // path -> {row, input, revert}
+  let session = { enabled: false, fieldConnected: false };
+  let current = {};
+  let committed = {};
 
   function shown(number) {
     return Number.isInteger(number) ? number.toFixed(1) : String(Number(number.toPrecision(6)));
   }
 
-  async function send(path, fields) {
-    await fetch(path, { method: "POST", body: new URLSearchParams(fields) });
-    poll();
+  function say(text, bad) {
+    const message = element("message");
+    message.hidden = !text;
+    message.textContent = text || "";
+    message.classList.toggle("bad", Boolean(bad));
   }
 
-  function build(values) {
+  /** Sends a request to the API, and says what became of it. */
+  async function send(method, path, body) {
+    const options = { method };
+    if (body !== undefined) {
+      options.headers = { "Content-Type": "application/merge-patch+json" };
+      options.body = JSON.stringify(body);
+    }
+    let response;
+    try {
+      response = await fetch(path, options);
+    } catch (error) {
+      say("The robot isn't answering.", true);
+      return false;
+    }
+    if (response.status === 202) {
+      say("Queued: the robot will apply it on its next loop.");
+    } else if (!response.ok) {
+      const problem = await response.json().catch(() => ({ detail: response.statusText }));
+      say(problem.detail || problem.title, true);
+    } else {
+      say("");
+    }
+    await poll();
+    return response.ok;
+  }
+
+  /** The edits waiting to be applied: {path: number}, and whether they are all numbers. */
+  function pending() {
+    const changes = {};
+    let valid = true;
+    for (const [path, { input }] of rows) {
+      if (input.value.trim() === "" || input.value === shown(current[path])) continue;
+      const number = Number(input.value);
+      const ok = Number.isFinite(number);
+      input.classList.toggle("invalid", !ok);
+      if (ok) changes[path] = number; else valid = false;
+    }
+    return { changes, valid };
+  }
+
+  function refreshControls() {
+    const { changes, valid } = pending();
+    const count = Object.keys(changes).length;
+    for (const [path, { row }] of rows) row.classList.toggle("pending", path in changes);
+    element("apply").disabled = !session.enabled || count === 0 || !valid;
+    element("apply").textContent = count > 1 ? `Apply ${count} changes` : "Apply";
+    element("discard").disabled = count === 0;
+  }
+
+  async function apply() {
+    const { changes, valid } = pending();
+    if (!valid) {
+      say("Only numbers can be applied.", true);
+      return;
+    }
+    if (Object.keys(changes).length === 0) return;
+    if (await send("PATCH", "/api/values", changes)) {
+      for (const [path, { input }] of rows) input.value = shown(current[path]);
+      refreshControls();
+    }
+  }
+
+  function build(tunables) {
     let group = null;
-    for (const value of values) {
-      const cut = value.path.lastIndexOf(".");
-      const heading = value.path.slice(0, cut);
+    for (const [path, { unit }] of Object.entries(tunables)) {
+      committed[path] = tunables[path].committed;
+      const cut = path.lastIndexOf(".");
+      const heading = path.slice(0, cut);
       if (heading !== group) {
         group = heading;
         const row = element("values").insertRow();
         row.className = "group";
         const cell = row.insertCell();
-        cell.colSpan = 4;
+        cell.colSpan = 5;
         cell.textContent = heading.replaceAll(".", " › ");
       }
       const row = element("values").insertRow();
-      row.insertCell().textContent = value.path.slice(cut + 1);
-      const committed = row.insertCell();
-      committed.className = "committed number";
+      row.insertCell().textContent = path.slice(cut + 1);
+      const committedCell = row.insertCell();
+      committedCell.className = "committed number";
+      committedCell.textContent = shown(tunables[path].committed);
       const input = document.createElement("input");
       input.inputMode = "decimal";
-      input.setAttribute("aria-label", value.path);
-      input.addEventListener("keydown", (event) => { if (event.key === "Enter") input.blur(); });
-      input.addEventListener("change", () => send("/api/set", { path: value.path, value: input.value }));
-      const refused = document.createElement("span");
-      refused.className = "refused";
-      const now = row.insertCell();
-      now.append(input, refused);
-      row.insertCell().textContent = value.unit;
-      rows.set(value.path, { row, committed, input, refused });
+      input.setAttribute("aria-label", path);
+      input.addEventListener("input", refreshControls);
+      input.addEventListener("keydown", (event) => { if (event.key === "Enter") apply(); });
+      row.insertCell().append(input);
+      row.insertCell().textContent = unit;
+      const revert = document.createElement("button");
+      revert.className = "small";
+      revert.textContent = "↺";
+      revert.title = "Back to the committed value";
+      revert.setAttribute("aria-label", "Revert " + path);
+      revert.addEventListener("click", () => send("PATCH", "/api/values", { [path]: null }));
+      row.insertCell().append(revert);
+      rows.set(path, { row, input, revert });
     }
   }
 
-  function render(state) {
-    if (rows.size === 0) build(state.values);
-    element("robot").textContent = "· " + state.name;
-    element("status").textContent = state.enabled ? "Tuning is on" : "Tuning is off";
+  function render(changes) {
+    element("name").textContent = "· " + session.name;
+    element("status").textContent = session.enabled ? "Tuning is on" : "Tuning is off";
     const toggle = element("toggle");
     toggle.hidden = false;
-    toggle.disabled = state.fieldConnected;
-    toggle.textContent = state.enabled ? "Switch off" : "Switch on";
-    toggle.className = state.enabled ? "" : "primary";
-    element("banner").hidden = !state.fieldConnected;
+    toggle.disabled = session.fieldConnected;
+    toggle.textContent = session.enabled ? "Switch off" : "Switch on";
+    toggle.className = session.enabled ? "" : "primary";
+    element("banner").hidden = !session.fieldConnected;
 
-    for (const value of state.values) {
-      const row = rows.get(value.path);
-      row.committed.textContent = shown(value.committed);
-      row.row.classList.toggle("changed", value.current !== value.committed);
-      row.input.disabled = !state.enabled;
-      if (document.activeElement !== row.input) row.input.value = shown(value.current);
-      row.refused.textContent = value.refused ? "Refused: " + value.refused : "";
+    const { changes: waiting } = pending();
+    for (const [path, { row, input, revert }] of rows) {
+      const changed = Math.abs(current[path] - committed[path]) > 1e-9;
+      row.classList.toggle("changed", changed);
+      revert.hidden = !changed;
+      revert.disabled = !session.enabled;
+      input.disabled = !session.enabled;
+      // Leave alone what someone is typing, or has typed and not yet applied.
+      if (document.activeElement !== input && !(path in waiting)) input.value = shown(current[path]);
     }
+    refreshControls();
 
-    const lines = state.changes.map(
-        (c) => `${c.path}: ${c.committed} -> ${c.tuned}   ${c.builderCall}`);
+    const lines = changes.map((c) => `${c.path}: ${c.committed} -> ${c.tuned}   ${c.builderCall}`);
     element("changes").textContent = lines.join("\n");
     element("changes").hidden = lines.length === 0;
     element("none").hidden = lines.length > 0;
     element("copy").disabled = lines.length === 0;
-    element("reset").disabled = lines.length === 0 || !state.enabled;
-    latest = lines;
+    element("reset").disabled = lines.length === 0 || !session.enabled;
   }
 
   async function poll() {
     try {
-      const response = await fetch("/api/state", { cache: "no-store" });
-      render(await response.json());
+      const [s, v, c] = await Promise.all(
+          ["/api/tuning", "/api/values", "/api/changes"].map((path) =>
+              fetch(path, { cache: "no-store" }).then((response) => response.json())));
+      session = s;
+      current = v;
+      render(c);
     } catch (error) {
       element("status").textContent = "The robot isn't answering; still trying…";
     }
   }
 
+  element("apply").addEventListener("click", apply);
+  element("discard").addEventListener("click", () => {
+    for (const [path, { input }] of rows) {
+      input.value = shown(current[path]);
+      input.classList.remove("invalid");
+    }
+    refreshControls();
+    say("");
+  });
   element("toggle").addEventListener("click", () =>
-      send("/api/enabled", { on: element("toggle").textContent === "Switch on" }));
-  element("reset").addEventListener("click", () => send("/api/reset", {}));
+      send("PATCH", "/api/tuning", { enabled: !session.enabled }));
+  element("reset").addEventListener("click", () => send("DELETE", "/api/changes"));
   element("copy").addEventListener("click", async () => {
-    const text = latest.join("\n");
+    const report = await fetch("/api/changes", { headers: { Accept: "text/plain" } })
+        .then((response) => response.text());
     try {
-      await navigator.clipboard.writeText(text); // needs a secure page, such as localhost
+      await navigator.clipboard.writeText(report); // needs a secure page, such as localhost
     } catch (error) {
       const area = document.createElement("textarea"); // the fallback for http://robot.local
-      area.value = text;
+      area.value = report;
       document.body.append(area);
       area.select();
       document.execCommand("copy");
@@ -177,8 +276,11 @@
     setTimeout(() => (element("copy").textContent = "Copy"), 1500);
   });
 
-  poll();
-  setInterval(poll, 500);
+  fetch("/api/tunables").then((response) => response.json()).then((tunables) => {
+    build(tunables);
+    poll();
+    setInterval(poll, 500);
+  });
 </script>
 </body>
 </html>

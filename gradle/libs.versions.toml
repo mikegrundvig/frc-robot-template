@@ -14,9 +14,11 @@ assertj = "3.27.7"
 archunit = "1.5.1"
 recordbuilder = "53"
 jetty = "12.1.13"
+jackson = "3.2.3"
 slf4j = "2.0.17"
 
 [libraries]
+jackson-databind = { module = "tools.jackson.core:jackson-databind", version.ref = "jackson" }
 # WPILib's units, for the tuning library; always the version GradleRIO brings the robot program.
 wpilib-units = { module = "org.wpilib.wpiunits:wpiunits-java", version.ref = "gradlerio" }
 jetty-server = { module = "org.eclipse.jetty:jetty-server", version.ref = "jetty" }

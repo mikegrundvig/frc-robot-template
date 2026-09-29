@@ -7,6 +7,7 @@ import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -117,10 +118,26 @@ public final class ConfigTuner<T extends Record> {
    *     configuration as it was, or if no tunable value has this path
    */
   public void set(String path, double value) {
-    Slot slot = slot(path);
-    Unit unit = slot.unit();
-    Object replacement = unit == null ? value : unit.of(value);
-    current = sameType(rebuild(current, slot.route(), 0, slot.component(), replacement));
+    set(Map.of(path, value));
+  }
+
+  /**
+   * Tunes several values at once, all or none, each in its knob's unit. The configuration is
+   * rebuilt once with every new value in place, so the records' checks see only the final
+   * combination: values that are valid only together, such as a range's two ends, can move
+   * together.
+   *
+   * @throws IllegalArgumentException if the records reject the combination, which leaves the
+   *     configuration as it was, or if no tunable value has one of the paths
+   */
+  public void set(Map<String, Double> values) {
+    Map<String, Object> replacements = new HashMap<>();
+    for (Map.Entry<String, Double> entry : values.entrySet()) {
+      Unit unit = slot(entry.getKey()).unit();
+      double value = entry.getValue();
+      replacements.put(entry.getKey(), unit == null ? value : unit.of(value));
+    }
+    current = sameType(rebuild(current, "", replacements));
     refreshValues();
   }
 
@@ -194,27 +211,37 @@ public final class ConfigTuner<T extends Record> {
         : unit.fromBaseUnits(((Measure<?>) value).baseUnitMagnitude());
   }
 
-  /** A copy of {@code record} with one value replaced, at the end of {@code route}. */
-  private static Record rebuild(
-      Record record, List<RecordComponent> route, int depth, RecordComponent leaf, Object value) {
-    if (depth == route.size()) {
-      return copy(record, leaf, value);
-    }
-    RecordComponent step = route.get(depth);
-    Record child = (Record) read(record, step);
-    return copy(record, step, rebuild(child, route, depth + 1, leaf, value));
-  }
-
-  /** A copy of {@code record} with one component replaced, built by its canonical constructor. */
-  private static Record copy(Record record, RecordComponent replaced, Object value) {
+  /**
+   * A copy of {@code record} with the replacements below {@code prefix} made. Each record that
+   * changes is built once, by its canonical constructor, with all of its new values.
+   */
+  private static Record rebuild(Record record, String prefix, Map<String, Object> replacements) {
     RecordComponent[] components = components(record);
     Class<?>[] types = new Class<?>[components.length];
     Object[] arguments = new Object[components.length];
+    boolean changed = false;
     for (int i = 0; i < components.length; i++) {
+      String path = prefix + components[i].getName();
+      Object value = read(record, components[i]);
+      Object replacement = replacements.get(path);
+      if (replacement != null) {
+        value = replacement;
+        changed = true;
+      } else if (value instanceof Record child && isAbove(path, replacements)) {
+        value = rebuild(child, path + ".", replacements);
+        changed = true;
+      }
       types[i] = components[i].getType();
-      arguments[i] =
-          components[i].getName().equals(replaced.getName()) ? value : read(record, components[i]);
+      arguments[i] = value;
     }
+    return changed ? construct(record, types, arguments) : record;
+  }
+
+  private static boolean isAbove(String path, Map<String, Object> replacements) {
+    return replacements.keySet().stream().anyMatch(replaced -> replaced.startsWith(path + "."));
+  }
+
+  private static Record construct(Record record, Class<?>[] types, Object[] arguments) {
     try {
       return (Record) record.getClass().getDeclaredConstructor(types).newInstance(arguments);
     } catch (InvocationTargetException e) {

@@ -31,6 +31,7 @@ dependencies {
     api libs.wpilib.units // measures appear in the tuner's API
     api libs.jspecify
     implementation libs.jetty.server
+    implementation libs.jackson.databind
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway

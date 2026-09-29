@@ -1,24 +1,24 @@
 package com.michaelgrundvig.frc.tuning;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-import org.jspecify.annotations.Nullable;
 
 /**
- * Live tuning of a configuration: the values marked {@link Tunable} can be changed from the tuning
- * page while the robot runs. Nothing is saved on the robot: what differs from the committed
- * configuration is listed as the builder calls that commit it.
+ * Live tuning of a configuration: the values marked {@link Tunable} can be changed while the robot
+ * runs. Nothing is saved on the robot: what differs from the committed configuration is listed as
+ * the builder calls that commit it.
  *
- * <p>Only the robot loop changes anything. The web server's threads queue requests and read a
- * snapshot ({@link #view()}); each loop, {@link #periodic} applies the queued requests and logs
- * them as AdvantageKit inputs, so the configuration changes only between loops, and a replay makes
- * the same changes at the same moments.
+ * <p>Only the robot loop changes anything. Requests, from the web server's threads, wait in a
+ * queue; each loop, {@link #periodic} applies them in order, each one all or nothing, and logs
+ * them, so the configuration changes only between loops and a replay makes the same changes at the
+ * same moments. Each request's future completes with what became of it.
  *
  * <p>Changes need tuning switched on, and are refused while the field system is connected.
  *
@@ -26,7 +26,7 @@ import org.jspecify.annotations.Nullable;
  */
 public final class Tuning<T extends Record> {
   /**
-   * What the tuning page shows. Safe to read from any thread.
+   * The state of tuning, as the page shows it. Safe to read from any thread.
    *
    * @param name what is being tuned, such as the robot's name
    * @param enabled whether tuning is switched on
@@ -58,13 +58,34 @@ public final class Tuning<T extends Record> {
    * @param unit the unit it is tuned in; empty for a plain number
    * @param committed its committed value
    * @param current its value now
-   * @param refused why the last change to it was refused, if it was
    */
-  public record Value(
-      String path, String unit, double committed, double current, @Nullable String refused) {}
+  public record Value(String path, String unit, double committed, double current) {}
+
+  /**
+   * What became of a request.
+   *
+   * @param result whether it was applied, refused by the configuration's checks, or locked out
+   * @param detail why it wasn't applied; empty when it was
+   */
+  public record Outcome(Result result, String detail) {
+    /** Whether a request was applied, and if not, why not. */
+    public enum Result {
+      /** Applied, all of it. */
+      APPLIED,
+      /** Refused by the configuration's checks; nothing changed. */
+      REFUSED,
+      /** Refused because tuning is off or the field system is connected; nothing changed. */
+      LOCKED
+    }
+
+    static Outcome applied() {
+      return new Outcome(Result.APPLIED, "");
+    }
+  }
 
   /** A request from the page, waiting for the robot loop. */
-  private record Request(TuningInputs.Kind kind, String path, double value) {}
+  private record Request(
+      TuningInputs.Kind kind, Map<String, Double> values, CompletableFuture<Outcome> outcome) {}
 
   private final String name;
   private final ConfigTuner<T> tuner;
@@ -73,7 +94,6 @@ public final class Tuning<T extends Record> {
   private final Set<String> paths;
   private final ConcurrentLinkedQueue<Request> queue = new ConcurrentLinkedQueue<>();
   private final TuningInputs inputs = new TuningInputs();
-  private final Map<String, String> refusals = new HashMap<>();
   private boolean enabled;
   private boolean fieldConnected;
   private volatile View view;
@@ -84,7 +104,7 @@ public final class Tuning<T extends Record> {
    * @param enabled whether tuning starts switched on
    * @param logInputs logs the requests one loop applies, or in a replay replaces them with the
    *     logged ones (with AdvantageKit, through {@code Logger.processInputs})
-   * @param onChange told, in the robot loop, each time what the page shows changes
+   * @param onChange told, in the robot loop, each time the state changes
    */
   public Tuning(
       String name,
@@ -107,7 +127,7 @@ public final class Tuning<T extends Record> {
     return tuner.current();
   }
 
-  /** What the tuning page shows. Safe to call from any thread. */
+  /** The state of tuning. Safe to call from any thread. */
   public View view() {
     return view;
   }
@@ -117,19 +137,25 @@ public final class Tuning<T extends Record> {
     return paths.contains(path);
   }
 
-  /** Asks the robot loop to change a value. Safe to call from any thread. */
-  public void requestSet(String path, double value) {
-    queue.add(new Request(TuningInputs.Kind.SET, path, value));
+  /**
+   * Asks the robot loop to change several values at once, all or none. Safe to call from any
+   * thread.
+   *
+   * @param values new values by path, each in its value's unit
+   * @return completes, in the robot loop, with what became of the request
+   */
+  public CompletableFuture<Outcome> requestChanges(Map<String, Double> values) {
+    return enqueue(TuningInputs.Kind.SET, new LinkedHashMap<>(values));
   }
 
   /** Asks the robot loop to return every value to its committed value. */
-  public void requestReset() {
-    queue.add(new Request(TuningInputs.Kind.RESET, "", 0));
+  public CompletableFuture<Outcome> requestReset() {
+    return enqueue(TuningInputs.Kind.RESET, Map.of());
   }
 
   /** Asks the robot loop to switch tuning on or off. */
-  public void requestEnabled(boolean on) {
-    queue.add(new Request(on ? TuningInputs.Kind.ENABLE : TuningInputs.Kind.DISABLE, "", 0));
+  public CompletableFuture<Outcome> requestEnabled(boolean on) {
+    return enqueue(on ? TuningInputs.Kind.ENABLE : TuningInputs.Kind.DISABLE, Map.of());
   }
 
   /**
@@ -140,20 +166,31 @@ public final class Tuning<T extends Record> {
    */
   public void periodic(boolean fieldConnected) {
     inputs.enabled = enabled;
-    drainInto(inputs);
+    List<CompletableFuture<Outcome>> outcomes = drainInto(inputs);
     logInputs.accept(inputs); // in replay, this replaces them with the logged ones
 
     boolean before = enabled;
     enabled = inputs.enabled && !fieldConnected;
     boolean changed = enabled != before || fieldConnected != this.fieldConnected;
     this.fieldConnected = fieldConnected;
-    for (int i = 0; i < inputs.kinds.length; i++) {
-      apply(TuningInputs.Kind.valueOf(inputs.kinds[i]), inputs.paths[i], inputs.values[i]);
+    // Entries with the same request number are one request, applied all or none.
+    List<Outcome> results = new ArrayList<>();
+    for (int start = 0, end; start < inputs.kinds.length; start = end) {
+      int request = inputs.requests[start];
+      end = start + 1;
+      while (end < inputs.kinds.length && inputs.requests[end] == request) {
+        end++;
+      }
+      results.add(apply(start, end));
       changed = true;
     }
     if (changed) {
       view = snapshot();
       onChange.accept(view);
+    }
+    // Only now, so whoever is waiting sees the state their request left. In replay, no one is.
+    for (int i = 0; i < outcomes.size() && i < results.size(); i++) {
+      outcomes.get(i).complete(results.get(i));
     }
   }
 
@@ -185,47 +222,93 @@ public final class Tuning<T extends Record> {
     return lines;
   }
 
-  private void drainInto(TuningInputs inputs) {
+  private CompletableFuture<Outcome> enqueue(TuningInputs.Kind kind, Map<String, Double> values) {
+    CompletableFuture<Outcome> outcome = new CompletableFuture<>();
+    queue.add(new Request(kind, values, outcome));
+    return outcome;
+  }
+
+  /** Moves the queued requests into the inputs, and returns their futures in request order. */
+  private List<CompletableFuture<Outcome>> drainInto(TuningInputs inputs) {
     if (queue.isEmpty()) {
       inputs.clearRequests();
-      return;
+      return List.of();
     }
     List<Request> requests = new ArrayList<>();
     for (Request request = queue.poll(); request != null; request = queue.poll()) {
       requests.add(request);
     }
-    inputs.kinds = requests.stream().map(r -> r.kind().name()).toArray(String[]::new);
-    inputs.paths = requests.stream().map(Request::path).toArray(String[]::new);
-    inputs.values = requests.stream().mapToDouble(Request::value).toArray();
+    List<String> kinds = new ArrayList<>();
+    List<String> paths = new ArrayList<>();
+    List<Double> values = new ArrayList<>();
+    List<Integer> numbers = new ArrayList<>();
+    for (int number = 0; number < requests.size(); number++) {
+      Request request = requests.get(number);
+      if (request.values().isEmpty()) {
+        kinds.add(request.kind().name());
+        paths.add("");
+        values.add(0.0);
+        numbers.add(number);
+      }
+      for (Map.Entry<String, Double> entry : request.values().entrySet()) {
+        kinds.add(request.kind().name());
+        paths.add(entry.getKey());
+        values.add(entry.getValue());
+        numbers.add(number);
+      }
+    }
+    inputs.kinds = kinds.toArray(String[]::new);
+    inputs.paths = paths.toArray(String[]::new);
+    inputs.values = values.stream().mapToDouble(Double::doubleValue).toArray();
+    inputs.requests = numbers.stream().mapToInt(Integer::intValue).toArray();
+    return requests.stream().map(Request::outcome).toList();
   }
 
-  private void apply(TuningInputs.Kind kind, String path, double value) {
-    switch (kind) {
-      case ENABLE -> enabled = !fieldConnected;
-      case DISABLE -> enabled = false;
-      case RESET -> {
-        if (enabled) {
-          tuner.reset();
-          refusals.clear();
+  /** Applies one request: the entries from {@code start} to just before {@code end}. */
+  private Outcome apply(int start, int end) {
+    return switch (TuningInputs.Kind.valueOf(inputs.kinds[start])) {
+      case ENABLE -> {
+        if (fieldConnected) {
+          yield locked("the field system is connected");
         }
+        enabled = true;
+        yield Outcome.applied();
       }
-      case SET -> set(path, value);
+      case DISABLE -> {
+        enabled = false;
+        yield Outcome.applied();
+      }
+      case RESET -> change(tuner::reset);
+      case SET -> {
+        Map<String, Double> values = new LinkedHashMap<>();
+        for (int i = start; i < end; i++) {
+          if (!inputs.paths[i].isEmpty()) {
+            values.put(inputs.paths[i], inputs.values[i]);
+          }
+        }
+        yield change(() -> tuner.set(values));
+      }
+    };
+  }
+
+  /** Makes a change to the configuration, if tuning allows it, and says what became of it. */
+  private Outcome change(Runnable change) {
+    if (fieldConnected) {
+      return locked("the field system is connected");
+    }
+    if (!enabled) {
+      return locked("tuning is off");
+    }
+    try {
+      change.run();
+      return Outcome.applied();
+    } catch (IllegalArgumentException refused) {
+      return new Outcome(Outcome.Result.REFUSED, String.valueOf(refused.getMessage()));
     }
   }
 
-  private void set(String path, double value) {
-    if (fieldConnected) {
-      refusals.put(path, "locked while the field is connected");
-    } else if (!enabled) {
-      refusals.put(path, "tuning is off");
-    } else {
-      try {
-        tuner.set(path, value);
-        refusals.remove(path);
-      } catch (IllegalArgumentException refused) {
-        refusals.put(path, String.valueOf(refused.getMessage()));
-      }
-    }
+  private static Outcome locked(String why) {
+    return new Outcome(Outcome.Result.LOCKED, "Tuning is locked: " + why);
   }
 
   private View snapshot() {
@@ -237,8 +320,7 @@ public final class Tuning<T extends Record> {
                         knob.path(),
                         knob.unit(),
                         tuner.committedValue(knob.path()),
-                        tuner.value(knob.path()),
-                        refusals.get(knob.path())))
+                        tuner.value(knob.path())))
             .toList();
     return new View(name, enabled, fieldConnected, values, tuner.changes());
   }

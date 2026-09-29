@@ -53,7 +53,7 @@ Also built in:
 - **Every log says which code produced it:** the robot records the git SHA, branch, build time, and
   whether anything was uncommitted (`gradle/build-info.gradle`).
 - **Live tuning from any browser:** the robot program serves its own web page, Pitwall
-  (http://localhost:5800 in the simulator, http://robot.local:5800 on the robot), where the values
+  (http://localhost:5820 in the simulator, http://robot.local:5820 on the robot), where the values
   marked `@Tunable`, such as gains and current limits, can be changed while the robot runs. Each
   change is checked exactly like a committed value, logged so replays reproduce it, and locked out
   while the field is connected. Nothing is saved on the robot: the page lists each change as the

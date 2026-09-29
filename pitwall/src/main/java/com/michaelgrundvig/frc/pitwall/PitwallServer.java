@@ -29,8 +29,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5800 in the
- * simulator, http://robot.local:5800 on the robot. Any browser works, a phone's included, and so
+ * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
+ * simulator, http://robot.local:5820 on the robot. Any browser works, a phone's included, and so
  * does anything else that speaks HTTP. So far it serves live tuning ({@link Tuning}):
  *
  * <ul>
@@ -54,8 +54,15 @@ import tools.jackson.databind.json.JsonMapper;
  * requests for the robot loop to apply.
  */
 public final class PitwallServer implements AutoCloseable {
-  /** In the range of ports the field network leaves open for teams. */
-  public static final int PORT = 5800;
+  /**
+   * Deliberately outside 5800-5810, the only team ports the field network lets through. Tools that
+   * must work on the field crowd into that range: on a Systemcore, Elastic's package serves on
+   * 5803, AdvantageScope Lite on 5808, and NetworkTables on 5810, and Elastic's docs have teams
+   * serve layouts from the robot program on 5800. Pitwall is locked while the field is connected,
+   * so it doesn't need the range. If something on your robot already uses this port, pass another
+   * to {@link #startOrExplain}.
+   */
+  public static final int PORT = 5820;
 
   /** How long a change waits for the robot loop before answering 202 Accepted. */
   static final Duration WAIT = Duration.ofSeconds(1);

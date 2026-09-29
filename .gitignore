@@ -29,3 +29,8 @@ ctre_sim/
 # OS
 .DS_Store
 Thumbs.db
+
+# JVM crash logs and stray compiled classes
+hs_err_pid*
+replay_pid*
+*.class

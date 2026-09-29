@@ -1,13 +1,19 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
+import org.wpilib.backend.NetworkTablesTunableBackend;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.framework.RobotBase;
 import org.wpilib.hardware.hal.RobotMode;
+import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.system.RobotController;
+import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.Alert;
 
 /**
@@ -24,6 +30,11 @@ import org.wpilib.util.Alert;
  * includes tuned values, and add status items and actions through {@link #status()} and {@link
  * #actions()}.
  *
+ * <p>Every WPILib tunable in the program goes through Pitwall's {@link TunableTee}, around WPILib's
+ * own NetworkTables backend: dashboards work as before, changes apply only while tuning is on and
+ * never on the field, and the configuration's values are published as tunables under {@code
+ * Config/}, where a change from a dashboard goes through the same checks as one from the page.
+ *
  * <p>With AdvantageKit, every request from the page is logged as an input, so a replay makes the
  * same changes at the same moments; while replaying, the page doesn't start. Without AdvantageKit
  * there is no replay, so nothing needs logging.
@@ -34,6 +45,8 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
   private final Tuning<T> tuning;
   private final Status status;
   private final Actions actions;
+  private final TunableTee tee;
+  private final List<String> configTunables = new ArrayList<>();
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
   private final boolean advantageKit;
   private final @Nullable PitwallServer server;
@@ -66,7 +79,18 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
             () -> String.format(Locale.ROOT, "%.1f V", RobotController.getBatteryVoltage()));
     actions = new Actions(advantageKit ? AdvantageKitLog.actions() : inputs -> {});
     boolean replaying = advantageKit && AdvantageKitLog.replaying();
-    server = replaying ? null : startPage(status, tuning, actions, port);
+    // Every WPILib tunable in the program goes through Pitwall's tee, wrapped around WPILib's own
+    // NetworkTables backend: dashboards see what they always did, while changes are locked with
+    // tuning and logged for replay, and the page lists every tunable.
+    tee =
+        new TunableTee(
+            new NetworkTablesTunableBackend(NetworkTableInstance.getDefault(), "/Tunables"),
+            this::whyLocked,
+            advantageKit ? AdvantageKitLog.tunables() : inputs -> {},
+            replaying);
+    TunableRegistry.registerBackend("", tee);
+    publishConfigTunables();
+    server = replaying ? null : startPage(status, tuning, actions, tee, port);
   }
 
   /**
@@ -74,9 +98,9 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
    * trimmed without it (the {@code jdk.httpserver} module) only loses the page.
    */
   private static @Nullable PitwallServer startPage(
-      Status status, Tuning<?> tuning, Actions actions, int port) {
+      Status status, Tuning<?> tuning, Actions actions, TunableTee tee, int port) {
     try {
-      return PitwallServer.startOrExplain(status, tuning, actions, port, System.out::println)
+      return PitwallServer.startOrExplain(status, tuning, actions, tee, port, System.out::println)
           .orElse(null);
     } catch (LinkageError e) {
       System.out.println(
@@ -110,6 +134,11 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
   /** The status the page shows. Add items here: {@code status().add("Arm homed", arm::isHomed)}. */
   public Status status() {
     return status;
+  }
+
+  /** Every WPILib tunable in the robot program, as Pitwall sees it. */
+  public TunableTee tunables() {
+    return tee;
   }
 
   /** The actions the page can run. Add them here: {@code actions().add("Home arm", arm::home)}. */
@@ -148,9 +177,15 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
     wasEnabled = enabled;
   }
 
-  /** Stops the page and releases the alert, so a test can start another. */
+  /**
+   * Stops the page, takes down Pitwall's tunables, and puts WPILib's own NetworkTables backend
+   * back, so a test can start another.
+   */
   @Override
   public void close() {
+    configTunables.forEach(TunableRegistry::remove);
+    TunableRegistry.registerBackend(
+        "", new NetworkTablesTunableBackend(NetworkTableInstance.getDefault(), "/Tunables"));
     PitwallServer running = server;
     if (running != null) {
       try {
@@ -160,6 +195,34 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
       }
     }
     tuned.close();
+  }
+
+  /**
+   * Publishes each tunable configuration value as a WPILib tunable at {@code Config/<path>}, so
+   * dashboards show and change it too. A change from a dashboard goes through {@link Tuning},
+   * checked and logged like one from the page; a refused one snaps back.
+   */
+  private void publishConfigTunables() {
+    for (Tuning.Value value : tuning.view().values()) {
+      String path = value.path();
+      TunableDouble tunable =
+          TunableDouble.create(
+              () -> tuning.value(path), v -> tuning.requestChanges(Map.of(path, v)));
+      tee.passThrough(tunable);
+      String published = "Config/" + path.replace('.', '/');
+      if (TunableRegistry.publish(published, tunable)) {
+        configTunables.add(published);
+      }
+    }
+  }
+
+  /** Why changes to tunables are refused right now, or null while they're allowed. */
+  private @Nullable String whyLocked() {
+    Tuning.View view = tuning.view();
+    if (view.fieldConnected()) {
+      return "the field system is connected";
+    }
+    return view.enabled() ? null : "tuning is off";
   }
 
   /** The mode as the status shows it: "Teleop, enabled", "Autonomous, disabled, on the field". */

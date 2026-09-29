@@ -30,6 +30,10 @@ final class AdvantageKitLog {
     return new ActionLog();
   }
 
+  static Consumer<TunableInputs> tunables() {
+    return new TunableLog();
+  }
+
   static final class TuningLog implements Consumer<TuningInputs>, LoggableInputs {
     private TuningInputs inputs = new TuningInputs();
 
@@ -55,6 +59,28 @@ final class AdvantageKitLog {
       inputs.paths = table.get("Paths", inputs.paths);
       inputs.values = table.get("Values", inputs.values);
       inputs.requests = table.get("Requests", inputs.requests);
+    }
+  }
+
+  static final class TunableLog implements Consumer<TunableInputs>, LoggableInputs {
+    private TunableInputs inputs = new TunableInputs();
+
+    @Override
+    public void accept(TunableInputs inputs) {
+      this.inputs = inputs;
+      Logger.processInputs("Pitwall/Tunables", this);
+    }
+
+    @Override
+    public void toLog(LogTable table) {
+      table.put("Paths", inputs.paths);
+      table.put("Values", inputs.values);
+    }
+
+    @Override
+    public void fromLog(LogTable table) {
+      inputs.paths = table.get("Paths", inputs.paths);
+      inputs.values = table.get("Values", inputs.values);
     }
   }
 

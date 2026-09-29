@@ -63,6 +63,10 @@ Also built in:
     value is checked exactly like a committed one and locked out while the field is connected.
     Nothing is saved on the robot: the page lists each change as the builder call that commits it
     to `Robots.java`.
+  - **Every WPILib tunable** in the program, through a tee around WPILib's own NetworkTables
+    backend: dashboards such as Elastic see and change them as always (the configuration's
+    `@Tunable` values too, under `Config/`), but a change applies only while tuning is on, never on
+    the field, and is logged for replay.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`.

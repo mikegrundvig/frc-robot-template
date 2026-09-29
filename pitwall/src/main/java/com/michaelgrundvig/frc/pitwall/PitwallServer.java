@@ -31,7 +31,8 @@ import org.jspecify.annotations.Nullable;
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
  * simulator, http://robot.local:5820 on the robot. Any browser works, a phone's included, and so
  * does anything else that speaks HTTP. It serves the robot's status ({@link Status}), actions
- * ({@link Actions}), and live tuning ({@link Tuning}):
+ * ({@link Actions}), live tuning of the configuration ({@link Tuning}), and every WPILib tunable in
+ * the program ({@link TunableTee}):
  *
  * <ul>
  *   <li>{@code GET /api/status}: the status items as of the last loop, {@code [{"name", "value"}]}.
@@ -46,6 +47,9 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@code GET /api/changes}: what differs from the committed configuration, with the builder
  *       calls that commit it ({@code Accept: text/plain} for the report). {@code DELETE} it to
  *       return every value to its committed one.
+ *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
+ *       "value", "editable"}]}. {@code PATCH} it with {@code {path: value}} to change several at
+ *       once, all or none.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
@@ -85,11 +89,18 @@ public final class PitwallServer implements AutoCloseable {
   /**
    * @param port the port to serve on; 0 picks a free one
    */
-  public PitwallServer(Status status, Tuning<?> tuning, Actions actions, int port) {
-    this(status, tuning, actions, port, WAIT);
+  public PitwallServer(
+      Status status, Tuning<?> tuning, Actions actions, TunableTee tunables, int port) {
+    this(status, tuning, actions, tunables, port, WAIT);
   }
 
-  PitwallServer(Status status, Tuning<?> tuning, Actions actions, int port, Duration wait) {
+  PitwallServer(
+      Status status,
+      Tuning<?> tuning,
+      Actions actions,
+      TunableTee tunables,
+      int port,
+      Duration wait) {
     this.port = port;
     try {
       server = HttpServer.create();
@@ -106,7 +117,7 @@ public final class PitwallServer implements AutoCloseable {
               return thread;
             });
     server.setExecutor(threads);
-    Api api = new Api(status, tuning, actions, page(), wait);
+    Api api = new Api(status, tuning, actions, tunables, page(), wait);
     server.createContext("/", api::handle);
   }
 
@@ -118,10 +129,15 @@ public final class PitwallServer implements AutoCloseable {
    * @return the running server, or empty if it couldn't start
    */
   public static Optional<PitwallServer> startOrExplain(
-      Status status, Tuning<?> tuning, Actions actions, int port, Consumer<String> say) {
+      Status status,
+      Tuning<?> tuning,
+      Actions actions,
+      TunableTee tunables,
+      int port,
+      Consumer<String> say) {
     PitwallServer server = null;
     try {
-      server = new PitwallServer(status, tuning, actions, port);
+      server = new PitwallServer(status, tuning, actions, tunables, port);
       server.start();
       say.accept(
           "Pitwall: http://localhost:"
@@ -195,19 +211,28 @@ public final class PitwallServer implements AutoCloseable {
             "/api/tuning", List.of("GET", "PATCH"),
             "/api/tunables", List.of("GET"),
             "/api/values", List.of("GET", "PATCH"),
-            "/api/changes", List.of("GET", "DELETE"));
+            "/api/changes", List.of("GET", "DELETE"),
+            "/api/wpilib-tunables", List.of("GET", "PATCH"));
 
     private final Status status;
     private final Tuning<?> tuning;
     private final Actions actions;
+    private final TunableTee tunables;
     private final String page;
     private final Duration wait;
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
 
-    Api(Status status, Tuning<?> tuning, Actions actions, String page, Duration wait) {
+    Api(
+        Status status,
+        Tuning<?> tuning,
+        Actions actions,
+        TunableTee tunables,
+        String page,
+        Duration wait) {
       this.status = status;
       this.tuning = tuning;
       this.actions = actions;
+      this.tunables = tunables;
       this.page = page;
       this.wait = wait;
     }
@@ -238,6 +263,8 @@ public final class PitwallServer implements AutoCloseable {
             case "PATCH /api/values" -> patchValues(exchange);
             case "GET /api/changes" -> getChanges(exchange);
             case "DELETE /api/changes" -> answer(exchange, tuning.requestReset(), this::changes);
+            case "GET /api/wpilib-tunables" -> sendJson(exchange, 200, wpilibTunables());
+            case "PATCH /api/wpilib-tunables" -> patchWpilibTunables(exchange);
             default -> throw new IllegalStateException("unrouted: " + method + " " + path);
           }
         } catch (Problem problem) {
@@ -310,6 +337,25 @@ public final class PitwallServer implements AutoCloseable {
         }
       }
       answer(exchange, tuning.requestChanges(values), this::values);
+    }
+
+    private void patchWpilibTunables(HttpExchange exchange) throws IOException {
+      Map<String, @Nullable Object> patch = readObject(exchange);
+      Map<String, Object> values = new LinkedHashMap<>();
+      for (Map.Entry<String, @Nullable Object> field : patch.entrySet()) {
+        if (!tunables.isEditable(field.getKey())) {
+          throw new Problem(
+              422,
+              "Not changeable",
+              "There is no tunable the page can change at " + field.getKey());
+        }
+        Object value = field.getValue();
+        if (!(value instanceof Number || value instanceof Boolean)) {
+          throw new Problem(400, "Not a value", field.getKey() + " takes a number or true/false");
+        }
+        values.put(field.getKey(), value);
+      }
+      answer(exchange, tunables.requestChanges(values), this::wpilibTunables);
     }
 
     private void getChanges(HttpExchange exchange) throws IOException {
@@ -429,6 +475,19 @@ public final class PitwallServer implements AutoCloseable {
         values.put(value.path(), value.current());
       }
       return values;
+    }
+
+    private List<Object> wpilibTunables() {
+      List<Object> listed = new ArrayList<>();
+      for (TunableTee.Listed tunable : tunables.view()) {
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("path", tunable.path());
+        shown.put("type", tunable.type());
+        shown.put("value", tunable.value());
+        shown.put("editable", tunable.editable());
+        listed.add(shown);
+      }
+      return listed;
     }
 
     private List<Object> changes() {

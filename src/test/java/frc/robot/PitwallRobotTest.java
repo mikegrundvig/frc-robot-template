@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.Status;
+import com.michaelgrundvig.frc.pitwall.TunableTee;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,9 +15,12 @@ import org.junit.jupiter.api.Test;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.hardware.hal.RobotMode;
+import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.telemetry.MockTelemetryBackend;
 import org.wpilib.telemetry.TelemetryRegistry;
+import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableRegistry;
 
 /** Pitwall in the simulated robot program: its standard status, and actions that run commands. */
 class PitwallRobotTest {
@@ -41,6 +45,7 @@ class PitwallRobotTest {
     SimTestSupport.setEnabled(false);
     SimTestSupport.resumeTime();
     TelemetryRegistry.reset();
+    TunableRegistry.reset();
   }
 
   @Test
@@ -54,6 +59,23 @@ class PitwallRobotTest {
     assertThat(value("Code")).contains(" on " + BuildConstants.GIT_BRANCH);
     assertThat(value("Battery")).matches("\\d+\\.\\d V");
     assertThat(pitwall.port()).as("the page is served").isPositive();
+  }
+
+  @Test
+  void everyWpilibTunableGoesThroughPitwallAndTheConfigurationIsOnNetworkTables() {
+    TunableDouble gain = TunableDouble.create(1.0);
+    TunableRegistry.publish("Shooter/gain", gain);
+    TunableRegistry.update();
+
+    assertThat(pitwall.tunables().view())
+        .extracting(TunableTee.Listed::path)
+        .containsExactly("/Shooter/gain");
+    try (var steerKp =
+        NetworkTableInstance.getDefault()
+            .getDoubleTopic("/Tunables/Config/drivetrain/gains/steerKp")
+            .subscribe(-1)) {
+      assertThat(steerKp.get()).as("dashboards see the configuration").isEqualTo(16.0);
+    }
   }
 
   @Test

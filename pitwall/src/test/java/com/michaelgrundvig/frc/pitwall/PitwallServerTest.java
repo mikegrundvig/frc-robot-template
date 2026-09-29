@@ -21,6 +21,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.wpilib.tunable.MockTunableBackend;
+import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableRegistry;
 
 /** The REST API and the page, over real HTTP, with a thread playing the robot loop. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -57,16 +60,25 @@ class PitwallServerTest {
                   homing.set(false);
                 }
               });
-  private final PitwallServer server = new PitwallServer(status, tuning, actions, 0);
+  private final TunableDouble shooterKp = TunableDouble.create(0.5);
+  private final TunableTee tunables =
+      new TunableTee(
+          new MockTunableBackend(),
+          () -> fieldConnected.get() ? "the field system is connected" : null,
+          inputs -> {},
+          false);
+  private final PitwallServer server = new PitwallServer(status, tuning, actions, tunables, 0);
   private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
 
   @BeforeAll
   void start() throws Exception {
+    tunables.publish("Shooter/kP", shooterKp);
     server.start();
     loop.scheduleAtFixedRate(
         () -> {
           tuning.periodic(fieldConnected.get());
           actions.periodic(gate);
+          tunables.update();
           status.periodic();
         },
         0,
@@ -76,6 +88,7 @@ class PitwallServerTest {
 
   @AfterAll
   void stop() throws Exception {
+    TunableRegistry.reset();
     loop.shutdownNow();
     server.close();
   }
@@ -87,6 +100,7 @@ class PitwallServerTest {
     send("POST", "/api/actions", "application/json", "{\"cancel\": \"Home arm\"}");
     send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
     send("DELETE", "/api/changes", null, null);
+    send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.5}");
   }
 
   @Test
@@ -153,6 +167,31 @@ class PitwallServerTest {
     assertThat(unknown.body()).contains("There is no action named Fly");
     assertThat(both.statusCode()).isEqualTo(400);
     assertThat(notAName.statusCode()).isEqualTo(400);
+  }
+
+  @Test
+  void everyOtherWpilibTunableIsListedAndCanBeChanged() throws Exception {
+    assertThat(get("/api/wpilib-tunables").body())
+        .isEqualTo(
+            "[{\"path\":\"/Shooter/kP\",\"type\":\"double\",\"value\":0.5,\"editable\":true}]");
+
+    var changed = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.75}");
+
+    assertThat(changed.statusCode()).isEqualTo(200);
+    assertThat(changed.body()).contains("\"value\":0.75");
+  }
+
+  @Test
+  void onlyTunablesThePageCanChangeTakeOnlyNumbersAndBooleans() throws Exception {
+    var unknown = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Nope\": 1}");
+    var notAValue =
+        send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": \"fast\"}");
+    fieldConnected.set(true);
+    var locked = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.6}");
+
+    assertThat(unknown.statusCode()).isEqualTo(422);
+    assertThat(notAValue.statusCode()).isEqualTo(400);
+    assertThat(locked.statusCode()).isEqualTo(409);
   }
 
   @Test
@@ -291,7 +330,12 @@ class PitwallServerTest {
     var idle = new Tuning<>("idle", machine(), true, inputs -> {}, view -> {});
     try (var paused =
         new PitwallServer(
-            new Status(), idle, new Actions(inputs -> {}), 0, Duration.ofMillis(50))) {
+            new Status(),
+            idle,
+            new Actions(inputs -> {}),
+            new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false),
+            0,
+            Duration.ofMillis(50))) {
       paused.start();
       var accepted =
           client.send(
@@ -313,7 +357,7 @@ class PitwallServerTest {
     List<String> said = new ArrayList<>();
 
     Optional<PitwallServer> started =
-        PitwallServer.startOrExplain(status, tuning, actions, 0, said::add);
+        PitwallServer.startOrExplain(status, tuning, actions, tunables, 0, said::add);
 
     assertThat(started).isPresent();
     try {
@@ -329,7 +373,7 @@ class PitwallServerTest {
 
     // The test's own server already holds this port.
     Optional<PitwallServer> started =
-        PitwallServer.startOrExplain(status, tuning, actions, server.port(), said::add);
+        PitwallServer.startOrExplain(status, tuning, actions, tunables, server.port(), said::add);
 
     assertThat(started).isEmpty();
     assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");

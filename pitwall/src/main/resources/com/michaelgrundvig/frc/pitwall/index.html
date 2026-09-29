@@ -100,6 +100,13 @@
   <pre id="changes" hidden></pre>
   <p class="muted">Nothing is saved on the robot, and a restart returns every value to its committed
     one. To keep a change, write its builder call into the configuration and commit it.</p>
+
+  <section id="others-section" hidden>
+    <h2>Other tunables</h2>
+    <p class="muted">Every other WPILib tunable in the robot program. Type a value and press Enter;
+      it applies only while tuning is on, and dashboards see it too.</p>
+    <table class="status"><tbody id="other-items"></tbody></table>
+  </section>
 </main>
 
 <script>
@@ -317,16 +324,62 @@
     }
   }
 
+  let shownOthers = "";
+  const others = new Map(); // path -> value cell
+
+  /** Every other WPILib tunable: rows rebuilt only when the set changes, values every poll. */
+  function renderOthers(list) {
+    const key = list.map((t) => t.path + ":" + t.editable).join("|");
+    if (key !== shownOthers) {
+      shownOthers = key;
+      others.clear();
+      const body = element("other-items");
+      body.replaceChildren();
+      for (const { path, type, editable } of list) {
+        const row = body.insertRow();
+        row.insertCell().textContent = path;
+        const valueCell = row.insertCell();
+        valueCell.className = "number";
+        const inputCell = row.insertCell();
+        if (editable) {
+          const input = document.createElement("input");
+          input.setAttribute("aria-label", path);
+          input.placeholder = type;
+          input.addEventListener("keydown", async (event) => {
+            if (event.key !== "Enter") return;
+            const text = input.value.trim();
+            const value = text === "true" ? true : text === "false" ? false : Number(text);
+            if (text === "" || (typeof value === "number" && !Number.isFinite(value))) {
+              say(path + " takes a " + type + " value.", true);
+              return;
+            }
+            if (await send("PATCH", "/api/wpilib-tunables", { [path]: value })) input.value = "";
+          });
+          inputCell.append(input);
+        }
+        others.set(path, valueCell);
+      }
+      element("others-section").hidden = list.length === 0;
+    }
+    for (const { path, value } of list) {
+      const cell = others.get(path);
+      if (cell) cell.textContent = typeof value === "number" ? shown(value) : String(value);
+    }
+  }
+
   async function poll() {
     try {
-      const [s, v, c, st, a] = await Promise.all(
-          ["/api/tuning", "/api/values", "/api/changes", "/api/status", "/api/actions"].map((path) =>
+      const paths = ["/api/tuning", "/api/values", "/api/changes", "/api/status", "/api/actions",
+          "/api/wpilib-tunables"];
+      const [s, v, c, st, a, o] = await Promise.all(
+          paths.map((path) =>
               fetch(path, { cache: "no-store" }).then((response) => response.json())));
       session = s;
       current = v;
       render(c);
       renderStatus(st);
       renderActions(a);
+      renderOthers(o);
     } catch (error) {
       element("status").textContent = "The robot isn't answering; still trying…";
     }

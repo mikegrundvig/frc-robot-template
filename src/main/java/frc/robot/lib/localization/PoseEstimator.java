@@ -99,6 +99,8 @@ public final class PoseEstimator {
   private long lastResetNanos = Long.MIN_VALUE;
 
   private final List<VisionMeasurement> pending = new ArrayList<>();
+  private final List<LandmarkEvent> pendingLandmarks = new ArrayList<>();
+  private final List<LandmarkDecision> landmarkDecisions = new ArrayList<>();
   private final List<Applied> applied = new ArrayList<>();
   private final ArrayDeque<Rejected> rejectedRecently = new ArrayDeque<>();
   private final List<Agreement> agreements = new ArrayList<>();
@@ -116,8 +118,12 @@ public final class PoseEstimator {
   private final double[] gain = new double[9];
   private final double[] product = new double[9];
 
-  /** A measurement applied to the history, kept so a rewind can apply it again. */
-  private record Applied(long time, VisionMeasurement measurement) {}
+  /**
+   * A measurement applied to the history, kept so a rewind can apply it again: a camera's, or a
+   * landmark.
+   */
+  private record Applied(
+      long time, @Nullable VisionMeasurement vision, @Nullable LandmarkEvent landmark) {}
 
   /**
    * A rejected measurement's disagreement with the estimate, for recovery: the heading's is NaN
@@ -134,8 +140,15 @@ public final class PoseEstimator {
   /** An accepted measurement's distance from the estimate, for the health's agreement. */
   private record Agreement(long time, double meters) {}
 
-  /** A measurement to apply during a replay; fresh ones are gated, applied ones are not. */
-  private record Event(long time, VisionMeasurement measurement, boolean fresh) {}
+  /**
+   * A measurement to apply during a replay, a camera's or a landmark; fresh ones are gated, applied
+   * ones are not.
+   */
+  private record Event(
+      long time,
+      @Nullable VisionMeasurement vision,
+      @Nullable LandmarkEvent landmark,
+      boolean fresh) {}
 
   /**
    * @param config how to weigh the sources
@@ -229,9 +242,13 @@ public final class PoseEstimator {
     int slot = index(size);
     size++;
     time[slot] = timestampNanos;
-    double trust = wheelTrust(conditions.tiltRadians());
-    stepDx[slot] = trust * motion.dxMeters();
-    stepDy[slot] = trust * motion.dyMeters();
+    // A tilt the ground explains still rolls on the ground: the travel counts at the slope's
+    // cosine.
+    // Tilt beyond it may have lifted the wheels: their travel counts for less.
+    double trust = wheelTrust(conditions.unexplainedTiltRadians());
+    double across = Math.cos(conditions.groundSlopeRadians());
+    stepDx[slot] = trust * across * motion.dxMeters();
+    stepDy[slot] = trust * across * motion.dyMeters();
     stepResidual[slot] = motion.residualMeters();
     stepExtra[slot] =
         extraVariance(
@@ -267,6 +284,19 @@ public final class PoseEstimator {
   }
 
   /**
+   * A landmark, to apply at the next {@link #update} at its time: an update along one axis, gated
+   * like a camera's measurement, and kept apart from the cameras' counts, agreement, and recovery.
+   */
+  public void addLandmark(LandmarkEvent landmark) {
+    pendingLandmarks.add(landmark);
+  }
+
+  /** What the last {@link #update} did with each landmark, for the log. */
+  public List<LandmarkDecision> landmarkDecisions() {
+    return List.copyOf(landmarkDecisions);
+  }
+
+  /**
    * Applies the measurements added since the last update, each at its capture time, and decides
    * whether odometry needs rescuing. Call it once per loop, after adding the loop's odometry and
    * measurements.
@@ -275,22 +305,30 @@ public final class PoseEstimator {
    */
   public List<VisionDecision> update() {
     List<VisionDecision> decisions = new ArrayList<>();
-    if (!pending.isEmpty()) {
-      pending.sort(Comparator.comparingLong(VisionMeasurement::timestampNanos));
-      List<VisionMeasurement> usable = new ArrayList<>();
-      for (VisionMeasurement measurement : pending) {
-        String why = whyNotUsable(measurement);
-        if (why == null) {
-          usable.add(measurement);
-        } else {
-          rejectedCount++;
-          decisions.add(new VisionDecision(measurement, false, why, Double.NaN, Double.NaN));
-        }
+    landmarkDecisions.clear();
+    List<VisionMeasurement> usable = new ArrayList<>();
+    for (VisionMeasurement measurement : pending) {
+      String why = whyNotUsable(measurement);
+      if (why == null) {
+        usable.add(measurement);
+      } else {
+        rejectedCount++;
+        decisions.add(new VisionDecision(measurement, false, why, Double.NaN, Double.NaN));
       }
-      pending.clear();
-      if (!usable.isEmpty()) {
-        replay(usable, decisions);
+    }
+    pending.clear();
+    List<LandmarkEvent> landmarks = new ArrayList<>();
+    for (LandmarkEvent landmark : pendingLandmarks) {
+      String why = whyNotInHistory(landmark.timestampNanos());
+      if (why == null) {
+        landmarks.add(landmark);
+      } else {
+        landmarkDecisions.add(new LandmarkDecision(landmark, false, why, Double.NaN, Double.NaN));
       }
+    }
+    pendingLandmarks.clear();
+    if (!usable.isEmpty() || !landmarks.isEmpty()) {
+      replay(usable, landmarks, decisions);
     }
     recoverIfTheCamerasAgree();
     if (started) {
@@ -460,10 +498,21 @@ public final class PoseEstimator {
   }
 
   private @Nullable String whyNotUsable(VisionMeasurement measurement) {
+    String why = whyNotInHistory(measurement.timestampNanos());
+    if (why != null) {
+      return why;
+    }
+    if (!onField.test(measurement.pose().getTranslation())) {
+      return "off the field";
+    }
+    return null;
+  }
+
+  /** Why a measurement at a time can't be applied: before the history, or after it. */
+  private @Nullable String whyNotInHistory(long t) {
     if (!started) {
       return "before odometry started";
     }
-    long t = measurement.timestampNanos();
     if (t <= lastResetNanos) {
       return "before the robot was last placed or recovered";
     }
@@ -473,9 +522,6 @@ public final class PoseEstimator {
     if (t > newestTime() + futureToleranceNanos) {
       return "from the future: after the newest odometry";
     }
-    if (!onField.test(measurement.pose().getTranslation())) {
-      return "off the field";
-    }
     return null;
   }
 
@@ -483,10 +529,19 @@ public final class PoseEstimator {
    * Rewinds to just before the earliest new measurement and replays the history from there,
    * applying the new measurements and the ones applied before, in time order.
    */
-  private void replay(List<VisionMeasurement> usable, List<VisionDecision> decisions) {
+  private void replay(
+      List<VisionMeasurement> usable,
+      List<LandmarkEvent> landmarks,
+      List<VisionDecision> decisions) {
     long newest = newestTime();
     // A measurement stamped a little after the newest step is applied at the newest step.
-    long earliest = Math.min(usable.get(0).timestampNanos(), newest);
+    long earliest = newest;
+    for (VisionMeasurement measurement : usable) {
+      earliest = Math.min(earliest, measurement.timestampNanos());
+    }
+    for (LandmarkEvent landmark : landmarks) {
+      earliest = Math.min(earliest, landmark.timestampNanos());
+    }
     int start = size - 1;
     while (start > 0 && time[index(start)] >= earliest) {
       start--;
@@ -495,11 +550,15 @@ public final class PoseEstimator {
     List<Event> events = new ArrayList<>();
     for (Applied done : applied) {
       if (done.time() > startTime) {
-        events.add(new Event(done.time(), done.measurement(), false));
+        events.add(new Event(done.time(), done.vision(), done.landmark(), false));
       }
     }
     for (VisionMeasurement measurement : usable) {
-      events.add(new Event(Math.min(measurement.timestampNanos(), newest), measurement, true));
+      events.add(
+          new Event(Math.min(measurement.timestampNanos(), newest), measurement, null, true));
+    }
+    for (LandmarkEvent landmark : landmarks) {
+      events.add(new Event(Math.min(landmark.timestampNanos(), newest), null, landmark, true));
     }
     events.sort(Comparator.comparingLong(Event::time));
     applied.removeIf(done -> done.time() > startTime);
@@ -529,7 +588,15 @@ public final class PoseEstimator {
 
   /** Gates a fresh measurement, then applies it as a Kalman update; applies an old one ungated. */
   private void apply(Event event, double yawThen, List<VisionDecision> decisions) {
-    VisionMeasurement measurement = event.measurement();
+    LandmarkEvent landmark = event.landmark();
+    if (landmark != null) {
+      applyLandmark(event, landmark);
+      return;
+    }
+    VisionMeasurement measurement = event.vision();
+    if (measurement == null) {
+      return;
+    }
     PoseCovariance noise = measurement.covariance();
     double innovationX = measurement.pose().getX() - x;
     double innovationY = measurement.pose().getY() - y;
@@ -634,7 +701,54 @@ public final class PoseEstimator {
       }
     }
     symmetrize();
-    applied.add(new Applied(event.time(), measurement));
+    applied.add(new Applied(event.time(), measurement, null));
+  }
+
+  /**
+   * A landmark, as a Kalman update along one axis: it moves the estimate across the line, and
+   * leaves it alone along it. Gated like a camera's measurement, but none of the cameras' records
+   * change: a landmark is no camera, and one axis says nothing about the rest.
+   */
+  private void applyLandmark(Event event, LandmarkEvent landmark) {
+    double nx = landmark.across().getCos();
+    double ny = landmark.across().getSin();
+    double innovation = -landmark.offset(new Translation2d(x, y));
+    // With H = [nx, ny, 0]: P H^T, then S = H P H^T + R.
+    double ph0 = covariance[0] * nx + covariance[1] * ny;
+    double ph1 = covariance[3] * nx + covariance[4] * ny;
+    double ph2 = covariance[6] * nx + covariance[7] * ny;
+    double s = nx * ph0 + ny * ph1 + square(landmark.stdDevMeters());
+    if (!(s > 0)) {
+      return;
+    }
+    double chiSquared = innovation * innovation / s;
+    if (event.fresh()) {
+      if (chiSquared > config.gateChiSquaredAxis()) {
+        landmarkDecisions.add(
+            new LandmarkDecision(
+                landmark,
+                false,
+                String.format(
+                    Locale.ROOT, "gate: %.1f > %.1f", chiSquared, config.gateChiSquaredAxis()),
+                Math.abs(innovation),
+                chiSquared));
+        return;
+      }
+      landmarkDecisions.add(
+          new LandmarkDecision(landmark, true, "accepted", Math.abs(innovation), chiSquared));
+    }
+    double[] k = {ph0 / s, ph1 / s, ph2 / s};
+    x += k[0] * innovation;
+    y += k[1] * innovation;
+    offset += k[2] * innovation;
+    // P = P - K H P, and H P is (P H^T) transposed: K K^T S.
+    for (int row = 0; row < 3; row++) {
+      for (int column = 0; column < 3; column++) {
+        covariance[row * 3 + column] -= k[row] * k[column] * s;
+      }
+    }
+    symmetrize();
+    applied.add(new Applied(event.time(), null, landmark));
   }
 
   /**

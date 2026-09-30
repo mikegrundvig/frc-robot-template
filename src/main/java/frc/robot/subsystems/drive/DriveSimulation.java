@@ -3,6 +3,7 @@ package frc.robot.subsystems.drive;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.SwerveKinematicsModel;
@@ -54,6 +55,15 @@ public final class DriveSimulation {
   private double pitchRadians;
   private double rollRadians;
 
+  // The ground under the robot: the terrain, and the plane through its wheels' contact points.
+  private final Translation2d[] moduleLocations;
+  private final double[] planeFit = new double[9];
+  private Terrain terrain = Terrain.FLAT;
+  private boolean tiltedByHand;
+  private double heightMeters;
+  private double riseForward;
+  private double riseLeft;
+
   // The robot's motion on the field, for what its IMU feels.
   private Translation2d lastVelocity = Translation2d.ZERO;
   private Translation2d acceleration = Translation2d.ZERO;
@@ -62,6 +72,8 @@ public final class DriveSimulation {
   private Translation2d jolt = Translation2d.ZERO;
 
   /**
+   * On flat ground until given its terrain ({@link #setTerrain}).
+   *
    * @param config the modules as configured: the code's belief about them
    * @param moduleLocations where the modules sit, from the robot's center
    * @param errors how the real wheels and sensors differ from the configuration
@@ -72,6 +84,8 @@ public final class DriveSimulation {
       throw new IllegalArgumentException("swerve needs exactly 4 modules");
     }
     kinematics = new SwerveKinematicsModel(moduleLocations);
+    this.moduleLocations = moduleLocations.clone();
+    planeFit(moduleLocations, planeFit);
     double radius = config.wheelRadius().in(Meters);
     for (int i = 0; i < 4; i++) {
       modules[i] = new ModuleIOSim(config, Math.toRadians(errors.steerOffsetDegrees().get(i)));
@@ -96,6 +110,16 @@ public final class DriveSimulation {
   /** The backup IMU (Systemcore's own), read once a loop. */
   public GyroIO backupGyro() {
     return backupGyro;
+  }
+
+  /**
+   * The ground the robot drives on: it rides over the bumps, tilted by the ground under its wheels,
+   * and its wheels' travel moves it at the slope's cosine. Undoes a tilt made by hand.
+   */
+  public void setTerrain(Terrain terrain) {
+    this.terrain = terrain;
+    tiltedByHand = false;
+    settle();
   }
 
   /** Unplugs the gyro, or plugs it back in. */
@@ -132,14 +156,22 @@ public final class DriveSimulation {
       OdometrySample wheels = trueWheels();
       BodyMotion motion = kinematics.motion(lastTrue, wheels);
       Translation2d before = truePose.getTranslation();
-      // Only the gripping share of the wheels' rolling moves the robot.
+      // Only the gripping share of the wheels' rolling moves the robot, and rolling up or down a
+      // slope moves it less across the field.
+      double travel = Math.hypot(motion.dxMeters(), motion.dyMeters());
+      double rise =
+          travel > 0
+              ? (riseForward * motion.dxMeters() + riseLeft * motion.dyMeters()) / travel
+              : 0;
+      double level = grip / Math.sqrt(1 + rise * rise);
       truePose =
           truePose.plus(
               new Twist2d(
-                      grip * motion.dxMeters(),
-                      grip * motion.dyMeters(),
+                      level * motion.dxMeters(),
+                      level * motion.dyMeters(),
                       grip * motion.dthetaRadians())
                   .exp());
+      settle();
       yawTurnedRadians += grip * motion.dthetaRadians();
       yawRateRadiansPerSecond = grip * motion.dthetaRadians() / dt;
       Translation2d velocity = truePose.getTranslation().minus(before).div(dt);
@@ -163,13 +195,70 @@ public final class DriveSimulation {
     return truePose;
   }
 
-  /** Where the robot really is, tilted as it is: what its cameras see from. */
+  /** Where the robot really is, raised and tilted as it is: what its cameras see from. */
   public Pose3d truePose3d() {
     return new Pose3d(
         truePose.getX(),
         truePose.getY(),
-        0,
+        heightMeters,
         new Rotation3d(rollRadians, pitchRadians, truePose.getRotation().getRadians()));
+  }
+
+  /**
+   * Sets the robot on the ground where it is: the plane through the ground under its wheels gives
+   * its height and, unless tilted by hand, its attitude.
+   */
+  private void settle() {
+    double sum = 0;
+    double sumX = 0;
+    double sumY = 0;
+    for (Translation2d wheel : moduleLocations) {
+      double height =
+          terrain.heightAt(truePose.getTranslation().plus(wheel.rotateBy(truePose.getRotation())));
+      sum += height;
+      sumX += wheel.getX() * height;
+      sumY += wheel.getY() * height;
+    }
+    // Least squares: height = a + (rise forward) x + (rise left) y, in the robot's frame.
+    heightMeters = planeFit[0] * sum + planeFit[1] * sumX + planeFit[2] * sumY;
+    riseForward = planeFit[3] * sum + planeFit[4] * sumX + planeFit[5] * sumY;
+    riseLeft = planeFit[6] * sum + planeFit[7] * sumX + planeFit[8] * sumY;
+    if (!tiltedByHand) {
+      // WPILib's convention: nose up is a negative pitch, the left side up a positive roll.
+      pitchRadians = -Math.atan(riseForward);
+      rollRadians = Math.atan(riseLeft * Math.cos(pitchRadians));
+    }
+  }
+
+  /** The inverse of the plane fit's normal equations for these wheels, row by row. */
+  private static void planeFit(Translation2d[] wheels, double[] inverse) {
+    double n = wheels.length;
+    double sx = 0;
+    double sy = 0;
+    double sxx = 0;
+    double sxy = 0;
+    double syy = 0;
+    for (Translation2d wheel : wheels) {
+      sx += wheel.getX();
+      sy += wheel.getY();
+      sxx += wheel.getX() * wheel.getX();
+      sxy += wheel.getX() * wheel.getY();
+      syy += wheel.getY() * wheel.getY();
+    }
+    double[] m = {n, sx, sy, sx, sxx, sxy, sy, sxy, syy};
+    double det =
+        m[0] * (m[4] * m[8] - m[5] * m[7])
+            - m[1] * (m[3] * m[8] - m[5] * m[6])
+            + m[2] * (m[3] * m[7] - m[4] * m[6]);
+    inverse[0] = (m[4] * m[8] - m[5] * m[7]) / det;
+    inverse[1] = (m[2] * m[7] - m[1] * m[8]) / det;
+    inverse[2] = (m[1] * m[5] - m[2] * m[4]) / det;
+    inverse[3] = (m[5] * m[6] - m[3] * m[8]) / det;
+    inverse[4] = (m[0] * m[8] - m[2] * m[6]) / det;
+    inverse[5] = (m[2] * m[3] - m[0] * m[5]) / det;
+    inverse[6] = (m[3] * m[7] - m[4] * m[6]) / det;
+    inverse[7] = (m[1] * m[6] - m[0] * m[7]) / det;
+    inverse[8] = (m[0] * m[4] - m[1] * m[3]) / det;
   }
 
   /**
@@ -179,6 +268,7 @@ public final class DriveSimulation {
   public void place(Pose2d pose) {
     yawTurnedRadians += pose.getRotation().minus(truePose.getRotation()).getRadians();
     truePose = pose;
+    settle();
   }
 
   /**
@@ -200,10 +290,12 @@ public final class DriveSimulation {
   }
 
   /**
-   * Tilts the robot, as a bump, a ramp, or a wheel up on a game piece does: its IMU reads the
-   * attitude. Level again with zeros.
+   * Tilts the robot by hand, as a wheel up on a game piece does, whatever the terrain under it
+   * says: its IMU reads the attitude. Level again with zeros; back on the terrain with {@link
+   * #setTerrain}.
    */
   public void tilt(double pitchRadians, double rollRadians) {
+    tiltedByHand = true;
     this.pitchRadians = pitchRadians;
     this.rollRadians = rollRadians;
   }

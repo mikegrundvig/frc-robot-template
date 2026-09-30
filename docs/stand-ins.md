@@ -28,5 +28,6 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 - **Physics simulation** (traction, collisions, game pieces): maple-sim. Until then, simulation tests
   the code, not the robot's traction or power. The simulator keeps the robot's true pose apart from
   its sensors (`DriveSimulation`, `SensorErrors`), the drive motors obey their stator current limit,
-  and faults can be made by hand: a slipping wheel, a push, a hit the IMU feels, a tilt with wheels
-  off the floor. Wheels still never slip on their own.
+  the robot rides over the field's bumps (tilted and raised by the ground under its wheels), and
+  faults can be made by hand: a slipping wheel, a push, a hit the IMU feels, a tilt with wheels off
+  the floor. Wheels still never slip on their own.

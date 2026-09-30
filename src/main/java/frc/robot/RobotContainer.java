@@ -8,7 +8,9 @@ import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
+import frc.robot.lib.localization.CrestLandmarks;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.LandmarkDecision;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.lib.localization.PoseCovariance;
@@ -27,6 +29,7 @@ import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.VisionSim;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -99,6 +102,14 @@ public final class RobotContainer implements AutoCloseable {
   private final Calibration calibration;
 
   private final PoseEstimator estimator;
+
+  /**
+   * Crests the robot passes, as landmarks: a crest places the robot's center within about 5 cm
+   * across it, and names its bump when the estimate is within a meter of it.
+   */
+  private final CrestLandmarks crestLandmarks;
+
+  private int landmarksAccepted;
   private final Drive drive;
   private final CommandGamepad driver;
   private final Alert noHardware =
@@ -198,6 +209,7 @@ public final class RobotContainer implements AutoCloseable {
               drivetrain.get().modules(),
               drivetrain.get().moduleTranslations(body),
               simulatedErrors);
+      simulation.setTerrain(field.terrain());
       hardware = null;
       modules = simulation.modules();
       gyro = simulation.gyro();
@@ -247,6 +259,8 @@ public final class RobotContainer implements AutoCloseable {
             scheduler,
             estimator,
             odometryLock);
+    drive.setTerrain(field.terrain());
+    crestLandmarks = new CrestLandmarks(field.terrain(), 0.05, 1.0);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (simulation != null) {
       simulation.place(middle);
@@ -347,9 +361,31 @@ public final class RobotContainer implements AutoCloseable {
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
     placed.ifPresent(
         pose -> estimator.reset(new PoseReset(RobotController.getTime(), pose, PLACED, placedOn)));
+    // A crest passed puts the robot on its bump's crest line then.
+    drive
+        .crest()
+        .flatMap(
+            crest ->
+                estimator
+                    .poseAt(crest.timestampNanos())
+                    .flatMap(then -> crestLandmarks.landmark(crest, then.getTranslation())))
+        .ifPresent(estimator::addLandmark);
     vision.periodic(estimator.estimate(), drive.pitchRadians(), drive.rollRadians());
     loop.mark("Vision", System.nanoTime());
     vision.record(estimator.update());
+    List<String> landmarks = new ArrayList<>();
+    for (LandmarkDecision decision : estimator.landmarkDecisions()) {
+      landmarks.add(
+          String.format(
+              Locale.ROOT,
+              "%s: %s, %.2f m across",
+              decision.landmark().name(),
+              decision.reason(),
+              decision.innovationMeters()));
+      landmarksAccepted += decision.accepted() ? 1 : 0;
+    }
+    Logger.recordOutput("Localization/Landmarks", landmarks.toArray(String[]::new));
+    Logger.recordOutput("Localization/LandmarksAccepted", landmarksAccepted);
     estimate = estimator.estimate();
     notReadyToScore = LocalizationGate.SCORING.whyNot(estimate);
     loop.mark("Localization", System.nanoTime());
@@ -550,6 +586,11 @@ public final class RobotContainer implements AutoCloseable {
   /** One line for the pit and the drive team: ready to score, or why not. */
   String scoring() {
     return notReadyToScore == null ? "Ready to score" : "Not ready: " + notReadyToScore;
+  }
+
+  /** How many crests the estimator has taken as landmarks since the robot started. */
+  int landmarksAccepted() {
+    return landmarksAccepted;
   }
 
   /** One line for the pit: the cameras, and how their measurements fare. */

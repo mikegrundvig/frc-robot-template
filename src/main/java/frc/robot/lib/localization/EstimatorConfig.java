@@ -44,6 +44,8 @@ import frc.robot.lib.config.ConfigRecord;
  *     Mahalanobis distance may not exceed this (13.8 passes 99.9% of good measurements, 2 degrees
  *     of freedom)
  * @param gateChiSquaredPose the same for a measurement with heading (16.3: 99.9%, 3 degrees)
+ * @param gateChiSquaredAxis the same for a landmark, which measures one axis (10.8: 99.9%, 1
+ *     degree)
  * @param recoveryMeasurements how many rejected measurements must agree with each other, within the
  *     recovery window, before odometry is judged wrong and the estimate jumps to them
  * @param recoveryWindowSeconds how recent those rejected measurements must be
@@ -77,6 +79,7 @@ public record EstimatorConfig(
     double disagreementWindowSeconds,
     double gateChiSquaredPosition,
     double gateChiSquaredPose,
+    double gateChiSquaredAxis,
     int recoveryMeasurements,
     double recoveryWindowSeconds,
     double recoveryAgreementMeters,
@@ -106,6 +109,7 @@ public record EstimatorConfig(
           .disagreementWindowSeconds(0.5)
           .gateChiSquaredPosition(13.816)
           .gateChiSquaredPose(16.266)
+          .gateChiSquaredAxis(10.828)
           .recoveryMeasurements(3)
           .recoveryWindowSeconds(1.0)
           .recoveryAgreementMeters(0.25)
@@ -142,6 +146,7 @@ public record EstimatorConfig(
       disagreementWindowSeconds,
       gateChiSquaredPosition,
       gateChiSquaredPose,
+      gateChiSquaredAxis,
       recoveryWindowSeconds,
       recoveryStdDevMeters,
       recoveryAgreementDegrees,

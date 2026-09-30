@@ -416,7 +416,8 @@ class TunableTeeTest {
     assertThat(live.get()).isEqualTo(Fixtures.machine());
     assertThat(tee.refusals())
         .containsExactly(
-            "/Machine/drive/limits/maxSpeed = 5.0: maxSpeed is faster than the motor's free speed");
+            "/Machine/drive/limits/maxSpeed = 5.0: machine: maxSpeed is faster than the motor's"
+                + " free speed");
   }
 
   /** From the page, a configuration's values change together: one rebuild, all or none. */
@@ -443,7 +444,27 @@ class TunableTeeTest {
     tee.update();
 
     assertThat(outcome.getNow(null))
-        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "min must be below max, got 12.0 and 10.0"));
+        .isEqualTo(
+            new Outcome(
+                Outcome.Result.REFUSED, "machine: min must be below max, got 12.0 and 10.0"));
+    assertThat(live.get()).isEqualTo(Fixtures.machine());
+  }
+
+  @Test
+  void thePageIsGivenEveryReasonARequestIsRefused() {
+    var live = publishedMachine();
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("Machine/drive/gains/kP", -1);
+    values.put("Nowhere", 1);
+    values.put("Machine/travel/min", 12);
+
+    var outcome = tee.requestChanges(values);
+    tee.update();
+
+    assertThat(outcome.getNow(null).detail().lines())
+        .containsExactly(
+            "/Machine/drive/gains/kP: -1 is below its limit of 0",
+            "There is no tunable the page can change at /Nowhere");
     assertThat(live.get()).isEqualTo(Fixtures.machine());
   }
 

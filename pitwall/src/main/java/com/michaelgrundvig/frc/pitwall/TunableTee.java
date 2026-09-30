@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -46,8 +47,11 @@ import org.wpilib.tunable.util.PathUtil;
  *
  * <p>A {@link LiveConfig}'s values are checked whole: before a change to one applies, the
  * configuration says whether it would take it (its limits, then its records' own checks), and a
- * page's changes to several of its values apply together, as one rebuild. {@link Tuning} puts them
- * back as committed when the field connects.
+ * page's changes to several of its values apply together, as one rebuild. Then the {@link
+ * ConfigRules} the change touches run, against every configuration as the change would leave them,
+ * so values of different mechanisms valid only together can change together. Nothing applies unless
+ * everything passes, and a refusal gives every reason. {@link Tuning} puts them back as committed
+ * when the field connects.
  *
  * <p>WPILib calls {@link #update} once per loop, after {@code robotPeriodic()}; dashboard writes
  * and the page's requests are applied there, and so are the logged ones in a replay.
@@ -411,14 +415,17 @@ public final class TunableTee implements TunableBackend {
   }
 
   /**
-   * The page's changes, all or none: every value is checked first (its type, and its limits), then
-   * each is applied, and if a tunable's own setter throws, the ones already applied are put back.
+   * The page's changes, all or none. Everything is checked before anything applies: each value (a
+   * tunable the page can change, its type, and its limits), then each configuration it changes,
+   * rebuilt with all of its new values. A refusal gives every reason, one per line. Then each is
+   * applied, and if a tunable's own setter throws, the ones already applied are put back.
    */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
     if (why != null) {
       return new Outcome(Outcome.Result.LOCKED, "Tuning is locked: " + why);
     }
+    List<String> problems = new ArrayList<>();
     List<Change> changes = new ArrayList<>();
     // A configuration's values, gathered to be checked and applied together.
     Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();
@@ -429,18 +436,19 @@ public final class TunableTee implements TunableBackend {
         entry = entries.get(value.getKey());
       }
       if (entry == null || entry.proxy() == null || !isMutable(entry.real())) {
-        return new Outcome(
-            Outcome.Result.REFUSED, "There is no tunable the page can change at " + value.getKey());
+        problems.add("There is no tunable the page can change at " + value.getKey());
+        continue;
       }
       Change change = change(value.getKey(), entry, value.getValue());
       if (change == null) {
-        return new Outcome(
-            Outcome.Result.REFUSED, value.getKey() + " takes a " + entry.type() + " value");
+        problems.add(value.getKey() + " takes a " + entry.type() + " value");
+        continue;
       }
       if (value.getValue() instanceof Number number) {
         String outside = entry.limits().whyNot(number.doubleValue());
         if (outside != null) {
-          return new Outcome(Outcome.Result.REFUSED, value.getKey() + ": " + outside);
+          problems.add(value.getKey() + ": " + outside);
+          continue;
         }
       }
       LiveConfig<?> config = entry.config();
@@ -455,28 +463,44 @@ public final class TunableTee implements TunableBackend {
       }
       changes.add(change);
     }
+    if (!problems.isEmpty()) {
+      return new Outcome(Outcome.Result.REFUSED, String.join("\n", problems));
+    }
+    Map<LiveConfig<?>, Record> candidates = new IdentityHashMap<>();
     for (Map.Entry<LiveConfig<?>, Map<String, Double>> group : configured.entrySet()) {
       LiveConfig<?> config = group.getKey();
-      String refused = config.whyNot(group.getValue());
-      if (refused != null) {
-        return new Outcome(Outcome.Result.REFUSED, refused);
+      Record candidate;
+      try {
+        candidate = config.candidate(group.getValue());
+      } catch (IllegalArgumentException refused) {
+        problems.add(Objects.requireNonNullElse(refused.getMessage(), refused.toString()));
+        continue;
       }
-      Map<String, Double> old = new LinkedHashMap<>();
-      group.getValue().keySet().forEach(field -> old.put(field, config.value(field)));
+      candidates.put(config, candidate);
+      Record old = config.get();
+      Map<String, Double> oldValues = new LinkedHashMap<>();
+      group.getValue().keySet().forEach(field -> oldValues.put(field, config.value(field)));
       Map<String, String> paths = Objects.requireNonNull(configuredPaths.get(config));
       changes.add(
           new Change(
               config.name(),
               () -> {
-                config.set(group.getValue());
+                config.accept(candidate);
                 group
                     .getValue()
                     .forEach((field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
               },
               () -> {
-                config.set(old);
-                old.forEach((field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
+                config.accept(old);
+                oldValues.forEach(
+                    (field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
               }));
+    }
+    if (problems.isEmpty()) {
+      problems.addAll(brokenRules(configured, candidates));
+    }
+    if (!problems.isEmpty()) {
+      return new Outcome(Outcome.Result.REFUSED, String.join("\n", problems));
     }
     List<Change> done = new ArrayList<>();
     for (Change change : changes) {
@@ -499,6 +523,29 @@ public final class TunableTee implements TunableBackend {
       }
     }
     return Outcome.applied();
+  }
+
+  /**
+   * Why a change breaks the rules across configurations it touches: each registry of rules that
+   * reads a configuration the change sets, asked once, with every candidate.
+   */
+  private static List<String> brokenRules(
+      Map<LiveConfig<?>, Map<String, Double>> configured, Map<LiveConfig<?>, Record> candidates) {
+    List<ConfigRules> registries = new ArrayList<>();
+    for (LiveConfig<?> config : configured.keySet()) {
+      for (ConfigRules registry : config.rules()) {
+        if (registries.stream().noneMatch(known -> known == registry)) {
+          registries.add(registry);
+        }
+      }
+    }
+    Map<LiveConfig<?>, Set<String>> changes = new IdentityHashMap<>();
+    configured.forEach((config, values) -> changes.put(config, values.keySet()));
+    List<String> broken = new ArrayList<>();
+    for (ConfigRules registry : registries) {
+      broken.addAll(registry.whyNot(changes, candidates));
+    }
+    return broken;
   }
 
   /**
@@ -563,7 +610,9 @@ public final class TunableTee implements TunableBackend {
 
   /**
    * Applies one update's logged changes during a replay, as the robot applied them: a
-   * configuration's values together, the rest one by one.
+   * configuration's values together, the rest one by one. The records still check a configuration's
+   * values, but the rules across configurations aren't run again: they judged the change when it
+   * was made, and the log says what was applied.
    */
   private void applyLogged(String[] paths, String[] texts) {
     Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();
@@ -587,9 +636,11 @@ public final class TunableTee implements TunableBackend {
     }
     configured.forEach(
         (config, values) -> {
-          if (!config.set(values)) {
+          try {
+            config.accept(config.candidate(values));
+          } catch (IllegalArgumentException refused) {
             TunableRegistry.reportWarning(
-                "Pitwall: " + config.name() + " refused a logged change: " + config.whyNot(values));
+                "Pitwall: " + config.name() + " refused a logged change: " + refused.getMessage());
           }
         });
   }

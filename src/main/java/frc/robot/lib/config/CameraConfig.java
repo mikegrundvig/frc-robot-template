@@ -1,5 +1,10 @@
 package frc.robot.lib.config;
 
+import static frc.robot.lib.config.Rules.below;
+import static frc.robot.lib.config.Rules.finite;
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.notBlank;
+import static frc.robot.lib.config.Rules.positive;
 import static org.wpilib.units.Units.Degrees;
 
 import org.wpilib.math.geometry.Rotation3d;
@@ -41,14 +46,16 @@ public record CameraConfig(
     Sensor sensor,
     double noiseScale) {
   public CameraConfig {
-    Require.notBlank("camera name", name);
-    Require.finite(name + " forward", forward);
-    Require.finite(name + " left", left);
-    Require.finite(name + " up", up);
-    Require.finite(name + " roll", roll);
-    Require.finite(name + " tiltUp", tiltUp);
-    Require.finite(name + " yaw", yaw);
-    Require.positive(name + " noiseScale", noiseScale);
+    Checks.on(CameraConfig.class, name)
+        .field("name", name, notBlank())
+        .field("forward", forward, finite())
+        .field("left", left, finite())
+        .field("up", up, finite())
+        .field("roll", roll, finite())
+        .field("tiltUp", tiltUp, finite())
+        .field("yaw", yaw, finite())
+        .field("noiseScale", noiseScale, positive())
+        .orThrow();
   }
 
   /** Starts building a camera, one named value at a time. */
@@ -86,16 +93,14 @@ public record CameraConfig(
       Frequency frameRate,
       Time latency) {
     public Sensor {
-      Require.positive("widthPixels", widthPixels);
-      Require.positive("heightPixels", heightPixels);
-      Require.positive("diagonalFieldOfView", diagonalFieldOfView);
-      if (diagonalFieldOfView.gte(Degrees.of(180))) {
-        throw new IllegalArgumentException(
-            "diagonalFieldOfView must be under 180 degrees, got "
-                + Require.shown(diagonalFieldOfView));
-      }
-      Require.positive("frameRate", frameRate);
-      Require.nonNegative("latency", latency);
+      Checks.on(Sensor.class)
+          .field("widthPixels", widthPixels, positive())
+          .field("heightPixels", heightPixels, positive())
+          .field("diagonalFieldOfView", diagonalFieldOfView, positive())
+          .field("diagonalFieldOfView", diagonalFieldOfView, below(Degrees.of(180)))
+          .field("frameRate", frameRate, positive())
+          .field("latency", latency, nonNegative())
+          .orThrow();
     }
 
     /** Starts building a camera sensor, one named value at a time. */

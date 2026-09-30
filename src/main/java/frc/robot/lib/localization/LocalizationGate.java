@@ -1,5 +1,8 @@
 package frc.robot.lib.localization;
 
+import static frc.robot.lib.config.Rules.positive;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
@@ -36,14 +39,12 @@ public record LocalizationGate(
           .build();
 
   public LocalizationGate {
-    double[] limits = {
-      maxVisionAgeSeconds, maxDisagreementMeters, maxPositionStdDevMeters, maxTiltDegrees
-    };
-    for (double limit : limits) {
-      if (!(limit > 0) || Double.isInfinite(limit)) {
-        throw new IllegalArgumentException("a gate's limits must be positive and finite");
-      }
-    }
+    Checks.on(LocalizationGate.class)
+        .field("maxVisionAgeSeconds", maxVisionAgeSeconds, positive())
+        .field("maxDisagreementMeters", maxDisagreementMeters, positive())
+        .field("maxPositionStdDevMeters", maxPositionStdDevMeters, positive())
+        .field("maxTiltDegrees", maxTiltDegrees, positive())
+        .orThrow();
   }
 
   /** Starts building a gate, one named limit at a time. */

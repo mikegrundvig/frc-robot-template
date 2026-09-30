@@ -1,5 +1,6 @@
 package frc.robot.lib.localization;
 
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import java.util.List;
 
@@ -44,14 +45,18 @@ public record ImuReadings(
           .build();
 
   public ImuReadings {
-    if (yawTimesNanos.size() != yawsRadians.size()) {
-      throw new IllegalArgumentException(
-          "one time for each yaw reading: "
-              + yawTimesNanos.size()
-              + " times, "
-              + yawsRadians.size()
-              + " readings");
-    }
+    Checks.on(ImuReadings.class)
+        .check(
+            "yawsRadians",
+            () ->
+                yawsRadians.size() == yawTimesNanos.size()
+                    ? null
+                    : "must have one reading for each time: "
+                        + yawTimesNanos.size()
+                        + " times, "
+                        + yawsRadians.size()
+                        + " readings")
+        .orThrow();
   }
 
   public static ImuReadingsBuilder.ReportingStage builder() {

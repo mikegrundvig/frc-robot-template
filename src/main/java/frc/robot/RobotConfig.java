@@ -1,16 +1,21 @@
 package frc.robot;
 
+import static frc.robot.lib.config.Rules.notBlank;
+
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.VisionConfig;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Translation2d;
 
 /**
@@ -39,21 +44,12 @@ public record RobotConfig(
     VisionConfig vision,
     EstimatorConfig estimator) {
   public RobotConfig {
-    if (name.isBlank()) {
-      throw new IllegalArgumentException("robot name is required");
-    }
-    cameras = List.copyOf(cameras);
-    drivetrain.moduleTranslations(body); // throws if the wheels don't fit the frame
-    Set<String> names = new HashSet<>();
-    for (CameraConfig camera : cameras) {
-      if (!names.add(camera.name())) {
-        throw new IllegalArgumentException(name + ": two cameras are named " + camera.name());
-      }
-      if (!body.contains(camera.position())) {
-        throw new IllegalArgumentException(
-            name + ": camera " + camera.name() + " is outside the robot, at " + camera.position());
-      }
-    }
+    Checks.on(RobotConfig.class, name)
+        .field("name", name, notBlank())
+        .field("cameras", cameras, RobotConfig::sharedNames)
+        .check("drivetrain.wheelInset", () -> drivetrain.whyWheelsDontFit(body))
+        .check("cameras", () -> outside(cameras, body))
+        .orThrow();
   }
 
   /** Starts building a robot's configuration, one named value at a time. */
@@ -64,5 +60,28 @@ public record RobotConfig(
   /** Where each wheel touches the floor: front left, front right, back left, back right. */
   public Translation2d[] moduleTranslations() {
     return drivetrain.moduleTranslations(body);
+  }
+
+  /** The names two cameras share, or null if none do. */
+  private static @Nullable String sharedNames(List<CameraConfig> cameras) {
+    Set<String> names = new HashSet<>();
+    List<String> shared = new ArrayList<>();
+    for (CameraConfig camera : cameras) {
+      if (!names.add(camera.name())) {
+        shared.add("two cameras are named " + camera.name());
+      }
+    }
+    return shared.isEmpty() ? null : String.join("; ", shared);
+  }
+
+  /** The cameras mounted outside the robot, or null if none are. */
+  private static @Nullable String outside(List<CameraConfig> cameras, Body body) {
+    List<String> outside = new ArrayList<>();
+    for (CameraConfig camera : cameras) {
+      if (!body.contains(camera.position())) {
+        outside.add("camera " + camera.name() + " is outside the robot, at " + camera.position());
+      }
+    }
+    return outside.isEmpty() ? null : String.join("; ", outside);
   }
 }

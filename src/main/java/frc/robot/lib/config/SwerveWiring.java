@@ -1,10 +1,15 @@
 package frc.robot.lib.config;
 
+import static frc.robot.lib.config.Rules.between;
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.size;
 import static org.wpilib.units.Units.Rotations;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.units.measure.Angle;
 
@@ -38,27 +43,13 @@ public record SwerveWiring(
     List<ModuleWiring> modules,
     OnboardIMU.MountOrientation systemcoreMount) {
   public SwerveWiring {
-    modules = List.copyOf(modules);
-    if (modules.size() != 4) {
-      throw new IllegalArgumentException(
-          "four modules: front left, front right, back left, back right");
-    }
-    if (!(gyroYawScale >= 0.9 && gyroYawScale <= 1.1)) {
-      throw new IllegalArgumentException(
-          "a gyro's scale is within 10% of true, or it's broken: " + gyroYawScale);
-    }
-    if (!(couplingRatio >= 0) || Double.isInfinite(couplingRatio)) {
-      throw new IllegalArgumentException("couplingRatio must be zero or more: " + couplingRatio);
-    }
-    requireId("gyroId", gyroId, new HashSet<>());
-    // Devices of different types may share an ID; two of one type may not.
-    Set<Integer> motorControllers = new HashSet<>();
-    Set<Integer> encoders = new HashSet<>();
-    for (ModuleWiring module : modules) {
-      requireId("driveId", module.driveId(), motorControllers);
-      requireId("steerId", module.steerId(), motorControllers);
-      requireId("encoderId", module.encoderId(), encoders);
-    }
+    Checks.on(SwerveWiring.class)
+        .field("gyroId", gyroId, between(0, 62)) // a CAN ID
+        .field("gyroYawScale", gyroYawScale, between(0.9, 1.1)) // off by more is a broken gyro
+        .field("couplingRatio", couplingRatio, nonNegative())
+        .field("modules", modules, size(4))
+        .field("modules", modules, SwerveWiring::sharedIds)
+        .orThrow();
   }
 
   /** Starts describing a drivetrain's wiring, one named value at a time. */
@@ -91,11 +82,12 @@ public record SwerveWiring(
       boolean steerInverted,
       boolean encoderInverted) {
     public ModuleWiring {
-      double rotations = encoderOffset.in(Rotations);
-      if (!(Math.abs(rotations) <= 1)) {
-        throw new IllegalArgumentException(
-            "an encoder offset is within a rotation either way: " + rotations + " rotations");
-      }
+      Checks.on(ModuleWiring.class)
+          .field("driveId", driveId, between(0, 62))
+          .field("steerId", steerId, between(0, 62))
+          .field("encoderId", encoderId, between(0, 62))
+          .field("encoderOffset", encoderOffset, between(Rotations.of(-1), Rotations.of(1)))
+          .orThrow();
     }
 
     /** Starts describing a module's wiring, one named value at a time. */
@@ -104,13 +96,24 @@ public record SwerveWiring(
     }
   }
 
-  private static void requireId(String name, int id, Set<Integer> seen) {
-    if (id < 0 || id > 62) {
-      throw new IllegalArgumentException(name + " must be a CAN ID from 0 to 62: " + id);
+  /**
+   * Which CAN IDs two motor controllers, or two encoders, share, or null if none do. Devices of
+   * different kinds may share an ID; two of one kind on one bus may not.
+   */
+  private static @Nullable String sharedIds(List<ModuleWiring> modules) {
+    Set<Integer> motorControllers = new HashSet<>();
+    Set<Integer> encoders = new HashSet<>();
+    List<String> shared = new ArrayList<>();
+    for (ModuleWiring module : modules) {
+      for (int id : List.of(module.driveId(), module.steerId())) {
+        if (!motorControllers.add(id)) {
+          shared.add("CAN ID " + id + " is used by two motor controllers");
+        }
+      }
+      if (!encoders.add(module.encoderId())) {
+        shared.add("CAN ID " + module.encoderId() + " is used by two encoders");
+      }
     }
-    if (!seen.add(id)) {
-      throw new IllegalArgumentException(
-          "CAN ID " + id + " is used twice by one kind of device on the drivetrain's bus");
-    }
+    return shared.isEmpty() ? null : String.join("; ", shared);
   }
 }

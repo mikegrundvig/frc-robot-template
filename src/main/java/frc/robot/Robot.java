@@ -8,6 +8,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import frc.robot.dashboard.DashboardStream;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.File;

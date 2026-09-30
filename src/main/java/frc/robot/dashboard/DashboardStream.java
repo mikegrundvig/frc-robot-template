@@ -1,4 +1,4 @@
-package frc.robot;
+package frc.robot.dashboard;
 
 import frc.robot.lib.timing.RobotLoop;
 import org.littletonrobotics.junction.LogDataReceiver;
@@ -10,7 +10,7 @@ import org.littletonrobotics.junction.LogTable;
  * everything anyway. Whether the field is attached comes from the logged Driver Station data
  * itself, so a replay streams the same loops.
  */
-final class DashboardStream implements LogDataReceiver {
+public final class DashboardStream implements LogDataReceiver {
   /** On the field, stream one loop in this many: 10 Hz. */
   static final int FIELD_DIVISOR = (int) Math.round(RobotLoop.FREQUENCY_HZ / 10);
 
@@ -20,7 +20,7 @@ final class DashboardStream implements LogDataReceiver {
   /**
    * @param dashboards where the log streams to: AdvantageKit's NetworkTables publisher
    */
-  DashboardStream(LogDataReceiver dashboards) {
+  public DashboardStream(LogDataReceiver dashboards) {
     this.dashboards = dashboards;
   }
 

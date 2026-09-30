@@ -1,4 +1,4 @@
-package frc.robot;
+package frc.robot.commands;
 
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
@@ -18,6 +18,7 @@ import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.Vision;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -35,7 +36,7 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  * frc.robot.lib.calibration}. Nothing is changed on its own: the numbers go into {@code Robots},
  * and the robot is redeployed.
  */
-final class Calibration {
+public final class Calibration {
   /** Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (6328). */
   private static final double WHEEL_SPIN_RADIANS_PER_SECOND = 0.5;
 
@@ -62,28 +63,38 @@ final class Calibration {
   private final Drive drive;
   private final Vision vision;
   private final Localization localization;
-  private final RobotConfig robot;
+  private final List<CameraConfig> cameras;
+  private final Optional<SwerveWiring> wiring;
   private final Supplier<SwerveConfig> drivetrain;
   private final Supplier<LocalDate> today;
   private String lastResult = "None run yet";
 
-  Calibration(
+  /**
+   * @param cameras the robot's cameras, whose mounts can be calibrated
+   * @param wiring the drivetrain's wiring, with the gyro's scale as configured; empty for a robot
+   *     that only runs in simulation
+   * @param drivetrain the drivetrain's configuration, with any values tuned while running
+   * @param today the date, for each result's note
+   */
+  public Calibration(
       Drive drive,
       Vision vision,
       Localization localization,
-      RobotConfig robot,
+      List<CameraConfig> cameras,
+      Optional<SwerveWiring> wiring,
       Supplier<SwerveConfig> drivetrain,
       Supplier<LocalDate> today) {
     this.drive = drive;
     this.vision = vision;
     this.localization = localization;
-    this.robot = robot;
+    this.cameras = List.copyOf(cameras);
+    this.wiring = wiring;
     this.drivetrain = drivetrain;
     this.today = today;
   }
 
   /** The last procedure's result, for the Pitwall page. */
-  String lastResult() {
+  public String lastResult() {
     return lastResult;
   }
 
@@ -91,7 +102,7 @@ final class Calibration {
    * Adds every procedure to the Pitwall page's actions, each named with what it asks of the drive
    * team: how long it takes, and where the robot needs to be.
    */
-  void addTo(Actions actions) {
+  public void addTo(Actions actions) {
     double wheelSpinSeconds =
         WHEEL_SPIN_TURNS * 2 * Math.PI / WHEEL_SPIN_RADIANS_PER_SECOND
             + WHEEL_SPIN_RADIANS_PER_SECOND / WHEEL_SPIN_RAMP;
@@ -107,7 +118,7 @@ final class Calibration {
         .add(
             format("Check the IMU reads level (%.0f s, on a level floor)", LEVEL_SECONDS),
             this::level);
-    for (CameraConfig camera : robot.cameras()) {
+    for (CameraConfig camera : cameras) {
       actions.add(
           format(
               "Calibrate the %s camera's mount (%.0f s, drive slowly past tags)",
@@ -129,7 +140,7 @@ final class Calibration {
    * The wheels' radius, by spinning slowly in place twice against the gyro. Calibrate the gyro's
    * scale first: its error carries straight into the radius.
    */
-  Command wheelRadius() {
+  public Command wheelRadius() {
     return drive
         .run(
             coroutine -> {
@@ -174,7 +185,7 @@ final class Calibration {
    * The gyro's scale, by five whole turns in place where the cameras see several tags: their
    * heading before and after is the reference.
    */
-  Command gyroScale() {
+  public Command gyroScale() {
     return drive
         .run(
             coroutine -> {
@@ -218,8 +229,7 @@ final class Calibration {
                 return;
               }
               spin.finish(drive.gyroYaw().getRadians(), after.average());
-              double configured =
-                  robot.drivetrainWiring().map(SwerveWiring::gyroYawScale).orElse(1.0);
+              double configured = wiring.map(SwerveWiring::gyroYawScale).orElse(1.0);
               double scale = configured * spin.scale();
               report(
                   String.format(
@@ -243,7 +253,7 @@ final class Calibration {
   }
 
   /** Whether the IMU reads level: the robot standing still on a level floor for two seconds. */
-  Command level() {
+  public Command level() {
     return Command.noRequirements(
             coroutine -> {
               LevelCheck level = new LevelCheck();
@@ -261,9 +271,9 @@ final class Calibration {
    * Where a camera really is, from the tags it sees while the other cameras hold the robot's pose:
    * drive slowly past tags, nearer and farther, for twenty seconds.
    */
-  Command cameraMount(String name) {
+  public Command cameraMount(String name) {
     CameraConfig camera =
-        robot.cameras().stream()
+        cameras.stream()
             .filter(each -> each.name().equals(name))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("no camera named " + name));

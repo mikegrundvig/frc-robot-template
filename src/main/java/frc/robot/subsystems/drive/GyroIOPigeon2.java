@@ -8,6 +8,7 @@ import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.hardware.Pigeon2;
+import frc.robot.lib.timing.RobotLoop;
 import java.util.Queue;
 import org.wpilib.math.filter.Debouncer;
 import org.wpilib.math.geometry.Rotation2d;
@@ -25,7 +26,6 @@ import org.wpilib.units.measure.LinearAcceleration;
  * down), where the size of a sideways jolt reads the same whichever way it faces.
  */
 final class GyroIOPigeon2 implements GyroIO {
-  private static final double LOOP_HZ = 50;
   private static final double ACCELERATION_HZ = 100;
 
   private final StatusSignal<Angle> yaw;
@@ -58,7 +58,7 @@ final class GyroIOPigeon2 implements GyroIO {
     radiansPerYawUnit = yaw.getValue().unit().toBaseUnits(1);
 
     yaw.setUpdateFrequency(PhoenixOdometryThread.FREQUENCY_HZ);
-    BaseStatusSignal.setUpdateFrequencyForAll(LOOP_HZ, yawVelocity, pitch, roll);
+    BaseStatusSignal.setUpdateFrequencyForAll(RobotLoop.FREQUENCY_HZ, yawVelocity, pitch, roll);
     BaseStatusSignal.setUpdateFrequencyForAll(ACCELERATION_HZ, accelerationX, accelerationY);
     pigeon.optimizeBusUtilization();
 

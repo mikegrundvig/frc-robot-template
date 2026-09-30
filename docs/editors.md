@@ -27,6 +27,11 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Add a vendor library | `./gradlew vendordep --url=<the vendor's JSON URL>` |
 | List every task | `./gradlew tasks` |
 
+**A debug deploy is for the pit only.** `deploy -PdebugMode` deploys a robot program that waits
+for a debugger before it starts, and takes one from any device on the robot's network. Until a
+debugger attaches, the robot does nothing, and after a brownout or a power cycle it waits again.
+When you're done, deploy again without `-PdebugMode`, and never take a debug deploy onto the field.
+
 ## IntelliJ IDEA
 
 1. **File > Open**, choose the repository folder, and trust the project when asked. IntelliJ reads

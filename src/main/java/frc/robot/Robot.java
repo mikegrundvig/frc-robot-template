@@ -13,6 +13,8 @@ import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.SensorErrors;
 import java.io.File;
+import java.lang.management.ManagementFactory;
+import java.util.List;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -24,6 +26,7 @@ import org.wpilib.driverstation.MatchState;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
+import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
 public class Robot extends LoggedRobot {
@@ -43,6 +46,15 @@ public class Robot extends LoggedRobot {
 
   /** Whether the loop keeps up, and its log with it. */
   private final LoopHealth loopHealth = new LoopHealth();
+
+  /** A debug deploy ({@code deploy -PdebugMode}) waits for a debugger every time it starts. */
+  private final Alert debugDeploy =
+      new Alert(
+          "Robot",
+          "debugDeploy",
+          "A debug deploy: after any restart the robot waits for a debugger. Deploy without"
+              + " -PdebugMode before a match",
+          Alert.Level.HIGH);
 
   public Robot() {
     super(RobotLoop.PERIOD_SECONDS);
@@ -83,6 +95,9 @@ public class Robot extends LoggedRobot {
     }
 
     Logger.start();
+    debugDeploy.set(
+        Constants.currentMode == Constants.Mode.REAL
+            && startedForDebugger(ManagementFactory.getRuntimeMXBean().getInputArguments()));
 
     RobotConfig robot = Robots.current();
     pitwall = Pitwall.start(robot.name(), robot);
@@ -123,6 +138,11 @@ public class Robot extends LoggedRobot {
             loopHealth);
     container.addTo(pitwall);
     return container;
+  }
+
+  /** Whether the program was started for a debugger to attach (JDWP), as a debug deploy is. */
+  static boolean startedForDebugger(List<String> jvmArguments) {
+    return jvmArguments.stream().anyMatch(argument -> argument.contains("jdwp"));
   }
 
   /** Pitwall, for tests that drive the robot program through it. */

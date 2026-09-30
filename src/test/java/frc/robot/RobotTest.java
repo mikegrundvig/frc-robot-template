@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
@@ -53,5 +54,14 @@ class RobotTest {
     Robot.startEnabledIfRequested(Constants.Mode.REPLAY, true);
 
     assertFalse(DriverStationSim.getEnabled());
+  }
+
+  @Test
+  void aDebugDeployIsKnownByItsDebuggerArgument() {
+    assertTrue(
+        Robot.startedForDebugger(
+            List.of(
+                "-Xmx100M", "-agentlib:jdwp=transport=dt_socket,address=0.0.0.0:8349,server=y")));
+    assertFalse(Robot.startedForDebugger(List.of("-Xmx100M", "-XX:+UseSerialGC")));
   }
 }

@@ -133,6 +133,35 @@ class DriveBasicsTest {
     }
   }
 
+  /**
+   * Wheels that report connected but send no readings have lost what reads them (on a robot, the
+   * odometry thread): the pose would freeze, so the pit must know.
+   */
+  @Test
+  void wheelsThatStopSendingReadingsRaiseAnAlert() {
+    ModuleIO[] connectedButSilent = new ModuleIO[4];
+    for (int i = 0; i < 4; i++) {
+      connectedButSilent[i] =
+          new ModuleIO() {
+            @Override
+            public void updateInputs(ModuleIOInputs inputs) {
+              inputs.driveConnected = true;
+              inputs.steerConnected = true;
+            }
+          };
+    }
+    try (Drive drive = drive("Silent", hardware(new GyroIO() {}, connectedButSilent))) {
+      drive.periodic(true);
+      boolean afterOneLoop = drive.isOdometryStoppedAlertActive();
+      for (int i = 0; i < 10; i++) {
+        drive.periodic(true);
+      }
+
+      assertFalse(afterOneLoop, "a loop without readings can happen");
+      assertTrue(drive.isOdometryStoppedAlertActive());
+    }
+  }
+
   private Drive drive(String name, DriveHardware hardware) {
     return new Drive(
         name,

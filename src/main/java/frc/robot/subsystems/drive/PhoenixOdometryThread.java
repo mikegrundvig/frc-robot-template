@@ -1,6 +1,7 @@
 package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.BaseStatusSignal;
+import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.Timestamp;
 import frc.robot.lib.localization.Timestamps;
 import java.util.ArrayList;
@@ -9,6 +10,7 @@ import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.system.RobotController;
 
 /**
@@ -28,8 +30,10 @@ final class PhoenixOdometryThread extends Thread {
   /** Readings held for the main loop: four loops' worth, in case one runs late. */
   private static final int CAPACITY = 20;
 
-  /** A signal's time in transit is trusted up to this; longer means it never arrived. */
-  private static final double MAX_LATENCY_SECONDS = 0.1;
+  /** A signal longer than two periods in transit is stale: its device has stopped answering. */
+  private static final double STALE = 2 / FREQUENCY_HZ;
+
+  private static final long PERIOD_MILLIS = Math.round(1000 / FREQUENCY_HZ);
 
   private final ReentrantLock lock = new ReentrantLock();
   private final List<Queue<Double>> values = new ArrayList<>();
@@ -80,53 +84,98 @@ final class PhoenixOdometryThread extends Thread {
     return lock;
   }
 
+  /**
+   * Reads until interrupted. Nothing a reading throws stops it: it's reported, and the thread reads
+   * again a period later. (If it stopped, odometry would freeze with every device still reporting
+   * connected; the drivetrain alerts when readings stop arriving.)
+   */
   @Override
   public void run() {
     while (!isInterrupted()) {
-      BaseStatusSignal[] reading;
-      lock.lock();
       try {
-        reading = signals;
-      } finally {
-        lock.unlock();
-      }
-      if (reading.length == 0) {
-        try {
-          Thread.sleep(Math.round(1000 / FREQUENCY_HZ));
-        } catch (InterruptedException e) {
+        readOnce();
+      } catch (InterruptedException e) {
+        return;
+      } catch (RuntimeException e) {
+        DriverStationErrors.reportError("Odometry thread: a reading failed: " + e, false);
+        if (!pause()) {
           return;
         }
-        continue;
       }
-      // Waits until every signal has a new value, or two periods pass (a device is missing: its
-      // value stays as it was, and its IO reports it disconnected).
-      BaseStatusSignal.waitForAll(2 / FREQUENCY_HZ, reading);
-      record(reading);
+    }
+  }
+
+  private void readOnce() throws InterruptedException {
+    BaseStatusSignal[] reading;
+    lock.lock();
+    try {
+      reading = signals;
+    } finally {
+      lock.unlock();
+    }
+    if (reading.length == 0) {
+      Thread.sleep(PERIOD_MILLIS);
+      return;
+    }
+    // Waits until every signal has a new value, or two periods pass (a device is missing: its value
+    // stays as it was, and its IO reports it disconnected). A wait that fails at once would spin:
+    // then it waits a period.
+    long before = System.nanoTime();
+    StatusCode status = BaseStatusSignal.waitForAll(2 / FREQUENCY_HZ, reading);
+    if (!status.isOK() && System.nanoTime() - before < PERIOD_MILLIS * 1_000_000L) {
+      Thread.sleep(PERIOD_MILLIS);
+    }
+    record(reading);
+  }
+
+  /** Waits a period after a failed reading: false if interrupted meanwhile. */
+  private static boolean pause() {
+    try {
+      Thread.sleep(PERIOD_MILLIS);
+      return true;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return false;
     }
   }
 
   private void record(BaseStatusSignal[] reading) {
+    // The time is read before the lock, which the main loop may be holding while it drains.
+    long now = RobotController.getTime();
     lock.lock();
     try {
+      // The signals' average time in transit, over the ones that arrived fresh: a device that's
+      // gone stale would otherwise skew every reading's time early.
       double latency = 0;
       int timed = 0;
       for (BaseStatusSignal signal : reading) {
         Timestamp stamp = signal.getTimestamp();
-        if (stamp.isValid() && stamp.getLatency() >= 0) {
-          latency += Math.min(stamp.getLatency(), MAX_LATENCY_SECONDS);
+        double transit = stamp.getLatency();
+        if (signal.getStatus().isOK() && stamp.isValid() && transit >= 0 && transit <= STALE) {
+          latency += transit;
           timed++;
         }
       }
-      long measured =
-          RobotController.getTime() - (timed == 0 ? 0 : Timestamps.fromSeconds(latency / timed));
+      long measured = now - (timed == 0 ? 0 : Timestamps.fromSeconds(latency / timed));
       for (int i = 0; i < reading.length; i++) {
-        values.get(i).offer(reading[i].getValueAsDouble());
+        keepNewest(values.get(i), reading[i].getValueAsDouble());
       }
       for (Queue<Long> queue : timestamps) {
-        queue.offer(measured);
+        keepNewest(queue, measured);
       }
     } finally {
       lock.unlock();
+    }
+  }
+
+  /**
+   * Adds a reading; when the main loop has fallen so far behind that the queue is full, the oldest
+   * reading makes room. Every queue fills and drains together, so they stay in step.
+   */
+  static <T> void keepNewest(Queue<T> queue, T value) {
+    if (!queue.offer(value)) {
+      queue.poll();
+      queue.offer(value);
     }
   }
 }

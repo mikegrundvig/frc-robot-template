@@ -14,6 +14,8 @@ import frc.robot.Robots;
 import frc.robot.SimTestSupport;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
+import java.util.Queue;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -96,6 +98,17 @@ class PhoenixIOTest {
     assertThat(inputs.steerAngle.getDegrees()).isCloseTo(90, within(0.5));
     assertThat(inputs.odometryTimestampsNanos).hasSameSizeAs(inputs.odometryDrivePositionsRad);
     assertThat(inputs.unconfigured).as("every device took its configuration").isEmpty();
+  }
+
+  /** A main loop that fell behind gets the newest readings, not stale ones. */
+  @Test
+  void aFullQueueMakesRoomByDroppingTheOldestReading() {
+    Queue<Integer> queue = new ArrayBlockingQueue<>(3);
+    for (int reading = 1; reading <= 5; reading++) {
+      PhoenixOdometryThread.keepNewest(queue, reading);
+    }
+
+    assertThat(queue).containsExactly(3, 4, 5);
   }
 
   @Test

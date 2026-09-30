@@ -4,7 +4,6 @@ import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
-import frc.robot.Constants;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import java.util.function.DoubleSupplier;
@@ -142,8 +141,7 @@ public class Drive implements Mechanism, AutoCloseable {
     lastPositions = positions;
     odometry.update(heading, positions);
 
-    // Simulation has no gyro: its wheels never slip, so they give the heading exactly.
-    gyroDisconnectedAlert.set(!gyroInputs.connected && Constants.currentMode != Constants.Mode.SIM);
+    gyroDisconnectedAlert.set(!gyroInputs.connected);
     for (int i = 0; i < 4; i++) {
       moduleDisconnectedAlerts[i].set(!modules[i].isConnected());
     }

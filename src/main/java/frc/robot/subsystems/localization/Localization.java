@@ -95,18 +95,11 @@ public final class Localization implements AutoCloseable {
   private final YawTrack gyroYaws = new YawTrack();
   private final YawTrack backupYaws = new YawTrack();
 
-  /**
-   * The gyro and the backup IMU should turn alike: over a second, within 3° and 5% of the turn
-   * (their scales differ a little).
-   */
-  private final ImuCrossCheck crossCheck = new ImuCrossCheck(1.0, Math.toRadians(3), 0.05);
+  /** The gyro and the backup IMU should turn alike. */
+  private final ImuCrossCheck crossCheck = new ImuCrossCheck(ImuCrossCheck.Settings.DEFAULTS);
 
-  /**
-   * Crossings of raised terrain, from the IMU: 1678's thresholds (10° steep, 5° level), and a
-   * second and a half to cross a flat top.
-   */
-  private final TerrainCrossing terrain =
-      new TerrainCrossing(Math.toRadians(10), Math.toRadians(5), 0.1, 1.5);
+  /** Crossings of raised terrain, from the IMU. */
+  private final TerrainCrossing terrain = new TerrainCrossing(TerrainCrossing.Settings.DEFAULTS);
 
   private YawSource yawSource = YawSource.GYRO;
 

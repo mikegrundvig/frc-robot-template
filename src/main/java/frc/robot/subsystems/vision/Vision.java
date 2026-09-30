@@ -72,6 +72,11 @@ public final class Vision implements AutoCloseable {
    */
   private static final long STILL_NANOS = 500_000_000L;
 
+  /** Slower than this, the robot counts as standing still: 2 cm and about a degree a second. */
+  private static final double STILL_METERS_PER_SECOND = 0.02;
+
+  private static final double STILL_RADIANS_PER_SECOND = 0.02;
+
   private long movingUntil = Long.MIN_VALUE;
 
   // Calibration: headings the cameras measure, and one camera's sightings for its mount.
@@ -184,8 +189,8 @@ public final class Vision implements AutoCloseable {
    */
   public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
     attitudes.add(estimate.timestampNanos(), pitchRadians, rollRadians);
-    if (estimate.fieldVelocity().getNorm() > 0.02
-        || Math.abs(estimate.yawRateRadiansPerSecond()) > 0.02) {
+    if (estimate.fieldVelocity().getNorm() > STILL_METERS_PER_SECOND
+        || Math.abs(estimate.yawRateRadiansPerSecond()) > STILL_RADIANS_PER_SECOND) {
       movingUntil = estimate.timestampNanos();
     }
     recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());

@@ -14,6 +14,8 @@ import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.VisionConfig;
+import frc.robot.lib.localization.VisionConfigBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -104,10 +106,13 @@ class VisionTest {
           new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed"));
   private Vision vision;
 
+  /** The vision settings as Pitwall would hand them over, tuned or not. */
+  private VisionConfig tuned = VisionConfig.DEFAULTS;
+
   @BeforeEach
   void setUp() {
     TunableRegistry.registerBackend("", new MockTunableBackend());
-    vision = new Vision(List.of(camera), new CameraIO[] {io}, estimator, FIELD);
+    vision = new Vision(List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned);
     for (int k = 0; k <= 10; k++) {
       estimator.addOdometry(T0 + k * 20_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
     }
@@ -139,6 +144,20 @@ class VisionTest {
     assertThat(vision.summary())
         .isEqualTo("1 of 1 cameras connected, 100% of 1 measurements accepted");
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
+  }
+
+  /** A tuned setting applies from the next loop's images. */
+  @Test
+  void theSettingsAreReadEveryLoop() {
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(0.1).build();
+    io.see(T0 + 200_000_000L, camera);
+    loop();
+    tuned = VisionConfig.DEFAULTS;
+    io.see(T0 + 220_000_000L, camera);
+
+    loop();
+
+    assertThat(vision.camera(0).accepted()).as("only the image after").isEqualTo(1);
   }
 
   @Test

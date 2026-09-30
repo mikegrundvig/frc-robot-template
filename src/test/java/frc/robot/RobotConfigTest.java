@@ -9,6 +9,8 @@ import static org.wpilib.units.Units.Inches;
 
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfigBuilder;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.VisionConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -82,6 +84,8 @@ class RobotConfigTest {
         .drivetrain(swerve())
         .drivetrainWiring(Optional.empty())
         .cameras(cameras)
+        .vision(VisionConfig.DEFAULTS)
+        .estimator(EstimatorConfig.DEFAULTS)
         .build();
   }
 

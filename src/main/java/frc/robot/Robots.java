@@ -16,6 +16,8 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.Motor;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.VisionConfig;
 import java.util.List;
 import java.util.Optional;
 
@@ -154,6 +156,8 @@ public final class Robots {
           .drivetrain(DRIVETRAIN)
           .drivetrainWiring(Optional.empty())
           .cameras(CAMERAS)
+          .vision(VisionConfig.DEFAULTS)
+          .estimator(EstimatorConfig.DEFAULTS)
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */

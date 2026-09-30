@@ -11,7 +11,6 @@ import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
@@ -20,6 +19,7 @@ import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -31,7 +31,6 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
-import org.wpilib.util.Alert;
 
 /**
  * The robot's cameras: reads each one's results, turns them into measurements through the {@link
@@ -44,9 +43,10 @@ import org.wpilib.util.Alert;
  * configured mount) with how far that lands from the tag's real place. A camera whose tags land
  * consistently off is mounted differently than its configuration says: recalibrate it.
  *
- * <p>Tunable while tuning is on: the main thresholds and uncertainties, a switch per camera to
- * leave it out (a camera fogged over, knocked loose, or blinded by stage lights), and how long to
- * hold the cameras back when autonomous starts.
+ * <p>How far images are trusted is the robot's configuration ({@code RobotConfig.vision}), whose
+ * main thresholds and uncertainties Pitwall tunes. Two switches are WPILib tunables, for the drive
+ * team as much as the pit: one per camera to leave it out (a camera fogged over, knocked loose, or
+ * blinded by stage lights), and how long to hold the cameras back when autonomous starts.
  */
 public final class Vision implements AutoCloseable {
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
@@ -56,12 +56,7 @@ public final class Vision implements AutoCloseable {
   private final CameraLocalizer localizer;
   private final FieldModel field;
   private final VisionPipeline pipeline;
-  private final Alert badSettings =
-      new Alert(
-          "Vision",
-          "badSettings",
-          "Vision settings out of range: keeping the last good ones",
-          Alert.Level.MEDIUM);
+  private final Supplier<VisionConfig> settings;
   private final double[] recentYawRates = new double[YAW_RATE_LOOPS];
   private int yawRateLoop;
 
@@ -84,17 +79,6 @@ public final class Vision implements AutoCloseable {
   private @Nullable CameraMountCalibration mountCalibration;
   private @Nullable Camera calibrating;
 
-  private final TunableDouble maxAmbiguity =
-      TunableDouble.create(VisionConfig.DEFAULTS.maxAmbiguity());
-  private final TunableDouble maxHeightError =
-      TunableDouble.create(VisionConfig.DEFAULTS.maxHeightErrorMeters());
-  private final TunableDouble linearStdDevBaseline =
-      TunableDouble.create(VisionConfig.DEFAULTS.linearStdDevBaseline());
-  private final TunableDouble angularStdDevBaseline =
-      TunableDouble.create(VisionConfig.DEFAULTS.angularStdDevBaseline());
-  private final TunableDouble distanceExponent =
-      TunableDouble.create(VisionConfig.DEFAULTS.distanceExponent());
-
   /**
    * How long to hold the cameras' measurements back when autonomous starts, trusting the placed
    * start while the robot launches: 6328 held theirs 2 s. Off by default: the estimator gates every
@@ -107,16 +91,21 @@ public final class Vision implements AutoCloseable {
 
   private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
-  private VisionConfig settings = VisionConfig.DEFAULTS;
+  private VisionConfig current;
 
   /**
    * @param cameras each camera's configuration, in the same order as its IO
    * @param ios each camera's door to its vision software
    * @param localizer where the robot was when each image was taken, and where measurements go
    * @param field the field, whose tags the cameras see
+   * @param settings how far images are trusted, as tuned: read once a loop
    */
   public Vision(
-      List<CameraConfig> cameras, CameraIO[] ios, CameraLocalizer localizer, FieldModel field) {
+      List<CameraConfig> cameras,
+      CameraIO[] ios,
+      CameraLocalizer localizer,
+      FieldModel field,
+      Supplier<VisionConfig> settings) {
     if (cameras.size() != ios.length) {
       throw new IllegalArgumentException("one IO for each camera");
     }
@@ -128,11 +117,8 @@ public final class Vision implements AutoCloseable {
     this.localizer = localizer;
     this.field = field;
     pipeline = new VisionPipeline(field);
-    publish("Vision/maxAmbiguity", maxAmbiguity);
-    publish("Vision/maxHeightErrorMeters", maxHeightError);
-    publish("Vision/linearStdDevBaseline", linearStdDevBaseline);
-    publish("Vision/angularStdDevBaseline", angularStdDevBaseline);
-    publish("Vision/distanceExponent", distanceExponent);
+    this.settings = settings;
+    current = settings.get();
     publish("Vision/autoStartHoldSeconds", autoStartHoldSeconds);
   }
 
@@ -208,7 +194,7 @@ public final class Vision implements AutoCloseable {
     for (double rate : recentYawRates) {
       recentYawRate = Math.max(recentYawRate, rate);
     }
-    settings = currentSettings();
+    current = settings.get();
     Motion motion =
         new Motion(
             estimate.fieldVelocity().getNorm(),
@@ -273,7 +259,7 @@ public final class Vision implements AutoCloseable {
                 tilted.rollRadians(),
                 motion.speed(),
                 motion.recentYawRate()),
-            settings);
+            current);
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.outcome(result.outcome());
@@ -393,25 +379,6 @@ public final class Vision implements AutoCloseable {
     return cameras.get(index);
   }
 
-  /** The settings as tuned, or the last good ones if a tuned value is out of range. */
-  private VisionConfig currentSettings() {
-    try {
-      VisionConfig tuned =
-          VisionConfigBuilder.builder(VisionConfig.DEFAULTS)
-              .maxAmbiguity(maxAmbiguity.get())
-              .maxHeightErrorMeters(maxHeightError.get())
-              .linearStdDevBaseline(linearStdDevBaseline.get())
-              .angularStdDevBaseline(angularStdDevBaseline.get())
-              .distanceExponent(distanceExponent.get())
-              .build();
-      badSettings.set(false);
-      return tuned;
-    } catch (IllegalArgumentException e) {
-      badSettings.set(true);
-      return settings;
-    }
-  }
-
   /**
    * One frame's tags, from the flat list the IO logs, as the pipeline takes them. A tag whose pose
    * isn't a number is left out, and so is a multi-tag solution that isn't; an ambiguity that isn't
@@ -472,7 +439,6 @@ public final class Vision implements AutoCloseable {
     for (Camera camera : cameras) {
       camera.close();
     }
-    badSettings.close();
     for (String path : tunablePaths) {
       TunableRegistry.remove(path);
     }

@@ -30,4 +30,22 @@ class RobotTuningTest {
 
     assertThat(tuner.current().drivetrain().gains().steerKp()).isEqualTo(18.5);
   }
+
+  /** Vision's thresholds are tuned like everything else in the configuration: through Pitwall. */
+  @Test
+  void visionsThresholdsAreTunedThroughTheConfiguration() {
+    ConfigTuner<RobotConfig> tuner = new ConfigTuner<>(Robots.SIM);
+
+    tuner.set("vision.maxAmbiguity", 0.1);
+
+    assertThat(tuner.knobs())
+        .extracting(ConfigTuner.Knob::path)
+        .contains(
+            "vision.maxAmbiguity",
+            "vision.maxHeightErrorMeters",
+            "vision.linearStdDevBaseline",
+            "vision.angularStdDevBaseline",
+            "vision.distanceExponent");
+    assertThat(tuner.current().vision().maxAmbiguity()).isEqualTo(0.1);
+  }
 }

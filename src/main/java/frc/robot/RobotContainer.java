@@ -13,7 +13,6 @@ import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
-import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
@@ -136,7 +135,8 @@ public final class RobotContainer implements AutoCloseable {
    *
    * @param scheduler runs every command: the controls', and the Pitwall page's actions
    * @param robot the robot: its frame, wiring, and cameras
-   * @param drivetrain the drivetrain's configuration, with any values tuned while running
+   * @param tuned the robot's configuration with any values tuned while running: the drivetrain and
+   *     vision read theirs every loop
    * @param field the field the robot plays on
    * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
    *     configuration ({@link SensorErrors#TYPICAL} makes its estimated pose drift from the truth
@@ -148,10 +148,11 @@ public final class RobotContainer implements AutoCloseable {
       Constants.Mode mode,
       Scheduler scheduler,
       RobotConfig robot,
-      Supplier<SwerveConfig> drivetrain,
+      Supplier<RobotConfig> tuned,
       FieldModel field,
       SensorErrors simulatedErrors,
       LoopHealth loopHealth) {
+    Supplier<SwerveConfig> drivetrain = () -> tuned.get().drivetrain();
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
     loop = loopHealth.monitor();
@@ -200,7 +201,7 @@ public final class RobotContainer implements AutoCloseable {
     localization =
         new Localization(
             new PoseEstimator(
-                EstimatorConfig.DEFAULTS,
+                robot.estimator(),
                 field::contains,
                 new PoseReset(
                     0,
@@ -228,7 +229,9 @@ public final class RobotContainer implements AutoCloseable {
                 : new CameraIO() {};
       }
     }
-    vision = new Vision(cameras, cameraIOs, localization.forCameras(), field);
+    vision =
+        new Vision(
+            cameras, cameraIOs, localization.forCameras(), field, () -> tuned.get().vision());
     calibration =
         new Calibration(
             drive,

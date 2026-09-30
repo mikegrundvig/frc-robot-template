@@ -178,7 +178,8 @@ class PitwallServerTest {
   void everyOtherWpilibTunableIsListedAndCanBeChanged() throws Exception {
     assertThat(get("/api/wpilib-tunables").body())
         .isEqualTo(
-            "[{\"path\":\"/Shooter/kP\",\"type\":\"double\",\"value\":0.5,\"editable\":true}]");
+            "[{\"path\":\"/Shooter/kP\",\"type\":\"double\",\"value\":0.5,\"editable\":true,"
+                + "\"limits\":\"\"}]");
 
     var changed = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.75}");
 

@@ -50,8 +50,9 @@ import org.jspecify.annotations.Nullable;
  *       calls that commit it ({@code Accept: text/plain} for the report). {@code DELETE} it to
  *       return every value to its committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
- *       "value", "editable"}]}. {@code PATCH} it with {@code {path: value}} to change several at
- *       once, all or none.
+ *       "value", "editable", "limits"}]}, the limits as text ({@code "0 to 30"}, empty for none).
+ *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
+ *       within its limits.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
@@ -589,6 +590,8 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("type", tunable.type());
         shown.put("value", tunable.value());
         shown.put("editable", tunable.editable());
+        shown.put(
+            "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
         listed.add(shown);
       }
       return listed;

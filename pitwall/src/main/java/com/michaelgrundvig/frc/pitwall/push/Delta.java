@@ -18,6 +18,9 @@ import org.jspecify.annotations.Nullable;
  * value, a removed key or section as {@code null}. Nothing changed, nothing to send: the patch is
  * empty.
  *
+ * <p>A value that is itself a map or a list is compared whole, and sent whole when it changes; a
+ * map's keys that are gone are sent as null, so a merge patch removes them.
+ *
  * <p>Values compare by {@code equals}, except a {@link Reading}, which changes only once it moves
  * by its resolution from the value last sent. What's sent is what's remembered, so a slow drift
  * still gets sent once it adds up.
@@ -85,7 +88,7 @@ public final class Delta {
       Object after = entry.getValue();
       if (all || before == null || changed(before, after)) {
         was.put(entry.getKey(), after);
-        changes.put(entry.getKey(), json(after));
+        changes.put(entry.getKey(), replacing(before, after));
       }
     }
     Map<String, Object> removed = new HashMap<>(was);
@@ -95,6 +98,21 @@ public final class Delta {
       changes.put(gone, null);
     }
     return changes;
+  }
+
+  /**
+   * A changed value as the patch carries it: whole, except that a map says which of its keys are
+   * gone (as null), since a merge patch merges a map into the one before rather than replacing it.
+   */
+  private static @Nullable Object replacing(@Nullable Object before, Object after) {
+    if (!(before instanceof Map<?, ?> was && after instanceof Map<?, ?> now)) {
+      return json(after);
+    }
+    Map<Object, @Nullable Object> replaced = new LinkedHashMap<>();
+    now.forEach(
+        (key, value) -> replaced.put(key, value == null ? null : replacing(was.get(key), value)));
+    was.keySet().forEach(key -> replaced.putIfAbsent(key, null));
+    return Collections.unmodifiableMap(replaced);
   }
 
   private static boolean changed(Object before, Object after) {

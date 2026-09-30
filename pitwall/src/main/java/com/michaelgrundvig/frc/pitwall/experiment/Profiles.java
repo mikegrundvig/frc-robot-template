@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.pitwall.experiment;
 import static org.wpilib.units.Units.Seconds;
 
 import java.util.List;
+import java.util.Locale;
 import org.wpilib.units.Measure;
 import org.wpilib.units.Unit;
 import org.wpilib.units.measure.Time;
@@ -123,14 +124,25 @@ public final class Profiles {
           : List.of(there);
     }
 
+    /** What it does, as the page shows it: {@code step and back, 0 ° to 90 °, held 0.8 s}. */
     @Override
     public String toString() {
       return (andBack ? "step and back, " : "step, ")
-          + fromMeasure
+          + shown(fromMeasure)
           + " to "
-          + toMeasure
+          + shown(toMeasure)
           + ", held "
-          + hold;
+          + shown(hold);
     }
+  }
+
+  /** A measure as people write it: {@code 90 °}, {@code 0.8 s}. */
+  private static String shown(Measure<?> measure) {
+    double value = measure.magnitude();
+    String number =
+        value == Math.rint(value) && Math.abs(value) < 1e15
+            ? Long.toString((long) value)
+            : String.format(Locale.ROOT, "%.4g", value).replaceAll("\\.?0+(e|$)", "$1");
+    return number + " " + measure.unit().symbol();
   }
 }

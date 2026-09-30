@@ -1,8 +1,8 @@
 // Simulation: ./gradlew run starts the robot program in the simulator, with its GUI.
 //
 // First-run defaults, so the simulator is drivable immediately: the robot starts enabled in teleop
-// (-PstartDisabled to start disabled, like a real robot), the keyboard is the driver's gamepad, and
-// the field view is open. sim/ holds the default GUI settings; they are copied only when missing, so
+// on the blue alliance's station 2, the center start (-PstartDisabled to start disabled with no
+// station, like a real robot), the keyboard is the driver's gamepad, and the field view is open. sim/ holds the default GUI settings; they are copied only when missing, so
 // a user's own layout and gamepad choices are kept.
 //
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log

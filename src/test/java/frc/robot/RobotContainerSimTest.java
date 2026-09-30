@@ -470,7 +470,7 @@ class RobotContainerSimTest {
     }
     RobotConfig wired =
         RobotConfigBuilder.builder(Robots.SIM)
-            .wiring(
+            .drivetrainWiring(
                 Optional.of(
                     SwerveWiring.builder()
                         .canBus(CanBus.canivore("drivetrain"))

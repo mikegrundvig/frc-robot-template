@@ -1,5 +1,6 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
@@ -17,6 +18,7 @@ import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.timing.LoopMonitor;
+import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
@@ -64,9 +66,6 @@ import org.wpilib.util.Alert;
 public final class RobotContainer implements AutoCloseable {
   private static final int DRIVER_PORT = 0;
 
-  /** The robot loop's period: the simulator's physics steps this far each loop. */
-  private static final double LOOP_PERIOD_SECONDS = 0.02;
-
   /** How far from a start position, and how far turned from it, still counts as on it. */
   static final double START_TOLERANCE_METERS = 0.10;
 
@@ -83,8 +82,8 @@ public final class RobotContainer implements AutoCloseable {
 
   static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
-  /** How many loops "lately" covers for loop timing: ten seconds. */
-  private static final int RECENT_LOOPS = 500;
+  /** How long "lately" covers for loop timing. */
+  private static final double RECENT_SECONDS = 10;
 
   private final FieldModel field;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
@@ -140,7 +139,8 @@ public final class RobotContainer implements AutoCloseable {
           Alert.Level.HIGH);
 
   /** Every loop's time, section by section: the robot marks its sections, this marks its own. */
-  private final LoopMonitor loop = new LoopMonitor(LOOP_PERIOD_SECONDS, RECENT_LOOPS);
+  private final LoopMonitor loop =
+      new LoopMonitor(RobotLoop.PERIOD_SECONDS, RobotLoop.loops(RECENT_SECONDS));
 
   private LoopMonitor.Report lastLoop = new LoopMonitor.Report(0, false, List.of(), 0, 0);
   private String lastOverrun = "";
@@ -214,14 +214,14 @@ public final class RobotContainer implements AutoCloseable {
       modules = simulation.modules();
       gyro = simulation.gyro();
       backupGyro = simulation.backupGyro();
-    } else if (mode == Constants.Mode.REAL && robot.wiring().isPresent()) {
+    } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
       simulation = null;
       PhoenixDrivetrain phoenix =
-          new PhoenixDrivetrain(robot.wiring().get(), drivetrain.get().modules());
+          new PhoenixDrivetrain(robot.drivetrainWiring().get(), drivetrain.get().modules());
       hardware = phoenix;
       modules = phoenix.modules();
       gyro = phoenix.gyro();
-      backupGyro = new GyroIOSystemcore(robot.wiring().get().systemcoreMount());
+      backupGyro = new GyroIOSystemcore(robot.drivetrainWiring().get().systemcoreMount());
       odometryLock = phoenix.odometryLock();
     } else {
       simulation = null;
@@ -339,7 +339,7 @@ public final class RobotContainer implements AutoCloseable {
       // In the simulator the drive team really moves it. Then the world moves on and the robot
       // reads its sensors, as on a robot between loops: its gyro feels the turn this loop.
       placed.ifPresent(sim::place);
-      sim.step(LOOP_PERIOD_SECONDS, RobotController.getTime());
+      sim.step(RobotLoop.PERIOD_SECONDS, RobotController.getTime());
       VisionSim cameras = visionSim;
       if (cameras != null) {
         cameras.update(sim.truePose3d());
@@ -441,10 +441,11 @@ public final class RobotContainer implements AutoCloseable {
     overrunning.setText(
         String.format(
             Locale.ROOT,
-            "The loop overran %.0f ms %d %s in the last 10 s%s",
-            LOOP_PERIOD_SECONDS * 1000,
+            "The loop overran %.0f ms %d %s in the last %.0f s%s",
+            RobotLoop.PERIOD_SECONDS * 1000,
             lastLoop.overrunsLately(),
             lastLoop.overrunsLately() == 1 ? "time" : "times",
+            RECENT_SECONDS,
             lastOverrun));
     overrunning.set(lastLoop.overrunsLately() > 0);
     loggingBehind.set(Logger.getReceiverQueueFault());
@@ -620,6 +621,28 @@ public final class RobotContainer implements AutoCloseable {
   /** A pit check for the Pitwall page: drive forward slowly for two seconds. */
   Command driveCheck() {
     return drive.driveForward(0.5, 2.0);
+  }
+
+  /** The drive check's name on the Pitwall page. */
+  static final String DRIVE_CHECK = "Drive forward slowly (2 s)";
+
+  /**
+   * Puts this robot's pit tools on its Pitwall page: the drive check and the calibrations as
+   * actions, and one status line each for the loop, the alliance, the placement, localization,
+   * scoring, the last calibration, and the cameras.
+   */
+  void addTo(Pitwall<?> pitwall) {
+    pitwall.actions().add(DRIVE_CHECK, this::driveCheck);
+    calibration.addTo(pitwall.actions());
+    pitwall
+        .status()
+        .add("Loop", this::loopStatus)
+        .add("Alliance", this::allianceStation)
+        .add("Placement", () -> placement.describe())
+        .add("Localization", this::localization)
+        .add("Scoring", this::scoring)
+        .add("Calibration", calibration::lastResult)
+        .add("Cameras", this::cameras);
   }
 
   Drive drive() {

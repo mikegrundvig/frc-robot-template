@@ -80,7 +80,7 @@ class RobotConfigTest {
         .name("test")
         .body(body())
         .drivetrain(swerve())
-        .wiring(Optional.empty())
+        .drivetrainWiring(Optional.empty())
         .cameras(cameras)
         .build();
   }

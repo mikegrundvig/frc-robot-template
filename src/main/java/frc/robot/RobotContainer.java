@@ -1,6 +1,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import frc.robot.commands.Calibration;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
@@ -243,7 +244,15 @@ public final class RobotContainer implements AutoCloseable {
       }
     }
     vision = new Vision(cameras, cameraIOs, localization.forCameras(), field);
-    calibration = new Calibration(drive, vision, localization, robot, drivetrain, LocalDate::now);
+    calibration =
+        new Calibration(
+            drive,
+            vision,
+            localization,
+            cameras,
+            robot.drivetrainWiring(),
+            drivetrain,
+            LocalDate::now);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns. Back, with the robot facing straight downfield, resets its heading: the fallback

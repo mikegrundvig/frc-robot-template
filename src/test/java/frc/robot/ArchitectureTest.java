@@ -150,7 +150,8 @@ class ArchitectureTest {
   void onlyTheTopLevelUsesTheTopLevel() {
     noClasses()
         .that()
-        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..")
+        .resideInAnyPackage(
+            "frc.robot.lib..", "frc.robot.subsystems..", "frc.robot.commands..", "frc.robot.sim..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot")

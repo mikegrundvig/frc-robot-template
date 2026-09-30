@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.hardware.bus.CANPort;
+import org.wpilib.hardware.imu.OnboardIMU;
 
 /** A drivetrain's wiring is checked when it's written down, not when the robot won't drive. */
 class SwerveWiringTest {
@@ -33,6 +34,7 @@ class SwerveWiringTest {
         .gyroId(1)
         .couplingRatio(3.5)
         .modules(modules)
+        .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
         .build();
   }
 
@@ -86,6 +88,7 @@ class SwerveWiringTest {
                     .gyroId(1)
                     .couplingRatio(-1)
                     .modules(modules())
+                    .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
                     .build())
         .hasMessageContaining("couplingRatio");
   }

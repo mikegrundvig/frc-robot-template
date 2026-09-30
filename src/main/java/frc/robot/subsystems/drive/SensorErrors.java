@@ -22,6 +22,7 @@ import org.wpilib.math.geometry.Transform3d;
  * @param seed for the noise, so a run repeats exactly
  * @param cameraMountErrors by camera name, how each camera is really mounted off its configured
  *     mount, in the robot's frame: a camera knocked 4 in low, or turned 2 degrees
+ * @param backupGyro the backup IMU's errors (Systemcore's own), read once a loop
  */
 public record SensorErrors(
     List<Double> wheelRadiusScale,
@@ -30,7 +31,8 @@ public record SensorErrors(
     double gyroDriftDegreesPerMinute,
     double gyroNoiseDegrees,
     long seed,
-    Map<String, Transform3d> cameraMountErrors) {
+    Map<String, Transform3d> cameraMountErrors,
+    GyroErrors backupGyro) {
   /**
    * Wheels and sensors exactly as configured: odometry is the truth. For tests of exact numbers.
    */
@@ -39,14 +41,45 @@ public record SensorErrors(
 
   /**
    * A robot partway through a season: tread worn 1-2% and unevenly, absolute encoder zeros off by
-   * up to half a degree, and a gyro reading 0.3% high, drifting 0.2° a minute. Plausible estimates,
-   * not measurements: replace them with a real robot's once it is calibrated.
+   * up to half a degree, and a gyro reading 0.3% high, drifting 0.2° a minute; its backup IMU reads
+   * 0.5% high and drifts a degree a minute. Plausible estimates, not measurements: replace them
+   * with a real robot's once it is calibrated.
    */
   public static final SensorErrors TYPICAL =
       new SensorErrors(
-          List.of(0.985, 0.99, 0.98, 0.988), List.of(0.5, -0.3, 0.0, 0.4), 1.003, 0.2, 0.02, 1);
+          List.of(0.985, 0.99, 0.98, 0.988),
+          List.of(0.5, -0.3, 0.0, 0.4),
+          1.003,
+          0.2,
+          0.02,
+          1,
+          Map.of(),
+          new GyroErrors(1.005, 1.0, 0.05));
 
-  /** Errors with every camera mounted exactly as configured. */
+  /**
+   * How a gyro's readings differ from the truth.
+   *
+   * @param scale its reading per true turn: 1.003 reads 0.3% too much rotation
+   * @param driftDegreesPerMinute a steady drift, from its bias
+   * @param noiseDegrees random noise on each reading, as a standard deviation
+   */
+  public record GyroErrors(double scale, double driftDegreesPerMinute, double noiseDegrees) {
+    /** A gyro that reads the truth. */
+    public static final GyroErrors EXACT = new GyroErrors(1, 0, 0);
+
+    public GyroErrors {
+      if (!(scale > 0)
+          || !Double.isFinite(scale)
+          || !Double.isFinite(driftDegreesPerMinute)
+          || !(noiseDegrees >= 0)
+          || !Double.isFinite(noiseDegrees)) {
+        throw new IllegalArgumentException(
+            "the gyro's scale must be positive, its drift a number, and its noise zero or more");
+      }
+    }
+  }
+
+  /** Errors with every camera mounted exactly as configured, and a backup IMU like the gyro. */
   public SensorErrors(
       List<Double> wheelRadiusScale,
       List<Double> steerOffsetDegrees,
@@ -61,7 +94,8 @@ public record SensorErrors(
         gyroDriftDegreesPerMinute,
         gyroNoiseDegrees,
         seed,
-        Map.of());
+        Map.of(),
+        new GyroErrors(gyroScale, gyroDriftDegreesPerMinute, gyroNoiseDegrees));
   }
 
   public SensorErrors {
@@ -79,14 +113,12 @@ public record SensorErrors(
         throw new IllegalArgumentException("a steer offset must be a number");
       }
     }
-    if (!(gyroScale > 0)
-        || !Double.isFinite(gyroScale)
-        || !Double.isFinite(gyroDriftDegreesPerMinute)
-        || !(gyroNoiseDegrees >= 0)
-        || !Double.isFinite(gyroNoiseDegrees)) {
-      throw new IllegalArgumentException(
-          "the gyro's scale must be positive, its drift a number, and its noise zero or more");
-    }
+    new GyroErrors(gyroScale, gyroDriftDegreesPerMinute, gyroNoiseDegrees); // checks them
+  }
+
+  /** The gyro's errors. */
+  public GyroErrors gyro() {
+    return new GyroErrors(gyroScale, gyroDriftDegreesPerMinute, gyroNoiseDegrees);
   }
 
   /** The same errors, with every wheel's radius scaled alike: tread worn evenly. */
@@ -98,7 +130,21 @@ public record SensorErrors(
         gyroDriftDegreesPerMinute,
         gyroNoiseDegrees,
         seed,
-        cameraMountErrors);
+        cameraMountErrors,
+        backupGyro);
+  }
+
+  /** The same errors, with the backup IMU reading like this. */
+  public SensorErrors withBackupGyro(GyroErrors backup) {
+    return new SensorErrors(
+        wheelRadiusScale,
+        steerOffsetDegrees,
+        gyroScale,
+        gyroDriftDegreesPerMinute,
+        gyroNoiseDegrees,
+        seed,
+        cameraMountErrors,
+        backup);
   }
 
   /** The same errors, with one camera mounted off its configuration. */
@@ -112,7 +158,8 @@ public record SensorErrors(
         gyroDriftDegreesPerMinute,
         gyroNoiseDegrees,
         seed,
-        errors);
+        errors,
+        backupGyro);
   }
 
   /** How a camera is really mounted off its configuration: none, unless one was set. */

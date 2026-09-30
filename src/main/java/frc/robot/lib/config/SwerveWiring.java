@@ -5,6 +5,7 @@ import static org.wpilib.units.Units.Rotations;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.units.measure.Angle;
 
 /**
@@ -23,10 +24,16 @@ import org.wpilib.units.measure.Angle;
  *     gear, which the drive encoder would otherwise count as travel. Zero for modules without
  *     coupling.
  * @param modules front left, front right, back left, back right
+ * @param systemcoreMount how Systemcore itself is mounted, for its onboard IMU, the backup to the
+ *     gyro: flat, or on edge along its long side (landscape) or short side (portrait)
  */
 @ConfigRecord
 public record SwerveWiring(
-    CanBus canBus, int gyroId, double couplingRatio, List<ModuleWiring> modules) {
+    CanBus canBus,
+    int gyroId,
+    double couplingRatio,
+    List<ModuleWiring> modules,
+    OnboardIMU.MountOrientation systemcoreMount) {
   public SwerveWiring {
     modules = List.copyOf(modules);
     if (modules.size() != 4) {

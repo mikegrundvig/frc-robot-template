@@ -24,6 +24,7 @@ import org.wpilib.command3.Scheduler;
 import org.wpilib.driverstation.Alliance;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
+import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.simulation.DriverStationSim;
@@ -476,6 +477,7 @@ class RobotContainerSimTest {
                         .gyroId(52)
                         .couplingRatio(3.5)
                         .modules(List.of(modules))
+                        .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
                         .build()))
             .build();
     container = containerFor(Constants.Mode.REAL, SensorErrors.NONE, wired);

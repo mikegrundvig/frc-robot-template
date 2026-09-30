@@ -235,6 +235,63 @@ class LocalizationSimTest {
     assertThat(robot.drive.terrainCrossings()).isEqualTo(1);
   }
 
+  /** Drives the route with the gyro unplugged a second in; returns the heading error at the end. */
+  private static double loseTheGyro(DriveSimHarness robot, boolean backupToo) {
+    robot.drive(1.0, 0.5, 0, 0.3);
+    robot.simulation.disconnectGyro(true);
+    robot.simulation.disconnectBackupGyro(backupToo);
+    driveTheRoute(robot);
+    return Math.abs(robot.headingErrorDegrees());
+  }
+
+  /** The gyro unplugged mid-match: the backup IMU keeps the heading, where the wheels drift. */
+  @Test
+  void whenTheGyroIsLostTheBackupImuKeepsTheHeading() {
+    double wheels = loseTheGyro(robot(SensorErrors.TYPICAL), true);
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    double backup = loseTheGyro(robot, false);
+
+    assertThat(backup).as("heading error on the backup IMU, degrees").isLessThan(1.5);
+    assertThat(wheels).as("on the wheels alone").isGreaterThan(3 * backup);
+    assertThat(robot.drive.yawSource()).isEqualTo(Drive.YawSource.BACKUP);
+    assertThat(robot.drive.isUsingBackupAlertActive()).isTrue();
+    assertThat(robot.drive.isGyroDisconnectedAlertActive()).isFalse();
+    assertThat(robot.estimator.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+  }
+
+  /** Switching between IMUs never shows up as a turn, though their zeros differ. */
+  @Test
+  void switchingImusDoesNotTurnTheEstimate() {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    robot.drive(1.0, 0.3, 0, 0.5);
+    double before = robot.headingErrorDegrees();
+
+    robot.simulation.disconnectGyro(true);
+    robot.drive(0.1, 0.3, 0, 0.5);
+    double onBackup = robot.headingErrorDegrees();
+    robot.simulation.disconnectGyro(false);
+    robot.drive(0.1, 0.3, 0, 0.5);
+
+    assertThat(onBackup).isCloseTo(before, within(0.2));
+    assertThat(robot.headingErrorDegrees()).isCloseTo(before, within(0.2));
+    assertThat(robot.drive.yawSource()).isEqualTo(Drive.YawSource.GYRO);
+    assertThat(robot.drive.isUsingBackupAlertActive()).isFalse();
+  }
+
+  /** A gyro that freezes still reports: only the backup IMU's disagreement catches it. */
+  @Test
+  void aFrozenGyroIsCaughtByTheBackupImu() {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    robot.drive(1.0, 0, 0, 0.4);
+    boolean beforeFreezing = robot.drive.isImuDisagreementAlertActive();
+
+    robot.simulation.freezeGyro(true);
+    robot.drive(0.3, 0, 0, 0.4);
+
+    assertThat(beforeFreezing).isFalse();
+    assertThat(robot.drive.isImuDisagreementAlertActive()).isTrue();
+  }
+
   @Test
   void drivingHardIsNeverMistakenForAHit() {
     DriveSimHarness robot = robot(SensorErrors.TYPICAL);

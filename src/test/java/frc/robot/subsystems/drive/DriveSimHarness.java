@@ -10,6 +10,7 @@ import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
@@ -68,11 +69,13 @@ final class DriveSimHarness implements AutoCloseable {
         new Drive(
             "Drive",
             simulation.gyro(),
+            simulation.backupGyro(),
             simulation.modules(),
             robot.body(),
             robot::drivetrain,
             scheduler,
-            estimator);
+            estimator,
+            new ReentrantLock());
   }
 
   /** From now on, a camera's results reach the estimator every loop. */

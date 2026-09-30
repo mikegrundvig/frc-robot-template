@@ -39,8 +39,13 @@ public class Module {
     io.configure(gains, limits);
   }
 
-  void periodic() {
+  /** Reads the hardware (in replay, nothing: the log supplies the inputs next). */
+  void readInputs() {
     io.updateInputs(inputs);
+  }
+
+  /** Logs the inputs, or in replay, takes them from the log. */
+  void logInputs() {
     Logger.processInputs("Drive/Module" + name, inputs);
   }
 

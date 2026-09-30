@@ -1,7 +1,7 @@
 package frc.robot.sim;
 
 import frc.robot.RobotConfig;
-import frc.robot.SimTestSupport;
+import frc.robot.RobotSim;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.PoseCovariance;
@@ -10,6 +10,7 @@ import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
+import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.localization.Localization;
@@ -127,9 +128,9 @@ public final class DriveSimHarness implements AutoCloseable {
    * the camera's results arrive, the estimate takes those, then commands run.
    */
   public void loop() {
-    SimTestSupport.stepLoop();
+    RobotSim.stepClock();
     long now = RobotController.getTime();
-    simulation.step(SimTestSupport.LOOP_PERIOD_S, now);
+    simulation.step(RobotLoop.PERIOD_SECONDS, now);
     boolean enabled = RobotState.isEnabled();
     drive.periodic(enabled);
     localization.periodic(drive.readings(), enabled);
@@ -149,10 +150,10 @@ public final class DriveSimHarness implements AutoCloseable {
 
   /** Hold the sticks (as {@link Drive#driveWithSticks} takes them) for {@code seconds}, enabled. */
   public void drive(double seconds, double x, double y, double omega) {
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     Command driving = drive.joystickDrive(() -> x, () -> y, () -> omega);
     scheduler.schedule(driving);
-    for (int i = 0; i < SimTestSupport.loops(seconds); i++) {
+    for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       loop();
     }
     scheduler.cancel(driving);
@@ -160,17 +161,17 @@ public final class DriveSimHarness implements AutoCloseable {
 
   /** Run a command for {@code seconds}, enabled, the way the robot loop runs it. */
   public void run(Command command, double seconds) {
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     scheduler.schedule(command);
-    for (int i = 0; i < SimTestSupport.loops(seconds); i++) {
+    for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       loop();
     }
   }
 
   /** Sit disabled for {@code seconds}. */
   public void idle(double seconds) {
-    SimTestSupport.setEnabled(false);
-    for (int i = 0; i < SimTestSupport.loops(seconds); i++) {
+    RobotSim.setEnabled(false);
+    for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       loop();
     }
   }

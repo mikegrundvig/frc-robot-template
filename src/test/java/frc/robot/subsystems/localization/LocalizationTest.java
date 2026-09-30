@@ -2,25 +2,21 @@ package frc.robot.subsystems.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
 import frc.robot.lib.localization.DrivetrainReadings;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.sim.DriveSimHarness;
 import java.util.List;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /** Localization fed by hand: what it makes of the drivetrain's readings, one loop at a time. */
+@ExtendWith(RobotSim.class)
 class LocalizationTest {
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
   private static final ImuReadings LEVEL =
       ImuReadings.builder()
           .reporting(true)

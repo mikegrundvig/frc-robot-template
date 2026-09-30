@@ -7,20 +7,16 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 
 /** Whether the loop keeps up, and its log with it: the loop's times given by hand. */
+@ExtendWith(RobotSim.class)
 class LoopHealthTest {
   private static final long MS = 1_000_000L;
 
   private final LoopHealth health = new LoopHealth();
-
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
 
   @AfterEach
   void tearDown() {

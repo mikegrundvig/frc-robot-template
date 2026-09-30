@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 import org.wpilib.datalog.DataLogReader;
@@ -30,6 +31,7 @@ import org.wpilib.datalog.DataLogRecord;
  * <p>Each run is its own process: AdvantageKit's logger starts once per program, and a replay ends
  * the program when the log runs out.
  */
+@EndToEndTest
 class ReplayEndToEndTest {
   private static final List<String> OUTPUTS =
       List.of(
@@ -51,6 +53,7 @@ class ReplayEndToEndTest {
   record Sample(long timestamp, Object value) {}
 
   @Test
+  @Timeout(value = 4, unit = TimeUnit.MINUTES) // two runs of the program, each allowed 90 s
   void aReplayReproducesTheSessionIncludingEveryChangeMadeThroughPitwall() throws Exception {
     run("record", Map.of("frc.simMode", "SIM", "pitwall.port", "0"), Map.of());
     Path recorded = onlyLog();

@@ -5,17 +5,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
+import frc.robot.SimulationTest;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.EstimatorConfig;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -27,25 +27,16 @@ import org.wpilib.math.geometry.Translation2d;
  * errors real ones have. Each test injects one error and checks that odometry drifts from the truth
  * the way a real robot's does: the gap localization has to close.
  */
+@SimulationTest
+@ExtendWith(RobotSim.class)
 class DriveSimulationTest {
   private @Nullable DriveSimHarness harness;
-
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
-  @BeforeEach
-  void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-  }
 
   @AfterEach
   void tearDown() {
     if (harness != null) {
       harness.close();
     }
-    SimTestSupport.resumeTime();
   }
 
   private DriveSimHarness robot(SensorErrors errors) {
@@ -88,9 +79,9 @@ class DriveSimulationTest {
 
   @Test
   void aDriftingGyroTurnsTheEstimateWhileTheRobotSitsStill() {
-    DriveSimHarness robot = robot(gyro(1.0, 1.0));
+    DriveSimHarness robot = robot(gyro(1.0, 10.0));
 
-    robot.idle(60);
+    robot.idle(6); // a tenth of a minute
 
     assertThat(robot.headingErrorDegrees()).isCloseTo(1.0, within(0.01));
     assertThat(robot.positionError()).as("its wheels never turned").isLessThan(1e-9);
@@ -215,7 +206,7 @@ class DriveSimulationTest {
   }
 
   private static Pose2d drivenWith(SensorErrors errors) {
-    SimTestSupport.pauseTimeAndDisable();
+    RobotSim.setEnabled(false);
     try (DriveSimHarness robot = new DriveSimHarness(Robots.SIM, errors)) {
       robot.drive(1.0, 0.8, 0.2, 0.5);
       return robot.drive.getPose();

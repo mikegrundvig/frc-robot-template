@@ -92,6 +92,12 @@ wpi.java.configureTestTasks(test)
 
 tasks.named("test") {
     useJUnitPlatform()
+    // Tests run in the build folder, so what simulated devices and logs write (CTRE's ctre_sim/,
+    // for one) stays out of the project. A test finds project files through frc.projectDir.
+    def work = layout.buildDirectory.dir("test-work")
+    workingDir = work
+    systemProperty "frc.projectDir", projectDir.absolutePath
+    doFirst { work.get().asFile.mkdirs() }
 }
 
 // A copy of the source travels with every deploy, so the code on a robot can always be recovered.

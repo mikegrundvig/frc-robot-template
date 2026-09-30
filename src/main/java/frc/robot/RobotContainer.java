@@ -1,5 +1,6 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
@@ -78,6 +79,7 @@ public final class RobotContainer implements AutoCloseable {
 
   static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
+  private final Scheduler scheduler;
   private final FieldModel field;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
@@ -130,12 +132,15 @@ public final class RobotContainer implements AutoCloseable {
   private Placement placement = new Placement(Placement.Status.ALLIANCE_UNKNOWN, null, 0, 0);
 
   /**
-   * In the simulator, the robot's wheels and sensors differ from its configuration as a real
-   * robot's do ({@link SensorErrors#TYPICAL}), so its estimated pose drifts from the truth.
+   * Built by {@link Robot#assemble}, for the robot and for tests alike.
    *
+   * @param scheduler runs every command: the controls', and the Pitwall page's actions
    * @param robot the robot: its frame, wiring, and cameras
    * @param drivetrain the drivetrain's configuration, with any values tuned while running
    * @param field the field the robot plays on
+   * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
+   *     configuration ({@link SensorErrors#TYPICAL} makes its estimated pose drift from the truth
+   *     as a real robot's does)
    * @param loopHealth the loop's timing, which the robot starts and finishes and this marks the
    *     sections of; closed with this
    */
@@ -145,44 +150,9 @@ public final class RobotContainer implements AutoCloseable {
       RobotConfig robot,
       Supplier<SwerveConfig> drivetrain,
       FieldModel field,
-      LoopHealth loopHealth) {
-    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL, loopHealth);
-  }
-
-  /** For a test: typical sensor errors in the simulator, and its own loop timing. */
-  RobotContainer(
-      Constants.Mode mode,
-      Scheduler scheduler,
-      RobotConfig robot,
-      Supplier<SwerveConfig> drivetrain,
-      FieldModel field) {
-    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL, new LoopHealth());
-  }
-
-  /**
-   * For a test: its own loop timing.
-   *
-   * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
-   *     configuration
-   */
-  RobotContainer(
-      Constants.Mode mode,
-      Scheduler scheduler,
-      RobotConfig robot,
-      Supplier<SwerveConfig> drivetrain,
-      FieldModel field,
-      SensorErrors simulatedErrors) {
-    this(mode, scheduler, robot, drivetrain, field, simulatedErrors, new LoopHealth());
-  }
-
-  private RobotContainer(
-      Constants.Mode mode,
-      Scheduler scheduler,
-      RobotConfig robot,
-      Supplier<SwerveConfig> drivetrain,
-      FieldModel field,
       SensorErrors simulatedErrors,
       LoopHealth loopHealth) {
+    this.scheduler = scheduler;
     this.loopHealth = loopHealth;
     loop = loopHealth.monitor();
     Body body = robot.body();
@@ -511,8 +481,8 @@ public final class RobotContainer implements AutoCloseable {
    * scoring, the last calibration, and the cameras.
    */
   void addTo(Pitwall<?> pitwall) {
-    pitwall.actions().add(DRIVE_CHECK, this::driveCheck);
-    calibration.addTo(pitwall.actions());
+    pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
+    calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .status()
         .add("Loop", this::loopStatus)

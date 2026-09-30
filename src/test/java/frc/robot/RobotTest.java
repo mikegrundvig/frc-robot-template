@@ -6,10 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Optional;
 import java.util.OptionalInt;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.hardware.hal.AllianceStationID;
@@ -20,23 +18,8 @@ import org.wpilib.simulation.DriverStationSim;
  * first-time driver can drive straight away; only a physics simulation that asked for it may enable
  * itself, since replay gets its enable state from the log.
  */
+@ExtendWith(RobotSim.class)
 class RobotTest {
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
-  @BeforeEach
-  void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-  }
-
-  @AfterEach
-  void tearDown() {
-    SimTestSupport.setEnabled(false);
-    SimTestSupport.resumeTime();
-  }
-
   @Test
   void simulatorStartsEnabledWhenAsked() {
     Robot.startEnabledIfRequested(Constants.Mode.SIM, true);

@@ -3,82 +3,36 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.ElasticLayoutCheck.Widget;
-import frc.robot.game.Rebuilt;
+import frc.robot.sim.SensorErrors;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import org.jspecify.annotations.Nullable;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.wpilib.command3.Scheduler;
-import org.wpilib.hardware.hal.AllianceStationID;
-import org.wpilib.simulation.DriverStationSim;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.wpilib.telemetry.MockTelemetryBackend;
-import org.wpilib.telemetry.TelemetryRegistry;
-import org.wpilib.tunable.MockTunableBackend;
-import org.wpilib.tunable.TunableRegistry;
 
 /**
  * The drive team's dashboard layout (`layouts/elastic-layout.json`, edited in Elastic) against the
  * robot code: every widget reads a value the robot publishes, of a kind it can show. When this
- * fails, a widget would sit blank on the Driver Station: point it at a value in {@link Dashboard},
- * or publish the value it needs there.
+ * fails, a widget would sit blank on the Driver Station: point it at a value in {@link
+ * frc.robot.dashboard.Dashboard}, or publish the value it needs there.
  */
+@SimulationTest
 class DashboardLayoutTest {
-  private static final Path LAYOUT = Path.of("layouts/elastic-layout.json");
+  private static final Path LAYOUT =
+      Path.of(System.getProperty("frc.projectDir", "."), "layouts", "elastic-layout.json");
 
-  private final Scheduler scheduler = Scheduler.createIndependentScheduler();
-  private final MockTelemetryBackend telemetry = new MockTelemetryBackend();
-  private @Nullable RobotContainer container;
-
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
-  @BeforeEach
-  void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-    DriverStationSim.setAllianceStationId(AllianceStationID.BLUE_2);
-    DriverStationSim.notifyNewData();
-    TelemetryRegistry.registerBackend("", telemetry);
-    TunableRegistry.registerBackend("", new MockTunableBackend());
-  }
-
-  @AfterEach
-  void tearDown() {
-    if (container != null) {
-      container.close();
-    }
-    TelemetryRegistry.reset();
-    TunableRegistry.reset();
-    SimTestSupport.resumeTime();
-  }
+  @RegisterExtension final RobotSim sim = new RobotSim();
 
   /** The whole robot in the simulator for a while, disabled and then enabled. */
   private Map<String, Object> runTheRobot() {
-    container =
-        new RobotContainer(
-            Constants.Mode.SIM,
-            scheduler,
-            Robots.SIM,
-            Robots.SIM::drivetrain,
-            Rebuilt.field(Robots.SIM.body()));
-    RobotContainer robot = Objects.requireNonNull(container);
-    for (int i = 0; i < SimTestSupport.loops(1.5); i++) {
-      if (i == SimTestSupport.loops(1.0)) {
-        SimTestSupport.setEnabled(true);
-      }
-      SimTestSupport.stepLoop();
-      robot.periodic();
-      scheduler.run();
-    }
-    return ElasticLayoutCheck.published(telemetry);
+    sim.build(SensorErrors.TYPICAL);
+    sim.run(1.0);
+    RobotSim.setEnabled(true);
+    sim.run(0.5);
+    return ElasticLayoutCheck.published(sim.telemetry());
   }
 
   @Test

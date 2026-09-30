@@ -8,7 +8,6 @@ import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.Status;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
-import frc.robot.game.Rebuilt;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
@@ -20,34 +19,26 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.simulation.DriverStationSim;
-import org.wpilib.telemetry.MockTelemetryBackend;
-import org.wpilib.telemetry.TelemetryRegistry;
 import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.AlertDataJNI;
 
 /** Pitwall in the simulated robot program: its standard status, and actions that run commands. */
+@ExtendWith(RobotSim.class)
 class PitwallRobotTest {
   private Pitwall<RobotConfig> pitwall;
 
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
   @BeforeEach
   void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-    TelemetryRegistry.registerBackend("", new MockTelemetryBackend()); // the simulator's field view
     pitwall = Pitwall.start(Robots.SIM.name(), Robots.SIM, 0);
   }
 
@@ -55,10 +46,6 @@ class PitwallRobotTest {
   void tearDown() {
     pitwall.close();
     Scheduler.getDefault().cancelAll();
-    SimTestSupport.setEnabled(false);
-    SimTestSupport.resumeTime();
-    TelemetryRegistry.reset();
-    TunableRegistry.reset();
   }
 
   @Test
@@ -95,7 +82,7 @@ class PitwallRobotTest {
   void theModeSaysWhetherTheRobotIsEnabledAndOnTheField() {
     assertThat(modeAfterALoop()).isEqualTo("Teleop, disabled");
 
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     assertThat(modeAfterALoop()).isEqualTo("Teleop, enabled");
 
     DriverStationSim.setRobotMode(RobotMode.AUTONOMOUS);
@@ -123,7 +110,7 @@ class PitwallRobotTest {
     loops(1);
     assertThat(locked.getNow(null).result()).as("teleop").isEqualTo(Outcome.Result.LOCKED);
 
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     setMode(RobotMode.UTILITY);
     var started = pitwall.actions().requestStart("Wait a moment");
     loops(1);
@@ -132,34 +119,6 @@ class PitwallRobotTest {
 
     loops(10);
     assertThat(phase()).as("its 0.1 s wait is over").isEqualTo(Actions.Phase.ENDED);
-  }
-
-  @Test
-  void theDriveCheckIsAnActionOnThePage() {
-    try (var container =
-        new RobotContainer(
-            Constants.Mode.SIM,
-            Scheduler.getDefault(),
-            Robots.SIM,
-            () -> pitwall.config().drivetrain(),
-            Rebuilt.field(Robots.SIM.body()))) {
-      container.addTo(pitwall);
-
-      SimTestSupport.setEnabled(true);
-      setMode(RobotMode.UTILITY);
-      pitwall.actions().requestStart(RobotContainer.DRIVE_CHECK);
-      for (int i = 0; i < 25; i++) {
-        SimTestSupport.stepLoop();
-        pitwall.periodic();
-        container.periodic();
-        Scheduler.getDefault().run();
-      }
-
-      assertThat(phase()).isEqualTo(Actions.Phase.RUNNING);
-      assertThat(container.drive().getRobotRelativeVelocities().vx)
-          .as("driving forward slowly")
-          .isBetween(0.4, 0.6);
-    }
   }
 
   /**
@@ -217,14 +176,14 @@ class PitwallRobotTest {
    */
   @Test
   void disablingPrintsWhatTuningChanged() throws Exception {
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     pitwall.periodic();
     patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
     PrintStream console = System.out;
     ByteArrayOutputStream printed = new ByteArrayOutputStream();
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
     try {
-      SimTestSupport.setEnabled(false);
+      RobotSim.setEnabled(false);
       pitwall.periodic();
     } finally {
       System.setOut(console);
@@ -323,7 +282,7 @@ class PitwallRobotTest {
 
   private void loops(int count) {
     for (int i = 0; i < count; i++) {
-      SimTestSupport.stepLoop();
+      RobotSim.stepClock();
       pitwall.periodic();
       Scheduler.getDefault().run();
     }

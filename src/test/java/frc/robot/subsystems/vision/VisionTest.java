@@ -189,6 +189,29 @@ class VisionTest {
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
   }
 
+  /** On a bump the attitude changes before an image arrives: it's solved as the robot was then. */
+  @Test
+  void anImageIsSolvedWithTheAttitudeWhenItWasTaken() {
+    double pitch = Math.toRadians(-8);
+    double roll = Math.toRadians(3);
+    loop(pitch, roll); // tilted as of T0 + 220 ms, when the image is taken
+    estimator.addOdometry(T0 + 240_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    io.see(
+        T0 + 220_000_000L,
+        camera,
+        new Pose3d(
+            ROBOT.getX(),
+            ROBOT.getY(),
+            0,
+            new Rotation3d(roll, pitch, ROBOT.getRotation().getRadians())));
+
+    loop(0, 0); // level again by the time it arrives
+
+    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+  }
+
   @Test
   void autonomousStartingCanHoldTheCamerasBack() {
     vision.autoStartHoldSeconds().set(2.0);

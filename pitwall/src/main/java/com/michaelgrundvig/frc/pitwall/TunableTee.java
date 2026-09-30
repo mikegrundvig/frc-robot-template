@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -32,7 +33,8 @@ import org.wpilib.tunable.util.PathUtil;
  *
  * <ul>
  *   <li>applies a change from a dashboard or the page only while tuning is allowed (on, and the
- *       field not connected); a refused change snaps back on the dashboard;
+ *       field not connected), and only within the tunable's {@link Limits}; a refused change snaps
+ *       back on the dashboard, and says why on the page;
  *   <li>logs every change it applies, so a replay makes the same changes at the same moments;
  *   <li>lists every tunable for the page, which can change the simple ones (numbers, booleans).
  * </ul>
@@ -55,11 +57,12 @@ public final class TunableTee implements TunableBackend {
    * @param type {@code double}, {@code boolean}, and so on
    * @param value its value: a number, a boolean, or text
    * @param editable whether the page can change it
+   * @param limits the range a number may be tuned in
    */
-  public record Listed(String path, String type, Object value, boolean editable) {}
+  public record Listed(String path, String type, Object value, boolean editable, Limits limits) {}
 
   private record Entry(
-      TunableBase real, @Nullable TunableBase proxy, String type, Object startup) {}
+      TunableBase real, @Nullable TunableBase proxy, String type, Object startup, Limits limits) {}
 
   private record PageRequest(Map<String, Object> values, CompletableFuture<Outcome> outcome) {}
 
@@ -76,6 +79,11 @@ public final class TunableTee implements TunableBackend {
   private final TunableInputs inputs = new TunableInputs();
   private final List<String> appliedPaths = new ArrayList<>();
   private final List<String> appliedValues = new ArrayList<>();
+
+  /** How many refused dashboard writes {@link #refusals()} keeps. */
+  private static final int REFUSALS_KEPT = 10;
+
+  private final ArrayDeque<String> refusals = new ArrayDeque<>();
   private volatile List<Listed> view = List.of();
 
   /**
@@ -134,6 +142,17 @@ public final class TunableTee implements TunableBackend {
     return changed;
   }
 
+  /**
+   * The latest dashboard writes that were refused, newest last, each as {@code "path = value:
+   * why"}. A dashboard can't show why a value snapped back; the page can. Safe to call from any
+   * thread.
+   */
+  public List<String> refusals() {
+    synchronized (refusals) {
+      return List.copyOf(refusals);
+    }
+  }
+
   /** Whether the page can change the tunable at a path. Safe to call from any thread. */
   public boolean isEditable(String path) {
     String key = PathUtil.normalizeName(path);
@@ -170,7 +189,10 @@ public final class TunableTee implements TunableBackend {
     boolean published = inner.publish(key, proxy != null ? proxy : tunable);
     if (published) {
       synchronized (entries) {
-        entries.put(key, new Entry(tunable, proxy, typeOf(tunable), valueOf(tunable)));
+        entries.put(
+            key,
+            new Entry(
+                tunable, proxy, typeOf(tunable), valueOf(tunable), Limits.of(tunable.getConfig())));
       }
     }
     return published;
@@ -247,21 +269,57 @@ public final class TunableTee implements TunableBackend {
 
   /**
    * A dashboard's write, through a proxy: applied if tuning allows it and the value is one the
-   * tunable can take, then logged. A value that isn't a number (NaN, infinity) is refused, and so
-   * is a write its tunable's own setter throws on; either way the dashboard shows the real value
-   * again at the next update.
+   * tunable can take, within its limits, then logged. A refused write (tuning locked, a value that
+   * isn't a number, one outside the limits, one the tunable's own setter throws on) is recorded
+   * with its reason; the dashboard shows the real value again at the next update.
+   *
+   * @param number the value as a number, for the limits; NaN for a true-or-false
    */
-  private void write(String path, TunableBase real, String text, boolean valid, Runnable apply) {
-    if (!valid || replaying || whyLocked.get() != null) {
+  private void write(
+      String path, TunableBase real, String text, double number, boolean valid, Runnable apply) {
+    if (replaying) {
+      return;
+    }
+    String locked = whyLocked.get();
+    if (locked != null) {
+      refused(path, text, "tuning is locked: " + locked);
+      return;
+    }
+    if (!valid) {
+      refused(path, text, "not a number");
+      return;
+    }
+    String outside = Double.isNaN(number) ? null : limitsOf(path).whyNot(number);
+    if (outside != null) {
+      refused(path, text, outside);
       return;
     }
     try {
       apply.run();
     } catch (RuntimeException e) {
-      TunableRegistry.reportWarning("Pitwall: " + path + " refused " + text + ": " + e);
+      String why = e.getMessage();
+      refused(path, text, why != null ? why : e.toString());
       return;
     }
     applied(path, real, text);
+  }
+
+  private void refused(String path, String text, String why) {
+    String refusal = path + " = " + text + ": " + why;
+    TunableRegistry.reportWarning("Pitwall refused " + refusal);
+    synchronized (refusals) {
+      refusals.addLast(refusal);
+      while (refusals.size() > REFUSALS_KEPT) {
+        refusals.removeFirst();
+      }
+    }
+  }
+
+  private Limits limitsOf(String path) {
+    synchronized (entries) {
+      Entry entry = entries.get(path);
+      return entry != null ? entry.limits() : Limits.NONE;
+    }
   }
 
   private void applied(String path, TunableBase real, String text) {
@@ -290,8 +348,8 @@ public final class TunableTee implements TunableBackend {
   }
 
   /**
-   * The page's changes, all or none: every value is checked first, then each is applied, and if a
-   * tunable's own setter throws, the ones already applied are put back.
+   * The page's changes, all or none: every value is checked first (its type, and its limits), then
+   * each is applied, and if a tunable's own setter throws, the ones already applied are put back.
    */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
@@ -312,6 +370,12 @@ public final class TunableTee implements TunableBackend {
       if (change == null) {
         return new Outcome(
             Outcome.Result.REFUSED, value.getKey() + " takes a " + entry.type() + " value");
+      }
+      if (value.getValue() instanceof Number number) {
+        String outside = entry.limits().whyNot(number.doubleValue());
+        if (outside != null) {
+          return new Outcome(Outcome.Result.REFUSED, value.getKey() + ": " + outside);
+        }
       }
       changes.add(change);
     }
@@ -444,22 +508,28 @@ public final class TunableTee implements TunableBackend {
       case TunableDouble t ->
           TunableDouble.createConfig(
               t::get,
-              v -> write(path, t, Double.toString(v), Double.isFinite(v), () -> t.set(v)),
+              v -> write(path, t, Double.toString(v), v, Double.isFinite(v), () -> t.set(v)),
               proxyConfig);
       case TunableFloat t ->
           TunableFloat.createConfig(
               t::get,
-              v -> write(path, t, Float.toString(v), Float.isFinite(v), () -> t.set(v)),
+              v -> write(path, t, Float.toString(v), v, Float.isFinite(v), () -> t.set(v)),
               proxyConfig);
       case TunableInt t ->
           TunableInt.createConfig(
-              t::get, v -> write(path, t, Integer.toString(v), true, () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Integer.toString(v), v, true, () -> t.set(v)),
+              proxyConfig);
       case TunableLong t ->
           TunableLong.createConfig(
-              t::get, v -> write(path, t, Long.toString(v), true, () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Long.toString(v), (double) v, true, () -> t.set(v)),
+              proxyConfig);
       case TunableBoolean t ->
           TunableBoolean.createConfig(
-              t::get, v -> write(path, t, Boolean.toString(v), true, () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Boolean.toString(v), Double.NaN, true, () -> t.set(v)),
+              proxyConfig);
       default -> null;
     };
   }
@@ -493,7 +563,8 @@ public final class TunableTee implements TunableBackend {
                 item.getKey(),
                 entry.type(),
                 valueOf(entry.real()),
-                entry.proxy() != null && isMutable(entry.real())));
+                entry.proxy() != null && isMutable(entry.real()),
+                entry.limits()));
       }
     }
     return List.copyOf(listed);

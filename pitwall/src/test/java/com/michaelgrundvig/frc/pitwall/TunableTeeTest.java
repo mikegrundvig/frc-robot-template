@@ -17,6 +17,7 @@ import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableConfig;
 import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableInt;
 import org.wpilib.tunable.TunableLong;
 import org.wpilib.tunable.TunableRegistry;
 
@@ -112,8 +113,8 @@ class TunableTeeTest {
     tee.update();
     assertThat(tee.view())
         .containsExactly(
-            new TunableTee.Listed("/Shooter/kP", "double", 0.5, true),
-            new TunableTee.Listed("/Intake/enabled", "boolean", false, true));
+            new TunableTee.Listed("/Shooter/kP", "double", 0.5, true, Limits.NONE),
+            new TunableTee.Listed("/Intake/enabled", "boolean", false, true, Limits.NONE));
 
     Map<String, Object> values = new LinkedHashMap<>();
     values.put("Shooter/kP", 1.5);
@@ -322,5 +323,70 @@ class TunableTeeTest {
     tee.update();
 
     assertThat(tee.view()).extracting(TunableTee.Listed::path).containsExactly("/Intake/enabled");
+  }
+
+  /** A tunable's limits ride on it as WPILib properties, which dashboards see through the tee. */
+  @Test
+  void dashboardsSeeATunablesLimits() {
+    tee.publish("Vision/hold", TunableDouble.createConfig(0.0, Limits.between(0, 30).config()));
+
+    assertThat(Limits.of(dashboard.getTunable("Vision/hold").getConfig()))
+        .isEqualTo(Limits.between(0, 30));
+  }
+
+  @Test
+  void aDashboardWriteOutsideItsLimitsIsRefusedAndSaysWhy() {
+    TunableDouble hold = TunableDouble.createConfig(2.0, Limits.between(0, 30).config());
+    tee.publish("Vision/hold", hold);
+
+    dashboard.setDouble("Vision/hold", 45);
+    tee.update();
+    dashboard.setDouble("Vision/hold", 5);
+    tee.update();
+
+    assertThat(hold.get()).as("the second, within the limits").isEqualTo(5.0);
+    assertThat(tee.refusals()).containsExactly("/Vision/hold = 45.0: 45 is above its limit of 30");
+    assertThat(logged).as("only what was applied").containsExactly("=", "/Vision/hold=5.0");
+  }
+
+  @Test
+  void aDashboardWriteWhileLockedSaysWhyItWasRefused() {
+    whyLocked = "tuning is off";
+
+    dashboard.setDouble("Shooter/kP", 0.9);
+    tee.update();
+
+    assertThat(tee.refusals())
+        .containsExactly("/Shooter/kP = 0.9: tuning is locked: tuning is off");
+  }
+
+  /** The page's changes are checked against every limit before any of them applies. */
+  @Test
+  void thePageIsRefusedOutsideTheLimitsAndNothingChanges() {
+    TunableInt count = TunableInt.createConfig(3, Limits.atLeast(1).config());
+    tee.publish("Arm/count", count);
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("Shooter/kP", 0.7);
+    values.put("Arm/count", 0);
+
+    var outcome = tee.requestChanges(values);
+    tee.update();
+
+    assertThat(outcome.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Arm/count: 0 is below its limit of 1"));
+    assertThat(kP.get()).as("all or none").isEqualTo(0.5);
+    assertThat(count.get()).isEqualTo(3);
+  }
+
+  @Test
+  void theListCarriesEachTunablesLimits() {
+    tee.publish("Vision/hold", TunableDouble.createConfig(0.0, Limits.atMost(30).config()));
+    tee.update();
+
+    assertThat(tee.view())
+        .filteredOn(listed -> listed.path().equals("/Vision/hold"))
+        .singleElement()
+        .extracting(TunableTee.Listed::limits)
+        .isEqualTo(Limits.atMost(30));
   }
 }

@@ -18,6 +18,15 @@ public interface CameraIO extends AutoCloseable {
 
     /** Every tag in those results, frame by frame: each frame's tags follow the previous one's. */
     public SeenTag[] tags = new SeenTag[] {};
+
+    /** Results left out because they couldn't be placed in time: no capture time, or a bad one. */
+    public int skippedFrames = 0;
+
+    /**
+     * Why the camera couldn't be read at all this loop (such as the coprocessor running a different
+     * vision software version than the robot's library), or empty.
+     */
+    public String error = "";
   }
 
   /**

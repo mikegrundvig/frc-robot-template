@@ -204,16 +204,25 @@ public final class Actions {
     logInputs.accept(inputs); // in replay, this replaces them with the logged ones
 
     for (Entry entry : actions.values()) {
-      if (entry.phase == Phase.RUNNING && !entry.routine.isRunning()) {
-        entry.set(Phase.ENDED, "Ended");
+      if (entry.phase == Phase.RUNNING) {
+        String broken = null;
+        boolean running;
+        try {
+          running = entry.routine.isRunning();
+        } catch (RuntimeException e) {
+          running = false;
+          broken = "Ended: checking whether it runs failed: " + describe(e);
+        }
+        if (!running) {
+          entry.set(Phase.ENDED, broken != null ? broken : "Ended");
+        }
       }
     }
     String whyNot = gate.whyNot();
     if (whyNot != null) {
       for (Entry entry : actions.values()) {
         if (entry.phase == Phase.RUNNING) {
-          entry.routine.cancel();
-          entry.set(Phase.CANCELED, "Canceled: " + whyNot);
+          entry.set(Phase.CANCELED, "Canceled: " + whyNot + cancel(entry));
         }
       }
     }
@@ -235,8 +244,7 @@ public final class Actions {
     }
     if (kind == ActionInputs.Kind.CANCEL) {
       if (entry.phase == Phase.RUNNING) {
-        entry.routine.cancel();
-        entry.set(Phase.CANCELED, "Canceled from the page");
+        entry.set(Phase.CANCELED, "Canceled from the page" + cancel(entry));
       }
       return Outcome.applied();
     }
@@ -250,8 +258,7 @@ public final class Actions {
     try {
       failed = entry.routine.start();
     } catch (RuntimeException e) {
-      String why = e.getMessage();
-      failed = why != null ? why : e.toString();
+      failed = describe(e);
     }
     if (failed != null) {
       entry.set(Phase.REFUSED, "Refused: " + failed);
@@ -259,6 +266,25 @@ public final class Actions {
     }
     entry.set(Phase.RUNNING, "Running");
     return Outcome.applied();
+  }
+
+  /**
+   * Cancels a routine: a team's routine that throws doesn't stop the robot loop.
+   *
+   * @return nothing, or why canceling failed, to add to the action's state
+   */
+  private static String cancel(Entry entry) {
+    try {
+      entry.routine.cancel();
+      return "";
+    } catch (RuntimeException e) {
+      return " (canceling it failed: " + describe(e) + ")";
+    }
+  }
+
+  private static String describe(RuntimeException e) {
+    String why = e.getMessage();
+    return why != null ? why : e.toString();
   }
 
   private CompletableFuture<Outcome> enqueue(ActionInputs.Kind kind, String name) {

@@ -275,8 +275,8 @@ public class Drive implements Mechanism, AutoCloseable {
     watchTerrain();
     checkImus();
 
-    gyroDisconnectedAlert.set(!gyroInputs.connected && !backupInputs.connected);
-    usingBackupAlert.set(!gyroInputs.connected && backupInputs.connected);
+    gyroDisconnectedAlert.set(!usable(gyroInputs) && !usable(backupInputs));
+    usingBackupAlert.set(!usable(gyroInputs) && usable(backupInputs));
     for (int i = 0; i < 4; i++) {
       moduleDisconnectedAlerts[i].set(!modules[i].isConnected());
     }
@@ -295,7 +295,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * picking one.
    */
   private void checkImus() {
-    if (gyroInputs.connected && backupInputs.connected) {
+    if (usable(gyroInputs) && usable(backupInputs)) {
       crossCheck.update(
           RobotController.getTime(), gyroInputs.yaw.getRadians(), backupInputs.yaw.getRadians());
     } else {
@@ -403,10 +403,21 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /** The IMU to read the robot's attitude from: the gyro's, or the backup's while it's lost. */
   private @Nullable GyroIOInputsAutoLogged imu() {
-    if (gyroInputs.connected) {
+    if (usable(gyroInputs)) {
       return gyroInputs;
     }
-    return backupInputs.connected ? backupInputs : null;
+    return usable(backupInputs) ? backupInputs : null;
+  }
+
+  /**
+   * Whether an IMU can be read from: connected, and reading numbers. One that sends a value that
+   * isn't a number counts as lost, so a bad reading costs its readings, never the robot program.
+   */
+  private static boolean usable(GyroIOInputsAutoLogged imu) {
+    return imu.connected
+        && Double.isFinite(imu.yaw.getRadians())
+        && Double.isFinite(imu.pitchRad)
+        && Double.isFinite(imu.rollRad);
   }
 
   /** Sends new gains and limits to the modules, and keeps the limits driving uses. */
@@ -463,12 +474,17 @@ public class Drive implements Mechanism, AutoCloseable {
     for (int k = 0; k < readings; k++) {
       double[] distances = new double[4];
       double[] angles = new double[4];
+      boolean numbers = true;
       for (int i = 0; i < 4; i++) {
         distances[i] = modules[i].odometryDistanceMeters(k);
         angles[i] = modules[i].odometryAngleRadians(k);
+        numbers &= Double.isFinite(distances[i]) && Double.isFinite(angles[i]);
       }
-      OdometrySample reading =
-          new OdometrySample(modules[0].odometryTimestampNanos(k), distances, angles);
+      long stamp = modules[0].odometryTimestampNanos(k);
+      if (!numbers || stamp < 0) {
+        continue; // a reading that isn't one is left out: the next good one covers the motion
+      }
+      OdometrySample reading = new OdometrySample(stamp, distances, angles);
       BodyMotion motion =
           lastReading == null ? new BodyMotion(0, 0, 0, 0) : odometry.motion(lastReading, reading);
       boolean turnedByImu = source != YawSource.WHEELS && !(switching && k == 0);
@@ -481,7 +497,11 @@ public class Drive implements Mechanism, AutoCloseable {
   /** Takes an IMU's readings this loop, or forgets them all while it's lost. */
   private static void track(YawTrack yaws, GyroIOInputsAutoLogged imu) {
     int readings = Math.min(imu.odometryTimestampsNanos.length, imu.odometryYawsRad.length);
-    if (!imu.connected || readings == 0) {
+    boolean numbers = true;
+    for (int i = 0; i < readings; i++) {
+      numbers &= Double.isFinite(imu.odometryYawsRad[i]);
+    }
+    if (!usable(imu) || !numbers || readings == 0) {
       yaws.clear();
       return;
     }

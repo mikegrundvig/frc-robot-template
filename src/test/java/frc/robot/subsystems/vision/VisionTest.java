@@ -16,6 +16,7 @@ import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,11 +64,15 @@ class VisionTest {
   /** A camera that reports whatever the test scripts. */
   private static final class ScriptedCamera implements CameraIO {
     boolean connected = true;
+    @Nullable RuntimeException failure;
     List<Frame> frames = new ArrayList<>();
     List<SeenTag> tags = new ArrayList<>();
 
     @Override
     public void updateInputs(CameraIOInputs inputs) {
+      if (failure != null) {
+        throw failure;
+      }
       inputs.connected = connected;
       inputs.frames = frames.toArray(Frame[]::new);
       inputs.tags = tags.toArray(SeenTag[]::new);
@@ -226,6 +231,75 @@ class VisionTest {
     io.see(T0 + 210_000_000L, camera);
     loop();
     assertThat(vision.accepted(0)).as("off: nothing held").isEqualTo(1);
+  }
+
+  /**
+   * PhotonLib throws, every few seconds, when the coprocessor runs a different PhotonVision than
+   * the robot's library: the camera reads as unreadable, and the robot program runs on.
+   */
+  @Test
+  void aCameraThatThrowsIsUnreadableAndTheLoopGoesOn() {
+    io.failure = new UnsupportedOperationException("Photonlib version mismatch\n");
+
+    loop();
+
+    assertThat(vision.isUnreadableAlertActive(0)).isTrue();
+    assertThat(vision.isDisconnectedAlertActive(0)).as("unreadable says why instead").isFalse();
+    assertThat(vision.summary()).startsWith("0 of 1 cameras connected");
+
+    io.failure = null;
+    io.see(T0 + 200_000_000L, camera);
+    loop();
+    assertThat(vision.isUnreadableAlertActive(0)).isFalse();
+    assertThat(vision.accepted(0)).isEqualTo(1);
+  }
+
+  /** Whatever a camera sends that isn't a number costs that image, never the robot program. */
+  @Test
+  void badNumbersFromACameraCostOnlyTheirImage() {
+    Transform3d notANumber = new Transform3d(Double.NaN, 0, 0, Rotation3d.ZERO);
+    io.frames.add(new CameraIO.Frame(T0 + 120_000_000L, 1, true, notANumber, Double.NaN));
+    io.tags.add(
+        new CameraIO.SeenTag(26, 0, 0, 1, 0, 1, 1, 0, 1, notANumber, notANumber, Double.NaN, true));
+    io.frames.add(new CameraIO.Frame(-1, 0, false, Transform3d.ZERO, 0)); // from an old log
+    io.see(T0 + 200_000_000L, camera);
+    io.tags.set(io.tags.size() - 1, withAmbiguity(io.tags.getLast(), Double.NaN));
+
+    loop();
+
+    assertThat(vision.accepted(0)).as("only the good image").isEqualTo(1);
+    assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+  }
+
+  @Test
+  void anAutoStartHoldThatIsntATimeHoldsNothing() {
+    vision.autoStartHoldSeconds().set(Double.POSITIVE_INFINITY);
+    vision.autonomousStarted(T0 + 100_000_000L);
+    vision.autoStartHoldSeconds().set(Double.NaN);
+    vision.autonomousStarted(T0 + 100_000_000L);
+    io.see(T0 + 200_000_000L, camera);
+
+    loop();
+
+    assertThat(vision.accepted(0)).isEqualTo(1);
+  }
+
+  private static CameraIO.SeenTag withAmbiguity(CameraIO.SeenTag tag, double ambiguity) {
+    return new CameraIO.SeenTag(
+        tag.id(),
+        tag.corner0X(),
+        tag.corner0Y(),
+        tag.corner1X(),
+        tag.corner1Y(),
+        tag.corner2X(),
+        tag.corner2Y(),
+        tag.corner3X(),
+        tag.corner3Y(),
+        tag.bestCameraToTag(),
+        tag.altCameraToTag(),
+        ambiguity,
+        tag.inMultiTag());
   }
 
   @Test

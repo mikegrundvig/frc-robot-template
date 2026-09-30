@@ -17,6 +17,7 @@ import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableConfig;
 import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableLong;
 import org.wpilib.tunable.TunableRegistry;
 
 /**
@@ -151,6 +152,80 @@ class TunableTeeTest {
     assertThat(outcome.getNow(null))
         .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Intake/enabled takes a boolean value"));
     assertThat(kP.get()).as("all or none").isEqualTo(0.5);
+  }
+
+  /** A value that isn't a number would throw wherever the robot program uses it. */
+  @Test
+  void numbersThatArentNumbersAreRefused() {
+    var page = tee.requestChanges(Map.of("Shooter/kP", Double.POSITIVE_INFINITY));
+    dashboard.setDouble("Shooter/kP", Double.NaN);
+    tee.update();
+
+    assertThat(page.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Shooter/kP takes a double value"));
+    assertThat(kP.get()).isEqualTo(0.5);
+    assertThat(dashboard.getDouble("Shooter/kP")).as("snaps back").isEqualTo(0.5);
+  }
+
+  @Test
+  void aWholeNumberBeyondItsTypeIsRefused() {
+    var count = TunableLong.create(3);
+    tee.publish("Arm/count", count);
+
+    var page = tee.requestChanges(Map.of("Arm/count", 1e30)); // would saturate to Long.MAX_VALUE
+    tee.update();
+
+    assertThat(page.getNow(null).result()).isEqualTo(Outcome.Result.REFUSED);
+    assertThat(count.get()).isEqualTo(3);
+  }
+
+  /** A team's tunable whose setter throws refuses the value; the page's other changes go back. */
+  @Test
+  void aSetterThatThrowsRefusesAndTheOtherChangesGoBack() {
+    double[] limit = {10};
+    var guarded =
+        TunableDouble.createConfig(
+            () -> limit[0],
+            value -> {
+              if (value > 40) {
+                throw new IllegalArgumentException("at most 40 A");
+              }
+              limit[0] = value;
+            },
+            new TunableConfig());
+    tee.publish("Arm/limit", guarded);
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("Intake/enabled", true);
+    values.put("Arm/limit", 60.0);
+
+    var page = tee.requestChanges(values);
+    tee.update();
+    dashboard.setDouble("Arm/limit", 80);
+    tee.update();
+
+    assertThat(page.getNow(null))
+        .isEqualTo(
+            new Outcome(Outcome.Result.REFUSED, "/Arm/limit refused the value: at most 40 A"));
+    assertThat(intake.get()).as("all or none").isFalse();
+    assertThat(limit[0]).isEqualTo(10);
+  }
+
+  @Test
+  void anOnTuneThatThrowsNeverStopsTheLoop() {
+    var gain =
+        TunableDouble.createConfig(
+            1.0,
+            new TunableConfig()
+                .withOnTune(
+                    () -> {
+                      throw new IllegalStateException("the mechanism rejected it");
+                    }));
+    tee.publish("Arm/kP", gain);
+
+    dashboard.setDouble("Arm/kP", 2.0);
+    tee.update();
+
+    assertThat(gain.get()).isEqualTo(2.0);
   }
 
   @Test

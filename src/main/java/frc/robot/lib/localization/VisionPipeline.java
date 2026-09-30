@@ -58,6 +58,9 @@ public final class VisionPipeline {
       return rejected(seen, "no tags from this field's layout", Double.NaN, Double.NaN);
     }
     distance /= known.size();
+    if (!Double.isFinite(distance)) {
+      return rejected(seen, "a tag's pose from the camera isn't a number", Double.NaN, Double.NaN);
+    }
     if (robot.recentYawRateRadiansPerSecond() > config.maxYawRateRadiansPerSecond()) {
       return rejected(
           seen,
@@ -141,11 +144,14 @@ public final class VisionPipeline {
         worstHeight = fix.heightErrorMeters();
       }
     }
-    if (Math.abs(worstHeight) > config.maxHeightErrorMeters()) {
+    if (!(Math.abs(worstHeight) <= config.maxHeightErrorMeters())) {
       return rejected(
           seen, format("a tag's height is off by %.2f m", worstHeight), distance, worstHeight);
     }
     Translation2d position = new Translation2d(sumX / sumWeights, sumY / sumWeights);
+    if (!Double.isFinite(position.getX()) || !Double.isFinite(position.getY())) {
+      return rejected(seen, "the solve isn't a number", distance, worstHeight);
+    }
     double spread =
         config.linearStdDevBaseline()
             * config.headingConstrainedFactor()
@@ -165,9 +171,12 @@ public final class VisionPipeline {
                   multiTag.fieldToCamera().getTranslation(),
                   multiTag.fieldToCamera().getRotation()),
               robotToCamera);
-      measuredHeading = full.toPose2d().getRotation();
-      headingStdDev =
-          config.angularStdDevBaseline() * scale(known.size(), distance, camera, robot, config);
+      Rotation2d solved = full.toPose2d().getRotation();
+      if (Double.isFinite(solved.getRadians())) {
+        measuredHeading = solved;
+        headingStdDev =
+            config.angularStdDevBaseline() * scale(known.size(), distance, camera, robot, config);
+      }
     }
     VisionMeasurement measurement =
         new VisionMeasurement(
@@ -225,7 +234,12 @@ public final class VisionPipeline {
       VisionMeasurement.Solver solver,
       VisionConfig config) {
     double height = pose.getZ();
-    if (Math.abs(height) > config.maxHeightErrorMeters()) {
+    if (!Double.isFinite(pose.getX())
+        || !Double.isFinite(pose.getY())
+        || !Double.isFinite(pose.getRotation().getZ())) {
+      return rejected(seen, "the solve isn't a number", distance, height);
+    }
+    if (!(Math.abs(height) <= config.maxHeightErrorMeters())) {
       return rejected(
           seen, format("the solve puts the robot %.2f m off the floor", height), distance, height);
     }

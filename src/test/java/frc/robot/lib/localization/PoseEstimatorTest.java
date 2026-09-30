@@ -683,6 +683,47 @@ class PoseEstimatorTest {
         .hasMessageContaining("tilt above");
   }
 
+  /** A gyro that sends NaN would poison the heading for good: it counts as lost instead. */
+  @Test
+  void aGyroYawThatIsntANumberCountsAsLost() {
+    Robot robot = new Robot().drive(25, 1, 0, 0);
+    robot.time += STEP;
+    robot.estimator.addOdometry(
+        robot.time, new BodyMotion(0.004, 0, 0, 0), Double.NaN, /* reporting */ true);
+
+    assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    robot.drive(25, 1, 0, 0);
+    assertThat(robot.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(robot.pose().getRotation().getRadians()).isCloseTo(0, within(1e-9));
+    assertThat(robot.pose().getX()).isCloseTo(START.getX() + 0.204, within(1e-6));
+    assertThat(robot.estimate().covariance().largestPositionStdDev()).isFinite();
+  }
+
+  /** A measurement that isn't a number fails the gate; it doesn't pass it. */
+  @Test
+  void aMeasurementThatIsntANumberIsRejected() {
+    Robot robot = new Robot().drive(25, 0, 0, 0);
+
+    List<VisionDecision> decisions =
+        robot.see(
+            new Pose2d(Double.NaN, Double.NaN, Rotation2d.ZERO),
+            robot.time,
+            PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY));
+
+    assertThat(decisions).singleElement().satisfies(d -> assertThat(d.accepted()).isFalse());
+    assertThat(robot.pose().getTranslation()).isEqualTo(START.getTranslation());
+  }
+
+  @Test
+  void aLandmarkThatIsntANumberIsRejected() {
+    Robot robot = new Robot().drive(25, 0, 0, 0);
+
+    List<LandmarkDecision> decisions = robot.cross(Double.NaN, robot.time, 0.05);
+
+    assertThat(decisions).singleElement().satisfies(d -> assertThat(d.accepted()).isFalse());
+    assertThat(robot.pose().getTranslation()).isEqualTo(START.getTranslation());
+  }
+
   private static EstimatorConfigBuilder with() {
     return EstimatorConfigBuilder.builder(EstimatorConfig.DEFAULTS);
   }

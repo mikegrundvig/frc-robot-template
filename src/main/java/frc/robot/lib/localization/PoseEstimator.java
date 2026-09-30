@@ -39,6 +39,9 @@ import org.wpilib.math.util.MathUtil;
 public final class PoseEstimator {
   private static final long VELOCITY_WINDOW_NANOS = 100_000_000L;
 
+  /** An uncertainty as big as the field: the estimate knows nothing. */
+  private static final PoseCovariance NO_IDEA = PoseCovariance.fromStdDevs(100, 100, Math.PI);
+
   private final EstimatorConfig config;
   private final Predicate<Translation2d> onField;
   private final double translationVariancePerMeter;
@@ -201,14 +204,16 @@ public final class PoseEstimator {
    * gyro's reference.
    *
    * @param gyroYawRadians the gyro's yaw, counterclockwise; any zero, wrapped or not
-   * @param gyroConnected false while the gyro is lost: the wheels' rotation stands in for it
+   * @param gyroReporting false while the gyro is lost: the wheels' rotation stands in for it. A yaw
+   *     that isn't a number counts as lost, so one bad reading can't poison the heading.
    */
   public void addOdometry(
-      long timestampNanos, BodyMotion motion, double gyroYawRadians, boolean gyroConnected) {
+      long timestampNanos, BodyMotion motion, double gyroYawRadians, boolean gyroReporting) {
+    boolean gyroConnected = gyroReporting && Double.isFinite(gyroYawRadians);
     if (!started) {
       started = true;
       yaw = gyroConnected ? gyroYawRadians : 0;
-      lastGyroYaw = gyroYawRadians;
+      lastGyroYaw = gyroConnected ? gyroYawRadians : 0;
       lastGyroConnected = gyroConnected;
       oldest = 0;
       size = 1;
@@ -646,7 +651,8 @@ public final class PoseEstimator {
     double innovationMeters = Math.hypot(innovationX, innovationY);
     if (event.fresh()) {
       lastInnovationMeters = innovationMeters;
-      if (chiSquared > gate) {
+      // Written so a measurement that isn't a number fails the gate instead of passing it.
+      if (!(chiSquared <= gate)) {
         rejectedCount++;
         consecutiveRejections++;
         rejectedRecently.addLast(
@@ -723,7 +729,7 @@ public final class PoseEstimator {
     }
     double chiSquared = innovation * innovation / s;
     if (event.fresh()) {
-      if (chiSquared > config.gateChiSquaredAxis()) {
+      if (!(chiSquared <= config.gateChiSquaredAxis())) {
         landmarkDecisions.add(
             new LandmarkDecision(
                 landmark,
@@ -1010,6 +1016,14 @@ public final class PoseEstimator {
   }
 
   private PoseCovariance currentCovariance() {
+    if (!Double.isFinite(covariance[0])
+        || !Double.isFinite(covariance[1])
+        || !Double.isFinite(covariance[4])
+        || !Double.isFinite(covariance[8])) {
+      // Only a bug gets here (every input is checked on the way in): say the estimate knows
+      // nothing, rather than throw in the robot loop.
+      return NO_IDEA;
+    }
     double xx = Math.max(0, covariance[0]);
     double yy = Math.max(0, covariance[4]);
     double limit = Math.sqrt(xx * yy);

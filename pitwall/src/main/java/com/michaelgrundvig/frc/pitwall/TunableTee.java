@@ -62,6 +62,9 @@ public final class TunableTee implements TunableBackend {
 
   private record PageRequest(Map<String, Object> values, CompletableFuture<Outcome> outcome) {}
 
+  /** One tunable's change from the page, and how to take it back if a later one fails. */
+  private record Change(String path, Runnable apply, Runnable undo) {}
+
   private final TunableBackend inner;
   private final Supplier<@Nullable String> whyLocked;
   private final Consumer<TunableInputs> logInputs;
@@ -218,31 +221,60 @@ public final class TunableTee implements TunableBackend {
     inner.close();
   }
 
-  /** A dashboard's write, through a proxy: applied if tuning allows it, then logged. */
-  private void write(String path, TunableBase real, String text, Runnable apply) {
-    if (replaying || whyLocked.get() != null) {
-      return; // refused: the dashboard shows the real value again at the next update
+  /**
+   * A dashboard's write, through a proxy: applied if tuning allows it and the value is one the
+   * tunable can take, then logged. A value that isn't a number (NaN, infinity) is refused, and so
+   * is a write its tunable's own setter throws on; either way the dashboard shows the real value
+   * again at the next update.
+   */
+  private void write(String path, TunableBase real, String text, boolean valid, Runnable apply) {
+    if (!valid || replaying || whyLocked.get() != null) {
+      return;
     }
-    apply.run();
+    try {
+      apply.run();
+    } catch (RuntimeException e) {
+      TunableRegistry.reportWarning("Pitwall: " + path + " refused " + text + ": " + e);
+      return;
+    }
     applied(path, real, text);
   }
 
   private void applied(String path, TunableBase real, String text) {
     appliedPaths.add(path);
     appliedValues.add(text);
+    runOnTune(path, real);
+  }
+
+  /**
+   * Runs a tunable's own reaction to a change after the update, where WPILib runs it with nothing
+   * around it: a reaction that throws is reported, and never stops the robot loop.
+   */
+  private static void runOnTune(String path, TunableBase real) {
     TunableConfig config = real.getConfig();
     Runnable onTune = config != null ? config.getOnTune() : null;
     if (onTune != null) {
-      TunableRegistry.runAfterUpdate(onTune);
+      TunableRegistry.runAfterUpdate(
+          () -> {
+            try {
+              onTune.run();
+            } catch (RuntimeException e) {
+              TunableRegistry.reportWarning("Pitwall: reacting to " + path + " failed: " + e);
+            }
+          });
     }
   }
 
+  /**
+   * The page's changes, all or none: every value is checked first, then each is applied, and if a
+   * tunable's own setter throws, the ones already applied are put back.
+   */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
     if (why != null) {
       return new Outcome(Outcome.Result.LOCKED, "Tuning is locked: " + why);
     }
-    List<Runnable> changes = new ArrayList<>();
+    List<Change> changes = new ArrayList<>();
     for (Map.Entry<String, Object> value : values.entrySet()) {
       Entry entry;
       synchronized (entries) {
@@ -252,56 +284,94 @@ public final class TunableTee implements TunableBackend {
         return new Outcome(
             Outcome.Result.REFUSED, "There is no tunable the page can change at " + value.getKey());
       }
-      Runnable change = change(value.getKey(), entry, value.getValue());
+      Change change = change(value.getKey(), entry, value.getValue());
       if (change == null) {
         return new Outcome(
             Outcome.Result.REFUSED, value.getKey() + " takes a " + entry.type() + " value");
       }
       changes.add(change);
     }
-    changes.forEach(Runnable::run);
+    List<Change> done = new ArrayList<>();
+    for (Change change : changes) {
+      try {
+        change.apply().run();
+        done.add(change);
+      } catch (RuntimeException e) {
+        for (Change applied : done.reversed()) {
+          try {
+            applied.undo().run();
+          } catch (RuntimeException alsoFailed) {
+            TunableRegistry.reportWarning(
+                "Pitwall: couldn't put " + applied.path() + " back: " + alsoFailed);
+          }
+        }
+        String reason = e.getMessage();
+        return new Outcome(
+            Outcome.Result.REFUSED,
+            change.path() + " refused the value: " + (reason != null ? reason : e.toString()));
+      }
+    }
     return Outcome.applied();
   }
 
-  /** The change a page's value makes to a tunable, or null when the value doesn't fit its type. */
-  private @Nullable Runnable change(String path, Entry entry, Object value) {
+  /**
+   * The change a page's value makes to a tunable, or null when the value doesn't fit its type: a
+   * number that isn't one (NaN, infinity) fits none, and a whole number must fit its type's range.
+   */
+  private @Nullable Change change(String path, Entry entry, Object value) {
     TunableBase real = entry.real();
     if (value instanceof Boolean on) {
-      return real instanceof TunableBoolean t
-          ? () -> {
-            t.set(on);
-            applied(path, t, Boolean.toString(on));
-          }
-          : null;
+      if (!(real instanceof TunableBoolean t)) {
+        return null;
+      }
+      boolean old = t.get();
+      return change(path, t, () -> t.set(on), Boolean.toString(on), () -> t.set(old), old);
     }
     if (!(value instanceof Number number)) {
       return null;
     }
     double d = number.doubleValue();
+    if (!Double.isFinite(d)) {
+      return null;
+    }
     return switch (real) {
-      case TunableDouble t ->
-          () -> {
-            t.set(d);
-            applied(path, t, Double.toString(d));
-          };
-      case TunableFloat t ->
-          () -> {
-            t.set((float) d);
-            applied(path, t, Float.toString((float) d));
-          };
+      case TunableDouble t -> {
+        double old = t.get();
+        yield change(path, t, () -> t.set(d), Double.toString(d), () -> t.set(old), old);
+      }
+      case TunableFloat t when Math.abs(d) <= Float.MAX_VALUE -> {
+        float old = t.get();
+        float f = (float) d;
+        yield change(path, t, () -> t.set(f), Float.toString(f), () -> t.set(old), old);
+      }
       case TunableInt t
-          when d == Math.rint(d) && d >= Integer.MIN_VALUE && d <= Integer.MAX_VALUE ->
-          () -> {
-            t.set((int) d);
-            applied(path, t, Integer.toString((int) d));
-          };
-      case TunableLong t when d == Math.rint(d) ->
-          () -> {
-            t.set(number.longValue());
-            applied(path, t, Long.toString(number.longValue()));
-          };
+          when d == Math.rint(d) && d >= Integer.MIN_VALUE && d <= Integer.MAX_VALUE -> {
+        int old = t.get();
+        int i = (int) d;
+        yield change(path, t, () -> t.set(i), Integer.toString(i), () -> t.set(old), old);
+      }
+      // Exactly representable longs only: 2^63 and beyond would silently become Long.MAX_VALUE.
+      case TunableLong t when d == Math.rint(d) && d >= -0x1p63 && d < 0x1p63 -> {
+        long old = t.get();
+        long l = number.longValue();
+        yield change(path, t, () -> t.set(l), Long.toString(l), () -> t.set(old), old);
+      }
       default -> null;
     };
+  }
+
+  private Change change(
+      String path, TunableBase real, Runnable set, String text, Runnable restore, Object old) {
+    return new Change(
+        path,
+        () -> {
+          set.run();
+          applied(path, real, text);
+        },
+        () -> {
+          restore.run();
+          applied(path, real, String.valueOf(old));
+        });
   }
 
   /** Applies a logged change during a replay, as the robot applied it. */
@@ -328,12 +398,11 @@ public final class TunableTee implements TunableBackend {
     } catch (NumberFormatException e) {
       TunableRegistry.reportWarning("Pitwall: a logged change to " + path + " is unreadable");
       return;
+    } catch (RuntimeException e) {
+      TunableRegistry.reportWarning("Pitwall: " + path + " refused a logged change: " + e);
+      return;
     }
-    TunableConfig config = entry.real().getConfig();
-    Runnable onTune = config != null ? config.getOnTune() : null;
-    if (onTune != null) {
-      TunableRegistry.runAfterUpdate(onTune);
-    }
+    runOnTune(path, entry.real());
   }
 
   /**
@@ -350,19 +419,23 @@ public final class TunableTee implements TunableBackend {
     return switch (real) {
       case TunableDouble t ->
           TunableDouble.createConfig(
-              t::get, v -> write(path, t, Double.toString(v), () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Double.toString(v), Double.isFinite(v), () -> t.set(v)),
+              proxyConfig);
       case TunableFloat t ->
           TunableFloat.createConfig(
-              t::get, v -> write(path, t, Float.toString(v), () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Float.toString(v), Float.isFinite(v), () -> t.set(v)),
+              proxyConfig);
       case TunableInt t ->
           TunableInt.createConfig(
-              t::get, v -> write(path, t, Integer.toString(v), () -> t.set(v)), proxyConfig);
+              t::get, v -> write(path, t, Integer.toString(v), true, () -> t.set(v)), proxyConfig);
       case TunableLong t ->
           TunableLong.createConfig(
-              t::get, v -> write(path, t, Long.toString(v), () -> t.set(v)), proxyConfig);
+              t::get, v -> write(path, t, Long.toString(v), true, () -> t.set(v)), proxyConfig);
       case TunableBoolean t ->
           TunableBoolean.createConfig(
-              t::get, v -> write(path, t, Boolean.toString(v), () -> t.set(v)), proxyConfig);
+              t::get, v -> write(path, t, Boolean.toString(v), true, () -> t.set(v)), proxyConfig);
       default -> null;
     };
   }

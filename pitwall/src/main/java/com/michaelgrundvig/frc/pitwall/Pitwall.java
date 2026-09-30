@@ -48,9 +48,11 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
   private final TunableTee tee;
   private final List<String> configTunables = new ArrayList<>();
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
+  private final Alert changedSwitches = new Alert("Pitwall", "", Alert.Level.HIGH);
   private final boolean advantageKit;
   private final @Nullable PitwallServer server;
   private boolean wasEnabled;
+  private boolean wasFieldConnected;
 
   private Pitwall(String name, T config, int port, boolean advantageKit) {
     this.advantageKit = advantageKit;
@@ -100,7 +102,8 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
   private static @Nullable PitwallServer startPage(
       Status status, Tuning<?> tuning, Actions actions, TunableTee tee, int port) {
     try {
-      return PitwallServer.startOrExplain(status, tuning, actions, tee, port, System.out::println)
+      return PitwallServer.startOrExplain(
+              status, tuning, actions, tee, port, thisComputerOnly(), System.out::println)
           .orElse(null);
     } catch (LinkageError e) {
       System.out.println(
@@ -166,18 +169,47 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
     boolean fieldConnected = RobotState.isFMSAttached();
+    if (fieldConnected && !wasFieldConnected) {
+      // Tuning returns every tuned value to its committed one now: say what they were first.
+      report(
+          "The field system connected: tuned values return to the committed configuration",
+          tuning.report());
+    }
     tuning.periodic(fieldConnected);
     actions.periodic(
         new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected));
     status.periodic();
     if (wasEnabled && !enabled) {
-      List<String> report = tuning.report();
-      report.forEach(System.out::println);
-      if (advantageKit) {
-        AdvantageKitLog.recordOutput("Pitwall/TuningReport", report.toArray(String[]::new));
+      report("", tuning.report());
+    }
+    // Switches (a camera left off, say) keep their setting on the field: say which differ.
+    List<String> switches = fieldConnected ? tee.changedSinceStartup() : List.of();
+    if (!switches.isEmpty()) {
+      String text =
+          "On the field with settings changed since startup: " + String.join(", ", switches);
+      if (!text.equals(changedSwitches.getText())) {
+        changedSwitches.setText(text);
       }
     }
+    changedSwitches.set(!switches.isEmpty());
     wasEnabled = enabled;
+    wasFieldConnected = fieldConnected;
+  }
+
+  /** Prints what tuning changed, and logs it, when there's anything to say. */
+  private void report(String heading, List<String> lines) {
+    if (lines.isEmpty()) {
+      return;
+    }
+    List<String> all = new ArrayList<>();
+    if (!heading.isEmpty()) {
+      all.add(heading + ":");
+    }
+    all.addAll(lines);
+    all.forEach(System.out::println);
+    if (advantageKit) {
+      AdvantageKitLog.recordOutput("Pitwall/TuningReport", all.toArray(String[]::new));
+    }
   }
 
   /**
@@ -198,6 +230,7 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
       }
     }
     tuned.close();
+    changedSwitches.close();
   }
 
   /**
@@ -261,6 +294,15 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
     } catch (ReflectiveOperationException | ClassCastException | NullPointerException e) {
       return null;
     }
+  }
+
+  /**
+   * Whether the page serves only this computer: in the simulator, whose laptop may be on a school's
+   * or an event's network, unless {@code -Dpitwall.network=true} asks for the network too (to open
+   * it on a phone). On the robot it always serves the robot's network.
+   */
+  static boolean thisComputerOnly() {
+    return RobotBase.isSimulation() && !Boolean.getBoolean("pitwall.network");
   }
 
   /** Whether the robot program has AdvantageKit, checked without loading any of it. */

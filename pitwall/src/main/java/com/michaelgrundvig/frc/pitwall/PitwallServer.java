@@ -9,12 +9,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -138,10 +140,27 @@ public final class PitwallServer implements AutoCloseable {
       TunableTee tunables,
       int port,
       Consumer<String> say) {
+    return startOrExplain(status, tuning, actions, tunables, port, false, say);
+  }
+
+  /**
+   * Starts the page, or says why it couldn't.
+   *
+   * @param thisComputerOnly serve only to this computer (the simulator on a laptop, where the
+   *     network may be a school's or an event's), not to the network the robot is on
+   */
+  public static Optional<PitwallServer> startOrExplain(
+      Status status,
+      Tuning<?> tuning,
+      Actions actions,
+      TunableTee tunables,
+      int port,
+      boolean thisComputerOnly,
+      Consumer<String> say) {
     PitwallServer server = null;
     try {
       server = new PitwallServer(status, tuning, actions, tunables, port);
-      server.start();
+      server.start(thisComputerOnly);
       say.accept(
           "Pitwall: http://localhost:"
               + server.port()
@@ -158,8 +177,22 @@ public final class PitwallServer implements AutoCloseable {
     }
   }
 
+  /** Serves the page to the network the robot is on. */
   public void start() throws IOException {
-    server.bind(new InetSocketAddress(port), 0);
+    start(false);
+  }
+
+  /**
+   * Serves the page.
+   *
+   * @param thisComputerOnly serve only to this computer, not to the network
+   */
+  public void start(boolean thisComputerOnly) throws IOException {
+    server.bind(
+        thisComputerOnly
+            ? new InetSocketAddress(InetAddress.getLoopbackAddress(), port)
+            : new InetSocketAddress(port),
+        0);
     server.start();
   }
 
@@ -245,6 +278,7 @@ public final class PitwallServer implements AutoCloseable {
         String path = exchange.getRequestURI().getPath();
         String method = exchange.getRequestMethod();
         try {
+          checkAddressed(exchange, method);
           List<String> allowed = METHODS.get(path);
           if (allowed == null) {
             throw new Problem(404, "Not found", "There is nothing at " + path);
@@ -276,6 +310,42 @@ public final class PitwallServer implements AutoCloseable {
           sendProblem(exchange, new Problem(500, "Server error", String.valueOf(e)));
         }
       }
+    }
+
+    /**
+     * Refuses a request addressed to anything but the robot itself, and a change sent from another
+     * site's page. A web page open on a laptop connected to the robot could otherwise point a name
+     * it controls at the robot's address (DNS rebinding) and use the page as its own; the address
+     * the request names gives it away. The robot is reached by address, as localhost, or by its
+     * local name (robot.local).
+     */
+    private static void checkAddressed(HttpExchange exchange, String method) {
+      String host = exchange.getRequestHeaders().getFirst("Host");
+      if (host == null || !isRobotsOwn(withoutPort(host))) {
+        throw new Problem(
+            403, "Wrong address", "Pitwall answers only at the robot's own address or name");
+      }
+      String origin = exchange.getRequestHeaders().getFirst("Origin");
+      if (!method.equals("GET") && origin != null && !origin.equals("http://" + host)) {
+        throw new Problem(403, "Another site", "Changes come only from Pitwall's own page");
+      }
+    }
+
+    private static String withoutPort(String host) {
+      if (host.startsWith("[")) {
+        int end = host.indexOf(']');
+        return end < 0 ? host : host.substring(0, end + 1);
+      }
+      int colon = host.lastIndexOf(':');
+      return colon < 0 ? host : host.substring(0, colon);
+    }
+
+    private static boolean isRobotsOwn(String name) {
+      String host = name.toLowerCase(Locale.ROOT);
+      return host.equals("localhost")
+          || host.endsWith(".local")
+          || host.startsWith("[") // an IPv6 address
+          || host.matches("\\d{1,3}(\\.\\d{1,3}){3}"); // an IPv4 address
     }
 
     private void postAction(HttpExchange exchange) throws IOException {
@@ -555,6 +625,17 @@ public final class PitwallServer implements AutoCloseable {
       byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
       exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
+      // The page may not be framed by another site's page (to trick a click on its buttons), and
+      // loads nothing from anywhere else.
+      exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+      exchange
+          .getResponseHeaders()
+          .set(
+              "Content-Security-Policy",
+              "default-src 'self'; script-src 'self' 'unsafe-inline';"
+                  + " style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
+      exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+      exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
       exchange.sendResponseHeaders(status, bytes.length > 0 ? bytes.length : -1);
       if (bytes.length > 0) {
         try (OutputStream out = exchange.getResponseBody()) {

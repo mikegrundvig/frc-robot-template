@@ -154,6 +154,17 @@ class TunableTeeTest {
     assertThat(kP.get()).as("all or none").isEqualTo(0.5);
   }
 
+  /** A switch left changed in the pit (a camera off, say) is listed, for the field's alert. */
+  @Test
+  void listsWhatChangedSinceStartup() {
+    assertThat(tee.changedSinceStartup()).isEmpty();
+
+    dashboard.setBoolean("Intake/enabled", true);
+    tee.update();
+
+    assertThat(tee.changedSinceStartup()).containsExactly("/Intake/enabled: true (was false)");
+  }
+
   /** A value that isn't a number would throw wherever the robot program uses it. */
   @Test
   void numbersThatArentNumbersAreRefused() {

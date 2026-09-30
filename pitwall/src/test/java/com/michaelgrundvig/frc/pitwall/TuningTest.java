@@ -49,6 +49,20 @@ class TuningTest {
         .containsExactly(".kP(18.5)");
   }
 
+  /** A match runs the committed configuration: what was tuned in the pit goes back. */
+  @Test
+  void theFieldConnectingReturnsTunedValuesToTheCommittedOnes() {
+    var tuning = tuning(true);
+    tuning.requestChanges(Map.of(KP, 18.5));
+    tuning.periodic(false);
+
+    tuning.periodic(true);
+
+    assertThat(tuning.config()).isEqualTo(machine());
+    assertThat(tuning.view().hasChanges()).isFalse();
+    assertThat(shown).last().satisfies(view -> assertThat(view.hasChanges()).isFalse());
+  }
+
   @Test
   void aRefusedChangeSaysWhyAndChangesNothing() {
     var tuning = tuning(true);

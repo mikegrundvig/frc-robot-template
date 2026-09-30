@@ -20,7 +20,9 @@ import java.util.stream.Collectors;
  * them, so the configuration changes only between loops and a replay makes the same changes at the
  * same moments. Each request's future completes with what became of it.
  *
- * <p>Changes need tuning switched on, and are refused while the field system is connected.
+ * <p>Changes need tuning switched on, and are refused while the field system is connected. When the
+ * field system connects, every tuned value returns to its committed one: a match runs the committed
+ * configuration.
  *
  * @param <T> the configuration record at the root
  */
@@ -159,6 +161,12 @@ public final class Tuning<T extends Record> {
     boolean before = enabled;
     enabled = inputs.enabled && !fieldConnected;
     boolean changed = enabled != before || fieldConnected != this.fieldConnected;
+    if (fieldConnected && !this.fieldConnected && !tuner.changes().isEmpty()) {
+      // A match runs the committed configuration: what was tuned in the pit goes back, and the
+      // report printed before (see Pitwall) keeps the numbers for committing.
+      tuner.reset();
+      changed = true;
+    }
     this.fieldConnected = fieldConnected;
     // Entries with the same request number are one request, applied all or none.
     List<Outcome> results = new ArrayList<>();

@@ -3,13 +3,18 @@
 // First-run defaults, so the simulator is drivable immediately: the robot starts enabled in teleop
 // (-PstartDisabled to start disabled, like a real robot), the keyboard is the driver's gamepad, and
 // the field view is open. sim/ holds the default GUI settings; they are copied only when missing, so
-// a user's own layout and gamepad choices are kept. AdvantageKit log replay needs every simulation
-// extension off: ./gradlew run -Preplay
+// a user's own layout and gamepad choices are kept.
+//
+// Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
+// (or the log open in AdvantageScope). Replay runs with every simulation extension off.
 
 wpi.sim.addGui().defaultEnabled = !project.hasProperty("replay")
 wpi.sim.addDriverstation()
 
 tasks.named("run") {
+    if (project.hasProperty("replay")) {
+        systemProperty "frc.simMode", "REPLAY"
+    }
     systemProperty "frc.sim.autoEnable",
             !project.hasProperty("startDisabled") && !project.hasProperty("replay")
     def defaults = fileTree("sim") { include "simgui*.json" }

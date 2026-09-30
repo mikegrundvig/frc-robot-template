@@ -1,0 +1,82 @@
+package frc.robot;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.Map;
+import org.littletonrobotics.junction.Logger;
+import org.wpilib.framework.RobotBase;
+import org.wpilib.hardware.hal.RobotMode;
+import org.wpilib.simulation.DriverStationSim;
+import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableRegistry;
+
+/**
+ * The template's robot program with a scripted session on top, for {@link ReplayEndToEndTest}. In
+ * the simulator it changes things the way people do in the pit: it enables utility mode, changes a
+ * configuration gain from Pitwall's page (over HTTP), changes a WPILib tunable, and runs an action.
+ * It records what those affect, then stops. Replayed, it only records, and the replay must match.
+ */
+final class ReplayScenarioRobot extends Robot {
+  /** How many loops the recorded session runs, about four seconds. */
+  static final int LOOPS = 200;
+
+  static final String GAIN = "Scenario/gain";
+  static final String DRIVE_CHECK = "Drive forward slowly (2 s)";
+
+  private final TunableDouble gain = TunableDouble.create(1.0);
+  private final HttpClient http = HttpClient.newHttpClient();
+  private int loop;
+
+  ReplayScenarioRobot() {
+    TunableRegistry.publish(GAIN, gain);
+  }
+
+  /** Runs the scenario robot: {@code java frc.robot.ReplayScenarioRobot}. */
+  public static void main(String... args) {
+    RobotBase.startRobot(ReplayScenarioRobot::new);
+  }
+
+  @Override
+  public void robotPeriodic() {
+    super.robotPeriodic();
+    Logger.recordOutput("Scenario/Gain", gain.get());
+    Logger.recordOutput("Scenario/SteerKp", pitwall().config().drivetrain().gains().steerKp());
+    Logger.recordOutput("Scenario/Action", pitwall().actions().view().get(0).phase().name());
+    if (Constants.currentMode == Constants.Mode.SIM) {
+      script(++loop);
+    }
+  }
+
+  /** The session, by loop: in a replay none of this runs, and the log supplies it instead. */
+  private void script(int loop) {
+    switch (loop) {
+      case 10 -> {
+        DriverStationSim.setDsAttached(true);
+        DriverStationSim.setRobotMode(RobotMode.UTILITY);
+        DriverStationSim.setEnabled(true);
+        DriverStationSim.notifyNewData();
+      }
+      case 20 ->
+          http.sendAsync(
+              HttpRequest.newBuilder(
+                      URI.create("http://localhost:" + pitwall().port() + "/api/values"))
+                  .header("Content-Type", "application/merge-patch+json")
+                  .method(
+                      "PATCH",
+                      HttpRequest.BodyPublishers.ofString("{\"drivetrain.gains.steerKp\": 18.5}"))
+                  .build(),
+              HttpResponse.BodyHandlers.discarding());
+      case 30 -> pitwall().tunables().requestChanges(Map.of(GAIN, 2.5));
+      case 40 -> pitwall().actions().requestStart(DRIVE_CHECK);
+      case LOOPS -> {
+        Logger.end(); // closes the log
+        System.exit(0);
+      }
+      default -> {
+        // nothing this loop
+      }
+    }
+  }
+}

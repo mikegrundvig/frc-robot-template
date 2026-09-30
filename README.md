@@ -23,6 +23,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
 ./gradlew run                                # the simulator, enabled and drivable from the keyboard
+AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
 ./gradlew deploy                             # to the robot, after every check passes
 ```

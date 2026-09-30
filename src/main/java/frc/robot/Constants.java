@@ -7,15 +7,17 @@
 
 package frc.robot;
 
+import java.util.Locale;
 import org.wpilib.framework.RobotBase;
 
 /**
  * This class defines the runtime mode used by AdvantageKit. The mode is always "real" when running
- * on a roboRIO. Change the value of "simMode" to switch between "sim" (physics sim) and "replay"
- * (log replay from a file).
+ * on a robot. In simulation it is "sim" (physics sim), or "replay" (log replay from a file) when
+ * the {@code frc.simMode} system property says so, which {@code ./gradlew run -Preplay} sets.
  */
 public final class Constants {
-  public static final Mode simMode = Mode.SIM;
+  public static final Mode simMode =
+      Mode.valueOf(System.getProperty("frc.simMode", "SIM").toUpperCase(Locale.ROOT));
   public static final Mode currentMode = RobotBase.isReal() ? Mode.REAL : simMode;
 
   public static enum Mode {

@@ -81,6 +81,11 @@ public class Robot extends LoggedRobot {
     pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
   }
 
+  /** Pitwall, for tests that drive the robot program through it. */
+  Pitwall<RobotConfig> pitwall() {
+    return pitwall;
+  }
+
   /**
    * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
    * command scheduler.

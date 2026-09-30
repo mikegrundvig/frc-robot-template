@@ -62,7 +62,12 @@ class CalibrationSimTest {
   @Test
   void theGyrosScaleIsFoundAgainstTheCameras() {
     SensorErrors gyroHigh =
-        new SensorErrors(List.of(1.0, 1.0, 1.0, 1.0), List.of(0.0, 0.0, 0.0, 0.0), 1.003, 0, 0, 1);
+        SensorErrors.NONE.withGyros(
+            SensorErrors.GyroErrors.builder()
+                .scale(1.003)
+                .driftDegreesPerMinute(0)
+                .noiseDegrees(0)
+                .build());
     build(gyroHigh, true);
     sim.run(1.0); // placed, and the cameras settle
 
@@ -128,8 +133,10 @@ class CalibrationSimTest {
     sim.run(0.5);
 
     String report = sim.robot().calibration().lastResult();
-    assertThat(report).startsWith("front-left: tags landed").contains("camera(\"front-left\"");
-    String line = report.substring(report.indexOf("camera(\"front-left\""));
+    assertThat(report)
+        .startsWith("front-left: tags landed")
+        .contains("In Robots, the front-left camera's mount: .forward(Inches.of(");
+    String line = report.substring(report.indexOf(".forward("));
     double[] mount = numbers(line);
     // Configured at (-7.75, 12.25, 21) in, roll 0, tilted up 10, turned 23.162: really 4 in lower.
     assertThat(mount[0]).as("forward").isCloseTo(-7.75, within(0.4));

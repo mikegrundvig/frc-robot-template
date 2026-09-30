@@ -3,9 +3,12 @@ package frc.robot.subsystems.drive;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Meters;
 
 import frc.robot.Robots;
 import frc.robot.SimTestSupport;
+import frc.robot.lib.field.Bump;
+import frc.robot.lib.field.Terrain;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -13,8 +16,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
+import org.wpilib.math.geometry.Translation2d;
 
 /**
  * The simulator keeps where the robot really is, and its wheels and gyro report that with the
@@ -147,6 +152,56 @@ class DriveSimulationTest {
 
     assertThat(robot.positionError()).isLessThan(1e-9);
     assertThat(robot.headingErrorDegrees()).isCloseTo(0.0, within(1e-9));
+  }
+
+  /**
+   * A long ramp up to a crest at x = 5, rising a quarter meter per meter: every wheel fits on it.
+   */
+  private static final Terrain RAMP =
+      new Terrain(
+          List.of(new Bump("Ramp", new Translation2d(5, 0), new Translation2d(5, 8), 0.5, 4)));
+
+  @Test
+  void theGroundUnderItsWheelsTiltsAndRaisesTheRobot() {
+    DriveSimHarness robot = robot(SensorErrors.NONE);
+    robot.simulation.setTerrain(RAMP);
+
+    robot.simulation.place(new Pose2d(4, 4, Rotation2d.ZERO)); // facing up the ramp
+    Pose3d facingUp = robot.simulation.truePose3d();
+    robot.simulation.place(new Pose2d(4, 4, Rotation2d.CCW_PI_2)); // across it
+    Pose3d across = robot.simulation.truePose3d();
+
+    assertThat(facingUp.getZ()).isCloseTo(0.25, within(1e-9));
+    assertThat(facingUp.getRotation().getY())
+        .as("nose up: a negative pitch")
+        .isCloseTo(-Math.atan(0.25), within(1e-9));
+    assertThat(facingUp.getRotation().getX()).isCloseTo(0.0, within(1e-9));
+    assertThat(across.getRotation().getX())
+        .as("left side downhill: a negative roll")
+        .isCloseTo(-Math.atan(0.25), within(1e-9));
+    assertThat(across.getRotation().getY()).isCloseTo(0.0, within(1e-9));
+  }
+
+  /** Up a ramp the wheels roll farther than the robot moves across the field; odometry knows. */
+  @Test
+  void onAKnownRampOdometryCountsTheWheelsTravelAtTheSlope() {
+    DriveSimHarness robot = robot(SensorErrors.NONE);
+    robot.simulation.setTerrain(RAMP);
+    robot.drive.setTerrain(RAMP);
+    Pose2d start = new Pose2d(3.4, 4, Rotation2d.ZERO);
+    robot.simulation.place(start);
+    robot.loop();
+    robot.drive.resetPose(start);
+    double wheelBefore = robot.drive.wheelRotationsRadians()[0];
+
+    robot.run(robot.drive.driveForward(1.0, 0.8), 1.0);
+
+    double moved = robot.simulation.truePose().getX() - start.getX();
+    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    double rolled = (robot.drive.wheelRotationsRadians()[0] - wheelBefore) * radius;
+    assertThat(moved).isGreaterThan(0.5);
+    assertThat(rolled).isCloseTo(moved * Math.hypot(1, 0.25), within(0.01));
+    assertThat(robot.positionError()).isLessThan(0.005);
   }
 
   /** Noise comes from a seed, so a simulated run, like a test, gives the same answer every time. */

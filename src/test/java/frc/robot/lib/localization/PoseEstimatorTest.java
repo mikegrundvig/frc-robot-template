@@ -92,15 +92,23 @@ class PoseEstimatorTest {
     LocalizationEstimate estimate() {
       return estimator.estimate();
     }
+
+    /** A landmark on the line x = lineX, crossed at some time: it says where x was, not y. */
+    List<LandmarkDecision> cross(double lineX, long when, double stdDev) {
+      estimator.addLandmark(
+          new LandmarkEvent(when, "bump", new Translation2d(lineX, 4), Rotation2d.ZERO, stdDev));
+      estimator.update();
+      return estimator.landmarkDecisions();
+    }
   }
 
   private static DriveConditions tilted(double degrees) {
-    return new DriveConditions(Math.toRadians(degrees), false, false, false);
+    return new DriveConditions(Math.toRadians(degrees), 0, false, false, false);
   }
 
-  private static final DriveConditions HIT = new DriveConditions(0, true, false, false);
-  private static final DriveConditions AT_THE_GRIP = new DriveConditions(0, false, true, false);
-  private static final DriveConditions DISABLED = new DriveConditions(0, false, false, true);
+  private static final DriveConditions HIT = new DriveConditions(0, 0, true, false, false);
+  private static final DriveConditions AT_THE_GRIP = new DriveConditions(0, 0, false, true, false);
+  private static final DriveConditions DISABLED = new DriveConditions(0, 0, false, false, true);
 
   private static boolean field(Translation2d point) {
     return point.getX() >= 0 && point.getX() <= 16 && point.getY() >= 0 && point.getY() <= 8;
@@ -573,6 +581,93 @@ class PoseEstimatorTest {
 
     assertThat(robot.pose().getRotation().getDegrees()).isCloseTo(0, within(1e-6));
     assertThat(robot.estimate().health().recoveries()).isZero();
+  }
+
+  @Test
+  void aLandmarkMovesTheEstimateAcrossItsLineAndNotAlongIt() {
+    Robot robot = new Robot().drive(1, 0, 0, 0);
+    PoseCovariance before = robot.estimate().covariance();
+
+    List<LandmarkDecision> decisions = robot.cross(1.2, robot.time, 0.05);
+
+    LandmarkDecision decision = decisions.get(0);
+    assertThat(decision.accepted()).isTrue();
+    assertThat(decision.innovationMeters()).isCloseTo(0.2, within(1e-9));
+    assertThat(robot.pose().getX()).as("equal trust: halfway").isCloseTo(1.1, within(1e-6));
+    assertThat(robot.pose().getY()).isCloseTo(1.0, within(1e-9));
+    assertThat(robot.estimate().covariance().xx()).isCloseTo(before.xx() / 2, within(1e-9));
+    assertThat(robot.estimate().covariance().yy()).isCloseTo(before.yy(), within(1e-12));
+  }
+
+  @Test
+  void aLandmarkFarFromTheEstimateIsGatedOut() {
+    Robot robot = new Robot().drive(1, 0, 0, 0);
+
+    LandmarkDecision decision = robot.cross(2.0, robot.time, 0.05).get(0);
+
+    assertThat(decision.accepted()).isFalse();
+    assertThat(decision.reason()).startsWith("gate: ").endsWith("> 10.8");
+    assertSame(robot.pose(), START, 1e-9);
+  }
+
+  /** A crest is known only once the robot is down the far ramp: it counts when it was crossed. */
+  @Test
+  void aLateLandmarkLandsWhereAnOnTimeOneWould() {
+    Robot onTime = new Robot();
+    Robot late = new Robot();
+    long crossed = T0 + 25 * STEP + STEP / 3;
+
+    onTime.drive(26, 1.0, 0.2, 0.3);
+    onTime.cross(1.15, crossed, 0.05);
+    onTime.drive(125, 1.0, 0.2, 0.3);
+    late.drive(151, 1.0, 0.2, 0.3);
+    late.cross(1.15, crossed, 0.05);
+
+    assertSame(late.pose(), onTime.pose(), 1e-9);
+    assertThat(late.estimate().covariance().xx())
+        .isCloseTo(onTime.estimate().covariance().xx(), within(1e-12));
+  }
+
+  @Test
+  void aLandmarkTheHistoryCannotPlaceIsRejected() {
+    Robot robot = new Robot().drive(500, 0, 0, 0); // 2 s: the history keeps 1.5 s
+
+    assertThat(robot.cross(1.0, T0 + STEP, 0.05).get(0).reason())
+        .isEqualTo("too late: older than the history kept");
+  }
+
+  @Test
+  void aLandmarkIsNoCamera() {
+    Robot robot = new Robot().drive(1, 0, 0, 0);
+
+    robot.cross(1.05, robot.time, 0.05);
+
+    LocalizationEstimate.Health health = robot.estimate().health();
+    assertThat(health.accepted()).isZero();
+    assertThat(health.visionAgeSeconds()).isInfinite();
+    assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
+  }
+
+  @Test
+  void onAKnownRampTheWheelsTravelCountsAtTheSlopesCosine() {
+    double slope = Math.toRadians(15);
+    Robot ramp = new Robot().under(new DriveConditions(slope, slope, false, false, false));
+    Robot unknown = new Robot().under(tilted(15));
+
+    ramp.drive(250, 1.0, 0, 0); // a meter along the ramp
+    unknown.drive(250, 1.0, 0, 0);
+
+    assertThat(ramp.pose().getX() - START.getX()).isCloseTo(Math.cos(slope), within(1e-9));
+    assertThat(unknown.pose().getX() - START.getX()).as("halved").isCloseTo(0.5, within(1e-9));
+    assertThat(ramp.estimate().health().suspectTravelMeters()).isZero();
+  }
+
+  @Test
+  void theGroundExplainsSomeOrAllOfATiltNeverMore() {
+    assertThatThrownBy(() -> new DriveConditions(0.1, 0.2, false, false, false))
+        .hasMessageContaining("never more");
+    assertThat(new DriveConditions(0.3, 0.2, false, false, false).unexplainedTiltRadians())
+        .isCloseTo(0.1, within(1e-12));
   }
 
   @Test

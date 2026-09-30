@@ -6,6 +6,7 @@ import static org.wpilib.units.Units.Seconds;
 
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.ImuCrossCheck;
@@ -15,9 +16,11 @@ import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.lib.localization.TerrainCrossing;
+import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.YawTrack;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
@@ -68,6 +71,15 @@ public class Drive implements Mechanism, AutoCloseable {
   /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
   private static final double MOVING = 0.25;
 
+  /**
+   * On a known bump, a tilt up to this much steeper than its ramps is still the ground's: bumpers,
+   * suspension, and the IMU's mount.
+   */
+  private static final double GROUND_SLOPE_MARGIN = Math.toRadians(3);
+
+  /** How far off a bump's footprint the estimate may put the robot and still be on it. */
+  private static final double MAX_GROUND_REACH_METERS = 1.0;
+
   /** A reset to "exactly here": a millimeter and a milliradian. */
   private static final PoseCovariance EXACTLY = PoseCovariance.fromStdDevs(0.001, 0.001, 0.001);
 
@@ -113,9 +125,18 @@ public class Drive implements Mechanism, AutoCloseable {
   /** What the IMU and the motors said about trusting the wheels this loop. */
   private DriveConditions conditions = DriveConditions.NORMAL;
 
-  /** Crossings of raised terrain, from the IMU: 1678's thresholds (10° steep, 5° level). */
+  /** The field's bumps, for telling a tilt the ground explains from one it doesn't. */
+  private Terrain ground = Terrain.FLAT;
+
+  /** How far the wheels reach from the robot's center. */
+  private final double wheelReach;
+
+  /**
+   * Crossings of raised terrain, from the IMU: 1678's thresholds (10° steep, 5° level), and a
+   * second and a half to cross a flat top.
+   */
   private final TerrainCrossing terrain =
-      new TerrainCrossing(Math.toRadians(10), Math.toRadians(5), 0.1);
+      new TerrainCrossing(Math.toRadians(10), Math.toRadians(5), 0.1, 1.5);
 
   private final Alert gyroDisconnectedAlert;
   private final Alert usingBackupAlert;
@@ -178,6 +199,11 @@ public class Drive implements Mechanism, AutoCloseable {
     applied = initial;
     apply(initial);
     kinematics = new SwerveDriveKinematics(initial.moduleTranslations(body));
+    double reach = 0;
+    for (Translation2d wheel : initial.moduleTranslations(body)) {
+      reach = Math.max(reach, wheel.getNorm());
+    }
+    wheelReach = reach;
     odometry = new SwerveKinematicsModel(initial.moduleTranslations(body));
     this.estimator = estimator;
     this.odometryLock = odometryLock;
@@ -257,6 +283,8 @@ public class Drive implements Mechanism, AutoCloseable {
     Logger.recordOutput("Drive/Pose", getPose());
     Logger.recordOutput("Drive/ModuleVelocities", moduleVelocities());
     Logger.recordOutput("Drive/TiltDegrees", Math.toDegrees(conditions.tiltRadians()));
+    Logger.recordOutput(
+        "Drive/GroundSlopeDegrees", Math.toDegrees(conditions.groundSlopeRadians()));
     Logger.recordOutput("Drive/Collision", conditions.collision());
     Logger.recordOutput("Drive/TractionLimited", conditions.tractionLimited());
   }
@@ -293,12 +321,17 @@ public class Drive implements Mechanism, AutoCloseable {
   /** Follows the robot over raised terrain: the slope along the way it moves, and its tilt. */
   private void watchTerrain() {
     ChassisVelocities moving = getRobotRelativeVelocities();
-    double climb =
-        Math.hypot(moving.vx, moving.vy) < MOVING
-            ? 0
-            : TerrainCrossing.climb(
-                pitchRadians(), rollRadians(), Math.atan2(moving.vy, moving.vx));
-    terrain.update(RobotController.getTime(), climb, conditions.tiltRadians());
+    boolean still = Math.hypot(moving.vx, moving.vy) < MOVING;
+    double way = Math.atan2(moving.vy, moving.vx);
+    double climb = still ? 0 : TerrainCrossing.climb(pitchRadians(), rollRadians(), way);
+    double fieldWay = still ? Double.NaN : way + getPose().getRotation().getRadians();
+    terrain.update(RobotController.getTime(), climb, conditions.tiltRadians(), fieldWay);
+    terrain
+        .crest()
+        .ifPresent(
+            crest ->
+                Logger.recordOutput(
+                    "Drive/CrestSeconds", Timestamps.toSeconds(crest.timestampNanos())));
     Logger.recordOutput("Drive/ClimbDegrees", Math.toDegrees(climb));
     Logger.recordOutput("Drive/Terrain", terrain.phase().name());
     Logger.recordOutput("Drive/TerrainCrossings", terrain.crossings());
@@ -307,6 +340,11 @@ public class Drive implements Mechanism, AutoCloseable {
   /** Where the robot is on raised terrain: level, climbing, or descending. */
   public TerrainCrossing.Phase terrainPhase() {
     return terrain.phase();
+  }
+
+  /** The crest of raised terrain the robot passed this loop, if it passed one: a landmark. */
+  public Optional<TerrainCrossing.Crest> crest() {
+    return terrain.crest();
   }
 
   /**
@@ -331,14 +369,36 @@ public class Drive implements Mechanism, AutoCloseable {
     }
     GyroIOInputsAutoLogged imu = imu();
     if (imu == null) {
-      return new DriveConditions(0, false, tractionLimited, !enabled);
+      return new DriveConditions(0, 0, false, tractionLimited, !enabled);
     }
     // The angle between the robot's up and straight up.
     double tilt = Math.acos(Math.min(1, Math.cos(imu.pitchRad) * Math.cos(imu.rollRad)));
     boolean collision =
         Math.hypot(imu.accelerationXMetersPerSecSq, imu.accelerationYMetersPerSecSq)
             > COLLISION_ACCELERATION;
-    return new DriveConditions(tilt, collision, tractionLimited, !enabled);
+    return new DriveConditions(tilt, groundSlope(tilt), collision, tractionLimited, !enabled);
+  }
+
+  /**
+   * How much of a tilt the ground explains: on a known bump (where the estimate puts the robot,
+   * give or take its wheels' reach and the estimate's doubt), up to its ramps' slope; none on flat
+   * ground.
+   */
+  private double groundSlope(double tilt) {
+    if (ground.bumps().isEmpty() || tilt == 0) {
+      return 0;
+    }
+    double doubt = 2 * estimator.estimate().covariance().largestPositionStdDev();
+    double reach = Math.min(MAX_GROUND_REACH_METERS, wheelReach + doubt);
+    return ground
+        .under(getPose().getTranslation(), reach)
+        .map(bump -> Math.min(tilt, bump.slopeRadians() + GROUND_SLOPE_MARGIN))
+        .orElse(0.0);
+  }
+
+  /** The field's bumps: a tilt one of them explains keeps the wheels trusted. Flat until given. */
+  public void setTerrain(Terrain terrain) {
+    ground = terrain;
   }
 
   /** The IMU to read the robot's attitude from: the gyro's, or the backup's while it's lost. */

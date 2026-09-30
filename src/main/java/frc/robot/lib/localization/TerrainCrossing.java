@@ -1,5 +1,9 @@
 package frc.robot.lib.localization;
 
+import java.util.Optional;
+import org.jspecify.annotations.Nullable;
+import org.wpilib.math.util.MathUtil;
+
 /**
  * Watches the IMU for the robot crossing raised terrain (a bump, a ramp, a platform's edge): up,
  * over the crest, down, and level again. Autos sequence on it (1678 drove over REBUILT's bumps
@@ -7,7 +11,11 @@ package frc.robot.lib.localization;
  * cameras to re-localize); the log shows each crossing.
  *
  * <p>It reads the slope along the direction the robot moves, so a bump taken at an angle, sideways,
- * or backwards reads the same as one taken head on.
+ * or backwards reads the same as one taken head on. Backing down the way it came is no crossing.
+ *
+ * <p>It also marks the crest: halfway between the last steep reading going up and the first going
+ * down, the moment the robot's center was over the top of a symmetric bump, driven at a steady
+ * speed. A crest is a landmark.
  */
 public final class TerrainCrossing {
   /** Where the robot is on the terrain. */
@@ -20,25 +28,44 @@ public final class TerrainCrossing {
   private final double steepRadians;
   private final double levelRadians;
   private final long levelNanos;
+  private final long topNanos;
   private Phase phase = Phase.LEVEL;
   private boolean climbed;
   private long levelSince = Long.MIN_VALUE;
   private int crossings;
+  private long lastSteepClimb = Long.MIN_VALUE;
+  private double climbDirection = Double.NaN;
+  private @Nullable Crest crest;
+
+  /**
+   * The top of a crossing.
+   *
+   * @param timestampNanos when the robot's center was over the crest
+   * @param directionRadians which way it was going, in the field frame; NaN if unknown
+   */
+  public record Crest(long timestampNanos, double directionRadians) {}
 
   /**
    * @param steepRadians a slope at least this steep, along the way the robot moves, is climbing or
    *     descending (1678 used 10°)
    * @param levelRadians a tilt within this is level (1678 used 5°)
    * @param levelSeconds how long the robot must stay level to count as off the terrain
+   * @param topSeconds how long the robot may take between going up and coming down the far side of
+   *     one feature (a flat top): longer is two features, or a stop on top
    */
-  public TerrainCrossing(double steepRadians, double levelRadians, double levelSeconds) {
-    if (!(levelRadians > 0) || !(steepRadians > levelRadians) || !(levelSeconds >= 0)) {
+  public TerrainCrossing(
+      double steepRadians, double levelRadians, double levelSeconds, double topSeconds) {
+    if (!(levelRadians > 0)
+        || !(steepRadians > levelRadians)
+        || !(levelSeconds >= 0)
+        || !(topSeconds > 0)) {
       throw new IllegalArgumentException(
-          "steep must be steeper than level, and both positive; the level time zero or more");
+          "steep must be steeper than level, both positive, and the times positive");
     }
     this.steepRadians = steepRadians;
     this.levelRadians = levelRadians;
     levelNanos = Timestamps.fromSeconds(levelSeconds);
+    topNanos = Timestamps.fromSeconds(topSeconds);
   }
 
   /**
@@ -62,9 +89,13 @@ public final class TerrainCrossing {
    * @param climbRadians the slope along the way the robot moves ({@link #climb}); zero while it
    *     stands still, when there's no way it moves
    * @param tiltRadians how far the robot tilts from level, whichever way
+   * @param directionRadians which way the robot moves, in the field frame; NaN while it stands
+   *     still
    * @return true on the reading a crossing completes: up, over, down, and level again
    */
-  public boolean update(long timestampNanos, double climbRadians, double tiltRadians) {
+  public boolean update(
+      long timestampNanos, double climbRadians, double tiltRadians, double directionRadians) {
+    crest = null;
     boolean level = tiltRadians <= levelRadians;
     if (!level) {
       levelSince = Long.MIN_VALUE;
@@ -72,21 +103,27 @@ public final class TerrainCrossing {
       levelSince = timestampNanos;
     }
     boolean settled = level && timestampNanos - levelSince >= levelNanos;
+    if (climbRadians >= steepRadians) {
+      lastSteepClimb = timestampNanos;
+      climbDirection = directionRadians;
+    }
     switch (phase) {
       case LEVEL -> {
         if (climbRadians >= steepRadians) {
           phase = Phase.CLIMBING;
           climbed = true;
         } else if (climbRadians <= -steepRadians) {
-          phase = Phase.DESCENDING; // down off a platform: not a crossing on its own
-          climbed = false;
+          // Down the far side of a flat top just climbed, or off a platform: not a crossing.
+          phase = Phase.DESCENDING;
+          climbed = crestPassed(timestampNanos, directionRadians);
         }
       }
       case CLIMBING -> {
         if (climbRadians <= -steepRadians) {
           phase = Phase.DESCENDING;
+          climbed = crestPassed(timestampNanos, directionRadians);
         } else if (settled) {
-          phase = Phase.LEVEL; // backed off, or up onto a platform
+          phase = Phase.LEVEL; // backed off, or up onto a flat top
           climbed = false;
         }
       }
@@ -107,8 +144,34 @@ public final class TerrainCrossing {
     return false;
   }
 
+  /**
+   * On the first steep reading down after a climb the same way, the robot has passed the crest:
+   * halfway between that climb's last steep reading and this one. Down the way it came up is no
+   * crest.
+   */
+  private boolean crestPassed(long timestampNanos, double directionRadians) {
+    if (lastSteepClimb == Long.MIN_VALUE || timestampNanos - lastSteepClimb > topNanos) {
+      return false;
+    }
+    boolean sameWay =
+        Double.isNaN(directionRadians)
+            || Double.isNaN(climbDirection)
+            || Math.abs(MathUtil.angleModulus(directionRadians - climbDirection)) < Math.PI / 2;
+    if (!sameWay) {
+      return false;
+    }
+    crest = new Crest(lastSteepClimb + (timestampNanos - lastSteepClimb) / 2, climbDirection);
+    lastSteepClimb = Long.MIN_VALUE;
+    return true;
+  }
+
   public Phase phase() {
     return phase;
+  }
+
+  /** The crest this reading found, if it found one. */
+  public Optional<Crest> crest() {
+    return Optional.ofNullable(crest);
   }
 
   /** How many crossings have completed. */

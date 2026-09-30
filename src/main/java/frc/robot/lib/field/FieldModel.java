@@ -18,10 +18,11 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.shape.Rectangle2d;
 
 /**
- * One season's field: its size, AprilTags, and symmetry, and the start positions, places, and zones
- * robot code refers to. Built once at startup from a tag layout (WPILib's for the season, or one
- * measured at an event) and never changed after. Every place and zone is checked against the layout
- * as the model is built, so a wrong tag number fails at startup, and first in the tests.
+ * One season's field: its size, AprilTags, and symmetry, the start positions, places, and zones
+ * robot code refers to, and the terrain robots drive over. Built once at startup from a tag layout
+ * (WPILib's for the season, or one measured at an event) and never changed after. Every place and
+ * zone is checked against the layout as the model is built, so a wrong tag number fails at startup,
+ * and first in the tests.
  *
  * <p>Everything is written for the blue alliance, and {@link #forAlliance} is the one conversion to
  * red (see the package documentation).
@@ -46,6 +47,7 @@ public final class FieldModel {
   private final List<Place> starts;
   private final List<Place> places;
   private final List<Zone> zones;
+  private final Terrain terrain;
 
   /**
    * @param layout the field's size and AprilTags; the model keeps its own copy
@@ -58,6 +60,21 @@ public final class FieldModel {
    */
   public FieldModel(
       Field layout, Symmetry symmetry, List<Place> starts, List<Place> places, List<Zone> zones) {
+    this(layout, symmetry, starts, places, zones, List.of());
+  }
+
+  /**
+   * @param bumps the bumps on the blue alliance's half, each named as blue's drivers would ("Left
+   *     bump"): the model adds each one's partner on red's half, and names them "(blue)" and
+   *     "(red)"
+   */
+  public FieldModel(
+      Field layout,
+      Symmetry symmetry,
+      List<Place> starts,
+      List<Place> places,
+      List<Zone> zones,
+      List<Bump> bumps) {
     name = layout.getName();
     length = layout.getFieldLength();
     width = layout.getFieldWidth();
@@ -71,6 +88,18 @@ public final class FieldModel {
     this.starts = List.copyOf(starts);
     this.places = List.copyOf(places);
     this.zones = List.copyOf(zones);
+    List<Bump> both = new ArrayList<>();
+    for (Bump bump : bumps) {
+      both.add(
+          new Bump(
+              bump.name() + " (blue)",
+              bump.crestStart(),
+              bump.crestEnd(),
+              bump.heightMeters(),
+              bump.depthMeters()));
+      both.add(bump.image(bump.name() + " (red)", symmetry, length, width));
+    }
+    terrain = new Terrain(both);
     check();
   }
 
@@ -124,6 +153,11 @@ public final class FieldModel {
 
   public List<Zone> zones() {
     return zones;
+  }
+
+  /** The bumps robots drive over, on both halves of the field. */
+  public Terrain terrain() {
+    return terrain;
   }
 
   /**
@@ -275,6 +309,15 @@ public final class FieldModel {
         if (!contains(area.getCenter().getTranslation())) {
           throw new IllegalArgumentException(zone.name() + ": an area is off the field");
         }
+      }
+    }
+    Set<String> bumpNames = new HashSet<>();
+    for (Bump bump : terrain.bumps()) {
+      if (!bumpNames.add(bump.name())) {
+        throw new IllegalArgumentException("two bumps are named " + bump.name());
+      }
+      if (!contains(bump.crestStart()) || !contains(bump.crestEnd())) {
+        throw new IllegalArgumentException(bump.name() + ": its crest runs off the field");
       }
     }
   }

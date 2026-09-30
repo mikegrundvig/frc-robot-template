@@ -43,7 +43,7 @@ class EventsTest {
   private static final String KP = "/Machine/drive/gains/kP";
   private static final JsonType<Object> JSON = Jsonb.builder().build().type(Object.class);
 
-  /** One server-sent event as it arrived: its name and data, or ":" and nothing for a comment. */
+  /** One server-sent event as it arrived: its name and data. */
   record Sse(String event, String data) {
     Map<String, Object> json() {
       return asMap(JSON.fromJson(data));
@@ -158,9 +158,7 @@ class EventsTest {
       try {
         lines.forEach(
             line -> {
-              if (line.startsWith(":")) {
-                events.add(new Sse(":", ""));
-              } else if (line.isEmpty()) {
+              if (line.isEmpty()) {
                 if (event.size() == 2) {
                   events.add(
                       new Sse(
@@ -238,14 +236,15 @@ class EventsTest {
     assertThat(page.events).as("one change, one patch").isEmpty();
   }
 
+  /** An event, not a comment line: a browser's EventSource never shows the page a comment. */
   @Test
-  void aQuietStreamSaysItsStillThereWithACommentLine() throws Exception {
+  void aQuietStreamSaysItsStillThereWithAHeartbeat() throws Exception {
     Listener page = new Listener(start(Duration.ofMillis(50)));
     page.snapshot();
 
     Sse quiet = Objects.requireNonNull(page.events.poll(5, TimeUnit.SECONDS));
 
-    assertThat(quiet).isEqualTo(new Sse(":", ""));
+    assertThat(quiet).isEqualTo(new Sse("heartbeat", "{}"));
   }
 
   @Test

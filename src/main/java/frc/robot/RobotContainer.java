@@ -18,6 +18,7 @@ import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
+import frc.robot.subsystems.drive.GyroIOSystemcore;
 import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.drive.SensorErrors;
@@ -185,6 +186,7 @@ public final class RobotContainer implements AutoCloseable {
     driver = new CommandGamepad(scheduler, DRIVER_PORT);
     ModuleIO[] modules;
     GyroIO gyro;
+    GyroIO backupGyro = new GyroIO() {};
     Lock odometryLock = new ReentrantLock();
     if (mode == Constants.Mode.SIM) {
       // The simulator knows where the robot really is, and its sensors report that with errors,
@@ -197,6 +199,7 @@ public final class RobotContainer implements AutoCloseable {
       hardware = null;
       modules = simulation.modules();
       gyro = simulation.gyro();
+      backupGyro = simulation.backupGyro();
     } else if (mode == Constants.Mode.REAL && robot.wiring().isPresent()) {
       simulation = null;
       PhoenixDrivetrain phoenix =
@@ -204,6 +207,7 @@ public final class RobotContainer implements AutoCloseable {
       hardware = phoenix;
       modules = phoenix.modules();
       gyro = phoenix.gyro();
+      backupGyro = new GyroIOSystemcore(robot.wiring().get().systemcoreMount());
       odometryLock = phoenix.odometryLock();
     } else {
       simulation = null;
@@ -230,7 +234,17 @@ public final class RobotContainer implements AutoCloseable {
                 PoseCovariance.fromStdDevs(field.length(), field.width(), Math.PI),
                 "not placed yet"));
     estimate = estimator.estimate();
-    drive = new Drive("Drive", gyro, modules, body, drivetrain, scheduler, estimator, odometryLock);
+    drive =
+        new Drive(
+            "Drive",
+            gyro,
+            backupGyro,
+            modules,
+            body,
+            drivetrain,
+            scheduler,
+            estimator,
+            odometryLock);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (simulation != null) {
       simulation.place(middle);

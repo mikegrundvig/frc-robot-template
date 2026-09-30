@@ -38,6 +38,7 @@ public final class DriveSimulation {
 
   private final ModuleIOSim[] modules = new ModuleIOSim[4];
   private final GyroIOSim gyro;
+  private final GyroIOSim backupGyro;
   private final double[] trueRadiusMeters = new double[4];
   private final SwerveKinematicsModel kinematics;
   private OdometrySample lastTrue;
@@ -76,7 +77,8 @@ public final class DriveSimulation {
       modules[i] = new ModuleIOSim(config, Math.toRadians(errors.steerOffsetDegrees().get(i)));
       trueRadiusMeters[i] = radius * errors.wheelRadiusScale().get(i);
     }
-    gyro = new GyroIOSim(this, errors);
+    gyro = new GyroIOSim(this, errors.gyro(), errors.seed());
+    backupGyro = new GyroIOSim(this, errors.backupGyro(), errors.seed() + 1);
     lastTrue = trueWheels();
     gripLimit = config.wheelCoefficientOfFriction() * GRAVITY_METERS_PER_SECOND_SQUARED;
   }
@@ -89,6 +91,26 @@ public final class DriveSimulation {
   /** The robot's gyro. */
   public GyroIO gyro() {
     return gyro;
+  }
+
+  /** The backup IMU (Systemcore's own), read once a loop. */
+  public GyroIO backupGyro() {
+    return backupGyro;
+  }
+
+  /** Unplugs the gyro, or plugs it back in. */
+  public void disconnectGyro(boolean disconnected) {
+    gyro.setConnected(!disconnected);
+  }
+
+  /** Freezes the gyro: it keeps reporting, the same yaw every time. */
+  public void freezeGyro(boolean frozen) {
+    gyro.setFrozen(frozen);
+  }
+
+  /** Unplugs the backup IMU, or plugs it back in. */
+  public void disconnectBackupGyro(boolean disconnected) {
+    backupGyro.setConnected(!disconnected);
   }
 
   /**
@@ -130,6 +152,9 @@ public final class DriveSimulation {
         module.sample(readingTime);
       }
       gyro.sample(readingTime);
+      if (remaining == 0) {
+        backupGyro.sample(readingTime);
+      }
     }
   }
 

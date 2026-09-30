@@ -8,12 +8,16 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.DriveConditions;
+import frc.robot.lib.localization.ImuCrossCheck;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.lib.localization.TerrainCrossing;
+import frc.robot.lib.localization.YawTrack;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
@@ -70,6 +74,25 @@ public class Drive implements Mechanism, AutoCloseable {
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
   private final GyroIOInputsAutoLogged gyroInputs = new GyroIOInputsAutoLogged();
+  private final GyroIO backupGyroIO;
+  private final GyroIOInputsAutoLogged backupInputs = new GyroIOInputsAutoLogged();
+  private final YawTrack gyroYaws = new YawTrack();
+  private final YawTrack backupYaws = new YawTrack();
+
+  /**
+   * The gyro and the backup IMU should turn alike: over a second, within 3° and 5% of the turn
+   * (their scales differ a little).
+   */
+  private final ImuCrossCheck crossCheck = new ImuCrossCheck(1.0, Math.toRadians(3), 0.05);
+
+  /** What turns odometry: the gyro, the backup IMU while the gyro is lost, or the wheels. */
+  public enum YawSource {
+    GYRO,
+    BACKUP,
+    WHEELS
+  }
+
+  private YawSource yawSource = YawSource.GYRO;
   private final Module[] modules = new Module[4];
   private final SwerveDriveKinematics kinematics;
   private final SwerveKinematicsModel odometry;
@@ -94,6 +117,8 @@ public class Drive implements Mechanism, AutoCloseable {
       new TerrainCrossing(Math.toRadians(10), Math.toRadians(5), 0.1);
 
   private final Alert gyroDisconnectedAlert;
+  private final Alert usingBackupAlert;
+  private final Alert imusDisagreeAlert;
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
 
   /**
@@ -110,16 +135,28 @@ public class Drive implements Mechanism, AutoCloseable {
       Supplier<SwerveConfig> config,
       Scheduler scheduler,
       PoseEstimator estimator) {
-    this(name, gyroIO, moduleIOs, body, config, scheduler, estimator, new ReentrantLock());
+    this(
+        name,
+        gyroIO,
+        new GyroIO() {},
+        moduleIOs,
+        body,
+        config,
+        scheduler,
+        estimator,
+        new ReentrantLock());
   }
 
   /**
+   * @param backupGyroIO a second IMU (Systemcore's own): checked against the gyro, and turning
+   *     odometry while the gyro is lost
    * @param odometryLock held while the drivetrain reads its IO, when a background thread records
    *     the devices' high-rate readings, so every device's readings stay in step
    */
   public Drive(
       String name,
       GyroIO gyroIO,
+      GyroIO backupGyroIO,
       ModuleIO[] moduleIOs,
       Body body,
       Supplier<SwerveConfig> config,
@@ -132,6 +169,7 @@ public class Drive implements Mechanism, AutoCloseable {
     this.config = config;
     this.scheduler = scheduler;
     this.gyroIO = gyroIO;
+    this.backupGyroIO = backupGyroIO;
     SwerveConfig initial = config.get();
     for (int i = 0; i < 4; i++) {
       modules[i] = new Module(moduleIOs[i], i, initial.modules().wheelRadius());
@@ -149,6 +187,14 @@ public class Drive implements Mechanism, AutoCloseable {
             "gyroDisconnected",
             "Gyro disconnected: heading estimated from wheels, and will drift",
             Alert.Level.HIGH);
+    usingBackupAlert =
+        new Alert(
+            name,
+            "usingBackupImu",
+            "Gyro disconnected: heading from the backup IMU",
+            Alert.Level.MEDIUM);
+    imusDisagreeAlert =
+        new Alert(name, "imusDisagree", "The gyro and the backup IMU disagree", Alert.Level.MEDIUM);
     for (int i = 0; i < 4; i++) {
       moduleDisconnectedAlerts[i] =
           new Alert(
@@ -177,6 +223,7 @@ public class Drive implements Mechanism, AutoCloseable {
     odometryLock.lock();
     try {
       gyroIO.updateInputs(gyroInputs);
+      backupGyroIO.updateInputs(backupInputs);
       for (Module module : modules) {
         module.readInputs();
       }
@@ -184,6 +231,7 @@ public class Drive implements Mechanism, AutoCloseable {
       odometryLock.unlock();
     }
     Logger.processInputs("Drive/Gyro", gyroInputs);
+    Logger.processInputs("Drive/BackupGyro", backupInputs);
     for (Module module : modules) {
       module.logInputs();
     }
@@ -198,8 +246,10 @@ public class Drive implements Mechanism, AutoCloseable {
     estimator.setConditions(conditions);
     updateOdometry();
     watchTerrain();
+    checkImus();
 
-    gyroDisconnectedAlert.set(!gyroInputs.connected);
+    gyroDisconnectedAlert.set(!gyroInputs.connected && !backupInputs.connected);
+    usingBackupAlert.set(!gyroInputs.connected && backupInputs.connected);
     for (int i = 0; i < 4; i++) {
       moduleDisconnectedAlerts[i].set(!modules[i].isConnected());
     }
@@ -208,6 +258,35 @@ public class Drive implements Mechanism, AutoCloseable {
     Logger.recordOutput("Drive/TiltDegrees", Math.toDegrees(conditions.tiltRadians()));
     Logger.recordOutput("Drive/Collision", conditions.collision());
     Logger.recordOutput("Drive/TractionLimited", conditions.tractionLimited());
+  }
+
+  /**
+   * While both report, compares the gyro with the backup IMU: a sustained disagreement means one is
+   * failing, loose, or needs its scale calibrated. It raises the question rather than silently
+   * picking one.
+   */
+  private void checkImus() {
+    if (gyroInputs.connected && backupInputs.connected) {
+      crossCheck.update(
+          RobotController.getTime(), gyroInputs.yaw.getRadians(), backupInputs.yaw.getRadians());
+    } else {
+      crossCheck.reset();
+    }
+    double disagreement = Math.toDegrees(crossCheck.disagreementRadians());
+    imusDisagreeAlert.setText(
+        String.format(
+            Locale.ROOT,
+            "The gyro and the backup IMU disagree by %.0f° over the last second: one is failing,"
+                + " loose, or needs its scale calibrated",
+            Math.abs(disagreement)));
+    imusDisagreeAlert.set(crossCheck.disagrees());
+    Logger.recordOutput("Drive/ImuDisagreementDegrees", disagreement);
+    Logger.recordOutput("Drive/YawSource", yawSource.name());
+  }
+
+  /** What turns odometry now: the gyro, the backup IMU, or the wheels. */
+  public YawSource yawSource() {
+    return yawSource;
   }
 
   /** Follows the robot over raised terrain: the slope along the way it moves, and its tilt. */
@@ -240,8 +319,8 @@ public class Drive implements Mechanism, AutoCloseable {
   /**
    * What the IMU and the motors say about trusting the wheels: the robot's tilt, a jolt beyond
    * driving, and wheels at the edge of their grip (a motor at its current limit, or a wheel well
-   * short of its commanded speed), and whether people might be carrying it. Without the gyro, only
-   * the motors can say.
+   * short of its commanded speed), and whether people might be carrying it. The gyro's IMU says, or
+   * the backup's while the gyro is lost; without either, only the motors can say.
    */
   private DriveConditions readConditions(boolean enabled) {
     boolean tractionLimited = false;
@@ -249,16 +328,24 @@ public class Drive implements Mechanism, AutoCloseable {
       tractionLimited |=
           module.isTorqueLimited() || module.speedDeficitMetersPerSecond() > SPEED_DEFICIT;
     }
-    if (!gyroInputs.connected) {
+    GyroIOInputsAutoLogged imu = imu();
+    if (imu == null) {
       return new DriveConditions(0, false, tractionLimited, !enabled);
     }
     // The angle between the robot's up and straight up.
-    double tilt =
-        Math.acos(Math.min(1, Math.cos(gyroInputs.pitchRad) * Math.cos(gyroInputs.rollRad)));
+    double tilt = Math.acos(Math.min(1, Math.cos(imu.pitchRad) * Math.cos(imu.rollRad)));
     boolean collision =
-        Math.hypot(gyroInputs.accelerationXMetersPerSecSq, gyroInputs.accelerationYMetersPerSecSq)
+        Math.hypot(imu.accelerationXMetersPerSecSq, imu.accelerationYMetersPerSecSq)
             > COLLISION_ACCELERATION;
     return new DriveConditions(tilt, collision, tractionLimited, !enabled);
+  }
+
+  /** The IMU to read the robot's attitude from: the gyro's, or the backup's while it's lost. */
+  private @Nullable GyroIOInputsAutoLogged imu() {
+    if (gyroInputs.connected) {
+      return gyroInputs;
+    }
+    return backupInputs.connected ? backupInputs : null;
   }
 
   /** Sends new gains and limits to the modules, and keeps the limits driving uses. */
@@ -290,18 +377,28 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /**
    * Feeds every high-rate reading since the last loop to the estimator, as the robot's motion
-   * between readings, with the gyro's yaw at each. When the gyro is lost, the estimator turns the
-   * robot by the wheels instead, and says so.
+   * between readings, with the yaw at each: the gyro's, or while it's lost the backup IMU's
+   * (interpolated between its once-a-loop readings), or with neither, the wheels' turning, which
+   * the estimator says drifts. The step where the source changes turns by the wheels too, so the
+   * estimator starts over from the new source's reading instead of taking the two IMUs' different
+   * zeros as a turn.
    */
   private void updateOdometry() {
     int readings = Integer.MAX_VALUE;
     for (Module module : modules) {
       readings = Math.min(readings, module.odometryReadings());
     }
-    boolean gyroHasReadings =
-        gyroInputs.connected
-            && gyroInputs.odometryYawsRad.length >= readings
-            && gyroInputs.odometryTimestampsNanos.length >= readings;
+    track(gyroYaws, gyroInputs);
+    track(backupYaws, backupInputs);
+    YawSource source =
+        gyroYaws.hasReadings()
+            ? YawSource.GYRO
+            : backupYaws.hasReadings() ? YawSource.BACKUP : YawSource.WHEELS;
+    YawTrack yaws = source == YawSource.GYRO ? gyroYaws : backupYaws;
+    boolean switching = readings > 0 && source != yawSource;
+    if (readings > 0) {
+      yawSource = source;
+    }
     for (int k = 0; k < readings; k++) {
       double[] distances = new double[4];
       double[] angles = new double[4];
@@ -313,20 +410,35 @@ public class Drive implements Mechanism, AutoCloseable {
           new OdometrySample(modules[0].odometryTimestampNanos(k), distances, angles);
       BodyMotion motion =
           lastReading == null ? new BodyMotion(0, 0, 0, 0) : odometry.motion(lastReading, reading);
-      double yaw = gyroHasReadings ? gyroInputs.odometryYawsRad[k] : 0;
-      estimator.addOdometry(reading.timestampNanos(), motion, yaw, gyroHasReadings);
+      boolean turnedByImu = source != YawSource.WHEELS && !(switching && k == 0);
+      double yaw = source == YawSource.WHEELS ? 0 : yaws.at(reading.timestampNanos());
+      estimator.addOdometry(reading.timestampNanos(), motion, yaw, turnedByImu);
       lastReading = reading;
     }
   }
 
-  /** The robot's pitch, from the IMU: zero without it. See {@link GyroIO} for the convention. */
-  public double pitchRadians() {
-    return gyroInputs.connected ? gyroInputs.pitchRad : 0;
+  /** Takes an IMU's readings this loop, or forgets them all while it's lost. */
+  private static void track(YawTrack yaws, GyroIOInputsAutoLogged imu) {
+    int readings = Math.min(imu.odometryTimestampsNanos.length, imu.odometryYawsRad.length);
+    if (!imu.connected || readings == 0) {
+      yaws.clear();
+      return;
+    }
+    yaws.update(
+        Arrays.copyOf(imu.odometryTimestampsNanos, readings),
+        Arrays.copyOf(imu.odometryYawsRad, readings));
   }
 
-  /** The robot's roll, from the IMU: zero without it. */
+  /** The robot's pitch, from the IMU: zero without one. See {@link GyroIO} for the convention. */
+  public double pitchRadians() {
+    GyroIOInputsAutoLogged imu = imu();
+    return imu == null ? 0 : imu.pitchRad;
+  }
+
+  /** The robot's roll, from the IMU: zero without one. */
   public double rollRadians() {
-    return gyroInputs.connected ? gyroInputs.rollRad : 0;
+    GyroIOInputsAutoLogged imu = imu();
+    return imu == null ? 0 : imu.rollRad;
   }
 
   /** Where the robot is, as the pose estimator has it. */
@@ -418,6 +530,18 @@ public class Drive implements Mechanism, AutoCloseable {
     return gyroInputs.yaw;
   }
 
+  boolean isGyroDisconnectedAlertActive() {
+    return gyroDisconnectedAlert.get();
+  }
+
+  boolean isUsingBackupAlertActive() {
+    return usingBackupAlert.get();
+  }
+
+  boolean isImuDisagreementAlertActive() {
+    return imusDisagreeAlert.get();
+  }
+
   /** What the IMU and the motors said about trusting the wheels this loop. */
   DriveConditions conditions() {
     return conditions;
@@ -426,6 +550,8 @@ public class Drive implements Mechanism, AutoCloseable {
   @Override
   public void close() {
     gyroDisconnectedAlert.close();
+    usingBackupAlert.close();
+    imusDisagreeAlert.close();
     for (Alert alert : moduleDisconnectedAlerts) {
       alert.close();
     }

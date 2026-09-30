@@ -12,6 +12,9 @@
  *       frc.robot.lib.localization.EstimatorConfig}. What it reports is a {@link
  *       frc.robot.lib.localization.LocalizationEstimate}; {@link
  *       frc.robot.lib.localization.LocalizationGate} says whether that's good enough to score on.
+ *       Inside it, {@code OdometryHistory} keeps the steps a late measurement is replayed through,
+ *       {@code PoseFilter} does the filter's math, and {@code Recovery} judges when the cameras
+ *       agree that odometry is wrong.
  *   <li><b>Wheels:</b> an {@link frc.robot.lib.localization.OdometrySample} of every wheel, turned
  *       into the robot's {@link frc.robot.lib.localization.BodyMotion} by the drivetrain's {@link
  *       frc.robot.lib.localization.DriveKinematicsModel} (swerve or differential). {@link

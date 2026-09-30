@@ -8,6 +8,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.timing.LoopMonitor;
 import java.io.File;
 import org.jspecify.annotations.Nullable;
@@ -95,7 +96,20 @@ public class Robot extends LoggedRobot {
             Robots.SIM,
             () -> pitwall.config().drivetrain(),
             Rebuilt.field(Robots.SIM.body()));
-    pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
+    Calibration calibration = container.calibration();
+    pitwall
+        .actions()
+        .add("Drive forward slowly (2 s)", container::driveCheck)
+        .add("Calibrate the gyro's scale (5 turns where cameras see tags)", calibration::gyroScale)
+        .add("Calibrate the wheel radius (2 slow turns in place, 30 s)", calibration::wheelRadius)
+        .add("Check the IMU reads level (2 s, on a level floor)", calibration::level);
+    for (CameraConfig camera : Robots.SIM.cameras()) {
+      pitwall
+          .actions()
+          .add(
+              "Calibrate the " + camera.name() + " camera's mount (20 s, drive slowly past tags)",
+              () -> calibration.cameraMount(camera.name()));
+    }
     if (noLogDrive != null) {
       noLogDriveAlert = new Alert("Loop", "noLogDrive", noLogDrive, Alert.Level.HIGH);
       noLogDriveAlert.set(true);
@@ -107,6 +121,7 @@ public class Robot extends LoggedRobot {
         .add("Placement", () -> container.placement().describe())
         .add("Localization", container::localization)
         .add("Scoring", container::scoring)
+        .add("Calibration", calibration::lastResult)
         .add("Cameras", container::cameras);
   }
 

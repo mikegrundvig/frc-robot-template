@@ -35,13 +35,18 @@ final class GyroIOPigeon2 implements GyroIO {
   private final StatusSignal<LinearAcceleration> accelerationX;
   private final StatusSignal<LinearAcceleration> accelerationY;
   private final double radiansPerYawUnit;
+  private final double yawScale;
   private final Queue<Long> odometryTimes;
   private final Queue<Double> odometryYaws;
 
   /** Disconnected once silent for half a second, not at one glitch. */
   private final Debouncer connected = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
-  GyroIOPigeon2(int id, CANBus bus, PhoenixOdometryThread odometry) {
+  /**
+   * @param yawScale the gyro's measured scale: its readings times this are the true rotation
+   */
+  GyroIOPigeon2(int id, CANBus bus, double yawScale, PhoenixOdometryThread odometry) {
+    this.yawScale = yawScale;
     Pigeon2 pigeon = new Pigeon2(id, bus);
     yaw = pigeon.getYaw();
     yawVelocity = pigeon.getAngularVelocityZWorld();
@@ -68,8 +73,8 @@ final class GyroIOPigeon2 implements GyroIO {
         BaseStatusSignal.refreshAll(yaw, yawVelocity, pitch, roll, accelerationX, accelerationY)
             .isOK();
     inputs.connected = connected.calculate(ok);
-    inputs.yaw = new Rotation2d(yaw.getValue().in(Radians));
-    inputs.yawVelocityRadPerSec = yawVelocity.getValue().in(RadiansPerSecond);
+    inputs.yaw = new Rotation2d(yawScale * yaw.getValue().in(Radians));
+    inputs.yawVelocityRadPerSec = yawScale * yawVelocity.getValue().in(RadiansPerSecond);
     inputs.pitchRad = pitch.getValue().in(Radians);
     inputs.rollRad = roll.getValue().in(Radians);
     inputs.accelerationXMetersPerSecSq = accelerationX.getValue().in(MetersPerSecondPerSecond);
@@ -87,7 +92,7 @@ final class GyroIOPigeon2 implements GyroIO {
         break; // cannot happen while the lock is held
       }
       times[k] = time;
-      yaws[k] = reading * radiansPerYawUnit;
+      yaws[k] = yawScale * reading * radiansPerYawUnit;
     }
     inputs.odometryTimestampsNanos = times;
     inputs.odometryYawsRad = yaws;

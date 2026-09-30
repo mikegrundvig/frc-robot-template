@@ -29,6 +29,7 @@ import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveDriveKinematics;
 import org.wpilib.math.kinematics.SwerveModulePosition;
@@ -525,9 +526,23 @@ public class Drive implements Mechanism, AutoCloseable {
         .named("Drive with joysticks");
   }
 
-  /** The gyro's yaw, as of this loop. */
-  Rotation2d gyroYaw() {
+  /** The gyro's yaw, as of this loop: for calibrating against, and WPILib's odometry. */
+  public Rotation2d gyroYaw() {
     return gyroInputs.yaw;
+  }
+
+  /** How far each wheel has turned, in radians: front left, front right, back left, back right. */
+  public double[] wheelRotationsRadians() {
+    double[] rotations = new double[4];
+    for (int i = 0; i < 4; i++) {
+      rotations[i] = modules[i].wheelRotationRadians();
+    }
+    return rotations;
+  }
+
+  /** Where each wheel touches the floor, from the robot's center. */
+  public Translation2d[] moduleLocations() {
+    return kinematics.getModules();
   }
 
   boolean isGyroDisconnectedAlertActive() {

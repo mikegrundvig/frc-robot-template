@@ -15,6 +15,7 @@ import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.Vision;
 import java.time.LocalDate;
 import java.util.Locale;
@@ -60,6 +61,7 @@ final class Calibration {
 
   private final Drive drive;
   private final Vision vision;
+  private final Localization localization;
   private final RobotConfig robot;
   private final Supplier<SwerveConfig> drivetrain;
   private final Supplier<LocalDate> today;
@@ -68,11 +70,13 @@ final class Calibration {
   Calibration(
       Drive drive,
       Vision vision,
+      Localization localization,
       RobotConfig robot,
       Supplier<SwerveConfig> drivetrain,
       Supplier<LocalDate> today) {
     this.drive = drive;
     this.vision = vision;
+    this.localization = localization;
     this.robot = robot;
     this.drivetrain = drivetrain;
     this.today = today;
@@ -244,7 +248,7 @@ final class Calibration {
             coroutine -> {
               LevelCheck level = new LevelCheck();
               for (int i = 0; i < RobotLoop.loops(LEVEL_SECONDS); i++) {
-                level.add(drive.pitchRadians(), drive.rollRadians());
+                level.add(localization.pitchRadians(), localization.rollRadians());
                 coroutine.yield();
               }
               report(level.describe(LEVEL_TOLERANCE_RADIANS) + ", " + today.get());

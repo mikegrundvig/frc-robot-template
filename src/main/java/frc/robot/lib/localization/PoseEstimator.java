@@ -36,7 +36,7 @@ import org.wpilib.math.util.MathUtil;
  * <p>Pure logic: no clock, no hardware, no static state. Every input comes in through a method,
  * stamped with its capture time, so a replay reproduces every decision. Use it from one thread.
  */
-public final class PoseEstimator {
+public final class PoseEstimator implements CameraLocalizer {
   private static final long VELOCITY_WINDOW_NANOS = 100_000_000L;
 
   /** An uncertainty as big as the field: the estimate knows nothing. */
@@ -283,6 +283,7 @@ public final class PoseEstimator {
   }
 
   /** A camera measurement, to apply at the next {@link #update}. */
+  @Override
   public void addVision(VisionMeasurement measurement) {
     pending.add(measurement);
   }
@@ -400,6 +401,7 @@ public final class PoseEstimator {
    *
    * @return empty outside the history
    */
+  @Override
   public Optional<Pose2d> poseAt(long timestampNanos) {
     if (!started || timestampNanos < time[oldest]) {
       return Optional.empty();

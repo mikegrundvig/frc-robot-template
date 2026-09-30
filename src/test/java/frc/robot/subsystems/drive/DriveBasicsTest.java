@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import frc.robot.Robots;
 import frc.robot.SimTestSupport;
 import frc.robot.sim.DriveSimHarness;
+import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,24 +82,17 @@ class DriveBasicsTest {
 
   @Test
   void needsExactlyFourModules() {
-    ModuleIO[] three = {new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}};
-
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new Drive(
-                "ThreeModules",
-                new GyroIO() {},
-                three,
-                Robots.SIM.body(),
-                Robots.SIM::drivetrain,
-                harness.scheduler,
-                DriveSimHarness.estimatorAt(Pose2d.ZERO)));
+        () -> hardware(new GyroIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}));
   }
 
-  /** An IMU that sends values that aren't numbers counts as lost, and the robot program runs on. */
+  /**
+   * An IMU that sends values that aren't numbers is reported as it read, for localization to judge
+   * (it counts as lost there), and the drivetrain runs on.
+   */
   @Test
-  void anImuThatSendsNaNCountsAsLost() {
+  void anImuThatSendsNaNIsReportedAsUnusable() {
     GyroIO sendingNaN =
         new GyroIO() {
           @Override
@@ -110,23 +105,11 @@ class DriveBasicsTest {
             inputs.odometryYawsRad = new double[] {Double.NaN};
           }
         };
-    ModuleIO[] modules = {
-      new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}
-    };
-    try (Drive drive =
-        new Drive(
-            "NaNImu",
-            sendingNaN,
-            modules,
-            Robots.SIM.body(),
-            Robots.SIM::drivetrain,
-            harness.scheduler,
-            DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+    try (Drive drive = drive("NaNImu", hardware(sendingNaN, fourModules()))) {
       drive.periodic(true);
 
-      assertTrue(drive.isGyroDisconnectedAlertActive());
-      assertEquals(0.0, drive.pitchRadians(), "no IMU, no tilt");
-      assertTrue(Double.isFinite(drive.getPose().getX()));
+      assertTrue(drive.readings().gyro().reporting());
+      assertFalse(drive.readings().gyro().usable());
     }
   }
 
@@ -140,20 +123,38 @@ class DriveBasicsTest {
             inputs.unconfigured = "drive motor 1";
           }
         };
-    ModuleIO[] modules = {missed, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}};
-    try (Drive drive =
-        new Drive(
-            "Unconfigured",
-            new GyroIO() {},
-            modules,
-            Robots.SIM.body(),
-            Robots.SIM::drivetrain,
-            harness.scheduler,
-            DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+    DriveHardware hardware =
+        hardware(new GyroIO() {}, missed, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {});
+    try (Drive drive = drive("Unconfigured", hardware)) {
       drive.periodic(false);
 
       assertTrue(drive.isModuleUnconfiguredAlertActive(0));
       assertFalse(drive.isModuleUnconfiguredAlertActive(1));
     }
+  }
+
+  private Drive drive(String name, DriveHardware hardware) {
+    return new Drive(
+        name,
+        hardware,
+        Robots.SIM.body(),
+        Robots.SIM::drivetrain,
+        harness.scheduler,
+        () -> Pose2d.ZERO);
+  }
+
+  private static ModuleIO[] fourModules() {
+    return new ModuleIO[] {
+      new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}
+    };
+  }
+
+  private static DriveHardware hardware(GyroIO gyro, ModuleIO... modules) {
+    return DriveHardware.builder()
+        .modules(List.of(modules))
+        .gyro(gyro)
+        .backupImu(new GyroIO() {})
+        .odometryLock(new ReentrantLock())
+        .build();
   }
 }

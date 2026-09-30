@@ -48,7 +48,7 @@ final class Dashboard {
     Telemetry.log(STATION, robot.allianceStation());
     Telemetry.log(ON_START, robot.placement().status() == Placement.Status.READY);
     Telemetry.log(PLACEMENT, robot.placement().describe());
-    Telemetry.log(LOCALIZATION, robot.localization());
+    Telemetry.log(LOCALIZATION, robot.localizationStatus());
     Telemetry.log(CAMERAS, robot.cameras());
     Telemetry.log(BATTERY_VOLTS, RobotController.getBatteryVoltage());
     Telemetry.log(LOOP, robot.loopStatus());

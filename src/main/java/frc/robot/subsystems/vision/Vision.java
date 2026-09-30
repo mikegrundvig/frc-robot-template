@@ -5,9 +5,9 @@ import frc.robot.lib.calibration.HeadingAverage;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.AttitudeHistory;
+import frc.robot.lib.localization.CameraLocalizer;
 import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
@@ -57,7 +57,7 @@ public final class Vision implements AutoCloseable {
   private final List<CameraConfig> cameras;
   private final CameraIO[] ios;
   private final CameraIOInputsAutoLogged[] inputs;
-  private final PoseEstimator estimator;
+  private final CameraLocalizer localizer;
   private final FieldModel field;
   private final VisionPipeline pipeline;
   private final Alert[] disconnected;
@@ -124,17 +124,17 @@ public final class Vision implements AutoCloseable {
   /**
    * @param cameras each camera's configuration, in the same order as its IO
    * @param ios each camera's door to its vision software
-   * @param estimator where measurements go
+   * @param localizer where the robot was when each image was taken, and where measurements go
    * @param field the field, whose tags the cameras see
    */
   public Vision(
-      List<CameraConfig> cameras, CameraIO[] ios, PoseEstimator estimator, FieldModel field) {
+      List<CameraConfig> cameras, CameraIO[] ios, CameraLocalizer localizer, FieldModel field) {
     if (cameras.size() != ios.length) {
       throw new IllegalArgumentException("one IO for each camera");
     }
     this.cameras = List.copyOf(cameras);
     this.ios = ios.clone();
-    this.estimator = estimator;
+    this.localizer = localizer;
     this.field = field;
     pipeline = new VisionPipeline(field);
     inputs = new CameraIOInputsAutoLogged[ios.length];
@@ -288,7 +288,7 @@ public final class Vision implements AutoCloseable {
             continue;
           }
           lastFrame[i] = frame.timestampNanos();
-          Pose2d then = estimator.poseAt(frame.timestampNanos()).orElse(null);
+          Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);
           Rotation2d heading = then != null ? then.getRotation() : null;
           AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
           VisionResult result =
@@ -311,7 +311,7 @@ public final class Vision implements AutoCloseable {
           } else if (frame.timestampNanos() < holdUntilNanos) {
             outcomes.add("held, autonomous just started: " + result.outcome());
           } else {
-            estimator.addVision(measurement);
+            localizer.addVision(measurement);
             outcomes.add(result.outcome());
           }
           HeadingAverage collecting = headings;

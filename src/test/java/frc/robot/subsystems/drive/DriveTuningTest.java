@@ -9,8 +9,9 @@ import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveConfigBuilder;
 import frc.robot.lib.config.SwerveConfigGainsBuilder;
 import frc.robot.lib.config.SwerveConfigLimitsBuilder;
-import frc.robot.sim.DriveSimHarness;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -58,12 +59,16 @@ class DriveTuningTest {
     try (Drive drive =
         new Drive(
             "TuningTest",
-            new GyroIO() {},
-            modules,
+            DriveHardware.builder()
+                .modules(List.of(modules))
+                .gyro(new GyroIO() {})
+                .backupImu(new GyroIO() {})
+                .odometryLock(new ReentrantLock())
+                .build(),
             Robots.SIM.body(),
             config::get,
             Scheduler.createIndependentScheduler(),
-            DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+            () -> Pose2d.ZERO)) {
       config.set(tuned);
       drive.periodic(false);
     }

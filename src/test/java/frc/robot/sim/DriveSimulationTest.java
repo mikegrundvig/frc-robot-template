@@ -9,6 +9,7 @@ import frc.robot.Robots;
 import frc.robot.SimTestSupport;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.Terrain;
+import frc.robot.lib.localization.EstimatorConfig;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -148,7 +149,7 @@ class DriveSimulationTest {
 
     robot.simulation.place(start);
     robot.loop();
-    robot.drive.resetPose(start);
+    robot.localization.resetPose(start);
 
     assertThat(robot.positionError()).isLessThan(1e-9);
     assertThat(robot.headingErrorDegrees()).isCloseTo(0.0, within(1e-9));
@@ -185,13 +186,13 @@ class DriveSimulationTest {
   /** Up a ramp the wheels roll farther than the robot moves across the field; odometry knows. */
   @Test
   void onAKnownRampOdometryCountsTheWheelsTravelAtTheSlope() {
-    DriveSimHarness robot = robot(SensorErrors.NONE);
-    robot.simulation.setTerrain(RAMP);
-    robot.drive.setTerrain(RAMP);
+    DriveSimHarness robot =
+        new DriveSimHarness(Robots.SIM, SensorErrors.NONE, EstimatorConfig.DEFAULTS, RAMP);
+    harness = robot;
     Pose2d start = new Pose2d(3.4, 4, Rotation2d.ZERO);
     robot.simulation.place(start);
     robot.loop();
-    robot.drive.resetPose(start);
+    robot.localization.resetPose(start);
     double wheelBefore = robot.drive.wheelRotationsRadians()[0];
 
     robot.run(robot.drive.driveForward(1.0, 0.8), 1.0);

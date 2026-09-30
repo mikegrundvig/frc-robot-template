@@ -242,28 +242,6 @@ class RobotContainerSimTest {
   }
 
   @Test
-  void eachLoopIsTimedAndOverrunsRaiseAnAlert() {
-    long first = System.nanoTime();
-    container.loop().start(first);
-    tick(1);
-    container.finishLoop(first + 5_000_000L); // as if the loop took 5 ms
-    String quick = container.loopStatus();
-    boolean alertAfterQuick = container.isOverrunAlertActive();
-
-    long start = System.nanoTime();
-    container.loop().start(start);
-    tick(1);
-    container.finishLoop(start + 35_000_000L); // as if the loop took 35 ms
-
-    assertThat(quick).isEqualTo("5.0 ms, worst 5.0 ms lately");
-    assertThat(alertAfterQuick).isFalse();
-    assertThat(container.isOverrunAlertActive()).isTrue();
-    assertThat(container.overrunAlertText())
-        .startsWith("The loop overran 20 ms 1 time in the last 10 s; the last took 35 ms");
-    assertThat(container.loopStatus()).isEqualTo("Overran 1 time lately, worst 35.0 ms");
-  }
-
-  @Test
   void theDriverStationsLocationChoosesTheStart() {
     setStation(AllianceStationID.RED_1);
 

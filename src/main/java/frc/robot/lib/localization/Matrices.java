@@ -33,4 +33,27 @@ final class Matrices {
     out[8] = (m[0] * m[4] - m[1] * m[3]) * inverse;
     return true;
   }
+
+  /** v^T M v, for a 3x3 M. */
+  static double quadratic3(double[] m, double[] v) {
+    double sum = 0;
+    for (int row = 0; row < 3; row++) {
+      for (int column = 0; column < 3; column++) {
+        sum += v[row] * m[row * 3 + column] * v[column];
+      }
+    }
+    return sum;
+  }
+
+  /** A B into {@code out}, for 3x3 A and B; {@code out} must be neither. */
+  static void multiply3(double[] a, double[] b, double[] out) {
+    for (int row = 0; row < 3; row++) {
+      for (int column = 0; column < 3; column++) {
+        out[row * 3 + column] =
+            a[row * 3] * b[column]
+                + a[row * 3 + 1] * b[3 + column]
+                + a[row * 3 + 2] * b[6 + column];
+      }
+    }
+  }
 }

@@ -10,6 +10,7 @@ package frc.robot.subsystems.drive;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
+import java.util.Arrays;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.system.DCMotor;
 import org.wpilib.math.system.Models;
@@ -35,6 +36,17 @@ final class ModuleIOSim implements ModuleIO {
 
   /** How far the absolute encoder's zero is off: it reads the true angle minus this. */
   private final double steerOffsetRadians;
+
+  /**
+   * Rotation the wheel spun without rolling the robot along: its encoder saw it, the floor didn't.
+   */
+  private double spinRadians;
+
+  // Readings taken since the last loop, for odometry.
+  private long[] sampleTimes = new long[8];
+  private double[] samplePositions = new double[8];
+  private double[] sampleAngles = new double[8];
+  private int samples;
 
   private double driveKp;
   private double steerKp;
@@ -85,10 +97,32 @@ final class ModuleIOSim implements ModuleIO {
     steerSim.update(seconds);
   }
 
+  /** Takes a reading for odometry, as a motor controller's high-rate signals would. */
+  void sample(long timestampNanos) {
+    if (samples == sampleTimes.length) {
+      sampleTimes = Arrays.copyOf(sampleTimes, samples * 2);
+      samplePositions = Arrays.copyOf(samplePositions, samples * 2);
+      sampleAngles = Arrays.copyOf(sampleAngles, samples * 2);
+    }
+    sampleTimes[samples] = timestampNanos;
+    samplePositions[samples] = driveSim.getAngularPosition() + spinRadians;
+    sampleAngles[samples] = measuredSteerRadians();
+    samples++;
+  }
+
+  /** Spins the wheel without the robot moving: a slip its encoder sees and the floor doesn't. */
+  void spin(double radians) {
+    spinRadians += radians;
+  }
+
   @Override
   public void updateInputs(ModuleIOInputs inputs) {
+    inputs.odometryTimestampsNanos = Arrays.copyOf(sampleTimes, samples);
+    inputs.odometryDrivePositionsRad = Arrays.copyOf(samplePositions, samples);
+    inputs.odometrySteerAnglesRad = Arrays.copyOf(sampleAngles, samples);
+    samples = 0;
     inputs.driveConnected = true;
-    inputs.drivePositionRad = driveSim.getAngularPosition();
+    inputs.drivePositionRad = driveSim.getAngularPosition() + spinRadians;
     inputs.driveVelocityRadPerSec = driveSim.getAngularVelocity();
     inputs.driveAppliedVolts = driveVolts;
     inputs.driveStatorCurrentAmps = Math.abs(driveSim.getCurrentDraw());
@@ -100,7 +134,7 @@ final class ModuleIOSim implements ModuleIO {
     inputs.steerStatorCurrentAmps = Math.abs(steerSim.getCurrentDraw());
   }
 
-  /** The wheel's rotation since the start, in radians: its encoder reads it exactly. */
+  /** The wheel's rotation since the start that rolled the robot along, in radians. */
   double wheelRotationRadians() {
     return driveSim.getAngularPosition();
   }

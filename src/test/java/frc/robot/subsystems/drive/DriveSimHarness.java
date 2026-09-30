@@ -2,10 +2,20 @@ package frc.robot.subsystems.drive;
 
 import frc.robot.RobotConfig;
 import frc.robot.SimTestSupport;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.PoseCovariance;
+import frc.robot.lib.localization.PoseEstimator;
+import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.VisionDecision;
+import frc.robot.lib.localization.VisionMeasurement;
+import java.util.ArrayList;
+import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.system.RobotController;
 
 /**
  * Drives the drivetrain in simulation the way the robot runs it: the simulated Driver Station, the
@@ -15,7 +25,24 @@ import org.wpilib.math.geometry.Pose2d;
 final class DriveSimHarness implements AutoCloseable {
   final Scheduler scheduler = Scheduler.createIndependentScheduler();
   final DriveSimulation simulation;
+  final PoseEstimator estimator = estimatorAt(Pose2d.ZERO);
   final Drive drive;
+
+  /** Every camera measurement's fate, in order. */
+  final List<VisionDecision> decisions = new ArrayList<>();
+
+  private @Nullable FakeCamera camera;
+  private @Nullable Runnable eachLoop;
+
+  /**
+   * An estimator that starts with the robot exactly here, and accepts any point as on the field.
+   */
+  static PoseEstimator estimatorAt(Pose2d start) {
+    return new PoseEstimator(
+        EstimatorConfig.DEFAULTS,
+        point -> true,
+        new PoseReset(0, start, PoseCovariance.fromStdDevs(0.001, 0.001, 0.001), "test start"));
+  }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */
   DriveSimHarness(RobotConfig robot) {
@@ -35,15 +62,41 @@ final class DriveSimHarness implements AutoCloseable {
             simulation.modules(),
             robot.body(),
             robot::drivetrain,
-            scheduler);
+            scheduler,
+            estimator);
   }
 
-  /** One robot loop: the physics moves, then the drivetrain reads its sensors, then commands. */
+  /** From now on, a camera's results reach the estimator every loop. */
+  void watchWith(FakeCamera camera) {
+    this.camera = camera;
+  }
+
+  /** Something to do at the end of every loop, such as feeding another estimator to compare. */
+  void eachLoop(Runnable action) {
+    eachLoop = action;
+  }
+
+  /**
+   * One robot loop: the physics moves, the drivetrain reads its sensors, the camera's results
+   * arrive, the estimator takes them, then commands run.
+   */
   void loop() {
     SimTestSupport.stepLoop();
-    simulation.step(SimTestSupport.LOOP_PERIOD_S);
+    long now = RobotController.getTime();
+    simulation.step(SimTestSupport.LOOP_PERIOD_S, now);
     drive.periodic(RobotState.isEnabled());
+    FakeCamera watching = camera;
+    if (watching != null) {
+      for (VisionMeasurement measurement : watching.poll(now)) {
+        estimator.addVision(measurement);
+      }
+    }
+    decisions.addAll(estimator.update());
     scheduler.run();
+    Runnable action = eachLoop;
+    if (action != null) {
+      action.run();
+    }
   }
 
   /** Hold the sticks (as {@link Drive#driveWithSticks} takes them) for {@code seconds}, enabled. */

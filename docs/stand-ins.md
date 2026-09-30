@@ -6,7 +6,7 @@ delete the row when you replace it.
 
 | Stand-in | Stands in for | Replace when |
 |---|---|---|
-| The swerve drivetrain, `src/main/java/frc/robot/subsystems/drive/` | AdvantageKit's swerve templates, which also bring the motor-controller and gyro code for real hardware and high-rate odometry | AdvantageKit publishes its 2027 swerve templates, planned for WPILib's 2027 beta (AdvantageKit 27.0.0-alpha-6 release notes) |
+| The swerve drivetrain, `src/main/java/frc/robot/subsystems/drive/` | AdvantageKit's swerve templates, which also bring the motor-controller and gyro code for real hardware, and the thread that reads them at 250 Hz. Our IO already carries 250 Hz readings the way theirs does, and the simulator produces them, so their hardware code can feed the estimator unchanged. | AdvantageKit publishes its 2027 swerve templates, planned for WPILib's 2027 beta (AdvantageKit 27.0.0-alpha-6 release notes) |
 
 ## Waiting on
 

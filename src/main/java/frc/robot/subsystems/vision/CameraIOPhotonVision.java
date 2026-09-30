@@ -33,12 +33,24 @@ public class CameraIOPhotonVision implements CameraIO {
     return camera;
   }
 
+  /**
+   * Reads every result since the last loop. PhotonLib throws on purpose when the coprocessor runs a
+   * different PhotonVision version than the robot's library, and again every few seconds after;
+   * {@link Vision} catches that, and the camera reads as unreadable, with PhotonLib's reason, while
+   * the robot drives on its other sensors.
+   */
   @Override
   public void updateInputs(CameraIOInputs inputs) {
     inputs.connected = camera.isConnected();
     List<Frame> frames = new ArrayList<>();
     List<SeenTag> tags = new ArrayList<>();
+    int skipped = 0;
     for (PhotonPipelineResult result : camera.getAllUnreadResults()) {
+      double capturedSeconds = result.getTimestampSeconds();
+      if (!Double.isFinite(capturedSeconds) || capturedSeconds < 0) {
+        skipped++; // PhotonLib's placeholder metadata says -1: no capture time to place it at
+        continue;
+      }
       Optional<MultiTargetPNPResult> multiTag = result.getMultiTagResult();
       Set<Integer> usedByMultiTag = new HashSet<>();
       multiTag.ifPresent(
@@ -46,7 +58,7 @@ public class CameraIOPhotonVision implements CameraIO {
       List<PhotonTrackedTarget> targets = result.getTargets();
       frames.add(
           new Frame(
-              Timestamps.fromSeconds(result.getTimestampSeconds()),
+              Timestamps.fromSeconds(capturedSeconds),
               targets.size(),
               multiTag.isPresent(),
               multiTag.map(solved -> solved.estimatedPose.best).orElse(Transform3d.ZERO),
@@ -77,6 +89,8 @@ public class CameraIOPhotonVision implements CameraIO {
     }
     inputs.frames = frames.toArray(Frame[]::new);
     inputs.tags = tags.toArray(SeenTag[]::new);
+    inputs.skippedFrames = skipped;
+    inputs.error = "";
   }
 
   @Override

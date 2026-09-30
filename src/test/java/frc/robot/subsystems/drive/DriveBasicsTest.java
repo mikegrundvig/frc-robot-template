@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Rotation2d;
 
 /** Does the drivetrain go where the driver points it? */
 class DriveBasicsTest {
@@ -90,5 +91,40 @@ class DriveBasicsTest {
                 Robots.SIM::drivetrain,
                 harness.scheduler,
                 DriveSimHarness.estimatorAt(Pose2d.ZERO)));
+  }
+
+  /** An IMU that sends values that aren't numbers counts as lost, and the robot program runs on. */
+  @Test
+  void anImuThatSendsNaNCountsAsLost() {
+    GyroIO sendingNaN =
+        new GyroIO() {
+          @Override
+          public void updateInputs(GyroIOInputs inputs) {
+            inputs.connected = true;
+            inputs.yaw = new Rotation2d(Double.NaN);
+            inputs.pitchRad = Double.NaN;
+            inputs.rollRad = Double.NaN;
+            inputs.odometryTimestampsNanos = new long[] {1};
+            inputs.odometryYawsRad = new double[] {Double.NaN};
+          }
+        };
+    ModuleIO[] modules = {
+      new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}
+    };
+    try (Drive drive =
+        new Drive(
+            "NaNImu",
+            sendingNaN,
+            modules,
+            Robots.SIM.body(),
+            Robots.SIM::drivetrain,
+            harness.scheduler,
+            DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+      drive.periodic(true);
+
+      assertTrue(drive.isGyroDisconnectedAlertActive());
+      assertEquals(0.0, drive.pitchRadians(), "no IMU, no tilt");
+      assertTrue(Double.isFinite(drive.getPose().getX()));
+    }
   }
 }

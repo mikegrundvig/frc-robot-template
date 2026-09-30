@@ -241,4 +241,52 @@ class ActionsTest {
         .isThrownBy(() -> actions.add(" ", new FakeRoutine()))
         .withMessage("an action needs a name");
   }
+
+  /** A team's routine that throws ends or cancels with the reason; the robot loop runs on. */
+  @Test
+  void aRoutineThatThrowsNeverStopsTheLoop() {
+    FakeRoutine broken =
+        new FakeRoutine() {
+          @Override
+          public boolean isRunning() {
+            throw new IllegalStateException("lost track");
+          }
+
+          @Override
+          public void cancel() {
+            throw new IllegalStateException("can't stop");
+          }
+        };
+    actions.add("Spin", broken);
+    actions.requestStart("Spin");
+    actions.periodic(READY);
+
+    actions.periodic(READY);
+
+    assertThat(actions.view().get(1))
+        .isEqualTo(
+            new Actions.State(
+                "Spin", Actions.Phase.ENDED, "Ended: checking whether it runs failed: lost track"));
+
+    FakeRoutine stubborn =
+        new FakeRoutine() {
+          @Override
+          public void cancel() {
+            throw new IllegalStateException("can't stop");
+          }
+        };
+    actions.add("Stubborn", stubborn);
+    actions.requestStart("Stubborn");
+    actions.periodic(READY);
+    actions.requestCancel("Stubborn");
+
+    actions.periodic(READY);
+
+    assertThat(actions.view().get(2))
+        .isEqualTo(
+            new Actions.State(
+                "Stubborn",
+                Actions.Phase.CANCELED,
+                "Canceled from the page (canceling it failed: can't stop)"));
+  }
 }

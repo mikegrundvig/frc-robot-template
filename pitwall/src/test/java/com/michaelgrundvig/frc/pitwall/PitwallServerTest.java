@@ -308,6 +308,32 @@ class PitwallServerTest {
     assertThat(send("PATCH", "/api/tuning", MERGE_PATCH, "{}").statusCode()).isEqualTo(200);
   }
 
+  /** 1e999 parses to infinity: no number that isn't finite gets as far as the robot loop. */
+  @Test
+  void refusesNumbersThatArentFinite() throws Exception {
+    var config = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 1e999}");
+    var wpilib = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": -1e999}");
+
+    assertThat(config.statusCode()).isEqualTo(400);
+    assertThat(wpilib.statusCode()).isEqualTo(400);
+    assertThat(shooterKp.get()).isEqualTo(0.5);
+  }
+
+  /** The parser recurses: a deep enough body would overflow its stack, so it's refused first. */
+  @Test
+  void refusesDeeplyNestedJson() throws Exception {
+    String deep = "{\"a\": " + "[".repeat(20_000) + "]".repeat(20_000) + "}";
+
+    var nested = send("PATCH", "/api/values", MERGE_PATCH, deep);
+
+    assertThat(nested.statusCode()).isEqualTo(400);
+    assertThat(nested.body()).contains("Too deeply nested");
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, "{\"note\": \"[[[[[[[[[[\"}"))
+        .as("brackets in a string don't count")
+        .extracting(HttpResponse::statusCode)
+        .isEqualTo(422);
+  }
+
   @Test
   void saysWhichMethodsAResourceAllows() throws Exception {
     var notAllowed = send("DELETE", "/api/values", null, null);

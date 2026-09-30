@@ -23,8 +23,10 @@ import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
+import org.wpilib.math.geometry.Quaternion;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableBoolean;
@@ -58,6 +60,7 @@ public final class Vision implements AutoCloseable {
   private final FieldModel field;
   private final VisionPipeline pipeline;
   private final Alert[] disconnected;
+  private final Alert[] unreadable;
   private final Alert badSettings =
       new Alert(
           "Vision",
@@ -110,6 +113,9 @@ public final class Vision implements AutoCloseable {
    */
   private final TunableDouble autoStartHoldSeconds = TunableDouble.create(0.0);
 
+  /** Longer than any autonomous period has been. */
+  private static final double MAX_HOLD_SECONDS = 30;
+
   private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
   private VisionConfig settings = VisionConfig.DEFAULTS;
@@ -132,6 +138,7 @@ public final class Vision implements AutoCloseable {
     pipeline = new VisionPipeline(field);
     inputs = new CameraIOInputsAutoLogged[ios.length];
     disconnected = new Alert[ios.length];
+    unreadable = new Alert[ios.length];
     enabled = new TunableBoolean[ios.length];
     lastFrame = new long[ios.length];
     accepted = new int[ios.length];
@@ -147,6 +154,9 @@ public final class Vision implements AutoCloseable {
               name + "Disconnected",
               "Camera " + name + " disconnected",
               Alert.Level.HIGH);
+      unreadable[i] =
+          new Alert(
+              "Vision", name + "Unreadable", "Camera " + name + " can't be read", Alert.Level.HIGH);
       enabled[i] = TunableBoolean.create(true);
       publish("Vision/" + name + "/enabled", enabled[i]);
       lastFrame[i] = Long.MIN_VALUE;
@@ -202,8 +212,12 @@ public final class Vision implements AutoCloseable {
    * are still read and logged, marked held.
    */
   public void autonomousStarted(long nowNanos) {
+    // A tuned value that isn't a sensible time holds nothing, and never throws in the loop.
     double seconds = autoStartHoldSeconds.get();
-    holdUntilNanos = seconds > 0 ? nowNanos + Timestamps.fromSeconds(seconds) : Long.MIN_VALUE;
+    holdUntilNanos =
+        seconds > 0 && Double.isFinite(seconds)
+            ? nowNanos + Timestamps.fromSeconds(Math.min(seconds, MAX_HOLD_SECONDS))
+            : Long.MIN_VALUE;
   }
 
   /**
@@ -234,86 +248,101 @@ public final class Vision implements AutoCloseable {
     for (int i = 0; i < ios.length; i++) {
       CameraConfig camera = cameras.get(i);
       String key = "Vision/" + camera.name();
-      ios[i].updateInputs(inputs[i]);
+      read(ios[i], inputs[i]);
       Logger.processInputs(key, inputs[i]);
-      disconnected[i].set(!inputs[i].connected);
+      boolean readable = inputs[i].error.isEmpty();
+      disconnected[i].set(!inputs[i].connected && readable);
+      if (!readable) {
+        unreadable[i].setText("Camera " + camera.name() + " can't be read: " + inputs[i].error);
+      }
+      unreadable[i].set(!readable);
 
       List<String> outcomes = new ArrayList<>();
+      if (inputs[i].skippedFrames > 0) {
+        outcomes.add(inputs[i].skippedFrames + " image(s) without a capture time, left out");
+      }
       List<Pose3d> seenTags = new ArrayList<>();
       double residualSum = 0;
       int residualCount = 0;
       int next = 0;
       for (CameraIO.Frame frame : inputs[i].frames) {
-        TagDetections detections = detections(frame, inputs[i].tags, next, camera.name());
+        int first = next;
         next += frame.tagCount();
-        if (!enabled[i].get()) {
-          outcomes.add("camera turned off");
-          continue;
-        }
-        if (frame.timestampNanos() <= lastFrame[i]) {
-          outcomes.add("the same image again");
-          continue;
-        }
-        lastFrame[i] = frame.timestampNanos();
-        Pose2d then = estimator.poseAt(frame.timestampNanos()).orElse(null);
-        Rotation2d heading = then != null ? then.getRotation() : null;
-        AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
-        VisionResult result =
-            pipeline.process(
-                detections,
-                camera,
-                new CaptureContext(
-                    heading,
-                    headingStdDev,
-                    tilted.pitchRadians(),
-                    tilted.rollRadians(),
-                    speed,
-                    recentYawRate),
-                settings);
-        VisionMeasurement measurement = result.measurement();
-        if (measurement == null) {
-          outcomes.add(result.outcome());
-        } else if (i == calibrating) {
-          outcomes.add("withheld while calibrating this camera: " + result.outcome());
-        } else if (frame.timestampNanos() < holdUntilNanos) {
-          outcomes.add("held, autonomous just started: " + result.outcome());
-        } else {
-          estimator.addVision(measurement);
-          outcomes.add(result.outcome());
-        }
-        HeadingAverage collecting = headings;
-        if (collecting != null && measurement != null && measurement.covariance().hasHeading()) {
-          collecting.add(measurement.pose().getRotation());
-        }
-        if (then != null) {
-          Pose3d robotThen =
-              new Pose3d(
-                  then.getX(),
-                  then.getY(),
-                  0,
-                  new Rotation3d(
-                      tilted.rollRadians(),
+        // One image's bad data costs that image, never the robot program: whatever a camera sends
+        // that the checks below miss ends here, logged as the image's outcome.
+        try {
+          TagDetections detections = detections(frame, inputs[i].tags, first, camera.name());
+          if (!enabled[i].get()) {
+            outcomes.add("camera turned off");
+            continue;
+          }
+          if (frame.timestampNanos() <= lastFrame[i]) {
+            outcomes.add("the same image again");
+            continue;
+          }
+          lastFrame[i] = frame.timestampNanos();
+          Pose2d then = estimator.poseAt(frame.timestampNanos()).orElse(null);
+          Rotation2d heading = then != null ? then.getRotation() : null;
+          AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
+          VisionResult result =
+              pipeline.process(
+                  detections,
+                  camera,
+                  new CaptureContext(
+                      heading,
+                      headingStdDev,
                       tilted.pitchRadians(),
-                      then.getRotation().getRadians()));
-          CameraMountCalibration sightings =
-              i == calibrating
-                      && poseKnown(estimate)
-                      && frame.timestampNanos() - movingUntil >= STILL_NANOS
-                  ? mountCalibration
-                  : null;
-          for (TagDetections.Tag tag : detections.tags()) {
-            Pose3d seen =
-                robotThen.transformBy(camera.robotToCamera()).transformBy(tag.bestCameraToTag());
-            seenTags.add(seen);
-            Pose3d real = field.tag(tag.id()).orElse(null);
-            if (real != null) {
-              residualSum += seen.getTranslation().getDistance(real.getTranslation());
-              residualCount++;
-              if (sightings != null) {
-                sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
+                      tilted.rollRadians(),
+                      speed,
+                      recentYawRate),
+                  settings);
+          VisionMeasurement measurement = result.measurement();
+          if (measurement == null) {
+            outcomes.add(result.outcome());
+          } else if (i == calibrating) {
+            outcomes.add("withheld while calibrating this camera: " + result.outcome());
+          } else if (frame.timestampNanos() < holdUntilNanos) {
+            outcomes.add("held, autonomous just started: " + result.outcome());
+          } else {
+            estimator.addVision(measurement);
+            outcomes.add(result.outcome());
+          }
+          HeadingAverage collecting = headings;
+          if (collecting != null && measurement != null && measurement.covariance().hasHeading()) {
+            collecting.add(measurement.pose().getRotation());
+          }
+          if (then != null) {
+            Pose3d robotThen =
+                new Pose3d(
+                    then.getX(),
+                    then.getY(),
+                    0,
+                    new Rotation3d(
+                        tilted.rollRadians(),
+                        tilted.pitchRadians(),
+                        then.getRotation().getRadians()));
+            CameraMountCalibration sightings =
+                i == calibrating
+                        && poseKnown(estimate)
+                        && frame.timestampNanos() - movingUntil >= STILL_NANOS
+                    ? mountCalibration
+                    : null;
+            for (TagDetections.Tag tag : detections.tags()) {
+              Pose3d seen =
+                  robotThen.transformBy(camera.robotToCamera()).transformBy(tag.bestCameraToTag());
+              seenTags.add(seen);
+              Pose3d real = field.tag(tag.id()).orElse(null);
+              if (real != null) {
+                residualSum += seen.getTranslation().getDistance(real.getTranslation());
+                residualCount++;
+                if (sightings != null) {
+                  sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
+                }
               }
             }
           }
+        } catch (RuntimeException e) {
+          outcomes.add("unusable data from the camera: " + e.getMessage());
         }
       }
       Logger.recordOutput(key + "/Outcomes", outcomes.toArray(String[]::new));
@@ -324,6 +353,26 @@ public final class Vision implements AutoCloseable {
         residualCounts[i] += residualCount;
         Logger.recordOutput(key + "/MeanTagResidualMeters", meanTagResidualMeters(camera.name()));
       }
+    }
+  }
+
+  /**
+   * Reads a camera. Nothing its IO throws gets past here: PhotonLib throws on purpose when the
+   * coprocessor runs a different PhotonVision version than the robot's library, and again every few
+   * seconds, which would end the robot program each time. Instead the camera reads as unreadable,
+   * with the reason, and the robot drives on its other sensors.
+   */
+  private static void read(CameraIO io, CameraIOInputsAutoLogged into) {
+    try {
+      io.updateInputs(into);
+      into.error = "";
+    } catch (RuntimeException e) {
+      into.connected = false;
+      into.frames = new CameraIO.Frame[] {};
+      into.tags = new CameraIO.SeenTag[] {};
+      into.skippedFrames = 0;
+      String why = e.getMessage();
+      into.error = why != null ? why.strip() : e.toString();
     }
   }
 
@@ -406,6 +455,10 @@ public final class Vision implements AutoCloseable {
     return disconnected[camera].get();
   }
 
+  boolean isUnreadableAlertActive(int camera) {
+    return unreadable[camera].get();
+  }
+
   /** How many of a camera's measurements the estimator accepted, by the camera's order. */
   int accepted(int camera) {
     return accepted[camera];
@@ -434,13 +487,20 @@ public final class Vision implements AutoCloseable {
     }
   }
 
-  /** One frame's tags, from the flat list the IO logs, as the pipeline takes them. */
+  /**
+   * One frame's tags, from the flat list the IO logs, as the pipeline takes them. A tag whose pose
+   * isn't a number is left out, and so is a multi-tag solution that isn't; an ambiguity that isn't
+   * one counts as a coin toss.
+   */
   private static TagDetections detections(
       CameraIO.Frame frame, CameraIO.SeenTag[] tags, int first, String camera) {
     List<TagDetections.Tag> seen = new ArrayList<>();
     List<Integer> usedByMultiTag = new ArrayList<>();
     for (int k = first; k < Math.min(first + frame.tagCount(), tags.length); k++) {
       CameraIO.SeenTag tag = tags[k];
+      if (!isFinite(tag.bestCameraToTag()) || !isFinite(tag.altCameraToTag())) {
+        continue;
+      }
       seen.add(
           new TagDetections.Tag(
               tag.id(),
@@ -452,13 +512,16 @@ public final class Vision implements AutoCloseable {
               tag.bestCameraToTag(),
               tag.altCameraToTag(),
               // PhotonVision reports -1 when it has no ambiguity to give: treat that as unknown.
-              tag.ambiguity() < 0 ? 1 : Math.min(tag.ambiguity(), 1)));
+              !(tag.ambiguity() >= 0) ? 1 : Math.min(tag.ambiguity(), 1)));
       if (tag.inMultiTag()) {
         usedByMultiTag.add(tag.id());
       }
     }
     TagDetections.MultiTag multiTag = null;
-    if (frame.hasMultiTag() && !usedByMultiTag.isEmpty()) {
+    if (frame.hasMultiTag()
+        && !usedByMultiTag.isEmpty()
+        && isFinite(frame.multiTagFieldToCamera())
+        && Double.isFinite(frame.multiTagReprojectionErrorPixels())) {
       multiTag =
           new TagDetections.MultiTag(
               frame.multiTagFieldToCamera(),
@@ -468,11 +531,23 @@ public final class Vision implements AutoCloseable {
     return new TagDetections(frame.timestampNanos(), camera, seen, multiTag);
   }
 
+  private static boolean isFinite(Transform3d transform) {
+    Quaternion rotation = transform.getRotation().getQuaternion();
+    return Double.isFinite(transform.getX())
+        && Double.isFinite(transform.getY())
+        && Double.isFinite(transform.getZ())
+        && Double.isFinite(rotation.getW())
+        && Double.isFinite(rotation.getX())
+        && Double.isFinite(rotation.getY())
+        && Double.isFinite(rotation.getZ());
+  }
+
   @Override
   public void close() {
     for (int i = 0; i < ios.length; i++) {
       ios[i].close();
       disconnected[i].close();
+      unreadable[i].close();
     }
     badSettings.close();
     for (String path : tunablePaths) {

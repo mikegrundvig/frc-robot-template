@@ -82,6 +82,9 @@ public final class PitwallServer implements AutoCloseable {
   /** The page's requests are a few hundred bytes; anything much bigger isn't from it. */
   private static final int MAX_BODY_BYTES = 64 * 1024;
 
+  /** How deeply a request's JSON may nest: the page sends flat objects. */
+  private static final int MAX_NESTING = 8;
+
   private final HttpServer server;
   private final ExecutorService threads;
   private final int port;
@@ -327,7 +330,7 @@ public final class PitwallServer implements AutoCloseable {
         Object number = field.getValue();
         if (number == null) {
           values.put(value.path(), value.committed());
-        } else if (number instanceof Number n) {
+        } else if (number instanceof Number n && Double.isFinite(n.doubleValue())) {
           values.put(value.path(), n.doubleValue());
         } else {
           throw new Problem(
@@ -350,7 +353,8 @@ public final class PitwallServer implements AutoCloseable {
               "There is no tunable the page can change at " + field.getKey());
         }
         Object value = field.getValue();
-        if (!(value instanceof Number || value instanceof Boolean)) {
+        boolean number = value instanceof Number n && Double.isFinite(n.doubleValue());
+        if (!(number || value instanceof Boolean)) {
           throw new Problem(400, "Not a value", field.getKey() + " takes a number or true/false");
         }
         values.put(field.getKey(), value);
@@ -412,6 +416,10 @@ public final class PitwallServer implements AutoCloseable {
       if (body.length > MAX_BODY_BYTES) {
         throw new Problem(413, "Too large", "The page's requests are well under 64 KB");
       }
+      if (nesting(body) > MAX_NESTING) {
+        // Checked before parsing: the parser recurses, and a deep enough body overflows its stack.
+        throw new Problem(400, "Too deeply nested", "The page's requests are flat JSON objects");
+      }
       Object parsed;
       try {
         parsed = json.fromJson(new String(body, StandardCharsets.UTF_8));
@@ -424,6 +432,32 @@ public final class PitwallServer implements AutoCloseable {
       Map<String, @Nullable Object> object = new LinkedHashMap<>();
       map.forEach((key, value) -> object.put(String.valueOf(key), value));
       return object;
+    }
+
+    /** How deeply a JSON body's objects and arrays nest, not counting brackets inside strings. */
+    private static int nesting(byte[] body) {
+      int depth = 0;
+      int deepest = 0;
+      boolean inString = false;
+      boolean escaped = false;
+      for (byte b : body) {
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (b == '\\') {
+            escaped = true;
+          } else if (b == '"') {
+            inString = false;
+          }
+        } else if (b == '"') {
+          inString = true;
+        } else if (b == '{' || b == '[') {
+          deepest = Math.max(deepest, ++depth);
+        } else if (b == '}' || b == ']') {
+          depth--;
+        }
+      }
+      return deepest;
     }
 
     private List<Object> statusItems() {

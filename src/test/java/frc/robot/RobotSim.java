@@ -7,7 +7,9 @@ import frc.robot.game.Rebuilt;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
+import frc.robot.sim.Scenario;
 import frc.robot.sim.SensorErrors;
+import frc.robot.sim.SimulatedWorld;
 import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
@@ -92,6 +94,16 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     return build(Constants.Mode.SIM, Robots.SIM, errors);
   }
 
+  /**
+   * Builds the simulator's robot in a scenario ({@link frc.robot.sim.Scenarios}), as {@code
+   * ./gradlew run -Pscenario=<name>} does: the scenario's faults in sensors that err as a
+   * season-worn robot's do. What happens to the robot in it waits until the test starts it ({@link
+   * #start}).
+   */
+  public RobotContainer build(Scenario scenario) {
+    return build(Robots.SIM, scenario.errorsOn(Robots.SIM.cameras()));
+  }
+
   /** Builds a robot in the simulator. */
   public RobotContainer build(RobotConfig robot, SensorErrors errors) {
     return build(Constants.Mode.SIM, robot, errors);
@@ -129,6 +141,19 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   /** The simulator's physics: where the robot really is. */
   public DriveSimulation simulation() {
     return Objects.requireNonNull(robot().simulation(), "only the simulator has physics");
+  }
+
+  /** The simulated world: the robot's physics and its cameras, which scenarios act on. */
+  public SimulatedWorld world() {
+    return Objects.requireNonNull(robot().world(), "only the simulator has a world");
+  }
+
+  /**
+   * Starts a scenario now: what happens to the robot in it (a collision, a slip) happens in the
+   * simulated world. {@code ./gradlew run} starts it on the first loop the robot is enabled.
+   */
+  public void start(Scenario scenario) {
+    scenario.startIn(world());
   }
 
   /** The robot's command scheduler. */

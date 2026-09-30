@@ -18,6 +18,8 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Run one test class ([more on tests](testing.md)) | `./gradlew :test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, enabled and drivable from the keyboard | `./gradlew run` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
+| Start it in a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
+| List the simulator's scenarios | `./gradlew scenarios` |
 | Start it waiting for a debugger on port 5005 | `./gradlew run --debug-jvm` |
 | Fix formatting (every local build does this too) | `./gradlew spotlessApply` |
 | Store your team number, once, before deploying | `./gradlew setTeamNumber -PteamNumber=NNNN` |

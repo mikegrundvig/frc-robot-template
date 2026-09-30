@@ -104,7 +104,7 @@ class PhoenixIOTest {
 
   @Test
   void theGyroPassesItsAnglesThroughInWpilibsConvention() throws InterruptedException {
-    GyroIOPigeon2 io = new GyroIOPigeon2(20, BUS, odometry);
+    GyroIOPigeon2 io = new GyroIOPigeon2(20, BUS, 1.0, odometry);
     odometry.start();
 
     var pigeon = new Pigeon2(20, BUS).getSimState();

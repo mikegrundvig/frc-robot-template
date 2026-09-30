@@ -1,5 +1,7 @@
 package frc.robot.subsystems.vision;
 
+import frc.robot.lib.calibration.CameraMountCalibration;
+import frc.robot.lib.calibration.HeadingAverage;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.AttitudeHistory;
@@ -11,11 +13,13 @@ import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
+import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
 import frc.robot.lib.localization.VisionResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -70,6 +74,22 @@ public final class Vision implements AutoCloseable {
 
   /** Half a second of the robot's attitude, for each image's capture time. */
   private final AttitudeHistory attitudes = new AttitudeHistory(25);
+
+  /** The robot's pose is good enough to calibrate a camera against: within 5 cm. */
+  private static final double CALIBRATION_POSE_STD_DEV_METERS = 0.05;
+
+  /**
+   * A camera is calibrated only from images taken standing still, this long: no blur, and no
+   * question of exactly when the image was taken.
+   */
+  private static final long STILL_NANOS = 500_000_000L;
+
+  private long movingUntil = Long.MIN_VALUE;
+
+  // Calibration: headings the cameras measure, and one camera's sightings for its mount.
+  private @Nullable HeadingAverage headings;
+  private @Nullable CameraMountCalibration mountCalibration;
+  private int calibrating = -1;
 
   private final TunableBoolean[] enabled;
   private final TunableDouble maxAmbiguity =
@@ -145,6 +165,39 @@ public final class Vision implements AutoCloseable {
   }
 
   /**
+   * From now on, every heading the cameras measure (multi-tag solutions, standing still) goes into
+   * this, until stopped: a heading reference for calibrating the gyro.
+   */
+  public void collectHeadings(HeadingAverage into) {
+    headings = into;
+  }
+
+  public void stopCollectingHeadings() {
+    headings = null;
+  }
+
+  /**
+   * From now on, a camera's tag sightings go into this calibration of its mount, taken while the
+   * robot stands still and the other cameras hold its pose within 5 cm; its measurements stay out
+   * of the estimator, so the pose comes from the others. Until stopped.
+   */
+  public void calibrateMount(String camera, CameraMountCalibration into) {
+    for (int i = 0; i < cameras.size(); i++) {
+      if (cameras.get(i).name().equals(camera)) {
+        calibrating = i;
+        mountCalibration = into;
+        return;
+      }
+    }
+    throw new IllegalArgumentException("no camera named " + camera);
+  }
+
+  public void stopCalibratingMount() {
+    calibrating = -1;
+    mountCalibration = null;
+  }
+
+  /**
    * Autonomous just started: hold the cameras' measurements back for the tuned time, if any. They
    * are still read and logged, marked held.
    */
@@ -164,6 +217,10 @@ public final class Vision implements AutoCloseable {
    */
   public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
     attitudes.add(estimate.timestampNanos(), pitchRadians, rollRadians);
+    if (estimate.fieldVelocity().getNorm() > 0.02
+        || Math.abs(estimate.yawRateRadiansPerSecond()) > 0.02) {
+      movingUntil = estimate.timestampNanos();
+    }
     recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());
     yawRateLoop = (yawRateLoop + 1) % YAW_RATE_LOOPS;
     double recentYawRate = 0;
@@ -213,13 +270,20 @@ public final class Vision implements AutoCloseable {
                     speed,
                     recentYawRate),
                 settings);
-        if (result.measurement() == null) {
+        VisionMeasurement measurement = result.measurement();
+        if (measurement == null) {
           outcomes.add(result.outcome());
+        } else if (i == calibrating) {
+          outcomes.add("withheld while calibrating this camera: " + result.outcome());
         } else if (frame.timestampNanos() < holdUntilNanos) {
           outcomes.add("held, autonomous just started: " + result.outcome());
         } else {
-          estimator.addVision(result.measurement());
+          estimator.addVision(measurement);
           outcomes.add(result.outcome());
+        }
+        HeadingAverage collecting = headings;
+        if (collecting != null && measurement != null && measurement.covariance().hasHeading()) {
+          collecting.add(measurement.pose().getRotation());
         }
         if (then != null) {
           Pose3d robotThen =
@@ -231,6 +295,12 @@ public final class Vision implements AutoCloseable {
                       tilted.rollRadians(),
                       tilted.pitchRadians(),
                       then.getRotation().getRadians()));
+          CameraMountCalibration sightings =
+              i == calibrating
+                      && poseKnown(estimate)
+                      && frame.timestampNanos() - movingUntil >= STILL_NANOS
+                  ? mountCalibration
+                  : null;
           for (TagDetections.Tag tag : detections.tags()) {
             Pose3d seen =
                 robotThen.transformBy(camera.robotToCamera()).transformBy(tag.bestCameraToTag());
@@ -239,6 +309,9 @@ public final class Vision implements AutoCloseable {
             if (real != null) {
               residualSum += seen.getTranslation().getDistance(real.getTranslation());
               residualCount++;
+              if (sightings != null) {
+                sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
+              }
             }
           }
         }
@@ -252,6 +325,12 @@ public final class Vision implements AutoCloseable {
         Logger.recordOutput(key + "/MeanTagResidualMeters", meanTagResidualMeters(camera.name()));
       }
     }
+  }
+
+  /** Whether the other cameras hold the robot's pose well enough to calibrate one against. */
+  private static boolean poseKnown(LocalizationEstimate estimate) {
+    return estimate.mode() == LocalizationEstimate.Mode.TRACKING
+        && estimate.covariance().largestPositionStdDev() <= CALIBRATION_POSE_STD_DEV_METERS;
   }
 
   /** Counts and logs what the estimator decided about each camera's measurements. */

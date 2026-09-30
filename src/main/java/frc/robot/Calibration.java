@@ -1,0 +1,321 @@
+package frc.robot;
+
+import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.Seconds;
+
+import frc.robot.lib.calibration.CameraMountCalibration;
+import frc.robot.lib.calibration.GyroScaleCalibration;
+import frc.robot.lib.calibration.HeadingAverage;
+import frc.robot.lib.calibration.LevelCheck;
+import frc.robot.lib.calibration.WheelRadiusCalibration;
+import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.config.SwerveWiring;
+import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.vision.Vision;
+import java.time.LocalDate;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.function.Supplier;
+import org.littletonrobotics.junction.Logger;
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Coroutine;
+import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.kinematics.ChassisVelocities;
+
+/**
+ * The calibration procedures, as actions for the Pitwall page: each drives or watches the robot,
+ * works out a number its configuration should have, and says where it goes, with the date. The
+ * written procedures are in {@code docs/calibration.md}; the math is in {@code
+ * frc.robot.lib.calibration}. Nothing is changed on its own: the numbers go into {@code Robots},
+ * and the robot is redeployed.
+ */
+final class Calibration {
+  private static final double LOOP_SECONDS = 0.02;
+
+  /** Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (6328). */
+  private static final double WHEEL_SPIN_RADIANS_PER_SECOND = 0.5;
+
+  private static final double WHEEL_SPIN_RAMP = 0.25;
+  private static final double WHEEL_SPIN_TURNS = 2;
+
+  /** Spinning for the gyro's scale: whole turns, as many as the reference can still place. */
+  private static final double GYRO_SPIN_RADIANS_PER_SECOND = 2;
+
+  private static final double GYRO_SPIN_RAMP = 2;
+  private static final int GYRO_SPIN_TURNS = 5;
+  private static final double STILL_SECONDS = 1.5;
+  private static final int MIN_HEADINGS = 5;
+
+  private static final double LEVEL_SECONDS = 2;
+  private static final double LEVEL_TOLERANCE_RADIANS = Math.toRadians(1);
+
+  /** A camera's mount: this long, or this many sightings, whichever comes first. */
+  private static final double MOUNT_SECONDS = 20;
+
+  private static final int MOUNT_SIGHTINGS = 600;
+  private static final int MIN_MOUNT_SIGHTINGS = 30;
+
+  private final Drive drive;
+  private final Vision vision;
+  private final RobotConfig robot;
+  private final Supplier<SwerveConfig> drivetrain;
+  private final Supplier<LocalDate> today;
+  private String lastResult = "None run yet";
+
+  Calibration(
+      Drive drive,
+      Vision vision,
+      RobotConfig robot,
+      Supplier<SwerveConfig> drivetrain,
+      Supplier<LocalDate> today) {
+    this.drive = drive;
+    this.vision = vision;
+    this.robot = robot;
+    this.drivetrain = drivetrain;
+    this.today = today;
+  }
+
+  /** The last procedure's result, for the Pitwall page. */
+  String lastResult() {
+    return lastResult;
+  }
+
+  private void report(String result) {
+    lastResult = result;
+    Logger.recordOutput("Calibration/Result", result);
+  }
+
+  /**
+   * The wheels' radius, by spinning slowly in place twice against the gyro. Calibrate the gyro's
+   * scale first: its error carries straight into the radius.
+   */
+  Command wheelRadius() {
+    return drive
+        .run(
+            coroutine -> {
+              // Point the wheels around the circle before counting.
+              spinFor(coroutine, 0.1, 0.5);
+              WheelRadiusCalibration spin = new WheelRadiusCalibration(drive.moduleLocations());
+              spin.start(drive.gyroYaw().getRadians(), drive.wheelRotationsRadians());
+              double rate = 0.1;
+              while (spin.turnedRadians() < WHEEL_SPIN_TURNS * 2 * Math.PI) {
+                rate =
+                    Math.min(WHEEL_SPIN_RADIANS_PER_SECOND, rate + WHEEL_SPIN_RAMP * LOOP_SECONDS);
+                drive.runVelocity(new ChassisVelocities(0, 0, rate));
+                coroutine.yield();
+                spin.update(drive.gyroYaw().getRadians(), drive.wheelRotationsRadians());
+              }
+              stop(coroutine);
+              double configured = drivetrain.get().modules().wheelRadius().in(Inches);
+              double measured = Meters.of(spin.radiusMeters()).in(Inches);
+              double[] wheels = spin.radiiMeters();
+              report(
+                  String.format(
+                      Locale.ROOT,
+                      "Wheel radius %.3f in by spinning in place (configured %.3f); each wheel %.3f,"
+                          + " %.3f, %.3f, %.3f. In Robots: .wheelRadius(Inches.of(%.3f)) //"
+                          + " measured %s",
+                      measured,
+                      configured,
+                      Meters.of(wheels[0]).in(Inches),
+                      Meters.of(wheels[1]).in(Inches),
+                      Meters.of(wheels[2]).in(Inches),
+                      Meters.of(wheels[3]).in(Inches),
+                      measured,
+                      today.get()));
+            })
+        .named("Calibrate wheel radius");
+  }
+
+  /**
+   * The gyro's scale, by five whole turns in place where the cameras see several tags: their
+   * heading before and after is the reference.
+   */
+  Command gyroScale() {
+    return drive
+        .run(
+            coroutine -> {
+              HeadingAverage before = headingsWhileStill(coroutine);
+              if (before.count() < MIN_HEADINGS) {
+                report(noReference(before));
+                return;
+              }
+              GyroScaleCalibration spin = new GyroScaleCalibration();
+              spin.start(drive.gyroYaw().getRadians(), before.average());
+              double target = GYRO_SPIN_TURNS * 2 * Math.PI;
+              double rate = 0;
+              while (spin.gyroTurnedRadians() < target) {
+                // Slow down in time to stop near the last whole turn.
+                double left = target - spin.gyroTurnedRadians();
+                double stopping = Math.sqrt(2 * GYRO_SPIN_RAMP * left);
+                rate =
+                    Math.max(
+                        0.2,
+                        Math.min(
+                            Math.min(GYRO_SPIN_RADIANS_PER_SECOND, stopping),
+                            rate + GYRO_SPIN_RAMP * LOOP_SECONDS));
+                drive.runVelocity(new ChassisVelocities(0, 0, rate));
+                coroutine.yield();
+                spin.update(drive.gyroYaw().getRadians());
+              }
+              stop(coroutine);
+              for (int i = 0; i < loops(0.5); i++) {
+                coroutine.yield();
+                spin.update(drive.gyroYaw().getRadians());
+              }
+              HeadingAverage after = new HeadingAverage();
+              vision.collectHeadings(after);
+              for (int i = 0; i < loops(STILL_SECONDS); i++) {
+                coroutine.yield();
+                spin.update(drive.gyroYaw().getRadians());
+              }
+              vision.stopCollectingHeadings();
+              if (after.count() < MIN_HEADINGS) {
+                report(noReference(after));
+                return;
+              }
+              spin.finish(drive.gyroYaw().getRadians(), after.average());
+              double configured = robot.wiring().map(SwerveWiring::gyroYawScale).orElse(1.0);
+              double scale = configured * spin.scale();
+              report(
+                  String.format(
+                      Locale.ROOT,
+                      "Gyro scale %.5f: it reads %.2f%% %s over %d turns (%.1f° off). In the"
+                          + " robot's wiring: .gyroYawScale(%.5f) // measured %s",
+                      scale,
+                      Math.abs(1 / spin.scale() - 1) * 100,
+                      spin.scale() < 1 ? "high" : "low",
+                      GYRO_SPIN_TURNS,
+                      Math.toDegrees(spin.gyroTurnedRadians() - spin.trueTurnedRadians()),
+                      scale,
+                      today.get()));
+            })
+        .named("Calibrate gyro scale");
+  }
+
+  /** Whether the IMU reads level: the robot standing still on a level floor for two seconds. */
+  Command level() {
+    return Command.noRequirements(
+            coroutine -> {
+              LevelCheck level = new LevelCheck();
+              for (int i = 0; i < loops(LEVEL_SECONDS); i++) {
+                level.add(drive.pitchRadians(), drive.rollRadians());
+                coroutine.yield();
+              }
+              report(level.describe(LEVEL_TOLERANCE_RADIANS) + ", " + today.get());
+            })
+        .named("Check the IMU reads level");
+  }
+
+  /**
+   * Where a camera really is, from the tags it sees while the other cameras hold the robot's pose:
+   * drive slowly past tags, nearer and farther, for twenty seconds.
+   */
+  Command cameraMount(String name) {
+    CameraConfig camera =
+        robot.cameras().stream()
+            .filter(each -> each.name().equals(name))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("no camera named " + name));
+    return Command.noRequirements(
+            coroutine -> {
+              CameraMountCalibration mount = new CameraMountCalibration(camera.robotToCamera());
+              vision.calibrateMount(name, mount);
+              try {
+                for (int i = 0; i < loops(MOUNT_SECONDS); i++) {
+                  if (mount.sightings() >= MOUNT_SIGHTINGS) {
+                    break;
+                  }
+                  coroutine.yield();
+                }
+              } finally {
+                vision.stopCalibratingMount();
+              }
+              Optional<CameraMountCalibration.Result> result =
+                  mount.sightings() >= MIN_MOUNT_SIGHTINGS ? mount.solve() : Optional.empty();
+              report(
+                  result
+                      .map(solved -> describe(camera, solved))
+                      .orElse(
+                          String.format(
+                              Locale.ROOT,
+                              "%s: too few sightings (%d) to place it. Drive slowly past tags,"
+                                  + " nearer and farther, where the other cameras see tags too.",
+                              name,
+                              mount.sightings())));
+            })
+        .named("Calibrate camera mount: " + name);
+  }
+
+  private String describe(CameraConfig camera, CameraMountCalibration.Result solved) {
+    Transform3d mount = solved.robotToCamera();
+    Rotation3d turn = mount.getRotation();
+    double[] sure = solved.stdDevs();
+    double placeSure = Math.max(sure[0], Math.max(sure[1], sure[2]));
+    double angleSure = Math.max(sure[3], Math.max(sure[4], sure[5]));
+    String unsure =
+        placeSure > 0.01 || angleSure > Math.toRadians(0.5)
+            ? " Not sure of it: drive nearer and farther from the tags, and run it again."
+            : "";
+    return String.format(
+        Locale.ROOT,
+        "%s: tags landed %.1f cm off, %.1f cm with the mount found (%d sightings; to within %.2f"
+            + " in and %.2f°).%s In Robots: camera(\"%s\", %.2f, %.2f, %.2f, %.1f, %.1f, %.1f) //"
+            + " measured %s",
+        camera.name(),
+        solved.residualBeforeMeters() * 100,
+        solved.residualAfterMeters() * 100,
+        solved.sightings(),
+        Meters.of(placeSure).in(Inches),
+        Math.toDegrees(angleSure),
+        unsure,
+        camera.name(),
+        Meters.of(mount.getX()).in(Inches),
+        Meters.of(mount.getY()).in(Inches),
+        Meters.of(mount.getZ()).in(Inches),
+        Math.toDegrees(turn.getX()),
+        -Math.toDegrees(turn.getY()),
+        Math.toDegrees(turn.getZ()),
+        today.get());
+  }
+
+  /** Stands still, collecting the cameras' headings. */
+  private HeadingAverage headingsWhileStill(Coroutine coroutine) {
+    HeadingAverage headings = new HeadingAverage();
+    stop(coroutine);
+    vision.collectHeadings(headings);
+    for (int i = 0; i < loops(STILL_SECONDS); i++) {
+      coroutine.yield();
+    }
+    vision.stopCollectingHeadings();
+    return headings;
+  }
+
+  private static String noReference(HeadingAverage headings) {
+    return String.format(
+        Locale.ROOT,
+        "Gyro scale: the cameras measured the heading %d times standing still; it needs %d. Face"
+            + " where they see two or more tags.",
+        headings.count(),
+        MIN_HEADINGS);
+  }
+
+  private void spinFor(Coroutine coroutine, double radiansPerSecond, double seconds) {
+    for (int i = 0; i < loops(seconds); i++) {
+      drive.runVelocity(new ChassisVelocities(0, 0, radiansPerSecond));
+      coroutine.yield();
+    }
+  }
+
+  private void stop(Coroutine coroutine) {
+    drive.runVelocity(new ChassisVelocities(0, 0, 0));
+    coroutine.wait(Seconds.of(LOOP_SECONDS));
+  }
+
+  private static int loops(double seconds) {
+    return (int) Math.ceil(seconds / LOOP_SECONDS);
+  }
+}

@@ -475,6 +475,7 @@ class RobotContainerSimTest {
                     SwerveWiring.builder()
                         .canBus(CanBus.canivore("drivetrain"))
                         .gyroId(52)
+                        .gyroYawScale(1.0)
                         .couplingRatio(3.5)
                         .modules(List.of(modules))
                         .systemcoreMount(OnboardIMU.MountOrientation.FLAT)

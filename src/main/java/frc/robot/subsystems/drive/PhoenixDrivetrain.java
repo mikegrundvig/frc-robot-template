@@ -32,7 +32,7 @@ public final class PhoenixDrivetrain implements AutoCloseable {
           new ModuleIOTalonFX(
               wiring.modules().get(i), bus, hardware, wiring.couplingRatio(), odometry);
     }
-    gyro = new GyroIOPigeon2(wiring.gyroId(), bus, odometry);
+    gyro = new GyroIOPigeon2(wiring.gyroId(), bus, wiring.gyroYawScale(), odometry);
     odometry.start();
   }
 

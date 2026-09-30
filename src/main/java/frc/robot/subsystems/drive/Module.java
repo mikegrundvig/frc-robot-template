@@ -95,6 +95,11 @@ public class Module {
         inputs.driveVelocityRadPerSec * wheelRadiusMeters, inputs.steerAngle);
   }
 
+  /** How far the wheel has turned, in radians. */
+  double wheelRotationRadians() {
+    return inputs.drivePositionRad;
+  }
+
   boolean isConnected() {
     return inputs.driveConnected && inputs.steerConnected;
   }

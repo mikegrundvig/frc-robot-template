@@ -19,6 +19,8 @@ import org.wpilib.units.measure.Angle;
  *
  * @param canBus the bus every drivetrain device is on
  * @param gyroId the Pigeon 2's CAN ID
+ * @param gyroYawScale the gyro's readings times this are the true rotation: 1 until the gyro scale
+ *     procedure measures it (docs/calibration.md)
  * @param couplingRatio how many rotations the drive motor turns for each full turn of the module,
  *     with the wheel held still: turning an MK4-style module turns its wheel through the bevel
  *     gear, which the drive encoder would otherwise count as travel. Zero for modules without
@@ -31,6 +33,7 @@ import org.wpilib.units.measure.Angle;
 public record SwerveWiring(
     CanBus canBus,
     int gyroId,
+    double gyroYawScale,
     double couplingRatio,
     List<ModuleWiring> modules,
     OnboardIMU.MountOrientation systemcoreMount) {
@@ -39,6 +42,10 @@ public record SwerveWiring(
     if (modules.size() != 4) {
       throw new IllegalArgumentException(
           "four modules: front left, front right, back left, back right");
+    }
+    if (!(gyroYawScale >= 0.9 && gyroYawScale <= 1.1)) {
+      throw new IllegalArgumentException(
+          "a gyro's scale is within 10% of true, or it's broken: " + gyroYawScale);
     }
     if (!(couplingRatio >= 0) || Double.isInfinite(couplingRatio)) {
       throw new IllegalArgumentException("couplingRatio must be zero or more: " + couplingRatio);

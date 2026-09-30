@@ -26,6 +26,7 @@ import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.VisionSim;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -95,6 +96,7 @@ public final class RobotContainer implements AutoCloseable {
   private final @Nullable VisionSim visionSim;
 
   private final Vision vision;
+  private final Calibration calibration;
 
   private final PoseEstimator estimator;
   private final Drive drive;
@@ -270,6 +272,7 @@ public final class RobotContainer implements AutoCloseable {
       }
     }
     vision = new Vision(cameras, cameraIOs, estimator, field);
+    calibration = new Calibration(drive, vision, robot, drivetrain, LocalDate::now);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns. Back, with the robot facing straight downfield, resets its heading: the fallback
@@ -564,6 +567,11 @@ public final class RobotContainer implements AutoCloseable {
   /** The pre-match placement check, as of the last loop. */
   Placement placement() {
     return placement;
+  }
+
+  /** The calibration procedures, for the Pitwall page. */
+  Calibration calibration() {
+    return calibration;
   }
 
   /** A pit check for the Pitwall page: drive forward slowly for two seconds. */

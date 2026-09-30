@@ -1,6 +1,7 @@
 package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -62,15 +63,24 @@ class DashboardStreamTest {
   }
 
   @Test
-  void aSessionWithoutAWritableDriveSaysItIsntLogged(@TempDir Path folder) throws Exception {
+  void aSessionWithoutADriveSaysItIsntLogged(@TempDir Path folder) {
     File drive = folder.toFile();
     File missing = folder.resolve("U").toFile();
-    File readOnly = Files.createDirectory(folder.resolve("locked")).toFile();
-    assertThat(readOnly.setWritable(false)).isTrue();
 
     assertThat(Robot.logDriveProblem(drive)).isNull();
     assertThat(Robot.logDriveProblem(missing))
         .isEqualTo("No USB drive at " + missing + ": this session isn't being logged");
+  }
+
+  @Test
+  void aSessionOnAReadOnlyDriveSaysItIsntLogged(@TempDir Path folder) throws Exception {
+    File readOnly = Files.createDirectory(folder.resolve("locked")).toFile();
+    // Linux, where the robot runs, can lock a folder against writing. Windows ignores a folder's
+    // read-only flag, and root can write anywhere, so there this case can't be set up: skipped.
+    assumeTrue(
+        readOnly.setWritable(false) && !readOnly.canWrite(),
+        "this system can't make a folder read-only");
+
     assertThat(Robot.logDriveProblem(readOnly)).contains("can't be written");
   }
 }

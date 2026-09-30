@@ -113,8 +113,9 @@ gradle.taskGraph.whenReady { graph ->
         }
     }
 }
+// Every check means ci: the robot program's and Pitwall's, which the robot runs too.
 tasks.matching { it.name == "deploy" }.configureEach {
-    dependsOn "check"
+    dependsOn "ci"
 }
 
 // Store the team number: ./gradlew setTeamNumber -PteamNumber=NNNN

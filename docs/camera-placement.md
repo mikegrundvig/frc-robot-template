@@ -41,9 +41,8 @@ outside is refused, naming it. The family leaves out heights the robot doesn't r
 simulation takes it, with the camera model the simulator uses (`VisionSim`): the sensor's
 resolution and field of view, about a quarter pixel of noise on each tag corner, and tags seen up
 to 7 m. Each image goes through the robot's own vision pipeline (`VisionPipeline`), as on the
-robot: solved with
-the gyro's heading, correcting heading from a multi-tag solution when it qualifies, with the same
-filters and uncertainties. The robot stands still and level, and its gyro's heading is off by a
+robot: solved with the gyro's heading, correcting heading from a multi-tag solution when it
+qualifies, with the same filters and uncertainties. The robot stands still and level, and its gyro's heading is off by a
 small random amount (a quarter degree, typically), as a real one is. The measurements from all the
 cameras are combined as the estimator combines them, each weighed by its uncertainty. Each camera
 takes two images at each pose, each with its own noise.
@@ -86,8 +85,8 @@ the pose, and where the camera is, so a layout scores the same whatever else is 
 ./gradlew cameraStudy --args="--layout=2027-field.json" # a field WPILib doesn't have yet
 ```
 
-The default run takes under a minute on two threads (43 s on the computer it was written on,
-3,840 poses and 157 layouts), and about 1 GB of memory. A finer grid costs the square:
+The default run takes under a minute on two threads (45 to 50 s on the computer it was written
+on, for 3,840 poses and 157 layouts), and under 1 GB of memory. A finer grid costs the square:
 `--grid-meters=0.25` takes four times as long.
 
 | Option | Default | What |
@@ -119,8 +118,9 @@ for none, `1` to `9` for tenths, `#` for all. Blue's alliance wall is on the lef
 
 Shares within about a point of each other are a tie: that's the sampling's own noise, so choose
 among them on something else (fewer cameras, easier mounts). To turn it into requirements for CAD:
-take the fewest cameras whose localized share is within a few points of the best, then read off what the top layouts at that count share (corners or sides,
-height, splay, tilt). Those are the requirements: "four cameras, one at each corner, facing out at
+take the fewest cameras whose localized share is within a few points of the best, then read off
+what the top layouts at that count share (corners or sides, height, splay, tilt). Those are the
+requirements, in words like these: "four cameras, one at each corner, facing out at
 30° to 45°, 16 to 24 in up, tilted up 10° to 20°". Rerun with weights once the strategy says where
 the robot must know where it is.
 
@@ -133,9 +133,29 @@ out (inside a field element), 3 counts it three times (where the robot scores).
 
 ```csv
 # name, x min, y min, x max, y max, weight
-Hub, 4.03, 3.43, 5.22, 4.64, 0
-Scoring, 2.0, 2.5, 4.0, 5.5, 3
+Field element, 7.5, 3.5, 9.0, 4.5, 0
+Scoring, 1.0, 2.0, 3.0, 6.0, 3
 ```
+
+## An example: the template's robot on 2026's field
+
+2026's field stands in until 2027's is published, so this says nothing about next season's robot;
+it shows what a run says and how to read it. The default run, seed 1:
+
+| Cameras | The best layout of that many | Rank | Localized | Two tags | Two cameras |
+|---:|---|---:|---:|---:|---:|
+| 1 | ahead, 16 in up, tilted 20° | 138 | 63.3% | 45.8% | 0.0% |
+| 2 | ahead and back, 24 in up, tilted 10° | 72 | 89.1% | 75.9% | 48.0% |
+| 3 | front corners splayed 45°, and back, 16 in up, tilted 20° | 35 | 97.6% | 91.5% | 82.7% |
+| 4 | corners splayed 30°, 24 in up, tilted 20° | 1 | 99.7% | 95.5% | 93.5% |
+| 4 | the template robot's own | 26 | 98.6% | 93.2% | 96.2% |
+
+Every camera up to four buys coverage; the fourth still buys two points localized and eleven of two
+cameras seeing tags. The top 25 layouts are four cameras within about a point of each other:
+corners splayed 30° or 45° and the four sides do alike, at any of the three heights, tilted up 10°
+to 20° (level does a little worse). The template robot's own layout is among them. With seed 2,
+95% of layouts move less than 0.3 points, and the top two stay the top two. REBUILT has 32 tags,
+many in mid-field on the hubs; a field with fewer tags spreads the layouts further apart.
 
 ## At kickoff
 

@@ -31,7 +31,7 @@ class CameraStudyTest {
   @Test
   void aCoarseRunRanksEveryLayoutAndWritesTheReport() throws IOException {
     Path weights =
-        Files.writeString(folder.resolve("weights.csv"), "Hub, 4.03, 3.43, 5.22, 4.64, 0\n");
+        Files.writeString(folder.resolve("weights.csv"), "Field element, 7.5, 3.5, 9.0, 4.5, 0\n");
 
     run(
         "--grid-meters=3",
@@ -48,7 +48,7 @@ class CameraStudyTest {
     String summary = Files.readString(folder.resolve("report/summary.md"));
     assertThat(summary)
         .contains("on 2026 FRC Rebuilt Welded (WPILib's layout): 32 tags, rotated")
-        .contains("Weights from `" + weights + "`: Hub 0.0")
+        .contains("Weights from `" + weights + "`: Field element 0.0")
         .contains("## The best at each camera count")
         .contains("## The robot's own layout")
         .contains("### The robot's own: sim");

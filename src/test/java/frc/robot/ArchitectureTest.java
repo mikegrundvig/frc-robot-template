@@ -133,6 +133,20 @@ class ArchitectureTest {
   }
 
   @Test
+  void theSimulatorStaysOutOfTheRobotsCode() {
+    noClasses()
+        .that()
+        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage("frc.robot.sim..")
+        .because(
+            "the robot's code runs the same on the robot as in the simulator: the simulated world"
+                + " plugs in behind the IO interfaces, chosen at the top level")
+        .check(PRODUCTION_CODE);
+  }
+
+  @Test
   void onlyTheTopLevelUsesTheTopLevel() {
     noClasses()
         .that()

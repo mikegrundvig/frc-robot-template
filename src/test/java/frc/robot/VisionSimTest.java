@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.subsystems.drive.DriveSimulation;
-import frc.robot.subsystems.drive.SensorErrors;
+import frc.robot.sim.DriveSimulation;
+import frc.robot.sim.SensorErrors;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;

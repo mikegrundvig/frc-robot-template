@@ -1,5 +1,6 @@
-package frc.robot.subsystems.drive;
+package frc.robot.sim;
 
+import frc.robot.subsystems.drive.GyroIO;
 import java.util.Arrays;
 import java.util.Random;
 import org.wpilib.math.geometry.Rotation2d;

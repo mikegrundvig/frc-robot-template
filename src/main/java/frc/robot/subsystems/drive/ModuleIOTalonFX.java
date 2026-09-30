@@ -23,6 +23,7 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
+import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
@@ -48,9 +49,6 @@ import org.wpilib.units.measure.Voltage;
  */
 final class ModuleIOTalonFX implements ModuleIO {
   private static final double TWO_PI = 2 * Math.PI;
-
-  /** Signals odometry doesn't need arrive once a loop. */
-  private static final double LOOP_HZ = 50;
 
   /** At startup, configuring a device is tried this many times, waiting this long each time. */
   private static final int TRIES = 5;
@@ -164,7 +162,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     BaseStatusSignal.setUpdateFrequencyForAll(
         PhoenixOdometryThread.FREQUENCY_HZ, drivePosition, steerPosition);
     BaseStatusSignal.setUpdateFrequencyForAll(
-        LOOP_HZ,
+        RobotLoop.FREQUENCY_HZ,
         driveVelocity,
         driveVolts,
         driveStatorCurrent,

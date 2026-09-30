@@ -18,6 +18,7 @@ import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.YawTrack;
+import frc.robot.lib.timing.RobotLoop;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Optional;
@@ -56,7 +57,6 @@ import org.wpilib.util.Alert;
  * swerve template ships: see docs/stand-ins.md.
  */
 public class Drive implements Mechanism, AutoCloseable {
-  private static final double LOOP_PERIOD_S = 0.02;
   private static final double STICK_DEADBAND = 0.1;
 
   /**
@@ -452,7 +452,7 @@ public class Drive implements Mechanism, AutoCloseable {
   public void runVelocity(ChassisVelocities robotRelative) {
     // Correct for the robot rotating during the 20 ms step, which otherwise makes it drift
     // sideways while spinning and driving at the same time.
-    ChassisVelocities discrete = robotRelative.discretize(LOOP_PERIOD_S);
+    ChassisVelocities discrete = robotRelative.discretize(RobotLoop.PERIOD_SECONDS);
     SwerveModuleVelocity[] setpoints =
         SwerveDriveKinematics.desaturateWheelVelocities(
             kinematics.toSwerveModuleVelocities(discrete), maxLinearSpeedMps);
@@ -601,7 +601,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * that every wheel turns the right way.
    */
   public Command driveForward(double metersPerSecond, double seconds) {
-    int loops = (int) Math.round(seconds / LOOP_PERIOD_S);
+    int loops = RobotLoop.loops(seconds);
     return run(coroutine -> {
           for (int i = 0; i < loops; i++) {
             runVelocity(new ChassisVelocities(metersPerSecond, 0, 0));

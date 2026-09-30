@@ -16,6 +16,7 @@ import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
 import frc.robot.lib.localization.VisionResult;
+import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -51,7 +52,7 @@ import org.wpilib.util.Alert;
  */
 public final class Vision implements AutoCloseable {
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
-  private static final int YAW_RATE_LOOPS = 15;
+  private static final int YAW_RATE_LOOPS = RobotLoop.loops(0.3);
 
   private final List<CameraConfig> cameras;
   private final CameraIO[] ios;
@@ -76,7 +77,7 @@ public final class Vision implements AutoCloseable {
   private int yawRateLoop;
 
   /** Half a second of the robot's attitude, for each image's capture time. */
-  private final AttitudeHistory attitudes = new AttitudeHistory(25);
+  private final AttitudeHistory attitudes = new AttitudeHistory(RobotLoop.loops(0.5));
 
   /** The robot's pose is good enough to calibrate a camera against: within 5 cm. */
   private static final double CALIBRATION_POSE_STD_DEV_METERS = 0.05;

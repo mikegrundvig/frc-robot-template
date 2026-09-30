@@ -1,5 +1,6 @@
 package frc.robot;
 
+import frc.robot.lib.timing.RobotLoop;
 import org.littletonrobotics.junction.LogDataReceiver;
 import org.littletonrobotics.junction.LogTable;
 
@@ -10,8 +11,8 @@ import org.littletonrobotics.junction.LogTable;
  * itself, so a replay streams the same loops.
  */
 final class DashboardStream implements LogDataReceiver {
-  /** On the field, stream one loop in this many: 10 Hz from a 50 Hz loop. */
-  static final int FIELD_DIVISOR = 5;
+  /** On the field, stream one loop in this many: 10 Hz. */
+  static final int FIELD_DIVISOR = (int) Math.round(RobotLoop.FREQUENCY_HZ / 10);
 
   private final LogDataReceiver dashboards;
   private long loops;

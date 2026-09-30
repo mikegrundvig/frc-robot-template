@@ -2,6 +2,7 @@ package frc.robot;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import frc.robot.lib.timing.RobotLoop;
 import org.wpilib.hardware.hal.HAL;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
@@ -14,7 +15,7 @@ import org.wpilib.simulation.SimHooks;
  * notifyNewData()}, or state from an earlier test leaks into the next one.
  */
 public final class SimTestSupport {
-  public static final double LOOP_PERIOD_S = 0.02;
+  public static final double LOOP_PERIOD_S = RobotLoop.PERIOD_SECONDS;
 
   private SimTestSupport() {}
 
@@ -46,6 +47,6 @@ public final class SimTestSupport {
   }
 
   public static int loops(double seconds) {
-    return (int) Math.ceil(seconds / LOOP_PERIOD_S);
+    return RobotLoop.loops(seconds);
   }
 }

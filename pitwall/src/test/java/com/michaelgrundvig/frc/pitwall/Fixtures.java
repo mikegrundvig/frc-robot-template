@@ -18,8 +18,8 @@ final class Fixtures {
   /** A fact about the hardware: not tunable. */
   record Motor(double freeSpeedMetersPerSecond) {}
 
-  record Limits(@Tunable Current current, @Tunable LinearVelocity maxSpeed) {
-    Limits {
+  record DriveLimits(@Tunable Current current, @Tunable LinearVelocity maxSpeed) {
+    DriveLimits {
       if (!(current.baseUnitMagnitude() > 0)) {
         throw new IllegalArgumentException("current must be positive");
       }
@@ -34,7 +34,7 @@ final class Fixtures {
     }
   }
 
-  record Drive(Motor motor, Limits limits, Gains gains) {
+  record Drive(Motor motor, DriveLimits limits, Gains gains) {
     Drive {
       if (limits.maxSpeed().in(MetersPerSecond) > motor.freeSpeedMetersPerSecond()) {
         throw new IllegalArgumentException("maxSpeed is faster than the motor's free speed");
@@ -61,7 +61,7 @@ final class Fixtures {
         "test",
         new Drive(
             new Motor(4.5),
-            new Limits(Amps.of(40), MetersPerSecond.of(4)),
+            new DriveLimits(Amps.of(40), MetersPerSecond.of(4)),
             new Gains(16, Seconds.of(0.03))),
         new Range(0, 10));
   }

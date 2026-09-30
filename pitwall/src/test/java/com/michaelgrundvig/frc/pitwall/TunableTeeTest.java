@@ -389,4 +389,103 @@ class TunableTeeTest {
         .extracting(TunableTee.Listed::limits)
         .isEqualTo(Limits.atMost(30));
   }
+
+  /** The test machine's travel and gain, live, published through the tee as WPILib does. */
+  private LiveConfig<Fixtures.Machine> publishedMachine() {
+    var live =
+        LiveConfig.of("machine", Fixtures.machine())
+            .number("drive.gains.kP", Limits.between(0, 100))
+            .number("drive.limits.maxSpeed", Limits.atMost(10))
+            .number("travel.min", Limits.NONE)
+            .number("travel.max", Limits.NONE);
+    TunableRegistry.registerBackend("", tee);
+    TunableRegistry.publish("Machine", live);
+    tee.update();
+    return live;
+  }
+
+  @Test
+  void aLiveConfigurationIsKnownAndItsValuesAreListed() {
+    var live = publishedMachine();
+
+    assertThat(tee.configs()).containsExactly(live);
+    assertThat(tee.view()).extracting(TunableTee.Listed::path).contains("/Machine/travel/min");
+  }
+
+  /** A dashboard's change to a configuration value is checked by the whole configuration. */
+  @Test
+  void aDashboardChangeTheConfigurationRefusesSaysWhy() {
+    var live = publishedMachine();
+
+    dashboard.setDouble("Machine/drive/limits/maxSpeed", 5);
+    tee.update();
+
+    assertThat(live.get()).isEqualTo(Fixtures.machine());
+    assertThat(tee.refusals())
+        .containsExactly(
+            "/Machine/drive/limits/maxSpeed = 5.0: maxSpeed is faster than the motor's free speed");
+  }
+
+  /** From the page, a configuration's values change together: one rebuild, all or none. */
+  @Test
+  void thePageChangesAConfigurationsValuesTogether() {
+    var live = publishedMachine();
+    Map<String, Object> both = new LinkedHashMap<>();
+    both.put("Machine/travel/min", 12);
+    both.put("Machine/travel/max", 20);
+
+    var outcome = tee.requestChanges(both);
+    tee.update();
+
+    assertThat(outcome.getNow(null)).isEqualTo(Outcome.applied());
+    assertThat(live.get().travel()).isEqualTo(new Fixtures.Range(12, 20));
+    assertThat(logged).last().isEqualTo("/Machine/travel/min,/Machine/travel/max=12.0,20.0");
+  }
+
+  @Test
+  void thePageIsToldWhyTheConfigurationRefusedAChange() {
+    var live = publishedMachine();
+
+    var outcome = tee.requestChanges(Map.of("Machine/travel/min", 12));
+    tee.update();
+
+    assertThat(outcome.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "min must be below max, got 12.0 and 10.0"));
+    assertThat(live.get()).isEqualTo(Fixtures.machine());
+  }
+
+  @Test
+  void replayMakesAConfigurationsLoggedChangesTogether() {
+    var replayDashboard = new MockTunableBackend();
+    var replay =
+        new TunableTee(
+            replayDashboard,
+            () -> null,
+            inputs -> {
+              inputs.paths = new String[] {"/Machine/travel/min", "/Machine/travel/max"};
+              inputs.values = new String[] {"12.0", "20.0"};
+            },
+            true);
+    var live =
+        LiveConfig.of("machine", Fixtures.machine())
+            .number("travel.min", Limits.NONE)
+            .number("travel.max", Limits.NONE);
+    TunableRegistry.registerBackend("", replay);
+    TunableRegistry.publish("Machine", live);
+
+    replay.update();
+
+    assertThat(live.get().travel()).isEqualTo(new Fixtures.Range(12, 20));
+  }
+
+  /** Configuration values go back to committed on the field; they aren't switches. */
+  @Test
+  void aConfigurationsValuesAreNotSwitches() {
+    publishedMachine();
+
+    dashboard.setDouble("Machine/drive/gains/kP", 18);
+    tee.update();
+
+    assertThat(tee.changedSinceStartup()).isEmpty();
+  }
 }

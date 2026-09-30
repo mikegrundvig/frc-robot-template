@@ -113,9 +113,10 @@ Also built in:
   owning heading and the wheels' disagreement (slip) lowering their trust; camera measurements
   applied at the moment their image was taken, however late they arrive; every measurement gated
   against the estimate, so a misread tag can't move it; and recovery when the cameras agree with
-  each other that odometry is wrong (a collision). It reports what it rests on (tracking,
-  dead reckoning, lost, gyro lost) and how sure it is, on Pitwall and in the log. Swerve and tank
-  kinematics plug in; so will any other drivetrain.
+  each other that odometry is wrong (a collision). A camera knocked off its mount counts for less
+  until it's recalibrated, and says so; a task lining up on a target can trust only that target's
+  tags. It reports what it rests on (tracking, dead reckoning, lost, gyro lost) and how sure it
+  is, on Pitwall and in the log. Swerve and tank kinematics plug in; so will any other drivetrain.
 - **A simulator that knows where the robot really is:** its wheels and gyro report the truth with
   the errors a season-worn robot has (worn tread, encoder zeros a little off, gyro scale, drift, and
   noise; `SensorErrors`), so odometry drifts as a real robot's does, and a wheel can be made to slip

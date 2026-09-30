@@ -17,14 +17,18 @@ import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.TagAllowlist;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
+import frc.robot.lib.localization.VisionDecision;
 import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Scheduler;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -383,6 +387,60 @@ class VisionTest {
     loop();
 
     assertThat(vision.meanTagResidualMeters("front")).isBetween(0.09, 0.11); // 4 in
+  }
+
+  /** One loop, and the tags each of its measurements came from. */
+  private List<List<Integer>> tagsMeasuredFrom() {
+    vision.periodic(estimator.estimate(), 0, 0);
+    List<VisionDecision> decisions = estimator.update();
+    vision.record(decisions);
+    return decisions.stream().map(decision -> decision.measurement().tagIds()).toList();
+  }
+
+  /**
+   * A task lining up on the hub trusts only the hub's tags while it runs; when it ends, or is
+   * canceled partway, the cameras trust every tag again.
+   */
+  @Test
+  void aTaskTrustsOnlyItsTagsWhileItRuns() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Command approach =
+        Command.noRequirements(
+                coroutine -> {
+                  coroutine.yield();
+                  coroutine.yield();
+                })
+            .named("Approach the hub");
+    Command task = vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach);
+    scheduler.schedule(task);
+    scheduler.run();
+    io.see(T0 + 200_000_000L, camera);
+
+    assertThat(tagsMeasuredFrom()).containsExactly(List.of(26));
+    for (int k = 0; k < 5; k++) {
+      scheduler.run();
+    }
+    assertThat(scheduler.isScheduledOrRunning(task)).as("done").isFalse();
+    io.see(T0 + 210_000_000L, camera);
+    assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
+
+    Command canceled = vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach);
+    scheduler.schedule(canceled);
+    scheduler.run();
+    scheduler.cancel(canceled);
+    io.see(T0 + 215_000_000L, camera);
+    assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
+  }
+
+  @Test
+  void anImageWithNoTagTheTaskTrustsIsLeftOut() {
+    vision.trustOnly(TagAllowlist.of("Loading", List.of(13)));
+    io.see(T0 + 200_000_000L, camera);
+
+    assertThat(tagsMeasuredFrom()).isEmpty();
+    vision.trustEveryTag();
+    io.see(T0 + 210_000_000L, camera);
+    assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
   }
 
   /** Images from the front camera, one a loop, with odometry moving on to each one's time. */

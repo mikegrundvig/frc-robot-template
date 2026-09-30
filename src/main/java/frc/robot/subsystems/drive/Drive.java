@@ -227,14 +227,14 @@ public class Drive implements Mechanism, AutoCloseable {
       moduleDisconnectedAlerts[i] =
           new Alert(
               name,
-              "module" + Module.NAMES[i] + "Disconnected",
-              Module.NAMES[i] + " swerve module disconnected: driving on three",
+              "module" + Module.NAMES.get(i) + "Disconnected",
+              Module.NAMES.get(i) + " swerve module disconnected: driving on three",
               Alert.Level.HIGH);
       moduleUnconfiguredAlerts[i] =
           new Alert(
               name,
-              "module" + Module.NAMES[i] + "Unconfigured",
-              Module.NAMES[i] + " swerve module not configured",
+              "module" + Module.NAMES.get(i) + "Unconfigured",
+              Module.NAMES.get(i) + " swerve module not configured",
               Alert.Level.HIGH);
     }
   }
@@ -289,7 +289,7 @@ public class Drive implements Mechanism, AutoCloseable {
       String unconfigured = modules[i].unconfigured();
       if (!unconfigured.isEmpty() && !moduleUnconfiguredAlerts[i].get()) {
         moduleUnconfiguredAlerts[i].setText(
-            Module.NAMES[i]
+            Module.NAMES.get(i)
                 + " swerve module: "
                 + unconfigured
                 + " didn't take its configuration and runs on defaults (no current limits):"

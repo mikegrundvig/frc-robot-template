@@ -11,6 +11,7 @@ import frc.robot.lib.localization.CameraLocalizer;
 import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.MountCheck;
+import frc.robot.lib.localization.TagAllowlist;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
@@ -24,6 +25,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
+import org.littletonrobotics.junction.Logger;
+import org.wpilib.command3.Command;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Quaternion;
@@ -52,6 +55,9 @@ import org.wpilib.tunable.TunableRegistry;
  * main thresholds and uncertainties Pitwall tunes. Two switches are WPILib tunables, for the drive
  * team as much as the pit: one per camera to leave it out (a camera fogged over, knocked loose, or
  * blinded by stage lights), and how long to hold the cameras back when autonomous starts.
+ *
+ * <p>A task lining up on a target can trust only that target's tags while it runs ({@link
+ * #trustingOnly}): 254's per-task allowlist.
  */
 public final class Vision implements AutoCloseable {
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
@@ -113,6 +119,9 @@ public final class Vision implements AutoCloseable {
   private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
   private VisionConfig current;
+
+  /** The tags the running task trusts; null for every tag. */
+  private @Nullable TagAllowlist onlyTags;
 
   /**
    * Vision's configuration as the pit tunes it: the main thresholds and uncertainties, each within
@@ -195,6 +204,39 @@ public final class Vision implements AutoCloseable {
   }
 
   /**
+   * A task that trusts only some tags while it runs: lining up on the hub, say, the cameras measure
+   * the robot from the hub's tags alone. They go back to every tag when the task ends, however it
+   * ends. One such task at a time.
+   *
+   * @param tags the tags it trusts: {@code TagAllowlist.of(hub.name(), hub.tags(field, alliance))}
+   */
+  public Command trustingOnly(TagAllowlist tags, Command task) {
+    return Command.noRequirements(
+            coroutine -> {
+              trustOnly(tags);
+              coroutine.await(task);
+              trustEveryTag();
+            })
+        // A canceled command never resumes, so nothing after the await runs (not even a finally).
+        .whenCanceled(this::trustEveryTag)
+        .named(task.name());
+  }
+
+  /**
+   * From now on, the cameras measure the robot only from these tags, until {@link #trustEveryTag}.
+   * Every tag is still logged, and still checks its camera's mount. {@link #trustingOnly} does both
+   * around a task, which is safer: a task canceled partway never reaches its own last line.
+   */
+  public void trustOnly(TagAllowlist tags) {
+    onlyTags = tags;
+  }
+
+  /** The cameras measure the robot from every tag again. */
+  public void trustEveryTag() {
+    onlyTags = null;
+  }
+
+  /**
    * Autonomous just started: hold the cameras' measurements back for the tuned time, if any. They
    * are still read and logged, marked held.
    */
@@ -230,6 +272,8 @@ public final class Vision implements AutoCloseable {
       recentYawRate = Math.max(recentYawRate, rate);
     }
     current = settings.get();
+    TagAllowlist trusted = onlyTags;
+    Logger.recordOutput("Vision/OnlyTags", trusted != null ? trusted.describe() : "");
     Motion motion =
         new Motion(
             estimate.fieldVelocity().getNorm(),
@@ -296,7 +340,8 @@ public final class Vision implements AutoCloseable {
                 motion.speed(),
                 motion.recentYawRate()),
             current,
-            camera.mountDoubtMeters());
+            camera.mountDoubtMeters(),
+            onlyTags);
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.outcome(result.outcome());

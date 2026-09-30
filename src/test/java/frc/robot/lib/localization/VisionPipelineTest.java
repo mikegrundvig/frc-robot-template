@@ -112,7 +112,7 @@ class VisionPipelineTest {
   }
 
   private VisionResult process(TagDetections seen, CaptureContext robot) {
-    return pipeline.process(seen, camera, robot, VisionConfig.DEFAULTS, 0);
+    return pipeline.process(seen, camera, robot, VisionConfig.DEFAULTS, 0, null);
   }
 
   @Test
@@ -228,7 +228,8 @@ class VisionPipelineTest {
             camera,
             steady(farAway.getRotation()),
             VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(3.0).build(),
-            0);
+            0,
+            null);
     VisionResult unknownTag =
         process(
             new TagDetections(
@@ -298,10 +299,10 @@ class VisionPipelineTest {
     VisionMeasurement constrained =
         measured(
             pipeline.process(
-                seen, camera, steady(ROBOT.getRotation()), VisionConfig.DEFAULTS, doubt));
+                seen, camera, steady(ROBOT.getRotation()), VisionConfig.DEFAULTS, doubt, null));
     VisionMeasurement calibrated = measured(process(seen, steady(ROBOT.getRotation())));
     VisionMeasurement full =
-        measured(pipeline.process(seen, camera, lost, VisionConfig.DEFAULTS, doubt));
+        measured(pipeline.process(seen, camera, lost, VisionConfig.DEFAULTS, doubt, null));
     VisionMeasurement fullCalibrated = measured(process(seen, lost));
     double distance = process(seen, lost).distanceMeters();
 
@@ -321,8 +322,65 @@ class VisionPipelineTest {
         .isEqualTo(calibrated.pose());
   }
 
+  /**
+   * A task that trusts only some tags gets measurements from those alone; an image without any is
+   * thrown out, saying which it wanted.
+   */
+  @Test
+  void aTaskTrustsOnlyItsOwnTags() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    CaptureContext steady = steady(ROBOT.getRotation());
+
+    VisionResult onlyOne =
+        pipeline.process(
+            seen,
+            camera,
+            steady,
+            VisionConfig.DEFAULTS,
+            0,
+            TagAllowlist.of("Hub", List.of(26, 27)));
+    VisionResult none =
+        pipeline.process(
+            seen, camera, steady, VisionConfig.DEFAULTS, 0, TagAllowlist.of("Hub", List.of(10)));
+
+    assertThat(measured(onlyOne).tagIds()).containsExactly(26);
+    assertThat(measured(onlyOne).pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+    assertThat(measured(onlyOne).covariance().hasHeading())
+        .as("the multi-tag solution used tag 25 too")
+        .isFalse();
+    assertThat(none.measurement()).isNull();
+    assertThat(none.outcome()).isEqualTo("no tags this task trusts (Hub: 10)");
+  }
+
+  /**
+   * A multi-tag solution from trusted tags alone still corrects heading, and solves a lost robot.
+   */
+  @Test
+  void aMultiTagSolutionOfTrustedTagsIsKept() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    TagAllowlist hub = TagAllowlist.of("Hub", List.of(25, 26));
+
+    VisionMeasurement steady =
+        measured(
+            pipeline.process(
+                seen, camera, steady(ROBOT.getRotation()), VisionConfig.DEFAULTS, 0, hub));
+    VisionMeasurement lost =
+        measured(
+            pipeline.process(
+                seen,
+                camera,
+                new CaptureContext(null, Math.PI, 0, 0, 0, 0),
+                VisionConfig.DEFAULTS,
+                0,
+                hub));
+
+    assertThat(steady.covariance().hasHeading()).isTrue();
+    assertThat(lost.solver()).isEqualTo(VisionMeasurement.Solver.MULTI_TAG);
+  }
+
   private double spread(TagDetections seen, CaptureContext robot, CameraConfig mount) {
-    return measured(pipeline.process(seen, mount, robot, VisionConfig.DEFAULTS, 0))
+    return measured(pipeline.process(seen, mount, robot, VisionConfig.DEFAULTS, 0, null))
         .covariance()
         .xStdDev();
   }

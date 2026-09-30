@@ -5,6 +5,7 @@ import frc.robot.lib.field.FieldModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -35,6 +36,9 @@ import org.wpilib.math.geometry.Translation2d;
  * turning and the solution fitting well; otherwise the gyro keeps heading to itself. Everything
  * thrown out says why, for the log.
  *
+ * <p>A task may trust only some tags ({@link TagAllowlist}): the image is solved from those alone,
+ * and the vision software's multi-tag solution only if it used no others.
+ *
  * <p>Pure logic: the field's layout, the camera's mount, and the robot at the capture time all come
  * in as arguments.
  */
@@ -51,8 +55,40 @@ public final class VisionPipeline {
    * @param mountDoubtMeters how far the camera's measurements may be off from where its mount moved
    *     since it was calibrated ({@link MountCheck#doubtMeters}): zero for a camera that sits where
    *     its configuration says
+   * @param onlyTags the tags the current task trusts; null for every tag
    */
   public VisionResult process(
+      TagDetections seen,
+      CameraConfig camera,
+      CaptureContext robot,
+      VisionConfig config,
+      double mountDoubtMeters,
+      @Nullable TagAllowlist onlyTags) {
+    if (onlyTags == null) {
+      return solve(seen, camera, robot, config, mountDoubtMeters);
+    }
+    TagDetections trusted = trusted(seen, onlyTags);
+    if (trusted.tags().isEmpty() && !seen.tags().isEmpty()) {
+      return rejected(
+          seen, "no tags this task trusts (" + onlyTags.describe() + ")", Double.NaN, Double.NaN);
+    }
+    return solve(trusted, camera, robot, config, mountDoubtMeters);
+  }
+
+  /**
+   * An image as a task sees it: only the tags it trusts, and the vision software's multi-tag
+   * solution only if that used no others.
+   */
+  private static TagDetections trusted(TagDetections seen, TagAllowlist onlyTags) {
+    List<TagDetections.Tag> tags =
+        seen.tags().stream().filter(tag -> onlyTags.allows(tag.id())).toList();
+    TagDetections.MultiTag multiTag = seen.multiTag();
+    boolean allTrusted = multiTag != null && multiTag.tagIds().stream().allMatch(onlyTags::allows);
+    return new TagDetections(
+        seen.timestampNanos(), seen.camera(), tags, allTrusted ? multiTag : null);
+  }
+
+  private VisionResult solve(
       TagDetections seen,
       CameraConfig camera,
       CaptureContext robot,

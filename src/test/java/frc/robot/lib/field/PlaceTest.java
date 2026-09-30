@@ -1,6 +1,7 @@
 package frc.robot.lib.field;
 
 import static frc.robot.lib.field.TestFields.assertPose;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
@@ -62,6 +63,15 @@ class PlaceTest {
 
     assertPose(loading.on(field, Alliance.BLUE), 1.5, 2, 180);
     assertPose(loading.on(field, Alliance.RED), 14.5, 6, 0);
+  }
+
+  /** A task lining up on a place trusts the tags it's found from: each alliance's own. */
+  @Test
+  void aPlaceNamesTheTagsItIsFoundFrom() {
+    assertThat(Place.between("Hub", 2, 3).tags(field, Alliance.BLUE)).containsExactly(2, 3);
+    assertThat(Place.between("Hub", 2, 3).tags(field, Alliance.RED)).containsExactly(12, 13);
+    assertThat(Place.facing("Loading", 4, 1.5).tags(field, Alliance.RED)).containsExactly(14);
+    assertThat(Place.at("Start", Pose2d.ZERO).tags(field, Alliance.BLUE)).isEmpty();
   }
 
   @Test

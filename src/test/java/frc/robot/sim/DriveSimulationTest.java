@@ -1,4 +1,4 @@
-package frc.robot.subsystems.drive;
+package frc.robot.sim;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

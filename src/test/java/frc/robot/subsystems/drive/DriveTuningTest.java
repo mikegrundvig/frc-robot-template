@@ -9,6 +9,7 @@ import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveConfigBuilder;
 import frc.robot.lib.config.SwerveConfigGainsBuilder;
 import frc.robot.lib.config.SwerveConfigLimitsBuilder;
+import frc.robot.sim.DriveSimHarness;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;

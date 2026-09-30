@@ -1,4 +1,4 @@
-package frc.robot.subsystems.drive;
+package frc.robot.sim;
 
 import static org.wpilib.units.Units.Meters;
 
@@ -7,6 +7,8 @@ import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.SwerveKinematicsModel;
+import frc.robot.subsystems.drive.GyroIO;
+import frc.robot.subsystems.drive.ModuleIO;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;

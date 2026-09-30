@@ -5,12 +5,13 @@
 // license that can be found in the LICENSE file
 // at the root directory of this project.
 
-package frc.robot.subsystems.drive;
+package frc.robot.sim;
 
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.subsystems.drive.ModuleIO;
 import java.util.Arrays;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.system.DCMotor;

@@ -1,4 +1,4 @@
-package frc.robot.subsystems.drive;
+package frc.robot.sim;
 
 import frc.robot.RobotConfig;
 import frc.robot.SimTestSupport;
@@ -8,6 +8,7 @@ import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
+import frc.robot.subsystems.drive.Drive;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
@@ -23,14 +24,14 @@ import org.wpilib.system.RobotController;
  * command scheduler, and the joystick drive command, on simulated modules and a simulated gyro,
  * with the simulator's physics stepped before each loop reads the sensors.
  */
-final class DriveSimHarness implements AutoCloseable {
-  final Scheduler scheduler = Scheduler.createIndependentScheduler();
-  final DriveSimulation simulation;
-  final PoseEstimator estimator;
-  final Drive drive;
+public final class DriveSimHarness implements AutoCloseable {
+  public final Scheduler scheduler = Scheduler.createIndependentScheduler();
+  public final DriveSimulation simulation;
+  public final PoseEstimator estimator;
+  public final Drive drive;
 
   /** Every camera measurement's fate, in order. */
-  final List<VisionDecision> decisions = new ArrayList<>();
+  public final List<VisionDecision> decisions = new ArrayList<>();
 
   private @Nullable FakeCamera camera;
   private @Nullable Runnable eachLoop;
@@ -38,11 +39,11 @@ final class DriveSimHarness implements AutoCloseable {
   /**
    * An estimator that starts with the robot exactly here, and accepts any point as on the field.
    */
-  static PoseEstimator estimatorAt(Pose2d start) {
+  public static PoseEstimator estimatorAt(Pose2d start) {
     return estimatorAt(start, EstimatorConfig.DEFAULTS);
   }
 
-  static PoseEstimator estimatorAt(Pose2d start, EstimatorConfig config) {
+  public static PoseEstimator estimatorAt(Pose2d start, EstimatorConfig config) {
     return new PoseEstimator(
         config,
         point -> true,
@@ -50,15 +51,15 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */
-  DriveSimHarness(RobotConfig robot) {
+  public DriveSimHarness(RobotConfig robot) {
     this(robot, SensorErrors.NONE);
   }
 
-  DriveSimHarness(RobotConfig robot, SensorErrors errors) {
+  public DriveSimHarness(RobotConfig robot, SensorErrors errors) {
     this(robot, errors, EstimatorConfig.DEFAULTS);
   }
 
-  DriveSimHarness(RobotConfig robot, SensorErrors errors, EstimatorConfig config) {
+  public DriveSimHarness(RobotConfig robot, SensorErrors errors, EstimatorConfig config) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     simulation =
         new DriveSimulation(
@@ -79,12 +80,12 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   /** From now on, a camera's results reach the estimator every loop. */
-  void watchWith(FakeCamera camera) {
+  public void watchWith(FakeCamera camera) {
     this.camera = camera;
   }
 
   /** Something to do at the end of every loop, such as feeding another estimator to compare. */
-  void eachLoop(Runnable action) {
+  public void eachLoop(Runnable action) {
     eachLoop = action;
   }
 
@@ -92,7 +93,7 @@ final class DriveSimHarness implements AutoCloseable {
    * One robot loop: the physics moves, the drivetrain reads its sensors, the camera's results
    * arrive, the estimator takes them, then commands run.
    */
-  void loop() {
+  public void loop() {
     SimTestSupport.stepLoop();
     long now = RobotController.getTime();
     simulation.step(SimTestSupport.LOOP_PERIOD_S, now);
@@ -112,7 +113,7 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   /** Hold the sticks (as {@link Drive#driveWithSticks} takes them) for {@code seconds}, enabled. */
-  void drive(double seconds, double x, double y, double omega) {
+  public void drive(double seconds, double x, double y, double omega) {
     SimTestSupport.setEnabled(true);
     Command driving = drive.joystickDrive(() -> x, () -> y, () -> omega);
     scheduler.schedule(driving);
@@ -123,7 +124,7 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   /** Run a command for {@code seconds}, enabled, the way the robot loop runs it. */
-  void run(Command command, double seconds) {
+  public void run(Command command, double seconds) {
     SimTestSupport.setEnabled(true);
     scheduler.schedule(command);
     for (int i = 0; i < SimTestSupport.loops(seconds); i++) {
@@ -132,7 +133,7 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   /** Sit disabled for {@code seconds}. */
-  void idle(double seconds) {
+  public void idle(double seconds) {
     SimTestSupport.setEnabled(false);
     for (int i = 0; i < SimTestSupport.loops(seconds); i++) {
       loop();
@@ -140,12 +141,12 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   /** How far the drivetrain's estimate is from where the robot really is, in meters. */
-  double positionError() {
+  public double positionError() {
     return drive.getPose().getTranslation().getDistance(simulation.truePose().getTranslation());
   }
 
   /** How far the estimate's heading is turned from the truth, in degrees. */
-  double headingErrorDegrees() {
+  public double headingErrorDegrees() {
     Pose2d truth = simulation.truePose();
     return drive.getPose().getRotation().minus(truth.getRotation()).getDegrees();
   }

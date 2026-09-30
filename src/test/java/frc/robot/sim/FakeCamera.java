@@ -1,4 +1,4 @@
-package frc.robot.subsystems.drive;
+package frc.robot.sim;
 
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.VisionMeasurement;
@@ -17,7 +17,7 @@ import org.wpilib.math.geometry.Translation2d;
  * heading-constrained solve as a real pipeline would. It can be told to lie once, as a misread tag
  * does.
  */
-final class FakeCamera {
+public final class FakeCamera {
   private final DriveSimulation robot;
   private final double stdDevMeters;
   private final long latencyNanos;
@@ -27,7 +27,7 @@ final class FakeCamera {
   private long lastFrameNanos = Long.MIN_VALUE;
   private Transform2d nextLie = Transform2d.ZERO;
 
-  FakeCamera(
+  public FakeCamera(
       DriveSimulation robot,
       double stdDevMeters,
       double latencySeconds,
@@ -41,12 +41,12 @@ final class FakeCamera {
   }
 
   /** The next picture's result will be off by this much, however sure it claims to be. */
-  void lieOnce(Transform2d lie) {
+  public void lieOnce(Transform2d lie) {
     nextLie = lie;
   }
 
   /** Takes a picture if one is due, and returns the results that have arrived by now. */
-  List<VisionMeasurement> poll(long nowNanos) {
+  public List<VisionMeasurement> poll(long nowNanos) {
     if (lastFrameNanos == Long.MIN_VALUE || nowNanos - lastFrameNanos >= frameNanos) {
       lastFrameNanos = nowNanos;
       Pose2d truth = robot.truePose();

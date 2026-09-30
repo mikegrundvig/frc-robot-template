@@ -67,6 +67,7 @@ class PitwallRobotTest {
 
   @Test
   void theStatusShowsTheRobotItsCodeItsModeAndTheBattery() {
+    pitwall.status().requestRead(); // as the page's GET does: nothing is read unless asked
     pitwall.periodic();
 
     assertThat(pitwall.status().view())
@@ -380,6 +381,7 @@ class PitwallRobotTest {
   }
 
   private String modeAfterALoop() {
+    pitwall.status().requestRead();
     pitwall.periodic();
     return value("Mode");
   }

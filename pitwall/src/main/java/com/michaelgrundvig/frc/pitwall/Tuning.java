@@ -130,6 +130,21 @@ public final class Tuning {
     return snapshot();
   }
 
+  /** What is being tuned: the robot's name. */
+  public String name() {
+    return name;
+  }
+
+  /** Whether tuning is switched on. Safe to call from any thread. */
+  public boolean isEnabled() {
+    return enabled;
+  }
+
+  /** Whether the field system is connected, which locks tuning off. Safe from any thread. */
+  public boolean isFieldConnected() {
+    return fieldConnected;
+  }
+
   /**
    * Why changes to tunables are refused right now, or null while they're allowed. Safe to call from
    * any thread.

@@ -79,7 +79,13 @@ class ProfilesTest {
                 .to(Degrees.of(90))
                 .hold(Seconds.of(0.8))
                 .toString())
-        .startsWith("step and back, ")
-        .contains("held");
+        .isEqualTo("step and back, 0 ° to 90 °, held 0.8 s");
+    assertThat(
+            Profiles.step()
+                .from(Radians.of(0.25))
+                .to(Radians.of(1.5708))
+                .hold(Seconds.of(1))
+                .toString())
+        .isEqualTo("step, 0.25 rad to 1.571 rad, held 1 s");
   }
 }

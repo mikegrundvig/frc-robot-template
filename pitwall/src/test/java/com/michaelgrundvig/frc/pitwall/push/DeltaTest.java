@@ -143,6 +143,24 @@ class DeltaTest {
             Map.of("actions", Map.of("Drive check", Map.of("phase", "RUNNING", "detail", ""))));
   }
 
+  /** A merge patch merges a map into the one before, so a key a map lost must be sent as null. */
+  @Test
+  void aMapThatLosesAKeySaysSo() {
+    var delta = new Delta();
+    Map<String, Map<String, Object>> state = new LinkedHashMap<>();
+    state.put("run", new LinkedHashMap<>(Map.of("gains", Map.of("kP", 16.0, "kD", 0.1), "id", 1)));
+    delta.patch(state);
+
+    section(state, "run").put("gains", Map.of("kP", 18.0));
+    Map<String, Object> gains = new HashMap<>();
+    gains.put("kP", 18.0);
+    gains.put("kD", null);
+
+    assertThat(delta.patch(state)).isEqualTo(Map.of("run", Map.of("gains", gains)));
+    assertThat(delta.document())
+        .isEqualTo(Map.of("run", Map.of("gains", Map.of("kP", 18.0), "id", 1)));
+  }
+
   @Test
   void aReadingHasAPositiveResolution() {
     assertThatIllegalArgumentException().isThrownBy(() -> Reading.of(1).toNearest(0));

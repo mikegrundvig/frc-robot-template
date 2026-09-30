@@ -1,8 +1,11 @@
 package com.michaelgrundvig.frc.pitwall;
 
 import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
+import static com.michaelgrundvig.frc.pitwall.experiment.ByHand.STEP;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.pitwall.experiment.ByHand;
+import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
@@ -68,7 +71,11 @@ class PitwallServerTest {
       new TunableTee(new MockTunableBackend(), this::whyLocked, inputs -> {}, false);
   private final Tuning tuning =
       new Tuning("test", tunables::configs, tunables::pathOf, true, inputs -> {}, view -> {});
-  private final PitwallServer server = new PitwallServer(status, tuning, actions, tunables, 0);
+  private final ByHand byHand = new ByHand(System::nanoTime);
+  private final Page page = new Page(status, actions, tuning, tunables, byHand.experiments());
+  private final Broadcaster broadcaster =
+      new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, stream -> {});
+  private final PitwallServer server = new PitwallServer(page, broadcaster, 0);
 
   private @Nullable String whyLocked() {
     return tuning.whyLocked();
@@ -92,8 +99,11 @@ class PitwallServerTest {
         () -> {
           tuning.periodic(fieldConnected.get());
           actions.periodic(gate);
+          byHand.experiments().periodic(gate);
+          status.periodic(broadcaster.watched());
+          broadcaster.periodic(page::sections, byHand.experiments().run());
+          byHand.step();
           tunables.update();
-          status.periodic();
         },
         0,
         5,
@@ -112,6 +122,7 @@ class PitwallServerTest {
     fieldConnected.set(false);
     gate = new Actions.Gate(true, true, false);
     send("POST", "/api/actions", "application/json", "{\"cancel\": \"Home arm\"}");
+    send("POST", "/api/experiments", "application/json", "{\"cancel\": \"" + STEP + "\"}");
     send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
     send("DELETE", "/api/changes", null, null);
     send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.5}");
@@ -387,12 +398,16 @@ class PitwallServerTest {
     var idle = new Tuning("idle", List::of, (config, field) -> null, true, inputs -> {}, v -> {});
     try (var paused =
         new PitwallServer(
-            new Status(),
-            idle,
-            new Actions(inputs -> {}),
-            new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false),
+            new Page(
+                new Status(),
+                new Actions(inputs -> {}),
+                idle,
+                new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false),
+                new ByHand(System::nanoTime).experiments()),
+            new Broadcaster(1, 1, stream -> {}),
             0,
-            Duration.ofMillis(50))) {
+            Duration.ofMillis(50),
+            PitwallServer.IDLE)) {
       paused.start();
       var accepted =
           client.send(
@@ -412,8 +427,7 @@ class PitwallServerTest {
   void startOrExplainStartsThePageAndSaysWhere() throws Exception {
     List<String> said = new ArrayList<>();
 
-    Optional<PitwallServer> started =
-        PitwallServer.startOrExplain(status, tuning, actions, tunables, 0, said::add);
+    Optional<PitwallServer> started = PitwallServer.startOrExplain(page, broadcaster, 0, said::add);
 
     assertThat(started).isPresent();
     try {
@@ -429,7 +443,7 @@ class PitwallServerTest {
 
     // The test's own server already holds this port.
     Optional<PitwallServer> started =
-        PitwallServer.startOrExplain(status, tuning, actions, tunables, server.port(), said::add);
+        PitwallServer.startOrExplain(page, broadcaster, server.port(), said::add);
 
     assertThat(started).isEmpty();
     assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");
@@ -491,6 +505,68 @@ class PitwallServerTest {
 
     assertThat(send("PATCH", "/api/values", MERGE_PATCH, large).statusCode()).isEqualTo(413);
     assertThat(send("PATCH", "/api/values", null, "{}").statusCode()).isEqualTo(415);
+  }
+
+  @Test
+  void aStatusItemWithAResolutionShowsToItAndItsUnit() throws Exception {
+    var battery =
+        new Status().add("Battery", () -> 12.345, "V", 0.1).add("Pressure", () -> 99.5, "psi", 1);
+
+    battery.periodic(true);
+
+    assertThat(battery.view())
+        .containsExactly(
+            new Status.Item("Battery", "12.3 V"), new Status.Item("Pressure", "100 psi"));
+  }
+
+  @Test
+  void theExperimentsAreListedWithTheirRigs() throws Exception {
+    assertThat(get("/api/experiments").body())
+        .isEqualTo(
+            "{\"rigs\":{\"Arm\":{\"config\":\"arm\",\"gains\":[\"gains.kP\",\"gains.kD\"],"
+                + "\"limits\":\"-100 ° to 100 °\",\"unit\":\"°\",\"measurements\":[\"Angle\"],"
+                + "\"signals\":[{\"name\":\"Voltage\",\"unit\":\"V\"}]}},"
+                + "\"experiments\":{\""
+                + STEP
+                + "\":{\"rig\":\"Arm\",\"settings\":\"step and back, 0 ° to 90 °, held 0.8 s\"}}}");
+  }
+
+  @Test
+  void anExperimentStartsFromThePageAndItsRunIsServedWithItsTrace() throws Exception {
+    var started =
+        send("POST", "/api/experiments", "application/json", "{\"start\": \"" + STEP + "\"}");
+    Thread.sleep(50); // a few loops
+
+    assertThat(started.statusCode()).isEqualTo(200);
+    assertThat(started.body())
+        .startsWith("{\"id\":")
+        .contains("\"experiment\":\"" + STEP + "\"", "\"phase\":\"RUNNING\"");
+    assertThat(get("/api/run").body()).contains("\"trace\":{\"run\":", "\"Setpoint\":{\"t\":[");
+
+    var canceled =
+        send("POST", "/api/experiments", "application/json", "{\"cancel\": \"" + STEP + "\"}");
+
+    assertThat(canceled.body()).contains("\"phase\":\"CANCELED\"", "Canceled from the page");
+  }
+
+  @Test
+  void onlyKnownExperimentsAndWellFormedRequestsAreAccepted() throws Exception {
+    var unknown = send("POST", "/api/experiments", "application/json", "{\"start\": \"Fly\"}");
+    var notAName = send("POST", "/api/experiments", "application/json", "{\"start\": 3}");
+    var neither = send("POST", "/api/experiments", "application/json", "{\"run\": \"x\"}");
+
+    assertThat(unknown.statusCode()).isEqualTo(422);
+    assertThat(unknown.body()).contains("There is no experiment named Fly");
+    assertThat(notAName.statusCode()).isEqualTo(400);
+    assertThat(neither.statusCode()).isEqualTo(400);
+  }
+
+  @Test
+  void aHeartbeatIsAcceptedAndSaysNothing() throws Exception {
+    var heartbeat = send("POST", "/api/heartbeat", null, null);
+
+    assertThat(heartbeat.statusCode()).isEqualTo(204);
+    assertThat(heartbeat.body()).isEmpty();
   }
 
   /** The status line of a GET naming this host, sent by hand: Java's client won't set Host. */

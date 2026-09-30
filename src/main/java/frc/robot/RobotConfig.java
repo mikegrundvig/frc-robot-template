@@ -5,6 +5,8 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.ConfigRecord;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.VisionConfig;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +25,9 @@ import org.wpilib.math.geometry.Translation2d;
  *     read: empty for a robot that only runs in simulation, whose drivetrain then stays still on
  *     real hardware
  * @param cameras the AprilTag cameras
+ * @param vision how far the cameras' images are trusted, and which are left out: the thresholds and
+ *     uncertainties, some tunable live
+ * @param estimator how the pose estimator weighs odometry, the gyro, and the cameras
  */
 @ConfigRecord
 public record RobotConfig(
@@ -30,7 +35,9 @@ public record RobotConfig(
     Body body,
     SwerveConfig drivetrain,
     Optional<SwerveWiring> drivetrainWiring,
-    List<CameraConfig> cameras) {
+    List<CameraConfig> cameras,
+    VisionConfig vision,
+    EstimatorConfig estimator) {
   public RobotConfig {
     if (name.isBlank()) {
       throw new IllegalArgumentException("robot name is required");

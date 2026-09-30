@@ -76,6 +76,12 @@ Also built in:
     differs from startup. Text, arrays, and structs pass straight through, unlocked, so choosers
     keep working on the field.
 
+  **Which one a new value is:** a value that describes the robot (a gain, a current limit, a
+  threshold, an uncertainty) is configuration. It goes in the robot's configuration record, set in
+  `Robots.java`, marked `@Tunable` if it may be tuned live, and the code reads it through
+  `pitwall.config()`. A WPILib tunable is only for a switch the drive team flips (a camera off, how
+  long autonomous holds the cameras back), which is why switches keep their setting on the field.
+
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver
   Station and NetworkTables, so give the robot's Wi-Fi a strong password (or turn it off at events).

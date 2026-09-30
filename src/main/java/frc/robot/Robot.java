@@ -113,7 +113,7 @@ public class Robot extends LoggedRobot {
 
   /**
    * Puts the robot together: every mechanism, on the field it plays on, with its pit tools and
-   * status on the Pitwall page. The drivetrain reads its configuration through Pitwall, so tuned
+   * status on the Pitwall page. The mechanisms read their configuration through Pitwall, so tuned
    * values take effect at once. Tests build the robot here too ({@code RobotSim}), so they test the
    * robot the robot runs.
    *
@@ -132,7 +132,7 @@ public class Robot extends LoggedRobot {
             mode,
             scheduler,
             robot,
-            () -> pitwall.config().drivetrain(),
+            pitwall::config,
             Rebuilt.field(robot.body()),
             simulatedErrors,
             loopHealth);

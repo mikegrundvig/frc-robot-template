@@ -1,6 +1,12 @@
 /**
  * The vocabulary for describing a robot: its body, drivetrain, cameras, and motors. Robot code
- * assembles these into its own configuration ({@code frc.robot.RobotConfig}); components read them.
+ * assembles these into its own configuration ({@code frc.robot.RobotConfig}), along with the
+ * components' own settings records (vision's, the estimator's); components read them.
+ *
+ * <p>Every value that describes the robot (a dimension, a gain, a limit, a threshold) belongs in
+ * that configuration, never in a WPILib tunable. Mark it {@code @Tunable} (Pitwall's) if it may be
+ * tuned while the robot runs: Pitwall checks a tuned value like a committed one, logs it, and
+ * reports the builder call that commits it. WPILib tunables are for the drive team's switches only.
  *
  * <p>Conventions:
  *

@@ -8,6 +8,7 @@ import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.Status;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
+import frc.robot.game.Rebuilt;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;

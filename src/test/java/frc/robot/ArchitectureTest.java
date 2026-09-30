@@ -155,6 +155,7 @@ class ArchitectureTest {
             "frc.robot.subsystems..",
             "frc.robot.commands..",
             "frc.robot.dashboard..",
+            "frc.robot.game..",
             "frc.robot.sim..")
         .should()
         .dependOnClassesThat()

@@ -3,6 +3,7 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.ElasticLayoutCheck.Widget;
+import frc.robot.game.Rebuilt;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

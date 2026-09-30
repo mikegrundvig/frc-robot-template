@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.wpilib.units.Units.Rotations;
 
+import frc.robot.game.Rebuilt;
 import frc.robot.lib.config.CanBus;
 import frc.robot.lib.config.SwerveWiring;
 import frc.robot.lib.field.FieldModel;

@@ -151,7 +151,11 @@ class ArchitectureTest {
     noClasses()
         .that()
         .resideInAnyPackage(
-            "frc.robot.lib..", "frc.robot.subsystems..", "frc.robot.commands..", "frc.robot.sim..")
+            "frc.robot.lib..",
+            "frc.robot.subsystems..",
+            "frc.robot.commands..",
+            "frc.robot.dashboard..",
+            "frc.robot.sim..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot")

@@ -2,6 +2,8 @@ package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.commands.Calibration;
+import frc.robot.dashboard.Dashboard;
+import frc.robot.dashboard.RobotStatus;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
@@ -345,7 +347,7 @@ public final class RobotContainer implements AutoCloseable {
     updateZones(pose);
     show(pose);
     loop.mark("Field", System.nanoTime());
-    Dashboard.publish(this);
+    Dashboard.publish(status());
     loop.mark("Dashboard", System.nanoTime());
   }
 
@@ -475,6 +477,20 @@ public final class RobotContainer implements AutoCloseable {
   boolean inZone(Zone zone) {
     ZoneTrigger trigger = zones.get(zone);
     return alliance.isPresent() && trigger != null && trigger.isActive();
+  }
+
+  /** The robot's state, as the drive team's dashboard shows it, as of this loop. */
+  RobotStatus status() {
+    return RobotStatus.builder()
+        .readyToScore(localization.readyToScore())
+        .scoring(localization.scoring())
+        .station(allianceStation())
+        .onStart(placement.status() == Placement.Status.READY)
+        .placement(placement.describe())
+        .localization(localization.describe())
+        .cameras(vision.summary())
+        .loop(loopStatus())
+        .build();
   }
 
   /** One line for the pit: what the pose rests on, and how sure it is. */

@@ -561,6 +561,25 @@ class PitwallServerTest {
     assertThat(neither.statusCode()).isEqualTo(400);
   }
 
+  /** uPlot draws the page's plots: served from Pitwall's own jar when it's bundled, never a CDN. */
+  @Test
+  void thePlottingLibraryIsServedFromTheJarIfBundled() throws Exception {
+    boolean bundled = PitwallServer.class.getResource("uPlot.iife.min.js") != null;
+
+    var script = get("/uPlot.iife.min.js", "*/*");
+
+    assertThat(script.statusCode()).isEqualTo(bundled ? 200 : 404);
+    if (bundled) {
+      assertThat(script.headers().firstValue("Content-Type"))
+          .hasValue("text/javascript; charset=utf-8");
+    } else {
+      assertThat(script.body()).contains("isn't bundled with Pitwall");
+    }
+    assertThat(get("/", "text/html").body())
+        .contains("<script src=\"/uPlot.iife.min.js\"></script>")
+        .doesNotContain("https://");
+  }
+
   @Test
   void aHeartbeatIsAcceptedAndSaysNothing() throws Exception {
     var heartbeat = send("POST", "/api/heartbeat", null, null);

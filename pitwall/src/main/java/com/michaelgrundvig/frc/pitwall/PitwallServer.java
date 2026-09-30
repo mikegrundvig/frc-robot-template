@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -45,7 +46,7 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  *   <li>{@code GET /api/events}: the page's state as server-sent events, pushed only when something
  *       changes: a {@code snapshot} first, then {@code patch} events (JSON merge patches) and the
- *       run's {@code samples}; a comment line after 5 s with nothing to say. See {@link
+ *       run's {@code samples}; a {@code heartbeat} after 5 s with nothing else to say. See {@link
  *       Broadcaster}.
  *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
  *       "value"}]}.
@@ -102,8 +103,22 @@ public final class PitwallServer implements AutoCloseable {
   /** How long a change waits for the robot loop before answering 202 Accepted. */
   static final Duration WAIT = Duration.ofSeconds(1);
 
-  /** How long a stream stays silent before a comment line says it's still there. */
+  /**
+   * How long a stream stays silent before a heartbeat says it's still there. The heartbeat is an
+   * event, not a comment line: a browser's EventSource never shows the page a comment, and the page
+   * counts 10 s without an event as the link lost.
+   */
   static final Duration IDLE = Duration.ofSeconds(5);
+
+  /** What a quiet stream sends: an event the page sees, holding nothing. */
+  private static final String HEARTBEAT = "event: heartbeat\ndata: {}\n\n";
+
+  /**
+   * Third-party files the page loads from here, as the robot has no internet at an event: uPlot,
+   * which draws the experiments' plots. Each is served if it's bundled.
+   */
+  private static final Map<String, String> BUNDLED =
+      Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
 
   /** The header a page names its event stream in, so the deadman knows who's asking. */
   static final String STREAM = "Pitwall-Stream";
@@ -143,7 +158,7 @@ public final class PitwallServer implements AutoCloseable {
     // or vanished page stalls only its own thread. They never keep the program running.
     threads = Executors.newVirtualThreadPerTaskExecutor();
     server.setExecutor(threads);
-    Api api = new Api(page, broadcaster, page(), wait, idle);
+    Api api = new Api(page, broadcaster, page(), bundled(), wait, idle);
     server.createContext("/", api::handle);
   }
 
@@ -226,6 +241,21 @@ public final class PitwallServer implements AutoCloseable {
     threads.shutdownNow();
   }
 
+  /** The bundled files that are here, by path. */
+  private static Map<String, byte[]> bundled() {
+    Map<String, byte[]> found = new LinkedHashMap<>();
+    for (String path : BUNDLED.keySet()) {
+      try (InputStream in = PitwallServer.class.getResourceAsStream(path.substring(1))) {
+        if (in != null) {
+          found.put(path, in.readAllBytes());
+        }
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
+    return found;
+  }
+
   private static String page() {
     try (InputStream in = PitwallServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
@@ -266,7 +296,9 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/wpilib-tunables", List.of("GET", "PATCH")),
             Map.entry("/api/experiments", List.of("GET", "POST")),
             Map.entry("/api/run", List.of("GET")),
-            Map.entry("/api/heartbeat", List.of("POST")));
+            Map.entry("/api/heartbeat", List.of("POST")),
+            Map.entry("/uPlot.iife.min.js", List.of("GET")),
+            Map.entry("/uPlot.min.css", List.of("GET")));
 
     private final Page state;
     private final Status status;
@@ -276,11 +308,18 @@ public final class PitwallServer implements AutoCloseable {
     private final Experiments experiments;
     private final Broadcaster broadcaster;
     private final String page;
+    private final Map<String, byte[]> bundled;
     private final Duration wait;
     private final Duration idle;
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
 
-    Api(Page state, Broadcaster broadcaster, String page, Duration wait, Duration idle) {
+    Api(
+        Page state,
+        Broadcaster broadcaster,
+        String page,
+        Map<String, byte[]> bundled,
+        Duration wait,
+        Duration idle) {
       this.state = state;
       status = state.status();
       tuning = state.tuning();
@@ -289,6 +328,7 @@ public final class PitwallServer implements AutoCloseable {
       experiments = state.experiments();
       this.broadcaster = broadcaster;
       this.page = page;
+      this.bundled = bundled;
       this.wait = wait;
       this.idle = idle;
     }
@@ -329,6 +369,7 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/experiments" -> postExperiment(exchange);
             case "GET /api/run" -> sendJson(exchange, 200, run(true));
             case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
+            case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
             default -> throw new IllegalStateException("unrouted: " + method + " " + path);
           }
         } catch (Problem problem) {
@@ -419,8 +460,8 @@ public final class PitwallServer implements AutoCloseable {
 
     /**
      * Streams the page's state until the page goes away: events as the robot loop sends them, and a
-     * comment line whenever it has been quiet for {@link #IDLE}. A write that fails means the page
-     * has gone, and ends the stream.
+     * heartbeat whenever it has been quiet for {@link #IDLE}. A write that fails means the page has
+     * gone, and ends the stream.
      */
     private void stream(HttpExchange exchange) throws IOException {
       Stream stream =
@@ -444,7 +485,7 @@ public final class PitwallServer implements AutoCloseable {
           if (!stream.isOpen()) {
             break;
           }
-          out.write((event == null ? ":\n" : event.wire()).getBytes(StandardCharsets.UTF_8));
+          out.write((event == null ? HEARTBEAT : event.wire()).getBytes(StandardCharsets.UTF_8));
           out.flush();
         }
       } catch (IOException gone) {
@@ -713,6 +754,20 @@ public final class PitwallServer implements AutoCloseable {
         }
       }
       return changes;
+    }
+
+    private void sendBundled(HttpExchange exchange, String path) throws IOException {
+      byte[] file = bundled.get(path);
+      if (file == null) {
+        throw new Problem(404, "Not bundled", path + " isn't bundled with Pitwall");
+      }
+      headers(exchange, Objects.requireNonNull(BUNDLED.get(path)));
+      // The same for as long as the program runs: the browser may keep it.
+      exchange.getResponseHeaders().set("Cache-Control", "max-age=3600");
+      exchange.sendResponseHeaders(200, file.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(file);
+      }
     }
 
     private void sendJson(HttpExchange exchange, int status, Object body) throws IOException {

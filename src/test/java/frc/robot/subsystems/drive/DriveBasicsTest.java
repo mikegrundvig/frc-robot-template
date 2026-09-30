@@ -1,6 +1,7 @@
 package frc.robot.subsystems.drive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -125,6 +126,33 @@ class DriveBasicsTest {
       assertTrue(drive.isGyroDisconnectedAlertActive());
       assertEquals(0.0, drive.pitchRadians(), "no IMU, no tilt");
       assertTrue(Double.isFinite(drive.getPose().getX()));
+    }
+  }
+
+  /** A device that missed its configuration runs without current limits: the pit must know. */
+  @Test
+  void aModuleWhoseDevicesMissedTheirConfigurationRaisesItsAlert() {
+    ModuleIO missed =
+        new ModuleIO() {
+          @Override
+          public void updateInputs(ModuleIOInputs inputs) {
+            inputs.unconfigured = "drive motor 1";
+          }
+        };
+    ModuleIO[] modules = {missed, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}};
+    try (Drive drive =
+        new Drive(
+            "Unconfigured",
+            new GyroIO() {},
+            modules,
+            Robots.SIM.body(),
+            Robots.SIM::drivetrain,
+            harness.scheduler,
+            DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+      drive.periodic(false);
+
+      assertTrue(drive.isModuleUnconfiguredAlertActive(0));
+      assertFalse(drive.isModuleUnconfiguredAlertActive(1));
     }
   }
 }

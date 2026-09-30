@@ -142,6 +142,7 @@ public class Drive implements Mechanism, AutoCloseable {
   private final Alert usingBackupAlert;
   private final Alert imusDisagreeAlert;
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
+  private final Alert[] moduleUnconfiguredAlerts = new Alert[4];
 
   /**
    * @param name alert group name: "Drive" on the robot, another name for a second instance
@@ -229,6 +230,12 @@ public class Drive implements Mechanism, AutoCloseable {
               "module" + Module.NAMES[i] + "Disconnected",
               Module.NAMES[i] + " swerve module disconnected: driving on three",
               Alert.Level.HIGH);
+      moduleUnconfiguredAlerts[i] =
+          new Alert(
+              name,
+              "module" + Module.NAMES[i] + "Unconfigured",
+              Module.NAMES[i] + " swerve module not configured",
+              Alert.Level.HIGH);
     }
   }
 
@@ -279,6 +286,16 @@ public class Drive implements Mechanism, AutoCloseable {
     usingBackupAlert.set(!usable(gyroInputs) && usable(backupInputs));
     for (int i = 0; i < 4; i++) {
       moduleDisconnectedAlerts[i].set(!modules[i].isConnected());
+      String unconfigured = modules[i].unconfigured();
+      if (!unconfigured.isEmpty() && !moduleUnconfiguredAlerts[i].get()) {
+        moduleUnconfiguredAlerts[i].setText(
+            Module.NAMES[i]
+                + " swerve module: "
+                + unconfigured
+                + " didn't take its configuration and runs on defaults (no current limits):"
+                + " restart the robot code once it's connected");
+      }
+      moduleUnconfiguredAlerts[i].set(!unconfigured.isEmpty());
     }
     Logger.recordOutput("Drive/Pose", getPose());
     Logger.recordOutput("Drive/ModuleVelocities", moduleVelocities());
@@ -650,5 +667,12 @@ public class Drive implements Mechanism, AutoCloseable {
     for (Alert alert : moduleDisconnectedAlerts) {
       alert.close();
     }
+    for (Alert alert : moduleUnconfiguredAlerts) {
+      alert.close();
+    }
+  }
+
+  boolean isModuleUnconfiguredAlertActive(int module) {
+    return moduleUnconfiguredAlerts[module].get();
   }
 }

@@ -411,14 +411,17 @@ public final class TunableTee implements TunableBackend {
   }
 
   /**
-   * The page's changes, all or none: every value is checked first (its type, and its limits), then
-   * each is applied, and if a tunable's own setter throws, the ones already applied are put back.
+   * The page's changes, all or none. Everything is checked before anything applies: each value (a
+   * tunable the page can change, its type, and its limits), then each configuration it changes,
+   * rebuilt with all of its new values. A refusal gives every reason, one per line. Then each is
+   * applied, and if a tunable's own setter throws, the ones already applied are put back.
    */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
     if (why != null) {
       return new Outcome(Outcome.Result.LOCKED, "Tuning is locked: " + why);
     }
+    List<String> problems = new ArrayList<>();
     List<Change> changes = new ArrayList<>();
     // A configuration's values, gathered to be checked and applied together.
     Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();
@@ -429,18 +432,19 @@ public final class TunableTee implements TunableBackend {
         entry = entries.get(value.getKey());
       }
       if (entry == null || entry.proxy() == null || !isMutable(entry.real())) {
-        return new Outcome(
-            Outcome.Result.REFUSED, "There is no tunable the page can change at " + value.getKey());
+        problems.add("There is no tunable the page can change at " + value.getKey());
+        continue;
       }
       Change change = change(value.getKey(), entry, value.getValue());
       if (change == null) {
-        return new Outcome(
-            Outcome.Result.REFUSED, value.getKey() + " takes a " + entry.type() + " value");
+        problems.add(value.getKey() + " takes a " + entry.type() + " value");
+        continue;
       }
       if (value.getValue() instanceof Number number) {
         String outside = entry.limits().whyNot(number.doubleValue());
         if (outside != null) {
-          return new Outcome(Outcome.Result.REFUSED, value.getKey() + ": " + outside);
+          problems.add(value.getKey() + ": " + outside);
+          continue;
         }
       }
       LiveConfig<?> config = entry.config();
@@ -455,28 +459,39 @@ public final class TunableTee implements TunableBackend {
       }
       changes.add(change);
     }
+    if (!problems.isEmpty()) {
+      return new Outcome(Outcome.Result.REFUSED, String.join("\n", problems));
+    }
     for (Map.Entry<LiveConfig<?>, Map<String, Double>> group : configured.entrySet()) {
       LiveConfig<?> config = group.getKey();
-      String refused = config.whyNot(group.getValue());
-      if (refused != null) {
-        return new Outcome(Outcome.Result.REFUSED, refused);
+      Record candidate;
+      try {
+        candidate = config.candidate(group.getValue());
+      } catch (IllegalArgumentException refused) {
+        problems.add(Objects.requireNonNullElse(refused.getMessage(), refused.toString()));
+        continue;
       }
-      Map<String, Double> old = new LinkedHashMap<>();
-      group.getValue().keySet().forEach(field -> old.put(field, config.value(field)));
+      Record old = config.get();
+      Map<String, Double> oldValues = new LinkedHashMap<>();
+      group.getValue().keySet().forEach(field -> oldValues.put(field, config.value(field)));
       Map<String, String> paths = Objects.requireNonNull(configuredPaths.get(config));
       changes.add(
           new Change(
               config.name(),
               () -> {
-                config.set(group.getValue());
+                config.accept(candidate);
                 group
                     .getValue()
                     .forEach((field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
               },
               () -> {
-                config.set(old);
-                old.forEach((field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
+                config.accept(old);
+                oldValues.forEach(
+                    (field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
               }));
+    }
+    if (!problems.isEmpty()) {
+      return new Outcome(Outcome.Result.REFUSED, String.join("\n", problems));
     }
     List<Change> done = new ArrayList<>();
     for (Change change : changes) {

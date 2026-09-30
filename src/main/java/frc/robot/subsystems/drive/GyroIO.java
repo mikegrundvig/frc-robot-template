@@ -10,6 +10,11 @@ public interface GyroIO {
     public boolean connected = false;
     public Rotation2d yaw = Rotation2d.ZERO;
     public double yawVelocityRadPerSec = 0.0;
+
+    /** Yaw readings taken since the last loop, with the modules' readings (see ModuleIO). */
+    public long[] odometryTimestampsNanos = new long[] {};
+
+    public double[] odometryYawsRad = new double[] {};
   }
 
   default void updateInputs(GyroIOInputs inputs) {}

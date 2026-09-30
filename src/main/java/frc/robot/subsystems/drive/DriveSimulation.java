@@ -3,12 +3,14 @@ package frc.robot.subsystems.drive;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.localization.BodyMotion;
+import frc.robot.lib.localization.OdometrySample;
+import frc.robot.lib.localization.SwerveKinematicsModel;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Twist2d;
-import org.wpilib.math.kinematics.SwerveDriveKinematics;
-import org.wpilib.math.kinematics.SwerveModulePosition;
 
 /**
  * The simulated drivetrain as it really moves: four modules' motors, and the robot's true pose on
@@ -16,16 +18,21 @@ import org.wpilib.math.kinematics.SwerveModulePosition;
  * pose the robot code works out can drift from where the robot really is, and localization is
  * tested against that gap instead of a perfect world.
  *
- * <p>Call {@link #step} once per loop, before the robot code reads its sensors. The robot moves as
- * its wheels roll, at their true radius and true angle; it never slips, since traction isn't
- * modeled yet (see docs/stand-ins.md). {@link #shove} moves it the way a collision would.
+ * <p>Call {@link #step} once per loop, before the robot code reads its sensors. It runs the physics
+ * at 250 Hz and takes the modules' and gyro's readings at each of those steps, as a robot's
+ * high-rate odometry does. The robot moves as its wheels roll, at their true radius and true angle;
+ * it doesn't slip on its own, since traction isn't modeled yet (see docs/stand-ins.md), but {@link
+ * #spin} makes a wheel slip and {@link #shove} moves the robot the way a collision does.
  */
 public final class DriveSimulation {
+  /** Physics steps, and odometry readings, per robot loop: 250 Hz at a 50 Hz loop. */
+  static final int STEPS_PER_LOOP = 5;
+
   private final ModuleIOSim[] modules = new ModuleIOSim[4];
+  private final GyroIOSim gyro;
   private final double[] trueRadiusMeters = new double[4];
-  private final SwerveDriveKinematics kinematics;
-  private final SensorErrors errors;
-  private SwerveModulePosition[] lastTruePositions;
+  private final SwerveKinematicsModel kinematics;
+  private OdometrySample lastTrue;
   private Pose2d truePose = Pose2d.ZERO;
   private double yawTurnedRadians;
   private double yawRateRadiansPerSecond;
@@ -41,14 +48,14 @@ public final class DriveSimulation {
     if (moduleLocations.length != 4) {
       throw new IllegalArgumentException("swerve needs exactly 4 modules");
     }
-    this.errors = errors;
-    kinematics = new SwerveDriveKinematics(moduleLocations);
+    kinematics = new SwerveKinematicsModel(moduleLocations);
     double radius = config.wheelRadius().in(Meters);
     for (int i = 0; i < 4; i++) {
       modules[i] = new ModuleIOSim(config, Math.toRadians(errors.steerOffsetDegrees().get(i)));
       trueRadiusMeters[i] = radius * errors.wheelRadiusScale().get(i);
     }
-    lastTruePositions = truePositions();
+    gyro = new GyroIOSim(this, errors);
+    lastTrue = trueWheels();
   }
 
   /** The modules' motor controllers and encoders, for the drivetrain. */
@@ -56,26 +63,42 @@ public final class DriveSimulation {
     return new ModuleIO[] {modules[0], modules[1], modules[2], modules[3]};
   }
 
-  /** A gyro on this robot. */
+  /** The robot's gyro. */
   public GyroIO gyro() {
-    return new GyroIOSim(this, errors);
+    return gyro;
   }
 
-  /** Runs the motors for a step, and moves the robot as its wheels truly rolled. */
-  public void step(double seconds) {
+  /**
+   * Runs the physics through one loop, and takes the sensors' readings along the way.
+   *
+   * @param seconds the loop's length
+   * @param nowNanos the robot clock at the loop's end: the last reading's time
+   */
+  public void step(double seconds, long nowNanos) {
     if (!(seconds > 0)) {
       throw new IllegalArgumentException("a step takes time: " + seconds);
     }
-    for (ModuleIOSim module : modules) {
-      module.step(seconds);
+    double dt = seconds / STEPS_PER_LOOP;
+    long dtNanos = Math.round(dt * 1e9);
+    for (int remaining = STEPS_PER_LOOP - 1; remaining >= 0; remaining--) {
+      for (ModuleIOSim module : modules) {
+        module.step(dt);
+      }
+      OdometrySample wheels = trueWheels();
+      BodyMotion motion = kinematics.motion(lastTrue, wheels);
+      truePose =
+          truePose.plus(
+              new Twist2d(motion.dxMeters(), motion.dyMeters(), motion.dthetaRadians()).exp());
+      yawTurnedRadians += motion.dthetaRadians();
+      yawRateRadiansPerSecond = motion.dthetaRadians() / dt;
+      lastTrue = wheels;
+      elapsedSeconds += dt;
+      long readingTime = nowNanos - remaining * dtNanos;
+      for (ModuleIOSim module : modules) {
+        module.sample(readingTime);
+      }
+      gyro.sample(readingTime);
     }
-    SwerveModulePosition[] now = truePositions();
-    Twist2d twist = kinematics.toTwist2d(lastTruePositions, now);
-    truePose = truePose.plus(twist.exp());
-    yawTurnedRadians += twist.dtheta;
-    yawRateRadiansPerSecond = twist.dtheta / seconds;
-    lastTruePositions = now;
-    elapsedSeconds += seconds;
   }
 
   /** Where the robot really is. */
@@ -100,6 +123,16 @@ public final class DriveSimulation {
     place(truePose.plus(shove));
   }
 
+  /**
+   * Spins one wheel without the robot moving: a slip, which its encoder counts and the floor never
+   * sees. Odometry catches it as the wheels disagreeing.
+   *
+   * @param module front left, front right, back left, back right: 0 to 3
+   */
+  public void spin(int module, double radians) {
+    modules[module].spin(radians);
+  }
+
   /** Every true turn since the start, driving or placed: what a gyro integrates. */
   double yawTurnedRadians() {
     return yawTurnedRadians;
@@ -113,13 +146,15 @@ public final class DriveSimulation {
     return elapsedSeconds;
   }
 
-  private SwerveModulePosition[] truePositions() {
-    SwerveModulePosition[] positions = new SwerveModulePosition[4];
+  /** The wheels as they truly rolled: the rotation that moved the robot, at the true radius. */
+  private OdometrySample trueWheels() {
+    double[] distances = new double[4];
+    double[] angles = new double[4];
     for (int i = 0; i < 4; i++) {
-      positions[i] =
-          new SwerveModulePosition(
-              modules[i].wheelRotationRadians() * trueRadiusMeters[i], modules[i].trueSteerAngle());
+      distances[i] = modules[i].wheelRotationRadians() * trueRadiusMeters[i];
+      Rotation2d angle = modules[i].trueSteerAngle();
+      angles[i] = angle.getRadians();
     }
-    return positions;
+    return new OdometrySample(0, distances, angles);
   }
 }

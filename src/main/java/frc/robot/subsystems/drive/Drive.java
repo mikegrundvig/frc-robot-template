@@ -6,25 +6,32 @@ import static org.wpilib.units.Units.Seconds;
 
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.localization.BodyMotion;
+import frc.robot.lib.localization.OdometrySample;
+import frc.robot.lib.localization.PoseCovariance;
+import frc.robot.lib.localization.PoseEstimator;
+import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.SwerveKinematicsModel;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.geometry.Twist2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveDriveKinematics;
-import org.wpilib.math.kinematics.SwerveDriveOdometry;
 import org.wpilib.math.kinematics.SwerveModulePosition;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
 import org.wpilib.math.util.MathUtil;
+import org.wpilib.system.RobotController;
 import org.wpilib.util.Alert;
 
 /**
- * The swerve drivetrain: four {@link Module}s, a gyro, and odometry.
+ * The swerve drivetrain: four {@link Module}s and a gyro, whose high-rate readings it turns into
+ * odometry for the pose estimator.
  *
  * <p>Call {@link #periodic(boolean)} once per loop, before the command scheduler runs. Driving
  * commands call {@link #runVelocity(ChassisVelocities)} every loop they are active.
@@ -38,13 +45,17 @@ public class Drive implements Mechanism, AutoCloseable {
   private static final double LOOP_PERIOD_S = 0.02;
   private static final double STICK_DEADBAND = 0.1;
 
+  /** A reset to "exactly here": a millimeter and a milliradian. */
+  private static final PoseCovariance EXACTLY = PoseCovariance.fromStdDevs(0.001, 0.001, 0.001);
+
   private final Supplier<SwerveConfig> config;
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
   private final GyroIOInputsAutoLogged gyroInputs = new GyroIOInputsAutoLogged();
   private final Module[] modules = new Module[4];
   private final SwerveDriveKinematics kinematics;
-  private final SwerveDriveOdometry odometry;
+  private final SwerveKinematicsModel odometry;
+  private final PoseEstimator estimator;
 
   /** The configuration the motor controllers have, and the limits taken from it. */
   private SwerveConfig applied;
@@ -53,8 +64,8 @@ public class Drive implements Mechanism, AutoCloseable {
   private double maxAngularSpeedRadPerSec;
   private double skewLookaheadSec;
 
-  private SwerveModulePosition[] lastPositions;
-  private Rotation2d heading = Rotation2d.ZERO;
+  /** The previous odometry reading, which the next one's motion is measured from. */
+  private @Nullable OdometrySample lastReading;
 
   private final Alert gyroDisconnectedAlert;
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
@@ -63,6 +74,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * @param name alert group name: "Drive" on the robot, another name for a second instance
    * @param body the robot's frame, which places the wheels
    * @param config the drivetrain's configuration, read every loop so tuned values take effect
+   * @param estimator where odometry goes, and where the robot's pose comes from
    */
   public Drive(
       String name,
@@ -70,7 +82,8 @@ public class Drive implements Mechanism, AutoCloseable {
       ModuleIO[] moduleIOs,
       Body body,
       Supplier<SwerveConfig> config,
-      Scheduler scheduler) {
+      Scheduler scheduler,
+      PoseEstimator estimator) {
     if (moduleIOs.length != 4) {
       throw new IllegalArgumentException("swerve needs exactly 4 modules");
     }
@@ -84,8 +97,8 @@ public class Drive implements Mechanism, AutoCloseable {
     applied = initial;
     apply(initial);
     kinematics = new SwerveDriveKinematics(initial.moduleTranslations(body));
-    lastPositions = modulePositions();
-    odometry = new SwerveDriveOdometry(kinematics, heading, lastPositions);
+    odometry = new SwerveKinematicsModel(initial.moduleTranslations(body));
+    this.estimator = estimator;
 
     gyroDisconnectedAlert =
         new Alert(
@@ -130,16 +143,7 @@ public class Drive implements Mechanism, AutoCloseable {
       Logger.recordOutput("Drive/SetpointsOptimized", new SwerveModuleVelocity[] {});
     }
 
-    SwerveModulePosition[] positions = modulePositions();
-    if (gyroInputs.connected) {
-      heading = gyroInputs.yaw;
-    } else {
-      // Fall back to the heading change the wheels imply. Worse, but better than stopping.
-      Twist2d twist = kinematics.toTwist2d(lastPositions, positions);
-      heading = heading.plus(new Rotation2d(twist.dtheta));
-    }
-    lastPositions = positions;
-    odometry.update(heading, positions);
+    updateOdometry();
 
     gyroDisconnectedAlert.set(!gyroInputs.connected);
     for (int i = 0; i < 4; i++) {
@@ -176,12 +180,45 @@ public class Drive implements Mechanism, AutoCloseable {
     Logger.recordOutput("Drive/SetpointsOptimized", sent);
   }
 
-  public Pose2d getPose() {
-    return odometry.getPose();
+  /**
+   * Feeds every high-rate reading since the last loop to the estimator, as the robot's motion
+   * between readings, with the gyro's yaw at each. When the gyro is lost, the estimator turns the
+   * robot by the wheels instead, and says so.
+   */
+  private void updateOdometry() {
+    int readings = Integer.MAX_VALUE;
+    for (Module module : modules) {
+      readings = Math.min(readings, module.odometryReadings());
+    }
+    boolean gyroHasReadings =
+        gyroInputs.connected
+            && gyroInputs.odometryYawsRad.length >= readings
+            && gyroInputs.odometryTimestampsNanos.length >= readings;
+    for (int k = 0; k < readings; k++) {
+      double[] distances = new double[4];
+      double[] angles = new double[4];
+      for (int i = 0; i < 4; i++) {
+        distances[i] = modules[i].odometryDistanceMeters(k);
+        angles[i] = modules[i].odometryAngleRadians(k);
+      }
+      OdometrySample reading =
+          new OdometrySample(modules[0].odometryTimestampNanos(k), distances, angles);
+      BodyMotion motion =
+          lastReading == null ? new BodyMotion(0, 0, 0, 0) : odometry.motion(lastReading, reading);
+      double yaw = gyroHasReadings ? gyroInputs.odometryYawsRad[k] : 0;
+      estimator.addOdometry(reading.timestampNanos(), motion, yaw, gyroHasReadings);
+      lastReading = reading;
+    }
   }
 
+  /** Where the robot is, as the pose estimator has it. */
+  public Pose2d getPose() {
+    return estimator.pose();
+  }
+
+  /** Tells the pose estimator the robot is exactly here, now. */
   public void resetPose(Pose2d pose) {
-    odometry.resetPosition(heading, modulePositions(), pose);
+    estimator.reset(new PoseReset(RobotController.getTime(), pose, EXACTLY, "reset"));
   }
 
   /** Measured robot-relative velocities. */
@@ -189,7 +226,8 @@ public class Drive implements Mechanism, AutoCloseable {
     return kinematics.toChassisVelocities(moduleVelocities());
   }
 
-  private SwerveModulePosition[] modulePositions() {
+  /** The modules' positions, as WPILib's odometry takes them. */
+  SwerveModulePosition[] modulePositions() {
     SwerveModulePosition[] positions = new SwerveModulePosition[4];
     for (int i = 0; i < 4; i++) {
       positions[i] = modules[i].getPosition();
@@ -255,6 +293,11 @@ public class Drive implements Mechanism, AutoCloseable {
           }
         })
         .named("Drive with joysticks");
+  }
+
+  /** The gyro's yaw, as of this loop. */
+  Rotation2d gyroYaw() {
+    return gyroInputs.yaw;
   }
 
   @Override

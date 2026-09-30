@@ -7,6 +7,11 @@ import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.PoseCovariance;
+import frc.robot.lib.localization.PoseEstimator;
+import frc.robot.lib.localization.PoseReset;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
@@ -14,6 +19,7 @@ import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.SensorErrors;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -31,6 +37,7 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.smartdashboard.Field2d;
+import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.Telemetry;
 import org.wpilib.util.Alert;
 
@@ -50,6 +57,9 @@ public final class RobotContainer implements AutoCloseable {
 
   static final double START_TOLERANCE_DEGREES = 5;
 
+  /** How well a drive team places the robot on its start: within about 5 cm and 2 degrees. */
+  static final PoseCovariance PLACED = PoseCovariance.fromStdDevs(0.05, 0.05, Math.toRadians(2));
+
   /** Zone triggers look this far ahead along the robot's path, and turn off this far outside. */
   static final double ZONE_LOOKAHEAD_SECONDS = 0.4;
 
@@ -64,6 +74,7 @@ public final class RobotContainer implements AutoCloseable {
   /** The simulator's physics, which knows where the robot really is. Null unless simulating. */
   private final @Nullable DriveSimulation simulation;
 
+  private final PoseEstimator estimator;
   private final Drive drive;
   private final CommandGamepad driver;
   private final Alert noHardware =
@@ -92,6 +103,7 @@ public final class RobotContainer implements AutoCloseable {
   private Optional<Pose2d> startPose = Optional.empty();
   private boolean enabledSinceBoot;
   private Placement placement = new Placement(Placement.Status.ALLIANCE_UNKNOWN, null, 0, 0);
+  private LocalizationEstimate estimate;
 
   /**
    * In the simulator, the robot's wheels and sensors differ from its configuration as a real
@@ -149,14 +161,24 @@ public final class RobotContainer implements AutoCloseable {
       gyro = new GyroIO() {};
       noHardware.set(mode == Constants.Mode.REAL);
     }
-    drive = new Drive("Drive", gyro, modules, body, drivetrain, scheduler);
-    fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
-    // Until the alliance is known, so is the start: the middle of the field stands in for it.
+    // Until the robot is placed it could be anywhere: the middle of the field stands in, with an
+    // uncertainty as big as the field, so the first camera measurement wins.
     Pose2d middle = new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO);
+    estimator =
+        new PoseEstimator(
+            EstimatorConfig.DEFAULTS,
+            field::contains,
+            new PoseReset(
+                0,
+                middle,
+                PoseCovariance.fromStdDevs(field.length(), field.width(), Math.PI),
+                "not placed yet"));
+    estimate = estimator.estimate();
+    drive = new Drive("Drive", gyro, modules, body, drivetrain, scheduler, estimator);
+    fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (simulation != null) {
       simulation.place(middle);
     }
-    drive.resetPose(middle);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns.
@@ -177,11 +199,6 @@ public final class RobotContainer implements AutoCloseable {
 
   /** Mechanism periodic methods, called once per loop before the command scheduler runs. */
   public void periodic() {
-    DriveSimulation sim = simulation;
-    if (sim != null) {
-      // The world moves, then the robot reads its sensors, as on a robot between loops.
-      sim.step(LOOP_PERIOD_SECONDS);
-    }
     boolean enabled = RobotState.isEnabled();
     alliance = MatchState.getAlliance();
     location = MatchState.getLocation();
@@ -194,8 +211,12 @@ public final class RobotContainer implements AutoCloseable {
         !chosenPose.equals(startPose) && (!enabled || !enabledSinceBoot)
             ? chosenPose
             : Optional.empty();
+    DriveSimulation sim = simulation;
     if (sim != null) {
-      placed.ifPresent(sim::place); // in the simulator, the drive team really moves it
+      // In the simulator the drive team really moves it. Then the world moves on and the robot
+      // reads its sensors, as on a robot between loops: its gyro feels the turn this loop.
+      placed.ifPresent(sim::place);
+      sim.step(LOOP_PERIOD_SECONDS, RobotController.getTime());
     }
     start = chosen;
     startPose = chosenPose;
@@ -203,8 +224,12 @@ public final class RobotContainer implements AutoCloseable {
 
     drive.periodic(enabled);
     // Told where it is after reading its gyro, so a turn made in placing it isn't counted twice.
-    placed.ifPresent(drive::resetPose);
-    Pose2d pose = drive.getPose();
+    String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
+    placed.ifPresent(
+        pose -> estimator.reset(new PoseReset(RobotController.getTime(), pose, PLACED, placedOn)));
+    estimator.update(); // applies the loop's camera measurements, once there are cameras
+    estimate = estimator.estimate();
+    Pose2d pose = estimate.pose();
     placement =
         Placement.check(
             field,
@@ -245,6 +270,16 @@ public final class RobotContainer implements AutoCloseable {
 
   /** Logs the robot's place on the field, and shows it in the simulator's field view. */
   private void show(Pose2d pose) {
+    PoseCovariance uncertainty = estimate.covariance();
+    Logger.recordOutput("Localization/Pose", pose);
+    Logger.recordOutput("Localization/Mode", estimate.mode().name());
+    Logger.recordOutput(
+        "Localization/PositionStdDevMeters",
+        Math.sqrt(Math.max(uncertainty.xx(), uncertainty.yy())));
+    Logger.recordOutput(
+        "Localization/HeadingStdDevDegrees", Math.toDegrees(uncertainty.headingStdDev()));
+    Logger.recordOutput("Localization/ResidualMeters", estimate.health().residualMeters());
+    Logger.recordOutput("Localization/Recoveries", estimate.health().recoveries());
     Logger.recordOutput("Field/Alliance", allianceStation());
     Logger.recordOutput("Field/Start", startPose.stream().toArray(Pose2d[]::new));
     Logger.recordOutput("Field/Placement", placement.describe());
@@ -294,6 +329,30 @@ public final class RobotContainer implements AutoCloseable {
   boolean inZone(Zone zone) {
     ZoneTrigger trigger = zones.get(zone);
     return alliance.isPresent() && trigger != null && trigger.isActive();
+  }
+
+  /** One line for the pit: what the pose rests on, and how sure it is. */
+  String localization() {
+    PoseCovariance uncertainty = estimate.covariance();
+    String basis =
+        switch (estimate.mode()) {
+          case INITIALIZING -> "Not placed yet";
+          case TRACKING -> "Tracking tags";
+          case DEAD_RECKONING -> "Dead reckoning";
+          case LOST -> "Lost: recovering";
+          case IMU_FAULT -> "Gyro lost";
+        };
+    return String.format(
+        Locale.ROOT,
+        "%s: within %.0f cm, %.1f°",
+        basis,
+        100 * Math.sqrt(Math.max(uncertainty.xx(), uncertainty.yy())),
+        Math.toDegrees(uncertainty.headingStdDev()));
+  }
+
+  /** The localization estimate, as of the last loop. */
+  LocalizationEstimate estimate() {
+    return estimate;
   }
 
   /** The pre-match placement check, as of the last loop. */

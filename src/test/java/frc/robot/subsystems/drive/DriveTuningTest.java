@@ -14,6 +14,7 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.math.geometry.Pose2d;
 
 /** Values tuned while the robot runs reach every module's motor controllers. */
 class DriveTuningTest {
@@ -60,7 +61,8 @@ class DriveTuningTest {
             modules,
             Robots.SIM.body(),
             config::get,
-            Scheduler.createIndependentScheduler())) {
+            Scheduler.createIndependentScheduler(),
+            DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
       config.set(tuned);
       drive.periodic(false);
     }

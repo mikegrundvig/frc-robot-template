@@ -88,6 +88,7 @@ class DriveBasicsTest {
                 three,
                 Robots.SIM.body(),
                 Robots.SIM::drivetrain,
-                harness.scheduler));
+                harness.scheduler,
+                DriveSimHarness.estimatorAt(Pose2d.ZERO)));
   }
 }

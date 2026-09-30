@@ -27,6 +27,18 @@ public interface ModuleIO {
     public double steerVelocityRadPerSec = 0.0;
     public double steerAppliedVolts = 0.0;
     public double steerStatorCurrentAmps = 0.0;
+
+    /**
+     * Readings taken since the last loop, oldest first, faster than the loop runs (250 Hz on a
+     * robot) so odometry sees every turn of the wheel: when each was taken, on the robot's clock,
+     * and the wheel's position and angle then. Angles are plain radians, not Rotation2d: a replay
+     * must hand the estimator the very same numbers, and a Rotation2d is rebuilt from its cosine
+     * and sine, a bit off.
+     */
+    public long[] odometryTimestampsNanos = new long[] {};
+
+    public double[] odometryDrivePositionsRad = new double[] {};
+    public double[] odometrySteerAnglesRad = new double[] {};
   }
 
   default void updateInputs(ModuleIOInputs inputs) {}

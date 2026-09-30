@@ -74,4 +74,25 @@ public class Module {
   boolean isConnected() {
     return inputs.driveConnected && inputs.steerConnected;
   }
+
+  /** How many high-rate readings arrived this loop, for odometry. */
+  int odometryReadings() {
+    return Math.min(
+        inputs.odometryTimestampsNanos.length,
+        Math.min(inputs.odometryDrivePositionsRad.length, inputs.odometrySteerAnglesRad.length));
+  }
+
+  long odometryTimestampNanos(int reading) {
+    return inputs.odometryTimestampsNanos[reading];
+  }
+
+  /** How far the wheel had rolled, in meters, at a reading. */
+  double odometryDistanceMeters(int reading) {
+    return inputs.odometryDrivePositionsRad[reading] * wheelRadiusMeters;
+  }
+
+  /** Which way the wheel pointed, in radians, at a reading. */
+  double odometryAngleRadians(int reading) {
+    return inputs.odometrySteerAnglesRad[reading];
+  }
 }

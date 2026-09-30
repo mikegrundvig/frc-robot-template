@@ -127,6 +127,7 @@ class DriveSimulationTest {
   @Test
   void theGyroFeelsTheRobotTurnedByHand() {
     DriveSimHarness robot = robot(SensorErrors.NONE);
+    robot.idle(0.1);
 
     robot.simulation.shove(new Transform2d(0, 0, Rotation2d.fromDegrees(30)));
     robot.idle(0.1);
@@ -179,7 +180,7 @@ class DriveSimulationTest {
                     List.of(1.0, 1.0, 1.0, 1.0), List.of(0.0, 0.0, 0.0, Double.NaN), 1.0, 0, 0, 1))
         .hasMessageContaining("steer offset");
     assertThatThrownBy(() -> gyro(1.0, Double.NaN)).hasMessageContaining("gyro");
-    assertThatThrownBy(() -> robot(SensorErrors.NONE).simulation.step(0))
+    assertThatThrownBy(() -> robot(SensorErrors.NONE).simulation.step(0, 0))
         .hasMessageContaining("a step takes time");
   }
 }

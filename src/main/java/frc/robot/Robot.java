@@ -85,7 +85,8 @@ public class Robot extends LoggedRobot {
     pitwall
         .status()
         .add("Alliance", container::allianceStation)
-        .add("Placement", () -> container.placement().describe());
+        .add("Placement", () -> container.placement().describe())
+        .add("Localization", container::localization);
   }
 
   /** Pitwall, for tests that drive the robot program through it. */

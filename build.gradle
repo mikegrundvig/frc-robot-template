@@ -98,6 +98,13 @@ tasks.named("test") {
     workingDir = work
     systemProperty "frc.projectDir", projectDir.absolutePath
     doFirst { work.get().asFile.mkdirs() }
+    // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
+    // coverage report to count: the program's startup runs nowhere else.
+    def endToEndCoverage = layout.buildDirectory.file("jacoco/end-to-end.exec")
+    doFirst { endToEndCoverage.get().asFile.delete() }
+}
+tasks.named("jacocoTestReport") {
+    executionData.from(fileTree(layout.buildDirectory.dir("jacoco")) { include "end-to-end.exec" })
 }
 
 // A copy of the source travels with every deploy, so the code on a robot can always be recovered.

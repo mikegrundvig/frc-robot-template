@@ -77,7 +77,8 @@ tasks.named("jacocoTestReport") {
 
 // Coverage floor: the build fails if coverage drops below the floors in coverage-floor.properties.
 // Keys are "line" and "branch" for everything, or "<package/path>.line" and ".branch" for one
-// package tree.
+// package tree. "file.line" is a floor for every source file on its own, so a file with no tests
+// fails even while the rest carries the total; "file.exempt" lists files it leaves out.
 def coverageCheck = tasks.register("coverageCheck") {
     group = "verification"
     description = "Fail if test coverage drops below coverage-floor.properties."
@@ -109,10 +110,37 @@ def coverageCheck = tasks.register("coverageCheck") {
             }
             return missed + covered > 0 ? 100.0 * covered / (missed + covered) : null
         }
-        def scopes = floors.stringPropertyNames().collect {
+        def scopes = floors.stringPropertyNames().findAll { !it.startsWith("file.") }.collect {
             it.contains(".") ? it.substring(0, it.lastIndexOf(".")) : ""
         }.unique().sort()
         def failures = []
+        def fileFloorText = floors.getProperty("file.line")
+        if (fileFloorText != null && xml != null) {
+            double fileFloor = fileFloorText.toDouble()
+            def exempt = (floors.getProperty("file.exempt") ?: "").split(",")*.trim().findAll { it }
+            def lowest = null
+            xml.package.each { pkg ->
+                pkg.sourcefile.each { source ->
+                    def path = "${pkg.@name}/${source.@name}".toString()
+                    def lines = source.counter.find { it.@type == "LINE" }
+                    if (lines.size() == 0 || path in exempt) {
+                        return
+                    }
+                    double missed = lines.@missed.toDouble()
+                    double covered = lines.@covered.toDouble()
+                    double actual = 100.0 * covered / (missed + covered)
+                    if (lowest == null || actual < lowest[1]) {
+                        lowest = [path, actual]
+                    }
+                    if (actual < fileFloor) {
+                        failures << String.format("%s line coverage %.1f%% is below the per-file floor %.1f%%", path, actual, fileFloor)
+                    }
+                }
+            }
+            if (lowest != null) {
+                println String.format("Coverage %-20s %-6s %5.1f%% (floor %5.1f%%), lowest: %s", "each file", "line", lowest[1], fileFloor, lowest[0])
+            }
+        }
         scopes.each { scope ->
             def packages = xml == null ? [] : (scope
             ? xml.package.findAll {

@@ -89,6 +89,12 @@ What it offers:
   gyro noise comes from a fixed seed, so those runs repeat exactly. PhotonVision's simulated
   cameras add noise of their own, unseeded, so a test with cameras checks against a margin, never
   an exact value. Never `Thread.sleep` to wait for robot time; step the loop.
+- **Recorded behavior stays recorded.** `EstimatorGoldenSimTest` compares the pose estimator's
+  estimate, loop by loop through a seeded session, with a recording
+  (`estimator-golden.csv`). It fails on any change to what the estimator does, which is the point
+  while restructuring it. When a change is meant to move the estimate, run the test with the
+  environment variable `GOLDEN_UPDATE=1` to record it again, and commit the recording with the
+  change, saying why it moved.
 - **No test runs past two minutes.** A hung test fails instead of hanging the build. A test that
   really needs longer says so with `@Timeout`.
 - **Tests run in `build/test-work`.** What simulated devices write (CTRE's `ctre_sim/`, for one)

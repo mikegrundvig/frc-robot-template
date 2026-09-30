@@ -39,18 +39,51 @@ class LoopMonitorTest {
 
   @Test
   void overrunsAreCountedWhileTheyAreRecent() {
+    // Each loop starts on its time, or at once after one that overran, as the robot's timer runs.
     loop(0, 25);
-    LoopMonitor.Report second = loop(100, 4);
-    loop(200, 30);
-    LoopMonitor.Report fourth = loop(300, 4); // the first has left the three recent loops
-    loop(400, 4);
-    LoopMonitor.Report sixth = loop(500, 4);
+    LoopMonitor.Report second = loop(26, 4);
+    loop(46, 30);
+    LoopMonitor.Report fourth = loop(77, 4); // the first has left the three recent loops
+    loop(97, 4);
+    LoopMonitor.Report sixth = loop(117, 4);
 
     assertThat(second.overrunsLately()).isEqualTo(1);
     assertThat(second.worstLatelySeconds()).isCloseTo(0.026, within(1e-12));
     assertThat(fourth.overrunsLately()).isEqualTo(1);
     assertThat(fourth.describe()).isEqualTo("Overran 1 time lately, worst 31.0 ms");
+    assertThat(fourth.lateLately()).as("an overrun isn't also a late start").isZero();
     assertThat(sixth.overrunsLately()).isZero();
+  }
+
+  /**
+   * Logging, dashboards, and garbage collection run between loops, where start-to-finish timing
+   * can't see them: a loop that starts late shows the time they took.
+   */
+  @Test
+  void aLoopThatStartsLateShowsTimeLostBetweenLoops() {
+    loop(0, 4); // takes 5 ms
+    LoopMonitor.Report late = loop(30, 4); // 10 ms after its time
+    LoopMonitor.Report onTime = loop(50, 4);
+
+    assertThat(late.overran()).as("its own code was quick").isFalse();
+    assertThat(late.lateLately()).isEqualTo(1);
+    assertThat(late.outsideSeconds())
+        .as("30 ms since, 5 in the loop")
+        .isCloseTo(0.025, within(1e-12));
+    assertThat(late.describe())
+        .isEqualTo(
+            "5.0 ms, worst 5.0 ms lately; 1 started late (time lost between loops: logging,"
+                + " garbage collection)");
+    assertThat(onTime.outsideSeconds()).isZero();
+    assertThat(onTime.lateLately()).as("still recent").isEqualTo(1);
+  }
+
+  @Test
+  void aStartWithinTheTimersJitterIsOnTime() {
+    loop(0, 4);
+    LoopMonitor.Report report = loop(24, 4); // 4 ms late: under a quarter period
+
+    assertThat(report.lateLately()).isZero();
   }
 
   @Test

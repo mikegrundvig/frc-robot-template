@@ -19,7 +19,6 @@ import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.lib.timing.LoopMonitor;
-import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SimulatedWorld;
@@ -34,7 +33,6 @@ import frc.robot.subsystems.vision.Vision;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -80,9 +78,6 @@ public final class RobotContainer implements AutoCloseable {
 
   static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
-  /** How long "lately" covers for loop timing. */
-  private static final double RECENT_SECONDS = 10;
-
   private final FieldModel field;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
@@ -115,21 +110,11 @@ public final class RobotContainer implements AutoCloseable {
           Alert.Level.MEDIUM);
   private final Alert offField =
       new Alert("Field", "offField", "Odometry puts the robot off the field", Alert.Level.MEDIUM);
-  private final Alert overrunning =
-      new Alert("Loop", "overrunning", "The loop is overrunning", Alert.Level.MEDIUM);
-  private final Alert loggingBehind =
-      new Alert(
-          "Loop",
-          "loggingBehind",
-          "Logging fell behind and dropped data: this log has gaps",
-          Alert.Level.HIGH);
 
   /** Every loop's time, section by section: the robot marks its sections, this marks its own. */
-  private final LoopMonitor loop =
-      new LoopMonitor(RobotLoop.PERIOD_SECONDS, RobotLoop.loops(RECENT_SECONDS));
+  private final LoopHealth loopHealth;
 
-  private LoopMonitor.Report lastLoop = new LoopMonitor.Report(0, false, List.of(), 0, 0);
-  private String lastOverrun = "";
+  private final LoopMonitor loop;
 
   /** This loop's alliance and station (1, 2, 3), from the Driver Station or the field system. */
   private Optional<Alliance> alliance = Optional.empty();
@@ -151,17 +136,32 @@ public final class RobotContainer implements AutoCloseable {
    * @param robot the robot: its frame, wiring, and cameras
    * @param drivetrain the drivetrain's configuration, with any values tuned while running
    * @param field the field the robot plays on
+   * @param loopHealth the loop's timing, which the robot starts and finishes and this marks the
+   *     sections of; closed with this
    */
-  public RobotContainer(
+  RobotContainer(
+      Constants.Mode mode,
+      Scheduler scheduler,
+      RobotConfig robot,
+      Supplier<SwerveConfig> drivetrain,
+      FieldModel field,
+      LoopHealth loopHealth) {
+    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL, loopHealth);
+  }
+
+  /** For a test: typical sensor errors in the simulator, and its own loop timing. */
+  RobotContainer(
       Constants.Mode mode,
       Scheduler scheduler,
       RobotConfig robot,
       Supplier<SwerveConfig> drivetrain,
       FieldModel field) {
-    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL);
+    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL, new LoopHealth());
   }
 
   /**
+   * For a test: its own loop timing.
+   *
    * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
    *     configuration
    */
@@ -172,6 +172,19 @@ public final class RobotContainer implements AutoCloseable {
       Supplier<SwerveConfig> drivetrain,
       FieldModel field,
       SensorErrors simulatedErrors) {
+    this(mode, scheduler, robot, drivetrain, field, simulatedErrors, new LoopHealth());
+  }
+
+  private RobotContainer(
+      Constants.Mode mode,
+      Scheduler scheduler,
+      RobotConfig robot,
+      Supplier<SwerveConfig> drivetrain,
+      FieldModel field,
+      SensorErrors simulatedErrors,
+      LoopHealth loopHealth) {
+    this.loopHealth = loopHealth;
+    loop = loopHealth.monitor();
     Body body = robot.body();
     List<CameraConfig> cameras = robot.cameras();
     this.field = field;
@@ -351,61 +364,9 @@ public final class RobotContainer implements AutoCloseable {
     loop.mark("Dashboard", System.nanoTime());
   }
 
-  /**
-   * The loop's timing, for the robot to mark the sections it runs outside this class: the page's
-   * requests, and the commands.
-   */
-  LoopMonitor loop() {
-    return loop;
-  }
-
-  /**
-   * The loop is done: logs its timing section by section, alerts if loops are overrunning, naming
-   * the slowest section of the last one that did, and alerts if the log is dropping data.
-   */
-  void finishLoop(long nowNanos) {
-    lastLoop = loop.finish(nowNanos);
-    Logger.recordOutput("Loop/Milliseconds", lastLoop.seconds() * 1000);
-    Logger.recordOutput("Loop/OverrunsLately", lastLoop.overrunsLately());
-    Logger.recordOutput("Loop/WorstLatelyMilliseconds", lastLoop.worstLatelySeconds() * 1000);
-    for (LoopMonitor.Section section : lastLoop.sections()) {
-      Logger.recordOutput(
-          "Loop/Sections/" + section.name() + "Milliseconds", section.seconds() * 1000);
-    }
-    LoopMonitor.Section slowest = lastLoop.slowest();
-    if (lastLoop.overran() && slowest != null) {
-      lastOverrun =
-          String.format(
-              Locale.ROOT,
-              "; the last took %.0f ms, %.0f of them in %s",
-              lastLoop.seconds() * 1000,
-              slowest.seconds() * 1000,
-              slowest.name());
-    }
-    overrunning.setText(
-        String.format(
-            Locale.ROOT,
-            "The loop overran %.0f ms %d %s in the last %.0f s%s",
-            RobotLoop.PERIOD_SECONDS * 1000,
-            lastLoop.overrunsLately(),
-            lastLoop.overrunsLately() == 1 ? "time" : "times",
-            RECENT_SECONDS,
-            lastOverrun));
-    overrunning.set(lastLoop.overrunsLately() > 0);
-    loggingBehind.set(Logger.getReceiverQueueFault());
-  }
-
   /** One line for the pit: how long loops take, and whether they keep up. */
   String loopStatus() {
-    return lastLoop.describe();
-  }
-
-  boolean isOverrunAlertActive() {
-    return overrunning.get();
-  }
-
-  String overrunAlertText() {
-    return overrunning.getText();
+    return loopHealth.describe();
   }
 
   /**
@@ -586,8 +547,7 @@ public final class RobotContainer implements AutoCloseable {
     noHardware.close();
     allianceUnknown.close();
     offField.close();
-    overrunning.close();
-    loggingBehind.close();
+    loopHealth.close();
     vision.close();
     if (world != null) {
       world.close();

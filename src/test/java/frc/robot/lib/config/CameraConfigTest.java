@@ -63,13 +63,13 @@ class CameraConfigTest {
   void theMountMustBeNumbers() {
     var nan = Double.NaN;
 
-    assertRejected("camera name", () -> change().name(" ").build());
-    assertRejected("front forward", () -> change().forward(Inches.of(nan)).build());
-    assertRejected("front left", () -> change().left(Inches.of(nan)).build());
-    assertRejected("front up", () -> change().up(Inches.of(nan)).build());
-    assertRejected("front roll", () -> change().roll(Degrees.of(nan)).build());
-    assertRejected("front tiltUp", () -> change().tiltUp(Degrees.of(nan)).build());
-    assertRejected("front yaw", () -> change().yaw(Degrees.of(nan)).build());
+    assertRejected("CameraConfig[ ].name", () -> change().name(" ").build());
+    assertRejected("CameraConfig[front].forward", () -> change().forward(Inches.of(nan)).build());
+    assertRejected("CameraConfig[front].left", () -> change().left(Inches.of(nan)).build());
+    assertRejected("CameraConfig[front].up", () -> change().up(Inches.of(nan)).build());
+    assertRejected("CameraConfig[front].roll", () -> change().roll(Degrees.of(nan)).build());
+    assertRejected("CameraConfig[front].tiltUp", () -> change().tiltUp(Degrees.of(nan)).build());
+    assertRejected("CameraConfig[front].yaw", () -> change().yaw(Degrees.of(nan)).build());
   }
 
   @Test
@@ -79,15 +79,16 @@ class CameraConfigTest {
 
   @Test
   void rejectsAnImpossibleSensor() {
-    assertRejected("widthPixels", () -> changeSensor().widthPixels(0).build());
-    assertRejected("heightPixels", () -> changeSensor().heightPixels(-800).build());
+    assertRejected("Sensor.widthPixels", () -> changeSensor().widthPixels(0).build());
+    assertRejected("Sensor.heightPixels", () -> changeSensor().heightPixels(-800).build());
     assertRejected(
-        "diagonalFieldOfView", () -> changeSensor().diagonalFieldOfView(Degrees.of(0)).build());
+        "Sensor.diagonalFieldOfView",
+        () -> changeSensor().diagonalFieldOfView(Degrees.of(0)).build());
     assertRejected(
-        "diagonalFieldOfView must be under 180",
+        "Sensor.diagonalFieldOfView: 180 ° must be below 180 °",
         () -> changeSensor().diagonalFieldOfView(Degrees.of(180)).build());
-    assertRejected("frameRate", () -> changeSensor().frameRate(Hertz.of(0)).build());
-    assertRejected("latency", () -> changeSensor().latency(Milliseconds.of(-1)).build());
+    assertRejected("Sensor.frameRate", () -> changeSensor().frameRate(Hertz.of(0)).build());
+    assertRejected("Sensor.latency", () -> changeSensor().latency(Milliseconds.of(-1)).build());
   }
 
   /** A copy of a valid camera named "front", to change one value. */

@@ -2,6 +2,7 @@ package frc.robot.lib.config;
 
 import static frc.robot.lib.config.Rules.atLeast;
 import static frc.robot.lib.config.Rules.atMost;
+import static frc.robot.lib.config.Rules.below;
 import static frc.robot.lib.config.Rules.between;
 import static frc.robot.lib.config.Rules.each;
 import static frc.robot.lib.config.Rules.finite;
@@ -41,7 +42,8 @@ class RulesTest {
   @Test
   void nanAndInfinityFailEveryRuleThatTakesANumber() {
     List<Rule<Double>> numberRules =
-        List.of(positive(), nonNegative(), finite(), atLeast(0), atMost(10), between(-1, 1));
+        List.of(
+            positive(), nonNegative(), finite(), atLeast(0), atMost(10), below(10), between(-1, 1));
     for (Rule<Double> rule : numberRules) {
       assertThat(rule.whyNot(Double.NaN)).isEqualTo("NaN must be a finite number");
       assertThat(rule.whyNot(Double.POSITIVE_INFINITY))
@@ -56,6 +58,7 @@ class RulesTest {
             finite(),
             atLeast(Degrees.of(0)),
             atMost(Degrees.of(90)),
+            below(Degrees.of(90)),
             between(Degrees.of(-90), Degrees.of(90)));
     for (Rule<Angle> rule : angleRules) {
       assertThat(rule.whyNot(Degrees.of(Double.NaN))).isEqualTo("NaN ° must be a finite number");
@@ -68,6 +71,8 @@ class RulesTest {
     assertThat(atLeast(2).whyNot(1.0)).isEqualTo("1 must be at least 2");
     assertThat(atMost(90).whyNot(90.0)).isNull();
     assertThat(atMost(90).whyNot(90.5)).isEqualTo("90.5 must be at most 90");
+    assertThat(below(180).whyNot(179.9)).isNull();
+    assertThat(below(180).whyNot(180.0)).isEqualTo("180 must be below 180");
     assertThat(between(-1, 1).whyNot(-1.0)).isNull();
     assertThat(between(-1, 1).whyNot(1.0)).isNull();
     assertThat(between(-1, 1).whyNot(1.25)).isEqualTo("1.25 must be from -1 to 1");
@@ -80,6 +85,8 @@ class RulesTest {
     assertThat(tilt.whyNot(Radians.of(1.5))).as("86 degrees").isNull();
     assertThat(tilt.whyNot(Radians.of(1.6))).isEqualTo("1.6 rad must be from -90 ° to 90 °");
     assertThat(atMost(Amps.of(80)).whyNot(Amps.of(120))).isEqualTo("120 A must be at most 80 A");
+    assertThat(below(Degrees.of(180)).whyNot(Radians.of(3.2)))
+        .isEqualTo("3.2 rad must be below 180 °");
     assertThat(atLeast(Meters.of(1)).whyNot(Meters.of(0.5)))
         .isEqualTo("0.5 m must be at least 1 m");
   }

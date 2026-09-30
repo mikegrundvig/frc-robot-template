@@ -46,6 +46,11 @@ public final class Rules {
     return value -> checked(value, value <= max, "must be at most " + shown(max));
   }
 
+  /** Less than {@code limit}. */
+  public static Rule<Double> below(double limit) {
+    return value -> checked(value, value < limit, "must be below " + shown(limit));
+  }
+
   /** From {@code min} to {@code max}, both included. */
   public static Rule<Double> between(double min, double max) {
     return value ->
@@ -71,6 +76,15 @@ public final class Rules {
             value,
             value.baseUnitMagnitude() <= max.baseUnitMagnitude(),
             "must be at most " + shown(max));
+  }
+
+  /** Less than {@code limit}, in real units. */
+  public static <M extends Measure<?>> Rule<M> below(M limit) {
+    return value ->
+        checked(
+            value,
+            value.baseUnitMagnitude() < limit.baseUnitMagnitude(),
+            "must be below " + shown(limit));
   }
 
   /** From {@code min} to {@code max}, both included, in real units. */

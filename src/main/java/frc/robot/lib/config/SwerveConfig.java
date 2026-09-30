@@ -1,8 +1,12 @@
 package frc.robot.lib.config;
 
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.positive;
+import static frc.robot.lib.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
@@ -25,14 +29,17 @@ import org.wpilib.units.measure.Time;
 @ConfigRecord
 public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, Gains gains) {
   public SwerveConfig {
-    Require.positive("wheelInset", wheelInset);
-    if (limits.maxLinearSpeed().gt(modules.freeSpeed())) {
-      throw new IllegalArgumentException(
-          "maxLinearSpeed "
-              + Require.shown(limits.maxLinearSpeed())
-              + " is faster than the drivetrain's free speed of "
-              + Require.shown(modules.freeSpeed()));
-    }
+    Checks.on(SwerveConfig.class)
+        .field("wheelInset", wheelInset, positive())
+        .check(
+            "limits.maxLinearSpeed",
+            () ->
+                limits.maxLinearSpeed().lte(modules.freeSpeed())
+                    ? null
+                    : shown(limits.maxLinearSpeed())
+                        + " is faster than the drivetrain's free speed of "
+                        + shown(modules.freeSpeed()))
+        .orThrow();
   }
 
   /** Starts building a swerve drivetrain, one named value at a time. */
@@ -60,10 +67,12 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       double steerGearing,
       double wheelCoefficientOfFriction) {
     public Modules {
-      Require.positive("wheelRadius", wheelRadius);
-      Require.positive("driveGearing", driveGearing);
-      Require.positive("steerGearing", steerGearing);
-      Require.positive("wheelCoefficientOfFriction", wheelCoefficientOfFriction);
+      Checks.on(Modules.class)
+          .field("wheelRadius", wheelRadius, positive())
+          .field("driveGearing", driveGearing, positive())
+          .field("steerGearing", steerGearing, positive())
+          .field("wheelCoefficientOfFriction", wheelCoefficientOfFriction, positive())
+          .orThrow();
     }
 
     /** Starts building the module hardware, one named value at a time. */
@@ -108,11 +117,13 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       LinearVelocity maxLinearSpeed,
       AngularVelocity maxAngularSpeed) {
     public Limits {
-      Require.positive("driveStatorCurrent", driveStatorCurrent);
-      Require.positive("driveSupplyCurrent", driveSupplyCurrent);
-      Require.positive("steerStatorCurrent", steerStatorCurrent);
-      Require.positive("maxLinearSpeed", maxLinearSpeed);
-      Require.positive("maxAngularSpeed", maxAngularSpeed);
+      Checks.on(Limits.class)
+          .field("driveStatorCurrent", driveStatorCurrent, positive())
+          .field("driveSupplyCurrent", driveSupplyCurrent, positive())
+          .field("steerStatorCurrent", steerStatorCurrent, positive())
+          .field("maxLinearSpeed", maxLinearSpeed, positive())
+          .field("maxAngularSpeed", maxAngularSpeed, positive())
+          .orThrow();
     }
 
     /** Starts building the limits, one named value at a time. */
@@ -145,12 +156,14 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       double steerKd,
       Time skewLookahead) {
     public Gains {
-      Require.nonNegative("driveKs", driveKs);
-      Require.nonNegative("driveKv", driveKv);
-      Require.nonNegative("driveKp", driveKp);
-      Require.nonNegative("steerKp", steerKp);
-      Require.nonNegative("steerKd", steerKd);
-      Require.nonNegative("skewLookahead", skewLookahead);
+      Checks.on(Gains.class)
+          .field("driveKs", driveKs, nonNegative())
+          .field("driveKv", driveKv, nonNegative())
+          .field("driveKp", driveKp, nonNegative())
+          .field("steerKp", steerKp, nonNegative())
+          .field("steerKd", steerKd, nonNegative())
+          .field("skewLookahead", skewLookahead, nonNegative())
+          .orThrow();
     }
 
     /** Starts building the gains, one named value at a time. */
@@ -160,20 +173,28 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
   }
 
   /**
+   * Why the wheels don't fit this body's frame, or null when they do: the inset must leave room
+   * between them.
+   */
+  public @Nullable String whyWheelsDontFit(Body body) {
+    return wheelInset.times(2).lt(body.frameLength()) && wheelInset.times(2).lt(body.frameWidth())
+        ? null
+        : shown(wheelInset) + " puts the wheels at or past the center of the frame";
+  }
+
+  /**
    * Where each wheel touches the floor, from the robot's center: front left, front right, back
    * left, back right.
    *
    * @throws IllegalArgumentException if the inset leaves no room between the wheels
    */
   public Translation2d[] moduleTranslations(Body body) {
+    String doesntFit = whyWheelsDontFit(body);
+    if (doesntFit != null) {
+      throw new IllegalArgumentException("wheelInset " + doesntFit);
+    }
     double x = body.frameLength().in(Meters) / 2 - wheelInset.in(Meters);
     double y = body.frameWidth().in(Meters) / 2 - wheelInset.in(Meters);
-    if (x <= 0 || y <= 0) {
-      throw new IllegalArgumentException(
-          "wheelInset "
-              + Require.shown(wheelInset)
-              + " puts the wheels at or past the center of the frame");
-    }
     return new Translation2d[] {
       new Translation2d(x, y),
       new Translation2d(x, -y),

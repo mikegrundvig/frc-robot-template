@@ -1,5 +1,7 @@
 package frc.robot.lib.config;
 
+import static frc.robot.lib.config.Rules.positive;
+import static frc.robot.lib.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 
 import org.wpilib.math.geometry.Translation3d;
@@ -34,20 +36,21 @@ public record Body(
     MomentOfInertia yawMomentOfInertia,
     Distance cgHeight) {
   public Body {
-    Require.positive("frameLength", frameLength);
-    Require.positive("frameWidth", frameWidth);
-    Require.positive("height", height);
-    Require.positive("bumperThickness", bumperThickness);
-    Require.positive("mass", mass);
-    Require.positive("yawMomentOfInertia", yawMomentOfInertia);
-    Require.positive("cgHeight", cgHeight);
-    if (cgHeight.gte(height)) {
-      throw new IllegalArgumentException(
-          "cgHeight "
-              + Require.shown(cgHeight)
-              + " must be below the robot's height of "
-              + Require.shown(height));
-    }
+    Checks.on(Body.class)
+        .field("frameLength", frameLength, positive())
+        .field("frameWidth", frameWidth, positive())
+        .field("height", height, positive())
+        .field("bumperThickness", bumperThickness, positive())
+        .field("mass", mass, positive())
+        .field("yawMomentOfInertia", yawMomentOfInertia, positive())
+        .field("cgHeight", cgHeight, positive())
+        .check(
+            "cgHeight",
+            () ->
+                cgHeight.lt(height)
+                    ? null
+                    : shown(cgHeight) + " must be below the robot's height (" + shown(height) + ")")
+        .orThrow();
   }
 
   /** Starts building a body, one named value at a time. */

@@ -98,34 +98,37 @@ class SwerveConfigTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> SwerveConfigBuilder.builder(swerve()).limits(tooFast).build())
         .withMessage(
-            "maxLinearSpeed 5 m/s is faster than the drivetrain's free speed of 4.729 m/s");
+            "SwerveConfig.limits.maxLinearSpeed: 5 m/s is faster than the drivetrain's free speed"
+                + " of 4.729 m/s");
   }
 
   @Test
   void rejectsImpossibleModuleValues() {
-    assertRejected("wheelRadius", () -> changeModules().wheelRadius(Inches.of(0)).build());
-    assertRejected("driveGearing", () -> changeModules().driveGearing(-6.75).build());
-    assertRejected("steerGearing", () -> changeModules().steerGearing(0).build());
+    assertRejected("Modules.wheelRadius", () -> changeModules().wheelRadius(Inches.of(0)).build());
+    assertRejected("Modules.driveGearing", () -> changeModules().driveGearing(-6.75).build());
+    assertRejected("Modules.steerGearing", () -> changeModules().steerGearing(0).build());
     assertRejected(
-        "wheelCoefficientOfFriction",
+        "Modules.wheelCoefficientOfFriction",
         () -> changeModules().wheelCoefficientOfFriction(Double.NaN).build());
     assertRejected(
-        "wheelInset",
+        "SwerveConfig.wheelInset",
         () -> SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(-1)).build());
   }
 
   @Test
   void limitsMustBePositive() {
     assertRejected(
-        "driveStatorCurrent", () -> changeLimits().driveStatorCurrent(Amps.of(0)).build());
+        "Limits.driveStatorCurrent", () -> changeLimits().driveStatorCurrent(Amps.of(0)).build());
     assertRejected(
-        "driveSupplyCurrent", () -> changeLimits().driveSupplyCurrent(Amps.of(-60)).build());
+        "Limits.driveSupplyCurrent", () -> changeLimits().driveSupplyCurrent(Amps.of(-60)).build());
     assertRejected(
-        "steerStatorCurrent", () -> changeLimits().steerStatorCurrent(Amps.of(Double.NaN)).build());
+        "Limits.steerStatorCurrent",
+        () -> changeLimits().steerStatorCurrent(Amps.of(Double.NaN)).build());
     assertRejected(
-        "maxLinearSpeed", () -> changeLimits().maxLinearSpeed(MetersPerSecond.of(0)).build());
+        "Limits.maxLinearSpeed",
+        () -> changeLimits().maxLinearSpeed(MetersPerSecond.of(0)).build());
     assertRejected(
-        "maxAngularSpeed",
+        "Limits.maxAngularSpeed",
         () ->
             changeLimits()
                 .maxAngularSpeed(RotationsPerSecond.of(Double.POSITIVE_INFINITY))
@@ -145,14 +148,15 @@ class SwerveConfigTest {
                     .steerKd(0)
                     .skewLookahead(Seconds.of(0))
                     .build());
-    assertRejected("driveKs", () -> changeGains().driveKs(-0.1).build());
-    assertRejected("driveKv", () -> changeGains().driveKv(Double.NaN).build());
-    assertRejected("driveKp", () -> changeGains().driveKp(-1).build());
-    assertRejected("steerKp", () -> changeGains().steerKp(-1).build());
-    assertRejected("steerKd", () -> changeGains().steerKd(-1).build());
-    assertRejected("skewLookahead", () -> changeGains().skewLookahead(Seconds.of(-0.01)).build());
+    assertRejected("Gains.driveKs", () -> changeGains().driveKs(-0.1).build());
+    assertRejected("Gains.driveKv", () -> changeGains().driveKv(Double.NaN).build());
+    assertRejected("Gains.driveKp", () -> changeGains().driveKp(-1).build());
+    assertRejected("Gains.steerKp", () -> changeGains().steerKp(-1).build());
+    assertRejected("Gains.steerKd", () -> changeGains().steerKd(-1).build());
     assertRejected(
-        "skewLookahead", () -> changeGains().skewLookahead(Seconds.of(Double.NaN)).build());
+        "Gains.skewLookahead", () -> changeGains().skewLookahead(Seconds.of(-0.01)).build());
+    assertRejected(
+        "Gains.skewLookahead", () -> changeGains().skewLookahead(Seconds.of(Double.NaN)).build());
   }
 
   private static SwerveConfigModulesBuilder changeModules() {

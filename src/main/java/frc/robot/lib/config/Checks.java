@@ -1,7 +1,9 @@
 package frc.robot.lib.config;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
@@ -22,11 +24,12 @@ import org.jspecify.annotations.Nullable;
  * }
  * }</pre>
  *
- * <p>Every rule runs, and {@link #orThrow()} throws one {@link ConfigException} naming every value
- * that broke one: a configuration with three bad values reports three. The checks across values run
- * last, and only once every value has passed its own rule, so they never compare a value that's
- * already reported. Values are named from the record that checks them ({@code Gains.steerKp}): a
- * nested record is built, and checked, before the record that holds it.
+ * <p>Every value is checked, and {@link #orThrow()} throws one {@link ConfigException} naming every
+ * value that broke a rule: a configuration with three bad values reports three. A value may be
+ * listed more than once, with a rule each time; once it breaks one, its later rules are skipped.
+ * The checks across values run last, and only once every value has passed its own rule, so they
+ * never compare a value that's already reported. Values are named from the record that checks them
+ * ({@code Gains.steerKp}): a nested record is built, and checked, before the record that holds it.
  */
 public final class Checks {
   private record Across(String name, Supplier<@Nullable String> why) {}
@@ -34,6 +37,7 @@ public final class Checks {
   private final String where;
   private final List<Violation> violations = new ArrayList<>();
   private final List<Across> checks = new ArrayList<>();
+  private final Set<String> broken = new HashSet<>();
 
   private Checks(String where) {
     this.where = where;
@@ -45,21 +49,21 @@ public final class Checks {
   }
 
   /**
-   * Checks whose violations are named after {@code where}, for a record that has a name of its own:
-   * {@code Checks.on("camera " + name)}.
+   * Checks for a record with a name of its own, which names its violations too: {@code
+   * CameraConfig[front].tiltUp}.
    */
-  public static Checks on(String where) {
-    return new Checks(where);
+  public static Checks on(Class<? extends Record> record, String name) {
+    return new Checks(record.getSimpleName() + "[" + name + "]");
   }
 
   /** Checks a number, or a whole number, against a rule. */
   public Checks field(String name, double value, Rule<Double> rule) {
-    return run(name, () -> rule.whyNot(value));
+    return broken.contains(name) ? this : run(name, () -> rule.whyNot(value));
   }
 
   /** Checks a value against a rule. */
   public <V> Checks field(String name, V value, Rule<? super V> rule) {
-    return run(name, () -> rule.whyNot(value));
+    return broken.contains(name) ? this : run(name, () -> rule.whyNot(value));
   }
 
   /**
@@ -100,6 +104,7 @@ public final class Checks {
     }
     if (problem != null) {
       violations.add(new Violation(where + "." + name, problem));
+      broken.add(name);
     }
     return this;
   }

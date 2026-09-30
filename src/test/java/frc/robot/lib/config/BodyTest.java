@@ -52,6 +52,22 @@ class BodyTest {
   }
 
   @Test
+  void everyBadMeasurementIsReportedAtOnce() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                change()
+                    .frameLength(Inches.of(0))
+                    .mass(Kilograms.of(-1))
+                    .cgHeight(Inches.of(Double.NaN))
+                    .build())
+        .withMessage(
+            "Body.frameLength: 0 in must be positive\n"
+                + "Body.mass: -1 Kg must be positive\n"
+                + "Body.cgHeight: NaN in must be a finite number");
+  }
+
+  @Test
   void centerOfGravityMustBeBelowTheTop() {
     assertRejected("cgHeight", () -> change().cgHeight(Inches.of(30)).build());
   }
@@ -79,6 +95,8 @@ class BodyTest {
   }
 
   private static void assertRejected(String field, ThrowingCallable build) {
-    assertThatIllegalArgumentException().isThrownBy(build).withMessageStartingWith(field);
+    assertThatIllegalArgumentException()
+        .isThrownBy(build)
+        .withMessageStartingWith("Body." + field + ": ");
   }
 }

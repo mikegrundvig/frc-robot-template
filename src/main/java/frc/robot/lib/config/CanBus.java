@@ -1,5 +1,7 @@
 package frc.robot.lib.config;
 
+import static frc.robot.lib.config.Rules.notBlank;
+
 import org.wpilib.hardware.bus.CANPort;
 
 /** Which CAN bus a device is on: one of Systemcore's own ports, or a CANivore, by its name. */
@@ -10,9 +12,7 @@ public sealed interface CanBus {
   /** A CANivore, by the name set in Phoenix Tuner X. */
   record Canivore(String name) implements CanBus {
     public Canivore {
-      if (name.isBlank()) {
-        throw new IllegalArgumentException("a CANivore is named in Phoenix Tuner X");
-      }
+      Checks.on(Canivore.class).field("name", name, notBlank()).orThrow();
     }
   }
 

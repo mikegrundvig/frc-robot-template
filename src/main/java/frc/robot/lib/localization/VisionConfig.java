@@ -1,5 +1,10 @@
 package frc.robot.lib.localization;
 
+import static frc.robot.lib.config.Rules.atLeast;
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.positive;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 
 /**
@@ -66,30 +71,25 @@ public record VisionConfig(
           .build();
 
   public VisionConfig {
-    double[] positive = {
-      maxAmbiguity,
-      maxHeightErrorMeters,
-      maxDistanceMeters,
-      maxYawRateRadiansPerSecond,
-      linearStdDevBaseline,
-      angularStdDevBaseline,
-      distanceExponent,
-      headingConstrainedFactor,
-      maxHeadingStdDevToConstrain,
-      maxYawRateForHeading,
-      maxReprojectionErrorForHeadingPixels
-    };
-    for (double value : positive) {
-      if (!(value > 0) || Double.isInfinite(value)) {
-        throw new IllegalArgumentException("vision thresholds and uncertainties must be positive");
-      }
-    }
-    if (!(speedStdDevFactor >= 0) || !(yawRateStdDevFactor >= 0)) {
-      throw new IllegalArgumentException("motion factors must be zero or more");
-    }
-    if (minTagsForHeading < 2) {
-      throw new IllegalArgumentException("heading comes only from two or more tags");
-    }
+    Checks.on(VisionConfig.class)
+        .field("maxAmbiguity", maxAmbiguity, positive())
+        .field("maxHeightErrorMeters", maxHeightErrorMeters, positive())
+        .field("maxDistanceMeters", maxDistanceMeters, positive())
+        .field("maxYawRateRadiansPerSecond", maxYawRateRadiansPerSecond, positive())
+        .field("linearStdDevBaseline", linearStdDevBaseline, positive())
+        .field("angularStdDevBaseline", angularStdDevBaseline, positive())
+        .field("distanceExponent", distanceExponent, positive())
+        .field("headingConstrainedFactor", headingConstrainedFactor, positive())
+        .field("speedStdDevFactor", speedStdDevFactor, nonNegative())
+        .field("yawRateStdDevFactor", yawRateStdDevFactor, nonNegative())
+        .field("maxHeadingStdDevToConstrain", maxHeadingStdDevToConstrain, positive())
+        .field("minTagsForHeading", minTagsForHeading, atLeast(2)) // one tag can't fix heading
+        .field("maxYawRateForHeading", maxYawRateForHeading, positive())
+        .field(
+            "maxReprojectionErrorForHeadingPixels",
+            maxReprojectionErrorForHeadingPixels,
+            positive())
+        .orThrow();
   }
 
   /** Starts building vision settings, one named value at a time. */

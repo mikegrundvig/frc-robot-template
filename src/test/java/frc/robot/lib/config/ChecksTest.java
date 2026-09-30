@@ -1,6 +1,7 @@
 package frc.robot.lib.config;
 
 import static frc.robot.lib.config.Rules.atLeast;
+import static frc.robot.lib.config.Rules.below;
 import static frc.robot.lib.config.Rules.between;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.positive;
@@ -75,8 +76,22 @@ class ChecksTest {
   @Test
   void aRecordWithANameOfItsOwnIsNamedByIt() {
     assertThat(
-            violations(() -> Checks.on("camera front").field("noise", 0.0, positive()).orThrow()))
-        .containsExactly(new Violation("camera front.noise", "0 must be positive"));
+            violations(
+                () -> Checks.on(Gains.class, "front").field("noise", 0.0, positive()).orThrow()))
+        .containsExactly(new Violation("Gains[front].noise", "0 must be positive"));
+  }
+
+  @Test
+  void aValueStopsAtTheFirstRuleItBreaks() {
+    assertThat(
+            violations(
+                () ->
+                    Checks.on(Gains.class)
+                        .field("fieldOfView", Double.NaN, positive())
+                        .field("fieldOfView", Double.NaN, below(180))
+                        .field("fieldOfView", 200.0, below(180))
+                        .orThrow()))
+        .containsExactly(new Violation("Gains.fieldOfView", "NaN must be a finite number"));
   }
 
   @Test

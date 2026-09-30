@@ -218,20 +218,23 @@ class DriveSimulationTest {
   @Test
   void errorsMustBeRealistic() {
     assertThatThrownBy(() -> SensorErrors.NONE.withWheelRadiusScale(0))
-        .hasMessageContaining("positive");
+        .hasMessage(
+            "SensorErrors.wheelRadiusScale: [0] 0 must be positive; [1] 0 must be positive;"
+                + " [2] 0 must be positive; [3] 0 must be positive");
     assertThatThrownBy(
             () ->
                 SensorErrorsBuilder.builder(SensorErrors.NONE)
                     .wheelRadiusScale(List.of(1.0, 1.0, 1.0))
                     .build())
-        .hasMessageContaining("per module");
+        .hasMessage("SensorErrors.wheelRadiusScale: must have 4, has 3");
     assertThatThrownBy(
             () ->
                 SensorErrorsBuilder.builder(SensorErrors.NONE)
                     .steerOffsetDegrees(List.of(0.0, 0.0, 0.0, Double.NaN))
                     .build())
-        .hasMessageContaining("steer offset");
-    assertThatThrownBy(() -> gyro(1.0, Double.NaN)).hasMessageContaining("gyro");
+        .hasMessage("SensorErrors.steerOffsetDegrees: [3] NaN must be a finite number");
+    assertThatThrownBy(() -> gyro(1.0, Double.NaN))
+        .hasMessage("GyroErrors.driftDegreesPerMinute: NaN must be a finite number");
     assertThatThrownBy(() -> robot(SensorErrors.NONE).simulation.step(0, 0))
         .hasMessageContaining("a step takes time");
   }

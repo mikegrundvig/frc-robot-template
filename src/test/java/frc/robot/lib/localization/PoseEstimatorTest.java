@@ -673,14 +673,21 @@ class PoseEstimatorTest {
   @Test
   void settingsMustMakeSense() {
     assertThatThrownBy(() -> with().translationStdDevPerMeter(-1).build())
-        .hasMessageContaining("zero or more");
-    assertThatThrownBy(() -> with().historySeconds(0).build()).hasMessageContaining("positive");
+        .hasMessage("EstimatorConfig.translationStdDevPerMeter: -1 must be zero or more");
+    assertThatThrownBy(() -> with().historySeconds(0).build())
+        .hasMessage("EstimatorConfig.historySeconds: 0 must be positive");
     assertThatThrownBy(() -> with().recoveryMeasurements(1).build())
-        .hasMessageContaining("at least 2");
+        .hasMessage("EstimatorConfig.recoveryMeasurements: 1 must be at least 2");
     assertThatThrownBy(() -> with().tractionLimitedSlipFraction(1.5).build())
-        .hasMessageContaining("0 to 1");
+        .hasMessage("EstimatorConfig.tractionLimitedSlipFraction: 1.5 must be from 0 to 1");
     assertThatThrownBy(() -> with().tiltStartDegrees(30).build())
-        .hasMessageContaining("tilt above");
+        .hasMessageStartingWith(
+            "EstimatorConfig.tiltZeroDegrees: 25 must be above tiltStartDegrees (30)");
+    assertThatThrownBy(() -> with().gateChiSquaredPose(0).recoveryStdDevMeters(-1).build())
+        .as("each value is named")
+        .hasMessage(
+            "EstimatorConfig.gateChiSquaredPose: 0 must be positive\n"
+                + "EstimatorConfig.recoveryStdDevMeters: -1 must be positive");
   }
 
   /** A gyro that sends NaN would poison the heading for good: it counts as lost instead. */

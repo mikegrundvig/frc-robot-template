@@ -1,5 +1,12 @@
 package frc.robot.sim;
 
+import static frc.robot.lib.config.Rules.each;
+import static frc.robot.lib.config.Rules.finite;
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.positive;
+import static frc.robot.lib.config.Rules.size;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import java.util.HashMap;
 import java.util.List;
@@ -88,14 +95,11 @@ public record SensorErrors(
         builder().scale(1).driftDegreesPerMinute(0).noiseDegrees(0).build();
 
     public GyroErrors {
-      if (!(scale > 0)
-          || !Double.isFinite(scale)
-          || !Double.isFinite(driftDegreesPerMinute)
-          || !(noiseDegrees >= 0)
-          || !Double.isFinite(noiseDegrees)) {
-        throw new IllegalArgumentException(
-            "the gyro's scale must be positive, its drift a number, and its noise zero or more");
-      }
+      Checks.on(GyroErrors.class)
+          .field("scale", scale, positive())
+          .field("driftDegreesPerMinute", driftDegreesPerMinute, finite())
+          .field("noiseDegrees", noiseDegrees, nonNegative())
+          .orThrow();
     }
 
     /** Starts describing a gyro's errors, one named value at a time. */
@@ -105,20 +109,12 @@ public record SensorErrors(
   }
 
   public SensorErrors {
-    cameraMountErrors = Map.copyOf(cameraMountErrors);
-    if (wheelRadiusScale.size() != 4 || steerOffsetDegrees.size() != 4) {
-      throw new IllegalArgumentException("one wheel radius scale and one steer offset per module");
-    }
-    wheelRadiusScale = List.copyOf(wheelRadiusScale);
-    steerOffsetDegrees = List.copyOf(steerOffsetDegrees);
-    for (int i = 0; i < 4; i++) {
-      if (!(wheelRadiusScale.get(i) > 0) || !Double.isFinite(wheelRadiusScale.get(i))) {
-        throw new IllegalArgumentException("a wheel radius scale must be positive");
-      }
-      if (!Double.isFinite(steerOffsetDegrees.get(i))) {
-        throw new IllegalArgumentException("a steer offset must be a number");
-      }
-    }
+    Checks.on(SensorErrors.class)
+        .field("wheelRadiusScale", wheelRadiusScale, size(4)) // one per module
+        .field("wheelRadiusScale", wheelRadiusScale, each(positive()))
+        .field("steerOffsetDegrees", steerOffsetDegrees, size(4))
+        .field("steerOffsetDegrees", steerOffsetDegrees, each(finite()))
+        .orThrow();
   }
 
   /** The same errors, with every wheel's radius scaled alike: tread worn evenly. */

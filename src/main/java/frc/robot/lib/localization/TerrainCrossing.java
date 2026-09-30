@@ -1,5 +1,11 @@
 package frc.robot.lib.localization;
 
+import static frc.robot.lib.config.Rules.below;
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.positive;
+import static frc.robot.lib.config.Rules.shown;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -64,15 +70,21 @@ public final class TerrainCrossing {
         builder().steepDegrees(10).levelDegrees(5).levelSeconds(0.1).topSeconds(1.5).build();
 
     public Settings {
-      if (!(levelDegrees > 0)
-          || !(steepDegrees > levelDegrees)
-          || !(steepDegrees < 90)
-          || !(levelSeconds >= 0)
-          || !(topSeconds > 0)
-          || Double.isInfinite(levelSeconds + topSeconds)) {
-        throw new IllegalArgumentException(
-            "steep must be steeper than level, both positive, and the times positive");
-      }
+      Checks.on(Settings.class)
+          .field("steepDegrees", steepDegrees, below(90))
+          .field("levelDegrees", levelDegrees, positive())
+          .field("levelSeconds", levelSeconds, nonNegative())
+          .field("topSeconds", topSeconds, positive())
+          .check(
+              "steepDegrees",
+              () ->
+                  steepDegrees > levelDegrees
+                      ? null
+                      : shown(steepDegrees)
+                          + " must be steeper than levelDegrees ("
+                          + shown(levelDegrees)
+                          + ")")
+          .orThrow();
     }
 
     /** Starts building the settings, one named value at a time. */

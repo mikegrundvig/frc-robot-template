@@ -74,8 +74,33 @@ and after, how sure it is, and the camera's mount as the builder calls to put in
 down 2° put a tag 3 m away in the same wrong place, and only tags at different distances tell them
 apart.
 
-When: after mounting, bumping, or remounting a camera, and whenever the Vision log's
-`MeanTagResidualMeters` for one camera stands out from the others'.
+When: after mounting, bumping, or remounting a camera, and whenever the robot says a camera is out
+of calibration.
+
+### How the robot notices a camera that moved
+
+The robot checks every camera's mount all the time, from the tags it sees while the other cameras
+hold the robot's pose. Each tag, placed on the field through the robot's pose and the camera's
+configured mount, should land on the tag. Noise puts tags off every which way and averages out; a
+camera bumped since it was calibrated puts them off the same way every time. Over its latest 500
+tags (seconds of seeing tags), the average of how far they land off is the Vision log's
+`MountOffsetMeters` for that camera.
+
+Past 5 cm (the vision configuration's `mountToleranceMeters`, which the pit can tune), the alert
+*Camera front-left is out of calibration: its tags land 10 cm off* says to recalibrate it. Until
+then, the part of the offset across the floor (beyond the tolerance, taken off in squares) is how
+much less the camera is trusted: it's added to each of its measurements' uncertainty
+(`MountDoubtMeters` in the log), and the angle it makes at the tags' distance to its heading's. A
+camera turned on its mount puts the robot off to the side, and its heading off by its turn; one
+knocked straight down still places the robot right on the floor, so the alert fires but its trust
+stays. The alert says "so it counts for less" when that's the case.
+
+The check measures against the robot's pose, so it needs other cameras to hold it: a robot with
+one camera can't tell that camera's mount moved. A wrong heading (the gyro's scale off, over many
+turns) puts every camera's tags off as if each had turned, until the cameras correct the heading;
+several cameras out of calibration at once more likely means that than several knocks. A badly
+knocked camera also pulls the pose a little, so a camera beside it can read a few centimeters off
+too: recalibrate the one farthest off first, and the other comes back with it.
 
 ## Done elsewhere
 

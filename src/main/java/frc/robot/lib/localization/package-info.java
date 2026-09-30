@@ -26,7 +26,9 @@
  *       through the {@link frc.robot.lib.localization.VisionPipeline}, which solves them (with
  *       {@link frc.robot.lib.localization.TagSolver}) into a {@link
  *       frc.robot.lib.localization.VisionMeasurement}, or says why not; the estimator's {@link
- *       frc.robot.lib.localization.VisionDecision} says what became of it.
+ *       frc.robot.lib.localization.VisionDecision} says what became of it. {@link
+ *       frc.robot.lib.localization.MountCheck} judges, from where a camera's tags land, whether it
+ *       still sits where its configuration says, and how much less to trust it if not.
  *   <li><b>Landmarks:</b> {@link frc.robot.lib.localization.CrestLandmarks} turns a bump's crest,
  *       crossed, into a {@link frc.robot.lib.localization.LandmarkEvent}: a one-axis fix.
  * </ul>

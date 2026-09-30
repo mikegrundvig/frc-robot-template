@@ -18,7 +18,7 @@ import org.wpilib.math.shape.Rectangle2d;
 /**
  * The field the robot plays on: 2026's, REBUILT, until the next game's is written at kickoff.
  *
- * <p>* Everything here is written as if the robot were on the blue alliance, in meters in WPILib's
+ * <p>Everything here is written as if the robot were on the blue alliance, in meters in WPILib's
  * field frame (see {@code frc.robot.lib.field}); the field model works out the red alliance's, and
  * the bumps on red's half. Places near AprilTags are derived from them, so a layout measured at an
  * event moves them for both alliances. Numbers come from WPILib's 2026 tag layout and the game

@@ -13,7 +13,7 @@ import org.wpilib.math.linalg.VecBuilder;
 /**
  * Where a camera really is on the robot, from the tags it sees while the robot's pose is known
  * (from the other cameras, or a surveyed spot): the mount that best explains every sighting, found
- * by least squares over its six degrees of freedom, starting from the configured mount. *
+ * by least squares over its six degrees of freedom, starting from the configured mount.
  *
  * <p>Each sighting says where the tag should be if the mount were right: the robot's pose, then the
  * mount, then the camera's view of the tag. The solver moves the mount until those land on the

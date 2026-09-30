@@ -248,8 +248,7 @@ public final class PoseEstimator {
     size++;
     time[slot] = timestampNanos;
     // A tilt the ground explains still rolls on the ground: the travel counts at the slope's
-    // cosine.
-    // Tilt beyond it may have lifted the wheels: their travel counts for less.
+    // cosine. Tilt beyond it may have lifted the wheels: their travel counts for less.
     double trust = wheelTrust(conditions.unexplainedTiltRadians());
     double across = Math.cos(conditions.groundSlopeRadians());
     stepDx[slot] = trust * across * motion.dxMeters();

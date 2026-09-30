@@ -14,8 +14,8 @@ import org.wpilib.system.RobotController;
  * <p>WPILib reports no connection status for it, so it counts as connected; a failure shows as the
  * drivetrain's cross-check disagreeing with the gyro. Its pitch and roll are WPILib's angles about
  * the board's axes for the chosen mount, and its accelerometer reads the board's axes, so it
- * reports acceleration only when mounted flat. Unconfirmed on a unit until checked against a Pigeon
- * (S13).
+ * reports acceleration only when mounted flat. Unconfirmed on a real unit until checked against
+ * another IMU: its axes, signs, scale, and drift.
  */
 public final class GyroIOSystemcore implements GyroIO {
   private final OnboardIMU imu;

@@ -56,7 +56,8 @@ public record LocalizationEstimate(
    * @param collisionActive whether a collision's window of doubt covers the newest step
    * @param recoveries how many times the estimate has jumped to agreeing measurements it had
    *     rejected
-   * @param gyroConnected whether the gyro is reporting
+   * @param gyroConnected whether an IMU turned the newest step: the gyro, or the backup IMU while
+   *     the gyro is lost. False only when neither did, and the wheels turned it.
    */
   public record Health(
       double visionAgeSeconds,

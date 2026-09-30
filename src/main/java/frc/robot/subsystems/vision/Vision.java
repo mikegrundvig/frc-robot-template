@@ -229,9 +229,10 @@ public final class Vision implements AutoCloseable {
    * Reads every camera and hands the estimator a measurement for each usable image.
    *
    * @param estimate the estimate as of this loop's odometry: the robot's motion and how sure its
-   *     heading is * @param pitchRadians the robot's pitch now, from the IMU: each image is solved
-   *     with the robot tilted as it was when the image was taken, since a tag seen from a tilted
-   *     camera as if level lands off by the tilt times its distance
+   *     heading is
+   * @param pitchRadians the robot's pitch now, from the IMU: each image is solved with the robot
+   *     tilted as it was when the image was taken, since a tag seen from a tilted camera as if
+   *     level lands off by the tilt times its distance
    * @param rollRadians the robot's roll now
    */
   public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {

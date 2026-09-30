@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Placement;
+import frc.robot.subsystems.drive.DriveSimulation;
+import frc.robot.subsystems.drive.SensorErrors;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,8 +63,14 @@ class RobotContainerSimTest {
     SimTestSupport.resumeTime();
   }
 
+  /** A robot whose wheels and sensors are exactly as configured, so poses come out exact. */
   private RobotContainer containerFor(Constants.Mode mode) {
-    return new RobotContainer(mode, scheduler, Robots.SIM.body(), Robots.SIM::drivetrain, FIELD);
+    return containerFor(mode, SensorErrors.NONE);
+  }
+
+  private RobotContainer containerFor(Constants.Mode mode, SensorErrors errors) {
+    return new RobotContainer(
+        mode, scheduler, Robots.SIM.body(), Robots.SIM::drivetrain, FIELD, errors);
   }
 
   private static void setStation(AllianceStationID station) {
@@ -237,6 +246,30 @@ class RobotContainerSimTest {
     assertEquals(Rebuilt.HUB.on(FIELD, Alliance.BLUE), shown("/Field/Hub")[0]);
   }
 
+  /**
+   * The simulator's robot has a season's wear on its wheels and gyro, as {@code ./gradlew run}
+   * builds it: what the robot believes drifts from where it really is, and the field view shows
+   * both.
+   */
+  @Test
+  void theSimulatorKnowsWhereTheRobotReallyIs() {
+    container.close();
+    container = containerFor(Constants.Mode.SIM, SensorErrors.TYPICAL);
+    tick(1);
+    pushLeftStickForward();
+
+    tick(SimTestSupport.loops(1.5));
+
+    DriveSimulation simulation =
+        Objects.requireNonNull(container.simulation(), "the simulator has physics");
+    Pose2d truth = simulation.truePose();
+    Pose2d believed = container.drive().getPose();
+    assertThat(believed.getX() - truth.getX())
+        .as("worn tread: odometry overestimates how far it went")
+        .isGreaterThan(0.02);
+    assertEquals(truth, shown("/Field/Truth")[0]);
+  }
+
   @Test
   void replayRunsWithoutTheSimulator() {
     container.close();
@@ -249,6 +282,7 @@ class RobotContainerSimTest {
         container.drive().getPose(),
         "on its start, as the log's Driver Station says; nothing moves");
     assertFalse(container.isNoHardwareAlertActive(), "replay's hardware is the log");
+    assertThat(container.simulation()).as("no physics in a replay").isNull();
   }
 
   /**

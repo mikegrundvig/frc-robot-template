@@ -8,9 +8,10 @@ import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
 import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
-import frc.robot.subsystems.drive.ModuleIOSim;
+import frc.robot.subsystems.drive.SensorErrors;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,9 @@ import org.wpilib.util.Alert;
 public final class RobotContainer implements AutoCloseable {
   private static final int DRIVER_PORT = 0;
 
+  /** The robot loop's period: the simulator's physics steps this far each loop. */
+  private static final double LOOP_PERIOD_SECONDS = 0.02;
+
   /** How far from a start position, and how far turned from it, still counts as on it. */
   static final double START_TOLERANCE_METERS = 0.10;
 
@@ -56,6 +60,9 @@ public final class RobotContainer implements AutoCloseable {
 
   /** The simulator's field view: the robot, its start, and the field's places. Null in a robot. */
   private final @Nullable Field2d fieldView;
+
+  /** The simulator's physics, which knows where the robot really is. Null unless simulating. */
+  private final @Nullable DriveSimulation simulation;
 
   private final Drive drive;
   private final CommandGamepad driver;
@@ -87,6 +94,9 @@ public final class RobotContainer implements AutoCloseable {
   private Placement placement = new Placement(Placement.Status.ALLIANCE_UNKNOWN, null, 0, 0);
 
   /**
+   * In the simulator, the robot's wheels and sensors differ from its configuration as a real
+   * robot's do ({@link SensorErrors#TYPICAL}), so its estimated pose drifts from the truth.
+   *
    * @param body the robot's frame and mass
    * @param drivetrain the drivetrain's configuration, with any values tuned while running
    * @param field the field the robot plays on
@@ -97,28 +107,56 @@ public final class RobotContainer implements AutoCloseable {
       Body body,
       Supplier<SwerveConfig> drivetrain,
       FieldModel field) {
+    this(mode, scheduler, body, drivetrain, field, SensorErrors.TYPICAL);
+  }
+
+  /**
+   * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
+   *     configuration
+   */
+  RobotContainer(
+      Constants.Mode mode,
+      Scheduler scheduler,
+      Body body,
+      Supplier<SwerveConfig> drivetrain,
+      FieldModel field,
+      SensorErrors simulatedErrors) {
     this.field = field;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
     }
     driver = new CommandGamepad(scheduler, DRIVER_PORT);
     ModuleIO[] modules;
+    GyroIO gyro;
     if (mode == Constants.Mode.SIM) {
-      modules = ModuleIOSim.of(drivetrain.get().modules());
+      // The simulator knows where the robot really is, and its sensors report that with errors,
+      // so the robot's own estimate drifts from the truth as a real robot's does.
+      simulation =
+          new DriveSimulation(
+              drivetrain.get().modules(),
+              drivetrain.get().moduleTranslations(body),
+              simulatedErrors);
+      modules = simulation.modules();
+      gyro = simulation.gyro();
     } else {
+      simulation = null;
       // In replay the inputs come from the log. On a robot there is no hardware code yet, so the
       // drivetrain stays still rather than guessing at motors, and says so.
       modules =
           new ModuleIO[] {
             new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}
           };
+      gyro = new GyroIO() {};
       noHardware.set(mode == Constants.Mode.REAL);
     }
-    // No gyro is simulated: there the heading comes from the wheels, as in AdvantageKit's template.
-    drive = new Drive("Drive", new GyroIO() {}, modules, body, drivetrain, scheduler);
+    drive = new Drive("Drive", gyro, modules, body, drivetrain, scheduler);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     // Until the alliance is known, so is the start: the middle of the field stands in for it.
-    drive.resetPose(new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO));
+    Pose2d middle = new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO);
+    if (simulation != null) {
+      simulation.place(middle);
+    }
+    drive.resetPose(middle);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns.
@@ -139,6 +177,11 @@ public final class RobotContainer implements AutoCloseable {
 
   /** Mechanism periodic methods, called once per loop before the command scheduler runs. */
   public void periodic() {
+    DriveSimulation sim = simulation;
+    if (sim != null) {
+      // The world moves, then the robot reads its sensors, as on a robot between loops.
+      sim.step(LOOP_PERIOD_SECONDS);
+    }
     boolean enabled = RobotState.isEnabled();
     alliance = MatchState.getAlliance();
     location = MatchState.getLocation();
@@ -147,14 +190,20 @@ public final class RobotContainer implements AutoCloseable {
     // The robot stands where the drive team put it: on the chosen start. It is put there whenever
     // the choice changes before the match or while disabled (so changing the alliance station in
     // the simulator moves it), never while it drives. With cameras, the tags will say instead.
-    if (!chosenPose.equals(startPose) && (!enabled || !enabledSinceBoot)) {
-      chosenPose.ifPresent(drive::resetPose);
+    Optional<Pose2d> placed =
+        !chosenPose.equals(startPose) && (!enabled || !enabledSinceBoot)
+            ? chosenPose
+            : Optional.empty();
+    if (sim != null) {
+      placed.ifPresent(sim::place); // in the simulator, the drive team really moves it
     }
     start = chosen;
     startPose = chosenPose;
     enabledSinceBoot |= enabled;
 
     drive.periodic(enabled);
+    // Told where it is after reading its gyro, so a turn made in placing it isn't counted twice.
+    placed.ifPresent(drive::resetPose);
     Pose2d pose = drive.getPose();
     placement =
         Placement.check(
@@ -204,8 +253,21 @@ public final class RobotContainer implements AutoCloseable {
           "Field/Places/" + place.name(),
           alliance.stream().map(ours -> place.on(field, ours)).toArray(Pose2d[]::new));
     }
+    DriveSimulation sim = simulation;
+    if (sim != null) {
+      // How far the robot's estimate is from the truth: what localization has to close.
+      Pose2d truth = sim.truePose();
+      Logger.recordOutput("Sim/TruePose", truth);
+      Logger.recordOutput(
+          "Sim/PoseErrorMeters", truth.getTranslation().getDistance(pose.getTranslation()));
+      Logger.recordOutput(
+          "Sim/HeadingErrorDegrees", pose.getRotation().minus(truth.getRotation()).getDegrees());
+    }
     if (fieldView != null) {
       fieldView.setRobotPose(pose);
+      if (sim != null) {
+        fieldView.getObject("Truth").setPose(sim.truePose());
+      }
       fieldView.getObject("Start").setPoses(startPose.stream().toList());
       for (Place place : field.places()) {
         fieldView
@@ -246,6 +308,11 @@ public final class RobotContainer implements AutoCloseable {
 
   Drive drive() {
     return drive;
+  }
+
+  /** The simulator's physics, or null outside the simulator. */
+  @Nullable DriveSimulation simulation() {
+    return simulation;
   }
 
   /** Whether the alert saying the drivetrain has no hardware code is active. */

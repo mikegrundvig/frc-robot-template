@@ -13,5 +13,13 @@ delete the row when you replace it.
 Not built here at all, because the library has no 2027 build yet. Add these when it does.
 
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
+- **Vision:** PhotonLib. Its one 2027 release (alpha-2, May 2026) targets WPILib alpha-5, and
+  GradleRIO alpha-7 refuses it. PhotonVision's development builds of its main branch target
+  alpha-7 and publish their own vendordep (`maven.photonvision.org/snapshots`, `photonlib-json`):
+  in a simulation spike (2026-09-29) a simulated camera saw the tags, and the multi-tag, single-tag,
+  and heading-constrained solves found the robot to within a centimeter. Vision can pin one of
+  those builds until a release; the coprocessor must run the same version.
 - **Physics simulation** (wheel slip, collisions, game pieces): maple-sim. Until then, simulation
-  tests the code, not the robot's traction or power.
+  tests the code, not the robot's traction or power. The simulator already keeps the robot's true
+  pose apart from its sensors (`DriveSimulation`, `SensorErrors`), and a shove stands in for a
+  collision; wheels still never slip.

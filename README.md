@@ -79,6 +79,11 @@ Also built in:
   field-relative from its own alliance's end, checks its placement before the match, and has
   zone triggers that look ahead along its path. In the simulator, change the alliance station
   while disabled to start somewhere else. At kickoff, write the new game's the same way.
+- **A simulator that knows where the robot really is:** its wheels and gyro report the truth with
+  the errors a season-worn robot has (worn tread, encoder zeros a little off, gyro scale, drift, and
+  noise; `SensorErrors`), so odometry drifts as a real robot's does. The field view shows the robot
+  where it believes it is and a "Truth" where it is; AdvantageScope gets `Sim/PoseErrorMeters`.
+  Localization is tested against that gap, not against a perfect world.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
   without a team number.
 - **Dependency updates** for build tools and CI actions arrive as weekly pull requests (Dependabot).
@@ -93,7 +98,7 @@ Also built in:
 | `src/main/java/frc/robot/Rebuilt.java` | The field the robot plays on: 2026's, until kickoff. Its starts, targets, and zones, written for the blue alliance. |
 | `src/main/java/frc/robot/RobotContainer.java` | Builds each mechanism with the hardware for the mode (real, simulated, or replayed from a log) and binds the controls to commands. |
 | `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
-| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`) and the field model (`lib/field`, which also writes down the field and robot frames). |
+| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`), the field model (`lib/field`, which also writes down the field and robot frames), and localization's measurement types (`lib/localization`). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |

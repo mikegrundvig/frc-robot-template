@@ -4,8 +4,10 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.ConfigRecord;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.config.SwerveWiring;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.wpilib.math.geometry.Translation2d;
 
@@ -17,11 +19,17 @@ import org.wpilib.math.geometry.Translation2d;
  * @param name which robot this is, as the logs name it
  * @param body frame, bumpers, and mass
  * @param drivetrain the swerve drive
+ * @param wiring where the drivetrain's devices are on the CAN bus, and how its encoders read: empty
+ *     for a robot that only runs in simulation, whose drivetrain then stays still on real hardware
  * @param cameras the AprilTag cameras
  */
 @ConfigRecord
 public record RobotConfig(
-    String name, Body body, SwerveConfig drivetrain, List<CameraConfig> cameras) {
+    String name,
+    Body body,
+    SwerveConfig drivetrain,
+    Optional<SwerveWiring> wiring,
+    List<CameraConfig> cameras) {
   public RobotConfig {
     if (name.isBlank()) {
       throw new IllegalArgumentException("robot name is required");

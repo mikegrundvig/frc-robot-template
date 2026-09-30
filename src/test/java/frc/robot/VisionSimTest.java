@@ -82,13 +82,7 @@ class VisionSimTest {
     scheduler = Scheduler.createIndependentScheduler();
     container =
         new RobotContainer(
-            Constants.Mode.SIM,
-            scheduler,
-            Robots.SIM.body(),
-            Robots.SIM::drivetrain,
-            Robots.SIM.cameras(),
-            FIELD,
-            errors);
+            Constants.Mode.SIM, scheduler, Robots.SIM, Robots.SIM::drivetrain, FIELD, errors);
     driver = new GamepadSim(0);
   }
 

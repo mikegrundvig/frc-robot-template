@@ -17,6 +17,7 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.Motor;
 import frc.robot.lib.config.SwerveConfig;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The team's robots, one {@link RobotConfig} each. A test builds every one, so an invalid value
@@ -142,9 +143,18 @@ public final class Robots {
         .build();
   }
 
-  /** The template's robot. */
+  /**
+   * The template's robot. It has no wiring: on real hardware its drivetrain stays still and says
+   * so. Give a real robot its own entry, with its wiring from Phoenix Tuner X's swerve generator.
+   */
   public static final RobotConfig SIM =
-      RobotConfig.builder().name("sim").body(BODY).drivetrain(DRIVETRAIN).cameras(CAMERAS).build();
+      RobotConfig.builder()
+          .name("sim")
+          .body(BODY)
+          .drivetrain(DRIVETRAIN)
+          .wiring(Optional.empty())
+          .cameras(CAMERAS)
+          .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */
   public static List<RobotConfig> all() {

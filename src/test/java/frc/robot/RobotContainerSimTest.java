@@ -5,14 +5,17 @@ import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.wpilib.units.Units.Rotations;
 
-import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.CanBus;
+import frc.robot.lib.config.SwerveWiring;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Placement;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.SensorErrors;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -80,13 +83,11 @@ class RobotContainerSimTest {
   }
 
   private RobotContainer containerFor(Constants.Mode mode, SensorErrors errors) {
-    return containerFor(mode, errors, Robots.SIM.cameras());
+    return containerFor(mode, errors, Robots.SIM);
   }
 
-  private RobotContainer containerFor(
-      Constants.Mode mode, SensorErrors errors, List<CameraConfig> cameras) {
-    return new RobotContainer(
-        mode, scheduler, Robots.SIM.body(), Robots.SIM::drivetrain, cameras, FIELD, errors);
+  private RobotContainer containerFor(Constants.Mode mode, SensorErrors errors, RobotConfig robot) {
+    return new RobotContainer(mode, scheduler, robot, Robots.SIM::drivetrain, FIELD, errors);
   }
 
   /** Turns the simulated robot by hand, where it stands: its gyro feels it. */
@@ -162,7 +163,11 @@ class RobotContainerSimTest {
   @Test
   void theBackButtonSaysTheRobotFacesDownfieldForTheDriversAlliance() {
     container.close();
-    container = containerFor(Constants.Mode.SIM, SensorErrors.NONE, List.of());
+    container =
+        containerFor(
+            Constants.Mode.SIM,
+            SensorErrors.NONE,
+            RobotConfigBuilder.builder(Robots.SIM).cameras(List.of()).build());
     setStation(AllianceStationID.RED_2);
     tick(2); // placed on red's center start, facing blue's wall
     turnByHand(30);
@@ -430,7 +435,7 @@ class RobotContainerSimTest {
    * says why, rather than guessing at motors.
    */
   @Test
-  void aRealRobotWithoutHardwareCodeHoldsStillAndSaysSo() {
+  void aRealRobotWithoutWiringHoldsStillAndSaysSo() {
     container.close();
     container = containerFor(Constants.Mode.REAL);
     tick(1);
@@ -440,6 +445,45 @@ class RobotContainerSimTest {
 
     assertTrue(container.isNoHardwareAlertActive());
     assertEquals(start("Center", Alliance.BLUE), container.drive().getPose(), "nothing moved");
+  }
+
+  /**
+   * A robot whose configuration has its wiring drives CTRE hardware: here Phoenix's simulated
+   * devices, which answer like real ones.
+   */
+  @Test
+  void aRealRobotWithWiringReadsItsCtreHardware() {
+    container.close();
+    SwerveWiring.ModuleWiring[] modules = new SwerveWiring.ModuleWiring[4];
+    for (int i = 0; i < 4; i++) {
+      modules[i] =
+          SwerveWiring.ModuleWiring.builder()
+              .driveId(40 + 3 * i)
+              .steerId(41 + 3 * i)
+              .encoderId(42 + 3 * i)
+              .encoderOffset(Rotations.of(0))
+              .driveInverted(false)
+              .steerInverted(true)
+              .encoderInverted(false)
+              .build();
+    }
+    RobotConfig wired =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .wiring(
+                Optional.of(
+                    SwerveWiring.builder()
+                        .canBus(CanBus.canivore("drivetrain"))
+                        .gyroId(52)
+                        .couplingRatio(3.5)
+                        .modules(List.of(modules))
+                        .build()))
+            .build();
+    container = containerFor(Constants.Mode.REAL, SensorErrors.NONE, wired);
+
+    tick(SimTestSupport.loops(0.5));
+
+    assertFalse(container.isNoHardwareAlertActive());
+    assertThat(container.estimate().health().gyroConnected()).as("the Pigeon answers").isTrue();
   }
 
   private Pose2d[] shown(String path) {

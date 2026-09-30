@@ -13,6 +13,8 @@ import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
@@ -40,7 +42,9 @@ import org.wpilib.util.Alert;
  * <p>The drivetrain's configuration is read every loop, so values tuned while the robot runs take
  * effect at once: new gains and current limits go to the motor controllers the loop they change.
  *
- * <p>A stand-in until AdvantageKit's 2027 swerve template ships: see docs/stand-ins.md.
+ * <p>Hardware comes in through the IO layer: {@link PhoenixDrivetrain} on a CTRE robot, {@link
+ * DriveSimulation} in the simulator, the log in a replay. A stand-in until AdvantageKit's 2027
+ * swerve template ships: see docs/stand-ins.md.
  */
 public class Drive implements Mechanism, AutoCloseable {
   private static final double LOOP_PERIOD_S = 0.02;
@@ -66,6 +70,7 @@ public class Drive implements Mechanism, AutoCloseable {
   private final SwerveDriveKinematics kinematics;
   private final SwerveKinematicsModel odometry;
   private final PoseEstimator estimator;
+  private final Lock odometryLock;
 
   /** The configuration the motor controllers have, and the limits taken from it. */
   private SwerveConfig applied;
@@ -97,6 +102,22 @@ public class Drive implements Mechanism, AutoCloseable {
       Supplier<SwerveConfig> config,
       Scheduler scheduler,
       PoseEstimator estimator) {
+    this(name, gyroIO, moduleIOs, body, config, scheduler, estimator, new ReentrantLock());
+  }
+
+  /**
+   * @param odometryLock held while the drivetrain reads its IO, when a background thread records
+   *     the devices' high-rate readings, so every device's readings stay in step
+   */
+  public Drive(
+      String name,
+      GyroIO gyroIO,
+      ModuleIO[] moduleIOs,
+      Body body,
+      Supplier<SwerveConfig> config,
+      Scheduler scheduler,
+      PoseEstimator estimator,
+      Lock odometryLock) {
     if (moduleIOs.length != 4) {
       throw new IllegalArgumentException("swerve needs exactly 4 modules");
     }
@@ -112,6 +133,7 @@ public class Drive implements Mechanism, AutoCloseable {
     kinematics = new SwerveDriveKinematics(initial.moduleTranslations(body));
     odometry = new SwerveKinematicsModel(initial.moduleTranslations(body));
     this.estimator = estimator;
+    this.odometryLock = odometryLock;
 
     gyroDisconnectedAlert =
         new Alert(
@@ -144,10 +166,18 @@ public class Drive implements Mechanism, AutoCloseable {
     if (!now.equals(applied)) {
       apply(now);
     }
-    gyroIO.updateInputs(gyroInputs);
+    odometryLock.lock();
+    try {
+      gyroIO.updateInputs(gyroInputs);
+      for (Module module : modules) {
+        module.readInputs();
+      }
+    } finally {
+      odometryLock.unlock();
+    }
     Logger.processInputs("Drive/Gyro", gyroInputs);
     for (Module module : modules) {
-      module.periodic();
+      module.logInputs();
     }
     if (!enabled) {
       for (Module module : modules) {

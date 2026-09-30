@@ -19,6 +19,7 @@ import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
+import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.drive.SensorErrors;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
@@ -30,6 +31,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
@@ -98,9 +101,13 @@ public final class RobotContainer implements AutoCloseable {
   private final Alert noHardware =
       new Alert(
           "Drive",
-          "The drivetrain has no motor-controller code yet: it runs only in simulation. Add a"
-              + " ModuleIO for your hardware (subsystems/drive).",
+          "This robot's configuration has no drivetrain wiring (CAN IDs and encoder offsets), so"
+              + " the drivetrain stays still. Add it to the robot's entry in Robots.",
           Alert.Level.HIGH);
+
+  /** The drivetrain's CTRE hardware, on a robot whose configuration has its wiring. */
+  private final @Nullable PhoenixDrivetrain hardware;
+
   private final Alert allianceUnknown =
       new Alert(
           "Field",
@@ -145,19 +152,17 @@ public final class RobotContainer implements AutoCloseable {
    * In the simulator, the robot's wheels and sensors differ from its configuration as a real
    * robot's do ({@link SensorErrors#TYPICAL}), so its estimated pose drifts from the truth.
    *
-   * @param body the robot's frame and mass
+   * @param robot the robot: its frame, wiring, and cameras
    * @param drivetrain the drivetrain's configuration, with any values tuned while running
-   * @param cameras the robot's cameras, where they're mounted and what they are
    * @param field the field the robot plays on
    */
   public RobotContainer(
       Constants.Mode mode,
       Scheduler scheduler,
-      Body body,
+      RobotConfig robot,
       Supplier<SwerveConfig> drivetrain,
-      List<CameraConfig> cameras,
       FieldModel field) {
-    this(mode, scheduler, body, drivetrain, cameras, field, SensorErrors.TYPICAL);
+    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL);
   }
 
   /**
@@ -167,11 +172,12 @@ public final class RobotContainer implements AutoCloseable {
   RobotContainer(
       Constants.Mode mode,
       Scheduler scheduler,
-      Body body,
+      RobotConfig robot,
       Supplier<SwerveConfig> drivetrain,
-      List<CameraConfig> cameras,
       FieldModel field,
       SensorErrors simulatedErrors) {
+    Body body = robot.body();
+    List<CameraConfig> cameras = robot.cameras();
     this.field = field;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
@@ -179,6 +185,7 @@ public final class RobotContainer implements AutoCloseable {
     driver = new CommandGamepad(scheduler, DRIVER_PORT);
     ModuleIO[] modules;
     GyroIO gyro;
+    Lock odometryLock = new ReentrantLock();
     if (mode == Constants.Mode.SIM) {
       // The simulator knows where the robot really is, and its sensors report that with errors,
       // so the robot's own estimate drifts from the truth as a real robot's does.
@@ -187,12 +194,22 @@ public final class RobotContainer implements AutoCloseable {
               drivetrain.get().modules(),
               drivetrain.get().moduleTranslations(body),
               simulatedErrors);
+      hardware = null;
       modules = simulation.modules();
       gyro = simulation.gyro();
+    } else if (mode == Constants.Mode.REAL && robot.wiring().isPresent()) {
+      simulation = null;
+      PhoenixDrivetrain phoenix =
+          new PhoenixDrivetrain(robot.wiring().get(), drivetrain.get().modules());
+      hardware = phoenix;
+      modules = phoenix.modules();
+      gyro = phoenix.gyro();
+      odometryLock = phoenix.odometryLock();
     } else {
       simulation = null;
-      // In replay the inputs come from the log. On a robot there is no hardware code yet, so the
-      // drivetrain stays still rather than guessing at motors, and says so.
+      hardware = null;
+      // In replay the inputs come from the log. On a robot without wiring the drivetrain stays
+      // still rather than guessing at motors, and says so.
       modules =
           new ModuleIO[] {
             new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}
@@ -213,7 +230,7 @@ public final class RobotContainer implements AutoCloseable {
                 PoseCovariance.fromStdDevs(field.length(), field.width(), Math.PI),
                 "not placed yet"));
     estimate = estimator.estimate();
-    drive = new Drive("Drive", gyro, modules, body, drivetrain, scheduler, estimator);
+    drive = new Drive("Drive", gyro, modules, body, drivetrain, scheduler, estimator, odometryLock);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (simulation != null) {
       simulation.place(middle);
@@ -566,6 +583,9 @@ public final class RobotContainer implements AutoCloseable {
     vision.close();
     if (visionSim != null) {
       visionSim.close();
+    }
+    if (hardware != null) {
+      hardware.close();
     }
     if (fieldView != null) {
       fieldView.close();

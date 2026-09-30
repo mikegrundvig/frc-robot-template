@@ -11,6 +11,7 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfigBuilder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Translation3d;
 
@@ -79,6 +80,7 @@ class RobotConfigTest {
         .name("test")
         .body(body())
         .drivetrain(swerve())
+        .wiring(Optional.empty())
         .cameras(cameras)
         .build();
   }

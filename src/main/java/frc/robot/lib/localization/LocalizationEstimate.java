@@ -46,7 +46,14 @@ public record LocalizationEstimate(
    * @param accepted camera measurements accepted since the robot started
    * @param rejected camera measurements rejected since the robot started
    * @param lastInnovationMeters how far the last compared measurement was from the estimate
+   * @param recentDisagreementMeters the farthest any camera measurement accepted lately (within
+   *     {@link EstimatorConfig#disagreementWindowSeconds}) was from the estimate it corrected: how
+   *     well the cameras and odometry agree. NaN when none was accepted lately.
    * @param residualMeters the wheels' disagreement in the newest odometry step
+   * @param suspectTravelMeters how much of the robot's recent travel odometry doubts: slip, tilt,
+   *     and the wheels' disagreement, adding up while it lasts
+   * @param tiltRadians how far the robot was tilted from level at the newest step
+   * @param collisionActive whether a collision's window of doubt covers the newest step
    * @param recoveries how many times the estimate has jumped to agreeing measurements it had
    *     rejected
    * @param gyroConnected whether the gyro is reporting
@@ -56,7 +63,11 @@ public record LocalizationEstimate(
       int accepted,
       int rejected,
       double lastInnovationMeters,
+      double recentDisagreementMeters,
       double residualMeters,
+      double suspectTravelMeters,
+      double tiltRadians,
+      boolean collisionActive,
       int recoveries,
       boolean gyroConnected) {}
 

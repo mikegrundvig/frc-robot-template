@@ -7,6 +7,7 @@
 
 package frc.robot.subsystems.drive;
 
+import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
@@ -21,8 +22,10 @@ import org.wpilib.simulation.DCMotorSim;
  * A module simulated the standard way, as in AdvantageKit's swerve templates: each motor turns a
  * fixed load through its gearing, and the motor controllers' loops run once per step. A {@link
  * DriveSimulation} steps it and moves the robot with its true wheel motion; its absolute encoder
- * can read off true ({@link SensorErrors}). Current limits and the battery are not modeled, so this
- * tests the code rather than the robot's power.
+ * can read off true ({@link SensorErrors}). The drive motor's stator current limit is modeled,
+ * since it caps the torque that accelerates the robot and says when a wheel is at the edge of its
+ * grip; the battery and the steering motor's limit are not, so this tests the code rather than the
+ * robot's power.
  */
 final class ModuleIOSim implements ModuleIO {
   // Tuner X's default simulated inertias, as AdvantageKit's template uses.
@@ -32,6 +35,8 @@ final class ModuleIOSim implements ModuleIO {
 
   private final DCMotorSim driveSim;
   private final DCMotorSim steerSim;
+  private final DCMotor driveMotor;
+  private final double driveGearing;
   private final double wheelRadiusMeters;
 
   /** How far the absolute encoder's zero is off: it reads the true angle minus this. */
@@ -56,6 +61,9 @@ final class ModuleIOSim implements ModuleIO {
   private double driveSetpointRadPerSec;
   private double driveFeedforwardVolts;
   private double driveVolts;
+  private double driveAppliedVolts;
+  private double driveStatorLimitAmps = Double.POSITIVE_INFINITY;
+  private boolean driveLimited;
   private boolean steering;
   private double steerSetpointRad;
   private double steerVolts;
@@ -65,7 +73,9 @@ final class ModuleIOSim implements ModuleIO {
    * @param steerOffsetRadians how far the absolute encoder's zero is off
    */
   ModuleIOSim(SwerveConfig.Modules modules, double steerOffsetRadians) {
-    driveSim = motorSim(modules.driveMotor().model(), DRIVE_INERTIA_KG_M2, modules.driveGearing());
+    driveMotor = modules.driveMotor().model();
+    driveGearing = modules.driveGearing();
+    driveSim = motorSim(driveMotor, DRIVE_INERTIA_KG_M2, driveGearing);
     steerSim = motorSim(modules.steerMotor().model(), STEER_INERTIA_KG_M2, modules.steerGearing());
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     this.steerOffsetRadians = steerOffsetRadians;
@@ -91,7 +101,13 @@ final class ModuleIOSim implements ModuleIO {
             : 0.0;
     driveVolts = Math.clamp(driveVolts, -MAX_VOLTS, MAX_VOLTS);
     steerVolts = Math.clamp(steerVolts, -MAX_VOLTS, MAX_VOLTS);
-    driveSim.setInputVoltage(driveVolts);
+    // The motor controller caps the current through the motor, and with it the torque: it applies
+    // no more than the motor's back EMF plus the limit's worth of voltage across the windings.
+    double backEmf = driveSim.getAngularVelocity() * driveGearing / driveMotor.Kv;
+    double headroom = driveStatorLimitAmps * driveMotor.R;
+    driveAppliedVolts = Math.clamp(driveVolts, backEmf - headroom, backEmf + headroom);
+    driveLimited |= driveAppliedVolts != driveVolts;
+    driveSim.setInputVoltage(driveAppliedVolts);
     steerSim.setInputVoltage(steerVolts);
     driveSim.update(seconds);
     steerSim.update(seconds);
@@ -124,9 +140,12 @@ final class ModuleIOSim implements ModuleIO {
     inputs.driveConnected = true;
     inputs.drivePositionRad = driveSim.getAngularPosition() + spinRadians;
     inputs.driveVelocityRadPerSec = driveSim.getAngularVelocity();
-    inputs.driveAppliedVolts = driveVolts;
+    inputs.driveAppliedVolts = driveAppliedVolts;
     inputs.driveStatorCurrentAmps = Math.abs(driveSim.getCurrentDraw());
-    inputs.driveSupplyCurrentAmps = Math.abs(driveVolts * driveSim.getCurrentDraw()) / MAX_VOLTS;
+    inputs.driveSupplyCurrentAmps =
+        Math.abs(driveAppliedVolts * driveSim.getCurrentDraw()) / MAX_VOLTS;
+    inputs.driveTorqueLimited = driveLimited;
+    driveLimited = false;
     inputs.steerConnected = true;
     inputs.steerAngle = new Rotation2d(measuredSteerRadians());
     inputs.steerVelocityRadPerSec = steerSim.getAngularVelocity();
@@ -148,12 +167,13 @@ final class ModuleIOSim implements ModuleIO {
     return steerSim.getAngularPosition() - steerOffsetRadians;
   }
 
-  /** Takes the gains. Current limits are not simulated. */
+  /** Takes the gains, and the drive motor's stator current limit. */
   @Override
   public void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
     driveKp = gains.driveKp();
     steerKp = gains.steerKp();
     steerKd = gains.steerKd();
+    driveStatorLimitAmps = limits.driveStatorCurrent().in(Amps);
   }
 
   @Override

@@ -3,11 +3,13 @@ package frc.robot.subsystems.drive;
 import java.util.Arrays;
 import java.util.Random;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 
 /**
  * The simulated gyro: the robot's true rotation, reported with the scale error, drift, and noise of
  * {@link SensorErrors}. Like a real gyro, it reads zero wherever the robot pointed when it started,
- * and it follows the robot when someone picks it up and turns it.
+ * and it follows the robot when someone picks it up and turns it. The rest of the IMU reads the
+ * robot's attitude and acceleration as they truly are.
  */
 final class GyroIOSim implements GyroIO {
   private final DriveSimulation robot;
@@ -50,6 +52,11 @@ final class GyroIOSim implements GyroIO {
     inputs.connected = true;
     inputs.yaw = new Rotation2d(latestYaw);
     inputs.yawVelocityRadPerSec = robot.yawRateRadiansPerSecond() * scale;
+    inputs.pitchRad = robot.pitchRadians();
+    inputs.rollRad = robot.rollRadians();
+    Translation2d felt = robot.feltAcceleration();
+    inputs.accelerationXMetersPerSecSq = felt.getX();
+    inputs.accelerationYMetersPerSecSq = felt.getY();
     inputs.odometryTimestampsNanos = Arrays.copyOf(sampleTimes, samples);
     inputs.odometryYawsRad = Arrays.copyOf(sampleYaws, samples);
     samples = 0;

@@ -10,6 +10,7 @@ import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
@@ -65,6 +66,9 @@ public final class RobotContainer implements AutoCloseable {
   /** How well a drive team places the robot on its start: within about 5 cm and 2 degrees. */
   static final PoseCovariance PLACED = PoseCovariance.fromStdDevs(0.05, 0.05, Math.toRadians(2));
 
+  /** How straight a driver lines the robot up by eye for a heading reset: about 5 degrees. */
+  static final double HEADING_BY_EYE_RADIANS = Math.toRadians(5);
+
   /** Zone triggers look this far ahead along the robot's path, and turn off this far outside. */
   static final double ZONE_LOOKAHEAD_SECONDS = 0.4;
 
@@ -112,8 +116,12 @@ public final class RobotContainer implements AutoCloseable {
 
   private Optional<Pose2d> startPose = Optional.empty();
   private boolean enabledSinceBoot;
+  private boolean wasAutonomous;
   private Placement placement = new Placement(Placement.Status.ALLIANCE_UNKNOWN, null, 0, 0);
   private LocalizationEstimate estimate;
+
+  /** Why the estimate isn't good enough to score from this loop; null when it is. */
+  private @Nullable String notReadyToScore = "not started";
 
   /**
    * In the simulator, the robot's wheels and sensors differ from its configuration as a real
@@ -215,10 +223,25 @@ public final class RobotContainer implements AutoCloseable {
     vision = new Vision(cameras, cameraIOs, estimator, field);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
-    // stick turns.
+    // stick turns. Back, with the robot facing straight downfield, resets its heading: the fallback
+    // when the heading has gone wrong. Enabled or not.
     drive.setDefaultCommand(
         drive.joystickDrive(
             () -> leftStick().getX(), () -> leftStick().getY(), () -> -driver.getRightX()));
+    driver
+        .back()
+        .onTrue(Command.noRequirements(coroutine -> faceDownfield()).named("Reset heading"));
+  }
+
+  /**
+   * The driver says the robot faces straight downfield, away from the driver's own wall: its
+   * heading becomes the alliance's forward, as sure as lining up by eye allows. Its position stays.
+   * If the driver was wrong, the cameras' headings will agree against it and the estimator turns
+   * back to them.
+   */
+  void faceDownfield() {
+    estimator.resetHeading(
+        FieldModel.driverForward(alliance.orElse(Alliance.BLUE)), HEADING_BY_EYE_RADIANS);
   }
 
   /**
@@ -253,9 +276,14 @@ public final class RobotContainer implements AutoCloseable {
       sim.step(LOOP_PERIOD_SECONDS, RobotController.getTime());
       VisionSim cameras = visionSim;
       if (cameras != null) {
-        cameras.update(sim.truePose());
+        cameras.update(sim.truePose3d());
       }
     }
+    boolean autonomous = RobotState.isAutonomousEnabled();
+    if (autonomous && !wasAutonomous) {
+      vision.autonomousStarted(RobotController.getTime());
+    }
+    wasAutonomous = autonomous;
     start = chosen;
     startPose = chosenPose;
     enabledSinceBoot |= enabled;
@@ -265,9 +293,10 @@ public final class RobotContainer implements AutoCloseable {
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
     placed.ifPresent(
         pose -> estimator.reset(new PoseReset(RobotController.getTime(), pose, PLACED, placedOn)));
-    vision.periodic(estimator.estimate());
+    vision.periodic(estimator.estimate(), drive.pitchRadians(), drive.rollRadians());
     vision.record(estimator.update());
     estimate = estimator.estimate();
+    notReadyToScore = LocalizationGate.SCORING.whyNot(estimate);
     Pose2d pose = estimate.pose();
     placement =
         Placement.check(
@@ -317,8 +346,14 @@ public final class RobotContainer implements AutoCloseable {
         Math.sqrt(Math.max(uncertainty.xx(), uncertainty.yy())));
     Logger.recordOutput(
         "Localization/HeadingStdDevDegrees", Math.toDegrees(uncertainty.headingStdDev()));
-    Logger.recordOutput("Localization/ResidualMeters", estimate.health().residualMeters());
-    Logger.recordOutput("Localization/Recoveries", estimate.health().recoveries());
+    LocalizationEstimate.Health health = estimate.health();
+    Logger.recordOutput("Localization/ResidualMeters", health.residualMeters());
+    Logger.recordOutput("Localization/SuspectTravelMeters", health.suspectTravelMeters());
+    Logger.recordOutput("Localization/RecentDisagreementMeters", health.recentDisagreementMeters());
+    Logger.recordOutput("Localization/Recoveries", health.recoveries());
+    Logger.recordOutput("Localization/ReadyToScore", notReadyToScore == null);
+    Logger.recordOutput(
+        "Localization/NotReadyBecause", notReadyToScore == null ? "" : notReadyToScore);
     Logger.recordOutput("Field/Alliance", allianceStation());
     Logger.recordOutput("Field/Start", startPose.stream().toArray(Pose2d[]::new));
     Logger.recordOutput("Field/Placement", placement.describe());
@@ -387,6 +422,19 @@ public final class RobotContainer implements AutoCloseable {
         basis,
         100 * Math.sqrt(Math.max(uncertainty.xx(), uncertainty.yy())),
         Math.toDegrees(uncertainty.headingStdDev()));
+  }
+
+  /**
+   * Whether the estimate is good enough to score from, by {@link LocalizationGate#SCORING}: bind
+   * scoring and aiming commands to it.
+   */
+  boolean readyToScore() {
+    return notReadyToScore == null;
+  }
+
+  /** One line for the pit and the drive team: ready to score, or why not. */
+  String scoring() {
+    return notReadyToScore == null ? "Ready to score" : "Not ready: " + notReadyToScore;
   }
 
   /** One line for the pit: the cameras, and how their measurements fare. */

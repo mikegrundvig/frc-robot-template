@@ -50,6 +50,11 @@ public record PoseCovariance(double xx, double xy, double yy, double heading) {
     return Math.sqrt(heading);
   }
 
+  /** The position's spread along its most uncertain direction, in meters. */
+  public double largestPositionStdDev() {
+    return Math.sqrt((xx + yy) / 2 + Math.hypot((xx - yy) / 2, xy));
+  }
+
   /** Whether the pose says anything about heading. */
   public boolean hasHeading() {
     return Double.isFinite(heading);

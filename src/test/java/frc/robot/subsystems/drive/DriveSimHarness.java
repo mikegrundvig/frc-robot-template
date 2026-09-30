@@ -25,7 +25,7 @@ import org.wpilib.system.RobotController;
 final class DriveSimHarness implements AutoCloseable {
   final Scheduler scheduler = Scheduler.createIndependentScheduler();
   final DriveSimulation simulation;
-  final PoseEstimator estimator = estimatorAt(Pose2d.ZERO);
+  final PoseEstimator estimator;
   final Drive drive;
 
   /** Every camera measurement's fate, in order. */
@@ -38,8 +38,12 @@ final class DriveSimHarness implements AutoCloseable {
    * An estimator that starts with the robot exactly here, and accepts any point as on the field.
    */
   static PoseEstimator estimatorAt(Pose2d start) {
+    return estimatorAt(start, EstimatorConfig.DEFAULTS);
+  }
+
+  static PoseEstimator estimatorAt(Pose2d start, EstimatorConfig config) {
     return new PoseEstimator(
-        EstimatorConfig.DEFAULTS,
+        config,
         point -> true,
         new PoseReset(0, start, PoseCovariance.fromStdDevs(0.001, 0.001, 0.001), "test start"));
   }
@@ -50,6 +54,11 @@ final class DriveSimHarness implements AutoCloseable {
   }
 
   DriveSimHarness(RobotConfig robot, SensorErrors errors) {
+    this(robot, errors, EstimatorConfig.DEFAULTS);
+  }
+
+  DriveSimHarness(RobotConfig robot, SensorErrors errors, EstimatorConfig config) {
+    estimator = estimatorAt(Pose2d.ZERO, config);
     simulation =
         new DriveSimulation(
             robot.drivetrain().modules(),

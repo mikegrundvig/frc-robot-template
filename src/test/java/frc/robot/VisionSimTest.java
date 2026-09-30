@@ -169,6 +169,20 @@ class VisionSimTest {
     assertThat(worst).as("the other cameras and the gate keep the estimate").isLessThan(0.08);
   }
 
+  /** On a ramp, nose up and leaning: the images are solved with the robot tilted as it is. */
+  @Test
+  void aTiltedRobotStillSeesWhereItIs() {
+    build(SensorErrors.TYPICAL);
+    tick(SimTestSupport.loops(1.0));
+    int before = robot().estimate().health().accepted();
+
+    Objects.requireNonNull(robot().simulation()).tilt(Math.toRadians(-8), Math.toRadians(3));
+    tick(SimTestSupport.loops(1.0));
+
+    assertThat(robot().estimate().health().accepted() - before).isGreaterThan(50);
+    assertThat(error()).isLessThan(0.03);
+  }
+
   @Test
   void aCameraTurnedTwoDegreesStandsOutToo() {
     build(

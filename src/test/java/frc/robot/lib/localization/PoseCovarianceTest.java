@@ -23,6 +23,15 @@ class PoseCovarianceTest {
 
   /** A solve that took its heading from the gyro tells the estimator nothing about heading. */
   @Test
+  void theLargestSpreadIsAlongTheWorstDirection() {
+    assertThat(PoseCovariance.fromStdDevs(0.2, 0.1, 0.01).largestPositionStdDev())
+        .isCloseTo(0.2, within(1e-12));
+    // Spreads of 0.02 m² each, varying together by 0.01: 0.03 m² along the diagonal.
+    assertThat(new PoseCovariance(0.02, 0.01, 0.02, 0.001).largestPositionStdDev())
+        .isCloseTo(Math.sqrt(0.03), within(1e-12));
+  }
+
+  @Test
   void anInfiniteHeadingVarianceMeansNoHeading() {
     PoseCovariance covariance = PoseCovariance.fromStdDevs(0.1, 0.1, Double.POSITIVE_INFINITY);
 

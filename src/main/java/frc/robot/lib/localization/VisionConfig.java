@@ -1,5 +1,7 @@
 package frc.robot.lib.localization;
 
+import frc.robot.lib.config.ConfigRecord;
+
 /**
  * How the vision pipeline filters camera results and how much it trusts them. The defaults start
  * from 2611's 2026 code (itself AdvantageKit's template) and what top teams did in 2025 and 2026;
@@ -28,6 +30,7 @@ package frc.robot.lib.localization;
  * @param maxYawRateForHeading and only while the robot turns slower than this
  * @param maxReprojectionErrorForHeadingPixels and only when the solution fits its tags this well
  */
+@ConfigRecord
 public record VisionConfig(
     double maxAmbiguity,
     double maxHeightErrorMeters,
@@ -45,8 +48,22 @@ public record VisionConfig(
     double maxReprojectionErrorForHeadingPixels) {
   /** Starting points: 2611's 2026 values where it had them, top teams' where it didn't. */
   public static final VisionConfig DEFAULTS =
-      new VisionConfig(
-          0.2, 0.2, 6.0, 5.0, 0.02, 0.03, 2.0, 0.5, 0.25, 0.5, Math.toRadians(5), 2, 0.5, 1.0);
+      builder()
+          .maxAmbiguity(0.2)
+          .maxHeightErrorMeters(0.2)
+          .maxDistanceMeters(6.0)
+          .maxYawRateRadiansPerSecond(5.0)
+          .linearStdDevBaseline(0.02)
+          .angularStdDevBaseline(0.03)
+          .distanceExponent(2.0)
+          .headingConstrainedFactor(0.5)
+          .speedStdDevFactor(0.25)
+          .yawRateStdDevFactor(0.5)
+          .maxHeadingStdDevToConstrain(Math.toRadians(5))
+          .minTagsForHeading(2)
+          .maxYawRateForHeading(0.5)
+          .maxReprojectionErrorForHeadingPixels(1.0)
+          .build();
 
   public VisionConfig {
     double[] positive = {
@@ -73,5 +90,10 @@ public record VisionConfig(
     if (minTagsForHeading < 2) {
       throw new IllegalArgumentException("heading comes only from two or more tags");
     }
+  }
+
+  /** Starts building vision settings, one named value at a time. */
+  public static VisionConfigBuilder.MaxAmbiguityStage builder() {
+    return VisionConfigBuilder.builder();
   }
 }

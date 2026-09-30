@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
@@ -37,6 +38,12 @@ class PoseEstimatorTest {
       estimator.reset(new PoseReset(T0, START, PLACED, "placed"));
     }
 
+    /** From now on, the robot's other sensors say this about its wheels. */
+    Robot under(DriveConditions conditions) {
+      estimator.setConditions(conditions);
+      return this;
+    }
+
     /** Drives at robot-relative velocities for some steps. */
     Robot drive(int steps, double vx, double vy, double omega) {
       return drive(steps, vx, vy, omega, 0, true);
@@ -65,6 +72,19 @@ class PoseEstimatorTest {
       return estimator.update();
     }
 
+    /** A camera measurement with heading, from several tags, taken now. */
+    VisionDecision seeWithHeading(Pose2d pose) {
+      estimator.addVision(
+          new VisionMeasurement(
+              time,
+              pose,
+              PoseCovariance.fromStdDevs(0.05, 0.05, Math.toRadians(2)),
+              "front",
+              List.of(25, 26),
+              VisionMeasurement.Solver.MULTI_TAG));
+      return estimator.update().get(0);
+    }
+
     Pose2d pose() {
       return estimator.pose();
     }
@@ -73,6 +93,14 @@ class PoseEstimatorTest {
       return estimator.estimate();
     }
   }
+
+  private static DriveConditions tilted(double degrees) {
+    return new DriveConditions(Math.toRadians(degrees), false, false, false);
+  }
+
+  private static final DriveConditions HIT = new DriveConditions(0, true, false, false);
+  private static final DriveConditions AT_THE_GRIP = new DriveConditions(0, false, true, false);
+  private static final DriveConditions DISABLED = new DriveConditions(0, false, false, true);
 
   private static boolean field(Translation2d point) {
     return point.getX() >= 0 && point.getX() <= 16 && point.getY() >= 0 && point.getY() <= 8;
@@ -378,21 +406,189 @@ class PoseEstimatorTest {
   }
 
   @Test
+  void aTiltedRobotsWheelsCountForLessAndPastTheLimitForNothing() {
+    Robot halfway = new Robot().under(tilted(15)).drive(250, 1.0, 0, 0); // a meter of wheel travel
+    Robot steep = new Robot().under(tilted(30)).drive(250, 1.0, 0, 0);
+    Robot level = new Robot().drive(250, 0.5, 0, 0); // half a meter, level
+
+    assertThat(halfway.pose().getX() - START.getX()).isCloseTo(0.5, within(1e-9));
+    assertThat(steep.pose().getX()).isCloseTo(START.getX(), within(1e-12));
+    // The half meter left out may have been real: the doubt grows by a good share of it.
+    double added =
+        Math.sqrt(halfway.estimate().covariance().xx() - level.estimate().covariance().xx());
+    assertThat(added).isBetween(0.3, 0.5);
+    assertThat(halfway.estimate().health().tiltRadians()).isEqualTo(Math.toRadians(15));
+  }
+
+  @Test
+  void slipAtTheEdgeOfGripAddsUpAsOneErrorNotManySmallOnes() {
+    Robot gripping = new Robot().drive(62, 2.0, 0, 0); // half a meter in a quarter second
+    Robot slipping = new Robot().under(AT_THE_GRIP).drive(62, 2.0, 0, 0);
+
+    double added =
+        Math.sqrt(slipping.estimate().covariance().xx() - gripping.estimate().covariance().xx());
+    // A quarter of the half meter is suspect. Squared step by step it would add only 1.6 cm; as one
+    // error building in one direction it adds nearly all of it.
+    assertThat(added).isBetween(0.09, 0.125);
+    assertThat(slipping.estimate().health().suspectTravelMeters()).isGreaterThan(0.09);
+  }
+
+  @Test
+  void aCollisionAddsItsDoubtAtOnceAndOnceForItsWindow() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    double before = robot.estimate().covariance().xx();
+
+    robot.under(HIT).drive(1, 0, 0, 0);
+    double hit = robot.estimate().covariance().xx();
+    robot.under(HIT).drive(5, 0, 0, 0); // the IMU still jolting, a loop later
+    boolean duringWindow = robot.estimate().health().collisionActive();
+    robot.under(DriveConditions.NORMAL).drive(100, 0, 0, 0);
+
+    assertThat(hit - before).isCloseTo(0.0625, within(1e-9)); // 25 cm
+    assertThat(robot.estimate().covariance().xx()).isCloseTo(hit, within(1e-12));
+    assertThat(duringWindow).isTrue();
+    assertThat(robot.estimate().health().collisionActive()).isFalse();
+  }
+
+  @Test
+  void aDisabledRobotMayBeCarriedSoItsPositionGrowsUnsure() {
+    Robot robot = new Robot().under(DISABLED).drive(15_000, 0, 0, 0); // a minute
+
+    // Placed to 5 cm, plus 2 cm per square root of second.
+    assertThat(robot.estimate().covariance().xStdDev())
+        .isCloseTo(Math.sqrt(0.0025 + 0.0004 * 60), within(1e-3));
+  }
+
+  @Test
+  void aLateMeasurementReplaysEachStepUnderItsOwnConditions() {
+    Robot inTime = new Robot().drive(50, 1.0, 0, 0);
+    Robot late = new Robot().drive(50, 1.0, 0, 0);
+    long captured = inTime.time;
+    Pose2d seen = new Pose2d(1.22, 1.03, Rotation2d.ZERO);
+
+    inTime.see(seen, captured, position(0.05));
+    for (Robot robot : List.of(inTime, late)) {
+      robot.under(tilted(12)).drive(40, 1.0, 0.2, 0.3);
+      robot.under(HIT).drive(10, 0.5, 0, 0);
+      robot.under(AT_THE_GRIP).drive(40, 2.0, -0.5, 0);
+      robot.under(DriveConditions.NORMAL).drive(10, 1.0, 0, 0);
+    }
+    late.see(seen, captured, position(0.05));
+
+    assertSame(late.pose(), inTime.pose(), 1e-9);
+    PoseCovariance expected = inTime.estimate().covariance();
+    PoseCovariance actual = late.estimate().covariance();
+    assertThat(actual.xx()).isCloseTo(expected.xx(), within(1e-12));
+    assertThat(actual.yy()).isCloseTo(expected.yy(), within(1e-12));
+    assertThat(actual.heading()).isCloseTo(expected.heading(), within(1e-12));
+  }
+
+  @Test
+  void theHealthSaysHowFarTheCamerasDisagreedLately() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    double before = robot.estimate().health().recentDisagreementMeters();
+
+    robot.see(new Pose2d(1.05, 1, Rotation2d.ZERO), robot.time, position(0.05));
+    double after = robot.estimate().health().recentDisagreementMeters();
+    robot.drive(150, 0, 0, 0); // 0.6 s, no camera
+
+    assertThat(before).isNaN();
+    assertThat(after).isCloseTo(0.05, within(1e-9));
+    assertThat(robot.estimate().health().recentDisagreementMeters()).isNaN();
+  }
+
+  @Test
+  void aHeadingResetTurnsTheRobotWhereItStands() {
+    Robot robot = new Robot().drive(100, 1.0, 0, 0);
+    Translation2d here = robot.pose().getTranslation();
+
+    robot.estimator.resetHeading(Rotation2d.fromDegrees(90), Math.toRadians(5));
+    Pose2d reset = robot.pose();
+    robot.drive(250, 1.0, 0, 0);
+
+    assertThat(reset.getTranslation()).isEqualTo(here);
+    assertThat(reset.getRotation().getDegrees()).isCloseTo(90, within(1e-9));
+    assertThat(robot.estimate().covariance().headingStdDev())
+        .isCloseTo(Math.toRadians(5), within(1e-4));
+    assertThat(robot.pose().getY() - here.getY())
+        .as("forward is now +y")
+        .isCloseTo(1, within(1e-6));
+  }
+
+  @Test
+  void aHeadingResetBeforeOdometryStartsIsKept() {
+    PoseEstimator estimator =
+        new PoseEstimator(
+            EstimatorConfig.DEFAULTS, point -> true, new PoseReset(0, START, PLACED, "start"));
+
+    estimator.resetHeading(Rotation2d.PI, 0.1);
+    estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0.4, true);
+
+    assertThat(estimator.pose().getRotation().getDegrees()).isCloseTo(180, within(1e-9));
+    assertThat(estimator.pose().getTranslation()).isEqualTo(START.getTranslation());
+    assertThatThrownBy(() -> estimator.resetHeading(Rotation2d.ZERO, 0))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void camerasThatAgreeOnAnotherHeadingTurnTheEstimateToIt() {
+    // The robot really faces +y, but was told it faces +x: a driver's reset facing the wrong way.
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    Pose2d truth = new Pose2d(1, 1, Rotation2d.fromDegrees(90));
+
+    List<Boolean> accepted = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      accepted.add(robot.seeWithHeading(truth).accepted());
+      robot.drive(8, 0, 0, 0);
+    }
+    Pose2d recovered = robot.pose();
+    boolean afterwards = robot.seeWithHeading(truth).accepted();
+
+    assertThat(accepted).containsExactly(false, false, false);
+    assertThat(recovered.getRotation().getDegrees()).isCloseTo(90, within(1e-6));
+    assertThat(robot.estimate().health().recoveries()).isEqualTo(1);
+    assertThat(afterwards).as("the next one, taken").isTrue();
+  }
+
+  @Test
+  void headingsEitherSideOfHalfATurnAgree() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+
+    for (double degrees : new double[] {179, -179, 179}) {
+      robot.seeWithHeading(new Pose2d(1, 1, Rotation2d.fromDegrees(degrees)));
+      robot.drive(8, 0, 0, 0);
+    }
+
+    assertThat(Math.abs(robot.pose().getRotation().getDegrees())).isGreaterThan(179);
+  }
+
+  @Test
+  void camerasThatDisagreeWithEachOtherDontTurnIt() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+
+    for (double degrees : new double[] {60, 90, 120}) {
+      robot.seeWithHeading(new Pose2d(1, 1, Rotation2d.fromDegrees(degrees)));
+      robot.drive(8, 0, 0, 0);
+    }
+
+    assertThat(robot.pose().getRotation().getDegrees()).isCloseTo(0, within(1e-6));
+    assertThat(robot.estimate().health().recoveries()).isZero();
+  }
+
+  @Test
   void settingsMustMakeSense() {
-    assertThatThrownBy(
-            () ->
-                new EstimatorConfig(
-                    -1, 0.02, 1, 0.5, 0.5, 10, 1.5, 0.05, 1, 13.8, 16.3, 3, 1, 0.25, 0.25))
+    assertThatThrownBy(() -> with().translationStdDevPerMeter(-1).build())
         .hasMessageContaining("zero or more");
-    assertThatThrownBy(
-            () ->
-                new EstimatorConfig(
-                    0.03, 0.02, 1, 0.5, 0.5, 10, 0, 0.05, 1, 13.8, 16.3, 3, 1, 0.25, 0.25))
-        .hasMessageContaining("positive");
-    assertThatThrownBy(
-            () ->
-                new EstimatorConfig(
-                    0.03, 0.02, 1, 0.5, 0.5, 10, 1.5, 0.05, 1, 13.8, 16.3, 1, 1, 0.25, 0.25))
+    assertThatThrownBy(() -> with().historySeconds(0).build()).hasMessageContaining("positive");
+    assertThatThrownBy(() -> with().recoveryMeasurements(1).build())
         .hasMessageContaining("at least 2");
+    assertThatThrownBy(() -> with().tractionLimitedSlipFraction(1.5).build())
+        .hasMessageContaining("0 to 1");
+    assertThatThrownBy(() -> with().tiltStartDegrees(30).build())
+        .hasMessageContaining("tilt above");
+  }
+
+  private static EstimatorConfigBuilder with() {
+    return EstimatorConfigBuilder.builder(EstimatorConfig.DEFAULTS);
   }
 }

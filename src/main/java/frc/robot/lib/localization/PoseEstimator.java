@@ -22,13 +22,16 @@ import org.wpilib.math.util.MathUtil;
  * relate: an unsure heading makes every meter driven add position uncertainty sideways.
  *
  * <p>Each odometry step predicts: the wheels' motion, along the arc the gyro turned through, moves
- * the position, and the uncertainty grows with the distance driven, the turning, the wheels'
- * disagreement, and time. A camera measurement is applied at the moment its image was taken,
- * however late it arrives: the estimator keeps {@link EstimatorConfig#historySeconds} of steps,
- * rewinds to the measurement, applies it, and replays the steps since, so measurements give the
- * same result in any order of arrival. Each is gated against the estimate first; when several
- * rejected ones agree with each other, odometry was the one that was wrong (a collision, a spin),
- * and the estimate recovers to them.
+ * the position, and the uncertainty grows with the distance driven, the turning, and time, and with
+ * whatever makes the wheels suspect: their disagreement, a tilt that lifts them, a grip at its
+ * limit, a collision (see {@link DriveConditions}). A camera measurement is applied at the moment
+ * its image was taken, however late it arrives: the estimator keeps {@link
+ * EstimatorConfig#historySeconds} of steps, rewinds to the measurement, applies it, and replays the
+ * steps since, so measurements give the same result in any order of arrival. Each is gated against
+ * the estimate first; when several rejected ones agree with each other, odometry was the one that
+ * was wrong (a collision, a spin), and the estimate recovers to them: to their heading first, if
+ * that is what they agree is wrong (a bad heading reset, a robot placed backwards), since every
+ * position worked out with a wrong heading is wrong too.
  *
  * <p>Pure logic: no clock, no hardware, no static state. Every input comes in through a method,
  * stamped with its capture time, so a replay reproduces every decision. Use it from one thread.
@@ -47,6 +50,12 @@ public final class PoseEstimator {
   private final long futureToleranceNanos;
   private final long visionTimeoutNanos;
   private final long recoveryWindowNanos;
+  private final double tiltStartRadians;
+  private final double tiltZeroRadians;
+  private final double collisionVariance;
+  private final long collisionWindowNanos;
+  private final double handlingVariancePerSecond;
+  private final long disagreementWindowNanos;
 
   // The history: a ring of odometry steps, each with the state after it.
   private final int capacity;
@@ -54,6 +63,10 @@ public final class PoseEstimator {
   private final double[] stepDx;
   private final double[] stepDy;
   private final double[] stepResidual;
+
+  /** Each step's own added position variance for slip, tilt, and collisions: fixed on arrival. */
+  private final double[] stepExtra;
+
   private final boolean[] stepGyro;
   private final double[] yawAfter;
   private final double[] xAfter;
@@ -75,6 +88,12 @@ public final class PoseEstimator {
   private double lastGyroYaw;
   private boolean lastGyroConnected;
 
+  // What the wheels are going through, and the doubt it adds up to.
+  private DriveConditions conditions = DriveConditions.NORMAL;
+  private double suspectTravel;
+  private boolean collisionPending;
+  private long collisionUntilNanos = Long.MIN_VALUE;
+
   private PoseReset initial;
   private boolean placed;
   private long lastResetNanos = Long.MIN_VALUE;
@@ -82,6 +101,7 @@ public final class PoseEstimator {
   private final List<VisionMeasurement> pending = new ArrayList<>();
   private final List<Applied> applied = new ArrayList<>();
   private final ArrayDeque<Rejected> rejectedRecently = new ArrayDeque<>();
+  private final List<Agreement> agreements = new ArrayList<>();
   private long lastAcceptedNanos = Long.MIN_VALUE;
   private int consecutiveRejections;
   private int acceptedCount;
@@ -99,8 +119,20 @@ public final class PoseEstimator {
   /** A measurement applied to the history, kept so a rewind can apply it again. */
   private record Applied(long time, VisionMeasurement measurement) {}
 
-  /** A rejected measurement's disagreement with the estimate, for recovery. */
-  private record Rejected(long time, double innovationX, double innovationY) {}
+  /**
+   * A rejected measurement's disagreement with the estimate, for recovery: the heading's is NaN
+   * when the measurement had no heading, and the position may have agreed when only the heading
+   * didn't.
+   */
+  private record Rejected(
+      long time,
+      double innovationX,
+      double innovationY,
+      double innovationHeading,
+      boolean positionAgreed) {}
+
+  /** An accepted measurement's distance from the estimate, for the health's agreement. */
+  private record Agreement(long time, double meters) {}
 
   /** A measurement to apply during a replay; fresh ones are gated, applied ones are not. */
   private record Event(long time, VisionMeasurement measurement, boolean fresh) {}
@@ -127,12 +159,19 @@ public final class PoseEstimator {
     futureToleranceNanos = Timestamps.fromSeconds(config.futureToleranceSeconds());
     visionTimeoutNanos = Timestamps.fromSeconds(config.visionTimeoutSeconds());
     recoveryWindowNanos = Timestamps.fromSeconds(config.recoveryWindowSeconds());
+    tiltStartRadians = Math.toRadians(config.tiltStartDegrees());
+    tiltZeroRadians = Math.toRadians(config.tiltZeroDegrees());
+    collisionVariance = square(config.collisionStdDevMeters());
+    collisionWindowNanos = Timestamps.fromSeconds(config.collisionWindowSeconds());
+    handlingVariancePerSecond = square(config.handlingStdDevPerSqrtSecond());
+    disagreementWindowNanos = Timestamps.fromSeconds(config.disagreementWindowSeconds());
     // Room for the history at up to 1 kHz of odometry.
     capacity = Math.max(16, (int) Math.ceil(config.historySeconds() * 1000) + 1);
     time = new long[capacity];
     stepDx = new double[capacity];
     stepDy = new double[capacity];
     stepResidual = new double[capacity];
+    stepExtra = new double[capacity];
     stepGyro = new boolean[capacity];
     yawAfter = new double[capacity];
     xAfter = new double[capacity];
@@ -168,7 +207,8 @@ public final class PoseEstimator {
       lastResetNanos = timestampNanos;
       return;
     }
-    if (timestampNanos <= newestTime()) {
+    long previousTime = newestTime();
+    if (timestampNanos <= previousTime) {
       return;
     }
     // The gyro owns rotation. When it's lost, or has just come back and its reading may have
@@ -189,14 +229,36 @@ public final class PoseEstimator {
     int slot = index(size);
     size++;
     time[slot] = timestampNanos;
-    stepDx[slot] = motion.dxMeters();
-    stepDy[slot] = motion.dyMeters();
+    double trust = wheelTrust(conditions.tiltRadians());
+    stepDx[slot] = trust * motion.dxMeters();
+    stepDy[slot] = trust * motion.dyMeters();
     stepResidual[slot] = motion.residualMeters();
+    stepExtra[slot] =
+        extraVariance(
+            previousTime,
+            timestampNanos,
+            Math.hypot(motion.dxMeters(), motion.dyMeters()),
+            trust,
+            motion.residualMeters());
     stepGyro[slot] = gyroConnected;
     yawAfter[slot] = yaw;
     advance(size - 1, 0, 1);
     store(slot);
     prune();
+  }
+
+  /**
+   * What the robot's other sensors say about its wheels, for the odometry steps added after this
+   * until the next call. A new collision makes the next step uncertain by {@link
+   * EstimatorConfig#collisionStdDevMeters}: the robot may have moved without its wheels seeing it.
+   * Jolts within {@link EstimatorConfig#collisionWindowSeconds} of the last are the same collision.
+   */
+  public void setConditions(DriveConditions conditions) {
+    this.conditions = conditions;
+    if (conditions.collision() && started) {
+      collisionPending |= !(newestTime() <= collisionUntilNanos);
+      collisionUntilNanos = newestTime() + collisionWindowNanos;
+    }
   }
 
   /** A camera measurement, to apply at the next {@link #update}. */
@@ -231,6 +293,10 @@ public final class PoseEstimator {
       }
     }
     recoverIfTheCamerasAgree();
+    if (started) {
+      long cutoff = newestTime() - disagreementWindowNanos;
+      agreements.removeIf(agreement -> agreement.time() < cutoff);
+    }
     return decisions;
   }
 
@@ -243,12 +309,46 @@ public final class PoseEstimator {
     placed = true;
     rejectedRecently.clear();
     consecutiveRejections = 0;
+    suspectTravel = 0;
     if (!started) {
       initial = reset;
       setState(reset);
       return;
     }
     setState(reset);
+    startHistoryHere();
+  }
+
+  /**
+   * Tells the estimator which way the robot faces, now, keeping where it is: a driver's "facing
+   * straight downfield" when the heading has gone wrong. History before it is dropped.
+   *
+   * @param stdDevRadians how sure: how straight a driver lines the robot up by eye
+   */
+  public void resetHeading(Rotation2d heading, double stdDevRadians) {
+    if (!(stdDevRadians > 0) || Double.isInfinite(stdDevRadians)) {
+      throw new IllegalArgumentException("a heading reset's uncertainty: " + stdDevRadians);
+    }
+    rejectedRecently.clear();
+    consecutiveRejections = 0;
+    double variance = square(stdDevRadians);
+    if (!started) {
+      PoseCovariance before = initial.covariance();
+      initial =
+          new PoseReset(
+              initial.timestampNanos(),
+              new Pose2d(initial.pose().getTranslation(), heading),
+              new PoseCovariance(before.xx(), before.xy(), before.yy(), variance),
+              initial.reason());
+      setState(initial);
+      return;
+    }
+    offset = heading.getRadians() - yaw;
+    covariance[8] = variance;
+    covariance[2] = 0;
+    covariance[6] = 0;
+    covariance[5] = 0;
+    covariance[7] = 0;
     startHistoryHere();
   }
 
@@ -331,6 +431,13 @@ public final class PoseEstimator {
             ? Double.POSITIVE_INFINITY
             : Timestamps.toSeconds(now - lastAcceptedNanos);
     double residual = started ? stepResidual[index(size - 1)] : 0;
+    double disagreement = Double.NaN;
+    for (Agreement agreement : agreements) {
+      if (agreement.time() >= now - disagreementWindowNanos
+          && !(agreement.meters() <= disagreement)) {
+        disagreement = agreement.meters();
+      }
+    }
     return new LocalizationEstimate(
         now,
         pose(),
@@ -343,7 +450,11 @@ public final class PoseEstimator {
             acceptedCount,
             rejectedCount,
             lastInnovationMeters,
+            disagreement,
             residual,
+            suspectTravel,
+            conditions.tiltRadians(),
+            started && now <= collisionUntilNanos,
             recoveries,
             gyroConnected));
   }
@@ -423,6 +534,20 @@ public final class PoseEstimator {
     double innovationX = measurement.pose().getX() - x;
     double innovationY = measurement.pose().getY() - y;
     boolean withHeading = noise.hasHeading();
+    // The position's own agreement, from the position block of S = P + R.
+    double s00 = covariance[0] + noise.xx();
+    double s01 = covariance[1] + noise.xy();
+    double s11 = covariance[4] + noise.yy();
+    double determinant = s00 * s11 - s01 * s01;
+    if (!(determinant > 0)) {
+      return;
+    }
+    double i00 = s11 / determinant;
+    double i01 = -s01 / determinant;
+    double i11 = s00 / determinant;
+    double positionChiSquared =
+        innovationX * (i00 * innovationX + i01 * innovationY)
+            + innovationY * (i01 * innovationX + i11 * innovationY);
     double chiSquared;
     double gate;
     if (withHeading) {
@@ -442,19 +567,7 @@ public final class PoseEstimator {
       chiSquared = quadratic3(sInverse3, innovation3);
       gate = config.gateChiSquaredPose();
     } else {
-      double s00 = covariance[0] + noise.xx();
-      double s01 = covariance[1] + noise.xy();
-      double s11 = covariance[4] + noise.yy();
-      double determinant = s00 * s11 - s01 * s01;
-      if (!(determinant > 0)) {
-        return;
-      }
-      double i00 = s11 / determinant;
-      double i01 = -s01 / determinant;
-      double i11 = s00 / determinant;
-      chiSquared =
-          innovationX * (i00 * innovationX + i01 * innovationY)
-              + innovationY * (i01 * innovationX + i11 * innovationY);
+      chiSquared = positionChiSquared;
       gate = config.gateChiSquaredPosition();
       // K = P H^T S^-1, for H picking out the position.
       for (int row = 0; row < 3; row++) {
@@ -469,7 +582,13 @@ public final class PoseEstimator {
       if (chiSquared > gate) {
         rejectedCount++;
         consecutiveRejections++;
-        rejectedRecently.addLast(new Rejected(event.time(), innovationX, innovationY));
+        rejectedRecently.addLast(
+            new Rejected(
+                event.time(),
+                innovationX,
+                innovationY,
+                withHeading ? innovation3[2] : Double.NaN,
+                positionChiSquared <= config.gateChiSquaredPosition()));
         decisions.add(
             new VisionDecision(
                 measurement,
@@ -483,6 +602,7 @@ public final class PoseEstimator {
       consecutiveRejections = 0;
       rejectedRecently.clear();
       lastAcceptedNanos = Math.max(lastAcceptedNanos, event.time());
+      agreements.add(new Agreement(event.time(), innovationMeters));
       placed = true;
       decisions.add(
           new VisionDecision(measurement, true, "accepted", innovationMeters, chiSquared));
@@ -533,15 +653,28 @@ public final class PoseEstimator {
     if (rejectedRecently.size() < config.recoveryMeasurements()) {
       return;
     }
+    if (recoverHeading()) {
+      return;
+    }
+    // Only the measurements whose positions disagreed say the position is wrong.
+    List<Rejected> offPosition = new ArrayList<>();
+    for (Rejected rejected : rejectedRecently) {
+      if (!rejected.positionAgreed()) {
+        offPosition.add(rejected);
+      }
+    }
+    if (offPosition.size() < config.recoveryMeasurements()) {
+      return;
+    }
     double meanX = 0;
     double meanY = 0;
-    for (Rejected rejected : rejectedRecently) {
+    for (Rejected rejected : offPosition) {
       meanX += rejected.innovationX();
       meanY += rejected.innovationY();
     }
-    meanX /= rejectedRecently.size();
-    meanY /= rejectedRecently.size();
-    for (Rejected rejected : rejectedRecently) {
+    meanX /= offPosition.size();
+    meanY /= offPosition.size();
+    for (Rejected rejected : offPosition) {
       double spread = Math.hypot(rejected.innovationX() - meanX, rejected.innovationY() - meanY);
       if (spread > config.recoveryAgreementMeters()) {
         return;
@@ -559,11 +692,67 @@ public final class PoseEstimator {
     covariance[5] = 0;
     covariance[7] = 0;
     startHistoryHere();
+    suspectTravel = 0;
     recoveries++;
     consecutiveRejections = 0;
     rejectedRecently.clear();
     lastAcceptedNanos = newest;
     placed = true;
+  }
+
+  /**
+   * When enough recent rejected measurements with heading agree with each other on a heading that
+   * isn't the estimate's, the heading is what's wrong: turn to theirs. Their positions were worked
+   * out with the wrong heading, so the position is left where it is, uncertain enough that the next
+   * measurement, worked out with the right heading, is taken.
+   *
+   * @return whether the heading recovered
+   */
+  private boolean recoverHeading() {
+    double first = Double.NaN;
+    double sum = 0;
+    int count = 0;
+    for (Rejected rejected : rejectedRecently) {
+      if (!Double.isNaN(rejected.innovationHeading())) {
+        if (count == 0) {
+          first = rejected.innovationHeading();
+        }
+        // Measured from the first, so headings either side of half a turn average rightly.
+        sum += MathUtil.angleModulus(rejected.innovationHeading() - first);
+        count++;
+      }
+    }
+    if (count < config.recoveryMeasurements()) {
+      return false;
+    }
+    double mean = first + sum / count;
+    double agreement = Math.toRadians(config.recoveryAgreementDegrees());
+    for (Rejected rejected : rejectedRecently) {
+      if (!Double.isNaN(rejected.innovationHeading())
+          && Math.abs(MathUtil.angleModulus(rejected.innovationHeading() - mean)) > agreement) {
+        return false;
+      }
+    }
+    if (Math.abs(MathUtil.angleModulus(mean)) <= agreement) {
+      return false;
+    }
+    offset += mean;
+    double position = square(config.lostPositionStdDevMeters());
+    covariance[0] = position;
+    covariance[4] = position;
+    covariance[8] = square(Math.toRadians(config.recoveryHeadingStdDevDegrees()));
+    covariance[1] = 0;
+    covariance[3] = 0;
+    covariance[2] = 0;
+    covariance[6] = 0;
+    covariance[5] = 0;
+    covariance[7] = 0;
+    startHistoryHere();
+    suspectTravel = 0;
+    recoveries++;
+    consecutiveRejections = 0;
+    rejectedRecently.clear();
+    return true;
   }
 
   /** Moves the current state through part of step j: from fraction f0 of it to f1. */
@@ -613,12 +802,11 @@ public final class PoseEstimator {
     // Plus the step's own uncertainty.
     double distance = Math.hypot(stepDx[slot], stepDy[slot]);
     double seconds = Timestamps.toSeconds(time[slot] - time[previous]);
-    double residual = fraction * stepResidual[slot] * config.residualScale();
     double positionNoise =
         fraction
-                * (translationVariancePerMeter * distance
-                    + translationVariancePerRadian * Math.abs(stepTurn))
-            + residual * residual;
+            * (translationVariancePerMeter * distance
+                + translationVariancePerRadian * Math.abs(stepTurn)
+                + stepExtra[slot]);
     double headingNoise =
         fraction
             * (headingVariancePerSecond * seconds
@@ -627,6 +815,40 @@ public final class PoseEstimator {
     covariance[0] += positionNoise;
     covariance[4] += positionNoise;
     covariance[8] += headingNoise;
+  }
+
+  /**
+   * How much of the wheels' travel counts at a tilt: all of it when level, less from the start
+   * angle on, none from the zero angle.
+   */
+  private double wheelTrust(double tiltRadians) {
+    return 1
+        - Math.clamp(
+            (tiltRadians - tiltStartRadians) / (tiltZeroRadians - tiltStartRadians), 0.0, 1.0);
+  }
+
+  /**
+   * A step's position variance beyond the base terms. Its suspect travel (the share of the wheels'
+   * travel the tilt left out or the grip put in doubt, and the wheels' disagreement) adds to the
+   * recent suspect travel before squaring, since slip keeps its direction for a while; a new
+   * collision adds its variance; and a disabled robot may be carried.
+   */
+  private double extraVariance(long from, long to, double distance, double trust, double residual) {
+    double share =
+        Math.max(
+            1 - trust, conditions.tractionLimited() ? config.tractionLimitedSlipFraction() : 0);
+    double seconds = Timestamps.toSeconds(to - from);
+    double carried = suspectTravel * Math.exp(-seconds / config.slipCorrelationSeconds());
+    suspectTravel = carried + share * distance + config.residualScale() * residual;
+    double variance = square(suspectTravel) - square(carried);
+    if (conditions.disabled()) {
+      variance += handlingVariancePerSecond * seconds;
+    }
+    if (collisionPending) {
+      variance += collisionVariance;
+      collisionPending = false;
+    }
+    return variance;
   }
 
   private double yawAt(int j, double fraction) {
@@ -658,6 +880,7 @@ public final class PoseEstimator {
     size = 1;
     store(oldest);
     applied.clear();
+    agreements.clear();
     lastResetNanos = time[oldest];
   }
 

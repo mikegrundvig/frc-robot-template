@@ -23,6 +23,9 @@ public class Module {
   private double driveKs;
   private double driveKv;
 
+  /** The wheel speed last sent, in meters per second: zero once stopped. */
+  private double commandedMetersPerSecond;
+
   Module(ModuleIO io, int index, Distance wheelRadius) {
     this.io = io;
     this.name = NAMES[index];
@@ -52,6 +55,7 @@ public class Module {
             : desired.optimize(current).cosineScale(current);
 
     double velocity = target.velocity;
+    commandedMetersPerSecond = velocity;
     double feedforward = driveKs * Math.signum(velocity) + driveKv * velocity;
     io.setDriveVelocity(velocity / wheelRadiusMeters, feedforward);
     io.setSteerAngle(target.angle);
@@ -59,7 +63,22 @@ public class Module {
   }
 
   void stop() {
+    commandedMetersPerSecond = 0;
     io.stop();
+  }
+
+  /** Whether the drive motor hit its current limit since the last loop. */
+  boolean isTorqueLimited() {
+    return inputs.driveTorqueLimited;
+  }
+
+  /**
+   * How far the wheel's speed falls short of the speed it was last sent, in meters per second:
+   * negative when it's faster.
+   */
+  double speedDeficitMetersPerSecond() {
+    return Math.abs(commandedMetersPerSecond)
+        - Math.abs(inputs.driveVelocityRadPerSec * wheelRadiusMeters);
   }
 
   SwerveModulePosition getPosition() {

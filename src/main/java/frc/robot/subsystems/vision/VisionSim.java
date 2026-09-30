@@ -12,7 +12,7 @@ import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
 import org.wpilib.fields.Field;
-import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform3d;
 
@@ -74,8 +74,11 @@ public final class VisionSim implements AutoCloseable {
     return io;
   }
 
-  /** Renders every camera's view from where the robot is. Call once per loop, before reading. */
-  public void update(Pose2d truth) {
+  /**
+   * Renders every camera's view from where the robot is, tilted as it is. Call once per loop,
+   * before reading.
+   */
+  public void update(Pose3d truth) {
     world.update(truth);
   }
 

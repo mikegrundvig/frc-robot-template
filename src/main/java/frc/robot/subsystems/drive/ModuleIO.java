@@ -19,6 +19,12 @@ public interface ModuleIO {
     public double driveStatorCurrentAmps = 0.0;
     public double driveSupplyCurrentAmps = 0.0;
 
+    /**
+     * Whether the drive motor hit its stator current limit since the last loop: the torque it can
+     * give is capped, and a wheel at that edge of its grip slips.
+     */
+    public boolean driveTorqueLimited = false;
+
     public boolean steerConnected = false;
 
     /** From the absolute encoder: valid at power-on, no homing needed. */

@@ -6,7 +6,9 @@ import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.TagDetections;
+import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
+import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionPipeline;
 import frc.robot.lib.localization.VisionResult;
@@ -17,6 +19,7 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableBoolean;
@@ -35,8 +38,9 @@ import org.wpilib.util.Alert;
  * configured mount) with how far that lands from the tag's real place. A camera whose tags land
  * consistently off is mounted differently than its configuration says: recalibrate it.
  *
- * <p>Tunable while tuning is on: the main thresholds and uncertainties, and a switch per camera to
- * leave it out (a camera fogged over, knocked loose, or blinded by stage lights).
+ * <p>Tunable while tuning is on: the main thresholds and uncertainties, a switch per camera to
+ * leave it out (a camera fogged over, knocked loose, or blinded by stage lights), and how long to
+ * hold the cameras back when autonomous starts.
  */
 public final class Vision implements AutoCloseable {
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
@@ -74,6 +78,15 @@ public final class Vision implements AutoCloseable {
       TunableDouble.create(VisionConfig.DEFAULTS.angularStdDevBaseline());
   private final TunableDouble distanceExponent =
       TunableDouble.create(VisionConfig.DEFAULTS.distanceExponent());
+
+  /**
+   * How long to hold the cameras' measurements back when autonomous starts, trusting the placed
+   * start while the robot launches: 6328 held theirs 2 s. Off by default: the estimator gates every
+   * measurement against the placed start anyway.
+   */
+  private final TunableDouble autoStartHoldSeconds = TunableDouble.create(0.0);
+
+  private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
   private VisionConfig settings = VisionConfig.DEFAULTS;
 
@@ -119,6 +132,7 @@ public final class Vision implements AutoCloseable {
     publish("Vision/linearStdDevBaseline", linearStdDevBaseline);
     publish("Vision/angularStdDevBaseline", angularStdDevBaseline);
     publish("Vision/distanceExponent", distanceExponent);
+    publish("Vision/autoStartHoldSeconds", autoStartHoldSeconds);
   }
 
   private void publish(String path, TunableBase tunable) {
@@ -127,12 +141,25 @@ public final class Vision implements AutoCloseable {
   }
 
   /**
+   * Autonomous just started: hold the cameras' measurements back for the tuned time, if any. They
+   * are still read and logged, marked held.
+   */
+  public void autonomousStarted(long nowNanos) {
+    double seconds = autoStartHoldSeconds.get();
+    holdUntilNanos = seconds > 0 ? nowNanos + Timestamps.fromSeconds(seconds) : Long.MIN_VALUE;
+  }
+
+  /**
    * Reads every camera and hands the estimator a measurement for each usable image.
    *
    * @param estimate the estimate as of this loop's odometry: the robot's motion and how sure its
    *     heading is
+   * @param pitchRadians the robot's pitch now, from the IMU: images are solved with the robot
+   *     tilted as it is, since a tag seen from a tilted camera as if level lands off by the tilt
+   *     times its distance
+   * @param rollRadians the robot's roll now
    */
-  public void periodic(LocalizationEstimate estimate) {
+  public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
     recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());
     yawRateLoop = (yawRateLoop + 1) % YAW_RATE_LOOPS;
     double recentYawRate = 0;
@@ -173,18 +200,27 @@ public final class Vision implements AutoCloseable {
             pipeline.process(
                 detections,
                 camera,
-                new CaptureContext(heading, headingStdDev, 0, 0, speed, recentYawRate),
+                new CaptureContext(
+                    heading, headingStdDev, pitchRadians, rollRadians, speed, recentYawRate),
                 settings);
-        if (result.measurement() != null) {
+        if (result.measurement() == null) {
+          outcomes.add(result.outcome());
+        } else if (frame.timestampNanos() < holdUntilNanos) {
+          outcomes.add("held, autonomous just started: " + result.outcome());
+        } else {
           estimator.addVision(result.measurement());
+          outcomes.add(result.outcome());
         }
-        outcomes.add(result.outcome());
         if (then != null) {
+          Pose3d robotThen =
+              new Pose3d(
+                  then.getX(),
+                  then.getY(),
+                  0,
+                  new Rotation3d(rollRadians, pitchRadians, then.getRotation().getRadians()));
           for (TagDetections.Tag tag : detections.tags()) {
             Pose3d seen =
-                new Pose3d(then)
-                    .transformBy(camera.robotToCamera())
-                    .transformBy(tag.bestCameraToTag());
+                robotThen.transformBy(camera.robotToCamera()).transformBy(tag.bestCameraToTag());
             seenTags.add(seen);
             Pose3d real = field.tag(tag.id()).orElse(null);
             if (real != null) {
@@ -264,6 +300,11 @@ public final class Vision implements AutoCloseable {
     throw new IllegalArgumentException("no camera named " + camera);
   }
 
+  /** How long autonomous's start holds the cameras back, in seconds: zero is off. */
+  TunableDouble autoStartHoldSeconds() {
+    return autoStartHoldSeconds;
+  }
+
   /** A camera's switch, by the camera's order: off leaves it out. */
   TunableBoolean enabled(int camera) {
     return enabled[camera];
@@ -284,24 +325,15 @@ public final class Vision implements AutoCloseable {
 
   /** The settings as tuned, or the last good ones if a tuned value is out of range. */
   private VisionConfig currentSettings() {
-    VisionConfig d = VisionConfig.DEFAULTS;
     try {
       VisionConfig tuned =
-          new VisionConfig(
-              maxAmbiguity.get(),
-              maxHeightError.get(),
-              d.maxDistanceMeters(),
-              d.maxYawRateRadiansPerSecond(),
-              linearStdDevBaseline.get(),
-              angularStdDevBaseline.get(),
-              distanceExponent.get(),
-              d.headingConstrainedFactor(),
-              d.speedStdDevFactor(),
-              d.yawRateStdDevFactor(),
-              d.maxHeadingStdDevToConstrain(),
-              d.minTagsForHeading(),
-              d.maxYawRateForHeading(),
-              d.maxReprojectionErrorForHeadingPixels());
+          VisionConfigBuilder.builder(VisionConfig.DEFAULTS)
+              .maxAmbiguity(maxAmbiguity.get())
+              .maxHeightErrorMeters(maxHeightError.get())
+              .linearStdDevBaseline(linearStdDevBaseline.get())
+              .angularStdDevBaseline(angularStdDevBaseline.get())
+              .distanceExponent(distanceExponent.get())
+              .build();
       badSettings.set(false);
       return tuned;
     } catch (IllegalArgumentException e) {

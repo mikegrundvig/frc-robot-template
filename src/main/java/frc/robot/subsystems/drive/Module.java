@@ -3,6 +3,7 @@ package frc.robot.subsystems.drive;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
+import java.util.List;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.kinematics.SwerveModulePosition;
@@ -11,7 +12,7 @@ import org.wpilib.units.measure.Distance;
 
 /** One swerve module: converts wheel radians to meters and runs module setpoints. */
 public class Module {
-  static final String[] NAMES = {"FrontLeft", "FrontRight", "BackLeft", "BackRight"};
+  static final List<String> NAMES = List.of("FrontLeft", "FrontRight", "BackLeft", "BackRight");
 
   /** Below this speed, hold the wheel's current angle instead of steering toward noise. */
   private static final double STEER_HOLD_SPEED_MPS = 0.01;
@@ -28,7 +29,7 @@ public class Module {
 
   Module(ModuleIO io, int index, Distance wheelRadius) {
     this.io = io;
-    this.name = NAMES[index];
+    this.name = NAMES.get(index);
     this.wheelRadiusMeters = wheelRadius.in(Meters);
   }
 

@@ -1,0 +1,42 @@
+// Studies (src/studies/java): simulations that answer a design question, such as where to mount
+// the cameras. Their own source set, so nothing in them ships to the robot; they use the robot's
+// code, and the tests check them like it (src/test/java/frc/robot/studies, the coverage floors).
+//
+//   ./gradlew cameraStudy --args="--weights=weights.csv"   see docs/camera-placement.md
+
+sourceSets {
+    studies {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+    test {
+        compileClasspath += sourceSets.studies.output
+        runtimeClasspath += sourceSets.studies.output
+    }
+}
+configurations {
+    studiesImplementation.extendsFrom implementation
+    studiesRuntimeOnly.extendsFrom runtimeOnly
+}
+dependencies {
+    studiesCompileOnly libs.recordbuilder.core
+    studiesAnnotationProcessor libs.recordbuilder.processor
+}
+
+// Their coverage counts with the robot's, under the same floors.
+tasks.named("jacocoTestReport") {
+    sourceSets sourceSets.studies
+}
+
+tasks.register("cameraStudy", JavaExec) {
+    group = "studies"
+    description = "Score camera layouts all over the field. Results go to build/studies/."
+    dependsOn "extractReleaseNative" // PhotonVision's simulation runs on native OpenCV
+    classpath = sourceSets.studies.runtimeClasspath
+    mainClass = "frc.robot.studies.CameraStudy"
+    def natives = layout.buildDirectory.dir("jni/release").get().asFile.absolutePath
+    systemProperty "java.library.path", natives
+    environment "LD_LIBRARY_PATH", natives
+    environment "PATH", natives + File.pathSeparator + System.getenv("PATH")
+    jvmArgs "--enable-native-access=ALL-UNNAMED"
+}

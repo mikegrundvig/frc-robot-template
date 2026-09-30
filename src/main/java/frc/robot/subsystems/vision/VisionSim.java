@@ -24,7 +24,7 @@ import org.wpilib.math.geometry.Transform3d;
  */
 public final class VisionSim implements AutoCloseable {
   /** Tags farther than this are not detected: small in the image, and noisy. */
-  private static final double MAX_SIGHT_METERS = 7.0;
+  public static final double MAX_SIGHT_METERS = 7.0;
 
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
@@ -49,20 +49,9 @@ public final class VisionSim implements AutoCloseable {
    */
   public CameraIO camera(CameraConfig config, Transform3d mountError) {
     CameraIOPhotonVision io = new CameraIOPhotonVision(config.name());
-    CameraConfig.Sensor sensor = config.sensor();
-    SimCameraProperties properties =
-        new SimCameraProperties()
-            .setCalibration(
-                sensor.widthPixels(),
-                sensor.heightPixels(),
-                Rotation2d.fromDegrees(sensor.diagonalFieldOfView().in(Degrees)))
-            .setCalibError(0.25, 0.08)
-            .setFPS(sensor.frameRate().in(Hertz))
-            .setAvgLatencyMs(sensor.latency().in(Milliseconds))
-            .setLatencyStdDevMs(5)
-            // Seeded, one seed per camera, so a simulated run repeats exactly.
-            .setRandomSeed(cameras.size() + 1);
-    PhotonCameraSim simulated = new PhotonCameraSim(io.camera(), properties, layout);
+    // Seeded, one seed per camera, so a simulated run repeats exactly.
+    PhotonCameraSim simulated =
+        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameras.size() + 1), layout);
     simulated.setMaxSightRange(MAX_SIGHT_METERS);
     Transform3d configured = config.robotToCamera();
     world.addCamera(
@@ -72,6 +61,26 @@ public final class VisionSim implements AutoCloseable {
             configured.getRotation().rotateBy(mountError.getRotation())));
     cameras.add(simulated);
     return io;
+  }
+
+  /**
+   * A camera as PhotonVision's simulation models it: the sensor's resolution, field of view, frame
+   * rate, and latency, and a little lens-calibration error, which moves each tag corner about a
+   * quarter pixel. The camera placement study takes its images with the same model.
+   *
+   * @param seed where the noise starts, so a run repeats exactly
+   */
+  public static SimCameraProperties properties(CameraConfig.Sensor sensor, long seed) {
+    return new SimCameraProperties()
+        .setCalibration(
+            sensor.widthPixels(),
+            sensor.heightPixels(),
+            Rotation2d.fromDegrees(sensor.diagonalFieldOfView().in(Degrees)))
+        .setCalibError(0.25, 0.08)
+        .setFPS(sensor.frameRate().in(Hertz))
+        .setAvgLatencyMs(sensor.latency().in(Milliseconds))
+        .setLatencyStdDevMs(5)
+        .setRandomSeed(seed);
   }
 
   /**

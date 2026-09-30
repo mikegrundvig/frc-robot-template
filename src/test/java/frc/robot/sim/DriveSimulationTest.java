@@ -44,14 +44,14 @@ class DriveSimulationTest {
     return harness;
   }
 
+  /** Both IMUs reading with this scale and drift, and no noise. */
   private static SensorErrors gyro(double scale, double driftDegreesPerMinute) {
-    return new SensorErrors(
-        List.of(1.0, 1.0, 1.0, 1.0),
-        List.of(0.0, 0.0, 0.0, 0.0),
-        scale,
-        driftDegreesPerMinute,
-        0,
-        1);
+    return SensorErrors.NONE.withGyros(
+        SensorErrors.GyroErrors.builder()
+            .scale(scale)
+            .driftDegreesPerMinute(driftDegreesPerMinute)
+            .noiseDegrees(0)
+            .build());
   }
 
   @Test
@@ -102,7 +102,9 @@ class DriveSimulationTest {
   @Test
   void anEncoderZeroedOffPointsItsModuleWrongAndOdometryDrifts() {
     SensorErrors oneOff =
-        new SensorErrors(List.of(1.0, 1.0, 1.0, 1.0), List.of(5.0, 0.0, 0.0, 0.0), 1.0, 0, 0, 1);
+        SensorErrorsBuilder.builder(SensorErrors.NONE)
+            .steerOffsetDegrees(List.of(5.0, 0.0, 0.0, 0.0))
+            .build();
     DriveSimHarness robot = robot(oneOff);
 
     robot.drive(2.0, 1.0, 0, 0);
@@ -219,12 +221,15 @@ class DriveSimulationTest {
         .hasMessageContaining("positive");
     assertThatThrownBy(
             () ->
-                new SensorErrors(List.of(1.0, 1.0, 1.0), List.of(0.0, 0.0, 0.0, 0.0), 1.0, 0, 0, 1))
+                SensorErrorsBuilder.builder(SensorErrors.NONE)
+                    .wheelRadiusScale(List.of(1.0, 1.0, 1.0))
+                    .build())
         .hasMessageContaining("per module");
     assertThatThrownBy(
             () ->
-                new SensorErrors(
-                    List.of(1.0, 1.0, 1.0, 1.0), List.of(0.0, 0.0, 0.0, Double.NaN), 1.0, 0, 0, 1))
+                SensorErrorsBuilder.builder(SensorErrors.NONE)
+                    .steerOffsetDegrees(List.of(0.0, 0.0, 0.0, Double.NaN))
+                    .build())
         .hasMessageContaining("steer offset");
     assertThatThrownBy(() -> gyro(1.0, Double.NaN)).hasMessageContaining("gyro");
     assertThatThrownBy(() -> robot(SensorErrors.NONE).simulation.step(0, 0))

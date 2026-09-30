@@ -327,8 +327,9 @@ public final class Calibration {
     return String.format(
         Locale.ROOT,
         "%s: tags landed %.1f cm off, %.1f cm with the mount found (%d sightings; to within %.2f"
-            + " in and %.2f°).%s In Robots: camera(\"%s\", %.2f, %.2f, %.2f, %.1f, %.1f, %.1f) //"
-            + " measured %s",
+            + " in and %.2f°).%s In Robots, the %s camera's mount: .forward(Inches.of(%.2f))"
+            + ".left(Inches.of(%.2f)).up(Inches.of(%.2f)).roll(Degrees.of(%.1f))"
+            + ".tiltUp(Degrees.of(%.1f)).yaw(Degrees.of(%.1f)) // measured %s",
         camera.name(),
         solved.residualBeforeMeters() * 100,
         solved.residualAfterMeters() * 100,

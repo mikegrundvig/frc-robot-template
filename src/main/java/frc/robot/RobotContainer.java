@@ -19,6 +19,7 @@ import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
+import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
@@ -27,7 +28,6 @@ import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
-import frc.robot.subsystems.vision.VisionSim;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,7 +35,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
@@ -87,11 +86,8 @@ public final class RobotContainer implements AutoCloseable {
   /** The simulator's field view: the robot, its start, and the field's places. Null in a robot. */
   private final @Nullable Field2d fieldView;
 
-  /** The simulator's physics, which knows where the robot really is. Null unless simulating. */
-  private final @Nullable DriveSimulation simulation;
-
-  /** The simulator's cameras, rendering from where the robot really is. Null unless simulating. */
-  private final @Nullable VisionSim visionSim;
+  /** The simulator's world, which knows where the robot really is. Null unless simulating. */
+  private final @Nullable SimulatedWorld world;
 
   private final Localization localization;
   private final Drive drive;
@@ -185,24 +181,11 @@ public final class RobotContainer implements AutoCloseable {
     // and a robot without wiring stays still rather than guess at motors, and says so).
     DriveHardware driveHardware;
     if (mode == Constants.Mode.SIM) {
-      // The simulator knows where the robot really is, and its sensors report that with errors,
-      // so the robot's own estimate drifts from the truth as a real robot's does.
-      simulation =
-          new DriveSimulation(
-              drivetrain.get().modules(),
-              drivetrain.get().moduleTranslations(body),
-              simulatedErrors);
-      simulation.setTerrain(field.terrain());
+      world = new SimulatedWorld(field, drivetrain.get(), body, cameras, simulatedErrors);
       hardware = null;
-      driveHardware =
-          DriveHardware.builder()
-              .modules(List.of(simulation.modules()))
-              .gyro(simulation.gyro())
-              .backupImu(simulation.backupGyro())
-              .odometryLock(new ReentrantLock())
-              .build();
+      driveHardware = world.drivetrainHardware();
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
-      simulation = null;
+      world = null;
       PhoenixDrivetrain phoenix =
           new PhoenixDrivetrain(robot.drivetrainWiring().get(), drivetrain.get().modules());
       hardware = phoenix;
@@ -214,7 +197,7 @@ public final class RobotContainer implements AutoCloseable {
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {
-      simulation = null;
+      world = null;
       hardware = null;
       driveHardware = DriveHardware.none();
       noHardware.set(mode == Constants.Mode.REAL);
@@ -243,22 +226,15 @@ public final class RobotContainer implements AutoCloseable {
             wheelReach);
     drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
-    if (simulation != null) {
-      simulation.place(middle);
+    if (world != null) {
+      world.place(middle);
     }
 
     // Cameras: PhotonVision on the robot, its simulation in the simulator, the log in a replay.
     CameraIO[] cameraIOs = new CameraIO[cameras.size()];
-    if (mode == Constants.Mode.SIM) {
-      VisionSim simulatedCameras = new VisionSim(field);
-      for (int i = 0; i < cameras.size(); i++) {
-        CameraConfig camera = cameras.get(i);
-        cameraIOs[i] =
-            simulatedCameras.camera(camera, simulatedErrors.cameraMountError(camera.name()));
-      }
-      visionSim = simulatedCameras;
+    if (world != null) {
+      cameraIOs = world.cameras();
     } else {
-      visionSim = null;
       for (int i = 0; i < cameras.size(); i++) {
         cameraIOs[i] =
             mode == Constants.Mode.REAL
@@ -318,16 +294,12 @@ public final class RobotContainer implements AutoCloseable {
         !chosenPose.equals(startPose) && (!enabled || !enabledSinceBoot)
             ? chosenPose
             : Optional.empty();
-    DriveSimulation sim = simulation;
+    SimulatedWorld sim = world;
     if (sim != null) {
       // In the simulator the drive team really moves it. Then the world moves on and the robot
       // reads its sensors, as on a robot between loops: its gyro feels the turn this loop.
       placed.ifPresent(sim::place);
-      sim.step(RobotLoop.PERIOD_SECONDS, RobotController.getTime());
-      VisionSim cameras = visionSim;
-      if (cameras != null) {
-        cameras.update(sim.truePose3d());
-      }
+      sim.step(RobotController.getTime());
       loop.mark("Simulation", System.nanoTime());
     }
     boolean autonomous = RobotState.isAutonomousEnabled();
@@ -459,15 +431,9 @@ public final class RobotContainer implements AutoCloseable {
           "Field/Places/" + place.name(),
           alliance.stream().map(ours -> place.on(field, ours)).toArray(Pose2d[]::new));
     }
-    DriveSimulation sim = simulation;
+    SimulatedWorld sim = world;
     if (sim != null) {
-      // How far the robot's estimate is from the truth: what localization has to close.
-      Pose2d truth = sim.truePose();
-      Logger.recordOutput("Sim/TruePose", truth);
-      Logger.recordOutput(
-          "Sim/PoseErrorMeters", truth.getTranslation().getDistance(pose.getTranslation()));
-      Logger.recordOutput(
-          "Sim/HeadingErrorDegrees", pose.getRotation().minus(truth.getRotation()).getDegrees());
+      sim.log(pose);
     }
     if (fieldView != null) {
       fieldView.setRobotPose(pose);
@@ -576,9 +542,10 @@ public final class RobotContainer implements AutoCloseable {
     return drive;
   }
 
-  /** The simulator's physics, or null outside the simulator. */
+  /** The simulator's drivetrain physics, or null outside the simulator. */
   @Nullable DriveSimulation simulation() {
-    return simulation;
+    SimulatedWorld sim = world;
+    return sim != null ? sim.drivetrain() : null;
   }
 
   /** Whether the alert saying the drivetrain has no hardware code is active. */
@@ -597,8 +564,8 @@ public final class RobotContainer implements AutoCloseable {
     overrunning.close();
     loggingBehind.close();
     vision.close();
-    if (visionSim != null) {
-      visionSim.close();
+    if (world != null) {
+      world.close();
     }
     if (hardware != null) {
       hardware.close();

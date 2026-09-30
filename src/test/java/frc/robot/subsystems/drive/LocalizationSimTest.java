@@ -1,9 +1,13 @@
 package frc.robot.subsystems.drive;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.Robots;
 import frc.robot.SimTestSupport;
+import frc.robot.lib.localization.DriveConditions;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
@@ -59,11 +63,15 @@ class LocalizationSimTest {
   }
 
   private DriveSimHarness robot(SensorErrors errors) {
+    return robot(errors, EstimatorConfig.DEFAULTS);
+  }
+
+  private DriveSimHarness robot(SensorErrors errors, EstimatorConfig config) {
     if (harness != null) {
       harness.close();
     }
     SimTestSupport.pauseTimeAndDisable();
-    harness = new DriveSimHarness(Robots.SIM, errors);
+    harness = new DriveSimHarness(Robots.SIM, errors, config);
     return harness;
   }
 
@@ -118,6 +126,93 @@ class LocalizationSimTest {
     assertThat(robot.positionError()).as("0.3 s after the shove").isLessThan(0.08);
     robot.drive(0.2, 0.3, 0, 0);
     assertThat(robot.positionError()).as("0.5 s after").isLessThan(0.04);
+  }
+
+  /** Knocked 60 cm sideways hard enough to feel: the camera is believed at once, no recovery. */
+  @Test
+  void aHitIsFeltSoTheCameraIsBelievedAtOnce() {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    robot.watchWith(camera(robot));
+    robot.drive(1.0, 0.3, 0, 0);
+
+    robot.simulation.hit(new Transform2d(0, 0.6, Rotation2d.ZERO));
+    List<LocalizationEstimate.Mode> modes = new ArrayList<>();
+    for (int i = 0; i < 8; i++) {
+      robot.drive(0.02, 0.3, 0, 0);
+      modes.add(robot.estimator.estimate().mode());
+    }
+
+    assertThat(modes).doesNotContain(LocalizationEstimate.Mode.LOST);
+    assertThat(robot.estimator.estimate().health().recoveries()).isZero();
+    assertThat(robot.positionError()).as("0.16 s after the hit").isLessThan(0.05);
+  }
+
+  /** Half a second on a bump, front wheels in the air: the tilt says their travel is suspect. */
+  private static double crossABump(DriveSimHarness robot) {
+    robot.drive(1.0, 0.5, 0, 0); // 1.1 m/s
+    robot.simulation.tilt(Math.toRadians(-20), 0); // nose up
+    robot.simulation.grip(0.4);
+    robot.drive(0.5, 0.5, 0, 0);
+    robot.simulation.tilt(0, 0);
+    robot.simulation.grip(1);
+    robot.drive(0.5, 0.5, 0, 0);
+    return robot.positionError();
+  }
+
+  @Test
+  void onABumpTheTiltDiscountsWheelsThatLostTheFloor() {
+    EstimatorConfig ignoringTilt =
+        EstimatorConfigBuilder.builder(EstimatorConfig.DEFAULTS)
+            .tiltStartDegrees(80)
+            .tiltZeroDegrees(89)
+            .build();
+    double trusting = crossABump(robot(SensorErrors.NONE, ignoringTilt));
+    DriveSimHarness robot = robot(SensorErrors.NONE);
+    double discounting = crossABump(robot);
+
+    assertThat(trusting).as("trusting every wheel turn").isGreaterThan(0.2);
+    assertThat(discounting).as("discounting by the tilt").isLessThan(trusting / 3);
+    assertThat(robot.estimator.estimate().covariance().xStdDev())
+        .as("and it knows it may be off")
+        .isGreaterThan(discounting);
+  }
+
+  @Test
+  void theDrivetrainReadsTiltJoltsAndStrainFromItsSensors() {
+    DriveSimHarness robot = robot(SensorErrors.NONE);
+    robot.idle(0.1);
+    boolean disabled = robot.drive.conditions().disabled();
+
+    robot.drive(0.04, 1.0, 0, 0); // full stick from a standstill
+    boolean starting = robot.drive.conditions().tractionLimited();
+    robot.drive(1.5, 1.0, 0, 0);
+    boolean cruising = robot.drive.conditions().tractionLimited();
+    robot.simulation.tilt(0.3, 0.1);
+    robot.simulation.hit(new Transform2d(0.1, 0, Rotation2d.ZERO));
+    robot.drive(0.02, 1.0, 0, 0);
+    DriveConditions hit = robot.drive.conditions();
+    robot.drive(0.02, 1.0, 0, 0);
+
+    assertThat(disabled).isTrue();
+    assertThat(starting).as("motors at their current limit").isTrue();
+    assertThat(cruising).isFalse();
+    assertThat(hit.tiltRadians()).isCloseTo(Math.acos(Math.cos(0.3) * Math.cos(0.1)), within(1e-9));
+    assertThat(hit.collision()).isTrue();
+    assertThat(hit.disabled()).isFalse();
+    assertThat(robot.drive.conditions().collision()).as("a loop later").isFalse();
+    assertThat(robot.drive.pitchRadians()).isEqualTo(0.3);
+    assertThat(robot.drive.rollRadians()).isEqualTo(0.1);
+  }
+
+  @Test
+  void drivingHardIsNeverMistakenForAHit() {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    boolean[] felt = {false};
+    robot.eachLoop(() -> felt[0] |= robot.drive.conditions().collision());
+
+    driveTheRoute(robot);
+
+    assertThat(felt[0]).isFalse();
   }
 
   /**

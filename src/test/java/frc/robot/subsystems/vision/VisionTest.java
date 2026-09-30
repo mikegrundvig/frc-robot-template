@@ -23,6 +23,7 @@ import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.tunable.MockTunableBackend;
 import org.wpilib.tunable.TunableRegistry;
@@ -76,7 +77,12 @@ class VisionTest {
 
     /** The exact view of the blue hub's near face from the robot. */
     void see(long timestampNanos, CameraConfig mount) {
-      Pose3d cameraPose = new Pose3d(ROBOT).transformBy(mount.robotToCamera());
+      see(timestampNanos, mount, new Pose3d(ROBOT));
+    }
+
+    /** The exact view from the robot, tilted as it is. */
+    void see(long timestampNanos, CameraConfig mount, Pose3d robot) {
+      Pose3d cameraPose = robot.transformBy(mount.robotToCamera());
       frames.add(new Frame(timestampNanos, 2, false, Transform3d.ZERO, 0));
       for (int id : new int[] {25, 26}) {
         Transform3d view = new Transform3d(cameraPose, FIELD.tag(id).orElseThrow());
@@ -110,7 +116,11 @@ class VisionTest {
   }
 
   private void loop() {
-    vision.periodic(estimator.estimate());
+    loop(0, 0);
+  }
+
+  private void loop(double pitch, double roll) {
+    vision.periodic(estimator.estimate(), pitch, roll);
     vision.record(estimator.update());
   }
 
@@ -156,6 +166,43 @@ class VisionTest {
 
     assertThat(vision.isDisconnectedAlertActive(0)).isTrue();
     assertThat(vision.summary()).startsWith("0 of 1 cameras connected");
+  }
+
+  @Test
+  void aTiltedRobotsImagesAreSolvedTilted() {
+    double pitch = Math.toRadians(-8); // nose up on a ramp
+    double roll = Math.toRadians(3);
+    io.see(
+        T0 + 200_000_000L,
+        camera,
+        new Pose3d(
+            ROBOT.getX(),
+            ROBOT.getY(),
+            0,
+            new Rotation3d(roll, pitch, ROBOT.getRotation().getRadians())));
+
+    loop(pitch, roll);
+
+    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+    assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
+  }
+
+  @Test
+  void autonomousStartingCanHoldTheCamerasBack() {
+    vision.autoStartHoldSeconds().set(2.0);
+    vision.autonomousStarted(T0 + 100_000_000L);
+    io.see(T0 + 200_000_000L, camera);
+
+    loop();
+
+    assertThat(vision.accepted(0) + vision.rejected(0)).as("held").isZero();
+    vision.autoStartHoldSeconds().set(0.0);
+    vision.autonomousStarted(T0 + 100_000_000L);
+    io.see(T0 + 210_000_000L, camera);
+    loop();
+    assertThat(vision.accepted(0)).as("off: nothing held").isEqualTo(1);
   }
 
   @Test

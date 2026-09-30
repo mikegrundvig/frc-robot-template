@@ -11,6 +11,23 @@ public interface GyroIO {
     public Rotation2d yaw = Rotation2d.ZERO;
     public double yawVelocityRadPerSec = 0.0;
 
+    /**
+     * The robot's attitude: tilted on a bump, a ramp, or a wheel up on a game piece. WPILib's
+     * convention: roll turns about the robot's forward axis and pitch about its left axis, each
+     * counterclockwise seen from the axis's tip, so a positive pitch is nose down.
+     */
+    public double pitchRad = 0.0;
+
+    public double rollRad = 0.0;
+
+    /**
+     * Acceleration along the robot's forward and left axes, as the IMU feels it: a jolt beyond what
+     * driving explains is a collision. Gravity is in it too, a little, when the robot tilts.
+     */
+    public double accelerationXMetersPerSecSq = 0.0;
+
+    public double accelerationYMetersPerSecSq = 0.0;
+
     /** Yaw readings taken since the last loop, with the modules' readings (see ModuleIO). */
     public long[] odometryTimestampsNanos = new long[] {};
 

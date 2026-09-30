@@ -227,7 +227,7 @@ class VisionPipelineTest {
             seeing(farAway, camera, false, 25, 26),
             camera,
             steady(farAway.getRotation()),
-            new VisionConfig(0.2, 0.2, 3.0, 5.0, 0.02, 0.03, 2, 0.5, 0.25, 0.5, 0.1, 2, 0.5, 1));
+            VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(3.0).build());
     VisionResult unknownTag =
         process(
             new TagDetections(

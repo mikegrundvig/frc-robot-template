@@ -7,6 +7,7 @@ import static org.wpilib.units.Units.Seconds;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.localization.BodyMotion;
+import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
@@ -45,6 +46,15 @@ public class Drive implements Mechanism, AutoCloseable {
   private static final double LOOP_PERIOD_S = 0.02;
   private static final double STICK_DEADBAND = 0.1;
 
+  /**
+   * A jolt beyond this, in m/s², is a collision (6800's threshold): hard driving stays near the
+   * wheels' grip, about 1 g.
+   */
+  private static final double COLLISION_ACCELERATION = 20.0;
+
+  /** A wheel this far short of its commanded speed, in m/s, is at the edge of its grip. */
+  private static final double SPEED_DEFICIT = 0.5;
+
   /** A reset to "exactly here": a millimeter and a milliradian. */
   private static final PoseCovariance EXACTLY = PoseCovariance.fromStdDevs(0.001, 0.001, 0.001);
 
@@ -66,6 +76,9 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /** The previous odometry reading, which the next one's motion is measured from. */
   private @Nullable OdometrySample lastReading;
+
+  /** What the IMU and the motors said about trusting the wheels this loop. */
+  private DriveConditions conditions = DriveConditions.NORMAL;
 
   private final Alert gyroDisconnectedAlert;
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
@@ -143,6 +156,8 @@ public class Drive implements Mechanism, AutoCloseable {
       Logger.recordOutput("Drive/SetpointsOptimized", new SwerveModuleVelocity[] {});
     }
 
+    conditions = readConditions(enabled);
+    estimator.setConditions(conditions);
     updateOdometry();
 
     gyroDisconnectedAlert.set(!gyroInputs.connected);
@@ -151,6 +166,33 @@ public class Drive implements Mechanism, AutoCloseable {
     }
     Logger.recordOutput("Drive/Pose", getPose());
     Logger.recordOutput("Drive/ModuleVelocities", moduleVelocities());
+    Logger.recordOutput("Drive/TiltDegrees", Math.toDegrees(conditions.tiltRadians()));
+    Logger.recordOutput("Drive/Collision", conditions.collision());
+    Logger.recordOutput("Drive/TractionLimited", conditions.tractionLimited());
+  }
+
+  /**
+   * What the IMU and the motors say about trusting the wheels: the robot's tilt, a jolt beyond
+   * driving, and wheels at the edge of their grip (a motor at its current limit, or a wheel well
+   * short of its commanded speed), and whether people might be carrying it. Without the gyro, only
+   * the motors can say.
+   */
+  private DriveConditions readConditions(boolean enabled) {
+    boolean tractionLimited = false;
+    for (Module module : modules) {
+      tractionLimited |=
+          module.isTorqueLimited() || module.speedDeficitMetersPerSecond() > SPEED_DEFICIT;
+    }
+    if (!gyroInputs.connected) {
+      return new DriveConditions(0, false, tractionLimited, !enabled);
+    }
+    // The angle between the robot's up and straight up.
+    double tilt =
+        Math.acos(Math.min(1, Math.cos(gyroInputs.pitchRad) * Math.cos(gyroInputs.rollRad)));
+    boolean collision =
+        Math.hypot(gyroInputs.accelerationXMetersPerSecSq, gyroInputs.accelerationYMetersPerSecSq)
+            > COLLISION_ACCELERATION;
+    return new DriveConditions(tilt, collision, tractionLimited, !enabled);
   }
 
   /** Sends new gains and limits to the modules, and keeps the limits driving uses. */
@@ -209,6 +251,16 @@ public class Drive implements Mechanism, AutoCloseable {
       estimator.addOdometry(reading.timestampNanos(), motion, yaw, gyroHasReadings);
       lastReading = reading;
     }
+  }
+
+  /** The robot's pitch, from the IMU: zero without it. See {@link GyroIO} for the convention. */
+  public double pitchRadians() {
+    return gyroInputs.connected ? gyroInputs.pitchRad : 0;
+  }
+
+  /** The robot's roll, from the IMU: zero without it. */
+  public double rollRadians() {
+    return gyroInputs.connected ? gyroInputs.rollRad : 0;
   }
 
   /** Where the robot is, as the pose estimator has it. */
@@ -298,6 +350,11 @@ public class Drive implements Mechanism, AutoCloseable {
   /** The gyro's yaw, as of this loop. */
   Rotation2d gyroYaw() {
     return gyroInputs.yaw;
+  }
+
+  /** What the IMU and the motors said about trusting the wheels this loop. */
+  DriveConditions conditions() {
+    return conditions;
   }
 
   @Override

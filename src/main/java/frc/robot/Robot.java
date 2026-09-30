@@ -88,6 +88,7 @@ public class Robot extends LoggedRobot {
         .add("Alliance", container::allianceStation)
         .add("Placement", () -> container.placement().describe())
         .add("Localization", container::localization)
+        .add("Scoring", container::scoring)
         .add("Cameras", container::cameras);
   }
 

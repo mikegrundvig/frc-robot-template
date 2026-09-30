@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Placement;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.SensorErrors;
+import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -18,7 +20,9 @@ import org.junit.jupiter.api.Test;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.driverstation.Alliance;
 import org.wpilib.hardware.hal.AllianceStationID;
+import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.simulation.GamepadSim;
 import org.wpilib.telemetry.MockTelemetryBackend;
@@ -39,6 +43,7 @@ class RobotContainerSimTest {
   private RobotContainer container;
   private GamepadSim driver;
   private MockTelemetryBackend telemetry;
+  private MockTunableBackend tunables;
 
   @BeforeAll
   static void initHal() {
@@ -51,7 +56,8 @@ class RobotContainerSimTest {
     setStation(AllianceStationID.BLUE_2);
     telemetry = new MockTelemetryBackend();
     TelemetryRegistry.registerBackend("", telemetry);
-    TunableRegistry.registerBackend("", new MockTunableBackend());
+    tunables = new MockTunableBackend();
+    TunableRegistry.registerBackend("", tunables);
     scheduler = Scheduler.createIndependentScheduler();
     container = containerFor(Constants.Mode.SIM);
     driver = new GamepadSim(DRIVER_PORT);
@@ -60,6 +66,7 @@ class RobotContainerSimTest {
   @AfterEach
   void tearDown() {
     driver.setLeftY(0.0);
+    driver.setBackButton(false);
     driver.notifyNewData();
     container.close();
     TelemetryRegistry.reset();
@@ -73,14 +80,34 @@ class RobotContainerSimTest {
   }
 
   private RobotContainer containerFor(Constants.Mode mode, SensorErrors errors) {
+    return containerFor(mode, errors, Robots.SIM.cameras());
+  }
+
+  private RobotContainer containerFor(
+      Constants.Mode mode, SensorErrors errors, List<CameraConfig> cameras) {
     return new RobotContainer(
-        mode,
-        scheduler,
-        Robots.SIM.body(),
-        Robots.SIM::drivetrain,
-        Robots.SIM.cameras(),
-        FIELD,
-        errors);
+        mode, scheduler, Robots.SIM.body(), Robots.SIM::drivetrain, cameras, FIELD, errors);
+  }
+
+  /** Turns the simulated robot by hand, where it stands: its gyro feels it. */
+  private void turnByHand(double degrees) {
+    DriveSimulation sim = Objects.requireNonNull(container.simulation());
+    Pose2d truth = sim.truePose();
+    sim.place(
+        new Pose2d(
+            truth.getTranslation(), truth.getRotation().plus(Rotation2d.fromDegrees(degrees))));
+  }
+
+  private void pressBack() {
+    driver.setBackButton(true);
+    driver.notifyNewData();
+    tick(1);
+    driver.setBackButton(false);
+    driver.notifyNewData();
+  }
+
+  private double headingDegrees() {
+    return container.drive().getPose().getRotation().getDegrees();
   }
 
   private static void setStation(AllianceStationID station) {
@@ -130,6 +157,81 @@ class RobotContainerSimTest {
     assertThat(container.allianceStation()).isEqualTo("Blue 2");
     assertThat(container.placement().status()).isEqualTo(Placement.Status.READY);
     assertFalse(container.isNoHardwareAlertActive(), "the simulator is the drivetrain's hardware");
+  }
+
+  @Test
+  void theBackButtonSaysTheRobotFacesDownfieldForTheDriversAlliance() {
+    container.close();
+    container = containerFor(Constants.Mode.SIM, SensorErrors.NONE, List.of());
+    setStation(AllianceStationID.RED_2);
+    tick(2); // placed on red's center start, facing blue's wall
+    turnByHand(30);
+    tick(1);
+    double turned = headingDegrees();
+
+    pressBack();
+
+    assertThat(turned).isCloseTo(-150, within(0.5));
+    assertThat(Math.abs(headingDegrees())).as("red faces -x").isCloseTo(180, within(1e-6));
+  }
+
+  /**
+   * The driver pressed Back with the robot turned 30 degrees: the cameras turn the estimate back.
+   */
+  @Test
+  void theCamerasTurnBackAWrongHeadingReset() {
+    setStation(AllianceStationID.RED_2);
+    tick(SimTestSupport.loops(1.0));
+    turnByHand(30);
+    tick(SimTestSupport.loops(0.5));
+
+    pressBack();
+    double wrong = headingDegrees();
+    tick(SimTestSupport.loops(1.0));
+
+    assertThat(Math.abs(wrong)).isCloseTo(180, within(0.5));
+    assertThat(headingDegrees()).isCloseTo(-150, within(1.0));
+    DriveSimulation sim = Objects.requireNonNull(container.simulation());
+    assertThat(
+            container
+                .drive()
+                .getPose()
+                .getTranslation()
+                .getDistance(sim.truePose().getTranslation()))
+        .isLessThan(0.05);
+  }
+
+  @Test
+  void itSaysWhenItIsReadyToScoreAndWhyNot() {
+    String before = container.scoring();
+    tick(SimTestSupport.loops(1.0));
+    String settled = container.scoring();
+    boolean ready = container.readyToScore();
+    Objects.requireNonNull(container.simulation()).tilt(Math.toRadians(10), 0);
+    tick(2);
+
+    assertThat(before).isEqualTo("Not ready: not started");
+    assertThat(settled).isEqualTo("Ready to score");
+    assertThat(ready).isTrue();
+    assertThat(container.scoring()).isEqualTo("Not ready: the robot is tilted 10 degrees");
+  }
+
+  @Test
+  void autonomousStartingHoldsTheCamerasOnlyWhenAsked() {
+    tunables.setDouble("Vision/autoStartHoldSeconds", 2.0);
+    tunables.update();
+    tick(SimTestSupport.loops(1.0));
+    int before = container.estimate().health().accepted();
+
+    DriverStationSim.setRobotMode(RobotMode.AUTONOMOUS);
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    tick(SimTestSupport.loops(1.0));
+    int held = container.estimate().health().accepted() - before;
+    tick(SimTestSupport.loops(1.5));
+
+    assertThat(held).as("held for 2 s").isZero();
+    assertThat(container.estimate().health().accepted() - before).as("then used").isPositive();
   }
 
   @Test

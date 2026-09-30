@@ -14,6 +14,7 @@ import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
@@ -74,6 +75,9 @@ public final class RobotContainer implements AutoCloseable {
 
   static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
+  /** How many loops "lately" covers for loop timing: ten seconds. */
+  private static final int RECENT_LOOPS = 500;
+
   private final FieldModel field;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
@@ -105,6 +109,20 @@ public final class RobotContainer implements AutoCloseable {
           Alert.Level.MEDIUM);
   private final Alert offField =
       new Alert("Field", "offField", "Odometry puts the robot off the field", Alert.Level.MEDIUM);
+  private final Alert overrunning =
+      new Alert("Loop", "overrunning", "The loop is overrunning", Alert.Level.MEDIUM);
+  private final Alert loggingBehind =
+      new Alert(
+          "Loop",
+          "loggingBehind",
+          "Logging fell behind and dropped data: this log has gaps",
+          Alert.Level.HIGH);
+
+  /** Every loop's time, section by section: the robot marks its sections, this marks its own. */
+  private final LoopMonitor loop = new LoopMonitor(LOOP_PERIOD_SECONDS, RECENT_LOOPS);
+
+  private LoopMonitor.Report lastLoop = new LoopMonitor.Report(0, false, List.of(), 0, 0);
+  private String lastOverrun = "";
 
   /** This loop's alliance and station (1, 2, 3), from the Driver Station or the field system. */
   private Optional<Alliance> alliance = Optional.empty();
@@ -278,6 +296,7 @@ public final class RobotContainer implements AutoCloseable {
       if (cameras != null) {
         cameras.update(sim.truePose3d());
       }
+      loop.mark("Simulation", System.nanoTime());
     }
     boolean autonomous = RobotState.isAutonomousEnabled();
     if (autonomous && !wasAutonomous) {
@@ -289,14 +308,17 @@ public final class RobotContainer implements AutoCloseable {
     enabledSinceBoot |= enabled;
 
     drive.periodic(enabled);
+    loop.mark("Drive", System.nanoTime());
     // Told where it is after reading its gyro, so a turn made in placing it isn't counted twice.
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
     placed.ifPresent(
         pose -> estimator.reset(new PoseReset(RobotController.getTime(), pose, PLACED, placedOn)));
     vision.periodic(estimator.estimate(), drive.pitchRadians(), drive.rollRadians());
+    loop.mark("Vision", System.nanoTime());
     vision.record(estimator.update());
     estimate = estimator.estimate();
     notReadyToScore = LocalizationGate.SCORING.whyNot(estimate);
+    loop.mark("Localization", System.nanoTime());
     Pose2d pose = estimate.pose();
     placement =
         Placement.check(
@@ -310,6 +332,63 @@ public final class RobotContainer implements AutoCloseable {
     offField.set(!field.contains(pose.getTranslation()));
     updateZones(pose);
     show(pose);
+    loop.mark("Field", System.nanoTime());
+  }
+
+  /**
+   * The loop's timing, for the robot to mark the sections it runs outside this class: the page's
+   * requests, and the commands.
+   */
+  LoopMonitor loop() {
+    return loop;
+  }
+
+  /**
+   * The loop is done: logs its timing section by section, alerts if loops are overrunning, naming
+   * the slowest section of the last one that did, and alerts if the log is dropping data.
+   */
+  void finishLoop(long nowNanos) {
+    lastLoop = loop.finish(nowNanos);
+    Logger.recordOutput("Loop/Milliseconds", lastLoop.seconds() * 1000);
+    Logger.recordOutput("Loop/OverrunsLately", lastLoop.overrunsLately());
+    Logger.recordOutput("Loop/WorstLatelyMilliseconds", lastLoop.worstLatelySeconds() * 1000);
+    for (LoopMonitor.Section section : lastLoop.sections()) {
+      Logger.recordOutput(
+          "Loop/Sections/" + section.name() + "Milliseconds", section.seconds() * 1000);
+    }
+    LoopMonitor.Section slowest = lastLoop.slowest();
+    if (lastLoop.overran() && slowest != null) {
+      lastOverrun =
+          String.format(
+              Locale.ROOT,
+              "; the last took %.0f ms, %.0f of them in %s",
+              lastLoop.seconds() * 1000,
+              slowest.seconds() * 1000,
+              slowest.name());
+    }
+    overrunning.setText(
+        String.format(
+            Locale.ROOT,
+            "The loop overran %.0f ms %d %s in the last 10 s%s",
+            LOOP_PERIOD_SECONDS * 1000,
+            lastLoop.overrunsLately(),
+            lastLoop.overrunsLately() == 1 ? "time" : "times",
+            lastOverrun));
+    overrunning.set(lastLoop.overrunsLately() > 0);
+    loggingBehind.set(Logger.getReceiverQueueFault());
+  }
+
+  /** One line for the pit: how long loops take, and whether they keep up. */
+  String loopStatus() {
+    return lastLoop.describe();
+  }
+
+  boolean isOverrunAlertActive() {
+    return overrunning.get();
+  }
+
+  String overrunAlertText() {
+    return overrunning.getText();
   }
 
   /**
@@ -482,6 +561,8 @@ public final class RobotContainer implements AutoCloseable {
     noHardware.close();
     allianceUnknown.close();
     offField.close();
+    overrunning.close();
+    loggingBehind.close();
     vision.close();
     if (visionSim != null) {
       visionSim.close();

@@ -8,6 +8,9 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import frc.robot.lib.timing.LoopMonitor;
+import java.io.File;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -19,6 +22,7 @@ import org.wpilib.driverstation.MatchState;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
+import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
 public class Robot extends LoggedRobot {
@@ -33,6 +37,14 @@ public class Robot extends LoggedRobot {
 
   /** Every mechanism, and the controls that drive them. */
   private final RobotContainer container;
+
+  /** Where the robot's log goes: AdvantageKit writes to its logs folder. */
+  static final String LOG_DRIVE = "/U";
+
+  /** Why this session isn't being logged, when it isn't; null when it is. */
+  private @Nullable String noLogDrive;
+
+  private @Nullable Alert noLogDriveAlert;
 
   public Robot() {
     // Every log records exactly which code produced it.
@@ -51,9 +63,11 @@ public class Robot extends LoggedRobot {
 
     switch (Constants.currentMode) {
       case REAL -> {
-        // On the robot: log to a file, and stream to dashboards.
+        // On the robot: log to the USB drive, and stream to dashboards (less often on the field,
+        // where the radio's bandwidth is capped and the drive keeps everything).
         Logger.addDataReceiver(new WPILOGWriter());
-        Logger.addDataReceiver(new NT4Publisher());
+        Logger.addDataReceiver(new DashboardStream(new NT4Publisher()));
+        noLogDrive = logDriveProblem(new File(LOG_DRIVE));
       }
       case SIM -> {
         // In the simulator: stream to AdvantageScope, and keep a log file (logs/) of every session.
@@ -83,8 +97,13 @@ public class Robot extends LoggedRobot {
             Robots.SIM.cameras(),
             Rebuilt.field(Robots.SIM.body()));
     pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
+    if (noLogDrive != null) {
+      noLogDriveAlert = new Alert("Loop", "noLogDrive", noLogDrive, Alert.Level.HIGH);
+      noLogDriveAlert.set(true);
+    }
     pitwall
         .status()
+        .add("Loop", container::loopStatus)
         .add("Alliance", container::allianceStation)
         .add("Placement", () -> container.placement().describe())
         .add("Localization", container::localization)
@@ -98,14 +117,34 @@ public class Robot extends LoggedRobot {
   }
 
   /**
+   * Why a session wouldn't be logged: no drive where the log goes, or one that can't be written.
+   *
+   * @return null when the drive is there and writable
+   */
+  static @Nullable String logDriveProblem(File drive) {
+    if (!drive.isDirectory()) {
+      return "No USB drive at " + drive + ": this session isn't being logged";
+    }
+    if (!drive.canWrite()) {
+      return "The USB drive at " + drive + " can't be written: this session isn't being logged";
+    }
+    return null;
+  }
+
+  /**
    * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
-   * command scheduler.
+   * command scheduler, each timed.
    */
   @Override
   public void robotPeriodic() {
+    LoopMonitor loop = container.loop();
+    loop.start(System.nanoTime());
     pitwall.periodic();
+    loop.mark("Pitwall", System.nanoTime());
     container.periodic();
     Scheduler.getDefault().run();
+    loop.mark("Commands", System.nanoTime());
+    container.finishLoop(System.nanoTime());
   }
 
   /**

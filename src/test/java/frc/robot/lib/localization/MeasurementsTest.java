@@ -71,7 +71,8 @@ class MeasurementsTest {
         .as("a yaw reading that isn't one")
         .isFalse();
     assertThatThrownBy(() -> ImuReadingsBuilder.builder(level).yawsRadians(List.of(0.3)).build())
-        .hasMessageContaining("one time for each yaw reading");
+        .hasMessage(
+            "ImuReadings.yawsRadians: must have one reading for each time: 2 times, 1 readings");
   }
 
   @Test

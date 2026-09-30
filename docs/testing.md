@@ -102,3 +102,19 @@ What it offers:
   property, as `DashboardLayoutTest` does.
 - **Coverage has a floor.** The build fails below the floors in `coverage-floor.properties`. They
   catch code with no tests at all; they are not a target to chase.
+
+## Configuration is tested too
+
+A bad configuration fails the build, never a robot. Every robot in `Robots.all()` is built and
+checked by the tests `deploy` runs first:
+
+- **Its values:** each record checks its own when built, and reports every problem at once
+  (`RobotConfigTest` and each record's own test).
+- **Its tuning:** every value a mechanism lets the pit tune starts within its limits
+  (`RobotTuningTest`).
+- **Its rules across mechanisms** (`RobotRules`): the committed configuration keeps every one
+  (`RobotRulesTest`).
+
+A new rule gets a test of its own: a change that breaks it is refused, one that keeps it isn't,
+and changing both sides together works. Pitwall's `ConfigRulesTest` works one through, two arms
+that can collide.

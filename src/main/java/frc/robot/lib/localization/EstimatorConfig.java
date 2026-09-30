@@ -1,5 +1,13 @@
 package frc.robot.lib.localization;
 
+import static frc.robot.lib.config.Rules.atLeast;
+import static frc.robot.lib.config.Rules.below;
+import static frc.robot.lib.config.Rules.between;
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.positive;
+import static frc.robot.lib.config.Rules.shown;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 
 /**
@@ -124,58 +132,45 @@ public record EstimatorConfig(
           .build();
 
   public EstimatorConfig {
-    double[] nonNegative = {
-      translationStdDevPerMeter,
-      translationStdDevPerRadian,
-      residualScale,
-      tiltStartDegrees,
-      collisionStdDevMeters,
-      handlingStdDevPerSqrtSecond,
-      headingDriftDegreesPerMinute,
-      headingStdDevDegreesPerTurn,
-      wheelHeadingStdDevDegreesPerTurn,
-      futureToleranceSeconds,
-      recoveryAgreementMeters
-    };
-    for (double value : nonNegative) {
-      if (!(value >= 0) || Double.isInfinite(value)) {
-        throw new IllegalArgumentException("estimator settings must be finite, and zero or more");
-      }
-    }
-    double[] positive = {
-      slipCorrelationSeconds,
-      collisionWindowSeconds,
-      historySeconds,
-      visionTimeoutSeconds,
-      disagreementWindowSeconds,
-      gateChiSquaredPosition,
-      gateChiSquaredPose,
-      gateChiSquaredAxis,
-      recoveryWindowSeconds,
-      recoveryStdDevMeters,
-      recoveryAgreementDegrees,
-      recoveryHeadingStdDevDegrees,
-      lostPositionStdDevMeters
-    };
-    for (double value : positive) {
-      if (!(value > 0) || Double.isInfinite(value)) {
-        throw new IllegalArgumentException(
-            "estimator windows, gates, and spreads must be positive");
-      }
-    }
-    if (!(tractionLimitedSlipFraction >= 0 && tractionLimitedSlipFraction <= 1)) {
-      throw new IllegalArgumentException("the slip fraction is from 0 to 1");
-    }
-    if (!(tiltZeroDegrees > tiltStartDegrees) || !(tiltZeroDegrees < 90)) {
-      throw new IllegalArgumentException(
-          "wheels must stop counting at a tilt above where they start to count less, and below 90");
-    }
-    if (recoveryMeasurements < 2) {
-      throw new IllegalArgumentException("recovery needs at least 2 agreeing measurements");
-    }
-    if (lostAfterRejections < 1) {
-      throw new IllegalArgumentException("lost takes at least 1 rejected measurement");
-    }
+    Checks.on(EstimatorConfig.class)
+        .field("translationStdDevPerMeter", translationStdDevPerMeter, nonNegative())
+        .field("translationStdDevPerRadian", translationStdDevPerRadian, nonNegative())
+        .field("residualScale", residualScale, nonNegative())
+        .field("tractionLimitedSlipFraction", tractionLimitedSlipFraction, between(0, 1))
+        .field("tiltStartDegrees", tiltStartDegrees, nonNegative())
+        .field("tiltZeroDegrees", tiltZeroDegrees, below(90))
+        .field("slipCorrelationSeconds", slipCorrelationSeconds, positive())
+        .field("collisionStdDevMeters", collisionStdDevMeters, nonNegative())
+        .field("collisionWindowSeconds", collisionWindowSeconds, positive())
+        .field("handlingStdDevPerSqrtSecond", handlingStdDevPerSqrtSecond, nonNegative())
+        .field("headingDriftDegreesPerMinute", headingDriftDegreesPerMinute, nonNegative())
+        .field("headingStdDevDegreesPerTurn", headingStdDevDegreesPerTurn, nonNegative())
+        .field("wheelHeadingStdDevDegreesPerTurn", wheelHeadingStdDevDegreesPerTurn, nonNegative())
+        .field("historySeconds", historySeconds, positive())
+        .field("futureToleranceSeconds", futureToleranceSeconds, nonNegative())
+        .field("visionTimeoutSeconds", visionTimeoutSeconds, positive())
+        .field("disagreementWindowSeconds", disagreementWindowSeconds, positive())
+        .field("gateChiSquaredPosition", gateChiSquaredPosition, positive())
+        .field("gateChiSquaredPose", gateChiSquaredPose, positive())
+        .field("gateChiSquaredAxis", gateChiSquaredAxis, positive())
+        .field("recoveryMeasurements", recoveryMeasurements, atLeast(2))
+        .field("recoveryWindowSeconds", recoveryWindowSeconds, positive())
+        .field("recoveryAgreementMeters", recoveryAgreementMeters, nonNegative())
+        .field("recoveryStdDevMeters", recoveryStdDevMeters, positive())
+        .field("recoveryAgreementDegrees", recoveryAgreementDegrees, positive())
+        .field("recoveryHeadingStdDevDegrees", recoveryHeadingStdDevDegrees, positive())
+        .field("lostAfterRejections", lostAfterRejections, atLeast(1))
+        .field("lostPositionStdDevMeters", lostPositionStdDevMeters, positive())
+        .check(
+            "tiltZeroDegrees",
+            () ->
+                tiltZeroDegrees > tiltStartDegrees
+                    ? null
+                    : shown(tiltZeroDegrees)
+                        + " must be above tiltStartDegrees ("
+                        + shown(tiltStartDegrees)
+                        + "): wheels stop counting above where they start to count less")
+        .orThrow();
   }
 
   /** Starts building estimator settings, one named value at a time. */

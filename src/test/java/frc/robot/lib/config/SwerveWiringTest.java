@@ -52,20 +52,20 @@ class SwerveWiringTest {
     List<SwerveWiring.ModuleWiring> modules = new ArrayList<>(modules());
     modules.set(3, module(7, 2, 4));
 
-    assertThatThrownBy(() -> wiring(modules)).hasMessageContaining("CAN ID 2 is used twice");
+    assertThatThrownBy(() -> wiring(modules))
+        .hasMessage("SwerveWiring.modules: CAN ID 2 is used by two motor controllers");
   }
 
   @Test
   void idsAreOnTheBus() {
-    List<SwerveWiring.ModuleWiring> modules = new ArrayList<>(modules());
-    modules.set(0, module(63, 2, 1));
-
-    assertThatThrownBy(() -> wiring(modules)).hasMessageContaining("from 0 to 62");
+    assertThatThrownBy(() -> module(63, 2, 1))
+        .hasMessage("ModuleWiring.driveId: 63 must be from 0 to 62");
   }
 
   @Test
   void itTakesFourModules() {
-    assertThatThrownBy(() -> wiring(modules().subList(0, 3))).hasMessageContaining("four modules");
+    assertThatThrownBy(() -> wiring(modules().subList(0, 3)))
+        .hasMessage("SwerveWiring.modules: must have 4, has 3");
   }
 
   @Test
@@ -81,7 +81,7 @@ class SwerveWiringTest {
                     .steerInverted(false)
                     .encoderInverted(false)
                     .build())
-        .hasMessageContaining("within a rotation");
+        .hasMessage("ModuleWiring.encoderOffset: 1.5 R must be from -1 R to 1 R");
     assertThatThrownBy(
             () ->
                 SwerveWiring.builder()
@@ -92,11 +92,11 @@ class SwerveWiringTest {
                     .modules(modules())
                     .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
                     .build())
-        .hasMessageContaining("couplingRatio");
+        .hasMessage("SwerveWiring.couplingRatio: -1 must be zero or more");
   }
 
   @Test
   void aCanivoreHasAName() {
-    assertThatThrownBy(() -> CanBus.canivore(" ")).hasMessageContaining("named");
+    assertThatThrownBy(() -> CanBus.canivore(" ")).hasMessage("Canivore.name: must not be blank");
   }
 }

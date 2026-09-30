@@ -42,9 +42,9 @@ import org.wpilib.units.Units;
  * <p>A value is checked twice before it applies: against its tuning limits (what's safe to dial in
  * live), then by rebuilding the configuration through the records' own constructors (what's valid,
  * including checks across values, such as a range's ends). Several values change at once, all or
- * none, so values valid only together can move together. Pitwall's tee asks {@link #whyNot} before
- * applying anything, and says why on the page; without Pitwall, a refused value is quietly
- * declined, and the dashboard shows the value in effect again.
+ * none, so values valid only together can move together. Pitwall's tee builds the {@link
+ * #candidate} before applying anything, and gives every reason on the page; without Pitwall, a
+ * refused value is quietly declined, and the dashboard shows the value in effect again.
  *
  * <p>Nothing is saved on the robot. {@link #changes()} lists what differs from the committed
  * configuration, each with the builder call that commits it.
@@ -85,6 +85,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   private final Map<String, Slot> slots = new LinkedHashMap<>();
   private final Map<TunableBase, String> children =
       Collections.synchronizedMap(new IdentityHashMap<>());
+  private final List<ConfigRules> rules = new ArrayList<>();
   private volatile T current;
 
   private LiveConfig(String name, T committed) {
@@ -226,35 +227,38 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   }
 
   /**
-   * Why a change can't be made, checking without making it: a path that isn't tunable, a value
-   * outside its limits, or a combination the records reject.
+   * The configuration a change would make, checked but not made: every value one that's tunable, a
+   * number, and within its limits; then the configuration rebuilt through its records' own checks.
+   *
+   * @param values new values by path, each in its knob's unit
+   * @throws IllegalArgumentException if it can't be made, with every reason, one per line, each
+   *     under this configuration's name: {@code "drivetrain: Gains.steerKd: 40 must be at most
+   *     steerKp (16)"}
+   */
+  public T candidate(Map<String, Double> values) {
+    List<String> problems = new ArrayList<>();
+    T candidate = check(values, problems);
+    if (candidate == null) {
+      throw new IllegalArgumentException(String.join("\n", problems));
+    }
+    return candidate;
+  }
+
+  /**
+   * Why a change can't be made, checking without making it: every reason {@link #candidate} gives,
+   * then every {@link ConfigRules} rule the change touches breaks, with the other configurations as
+   * they are now.
    *
    * @param values new values by path, each in its knob's unit
    * @return null when it can be made
    */
   public @Nullable String whyNot(Map<String, Double> values) {
-    for (Map.Entry<String, Double> entry : values.entrySet()) {
-      Slot slot = slots.get(entry.getKey());
-      if (slot == null) {
-        return name + ": " + entry.getKey() + " isn't tunable";
-      }
-      double value = entry.getValue();
-      if (!Double.isFinite(value)) {
-        return entry.getKey() + " takes a number, got " + value;
-      }
-      String outside = slot.knob().limits().whyNot(value);
-      if (outside != null) {
-        return entry.getKey() + ": " + outside;
-      }
+    List<String> problems = new ArrayList<>();
+    T candidate = check(values, problems);
+    if (candidate != null) {
+      problems.addAll(brokenRules(values, candidate));
     }
-    try {
-      rebuilt(values);
-      return null;
-    } catch (RuntimeException refused) {
-      // Whatever a record's checks throw refuses the change.
-      String why = refused.getMessage();
-      return why != null ? why : refused.toString();
-    }
+    return problems.isEmpty() ? null : String.join("\n", problems);
   }
 
   /**
@@ -263,11 +267,24 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    * @return whether it was made
    */
   public boolean set(Map<String, Double> values) {
-    if (whyNot(values) != null) {
+    T candidate = check(values, new ArrayList<>());
+    if (candidate == null || !brokenRules(values, candidate).isEmpty()) {
       return false;
     }
-    current = rebuilt(values);
+    current = candidate;
     return true;
+  }
+
+  /**
+   * Makes a configuration from {@link #candidate} the one in effect, for Pitwall's tee, which
+   * checks more before it applies a change.
+   */
+  void accept(Record candidate) {
+    if (candidate.getClass() != committed.getClass()) {
+      throw new IllegalArgumentException(
+          name + " is a " + committed.getClass().getSimpleName() + ", not a " + candidate);
+    }
+    current = sameType(candidate);
   }
 
   /** Returns every tuned value to its committed value. */
@@ -343,6 +360,18 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
     }
   }
 
+  /** Registers rules that read this configuration, which its checks then run. */
+  void ruledBy(ConfigRules registry) {
+    if (rules.stream().noneMatch(known -> known == registry)) {
+      rules.add(registry);
+    }
+  }
+
+  /** The rules that read this configuration. */
+  List<ConfigRules> rules() {
+    return List.copyOf(rules);
+  }
+
   /** Which tunable value a published tunable is, or null if it isn't one of these. */
   @Nullable String pathOf(TunableBase tunable) {
     return children.get(tunable);
@@ -354,6 +383,51 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
       throw new IllegalArgumentException(name + ": no tunable value at " + path);
     }
     return slot;
+  }
+
+  /**
+   * The configuration a change would make, or null with every reason it can't be made added to
+   * {@code problems}.
+   */
+  private @Nullable T check(Map<String, Double> values, List<String> problems) {
+    for (Map.Entry<String, Double> entry : values.entrySet()) {
+      String path = entry.getKey();
+      double value = entry.getValue();
+      Slot slot = slots.get(path);
+      if (slot == null) {
+        problems.add(name + ": " + path + " isn't tunable");
+      } else if (!Double.isFinite(value)) {
+        problems.add(name + ": " + path + " takes a number, got " + value);
+      } else {
+        String outside = slot.knob().limits().whyNot(value);
+        if (outside != null) {
+          problems.add(name + ": " + path + ": " + outside);
+        }
+      }
+    }
+    if (!problems.isEmpty()) {
+      return null;
+    }
+    try {
+      return rebuilt(values);
+    } catch (RuntimeException refused) {
+      // Whatever a record's checks throw refuses the change; a ConfigException has a line for
+      // each value it rejects.
+      String why = refused.getMessage();
+      for (String line : (why != null ? why : refused.toString()).split("\n")) {
+        problems.add(name + ": " + line);
+      }
+      return null;
+    }
+  }
+
+  /** Why a candidate breaks the rules the change touches, one line for each rule broken. */
+  private List<String> brokenRules(Map<String, Double> values, T candidate) {
+    List<String> broken = new ArrayList<>();
+    for (ConfigRules registry : rules) {
+      broken.addAll(registry.whyNot(Map.of(this, values.keySet()), Map.of(this, candidate)));
+    }
+    return broken;
   }
 
   /** The configuration rebuilt with new values, each in its knob's unit; throws if rejected. */

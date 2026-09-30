@@ -1,5 +1,8 @@
 package frc.robot.subsystems.drive;
 
+import static frc.robot.lib.config.Rules.size;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import java.util.List;
 import java.util.concurrent.locks.Lock;
@@ -21,9 +24,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public record DriveHardware(
     List<ModuleIO> modules, GyroIO gyro, GyroIO backupImu, Lock odometryLock) {
   public DriveHardware {
-    if (modules.size() != 4) {
-      throw new IllegalArgumentException("swerve needs exactly 4 modules: " + modules.size());
-    }
+    Checks.on(DriveHardware.class).field("modules", modules, size(4)).orThrow(); // swerve's four
   }
 
   public static DriveHardwareBuilder.ModulesStage builder() {

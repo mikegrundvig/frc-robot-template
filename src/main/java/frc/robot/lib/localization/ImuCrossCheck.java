@@ -1,5 +1,9 @@
 package frc.robot.lib.localization;
 
+import static frc.robot.lib.config.Rules.nonNegative;
+import static frc.robot.lib.config.Rules.positive;
+
+import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import java.util.ArrayDeque;
 import org.wpilib.math.util.MathUtil;
@@ -41,12 +45,11 @@ public final class ImuCrossCheck {
         builder().windowSeconds(1.0).toleranceDegrees(3).scaleTolerance(0.05).build();
 
     public Settings {
-      if (!(windowSeconds > 0)
-          || !(toleranceDegrees > 0)
-          || !(scaleTolerance >= 0)
-          || Double.isInfinite(windowSeconds + toleranceDegrees + scaleTolerance)) {
-        throw new IllegalArgumentException("a positive window and tolerance, and a scale share");
-      }
+      Checks.on(Settings.class)
+          .field("windowSeconds", windowSeconds, positive())
+          .field("toleranceDegrees", toleranceDegrees, positive())
+          .field("scaleTolerance", scaleTolerance, nonNegative())
+          .orThrow();
     }
 
     /** Starts building the settings, one named value at a time. */

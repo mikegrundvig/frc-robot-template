@@ -39,7 +39,18 @@ class RobotTuningTest {
     assertThat(drivetrain.set(Map.of("gains.steerKp", 18.5))).isTrue();
     assertThat(drivetrain.get().gains().steerKp()).isEqualTo(18.5);
     assertThat(drivetrain.whyNot(Map.of("gains.steerKp", 500.0)))
-        .isEqualTo("gains.steerKp: 500 is above its limit of 100");
+        .isEqualTo("drivetrain: gains.steerKp: 500 is above its limit of 100");
+  }
+
+  /** Within its limits isn't enough: the records' own checks have the last word, and say which. */
+  @Test
+  void aValueTheRecordsRejectIsRefusedNamingTheRecordsValue() {
+    var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+
+    assertThat(drivetrain.whyNot(Map.of("limits.maxLinearSpeed", 6.0)))
+        .startsWith(
+            "drivetrain: SwerveConfig.limits.maxLinearSpeed: 6 m/s is faster than the"
+                + " drivetrain's free speed");
   }
 
   /** Vision's thresholds are tuned like the drivetrain's gains: its configuration, live. */

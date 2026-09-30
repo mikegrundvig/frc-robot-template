@@ -30,7 +30,8 @@
   .muted { color: var(--muted); }
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .banner { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--changed); }
-  .message { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel); }
+  .message { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel);
+             white-space: pre-line; } /* a refusal gives each reason on its own line */
   .message.bad { color: var(--bad); }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
@@ -91,7 +92,7 @@
     <span class="muted">Edits wait here until you apply them, then all change at once, or none do.</span>
   </div>
   <div id="message" class="message" hidden></div>
-  <p id="refused" class="muted" hidden></p>
+  <p id="refused" class="muted" style="white-space: pre-line" hidden></p>
 
   <h2>Changes
     <button id="copy" disabled>Copy</button>

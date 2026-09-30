@@ -62,10 +62,11 @@ class LiveConfigTest {
     var live = live();
 
     assertThat(live.whyNot(Map.of(KP, 18.5))).isNull();
-    assertThat(live.whyNot(Map.of(KP, -1.0))).isEqualTo(KP + ": -1 is below its limit of 0");
+    assertThat(live.whyNot(Map.of(KP, -1.0)))
+        .isEqualTo("machine: " + KP + ": -1 is below its limit of 0");
     assertThat(live.whyNot(Map.of("travel.min", 12.0)))
         .as("the record's own check")
-        .isEqualTo("min must be below max, got 12.0 and 10.0");
+        .isEqualTo("machine: min must be below max, got 12.0 and 10.0");
     assertThat(live.whyNot(Map.of("drive.motor.freeSpeedMetersPerSecond", 9.0)))
         .isEqualTo("machine: drive.motor.freeSpeedMetersPerSecond isn't tunable");
     assertThat(live.get()).isEqualTo(machine());
@@ -86,7 +87,62 @@ class LiveConfigTest {
     var live = live();
 
     assertThat(live.whyNot(Map.of("drive.limits.maxSpeed", 5.0)))
-        .isEqualTo("maxSpeed is faster than the motor's free speed");
+        .isEqualTo("machine: maxSpeed is faster than the motor's free speed");
+  }
+
+  @Test
+  void aCandidateIsTheConfigurationAChangeWouldMakeWithoutMakingIt() {
+    var live = live();
+
+    Fixtures.Machine candidate = live.candidate(Map.of(KP, 18.5));
+
+    assertThat(candidate.drive().gains().kP()).isEqualTo(18.5);
+    assertThat(live.get()).isEqualTo(machine());
+  }
+
+  @Test
+  void aRefusalGivesEveryReasonUnderTheConfigurationsName() {
+    var live = live();
+    Map<String, Double> values = new LinkedHashMap<>();
+    values.put(KP, -1.0);
+    values.put("drive.limits.current", 500.0);
+    values.put("travel.middle", 3.0);
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> live.candidate(values))
+        .withMessage(
+            "machine: drive.gains.kP: -1 is below its limit of 0\n"
+                + "machine: drive.limits.current: 500 is above its limit of 80\n"
+                + "machine: travel.middle isn't tunable");
+  }
+
+  /** A record that reports each value it rejects on a line, as the robot's records do. */
+  record Pair(double a, double b) {
+    Pair {
+      if (a < 0 && b < 0) {
+        throw new IllegalArgumentException("Pair.a: must be zero or more\nPair.b: must be too");
+      }
+    }
+  }
+
+  @Test
+  void eachLineOfARecordsRefusalIsUnderTheConfigurationsName() {
+    var live =
+        LiveConfig.of("pair", new Pair(1, 1)).number("a", Limits.NONE).number("b", Limits.NONE);
+
+    assertThat(live.whyNot(Map.of("a", -1.0, "b", -1.0)))
+        .isEqualTo("pair: Pair.a: must be zero or more\npair: Pair.b: must be too");
+  }
+
+  @Test
+  void theTeeAcceptsOnlyItsOwnKindOfCandidate() {
+    var live = live();
+    Fixtures.Machine candidate = live.candidate(Map.of(KP, 18.5));
+
+    live.accept(candidate);
+
+    assertThat(live.get()).isEqualTo(candidate);
+    assertThatIllegalArgumentException().isThrownBy(() -> live.accept(new Pair(1, 1)));
   }
 
   @Test

@@ -72,9 +72,10 @@ Also built in:
       `LiveConfig.of("drivetrain", committed).number("gains.steerKp", Limits.between(0, 100))`.
       Each value carries its tuning limits, the range that's safe to dial in live, as WPILib
       properties any NetworkTables tool can read. Before a change applies, it is checked against
-      its limits and then by the configuration's own checks, so a refused value never reaches the
-      robot, and the page says why (a dashboard's snaps back, and the page shows why). Several
-      values change together, all or none. Nothing is saved on the robot: the page lists each
+      its limits, then by the configuration's own checks, then by the robot's rules across
+      mechanisms that read it (`RobotRules`: two arms that could collide), so a refused value
+      never reaches the robot, and the page gives every reason (a dashboard's snaps back, and the
+      page shows why). Several values change together, all or none, even across mechanisms. Nothing is saved on the robot: the page lists each
       change as the builder call that commits it to `Robots.java`. When the field connects, every
       configuration returns to committed (printed first, so nothing is lost): a match runs the
       committed configuration.
@@ -88,6 +89,11 @@ Also built in:
   threshold, an uncertainty) is configuration: a field of the robot's configuration record, set in
   `Robots.java`, and, to tune it live, declared in its mechanism's `LiveConfig` with its limits
   (see `Drive.tuning`). A plain tunable is only for a switch.
+
+  **Where a check goes:** what a value may be at all goes in its record, with `Checks` (`steerKp`
+  zero or more; `cgHeight` below the robot's height); how far it may be tuned live goes with its
+  `Limits` in the mechanism's `tuning`; a check that reads two mechanisms goes in `RobotRules`.
+  Each is checked against the committed configuration in the tests and at startup.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver

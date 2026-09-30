@@ -1,7 +1,8 @@
 /**
- * The vocabulary for describing a robot: its body, drivetrain, cameras, and motors. Robot code
- * assembles these into its own configuration ({@code frc.robot.RobotConfig}), along with the
- * components' own settings records (vision's, the estimator's); components read them.
+ * The vocabulary for describing a robot, and checking it: its body, drivetrain, cameras, and
+ * motors, and the rules their values keep. Robot code assembles these into its own configuration
+ * ({@code frc.robot.RobotConfig}), along with the components' own settings records (vision's, the
+ * estimator's); components read them.
  *
  * <p>Every value that describes the robot (a dimension, a gain, a limit, a threshold) belongs in
  * that configuration, committed in {@code Robots}. To tune some of it on a running robot, the
@@ -9,6 +10,21 @@
  * that's safe to dial in: they become WPILib tunables, checked like committed values before a
  * change applies, returned to committed when the field connects, and reported as the builder calls
  * that commit them. A plain WPILib tunable is for a switch the drive team flips.
+ *
+ * <p>A value is checked in three places, each where what it knows lives:
+ *
+ * <ol>
+ *   <li><b>Its record</b>, when built: what the value may be at all, alone or with the record's
+ *       other values.
+ *   <li><b>Its tuning limits</b>, declared with it in the mechanism's {@code LiveConfig}: how far
+ *       the pit may take it while the robot runs.
+ *   <li><b>The robot's rules across mechanisms</b> ({@code frc.robot.RobotRules}, with Pitwall's
+ *       {@code ConfigRules}): what two mechanisms' values may be together, such as two arms that
+ *       could collide. A rule runs when a change touches a value it reads.
+ * </ol>
+ *
+ * <p>All three check the committed configuration in the tests and at startup, and every change the
+ * pit makes before it applies.
  *
  * <p>Conventions:
  *
@@ -20,8 +36,12 @@
  *       frc.robot.lib.config.ConfigRecord}: {@code Body.builder().frameLength(...)...build()}. The
  *       builder asks for each value in turn, so none can be left out or put in the wrong place, and
  *       the architecture tests reject building one any other way.
- *   <li>Every record checks its values when it is built. A bad value fails at startup, and first in
- *       the tests, which build every robot's configuration.
+ *   <li>Every record checks its values when it is built, with {@link frc.robot.lib.config.Checks}:
+ *       each value with its {@link frc.robot.lib.config.Rule} ({@code positive()}, {@code
+ *       between(Degrees.of(-90), Degrees.of(90))}, or any lambda), then checks across its values.
+ *       Every problem is reported at once, each naming its value ({@code Gains.steerKp: -3 must be
+ *       zero or more}). A bad value fails at startup, and first in the tests, which build every
+ *       robot's configuration.
  *   <li>Physical measurements have no defaults: every robot states its own.
  *   <li>Derived values (the bumper outline, wheel positions, free speed) are computed, never
  *       written down twice.

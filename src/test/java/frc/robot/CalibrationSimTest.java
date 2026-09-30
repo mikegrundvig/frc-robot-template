@@ -3,6 +3,7 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import frc.robot.game.Rebuilt;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;

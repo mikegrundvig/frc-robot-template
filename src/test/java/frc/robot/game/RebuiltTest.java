@@ -1,9 +1,10 @@
-package frc.robot;
+package frc.robot.game;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import frc.robot.Robots;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Place;
 import java.util.Arrays;

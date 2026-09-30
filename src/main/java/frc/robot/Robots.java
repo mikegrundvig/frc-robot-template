@@ -152,12 +152,21 @@ public final class Robots {
           .name("sim")
           .body(BODY)
           .drivetrain(DRIVETRAIN)
-          .wiring(Optional.empty())
+          .drivetrainWiring(Optional.empty())
           .cameras(CAMERAS)
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */
   public static List<RobotConfig> all() {
     return List.of(SIM);
+  }
+
+  /**
+   * The robot this program is running on: the one place that decides, so a new robot is one line
+   * here. With several robots, choose by something the robot itself knows (a device's serial
+   * number, a file on its storage) rather than by editing this before each deploy.
+   */
+  public static RobotConfig current() {
+    return SIM;
   }
 }

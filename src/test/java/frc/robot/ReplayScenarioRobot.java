@@ -26,7 +26,6 @@ final class ReplayScenarioRobot extends Robot {
   static final int LOOPS = 200;
 
   static final String GAIN = "Scenario/gain";
-  static final String DRIVE_CHECK = "Drive forward slowly (2 s)";
 
   private final TunableDouble gain = TunableDouble.create(1.0);
   private final HttpClient http = HttpClient.newHttpClient();
@@ -80,7 +79,7 @@ final class ReplayScenarioRobot extends Robot {
                   .build(),
               HttpResponse.BodyHandlers.discarding());
       case 30 -> pitwall().tunables().requestChanges(Map.of(GAIN, 2.5));
-      case 40 -> pitwall().actions().requestStart(DRIVE_CHECK);
+      case 40 -> pitwall().actions().requestStart(RobotContainer.DRIVE_CHECK);
       case LOOPS -> {
         Logger.end(); // closes the log
         System.exit(0);

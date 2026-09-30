@@ -8,8 +8,8 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.timing.LoopMonitor;
+import frc.robot.lib.timing.RobotLoop;
 import java.io.File;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.LogFileUtil;
@@ -32,7 +32,6 @@ public class Robot extends LoggedRobot {
 
   /**
    * Pitwall, the robot's own web page: its status, actions, and live tuning of its configuration.
-   * One robot for now; with several, choose its configuration by the robot's identity here.
    */
   private final Pitwall<RobotConfig> pitwall;
 
@@ -48,6 +47,7 @@ public class Robot extends LoggedRobot {
   private @Nullable Alert noLogDriveAlert;
 
   public Robot() {
+    super(RobotLoop.PERIOD_SECONDS);
     // Every log records exactly which code produced it.
     Logger.recordMetadata("ProjectName", BuildConstants.MAVEN_NAME);
     Logger.recordMetadata("BuildDate", BuildConstants.BUILD_DATE);
@@ -86,43 +86,22 @@ public class Robot extends LoggedRobot {
 
     Logger.start();
 
-    pitwall = Pitwall.start(Robots.SIM.name(), Robots.SIM);
+    RobotConfig robot = Robots.current();
+    pitwall = Pitwall.start(robot.name(), robot);
 
     // The drivetrain reads its configuration through Pitwall, so tuned values take effect at once.
     container =
         new RobotContainer(
             Constants.currentMode,
             Scheduler.getDefault(),
-            Robots.SIM,
+            robot,
             () -> pitwall.config().drivetrain(),
-            Rebuilt.field(Robots.SIM.body()));
-    Calibration calibration = container.calibration();
-    pitwall
-        .actions()
-        .add("Drive forward slowly (2 s)", container::driveCheck)
-        .add("Calibrate the gyro's scale (5 turns where cameras see tags)", calibration::gyroScale)
-        .add("Calibrate the wheel radius (2 slow turns in place, 30 s)", calibration::wheelRadius)
-        .add("Check the IMU reads level (2 s, on a level floor)", calibration::level);
-    for (CameraConfig camera : Robots.SIM.cameras()) {
-      pitwall
-          .actions()
-          .add(
-              "Calibrate the " + camera.name() + " camera's mount (20 s, drive slowly past tags)",
-              () -> calibration.cameraMount(camera.name()));
-    }
+            Rebuilt.field(robot.body()));
+    container.addTo(pitwall);
     if (noLogDrive != null) {
       noLogDriveAlert = new Alert("Loop", "noLogDrive", noLogDrive, Alert.Level.HIGH);
       noLogDriveAlert.set(true);
     }
-    pitwall
-        .status()
-        .add("Loop", container::loopStatus)
-        .add("Alliance", container::allianceStation)
-        .add("Placement", () -> container.placement().describe())
-        .add("Localization", container::localization)
-        .add("Scoring", container::scoring)
-        .add("Calibration", calibration::lastResult)
-        .add("Cameras", container::cameras);
   }
 
   /** Pitwall, for tests that drive the robot program through it. */

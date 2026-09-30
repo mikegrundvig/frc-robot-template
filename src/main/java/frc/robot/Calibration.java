@@ -4,6 +4,7 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.pitwall.Actions;
 import frc.robot.lib.calibration.CameraMountCalibration;
 import frc.robot.lib.calibration.GyroScaleCalibration;
 import frc.robot.lib.calibration.HeadingAverage;
@@ -12,6 +13,7 @@ import frc.robot.lib.calibration.WheelRadiusCalibration;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
+import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
 import java.time.LocalDate;
@@ -33,8 +35,6 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  * and the robot is redeployed.
  */
 final class Calibration {
-  private static final double LOOP_SECONDS = 0.02;
-
   /** Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (6328). */
   private static final double WHEEL_SPIN_RADIANS_PER_SECOND = 0.5;
 
@@ -83,6 +83,39 @@ final class Calibration {
     return lastResult;
   }
 
+  /**
+   * Adds every procedure to the Pitwall page's actions, each named with what it asks of the drive
+   * team: how long it takes, and where the robot needs to be.
+   */
+  void addTo(Actions actions) {
+    double wheelSpinSeconds =
+        WHEEL_SPIN_TURNS * 2 * Math.PI / WHEEL_SPIN_RADIANS_PER_SECOND
+            + WHEEL_SPIN_RADIANS_PER_SECOND / WHEEL_SPIN_RAMP;
+    actions
+        .add(
+            format("Calibrate the gyro's scale (%d turns where cameras see tags)", GYRO_SPIN_TURNS),
+            this::gyroScale)
+        .add(
+            format(
+                "Calibrate the wheel radius (%.0f slow turns in place, about %.0f s)",
+                WHEEL_SPIN_TURNS, 5 * Math.ceil(wheelSpinSeconds / 5)),
+            this::wheelRadius)
+        .add(
+            format("Check the IMU reads level (%.0f s, on a level floor)", LEVEL_SECONDS),
+            this::level);
+    for (CameraConfig camera : robot.cameras()) {
+      actions.add(
+          format(
+              "Calibrate the %s camera's mount (%.0f s, drive slowly past tags)",
+              camera.name(), MOUNT_SECONDS),
+          () -> cameraMount(camera.name()));
+    }
+  }
+
+  private static String format(String pattern, Object... values) {
+    return String.format(Locale.ROOT, pattern, values);
+  }
+
   private void report(String result) {
     lastResult = result;
     Logger.recordOutput("Calibration/Result", result);
@@ -103,7 +136,9 @@ final class Calibration {
               double rate = 0.1;
               while (spin.turnedRadians() < WHEEL_SPIN_TURNS * 2 * Math.PI) {
                 rate =
-                    Math.min(WHEEL_SPIN_RADIANS_PER_SECOND, rate + WHEEL_SPIN_RAMP * LOOP_SECONDS);
+                    Math.min(
+                        WHEEL_SPIN_RADIANS_PER_SECOND,
+                        rate + WHEEL_SPIN_RAMP * RobotLoop.PERIOD_SECONDS);
                 drive.runVelocity(new ChassisVelocities(0, 0, rate));
                 coroutine.yield();
                 spin.update(drive.gyroYaw().getRadians(), drive.wheelRotationsRadians());
@@ -157,19 +192,19 @@ final class Calibration {
                         0.2,
                         Math.min(
                             Math.min(GYRO_SPIN_RADIANS_PER_SECOND, stopping),
-                            rate + GYRO_SPIN_RAMP * LOOP_SECONDS));
+                            rate + GYRO_SPIN_RAMP * RobotLoop.PERIOD_SECONDS));
                 drive.runVelocity(new ChassisVelocities(0, 0, rate));
                 coroutine.yield();
                 spin.update(drive.gyroYaw().getRadians());
               }
               stop(coroutine);
-              for (int i = 0; i < loops(0.5); i++) {
+              for (int i = 0; i < RobotLoop.loops(0.5); i++) {
                 coroutine.yield();
                 spin.update(drive.gyroYaw().getRadians());
               }
               HeadingAverage after = new HeadingAverage();
               vision.collectHeadings(after);
-              for (int i = 0; i < loops(STILL_SECONDS); i++) {
+              for (int i = 0; i < RobotLoop.loops(STILL_SECONDS); i++) {
                 coroutine.yield();
                 spin.update(drive.gyroYaw().getRadians());
               }
@@ -179,7 +214,8 @@ final class Calibration {
                 return;
               }
               spin.finish(drive.gyroYaw().getRadians(), after.average());
-              double configured = robot.wiring().map(SwerveWiring::gyroYawScale).orElse(1.0);
+              double configured =
+                  robot.drivetrainWiring().map(SwerveWiring::gyroYawScale).orElse(1.0);
               double scale = configured * spin.scale();
               report(
                   String.format(
@@ -207,7 +243,7 @@ final class Calibration {
     return Command.noRequirements(
             coroutine -> {
               LevelCheck level = new LevelCheck();
-              for (int i = 0; i < loops(LEVEL_SECONDS); i++) {
+              for (int i = 0; i < RobotLoop.loops(LEVEL_SECONDS); i++) {
                 level.add(drive.pitchRadians(), drive.rollRadians());
                 coroutine.yield();
               }
@@ -231,7 +267,7 @@ final class Calibration {
             coroutine -> {
               CameraMountCalibration mount = new CameraMountCalibration(camera.robotToCamera());
               vision.calibrateMount(name, mount);
-              for (int i = 0; i < loops(MOUNT_SECONDS); i++) {
+              for (int i = 0; i < RobotLoop.loops(MOUNT_SECONDS); i++) {
                 if (mount.sightings() >= MOUNT_SIGHTINGS) {
                   break;
                 }
@@ -298,7 +334,7 @@ final class Calibration {
     HeadingAverage headings = new HeadingAverage();
     stop(coroutine);
     vision.collectHeadings(headings);
-    for (int i = 0; i < loops(STILL_SECONDS); i++) {
+    for (int i = 0; i < RobotLoop.loops(STILL_SECONDS); i++) {
       coroutine.yield();
     }
     vision.stopCollectingHeadings();
@@ -315,7 +351,7 @@ final class Calibration {
   }
 
   private void spinFor(Coroutine coroutine, double radiansPerSecond, double seconds) {
-    for (int i = 0; i < loops(seconds); i++) {
+    for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       drive.runVelocity(new ChassisVelocities(0, 0, radiansPerSecond));
       coroutine.yield();
     }
@@ -323,10 +359,6 @@ final class Calibration {
 
   private void stop(Coroutine coroutine) {
     drive.runVelocity(new ChassisVelocities(0, 0, 0));
-    coroutine.wait(Seconds.of(LOOP_SECONDS));
-  }
-
-  private static int loops(double seconds) {
-    return (int) Math.ceil(seconds / LOOP_SECONDS);
+    coroutine.wait(Seconds.of(RobotLoop.PERIOD_SECONDS));
   }
 }

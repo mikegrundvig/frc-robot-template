@@ -19,8 +19,9 @@ import org.wpilib.math.geometry.Translation2d;
  * @param name which robot this is, as the logs name it
  * @param body frame, bumpers, and mass
  * @param drivetrain the swerve drive
- * @param wiring where the drivetrain's devices are on the CAN bus, and how its encoders read: empty
- *     for a robot that only runs in simulation, whose drivetrain then stays still on real hardware
+ * @param drivetrainWiring where the drivetrain's devices are on the CAN bus, and how its encoders
+ *     read: empty for a robot that only runs in simulation, whose drivetrain then stays still on
+ *     real hardware
  * @param cameras the AprilTag cameras
  */
 @ConfigRecord
@@ -28,7 +29,7 @@ public record RobotConfig(
     String name,
     Body body,
     SwerveConfig drivetrain,
-    Optional<SwerveWiring> wiring,
+    Optional<SwerveWiring> drivetrainWiring,
     List<CameraConfig> cameras) {
   public RobotConfig {
     if (name.isBlank()) {

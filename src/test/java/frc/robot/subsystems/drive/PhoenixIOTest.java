@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Rotations;
 
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
@@ -33,6 +34,7 @@ class PhoenixIOTest {
   @BeforeAll
   static void initHal() {
     SimTestSupport.initHal();
+    SignalLogger.enableAutoLogging(false); // as PhoenixDrivetrain does on the robot
   }
 
   @AfterEach

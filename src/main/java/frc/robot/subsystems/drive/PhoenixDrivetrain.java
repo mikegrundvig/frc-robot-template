@@ -1,6 +1,7 @@
 package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.SignalLogger;
 import frc.robot.lib.config.CanBus;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
@@ -13,6 +14,12 @@ import java.util.concurrent.locks.Lock;
  * it.
  *
  * <p>Needs Phoenix 6 26.70 or later on the devices (firmware 26.70) for WPILib 2027 alpha 7.
+ *
+ * <p>Phoenix's own signal log (a {@code .hoot} file) is off: on Systemcore it would otherwise start
+ * in every session, a second writer on the USB drive beside the AdvantageKit log, which is the
+ * record and the one replay reads. A routine that needs a {@code .hoot} file, such as a
+ * characterization in Phoenix Tuner X, calls {@code SignalLogger.start()} and {@code stop()} around
+ * its run.
  */
 public final class PhoenixDrivetrain implements AutoCloseable {
   private final PhoenixOdometryThread odometry = new PhoenixOdometryThread();
@@ -26,6 +33,7 @@ public final class PhoenixDrivetrain implements AutoCloseable {
    * @param hardware the modules' gearing and wheels
    */
   public PhoenixDrivetrain(SwerveWiring wiring, SwerveConfig.Modules hardware) {
+    SignalLogger.enableAutoLogging(false);
     CANBus bus = bus(wiring.canBus());
     for (int i = 0; i < 4; i++) {
       modules[i] =

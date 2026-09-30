@@ -1,6 +1,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
+import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.commands.Calibration;
@@ -163,6 +164,11 @@ public final class RobotContainer implements AutoCloseable {
     TunableRegistry.publish("Drive/config", drivetrainTuning);
     visionTuning = Vision.tuning(robot.vision());
     TunableRegistry.publish("Vision/config", visionTuning);
+    // The rules across mechanisms: checked on every change the pit makes, and here, as committed,
+    // so a configuration that breaks one stops the program with every rule it breaks.
+    ConfigRules rules = new ConfigRules();
+    RobotRules.register(rules, drivetrainTuning, visionTuning);
+    rules.checkCommitted();
     Supplier<SwerveConfig> drivetrain = drivetrainTuning::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;

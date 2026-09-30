@@ -1,5 +1,6 @@
 package frc.robot.lib.localization;
 
+import frc.robot.lib.config.ConfigRecord;
 import java.util.ArrayDeque;
 import org.wpilib.math.util.MathUtil;
 
@@ -23,19 +24,41 @@ public final class ImuCrossCheck {
   private record Reading(long time, double primary, double backup) {}
 
   /**
+   * How closely two IMUs must agree.
+   *
    * @param windowSeconds how far back the comparison looks
-   * @param toleranceRadians how far apart the two may turn over the window, however little it
+   * @param toleranceDegrees how far apart the two may turn over the window, however little it
    *     turned
    * @param scaleTolerance and this share of the turning on top: two gyros whose scales differ by 1%
    *     disagree by 1% of every turn
    */
-  public ImuCrossCheck(double windowSeconds, double toleranceRadians, double scaleTolerance) {
-    if (!(windowSeconds > 0) || !(toleranceRadians > 0) || !(scaleTolerance >= 0)) {
-      throw new IllegalArgumentException("a positive window and tolerance, and a scale share");
+  @ConfigRecord
+  public record Settings(double windowSeconds, double toleranceDegrees, double scaleTolerance) {
+    /**
+     * Over a second, within 3° and 5% of the turn: a gyro and an IMU whose scales differ a little.
+     */
+    public static final Settings DEFAULTS =
+        builder().windowSeconds(1.0).toleranceDegrees(3).scaleTolerance(0.05).build();
+
+    public Settings {
+      if (!(windowSeconds > 0)
+          || !(toleranceDegrees > 0)
+          || !(scaleTolerance >= 0)
+          || Double.isInfinite(windowSeconds + toleranceDegrees + scaleTolerance)) {
+        throw new IllegalArgumentException("a positive window and tolerance, and a scale share");
+      }
     }
-    windowNanos = Timestamps.fromSeconds(windowSeconds);
-    this.toleranceRadians = toleranceRadians;
-    this.scaleTolerance = scaleTolerance;
+
+    /** Starts building the settings, one named value at a time. */
+    public static ImuCrossCheckSettingsBuilder.WindowSecondsStage builder() {
+      return ImuCrossCheckSettingsBuilder.builder();
+    }
+  }
+
+  public ImuCrossCheck(Settings settings) {
+    windowNanos = Timestamps.fromSeconds(settings.windowSeconds());
+    toleranceRadians = Math.toRadians(settings.toleranceDegrees());
+    scaleTolerance = settings.scaleTolerance();
   }
 
   /** Both IMUs' yaw, once a loop while both report. */

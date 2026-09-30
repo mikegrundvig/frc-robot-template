@@ -462,7 +462,7 @@ public final class PoseEstimator implements CameraLocalizer {
       mode = LocalizationEstimate.Mode.IMU_FAULT;
     } else if (!placed) {
       mode = LocalizationEstimate.Mode.INITIALIZING;
-    } else if (consecutiveRejections >= 2) {
+    } else if (consecutiveRejections >= config.lostAfterRejections()) {
       mode = LocalizationEstimate.Mode.LOST;
     } else if (lastAcceptedNanos != Long.MIN_VALUE
         && now - lastAcceptedNanos <= visionTimeoutNanos) {

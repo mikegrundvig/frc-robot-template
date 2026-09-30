@@ -42,12 +42,24 @@ public final class Calibration {
   private static final double WHEEL_SPIN_RADIANS_PER_SECOND = 0.5;
 
   private static final double WHEEL_SPIN_RAMP = 0.25;
+
+  /** Before counting, a slow half second of turning points the wheels around the circle. */
+  private static final double WHEEL_ALIGN_RADIANS_PER_SECOND = 0.1;
+
+  private static final double WHEEL_ALIGN_SECONDS = 0.5;
   private static final double WHEEL_SPIN_TURNS = 2;
 
   /** Spinning for the gyro's scale: whole turns, as many as the reference can still place. */
   private static final double GYRO_SPIN_RADIANS_PER_SECOND = 2;
 
   private static final double GYRO_SPIN_RAMP = 2;
+
+  /** Slowing for the last turn, never slower than this, so the robot doesn't stall short of it. */
+  private static final double GYRO_SPIN_MIN_RADIANS_PER_SECOND = 0.2;
+
+  /** After spinning, how long the robot settles before the gyro's last reading counts. */
+  private static final double SETTLE_SECONDS = 0.5;
+
   private static final int GYRO_SPIN_TURNS = 5;
   private static final double STILL_SECONDS = 1.5;
   private static final int MIN_HEADINGS = 5;
@@ -60,6 +72,11 @@ public final class Calibration {
 
   private static final int MOUNT_SIGHTINGS = 600;
   private static final int MIN_MOUNT_SIGHTINGS = 30;
+
+  /** A camera's mount is sure when its position is known within 1 cm and its angles 0.5°. */
+  private static final double MOUNT_SURE_METERS = 0.01;
+
+  private static final double MOUNT_SURE_DEGREES = 0.5;
 
   private final Drive drive;
   private final Vision vision;
@@ -148,10 +165,10 @@ public final class Calibration {
         .run(
             coroutine -> {
               // Point the wheels around the circle before counting.
-              spinFor(coroutine, 0.1, 0.5);
+              spinFor(coroutine, WHEEL_ALIGN_RADIANS_PER_SECOND, WHEEL_ALIGN_SECONDS);
               WheelRadiusCalibration spin = new WheelRadiusCalibration(drive.moduleLocations());
               spin.start(drive.gyroYaw().getRadians(), drive.wheelRotationsRadians());
-              double rate = 0.1;
+              double rate = WHEEL_ALIGN_RADIANS_PER_SECOND;
               while (spin.turnedRadians() < WHEEL_SPIN_TURNS * 2 * Math.PI) {
                 rate =
                     Math.min(
@@ -207,7 +224,7 @@ public final class Calibration {
                 double stopping = Math.sqrt(2 * GYRO_SPIN_RAMP * left);
                 rate =
                     Math.max(
-                        0.2,
+                        GYRO_SPIN_MIN_RADIANS_PER_SECOND,
                         Math.min(
                             Math.min(GYRO_SPIN_RADIANS_PER_SECOND, stopping),
                             rate + GYRO_SPIN_RAMP * RobotLoop.PERIOD_SECONDS));
@@ -216,7 +233,7 @@ public final class Calibration {
                 spin.update(drive.gyroYaw().getRadians());
               }
               stop(coroutine);
-              for (int i = 0; i < RobotLoop.loops(0.5); i++) {
+              for (int i = 0; i < RobotLoop.loops(SETTLE_SECONDS); i++) {
                 coroutine.yield();
                 spin.update(drive.gyroYaw().getRadians());
               }
@@ -321,7 +338,7 @@ public final class Calibration {
     double placeSure = Math.max(sure[0], Math.max(sure[1], sure[2]));
     double angleSure = Math.max(sure[3], Math.max(sure[4], sure[5]));
     String unsure =
-        placeSure > 0.01 || angleSure > Math.toRadians(0.5)
+        placeSure > MOUNT_SURE_METERS || angleSure > Math.toRadians(MOUNT_SURE_DEGREES)
             ? " Not sure of it: drive nearer and farther from the tags, and run it again."
             : "";
     return String.format(

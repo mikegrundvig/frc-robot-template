@@ -1,5 +1,6 @@
 package frc.robot.lib.localization;
 
+import frc.robot.lib.config.ConfigRecord;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.util.MathUtil;
@@ -46,26 +47,45 @@ public final class TerrainCrossing {
   public record Crest(long timestampNanos, double directionRadians) {}
 
   /**
-   * @param steepRadians a slope at least this steep, along the way the robot moves, is climbing or
+   * What counts as climbing, level, and one feature.
+   *
+   * @param steepDegrees a slope at least this steep, along the way the robot moves, is climbing or
    *     descending (1678 used 10°)
-   * @param levelRadians a tilt within this is level (1678 used 5°)
+   * @param levelDegrees a tilt within this is level (1678 used 5°)
    * @param levelSeconds how long the robot must stay level to count as off the terrain
    * @param topSeconds how long the robot may take between going up and coming down the far side of
    *     one feature (a flat top): longer is two features, or a stop on top
    */
-  public TerrainCrossing(
-      double steepRadians, double levelRadians, double levelSeconds, double topSeconds) {
-    if (!(levelRadians > 0)
-        || !(steepRadians > levelRadians)
-        || !(levelSeconds >= 0)
-        || !(topSeconds > 0)) {
-      throw new IllegalArgumentException(
-          "steep must be steeper than level, both positive, and the times positive");
+  @ConfigRecord
+  public record Settings(
+      double steepDegrees, double levelDegrees, double levelSeconds, double topSeconds) {
+    /** 1678's thresholds, and a second and a half to cross a flat top. */
+    public static final Settings DEFAULTS =
+        builder().steepDegrees(10).levelDegrees(5).levelSeconds(0.1).topSeconds(1.5).build();
+
+    public Settings {
+      if (!(levelDegrees > 0)
+          || !(steepDegrees > levelDegrees)
+          || !(steepDegrees < 90)
+          || !(levelSeconds >= 0)
+          || !(topSeconds > 0)
+          || Double.isInfinite(levelSeconds + topSeconds)) {
+        throw new IllegalArgumentException(
+            "steep must be steeper than level, both positive, and the times positive");
+      }
     }
-    this.steepRadians = steepRadians;
-    this.levelRadians = levelRadians;
-    levelNanos = Timestamps.fromSeconds(levelSeconds);
-    topNanos = Timestamps.fromSeconds(topSeconds);
+
+    /** Starts building the settings, one named value at a time. */
+    public static TerrainCrossingSettingsBuilder.SteepDegreesStage builder() {
+      return TerrainCrossingSettingsBuilder.builder();
+    }
+  }
+
+  public TerrainCrossing(Settings settings) {
+    steepRadians = Math.toRadians(settings.steepDegrees());
+    levelRadians = Math.toRadians(settings.levelDegrees());
+    levelNanos = Timestamps.fromSeconds(settings.levelSeconds());
+    topNanos = Timestamps.fromSeconds(settings.topSeconds());
   }
 
   /**

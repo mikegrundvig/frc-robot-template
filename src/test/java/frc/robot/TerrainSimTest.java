@@ -95,7 +95,7 @@ class TerrainSimTest {
   private void crossTheBump(Transform2d hit) {
     tick(1);
     sim().place(BEFORE_THE_BUMP);
-    robot().drive().resetPose(BEFORE_THE_BUMP);
+    robot().localization().resetPose(BEFORE_THE_BUMP);
     tick(5);
     if (!hit.equals(Transform2d.ZERO)) {
       sim().hit(hit);
@@ -122,7 +122,7 @@ class TerrainSimTest {
     crossTheBump(Transform2d.ZERO);
 
     assertThat(sim().truePose().getX()).as("over the bump").isGreaterThan(5.2);
-    assertThat(robot().drive().terrainCrossings()).isEqualTo(1);
+    assertThat(robot().localization().terrainCrossings()).isEqualTo(1);
     assertThat(error()).as("after crossing, no cameras").isLessThan(0.03);
   }
 
@@ -131,7 +131,7 @@ class TerrainSimTest {
   void theCrestPutsAKnockedRobotBackOnTheLine() {
     crossTheBump(new Transform2d(-0.3, 0, Rotation2d.ZERO));
 
-    assertThat(robot().landmarksAccepted()).isEqualTo(1);
+    assertThat(robot().localization().landmarksAccepted()).isEqualTo(1);
     assertThat(error()).as("after the crest, no cameras").isLessThan(0.05);
   }
 }

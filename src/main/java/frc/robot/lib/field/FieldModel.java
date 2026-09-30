@@ -98,6 +98,15 @@ public final class FieldModel {
     return tags;
   }
 
+  /** The layout as WPILib's {@link Field}, for tools that take one, such as a vision simulation. */
+  public Field toField() {
+    List<FieldTag> list = new ArrayList<>();
+    for (Map.Entry<Integer, Pose3d> tag : tags.entrySet()) {
+      list.add(new FieldTag(tag.getKey(), tag.getValue()));
+    }
+    return new Field(name, "", "", null, length, width, "frc", list);
+  }
+
   /** A tag's pose, if the layout has it. */
   public Optional<Pose3d> tag(int id) {
     return Optional.ofNullable(tags.get(id));

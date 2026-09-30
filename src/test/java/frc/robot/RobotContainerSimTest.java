@@ -23,6 +23,8 @@ import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.simulation.GamepadSim;
 import org.wpilib.telemetry.MockTelemetryBackend;
 import org.wpilib.telemetry.TelemetryRegistry;
+import org.wpilib.tunable.MockTunableBackend;
+import org.wpilib.tunable.TunableRegistry;
 
 /**
  * The whole robot as the simulator runs it: the real composition root, the real controller
@@ -49,6 +51,7 @@ class RobotContainerSimTest {
     setStation(AllianceStationID.BLUE_2);
     telemetry = new MockTelemetryBackend();
     TelemetryRegistry.registerBackend("", telemetry);
+    TunableRegistry.registerBackend("", new MockTunableBackend());
     scheduler = Scheduler.createIndependentScheduler();
     container = containerFor(Constants.Mode.SIM);
     driver = new GamepadSim(DRIVER_PORT);
@@ -60,6 +63,7 @@ class RobotContainerSimTest {
     driver.notifyNewData();
     container.close();
     TelemetryRegistry.reset();
+    TunableRegistry.reset();
     SimTestSupport.resumeTime();
   }
 
@@ -70,7 +74,13 @@ class RobotContainerSimTest {
 
   private RobotContainer containerFor(Constants.Mode mode, SensorErrors errors) {
     return new RobotContainer(
-        mode, scheduler, Robots.SIM.body(), Robots.SIM::drivetrain, FIELD, errors);
+        mode,
+        scheduler,
+        Robots.SIM.body(),
+        Robots.SIM::drivetrain,
+        Robots.SIM.cameras(),
+        FIELD,
+        errors);
   }
 
   private static void setStation(AllianceStationID station) {
@@ -111,7 +121,12 @@ class RobotContainerSimTest {
   void waitsOnItsStartWhileDisabled() {
     tick(SimTestSupport.loops(1.0));
 
-    assertEquals(start("Center", Alliance.BLUE), container.drive().getPose());
+    // Placed on its start; the cameras then refine that to within their noise.
+    Pose2d pose = container.drive().getPose();
+    Pose2d center = start("Center", Alliance.BLUE);
+    assertThat(pose.getTranslation().getDistance(center.getTranslation())).isLessThan(0.03);
+    assertThat(pose.getRotation().minus(center.getRotation()).getDegrees())
+        .isCloseTo(0.0, within(0.5));
     assertThat(container.allianceStation()).isEqualTo("Blue 2");
     assertThat(container.placement().status()).isEqualTo(Placement.Status.READY);
     assertFalse(container.isNoHardwareAlertActive(), "the simulator is the drivetrain's hardware");
@@ -248,11 +263,11 @@ class RobotContainerSimTest {
 
   /**
    * The simulator's robot has a season's wear on its wheels and gyro, as {@code ./gradlew run}
-   * builds it: what the robot believes drifts from where it really is, and the field view shows
-   * both.
+   * builds it, and four cameras whose views PhotonVision renders from where the robot really is:
+   * the estimate stays with the truth, and the field view shows both.
    */
   @Test
-  void theSimulatorKnowsWhereTheRobotReallyIs() {
+  void theCamerasKeepTheEstimateWithTheTruth() {
     container.close();
     container = containerFor(Constants.Mode.SIM, SensorErrors.TYPICAL);
     tick(1);
@@ -264,9 +279,10 @@ class RobotContainerSimTest {
         Objects.requireNonNull(container.simulation(), "the simulator has physics");
     Pose2d truth = simulation.truePose();
     Pose2d believed = container.drive().getPose();
-    assertThat(believed.getX() - truth.getX())
-        .as("worn tread: odometry overestimates how far it went")
-        .isGreaterThan(0.02);
+    assertThat(believed.getTranslation().getDistance(truth.getTranslation()))
+        .as("6 m driven on worn wheels")
+        .isLessThan(0.10);
+    assertThat(container.estimate().health().accepted()).as("camera measurements").isPositive();
     assertEquals(truth, shown("/Field/Truth")[0]);
   }
 

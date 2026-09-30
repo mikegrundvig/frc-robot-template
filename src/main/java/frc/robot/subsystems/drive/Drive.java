@@ -49,6 +49,12 @@ public class Drive implements Mechanism, AutoCloseable {
   /** A wheel this far short of its commanded speed, in m/s, is at the edge of its grip. */
   private static final double SPEED_DEFICIT = 0.5;
 
+  /**
+   * Wheels that report connected but send no readings this long have lost what reads them: on a
+   * robot, the thread that records their high-rate readings.
+   */
+  private static final double STOPPED_SECONDS = 0.1;
+
   private final Supplier<SwerveConfig> config;
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
@@ -72,6 +78,10 @@ public class Drive implements Mechanism, AutoCloseable {
 
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
   private final Alert[] moduleUnconfiguredAlerts = new Alert[4];
+  private final Alert odometryStopped;
+
+  /** Loops in a row that the wheels reported connected but sent no readings. */
+  private int loopsWithoutReadings;
 
   /**
    * @param name alert group name: "Drive" on the robot, another name for a second instance
@@ -109,6 +119,14 @@ public class Drive implements Mechanism, AutoCloseable {
             .tractionLimited(false)
             .build();
 
+    odometryStopped =
+        new Alert(
+            name,
+            "odometryStopped",
+            "Odometry stopped: the wheels report connected, but no readings have arrived for "
+                + STOPPED_SECONDS
+                + " s. Restart the robot code.",
+            Alert.Level.HIGH);
     for (int i = 0; i < 4; i++) {
       String module = Module.NAMES.get(i);
       moduleDisconnectedAlerts[i] =
@@ -164,9 +182,16 @@ public class Drive implements Mechanism, AutoCloseable {
       Logger.recordOutput("Drive/SetpointsOptimized", new SwerveModuleVelocity[] {});
     }
 
+    List<OdometrySample> wheels = wheelReadings();
+    boolean connected = true;
+    for (Module module : modules) {
+      connected &= module.isConnected();
+    }
+    loopsWithoutReadings = connected && wheels.isEmpty() ? loopsWithoutReadings + 1 : 0;
+    odometryStopped.set(loopsWithoutReadings > RobotLoop.loops(STOPPED_SECONDS));
     readings =
         DrivetrainReadings.builder()
-            .wheels(wheelReadings())
+            .wheels(wheels)
             .gyro(imuReadings(gyroInputs))
             .backupImu(imuReadings(backupInputs))
             .velocities(getRobotRelativeVelocities())
@@ -386,6 +411,10 @@ public class Drive implements Mechanism, AutoCloseable {
     return moduleUnconfiguredAlerts[module].get();
   }
 
+  boolean isOdometryStoppedAlertActive() {
+    return odometryStopped.get();
+  }
+
   @Override
   public void close() {
     for (Alert alert : moduleDisconnectedAlerts) {
@@ -394,5 +423,6 @@ public class Drive implements Mechanism, AutoCloseable {
     for (Alert alert : moduleUnconfiguredAlerts) {
       alert.close();
     }
+    odometryStopped.close();
   }
 }

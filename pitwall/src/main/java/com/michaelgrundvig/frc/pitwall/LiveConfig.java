@@ -85,6 +85,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   private final Map<String, Slot> slots = new LinkedHashMap<>();
   private final Map<TunableBase, String> children =
       Collections.synchronizedMap(new IdentityHashMap<>());
+  private final List<ConfigRules> rules = new ArrayList<>();
   private volatile T current;
 
   private LiveConfig(String name, T committed) {
@@ -244,14 +245,20 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   }
 
   /**
-   * Why a change can't be made, checking without making it: every reason {@link #candidate} gives.
+   * Why a change can't be made, checking without making it: every reason {@link #candidate} gives,
+   * then every {@link ConfigRules} rule the change touches breaks, with the other configurations as
+   * they are now.
    *
    * @param values new values by path, each in its knob's unit
    * @return null when it can be made
    */
   public @Nullable String whyNot(Map<String, Double> values) {
     List<String> problems = new ArrayList<>();
-    return check(values, problems) == null ? String.join("\n", problems) : null;
+    T candidate = check(values, problems);
+    if (candidate != null) {
+      problems.addAll(brokenRules(values, candidate));
+    }
+    return problems.isEmpty() ? null : String.join("\n", problems);
   }
 
   /**
@@ -261,7 +268,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    */
   public boolean set(Map<String, Double> values) {
     T candidate = check(values, new ArrayList<>());
-    if (candidate == null) {
+    if (candidate == null || !brokenRules(values, candidate).isEmpty()) {
       return false;
     }
     current = candidate;
@@ -353,6 +360,18 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
     }
   }
 
+  /** Registers rules that read this configuration, which its checks then run. */
+  void ruledBy(ConfigRules registry) {
+    if (rules.stream().noneMatch(known -> known == registry)) {
+      rules.add(registry);
+    }
+  }
+
+  /** The rules that read this configuration. */
+  List<ConfigRules> rules() {
+    return List.copyOf(rules);
+  }
+
   /** Which tunable value a published tunable is, or null if it isn't one of these. */
   @Nullable String pathOf(TunableBase tunable) {
     return children.get(tunable);
@@ -400,6 +419,15 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
       }
       return null;
     }
+  }
+
+  /** Why a candidate breaks the rules the change touches, one line for each rule broken. */
+  private List<String> brokenRules(Map<String, Double> values, T candidate) {
+    List<String> broken = new ArrayList<>();
+    for (ConfigRules registry : rules) {
+      broken.addAll(registry.whyNot(Map.of(this, values.keySet()), Map.of(this, candidate)));
+    }
+    return broken;
   }
 
   /** The configuration rebuilt with new values, each in its knob's unit; throws if rejected. */

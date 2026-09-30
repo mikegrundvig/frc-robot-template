@@ -15,6 +15,8 @@ import org.littletonrobotics.junction.networktables.NT4Publisher;
 import org.littletonrobotics.junction.wpilog.WPILOGReader;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
 
@@ -77,8 +79,13 @@ public class Robot extends LoggedRobot {
             Constants.currentMode,
             Scheduler.getDefault(),
             Robots.SIM.body(),
-            () -> pitwall.config().drivetrain());
+            () -> pitwall.config().drivetrain(),
+            Rebuilt.field(Robots.SIM.body()));
     pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
+    pitwall
+        .status()
+        .add("Alliance", container::allianceStation)
+        .add("Placement", () -> container.placement().describe());
   }
 
   /** Pitwall, for tests that drive the robot program through it. */
@@ -98,10 +105,11 @@ public class Robot extends LoggedRobot {
   }
 
   /**
-   * {@code ./gradlew run} starts the simulated robot enabled in teleop, so a driver can drive right
-   * away instead of hunting through the simulator GUI first. The GUI can still disable it, and
-   * {@code ./gradlew run -PstartDisabled} starts disabled like a real robot. Tests and replay never
-   * set the property.
+   * {@code ./gradlew run} starts the simulated robot enabled in teleop, on the blue alliance's
+   * station 2 unless the simulator GUI already chose one, so a driver can drive right away instead
+   * of hunting through the GUI first. The GUI can still disable it or change the station, and
+   * {@code ./gradlew run -PstartDisabled} starts disabled with no station, like a real robot before
+   * its Driver Station connects. Tests and replay never set the property.
    */
   @Override
   public void simulationInit() {
@@ -111,6 +119,10 @@ public class Robot extends LoggedRobot {
   /** Enable the simulated robot in teleop, only in a physics simulation and only when asked. */
   static void startEnabledIfRequested(Constants.Mode mode, boolean requested) {
     if (mode == Constants.Mode.SIM && requested) {
+      if (MatchState.getAlliance().isEmpty()) {
+        // The center start, and blue's forward is the field view's right: the easiest first drive.
+        DriverStationSim.setAllianceStationId(AllianceStationID.BLUE_2);
+      }
       DriverStationSim.setDsAttached(true);
       DriverStationSim.setRobotMode(RobotMode.TELEOPERATED);
       DriverStationSim.setEnabled(true);

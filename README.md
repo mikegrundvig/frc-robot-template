@@ -22,7 +22,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ```bash
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
-./gradlew run                                # the simulator, enabled and drivable from the keyboard
+./gradlew run                                # the simulator, enabled on a start and drivable from the keyboard
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
 ./gradlew deploy                             # to the robot, after every check passes
@@ -71,6 +71,14 @@ Also built in:
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`.
+- **A field model** (`lib/field`, filled in for 2026 in `Rebuilt.java`): the field's AprilTags and
+  symmetry, and the start positions, targets, and zones robot code refers to by name. Everything is
+  written once, for the blue alliance, and one tested transform gives red's; targets near tags are
+  derived from each alliance's own tags, so a layout measured at an event corrects both. The robot
+  waits on the start its Driver Station location picks (1, 2, 3: left, center, right), drives
+  field-relative from its own alliance's end, checks its placement before the match, and has
+  zone triggers that look ahead along its path. In the simulator, change the alliance station
+  while disabled to start somewhere else. At kickoff, write the new game's the same way.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
   without a team number.
 - **Dependency updates** for build tools and CI actions arrive as weekly pull requests (Dependabot).
@@ -82,9 +90,10 @@ Also built in:
 |---|---|
 | `src/main/java/frc/robot/` | The robot program. |
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
+| `src/main/java/frc/robot/Rebuilt.java` | The field the robot plays on: 2026's, until kickoff. Its starts, targets, and zones, written for the blue alliance. |
 | `src/main/java/frc/robot/RobotContainer.java` | Builds each mechanism with the hardware for the mode (real, simulated, or replayed from a log) and binds the controls to commands. |
 | `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
-| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`). |
+| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`) and the field model (`lib/field`, which also writes down the field and robot frames). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |

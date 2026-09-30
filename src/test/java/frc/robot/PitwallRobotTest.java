@@ -128,7 +128,8 @@ class PitwallRobotTest {
             Constants.Mode.SIM,
             Scheduler.getDefault(),
             Robots.SIM.body(),
-            () -> pitwall.config().drivetrain())) {
+            () -> pitwall.config().drivetrain(),
+            Rebuilt.field(Robots.SIM.body()))) {
       pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
 
       SimTestSupport.setEnabled(true);

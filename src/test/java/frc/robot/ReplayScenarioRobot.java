@@ -7,6 +7,7 @@ import java.net.http.HttpResponse;
 import java.util.Map;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.framework.RobotBase;
+import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.tunable.TunableDouble;
@@ -14,9 +15,11 @@ import org.wpilib.tunable.TunableRegistry;
 
 /**
  * The template's robot program with a scripted session on top, for {@link ReplayEndToEndTest}. In
- * the simulator it changes things the way people do in the pit: it enables utility mode, changes a
- * configuration gain from Pitwall's page (over HTTP), changes a WPILib tunable, and runs an action.
- * It records what those affect, then stops. Replayed, it only records, and the replay must match.
+ * the simulator it changes things the way people do in the pit: it picks the red alliance's station
+ * 1 (which puts the robot on that start), enables utility mode, changes a configuration gain from
+ * Pitwall's page (over HTTP), changes a WPILib tunable, and runs an action that drives the robot
+ * under a trench. It records what those affect, then stops. Replayed, it only records, and the
+ * replay must match.
  */
 final class ReplayScenarioRobot extends Robot {
   /** How many loops the recorded session runs, about four seconds. */
@@ -40,18 +43,26 @@ final class ReplayScenarioRobot extends Robot {
 
   @Override
   public void robotPeriodic() {
+    // The script runs before the robot's code, the way Driver Station data arrives between loops:
+    // AdvantageKit records it at the end of each loop, so a change made after the robot's code had
+    // read it would be logged a loop before the robot saw it, and the replay would run a loop
+    // early.
+    if (Constants.currentMode == Constants.Mode.SIM) {
+      script(++loop);
+    }
     super.robotPeriodic();
     Logger.recordOutput("Scenario/Gain", gain.get());
     Logger.recordOutput("Scenario/SteerKp", pitwall().config().drivetrain().gains().steerKp());
     Logger.recordOutput("Scenario/Action", pitwall().actions().view().get(0).phase().name());
-    if (Constants.currentMode == Constants.Mode.SIM) {
-      script(++loop);
-    }
   }
 
   /** The session, by loop: in a replay none of this runs, and the log supplies it instead. */
   private void script(int loop) {
     switch (loop) {
+      case 5 -> {
+        DriverStationSim.setAllianceStationId(AllianceStationID.RED_1);
+        DriverStationSim.notifyNewData();
+      }
       case 10 -> {
         DriverStationSim.setDsAttached(true);
         DriverStationSim.setRobotMode(RobotMode.UTILITY);

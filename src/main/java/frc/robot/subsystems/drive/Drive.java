@@ -208,9 +208,9 @@ public class Drive implements Mechanism, AutoCloseable {
   }
 
   /**
-   * Field-relative driving from sticks, for one loop. Inputs are -1..1 with +x away from the
-   * driver, +y to the driver's left, and +omega counterclockwise. Deadband, then squared for fine
-   * control near center.
+   * Field-relative driving from sticks, for one loop. Inputs are -1..1 along the field's axes (turn
+   * the driver's stick to the field first: a red driver's forward is -x), and +omega
+   * counterclockwise. Deadband, then squared for fine control near center.
    */
   public void driveWithSticks(double x, double y, double omega) {
     double linear = MathUtil.applyDeadband(Math.hypot(x, y), STICK_DEADBAND);

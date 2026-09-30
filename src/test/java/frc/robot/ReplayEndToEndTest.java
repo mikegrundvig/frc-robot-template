@@ -32,7 +32,14 @@ import org.wpilib.datalog.DataLogRecord;
  */
 class ReplayEndToEndTest {
   private static final List<String> OUTPUTS =
-      List.of("Scenario/Gain", "Scenario/SteerKp", "Scenario/Action", "Drive/Pose");
+      List.of(
+          "Scenario/Gain",
+          "Scenario/SteerKp",
+          "Scenario/Action",
+          "Drive/Pose",
+          "Field/Alliance",
+          "Field/Placement",
+          "Field/Zones/Trench");
 
   @TempDir(cleanup = CleanupMode.ON_SUCCESS) // a failed run keeps its logs to look at
   Path dir;
@@ -59,6 +66,9 @@ class ReplayEndToEndTest {
     assertThat(values(original, "Scenario/Gain")).contains(1.0, 2.5);
     assertThat(values(original, "Scenario/SteerKp")).contains(16.0, 18.5);
     assertThat(values(original, "Scenario/Action")).contains("READY", "RUNNING", "ENDED");
+    assertThat(values(original, "Field/Alliance")).contains("Red 1");
+    assertThat(values(original, "Field/Placement")).contains("Ready on Left: 0 cm, 0° off");
+    assertThat(values(original, "Field/Zones/Trench")).as("drove under it").contains(true);
 
     // AdvantageKit's reader reads each loop up to the next loop's timestamp, so a replay runs every
     // loop of the log except the last.
@@ -153,6 +163,7 @@ class ReplayEndToEndTest {
           switch (entry.type()) {
             case "double" -> record.getDouble();
             case "string" -> record.getString();
+            case "boolean" -> record.getBoolean();
             default -> HexFormat.of().formatHex(record.getRaw());
           };
       samples

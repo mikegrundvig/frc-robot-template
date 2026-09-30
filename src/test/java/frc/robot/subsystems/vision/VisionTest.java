@@ -135,7 +135,7 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
     assertThat(vision.summary())
         .isEqualTo("1 of 1 cameras connected, 100% of 1 measurements accepted");
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
@@ -149,17 +149,17 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.accepted(0) + vision.rejected(0)).isEqualTo(1);
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isEqualTo(1);
   }
 
   @Test
   void aCameraTurnedOffIsLeftOut() {
-    vision.enabled(0).set(false);
+    vision.camera(0).enabled.set(false);
     io.see(T0 + 200_000_000L, camera);
 
     loop();
 
-    assertThat(vision.accepted(0) + vision.rejected(0)).isZero();
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
     assertThat(vision.summary()).endsWith("no measurements yet");
   }
 
@@ -169,7 +169,7 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.isDisconnectedAlertActive(0)).isTrue();
+    assertThat(vision.camera(0).isDisconnectedAlertActive()).isTrue();
     assertThat(vision.summary()).startsWith("0 of 1 cameras connected");
   }
 
@@ -188,7 +188,7 @@ class VisionTest {
 
     loop(pitch, roll);
 
-    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
     assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
         .isLessThan(1e-6);
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
@@ -212,7 +212,7 @@ class VisionTest {
 
     loop(0, 0); // level again by the time it arrives
 
-    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
     assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
         .isLessThan(1e-6);
   }
@@ -225,12 +225,12 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.accepted(0) + vision.rejected(0)).as("held").isZero();
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).as("held").isZero();
     vision.autoStartHoldSeconds().set(0.0);
     vision.autonomousStarted(T0 + 100_000_000L);
     io.see(T0 + 210_000_000L, camera);
     loop();
-    assertThat(vision.accepted(0)).as("off: nothing held").isEqualTo(1);
+    assertThat(vision.camera(0).accepted()).as("off: nothing held").isEqualTo(1);
   }
 
   /**
@@ -243,15 +243,17 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.isUnreadableAlertActive(0)).isTrue();
-    assertThat(vision.isDisconnectedAlertActive(0)).as("unreadable says why instead").isFalse();
+    assertThat(vision.camera(0).isUnreadableAlertActive()).isTrue();
+    assertThat(vision.camera(0).isDisconnectedAlertActive())
+        .as("unreadable says why instead")
+        .isFalse();
     assertThat(vision.summary()).startsWith("0 of 1 cameras connected");
 
     io.failure = null;
     io.see(T0 + 200_000_000L, camera);
     loop();
-    assertThat(vision.isUnreadableAlertActive(0)).isFalse();
-    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(vision.camera(0).isUnreadableAlertActive()).isFalse();
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
   }
 
   /** Whatever a camera sends that isn't a number costs that image, never the robot program. */
@@ -267,7 +269,7 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.accepted(0)).as("only the good image").isEqualTo(1);
+    assertThat(vision.camera(0).accepted()).as("only the good image").isEqualTo(1);
     assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
         .isLessThan(1e-6);
   }
@@ -282,7 +284,7 @@ class VisionTest {
 
     loop();
 
-    assertThat(vision.accepted(0)).isEqualTo(1);
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
   }
 
   private static CameraIO.SeenTag withAmbiguity(CameraIO.SeenTag tag, double ambiguity) {

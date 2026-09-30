@@ -138,7 +138,7 @@ class VisionTest {
   }
 
   private void loop(double pitch, double roll) {
-    vision.periodic(estimator.estimate(), pitch, roll);
+    vision.periodic(estimator.estimate().timestampNanos(), estimator.estimate(), pitch, roll);
     vision.record(estimator.update());
   }
 
@@ -389,9 +389,40 @@ class VisionTest {
     assertThat(vision.meanTagResidualMeters("front")).isBetween(0.09, 0.11); // 4 in
   }
 
+  /**
+   * An image stamped far earlier than its camera's images take to arrive, or after the robot read
+   * it, has the wrong capture time: the camera's clock and the robot's are out of step. It's left
+   * out before the estimator sees it, and an alert says so until an image arrives in time again.
+   */
+  @Test
+  void anImageOutsideItsCamerasLatencyBandIsLeftOut() {
+    long now = estimator.estimate().timestampNanos();
+    io.see(now - 300_000_000L, camera); // the camera takes 30 ms; 100 ms more is the margin
+
+    loop();
+
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
+    assertThat(vision.camera(0).outOfStepAlertText())
+        .isEqualTo(
+            "Camera front's images arrive 300 ms after they're taken, outside 0 to 130 ms, and are"
+                + " left out: are its clock and the robot's in step (time sync)? If it's just"
+                + " slower, measure its latency");
+    io.see(now + 5_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).outOfStepAlertText()).contains("arrive 5 ms before they're taken");
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+
+    estimator.addOdometry(now + 40_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    io.see(now + 20_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).accepted()).as("in time again").isEqualTo(1);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+  }
+
   /** One loop, and the tags each of its measurements came from. */
   private List<List<Integer>> tagsMeasuredFrom() {
-    vision.periodic(estimator.estimate(), 0, 0);
+    vision.periodic(estimator.estimate().timestampNanos(), estimator.estimate(), 0, 0);
     List<VisionDecision> decisions = estimator.update();
     vision.record(decisions);
     return decisions.stream().map(decision -> decision.measurement().tagIds()).toList();

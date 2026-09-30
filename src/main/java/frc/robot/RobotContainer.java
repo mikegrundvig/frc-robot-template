@@ -330,7 +330,10 @@ public final class RobotContainer implements AutoCloseable {
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
     placed.ifPresent(pose -> localization.place(pose, PLACED, placedOn));
     vision.periodic(
-        localization.estimate(), localization.pitchRadians(), localization.rollRadians());
+        RobotController.getTime(),
+        localization.estimate(),
+        localization.pitchRadians(),
+        localization.rollRadians());
     loop.mark("Vision", System.nanoTime());
     vision.record(localization.update());
     loop.mark("Localization", System.nanoTime());

@@ -51,6 +51,10 @@ import org.wpilib.tunable.TunableRegistry;
  * Past a tolerance it raises an alert to recalibrate it, and until then its measurements count for
  * less, by how far its tags land off across the floor (see {@link MountCheck}).
  *
+ * <p>Each image's latency, from when it was taken to the loop that reads it, is logged too. One
+ * that arrives before it was taken, or much later than its camera's usual latency, has the wrong
+ * capture time (the camera's clock and the robot's out of step): it's left out, with an alert.
+ *
  * <p>How far images are trusted is the robot's configuration ({@code RobotConfig.vision}), whose
  * main thresholds and uncertainties Pitwall tunes. Two switches are WPILib tunables, for the drive
  * team as much as the pit: one per camera to leave it out (a camera fogged over, knocked loose, or
@@ -134,7 +138,8 @@ public final class Vision implements AutoCloseable {
         .number("linearStdDevBaseline", Limits.between(0.001, 1)) // meters
         .number("angularStdDevBaseline", Limits.between(0.001, 1)) // radians
         .number("distanceExponent", Limits.between(0, 4))
-        .number("mountToleranceMeters", Limits.between(0.01, 0.5));
+        .number("mountToleranceMeters", Limits.between(0.01, 0.5))
+        .number("latencyMarginSeconds", Limits.between(0.01, 1));
   }
 
   /**
@@ -252,6 +257,7 @@ public final class Vision implements AutoCloseable {
   /**
    * Reads every camera and hands the estimator a measurement for each usable image.
    *
+   * @param nowNanos the robot's clock this loop: how late each image arrived is measured to it
    * @param estimate the estimate as of this loop's odometry: the robot's motion and how sure its
    *     heading is
    * @param pitchRadians the robot's pitch now, from the IMU: each image is solved with the robot
@@ -259,7 +265,8 @@ public final class Vision implements AutoCloseable {
    *     level lands off by the tilt times its distance
    * @param rollRadians the robot's roll now
    */
-  public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
+  public void periodic(
+      long nowNanos, LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
     attitudes.add(estimate.timestampNanos(), pitchRadians, rollRadians);
     if (estimate.fieldVelocity().getNorm() > STILL_METERS_PER_SECOND
         || Math.abs(estimate.yawRateRadiansPerSecond()) > STILL_RADIANS_PER_SECOND) {
@@ -291,7 +298,7 @@ public final class Vision implements AutoCloseable {
         // One image's bad data costs that image, never the robot program: whatever a camera sends
         // that the checks miss ends here, logged as the image's outcome.
         try {
-          processFrame(camera, frame, first, motion);
+          processFrame(camera, frame, first, motion, nowNanos);
         } catch (RuntimeException e) {
           camera.outcome("unusable data from the camera: " + e.getMessage());
         }
@@ -315,7 +322,8 @@ public final class Vision implements AutoCloseable {
    * One image: solved into a measurement for the estimator (unless it's held back), and its tags
    * placed on the field, for the camera's residual and any calibration collecting them.
    */
-  private void processFrame(Camera camera, CameraIO.Frame frame, int first, Motion motion) {
+  private void processFrame(
+      Camera camera, CameraIO.Frame frame, int first, Motion motion, long nowNanos) {
     TagDetections detections = detections(frame, camera.inputs.tags, first, camera.name());
     if (!camera.enabled.get()) {
       camera.outcome("camera turned off");
@@ -323,6 +331,12 @@ public final class Vision implements AutoCloseable {
     }
     if (!camera.isNew(frame.timestampNanos())) {
       camera.outcome("the same image again");
+      return;
+    }
+    // An image that arrived before it was taken, or far later than its camera's images do, has
+    // the wrong capture time: solved as of that time, it would put the robot where it wasn't.
+    if (!camera.arrivedInTime(
+        Timestamps.toSeconds(nowNanos - frame.timestampNanos()), current.latencyMarginSeconds())) {
       return;
     }
     Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);

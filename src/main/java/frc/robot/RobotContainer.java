@@ -367,6 +367,8 @@ public final class RobotContainer implements AutoCloseable {
     updateZones(pose);
     show(pose);
     loop.mark("Field", System.nanoTime());
+    Dashboard.publish(this);
+    loop.mark("Dashboard", System.nanoTime());
   }
 
   /**

@@ -127,6 +127,7 @@ final class Calibration {
                       measured,
                       today.get()));
             })
+        .whenCanceled(() -> report("Wheel radius: canceled before it finished"))
         .named("Calibrate wheel radius");
   }
 
@@ -193,6 +194,11 @@ final class Calibration {
                       scale,
                       today.get()));
             })
+        .whenCanceled(
+            () -> {
+              vision.stopCollectingHeadings();
+              report("Gyro scale: canceled before it finished");
+            })
         .named("Calibrate gyro scale");
   }
 
@@ -207,6 +213,7 @@ final class Calibration {
               }
               report(level.describe(LEVEL_TOLERANCE_RADIANS) + ", " + today.get());
             })
+        .whenCanceled(() -> report("Level check: canceled before it finished"))
         .named("Check the IMU reads level");
   }
 
@@ -224,16 +231,13 @@ final class Calibration {
             coroutine -> {
               CameraMountCalibration mount = new CameraMountCalibration(camera.robotToCamera());
               vision.calibrateMount(name, mount);
-              try {
-                for (int i = 0; i < loops(MOUNT_SECONDS); i++) {
-                  if (mount.sightings() >= MOUNT_SIGHTINGS) {
-                    break;
-                  }
-                  coroutine.yield();
+              for (int i = 0; i < loops(MOUNT_SECONDS); i++) {
+                if (mount.sightings() >= MOUNT_SIGHTINGS) {
+                  break;
                 }
-              } finally {
-                vision.stopCalibratingMount();
+                coroutine.yield();
               }
+              vision.stopCalibratingMount();
               Optional<CameraMountCalibration.Result> result =
                   mount.sightings() >= MIN_MOUNT_SIGHTINGS ? mount.solve() : Optional.empty();
               report(
@@ -246,6 +250,13 @@ final class Calibration {
                                   + " nearer and farther, where the other cameras see tags too.",
                               name,
                               mount.sightings())));
+            })
+        // A canceled command never resumes, so nothing after the loop runs (not even a finally):
+        // without this, the camera would stay out of localization until the robot restarts.
+        .whenCanceled(
+            () -> {
+              vision.stopCalibratingMount();
+              report(name + ": canceled before it finished");
             })
         .named("Calibrate camera mount: " + name);
   }

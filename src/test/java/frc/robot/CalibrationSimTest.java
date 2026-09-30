@@ -205,4 +205,28 @@ class CalibrationSimTest {
     assertThat(numbers(report)[0]).as("tags landed off, cm").isGreaterThan(5);
     assertThat(numbers(report)[1]).as("and with the mount found").isLessThan(3);
   }
+
+  /**
+   * A canceled command never resumes, so its cleanup can't be code after its loop: disabling the
+   * robot mid-calibration must give the camera back to localization at once, not at a restart.
+   */
+  @Test
+  void aCanceledCalibrationGivesTheCamerasBack() {
+    build(SensorErrors.NONE, true);
+    tick(SimTestSupport.loops(1.0));
+    SimTestSupport.setEnabled(true);
+    for (Command procedure :
+        List.of(
+            robot().calibration().cameraMount("front-left"), robot().calibration().gyroScale())) {
+      scheduler.schedule(procedure);
+      tick(5);
+      assertThat(robot().vision().isCalibrating()).as(procedure.name()).isTrue();
+
+      scheduler.cancel(procedure);
+      tick(1);
+
+      assertThat(robot().vision().isCalibrating()).as(procedure.name()).isFalse();
+      assertThat(robot().calibration().lastResult()).endsWith(": canceled before it finished");
+    }
+  }
 }

@@ -11,8 +11,9 @@ WPILib and AdvantageKit guide apply unchanged. Use it by clicking **Use this tem
 your robot.
 
 > **Status:** early. It tracks WPILib's 2027 prereleases (currently 2027.0.0-alpha-7). The swerve
-> drivetrain drives in the simulator; code for real motor controllers is still to come. Parts that
-> only stand in until a library ships for 2027 are listed in [docs/stand-ins.md](docs/stand-ins.md).
+> drivetrain drives in the simulator, and has code for CTRE hardware (TalonFX, CANcoder, Pigeon 2)
+> tested against CTRE's simulated devices, not yet on a robot. Parts that only stand in until a
+> library ships for 2027 are listed in [docs/stand-ins.md](docs/stand-ins.md).
 
 ## Quick start
 
@@ -42,15 +43,17 @@ catches a kind of bug that robot code otherwise accumulates quietly until it bit
 | **Error Prone** (error level) | Code that compiles but is certainly wrong: exceptions created and never thrown, bad equality, misused APIs. |
 | **WPILib's compiler plugin** | FRC-specific mistakes, such as a Commands v3 loop that never yields and freezes the robot. |
 | **Compiler warnings as errors** (a curated set) | Unchecked casts, raw types, switch fall-through, and other near-certain bugs. |
-| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, static mutable state that makes behavior depend on what ran before, and configuration written by position, where two values can swap unnoticed. |
+| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, hardware, or the clock (so a replay would decide differently); vendor libraries outside the IO layer; subsystems reaching into each other; static mutable state that makes behavior depend on what ran before; and configuration written by position, where two values can swap unnoticed. |
 | **Tests** (JUnit 6, [AssertJ](https://assertj.github.io/doc/)) | Behavior regressions, including simulation tests that exercise physics. |
 | **Coverage floor** (JaCoCo) | Code with no tests at all. The build fails below 50% line or branch coverage (`coverage-floor.properties`): enough to catch untested code, low enough not to slow heavy development. |
 | **Formatting** (google-java-format via Spotless) | Diff noise and review friction. Your local build formats automatically; CI only checks. |
 
 Also built in:
 
-- **One build, everywhere:** a Gradle toolchain pins Java 25 and downloads it when missing, and the
-  version catalog (`gradle/libs.versions.toml`) holds every build and test version in one place.
+- **One build, everywhere:** a Gradle toolchain pins Java 25 and downloads it when missing. Build
+  and test tools are versioned in one place, the version catalog (`gradle/libs.versions.toml`);
+  robot libraries, as in any WPILib project, by GradleRIO's version (in the catalog) and
+  `vendordeps/`.
 - **Every log says which code produced it:** the robot records the git SHA, branch, build time, and
   whether anything was uncommitted (`gradle/build-info.gradle`).
 - **Pitwall, the robot's own web page** (http://localhost:5820 in the simulator,
@@ -66,8 +69,9 @@ Also built in:
     to `Robots.java`.
   - **Every WPILib tunable** in the program, through a tee around WPILib's own NetworkTables
     backend: dashboards such as Elastic see and change them as always (the configuration's
-    `@Tunable` values too, under `Config/`), but a change applies only while tuning is on, never on
-    the field, and is logged for replay.
+    `@Tunable` values too, under `Config/`), but a change to a number or a true/false applies only
+    while tuning is on, never on the field, and is logged for replay. Text, arrays, and structs pass
+    straight through, unlocked, so choosers keep working on the field.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`.
@@ -106,8 +110,8 @@ Also built in:
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
 | `src/main/java/frc/robot/Rebuilt.java` | The field the robot plays on: 2026's, until kickoff. Its starts, targets, and zones, written for the blue alliance. |
 | `src/main/java/frc/robot/RobotContainer.java` | Builds each mechanism with the hardware for the mode (real, simulated, or replayed from a log) and binds the controls to commands. |
-| `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware. Simulated today; add one for your motor controllers. A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
-| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`), the field model (`lib/field`, which also writes down the field and robot frames), and localization's measurement types (`lib/localization`). |
+| `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware: simulated, and CTRE's (`PhoenixDrivetrain`). A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
+| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`), the field model (`lib/field`, which also writes down the field and robot frames), and localization: the pose estimator and everything that feeds it (`lib/localization`, whose package documentation is a reading map). |
 | `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |

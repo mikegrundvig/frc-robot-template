@@ -11,10 +11,11 @@ import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
 
 /**
- * A stand-in camera for the estimator's simulation tests, until PhotonLib's simulated cameras are
- * wired in: it sees the robot's true pose (never the estimate), with noise, a frame rate, and a
- * delay before each result arrives, and reports a heading-constrained solve as a real pipeline
- * would. It can be told to lie once, as a misread tag does.
+ * A plain camera for the drivetrain's estimator tests, lighter than PhotonVision's simulated ones
+ * ({@code VisionSim}, which the whole-robot tests use): it sees the robot's true pose (never the
+ * estimate), with noise, a frame rate, and a delay before each result arrives, and reports a
+ * heading-constrained solve as a real pipeline would. It can be told to lie once, as a misread tag
+ * does.
  */
 final class FakeCamera {
   private final DriveSimulation robot;

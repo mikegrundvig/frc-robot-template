@@ -276,8 +276,8 @@ final class ModuleIOTalonFX implements ModuleIO {
 
   /**
    * Gains and limits, at startup and whenever tuning changes them. At startup it waits for each
-   * device to confirm; while running it sends them without waiting, so the loop never blocks (ADR
-   * 0007).
+   * device to confirm; while running it sends them without waiting, so the loop never blocks: a
+   * robot loop that waits on a device stutters.
    */
   @Override
   public void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {

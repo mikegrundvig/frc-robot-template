@@ -9,6 +9,7 @@ import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import java.util.ArrayList;
@@ -202,6 +203,36 @@ class LocalizationSimTest {
     assertThat(robot.drive.conditions().collision()).as("a loop later").isFalse();
     assertThat(robot.drive.pitchRadians()).isEqualTo(0.3);
     assertThat(robot.drive.rollRadians()).isEqualTo(0.1);
+  }
+
+  /** Over a bump, nose up then nose down: the drivetrain follows the crossing from its IMU. */
+  @Test
+  void theDrivetrainFollowsTheRobotOverABump() {
+    DriveSimHarness robot = robot(SensorErrors.NONE);
+    robot.drive(0.6, 0.5, 0, 0); // 1.1 m/s ahead
+    List<TerrainCrossing.Phase> phases = new ArrayList<>(List.of(robot.drive.terrainPhase()));
+    robot.eachLoop(
+        () -> {
+          TerrainCrossing.Phase now = robot.drive.terrainPhase();
+          if (phases.isEmpty() || phases.get(phases.size() - 1) != now) {
+            phases.add(now);
+          }
+        });
+
+    robot.simulation.tilt(Math.toRadians(-15), 0); // nose up
+    robot.drive(0.3, 0.5, 0, 0);
+    robot.simulation.tilt(Math.toRadians(15), 0); // over the crest, nose down
+    robot.drive(0.3, 0.5, 0, 0);
+    robot.simulation.tilt(0, 0);
+    robot.drive(0.3, 0.5, 0, 0);
+
+    assertThat(phases)
+        .containsExactly(
+            TerrainCrossing.Phase.LEVEL,
+            TerrainCrossing.Phase.CLIMBING,
+            TerrainCrossing.Phase.DESCENDING,
+            TerrainCrossing.Phase.LEVEL);
+    assertThat(robot.drive.terrainCrossings()).isEqualTo(1);
   }
 
   @Test

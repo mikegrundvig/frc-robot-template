@@ -2,6 +2,7 @@ package frc.robot.subsystems.vision;
 
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.localization.AttitudeHistory;
 import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseEstimator;
@@ -66,6 +67,9 @@ public final class Vision implements AutoCloseable {
   private final int[] residualCounts;
   private final double[] recentYawRates = new double[YAW_RATE_LOOPS];
   private int yawRateLoop;
+
+  /** Half a second of the robot's attitude, for each image's capture time. */
+  private final AttitudeHistory attitudes = new AttitudeHistory(25);
 
   private final TunableBoolean[] enabled;
   private final TunableDouble maxAmbiguity =
@@ -153,13 +157,13 @@ public final class Vision implements AutoCloseable {
    * Reads every camera and hands the estimator a measurement for each usable image.
    *
    * @param estimate the estimate as of this loop's odometry: the robot's motion and how sure its
-   *     heading is
-   * @param pitchRadians the robot's pitch now, from the IMU: images are solved with the robot
-   *     tilted as it is, since a tag seen from a tilted camera as if level lands off by the tilt
-   *     times its distance
+   *     heading is * @param pitchRadians the robot's pitch now, from the IMU: each image is solved
+   *     with the robot tilted as it was when the image was taken, since a tag seen from a tilted
+   *     camera as if level lands off by the tilt times its distance
    * @param rollRadians the robot's roll now
    */
   public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
+    attitudes.add(estimate.timestampNanos(), pitchRadians, rollRadians);
     recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());
     yawRateLoop = (yawRateLoop + 1) % YAW_RATE_LOOPS;
     double recentYawRate = 0;
@@ -196,12 +200,18 @@ public final class Vision implements AutoCloseable {
         lastFrame[i] = frame.timestampNanos();
         Pose2d then = estimator.poseAt(frame.timestampNanos()).orElse(null);
         Rotation2d heading = then != null ? then.getRotation() : null;
+        AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
         VisionResult result =
             pipeline.process(
                 detections,
                 camera,
                 new CaptureContext(
-                    heading, headingStdDev, pitchRadians, rollRadians, speed, recentYawRate),
+                    heading,
+                    headingStdDev,
+                    tilted.pitchRadians(),
+                    tilted.rollRadians(),
+                    speed,
+                    recentYawRate),
                 settings);
         if (result.measurement() == null) {
           outcomes.add(result.outcome());
@@ -217,7 +227,10 @@ public final class Vision implements AutoCloseable {
                   then.getX(),
                   then.getY(),
                   0,
-                  new Rotation3d(rollRadians, pitchRadians, then.getRotation().getRadians()));
+                  new Rotation3d(
+                      tilted.rollRadians(),
+                      tilted.pitchRadians(),
+                      then.getRotation().getRadians()));
           for (TagDetections.Tag tag : detections.tags()) {
             Pose3d seen =
                 robotThen.transformBy(camera.robotToCamera()).transformBy(tag.bestCameraToTag());

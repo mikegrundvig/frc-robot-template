@@ -13,6 +13,7 @@ import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
+import frc.robot.lib.localization.TerrainCrossing;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.DoubleSupplier;
@@ -59,6 +60,9 @@ public class Drive implements Mechanism, AutoCloseable {
   /** A wheel this far short of its commanded speed, in m/s, is at the edge of its grip. */
   private static final double SPEED_DEFICIT = 0.5;
 
+  /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
+  private static final double MOVING = 0.25;
+
   /** A reset to "exactly here": a millimeter and a milliradian. */
   private static final PoseCovariance EXACTLY = PoseCovariance.fromStdDevs(0.001, 0.001, 0.001);
 
@@ -84,6 +88,10 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /** What the IMU and the motors said about trusting the wheels this loop. */
   private DriveConditions conditions = DriveConditions.NORMAL;
+
+  /** Crossings of raised terrain, from the IMU: 1678's thresholds (10° steep, 5° level). */
+  private final TerrainCrossing terrain =
+      new TerrainCrossing(Math.toRadians(10), Math.toRadians(5), 0.1);
 
   private final Alert gyroDisconnectedAlert;
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
@@ -189,6 +197,7 @@ public class Drive implements Mechanism, AutoCloseable {
     conditions = readConditions(enabled);
     estimator.setConditions(conditions);
     updateOdometry();
+    watchTerrain();
 
     gyroDisconnectedAlert.set(!gyroInputs.connected);
     for (int i = 0; i < 4; i++) {
@@ -199,6 +208,33 @@ public class Drive implements Mechanism, AutoCloseable {
     Logger.recordOutput("Drive/TiltDegrees", Math.toDegrees(conditions.tiltRadians()));
     Logger.recordOutput("Drive/Collision", conditions.collision());
     Logger.recordOutput("Drive/TractionLimited", conditions.tractionLimited());
+  }
+
+  /** Follows the robot over raised terrain: the slope along the way it moves, and its tilt. */
+  private void watchTerrain() {
+    ChassisVelocities moving = getRobotRelativeVelocities();
+    double climb =
+        Math.hypot(moving.vx, moving.vy) < MOVING
+            ? 0
+            : TerrainCrossing.climb(
+                pitchRadians(), rollRadians(), Math.atan2(moving.vy, moving.vx));
+    terrain.update(RobotController.getTime(), climb, conditions.tiltRadians());
+    Logger.recordOutput("Drive/ClimbDegrees", Math.toDegrees(climb));
+    Logger.recordOutput("Drive/Terrain", terrain.phase().name());
+    Logger.recordOutput("Drive/TerrainCrossings", terrain.crossings());
+  }
+
+  /** Where the robot is on raised terrain: level, climbing, or descending. */
+  public TerrainCrossing.Phase terrainPhase() {
+    return terrain.phase();
+  }
+
+  /**
+   * How many times the robot has crossed raised terrain: up, over, down, and level again. An auto
+   * that drives over a bump waits for this to count up.
+   */
+  public int terrainCrossings() {
+    return terrain.crossings();
   }
 
   /**

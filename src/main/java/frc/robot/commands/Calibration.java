@@ -25,6 +25,7 @@ import java.util.function.Supplier;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Coroutine;
+import org.wpilib.command3.Scheduler;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.kinematics.ChassisVelocities;
@@ -101,29 +102,31 @@ public final class Calibration {
   /**
    * Adds every procedure to the Pitwall page's actions, each named with what it asks of the drive
    * team: how long it takes, and where the robot needs to be.
+   *
+   * @param scheduler runs the procedures: the robot's own
    */
-  public void addTo(Actions actions) {
+  public void addTo(Actions actions, Scheduler scheduler) {
     double wheelSpinSeconds =
         WHEEL_SPIN_TURNS * 2 * Math.PI / WHEEL_SPIN_RADIANS_PER_SECOND
             + WHEEL_SPIN_RADIANS_PER_SECOND / WHEEL_SPIN_RAMP;
     actions
         .add(
             format("Calibrate the gyro's scale (%d turns where cameras see tags)", GYRO_SPIN_TURNS),
-            this::gyroScale)
+            Actions.command(() -> scheduler, this::gyroScale))
         .add(
             format(
                 "Calibrate the wheel radius (%.0f slow turns in place, about %.0f s)",
                 WHEEL_SPIN_TURNS, 5 * Math.ceil(wheelSpinSeconds / 5)),
-            this::wheelRadius)
+            Actions.command(() -> scheduler, this::wheelRadius))
         .add(
             format("Check the IMU reads level (%.0f s, on a level floor)", LEVEL_SECONDS),
-            this::level);
+            Actions.command(() -> scheduler, this::level));
     for (CameraConfig camera : cameras) {
       actions.add(
           format(
               "Calibrate the %s camera's mount (%.0f s, drive slowly past tags)",
               camera.name(), MOUNT_SECONDS),
-          () -> cameraMount(camera.name()));
+          Actions.command(() -> scheduler, () -> cameraMount(camera.name())));
     }
   }
 

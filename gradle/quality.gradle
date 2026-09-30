@@ -5,8 +5,10 @@
 //   ./gradlew test -Pquick --continuous        fast edit-test loop (skips the CI-only work)
 
 // Quick mode skips the work only CI needs (static analysis, auto-formatting, the coverage report),
-// which costs seconds on every save. `ci` still enforces all of it, and refuses to run in quick mode.
+// which costs seconds on every save, and the slow tests (@SimulationTest, @EndToEndTest) unless
+// --tests names what to run. `ci` still enforces all of it, and refuses to run in quick mode.
 def quick = project.hasProperty("quick")
+def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
 
 // NullAway checks the project's own packages: the robot program's, unless a project (such as a
 // library) sets ext.nullSafePackages before applying this file.
@@ -41,8 +43,16 @@ tasks.withType(JavaCompile).configureEach {
     }
 }
 
-// Tests produce a coverage report (JaCoCo), except in quick mode.
+// Tests produce a coverage report (JaCoCo), except in quick mode. None may run past two minutes
+// (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test fails
+// instead of hanging the build.
 tasks.named("test") {
+    systemProperty "junit.jupiter.execution.timeout.default", "2 m"
+    if (quick && !testsNamed) {
+        useJUnitPlatform {
+            excludeTags "simulation", "end-to-end"
+        }
+    }
     if (!quick) {
         finalizedBy "jacocoTestReport"
     }

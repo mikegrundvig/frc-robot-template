@@ -15,7 +15,7 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 |---|---|
 | Every check CI runs; run it before pushing | `./gradlew ci` |
 | Rerun the tests on every save | `./gradlew test -Pquick --continuous` |
-| Run one test class | `./gradlew test --tests frc.robot.ArchitectureTest` |
+| Run one test class ([more on tests](testing.md)) | `./gradlew :test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, enabled and drivable from the keyboard | `./gradlew run` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
 | Start it waiting for a debugger on port 5005 | `./gradlew run --debug-jvm` |

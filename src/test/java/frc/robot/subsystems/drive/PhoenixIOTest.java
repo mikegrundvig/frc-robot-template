@@ -10,8 +10,8 @@ import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.hardware.TalonFX;
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
 import java.util.Queue;
@@ -20,12 +20,14 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The CTRE IO against Phoenix's own simulated devices: set what a sensor reads, and check what the
  * robot code gets. Conversions, the coupling, and the odometry thread; the control loops belong to
  * the devices.
  */
+@ExtendWith(RobotSim.class)
 class PhoenixIOTest {
   private static final CANBus BUS = new CANBus("drivetrain");
   private static final SwerveConfig DRIVETRAIN = Robots.SIM.drivetrain();
@@ -34,14 +36,14 @@ class PhoenixIOTest {
   private final PhoenixOdometryThread odometry = new PhoenixOdometryThread();
 
   @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
+  static void quietCtreLog() {
     SignalLogger.enableAutoLogging(false); // as PhoenixDrivetrain does on the robot
   }
 
   @AfterEach
-  void tearDown() {
+  void tearDown() throws InterruptedException {
     odometry.interrupt();
+    odometry.join(2000); // stopped before the next test's devices start
   }
 
   private static SwerveWiring.ModuleWiring wiring(int drive, int steer, int encoder) {

@@ -3,8 +3,9 @@ package frc.robot.subsystems.localization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
+import frc.robot.SimulationTest;
 import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
@@ -19,9 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.estimator.SwerveDrivePoseEstimator;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -35,6 +35,8 @@ import org.wpilib.system.RobotController;
  * camera that sees the robot's true pose late and noisily. Does the estimate hold to the truth
  * where odometry alone drifts, and does it survive a shove, a slipping wheel, and a misread tag?
  */
+@SimulationTest
+@ExtendWith(RobotSim.class)
 class LocalizationSimTest {
   /** A match-like route: sprints, strafes, turns while driving, and a stop. */
   private static final double[][] ROUTE = {
@@ -48,22 +50,11 @@ class LocalizationSimTest {
 
   private @Nullable DriveSimHarness harness;
 
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
-  @BeforeEach
-  void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-  }
-
   @AfterEach
   void tearDown() {
     if (harness != null) {
       harness.close();
     }
-    SimTestSupport.resumeTime();
   }
 
   private DriveSimHarness robot(SensorErrors errors) {
@@ -74,7 +65,6 @@ class LocalizationSimTest {
     if (harness != null) {
       harness.close();
     }
-    SimTestSupport.pauseTimeAndDisable();
     harness = new DriveSimHarness(Robots.SIM, errors, config);
     return harness;
   }

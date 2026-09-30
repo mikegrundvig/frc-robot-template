@@ -11,6 +11,7 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.dashboard.DashboardStream;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.sim.SensorErrors;
 import java.io.File;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
@@ -85,17 +86,43 @@ public class Robot extends LoggedRobot {
 
     RobotConfig robot = Robots.current();
     pitwall = Pitwall.start(robot.name(), robot);
-
-    // The drivetrain reads its configuration through Pitwall, so tuned values take effect at once.
     container =
-        new RobotContainer(
+        assemble(
             Constants.currentMode,
             Scheduler.getDefault(),
             robot,
+            pitwall,
+            SensorErrors.TYPICAL,
+            loopHealth);
+  }
+
+  /**
+   * Puts the robot together: every mechanism, on the field it plays on, with its pit tools and
+   * status on the Pitwall page. The drivetrain reads its configuration through Pitwall, so tuned
+   * values take effect at once. Tests build the robot here too ({@code RobotSim}), so they test the
+   * robot the robot runs.
+   *
+   * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
+   *     configuration
+   */
+  static RobotContainer assemble(
+      Constants.Mode mode,
+      Scheduler scheduler,
+      RobotConfig robot,
+      Pitwall<RobotConfig> pitwall,
+      SensorErrors simulatedErrors,
+      LoopHealth loopHealth) {
+    RobotContainer container =
+        new RobotContainer(
+            mode,
+            scheduler,
+            robot,
             () -> pitwall.config().drivetrain(),
             Rebuilt.field(robot.body()),
+            simulatedErrors,
             loopHealth);
     container.addTo(pitwall);
+    return container;
   }
 
   /** Pitwall, for tests that drive the robot program through it. */
@@ -103,17 +130,22 @@ public class Robot extends LoggedRobot {
     return pitwall;
   }
 
-  /**
-   * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
-   * command scheduler, each timed.
-   */
   @Override
   public void robotPeriodic() {
+    loop(pitwall, container, Scheduler.getDefault(), loopHealth);
+  }
+
+  /**
+   * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
+   * command scheduler, each timed. Tests run the robot with this too ({@code RobotSim}).
+   */
+  static void loop(
+      Pitwall<?> pitwall, RobotContainer container, Scheduler scheduler, LoopHealth loopHealth) {
     loopHealth.start(System.nanoTime());
     pitwall.periodic();
     loopHealth.monitor().mark("Pitwall", System.nanoTime());
     container.periodic();
-    Scheduler.getDefault().run();
+    scheduler.run();
     loopHealth.monitor().mark("Commands", System.nanoTime());
     loopHealth.finish(System.nanoTime(), Logger.getReceiverQueueFault());
   }

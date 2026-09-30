@@ -5,37 +5,31 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
 import frc.robot.sim.DriveSimHarness;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 
 /** Does the drivetrain go where the driver points it? */
+@ExtendWith(RobotSim.class)
 class DriveBasicsTest {
   private DriveSimHarness harness;
 
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
   @BeforeEach
   void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
     harness = new DriveSimHarness(Robots.SIM);
   }
 
   @AfterEach
   void tearDown() {
     harness.close();
-    SimTestSupport.resumeTime();
   }
 
   @Test

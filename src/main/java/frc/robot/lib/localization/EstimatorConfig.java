@@ -55,6 +55,8 @@ import frc.robot.lib.config.ConfigRecord;
  *     gyro's heading is judged wrong (a bad heading reset, a robot placed backwards, a gyro that
  *     jumped) and the estimate turns to them
  * @param recoveryHeadingStdDevDegrees the heading uncertainty after a heading recovery
+ * @param lostAfterRejections this many camera measurements rejected in a row, with none accepted
+ *     between, and the estimate is lost: the cameras keep disagreeing with it
  * @param lostPositionStdDevMeters the position uncertainty after a heading recovery: the position
  *     was worked out with the wrong heading, so it could be far off
  */
@@ -86,6 +88,7 @@ public record EstimatorConfig(
     double recoveryStdDevMeters,
     double recoveryAgreementDegrees,
     double recoveryHeadingStdDevDegrees,
+    int lostAfterRejections,
     double lostPositionStdDevMeters) {
   /** Starting points for a swerve robot with a good gyro. */
   public static final EstimatorConfig DEFAULTS =
@@ -116,6 +119,7 @@ public record EstimatorConfig(
           .recoveryStdDevMeters(0.25)
           .recoveryAgreementDegrees(5)
           .recoveryHeadingStdDevDegrees(2)
+          .lostAfterRejections(2)
           .lostPositionStdDevMeters(1.0)
           .build();
 
@@ -168,6 +172,9 @@ public record EstimatorConfig(
     }
     if (recoveryMeasurements < 2) {
       throw new IllegalArgumentException("recovery needs at least 2 agreeing measurements");
+    }
+    if (lostAfterRejections < 1) {
+      throw new IllegalArgumentException("lost takes at least 1 rejected measurement");
     }
   }
 

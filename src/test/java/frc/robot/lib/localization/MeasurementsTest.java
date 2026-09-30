@@ -9,10 +9,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.geometry.Translation3d;
 
 /** The measurement types hold only what can be real, and keep their own copies. */
 class MeasurementsTest {
@@ -47,21 +45,33 @@ class MeasurementsTest {
   }
 
   @Test
-  void anImuSampleSaysWhichImuAndWhen() {
-    ImuSample sample =
-        new ImuSample(
-            1, Rotation3d.ZERO, Translation3d.ZERO, new Translation3d(0, 0, 9.81), true, "Pigeon");
+  void anImuIsUsableOnlyWhileItReportsNumbers() {
+    ImuReadings level =
+        ImuReadings.builder()
+            .reporting(true)
+            .yawRadians(0.3)
+            .pitchRadians(0)
+            .rollRadians(0)
+            .forwardAccelerationMetersPerSecSq(0)
+            .leftAccelerationMetersPerSecSq(0)
+            .yawTimesNanos(List.of(1L, 2L))
+            .yawsRadians(List.of(0.29, 0.3))
+            .build();
 
-    assertThat(sample.acceleration().getZ()).isEqualTo(9.81);
-    assertThatThrownBy(
-            () ->
-                new ImuSample(
-                    -1, Rotation3d.ZERO, Translation3d.ZERO, Translation3d.ZERO, true, "Pigeon"))
-        .hasMessageContaining("robot's clock");
-    assertThatThrownBy(
-            () ->
-                new ImuSample(1, Rotation3d.ZERO, Translation3d.ZERO, Translation3d.ZERO, true, ""))
-        .hasMessageContaining("source");
+    assertThat(level.usable()).isTrue();
+    assertThat(ImuReadings.NONE.usable()).as("not there").isFalse();
+    assertThat(ImuReadingsBuilder.builder(level).pitchRadians(Double.NaN).build().usable())
+        .as("an attitude that isn't a number")
+        .isFalse();
+    assertThat(
+            ImuReadingsBuilder.builder(level)
+                .yawsRadians(List.of(0.29, Double.POSITIVE_INFINITY))
+                .build()
+                .usable())
+        .as("a yaw reading that isn't one")
+        .isFalse();
+    assertThatThrownBy(() -> ImuReadingsBuilder.builder(level).yawsRadians(List.of(0.3)).build())
+        .hasMessageContaining("one time for each yaw reading");
   }
 
   @Test

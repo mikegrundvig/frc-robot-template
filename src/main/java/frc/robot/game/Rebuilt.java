@@ -1,4 +1,4 @@
-package frc.robot;
+package frc.robot.game;
 
 import static org.wpilib.units.Units.Meters;
 
@@ -24,8 +24,8 @@ import org.wpilib.math.shape.Rectangle2d;
  * event moves them for both alliances. Numbers come from WPILib's 2026 tag layout and the game
  * manual.
  *
- * <p>At kickoff: choose the new game's layout from {@link Fields}, declare its symmetry (the season
- * test checks it against the tags), and write its starts, places, and zones the same way.
+ * <p>At kickoff, this class moves to the test tree as a fixture and the new game gets its own, the
+ * same way: see docs/kickoff.md.
  */
 public final class Rebuilt {
   private Rebuilt() {}

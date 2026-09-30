@@ -1,6 +1,5 @@
 package frc.robot.lib.localization;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -33,14 +32,15 @@ import org.wpilib.math.util.MathUtil;
  * that is what they agree is wrong (a bad heading reset, a robot placed backwards), since every
  * position worked out with a wrong heading is wrong too.
  *
+ * <p>Its parts: {@link OdometryHistory} keeps the steps, {@link PoseFilter} does the filter's math,
+ * and {@link Recovery} judges when the cameras agree against odometry. This class feeds them and
+ * keeps the books.
+ *
  * <p>Pure logic: no clock, no hardware, no static state. Every input comes in through a method,
  * stamped with its capture time, so a replay reproduces every decision. Use it from one thread.
  */
-public final class PoseEstimator {
+public final class PoseEstimator implements CameraLocalizer {
   private static final long VELOCITY_WINDOW_NANOS = 100_000_000L;
-
-  /** An uncertainty as big as the field: the estimate knows nothing. */
-  private static final PoseCovariance NO_IDEA = PoseCovariance.fromStdDevs(100, 100, Math.PI);
 
   private final EstimatorConfig config;
   private final Predicate<Translation2d> onField;
@@ -52,7 +52,6 @@ public final class PoseEstimator {
   private final long historyNanos;
   private final long futureToleranceNanos;
   private final long visionTimeoutNanos;
-  private final long recoveryWindowNanos;
   private final double tiltStartRadians;
   private final double tiltZeroRadians;
   private final double collisionVariance;
@@ -60,30 +59,9 @@ public final class PoseEstimator {
   private final double handlingVariancePerSecond;
   private final long disagreementWindowNanos;
 
-  // The history: a ring of odometry steps, each with the state after it.
-  private final int capacity;
-  private final long[] time;
-  private final double[] stepDx;
-  private final double[] stepDy;
-  private final double[] stepResidual;
-
-  /** Each step's own added position variance for slip, tilt, and collisions: fixed on arrival. */
-  private final double[] stepExtra;
-
-  private final boolean[] stepGyro;
-  private final double[] yawAfter;
-  private final double[] xAfter;
-  private final double[] yAfter;
-  private final double[] offsetAfter;
-  private final double[] covarianceAfter;
-  private int oldest;
-  private int size;
-
-  // The current state: the newest step's, or, during a replay, the replay's.
-  private double x;
-  private double y;
-  private double offset;
-  private final double[] covariance = new double[9];
+  private final OdometryHistory history;
+  private final PoseFilter filter = new PoseFilter();
+  private final Recovery recovery;
 
   // The gyro's reading, unwrapped into one continuous yaw.
   private boolean started;
@@ -104,8 +82,7 @@ public final class PoseEstimator {
   private final List<VisionMeasurement> pending = new ArrayList<>();
   private final List<LandmarkEvent> pendingLandmarks = new ArrayList<>();
   private final List<LandmarkDecision> landmarkDecisions = new ArrayList<>();
-  private final List<Applied> applied = new ArrayList<>();
-  private final ArrayDeque<Rejected> rejectedRecently = new ArrayDeque<>();
+  private final List<Correction> applied = new ArrayList<>();
   private final List<Agreement> agreements = new ArrayList<>();
   private long lastAcceptedNanos = Long.MIN_VALUE;
   private int consecutiveRejections;
@@ -114,44 +91,24 @@ public final class PoseEstimator {
   private int recoveries;
   private double lastInnovationMeters = Double.NaN;
 
-  // Scratch space for a measurement with heading.
-  private final double[] innovation3 = new double[3];
-  private final double[] s3 = new double[9];
-  private final double[] sInverse3 = new double[9];
-  private final double[] gain = new double[9];
-  private final double[] product = new double[9];
+  /** A measurement the history applies at its time: a camera's, or a landmark. */
+  private sealed interface Correction permits CameraCorrection, LandmarkCorrection {
+    long time();
+  }
 
-  /**
-   * A measurement applied to the history, kept so a rewind can apply it again: a camera's, or a
-   * landmark.
-   */
-  private record Applied(
-      long time, @Nullable VisionMeasurement vision, @Nullable LandmarkEvent landmark) {}
+  private record CameraCorrection(long time, VisionMeasurement measurement) implements Correction {}
 
-  /**
-   * A rejected measurement's disagreement with the estimate, for recovery: the heading's is NaN
-   * when the measurement had no heading, and the position may have agreed when only the heading
-   * didn't.
-   */
-  private record Rejected(
-      long time,
-      double innovationX,
-      double innovationY,
-      double innovationHeading,
-      boolean positionAgreed) {}
+  private record LandmarkCorrection(long time, LandmarkEvent landmark) implements Correction {}
+
+  /** A correction to apply during a replay: a fresh one is gated, one applied before is not. */
+  private record Event(Correction correction, boolean fresh) {
+    long time() {
+      return correction.time();
+    }
+  }
 
   /** An accepted measurement's distance from the estimate, for the health's agreement. */
   private record Agreement(long time, double meters) {}
-
-  /**
-   * A measurement to apply during a replay, a camera's or a landmark; fresh ones are gated, applied
-   * ones are not.
-   */
-  private record Event(
-      long time,
-      @Nullable VisionMeasurement vision,
-      @Nullable LandmarkEvent landmark,
-      boolean fresh) {}
 
   /**
    * @param config how to weigh the sources
@@ -174,7 +131,6 @@ public final class PoseEstimator {
     historyNanos = Timestamps.fromSeconds(config.historySeconds());
     futureToleranceNanos = Timestamps.fromSeconds(config.futureToleranceSeconds());
     visionTimeoutNanos = Timestamps.fromSeconds(config.visionTimeoutSeconds());
-    recoveryWindowNanos = Timestamps.fromSeconds(config.recoveryWindowSeconds());
     tiltStartRadians = Math.toRadians(config.tiltStartDegrees());
     tiltZeroRadians = Math.toRadians(config.tiltZeroDegrees());
     collisionVariance = square(config.collisionStdDevMeters());
@@ -182,19 +138,10 @@ public final class PoseEstimator {
     handlingVariancePerSecond = square(config.handlingStdDevPerSqrtSecond());
     disagreementWindowNanos = Timestamps.fromSeconds(config.disagreementWindowSeconds());
     // Room for the history at up to 1 kHz of odometry.
-    capacity = Math.max(16, (int) Math.ceil(config.historySeconds() * 1000) + 1);
-    time = new long[capacity];
-    stepDx = new double[capacity];
-    stepDy = new double[capacity];
-    stepResidual = new double[capacity];
-    stepExtra = new double[capacity];
-    stepGyro = new boolean[capacity];
-    yawAfter = new double[capacity];
-    xAfter = new double[capacity];
-    yAfter = new double[capacity];
-    offsetAfter = new double[capacity];
-    covarianceAfter = new double[capacity * 9];
-    setState(initial);
+    history =
+        new OdometryHistory(Math.max(16, (int) Math.ceil(config.historySeconds() * 1000) + 1));
+    recovery = new Recovery(config);
+    filter.set(initial, yaw);
   }
 
   /**
@@ -215,17 +162,13 @@ public final class PoseEstimator {
       yaw = gyroConnected ? gyroYawRadians : 0;
       lastGyroYaw = gyroConnected ? gyroYawRadians : 0;
       lastGyroConnected = gyroConnected;
-      oldest = 0;
-      size = 1;
-      time[0] = timestampNanos;
-      stepGyro[0] = gyroConnected;
-      yawAfter[0] = yaw;
-      setState(initial);
-      store(0);
+      history.start(timestampNanos, gyroConnected, yaw);
+      filter.set(initial, yaw);
+      history.store(0, filter);
       lastResetNanos = timestampNanos;
       return;
     }
-    long previousTime = newestTime();
+    long previousTime = history.newestTime();
     if (timestampNanos <= previousTime) {
       return;
     }
@@ -240,31 +183,28 @@ public final class PoseEstimator {
     }
     lastGyroConnected = gyroConnected;
 
-    if (size == capacity) {
-      oldest = index(1);
-      size--;
-    }
-    int slot = index(size);
-    size++;
-    time[slot] = timestampNanos;
     // A tilt the ground explains still rolls on the ground: the travel counts at the slope's
     // cosine. Tilt beyond it may have lifted the wheels: their travel counts for less.
     double trust = wheelTrust(conditions.unexplainedTiltRadians());
     double across = Math.cos(conditions.groundSlopeRadians());
-    stepDx[slot] = trust * across * motion.dxMeters();
-    stepDy[slot] = trust * across * motion.dyMeters();
-    stepResidual[slot] = motion.residualMeters();
-    stepExtra[slot] =
+    double extra =
         extraVariance(
             previousTime,
             timestampNanos,
             Math.hypot(motion.dxMeters(), motion.dyMeters()),
             trust,
             motion.residualMeters());
-    stepGyro[slot] = gyroConnected;
-    yawAfter[slot] = yaw;
-    advance(size - 1, 0, 1);
-    store(slot);
+    int step =
+        history.add(
+            timestampNanos,
+            trust * across * motion.dxMeters(),
+            trust * across * motion.dyMeters(),
+            motion.residualMeters(),
+            extra,
+            gyroConnected,
+            yaw);
+    advance(step, 0, 1);
+    history.store(step, filter);
     prune();
   }
 
@@ -277,12 +217,13 @@ public final class PoseEstimator {
   public void setConditions(DriveConditions conditions) {
     this.conditions = conditions;
     if (conditions.collision() && started) {
-      collisionPending |= !(newestTime() <= collisionUntilNanos);
-      collisionUntilNanos = newestTime() + collisionWindowNanos;
+      collisionPending |= !(history.newestTime() <= collisionUntilNanos);
+      collisionUntilNanos = history.newestTime() + collisionWindowNanos;
     }
   }
 
   /** A camera measurement, to apply at the next {@link #update}. */
+  @Override
   public void addVision(VisionMeasurement measurement) {
     pending.add(measurement);
   }
@@ -336,7 +277,7 @@ public final class PoseEstimator {
     }
     recoverIfTheCamerasAgree();
     if (started) {
-      long cutoff = newestTime() - disagreementWindowNanos;
+      long cutoff = history.newestTime() - disagreementWindowNanos;
       agreements.removeIf(agreement -> agreement.time() < cutoff);
     }
     return decisions;
@@ -349,15 +290,15 @@ public final class PoseEstimator {
    */
   public void reset(PoseReset reset) {
     placed = true;
-    rejectedRecently.clear();
+    recovery.clear();
     consecutiveRejections = 0;
     suspectTravel = 0;
     if (!started) {
       initial = reset;
-      setState(reset);
+      filter.set(reset, yaw);
       return;
     }
-    setState(reset);
+    filter.set(reset, yaw);
     startHistoryHere();
   }
 
@@ -371,7 +312,7 @@ public final class PoseEstimator {
     if (!(stdDevRadians > 0) || Double.isInfinite(stdDevRadians)) {
       throw new IllegalArgumentException("a heading reset's uncertainty: " + stdDevRadians);
     }
-    rejectedRecently.clear();
+    recovery.clear();
     consecutiveRejections = 0;
     double variance = square(stdDevRadians);
     if (!started) {
@@ -382,15 +323,10 @@ public final class PoseEstimator {
               new Pose2d(initial.pose().getTranslation(), heading),
               new PoseCovariance(before.xx(), before.xy(), before.yy(), variance),
               initial.reason());
-      setState(initial);
+      filter.set(initial, yaw);
       return;
     }
-    offset = heading.getRadians() - yaw;
-    covariance[8] = variance;
-    covariance[2] = 0;
-    covariance[6] = 0;
-    covariance[5] = 0;
-    covariance[7] = 0;
+    filter.resetHeading(heading.getRadians() - yaw, variance);
     startHistoryHere();
   }
 
@@ -400,79 +336,36 @@ public final class PoseEstimator {
    *
    * @return empty outside the history
    */
+  @Override
   public Optional<Pose2d> poseAt(long timestampNanos) {
-    if (!started || timestampNanos < time[oldest]) {
+    if (!started || timestampNanos < history.time(0)) {
       return Optional.empty();
     }
-    if (timestampNanos >= newestTime()) {
-      return timestampNanos <= newestTime() + futureToleranceNanos
+    if (timestampNanos >= history.newestTime()) {
+      return timestampNanos <= history.newestTime() + futureToleranceNanos
           ? Optional.of(pose())
           : Optional.empty();
     }
-    int j = size - 1;
-    while (j > 0 && time[index(j - 1)] >= timestampNanos) {
-      j--;
-    }
-    if (j == 0) {
-      int slot = index(0);
-      return Optional.of(
-          new Pose2d(xAfter[slot], yAfter[slot], new Rotation2d(yawAfter[slot] + offset)));
-    }
-    int before = index(j - 1);
-    int after = index(j);
-    double fraction = (double) (timestampNanos - time[before]) / (time[after] - time[before]);
-    return Optional.of(
-        new Pose2d(
-            xAfter[before] + fraction * (xAfter[after] - xAfter[before]),
-            yAfter[before] + fraction * (yAfter[after] - yAfter[before]),
-            new Rotation2d(yawAt(j, fraction) + offset)));
+    return Optional.of(history.poseAt(timestampNanos, filter.offset()));
   }
 
   /** The current pose: cheap, for driving every loop. */
   public Pose2d pose() {
-    return new Pose2d(x, y, new Rotation2d(yaw + offset));
+    return filter.pose(yaw);
   }
 
   /** The current estimate, with its uncertainty, velocity, mode, and health. */
   public LocalizationEstimate estimate() {
-    long now = started ? newestTime() : 0;
-    double moveX = 0;
-    double moveY = 0;
-    double turned = 0;
-    long from = now;
-    for (int j = size - 1; j > 0 && time[index(j)] > now - VELOCITY_WINDOW_NANOS; j--) {
-      int slot = index(j);
-      int previous = index(j - 1);
-      double heading = yawAfter[previous] + offset;
-      moveX += Math.cos(heading) * stepDx[slot] - Math.sin(heading) * stepDy[slot];
-      moveY += Math.sin(heading) * stepDx[slot] + Math.cos(heading) * stepDy[slot];
-      turned += yawAfter[slot] - yawAfter[previous];
-      from = time[previous];
-    }
-    double seconds = Timestamps.toSeconds(now - from);
-    Translation2d velocity =
-        seconds > 0 ? new Translation2d(moveX / seconds, moveY / seconds) : Translation2d.ZERO;
-    double yawRate = seconds > 0 ? turned / seconds : 0;
-
-    boolean gyroConnected = !started || stepGyro[index(size - 1)];
-    LocalizationEstimate.Mode mode;
-    if (!gyroConnected) {
-      mode = LocalizationEstimate.Mode.IMU_FAULT;
-    } else if (!placed) {
-      mode = LocalizationEstimate.Mode.INITIALIZING;
-    } else if (consecutiveRejections >= 2) {
-      mode = LocalizationEstimate.Mode.LOST;
-    } else if (lastAcceptedNanos != Long.MIN_VALUE
-        && now - lastAcceptedNanos <= visionTimeoutNanos) {
-      mode = LocalizationEstimate.Mode.TRACKING;
-    } else {
-      mode = LocalizationEstimate.Mode.DEAD_RECKONING;
-    }
+    long now = started ? history.newestTime() : 0;
+    OdometryHistory.Motion motion =
+        started
+            ? history.motionOver(VELOCITY_WINDOW_NANOS, filter.offset())
+            : new OdometryHistory.Motion(Translation2d.ZERO, 0);
+    boolean gyroConnected = !started || history.gyro(history.size() - 1);
     double visionAge =
         lastAcceptedNanos == Long.MIN_VALUE
             ? Double.POSITIVE_INFINITY
             : Timestamps.toSeconds(now - lastAcceptedNanos);
-    double residual = started ? stepResidual[index(size - 1)] : 0;
     double disagreement = Double.NaN;
     for (Agreement agreement : agreements) {
       if (agreement.time() >= now - disagreementWindowNanos
@@ -483,22 +376,47 @@ public final class PoseEstimator {
     return new LocalizationEstimate(
         now,
         pose(),
-        currentCovariance(),
-        velocity,
-        yawRate,
-        mode,
+        filter.covariance(),
+        motion.velocity(),
+        motion.yawRate(),
+        mode(
+            gyroConnected,
+            placed,
+            consecutiveRejections >= config.lostAfterRejections(),
+            lastAcceptedNanos != Long.MIN_VALUE && now - lastAcceptedNanos <= visionTimeoutNanos),
         new LocalizationEstimate.Health(
             visionAge,
             acceptedCount,
             rejectedCount,
             lastInnovationMeters,
             disagreement,
-            residual,
+            started ? history.residual(history.size() - 1) : 0,
             suspectTravel,
             conditions.tiltRadians(),
             started && now <= collisionUntilNanos,
             recoveries,
             gyroConnected));
+  }
+
+  /**
+   * What the estimate rests on, in order: a lost gyro, then not placed yet, then cameras that keep
+   * disagreeing, then recent camera measurements, else odometry alone.
+   *
+   * @param lost whether the cameras have kept disagreeing, measurement after measurement
+   * @param visionRecent whether a camera measurement was accepted recently
+   */
+  static LocalizationEstimate.Mode mode(
+      boolean gyroConnected, boolean placed, boolean lost, boolean visionRecent) {
+    if (!gyroConnected) {
+      return LocalizationEstimate.Mode.IMU_FAULT;
+    } else if (!placed) {
+      return LocalizationEstimate.Mode.INITIALIZING;
+    } else if (lost) {
+      return LocalizationEstimate.Mode.LOST;
+    } else if (visionRecent) {
+      return LocalizationEstimate.Mode.TRACKING;
+    }
+    return LocalizationEstimate.Mode.DEAD_RECKONING;
   }
 
   private @Nullable String whyNotUsable(VisionMeasurement measurement) {
@@ -520,10 +438,10 @@ public final class PoseEstimator {
     if (t <= lastResetNanos) {
       return "before the robot was last placed or recovered";
     }
-    if (t <= time[oldest]) {
+    if (t <= history.time(0)) {
       return "too late: older than the history kept";
     }
-    if (t > newestTime() + futureToleranceNanos) {
+    if (t > history.newestTime() + futureToleranceNanos) {
       return "from the future: after the newest odometry";
     }
     return null;
@@ -537,7 +455,7 @@ public final class PoseEstimator {
       List<VisionMeasurement> usable,
       List<LandmarkEvent> landmarks,
       List<VisionDecision> decisions) {
-    long newest = newestTime();
+    long newest = history.newestTime();
     // A measurement stamped a little after the newest step is applied at the newest step.
     long earliest = newest;
     for (VisionMeasurement measurement : usable) {
@@ -546,167 +464,113 @@ public final class PoseEstimator {
     for (LandmarkEvent landmark : landmarks) {
       earliest = Math.min(earliest, landmark.timestampNanos());
     }
-    int start = size - 1;
-    while (start > 0 && time[index(start)] >= earliest) {
-      start--;
-    }
-    long startTime = time[index(start)];
+    int start = history.lastStepBefore(earliest);
+    long startTime = history.time(start);
     List<Event> events = new ArrayList<>();
-    for (Applied done : applied) {
+    for (Correction done : applied) {
       if (done.time() > startTime) {
-        events.add(new Event(done.time(), done.vision(), done.landmark(), false));
+        events.add(new Event(done, false));
       }
     }
     for (VisionMeasurement measurement : usable) {
       events.add(
-          new Event(Math.min(measurement.timestampNanos(), newest), measurement, null, true));
+          new Event(
+              new CameraCorrection(Math.min(measurement.timestampNanos(), newest), measurement),
+              true));
     }
     for (LandmarkEvent landmark : landmarks) {
-      events.add(new Event(Math.min(landmark.timestampNanos(), newest), null, landmark, true));
+      events.add(
+          new Event(
+              new LandmarkCorrection(Math.min(landmark.timestampNanos(), newest), landmark), true));
     }
     events.sort(Comparator.comparingLong(Event::time));
     applied.removeIf(done -> done.time() > startTime);
 
-    restore(index(start));
+    history.restore(start, filter);
     int next = 0;
-    for (int j = start + 1; j < size; j++) {
-      long before = time[index(j - 1)];
-      long after = time[index(j)];
+    for (int j = start + 1; j < history.size(); j++) {
+      long before = history.time(j - 1);
+      long after = history.time(j);
       double done = 0;
       while (next < events.size() && events.get(next).time() <= after) {
         Event event = events.get(next++);
         double fraction = (double) (event.time() - before) / (after - before);
         advance(j, done, fraction);
         done = fraction;
-        apply(event, yawAt(j, fraction), decisions);
+        apply(event, history.yawAt(j, fraction), decisions);
       }
       advance(j, done, 1);
-      store(index(j));
+      history.store(j, filter);
     }
     // Only when the history is a single step: measurements at that step itself.
     while (next < events.size()) {
-      apply(events.get(next++), yawAfter[index(size - 1)], decisions);
+      apply(events.get(next++), history.yawAfter(history.size() - 1), decisions);
     }
-    store(index(size - 1));
+    history.store(history.size() - 1, filter);
   }
 
-  /** Gates a fresh measurement, then applies it as a Kalman update; applies an old one ungated. */
   private void apply(Event event, double yawThen, List<VisionDecision> decisions) {
-    LandmarkEvent landmark = event.landmark();
-    if (landmark != null) {
-      applyLandmark(event, landmark);
-      return;
+    switch (event.correction()) {
+      case CameraCorrection camera -> applyCamera(camera, event.fresh(), yawThen, decisions);
+      case LandmarkCorrection landmark -> applyLandmark(landmark, event.fresh());
     }
-    VisionMeasurement measurement = event.vision();
-    if (measurement == null) {
-      return;
-    }
-    PoseCovariance noise = measurement.covariance();
-    double innovationX = measurement.pose().getX() - x;
-    double innovationY = measurement.pose().getY() - y;
-    boolean withHeading = noise.hasHeading();
-    // The position's own agreement, from the position block of S = P + R.
-    double s00 = covariance[0] + noise.xx();
-    double s01 = covariance[1] + noise.xy();
-    double s11 = covariance[4] + noise.yy();
-    double determinant = s00 * s11 - s01 * s01;
-    if (!(determinant > 0)) {
-      return;
-    }
-    double i00 = s11 / determinant;
-    double i01 = -s01 / determinant;
-    double i11 = s00 / determinant;
-    double positionChiSquared =
-        innovationX * (i00 * innovationX + i01 * innovationY)
-            + innovationY * (i01 * innovationX + i11 * innovationY);
-    double chiSquared;
-    double gate;
-    if (withHeading) {
-      innovation3[0] = innovationX;
-      innovation3[1] = innovationY;
-      innovation3[2] =
-          MathUtil.angleModulus(measurement.pose().getRotation().getRadians() - (yawThen + offset));
-      System.arraycopy(covariance, 0, s3, 0, 9);
-      s3[0] += noise.xx();
-      s3[1] += noise.xy();
-      s3[3] += noise.xy();
-      s3[4] += noise.yy();
-      s3[8] += noise.heading();
-      if (!Matrices.invert3(s3, sInverse3)) {
-        return;
-      }
-      chiSquared = quadratic3(sInverse3, innovation3);
-      gate = config.gateChiSquaredPose();
-    } else {
-      chiSquared = positionChiSquared;
-      gate = config.gateChiSquaredPosition();
-      // K = P H^T S^-1, for H picking out the position.
-      for (int row = 0; row < 3; row++) {
-        gain[row * 3] = covariance[row * 3] * i00 + covariance[row * 3 + 1] * i01;
-        gain[row * 3 + 1] = covariance[row * 3] * i01 + covariance[row * 3 + 1] * i11;
-      }
-    }
+  }
 
-    double innovationMeters = Math.hypot(innovationX, innovationY);
-    if (event.fresh()) {
-      lastInnovationMeters = innovationMeters;
-      // Written so a measurement that isn't a number fails the gate instead of passing it.
-      if (!(chiSquared <= gate)) {
-        rejectedCount++;
-        consecutiveRejections++;
-        rejectedRecently.addLast(
-            new Rejected(
-                event.time(),
-                innovationX,
-                innovationY,
-                withHeading ? innovation3[2] : Double.NaN,
-                positionChiSquared <= config.gateChiSquaredPosition()));
-        decisions.add(
-            new VisionDecision(
-                measurement,
-                false,
-                String.format(Locale.ROOT, "gate: %.1f > %.1f", chiSquared, gate),
-                innovationMeters,
-                chiSquared));
-        return;
-      }
-      acceptedCount++;
-      consecutiveRejections = 0;
-      rejectedRecently.clear();
-      lastAcceptedNanos = Math.max(lastAcceptedNanos, event.time());
-      agreements.add(new Agreement(event.time(), innovationMeters));
-      placed = true;
+  /** Gates a fresh camera measurement, then applies it as a Kalman update; applies an old one. */
+  private void applyCamera(
+      CameraCorrection camera, boolean fresh, double yawThen, List<VisionDecision> decisions) {
+    VisionMeasurement measurement = camera.measurement();
+    PoseFilter.Innovation innovation = filter.innovation(measurement, yawThen);
+    if (innovation == null) {
+      return;
+    }
+    if (fresh && !gateCamera(camera, innovation, decisions)) {
+      return;
+    }
+    filter.correct(innovation);
+    applied.add(camera);
+  }
+
+  /**
+   * Whether a fresh camera measurement passes the gate, keeping the books either way: the counts,
+   * the agreement, and what recovery needs from a rejection.
+   */
+  private boolean gateCamera(
+      CameraCorrection camera, PoseFilter.Innovation innovation, List<VisionDecision> decisions) {
+    VisionMeasurement measurement = camera.measurement();
+    double gate =
+        innovation.withHeading() ? config.gateChiSquaredPose() : config.gateChiSquaredPosition();
+    double chiSquared = innovation.chiSquared();
+    lastInnovationMeters = innovation.meters();
+    // Written so a measurement that isn't a number fails the gate instead of passing it.
+    if (!(chiSquared <= gate)) {
+      rejectedCount++;
+      consecutiveRejections++;
+      recovery.rejected(
+          new Recovery.Rejected(
+              camera.time(),
+              innovation.x(),
+              innovation.y(),
+              innovation.heading(),
+              innovation.positionChiSquared() <= config.gateChiSquaredPosition()));
       decisions.add(
-          new VisionDecision(measurement, true, "accepted", innovationMeters, chiSquared));
+          new VisionDecision(
+              measurement,
+              false,
+              String.format(Locale.ROOT, "gate: %.1f > %.1f", chiSquared, gate),
+              innovation.meters(),
+              chiSquared));
+      return false;
     }
-
-    if (withHeading) {
-      multiply3(covariance, sInverse3, gain);
-      x += gain[0] * innovation3[0] + gain[1] * innovation3[1] + gain[2] * innovation3[2];
-      y += gain[3] * innovation3[0] + gain[4] * innovation3[1] + gain[5] * innovation3[2];
-      offset += gain[6] * innovation3[0] + gain[7] * innovation3[1] + gain[8] * innovation3[2];
-      // P = P - K P
-      multiply3(gain, covariance, product);
-      for (int k = 0; k < 9; k++) {
-        covariance[k] -= product[k];
-      }
-    } else {
-      x += gain[0] * innovationX + gain[1] * innovationY;
-      y += gain[3] * innovationX + gain[4] * innovationY;
-      offset += gain[6] * innovationX + gain[7] * innovationY;
-      // P = P - K H P, where H P is P's first two rows.
-      for (int row = 0; row < 3; row++) {
-        for (int column = 0; column < 3; column++) {
-          product[row * 3 + column] =
-              gain[row * 3] * covariance[column] + gain[row * 3 + 1] * covariance[3 + column];
-        }
-      }
-      for (int k = 0; k < 9; k++) {
-        covariance[k] -= product[k];
-      }
-    }
-    symmetrize();
-    applied.add(new Applied(event.time(), measurement, null));
+    acceptedCount++;
+    consecutiveRejections = 0;
+    recovery.clear();
+    lastAcceptedNanos = Math.max(lastAcceptedNanos, camera.time());
+    agreements.add(new Agreement(camera.time(), innovation.meters()));
+    placed = true;
+    decisions.add(
+        new VisionDecision(measurement, true, "accepted", innovation.meters(), chiSquared));
+    return true;
   }
 
   /**
@@ -714,164 +578,72 @@ public final class PoseEstimator {
    * leaves it alone along it. Gated like a camera's measurement, but none of the cameras' records
    * change: a landmark is no camera, and one axis says nothing about the rest.
    */
-  private void applyLandmark(Event event, LandmarkEvent landmark) {
-    double nx = landmark.across().getCos();
-    double ny = landmark.across().getSin();
-    double innovation = -landmark.offset(new Translation2d(x, y));
-    // With H = [nx, ny, 0]: P H^T, then S = H P H^T + R.
-    double ph0 = covariance[0] * nx + covariance[1] * ny;
-    double ph1 = covariance[3] * nx + covariance[4] * ny;
-    double ph2 = covariance[6] * nx + covariance[7] * ny;
-    double s = nx * ph0 + ny * ph1 + square(landmark.stdDevMeters());
-    if (!(s > 0)) {
+  private void applyLandmark(LandmarkCorrection correction, boolean fresh) {
+    LandmarkEvent landmark = correction.landmark();
+    PoseFilter.AxisInnovation innovation = filter.innovationAlong(landmark);
+    if (innovation == null) {
       return;
     }
-    double chiSquared = innovation * innovation / s;
-    if (event.fresh()) {
-      if (!(chiSquared <= config.gateChiSquaredAxis())) {
-        landmarkDecisions.add(
-            new LandmarkDecision(
-                landmark,
-                false,
-                String.format(
-                    Locale.ROOT, "gate: %.1f > %.1f", chiSquared, config.gateChiSquaredAxis()),
-                Math.abs(innovation),
-                chiSquared));
+    if (fresh) {
+      double chiSquared = innovation.chiSquared();
+      boolean passes = chiSquared <= config.gateChiSquaredAxis();
+      landmarkDecisions.add(
+          new LandmarkDecision(
+              landmark,
+              passes,
+              passes
+                  ? "accepted"
+                  : String.format(
+                      Locale.ROOT, "gate: %.1f > %.1f", chiSquared, config.gateChiSquaredAxis()),
+              Math.abs(innovation.meters()),
+              chiSquared));
+      if (!passes) {
         return;
       }
-      landmarkDecisions.add(
-          new LandmarkDecision(landmark, true, "accepted", Math.abs(innovation), chiSquared));
     }
-    double[] k = {ph0 / s, ph1 / s, ph2 / s};
-    x += k[0] * innovation;
-    y += k[1] * innovation;
-    offset += k[2] * innovation;
-    // P = P - K H P, and H P is (P H^T) transposed: K K^T S.
-    for (int row = 0; row < 3; row++) {
-      for (int column = 0; column < 3; column++) {
-        covariance[row * 3 + column] -= k[row] * k[column] * s;
-      }
-    }
-    symmetrize();
-    applied.add(new Applied(event.time(), null, landmark));
+    filter.correct(innovation);
+    applied.add(correction);
   }
 
   /**
    * When enough recent rejected measurements agree with each other, the cameras are right and
-   * odometry is wrong: jump to where they put the robot, with a fresh uncertainty.
+   * odometry is wrong: turn to the heading they agree on, or else jump to where they put the robot,
+   * with a fresh uncertainty.
    */
   private void recoverIfTheCamerasAgree() {
     if (!started) {
       return;
     }
-    long newest = newestTime();
-    while (!rejectedRecently.isEmpty()
-        && rejectedRecently.getFirst().time() < newest - recoveryWindowNanos) {
-      rejectedRecently.removeFirst();
-    }
-    if (rejectedRecently.size() < config.recoveryMeasurements()) {
+    long newest = history.newestTime();
+    if (!recovery.enoughAsOf(newest)) {
       return;
     }
-    if (recoverHeading()) {
+    double turn = recovery.headingCorrection();
+    if (!Double.isNaN(turn)) {
+      filter.turn(
+          turn,
+          square(config.lostPositionStdDevMeters()),
+          square(Math.toRadians(config.recoveryHeadingStdDevDegrees())));
+      recovered();
       return;
     }
-    // Only the measurements whose positions disagreed say the position is wrong.
-    List<Rejected> offPosition = new ArrayList<>();
-    for (Rejected rejected : rejectedRecently) {
-      if (!rejected.positionAgreed()) {
-        offPosition.add(rejected);
-      }
-    }
-    if (offPosition.size() < config.recoveryMeasurements()) {
+    Translation2d move = recovery.positionCorrection();
+    if (move == null) {
       return;
     }
-    double meanX = 0;
-    double meanY = 0;
-    for (Rejected rejected : offPosition) {
-      meanX += rejected.innovationX();
-      meanY += rejected.innovationY();
-    }
-    meanX /= offPosition.size();
-    meanY /= offPosition.size();
-    for (Rejected rejected : offPosition) {
-      double spread = Math.hypot(rejected.innovationX() - meanX, rejected.innovationY() - meanY);
-      if (spread > config.recoveryAgreementMeters()) {
-        return;
-      }
-    }
-    x += meanX;
-    y += meanY;
-    double variance = square(config.recoveryStdDevMeters());
-    covariance[0] = variance;
-    covariance[4] = variance;
-    covariance[1] = 0;
-    covariance[3] = 0;
-    covariance[2] = 0;
-    covariance[6] = 0;
-    covariance[5] = 0;
-    covariance[7] = 0;
-    startHistoryHere();
-    suspectTravel = 0;
-    recoveries++;
-    consecutiveRejections = 0;
-    rejectedRecently.clear();
+    filter.shift(move.getX(), move.getY(), square(config.recoveryStdDevMeters()));
+    recovered();
     lastAcceptedNanos = newest;
     placed = true;
   }
 
-  /**
-   * When enough recent rejected measurements with heading agree with each other on a heading that
-   * isn't the estimate's, the heading is what's wrong: turn to theirs. Their positions were worked
-   * out with the wrong heading, so the position is left where it is, uncertain enough that the next
-   * measurement, worked out with the right heading, is taken.
-   *
-   * @return whether the heading recovered
-   */
-  private boolean recoverHeading() {
-    double first = Double.NaN;
-    double sum = 0;
-    int count = 0;
-    for (Rejected rejected : rejectedRecently) {
-      if (!Double.isNaN(rejected.innovationHeading())) {
-        if (count == 0) {
-          first = rejected.innovationHeading();
-        }
-        // Measured from the first, so headings either side of half a turn average rightly.
-        sum += MathUtil.angleModulus(rejected.innovationHeading() - first);
-        count++;
-      }
-    }
-    if (count < config.recoveryMeasurements()) {
-      return false;
-    }
-    double mean = first + sum / count;
-    double agreement = Math.toRadians(config.recoveryAgreementDegrees());
-    for (Rejected rejected : rejectedRecently) {
-      if (!Double.isNaN(rejected.innovationHeading())
-          && Math.abs(MathUtil.angleModulus(rejected.innovationHeading() - mean)) > agreement) {
-        return false;
-      }
-    }
-    if (Math.abs(MathUtil.angleModulus(mean)) <= agreement) {
-      return false;
-    }
-    offset += mean;
-    double position = square(config.lostPositionStdDevMeters());
-    covariance[0] = position;
-    covariance[4] = position;
-    covariance[8] = square(Math.toRadians(config.recoveryHeadingStdDevDegrees()));
-    covariance[1] = 0;
-    covariance[3] = 0;
-    covariance[2] = 0;
-    covariance[6] = 0;
-    covariance[5] = 0;
-    covariance[7] = 0;
+  /** After a recovery: the history starts again from it, and so do the doubts. */
+  private void recovered() {
     startHistoryHere();
     suspectTravel = 0;
     recoveries++;
     consecutiveRejections = 0;
-    rejectedRecently.clear();
-    return true;
+    recovery.clear();
   }
 
   /** Moves the current state through part of step j: from fraction f0 of it to f1. */
@@ -880,60 +652,24 @@ public final class PoseEstimator {
     if (fraction <= 0) {
       return;
     }
-    int slot = index(j);
-    int previous = index(j - 1);
-    double stepTurn = yawAfter[slot] - yawAfter[previous];
-    double heading = yawAfter[previous] + f0 * stepTurn + offset;
-    double turn = fraction * stepTurn;
-    double dx = fraction * stepDx[slot];
-    double dy = fraction * stepDy[slot];
-    // The wheels' travel, along the arc the gyro says the robot turned through.
-    double along = dx;
-    double across = dy;
-    if (Math.abs(turn) > 1e-9) {
-      double s = Math.sin(turn) / turn;
-      double c = (1 - Math.cos(turn)) / turn;
-      along = s * dx - c * dy;
-      across = c * dx + s * dy;
-    }
-    double cos = Math.cos(heading);
-    double sin = Math.sin(heading);
-    double moveX = cos * along - sin * across;
-    double moveY = sin * along + cos * across;
-    x += moveX;
-    y += moveY;
-
-    // P = F P F^T, where F = I plus a heading column: turning the offset swings the move.
-    double a = -moveY;
-    double b = moveX;
-    double p02 = covariance[2];
-    double p12 = covariance[5];
-    double p22 = covariance[8];
-    covariance[0] += 2 * a * p02 + a * a * p22;
-    covariance[1] += a * p12 + b * p02 + a * b * p22;
-    covariance[3] = covariance[1];
-    covariance[4] += 2 * b * p12 + b * b * p22;
-    covariance[2] += a * p22;
-    covariance[6] = covariance[2];
-    covariance[5] += b * p22;
-    covariance[7] = covariance[5];
-
-    // Plus the step's own uncertainty.
-    double distance = Math.hypot(stepDx[slot], stepDy[slot]);
-    double seconds = Timestamps.toSeconds(time[slot] - time[previous]);
-    double positionNoise =
+    double stepTurn = history.yawAfter(j) - history.yawAfter(j - 1);
+    double stepDx = history.dx(j);
+    double stepDy = history.dy(j);
+    double distance = Math.hypot(stepDx, stepDy);
+    double seconds = Timestamps.toSeconds(history.time(j) - history.time(j - 1));
+    filter.predict(
+        history.yawAfter(j - 1) + f0 * stepTurn,
+        fraction * stepTurn,
+        fraction * stepDx,
+        fraction * stepDy,
         fraction
             * (translationVariancePerMeter * distance
                 + translationVariancePerRadian * Math.abs(stepTurn)
-                + stepExtra[slot]);
-    double headingNoise =
+                + history.extra(j)),
         fraction
             * (headingVariancePerSecond * seconds
-                + (stepGyro[slot] ? headingVariancePerRadian : wheelHeadingVariancePerRadian)
-                    * Math.abs(stepTurn));
-    covariance[0] += positionNoise;
-    covariance[4] += positionNoise;
-    covariance[8] += headingNoise;
+                + (history.gyro(j) ? headingVariancePerRadian : wheelHeadingVariancePerRadian)
+                    * Math.abs(stepTurn)));
   }
 
   /**
@@ -970,113 +706,20 @@ public final class PoseEstimator {
     return variance;
   }
 
-  private double yawAt(int j, double fraction) {
-    double before = yawAfter[index(j - 1)];
-    return before + fraction * (yawAfter[index(j)] - before);
-  }
-
-  private void setState(PoseReset reset) {
-    x = reset.pose().getX();
-    y = reset.pose().getY();
-    PoseCovariance given = reset.covariance();
-    if (given.hasHeading()) {
-      offset = reset.pose().getRotation().getRadians() - yaw;
-      covariance[8] = given.heading();
-    }
-    covariance[0] = given.xx();
-    covariance[1] = given.xy();
-    covariance[3] = given.xy();
-    covariance[4] = given.yy();
-    covariance[2] = 0;
-    covariance[6] = 0;
-    covariance[5] = 0;
-    covariance[7] = 0;
-  }
-
   /** Drops the history: the newest step, with the current state, becomes its start. */
   private void startHistoryHere() {
-    oldest = index(size - 1);
-    size = 1;
-    store(oldest);
+    history.keepOnlyNewest();
+    history.store(0, filter);
     applied.clear();
     agreements.clear();
-    lastResetNanos = time[oldest];
+    lastResetNanos = history.time(0);
   }
 
   /** Drops steps older than the history keeps, and the measurements already inside the oldest. */
   private void prune() {
-    long cutoff = newestTime() - historyNanos;
-    while (size > 1 && time[index(1)] <= cutoff) {
-      oldest = index(1);
-      size--;
-    }
-    long oldestTime = time[oldest];
+    history.dropThrough(history.newestTime() - historyNanos);
+    long oldestTime = history.time(0);
     applied.removeIf(done -> done.time() <= oldestTime);
-  }
-
-  private PoseCovariance currentCovariance() {
-    if (!Double.isFinite(covariance[0])
-        || !Double.isFinite(covariance[1])
-        || !Double.isFinite(covariance[4])
-        || !Double.isFinite(covariance[8])) {
-      // Only a bug gets here (every input is checked on the way in): say the estimate knows
-      // nothing, rather than throw in the robot loop.
-      return NO_IDEA;
-    }
-    double xx = Math.max(0, covariance[0]);
-    double yy = Math.max(0, covariance[4]);
-    double limit = Math.sqrt(xx * yy);
-    double xy = Math.clamp(covariance[1], -limit, limit);
-    return new PoseCovariance(xx, xy, yy, Math.max(0, covariance[8]));
-  }
-
-  private void symmetrize() {
-    covariance[1] = covariance[3] = (covariance[1] + covariance[3]) / 2;
-    covariance[2] = covariance[6] = (covariance[2] + covariance[6]) / 2;
-    covariance[5] = covariance[7] = (covariance[5] + covariance[7]) / 2;
-  }
-
-  private void store(int slot) {
-    xAfter[slot] = x;
-    yAfter[slot] = y;
-    offsetAfter[slot] = offset;
-    System.arraycopy(covariance, 0, covarianceAfter, slot * 9, 9);
-  }
-
-  private void restore(int slot) {
-    x = xAfter[slot];
-    y = yAfter[slot];
-    offset = offsetAfter[slot];
-    System.arraycopy(covarianceAfter, slot * 9, covariance, 0, 9);
-  }
-
-  private long newestTime() {
-    return time[index(size - 1)];
-  }
-
-  private int index(int k) {
-    return (oldest + k) % capacity;
-  }
-
-  private static double quadratic3(double[] m, double[] v) {
-    double sum = 0;
-    for (int row = 0; row < 3; row++) {
-      for (int column = 0; column < 3; column++) {
-        sum += v[row] * m[row * 3 + column] * v[column];
-      }
-    }
-    return sum;
-  }
-
-  private static void multiply3(double[] a, double[] b, double[] out) {
-    for (int row = 0; row < 3; row++) {
-      for (int column = 0; column < 3; column++) {
-        out[row * 3 + column] =
-            a[row * 3] * b[column]
-                + a[row * 3 + 1] * b[3 + column]
-                + a[row * 3 + 2] * b[6 + column];
-      }
-    }
   }
 
   private static double square(double value) {

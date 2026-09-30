@@ -13,8 +13,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 import org.wpilib.datalog.DataLogReader;
@@ -30,7 +33,11 @@ import org.wpilib.datalog.DataLogRecord;
  * <p>Each run is its own process: AdvantageKit's logger starts once per program, and a replay ends
  * the program when the log runs out.
  */
+@EndToEndTest
 class ReplayEndToEndTest {
+  /** Where the robot programs' coverage goes, beside the test's; build.gradle reports it. */
+  static final String COVERAGE = "end-to-end.exec";
+
   private static final List<String> OUTPUTS =
       List.of(
           "Scenario/Gain",
@@ -51,6 +58,7 @@ class ReplayEndToEndTest {
   record Sample(long timestamp, Object value) {}
 
   @Test
+  @Timeout(value = 4, unit = TimeUnit.MINUTES) // two runs of the program, each allowed 90 s
   void aReplayReproducesTheSessionIncludingEveryChangeMadeThroughPitwall() throws Exception {
     run("record", Map.of("frc.simMode", "SIM", "pitwall.port", "0"), Map.of());
     Path recorded = onlyLog();
@@ -104,8 +112,10 @@ class ReplayEndToEndTest {
     List<String> command = new ArrayList<>();
     command.add(ProcessHandle.current().info().command().orElseThrow());
     for (String argument : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
-      if (!argument.startsWith("-javaagent")) { // the coverage agent stays with the test process
+      if (!argument.startsWith("-javaagent")) {
         command.add(argument);
+      } else if (argument.contains("jacoco")) {
+        command.add(coverageOfItsOwn(argument));
       }
     }
     properties.forEach((key, value) -> command.add("-D" + key + "=" + value));
@@ -127,6 +137,19 @@ class ReplayEndToEndTest {
     assertThat(finished && process.exitValue() == 0)
         .as(name + " run finished cleanly; its output:\n" + tail(output))
         .isTrue();
+  }
+
+  /**
+   * The test's coverage agent (JaCoCo's), for a robot program: it writes beside the test's own
+   * coverage, to {@value #COVERAGE}, which the coverage report counts too.
+   */
+  private static String coverageOfItsOwn(String agent) {
+    Matcher destination = Pattern.compile("destfile=([^,]*)").matcher(agent);
+    if (!destination.find()) {
+      return agent;
+    }
+    Path own = Path.of(destination.group(1)).toAbsolutePath().normalize().resolveSibling(COVERAGE);
+    return destination.replaceFirst(Matcher.quoteReplacement("destfile=" + own));
   }
 
   private Path onlyLog() throws IOException {

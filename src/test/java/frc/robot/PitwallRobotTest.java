@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.Status;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
+import frc.robot.lib.config.SwerveConfig;
+import frc.robot.subsystems.drive.Drive;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
@@ -15,45 +18,41 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.simulation.DriverStationSim;
-import org.wpilib.telemetry.MockTelemetryBackend;
-import org.wpilib.telemetry.TelemetryRegistry;
+import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
+import org.wpilib.util.AlertDataJNI;
 
 /** Pitwall in the simulated robot program: its standard status, and actions that run commands. */
+@ExtendWith(RobotSim.class)
 class PitwallRobotTest {
-  private Pitwall<RobotConfig> pitwall;
-
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
+  private Pitwall pitwall;
+  private LiveConfig<SwerveConfig> drivetrain;
 
   @BeforeEach
   void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-    TelemetryRegistry.registerBackend("", new MockTelemetryBackend()); // the simulator's field view
-    pitwall = Pitwall.start(Robots.SIM.name(), Robots.SIM, 0);
+    pitwall = Pitwall.start(Robots.SIM.name(), 0);
+    // The drivetrain's tuning, published as the robot program publishes it.
+    drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+    TunableRegistry.publish("Drive/config", drivetrain);
   }
 
   @AfterEach
   void tearDown() {
     pitwall.close();
     Scheduler.getDefault().cancelAll();
-    SimTestSupport.setEnabled(false);
-    SimTestSupport.resumeTime();
-    TelemetryRegistry.reset();
-    TunableRegistry.reset();
   }
 
   @Test
@@ -70,7 +69,7 @@ class PitwallRobotTest {
   }
 
   @Test
-  void everyWpilibTunableGoesThroughPitwallAndTheConfigurationIsOnNetworkTables() {
+  void everyWpilibTunableGoesThroughPitwallAndTheConfigurationIsOnNetworkTablesWithItsLimits() {
     TunableDouble gain = TunableDouble.create(1.0);
     TunableRegistry.publish("Shooter/gain", gain);
     TunableRegistry.update();
@@ -80,9 +79,10 @@ class PitwallRobotTest {
         .containsExactly("/Shooter/gain");
     try (var steerKp =
         NetworkTableInstance.getDefault()
-            .getDoubleTopic("/Tunables/Config/drivetrain/gains/steerKp")
+            .getDoubleTopic("/Tunables/Drive/config/gains/steerKp")
             .subscribe(-1)) {
       assertThat(steerKp.get()).as("dashboards see the configuration").isEqualTo(16.0);
+      assertThat(steerKp.getTopic().getProperties()).as("and its limits").contains("\"max\":100");
     }
   }
 
@@ -90,7 +90,7 @@ class PitwallRobotTest {
   void theModeSaysWhetherTheRobotIsEnabledAndOnTheField() {
     assertThat(modeAfterALoop()).isEqualTo("Teleop, disabled");
 
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     assertThat(modeAfterALoop()).isEqualTo("Teleop, enabled");
 
     DriverStationSim.setRobotMode(RobotMode.AUTONOMOUS);
@@ -118,7 +118,7 @@ class PitwallRobotTest {
     loops(1);
     assertThat(locked.getNow(null).result()).as("teleop").isEqualTo(Outcome.Result.LOCKED);
 
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     setMode(RobotMode.UTILITY);
     var started = pitwall.actions().requestStart("Wait a moment");
     loops(1);
@@ -127,34 +127,6 @@ class PitwallRobotTest {
 
     loops(10);
     assertThat(phase()).as("its 0.1 s wait is over").isEqualTo(Actions.Phase.ENDED);
-  }
-
-  @Test
-  void theDriveCheckIsAnActionOnThePage() {
-    try (var container =
-        new RobotContainer(
-            Constants.Mode.SIM,
-            Scheduler.getDefault(),
-            Robots.SIM,
-            () -> pitwall.config().drivetrain(),
-            Rebuilt.field(Robots.SIM.body()))) {
-      container.addTo(pitwall);
-
-      SimTestSupport.setEnabled(true);
-      setMode(RobotMode.UTILITY);
-      pitwall.actions().requestStart(RobotContainer.DRIVE_CHECK);
-      for (int i = 0; i < 25; i++) {
-        SimTestSupport.stepLoop();
-        pitwall.periodic();
-        container.periodic();
-        Scheduler.getDefault().run();
-      }
-
-      assertThat(phase()).isEqualTo(Actions.Phase.RUNNING);
-      assertThat(container.drive().getRobotRelativeVelocities().vx)
-          .as("driving forward slowly")
-          .isBetween(0.4, 0.6);
-    }
   }
 
   /**
@@ -170,7 +142,7 @@ class PitwallRobotTest {
     pitwall.periodic();
 
     var page = patch("/api/wpilib-tunables", "{\"Shooter/gain\": 2.0}");
-    var config = patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
+    var config = patch("/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
     try (var dashboard =
         NetworkTableInstance.getDefault().getDoubleTopic("/Tunables/Shooter/gain").publish()) {
       dashboard.set(3.0);
@@ -180,7 +152,7 @@ class PitwallRobotTest {
       assertThat(page.body()).contains("the field system is connected");
       assertThat(config.statusCode()).isEqualTo(409);
       assertThat(gain.get()).as("neither the page nor a dashboard").isEqualTo(1.0);
-      assertThat(pitwall.config().drivetrain().gains().steerKp()).isEqualTo(16.0);
+      assertThat(drivetrain.get().gains().steerKp()).isEqualTo(16.0);
 
       // The same dashboard write, off the field with tuning switched back on (the field switched it
       // off): it gets through, so the lock is what held it.
@@ -212,22 +184,68 @@ class PitwallRobotTest {
    */
   @Test
   void disablingPrintsWhatTuningChanged() throws Exception {
-    SimTestSupport.setEnabled(true);
+    RobotSim.setEnabled(true);
     pitwall.periodic();
-    patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
+    patch("/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
     PrintStream console = System.out;
     ByteArrayOutputStream printed = new ByteArrayOutputStream();
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
     try {
-      SimTestSupport.setEnabled(false);
+      RobotSim.setEnabled(false);
       pitwall.periodic();
     } finally {
       System.setOut(console);
     }
 
     assertThat(printed.toString(StandardCharsets.UTF_8))
-        .contains("drivetrain.gains.steerKp: 16.0 -> 18.0")
+        .contains("gains.steerKp: 16.0 -> 18.0")
         .contains(".steerKp(18.0)");
+  }
+
+  /**
+   * When the field connects, a match runs the committed configuration: tuned gains go back (printed
+   * first, so they can be committed), while a switch left changed (a camera off) keeps its setting
+   * and raises an alert naming it.
+   */
+  @Test
+  void theFieldConnectingRevertsTunedValuesAndNamesChangedSwitches() throws Exception {
+    TunableBoolean camera = TunableBoolean.create(true);
+    TunableRegistry.publish("Vision/front/enabled", camera);
+    patch("/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
+    patch("/api/wpilib-tunables", "{\"Vision/front/enabled\": false}");
+    PrintStream console = System.out;
+    ByteArrayOutputStream printed = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      DriverStationSim.setFmsAttached(true);
+      DriverStationSim.notifyNewData();
+      pitwall.periodic();
+    } finally {
+      System.setOut(console);
+    }
+
+    assertThat(drivetrain.get().gains().steerKp()).as("reverted").isEqualTo(16.0);
+    assertThat(printed.toString(StandardCharsets.UTF_8))
+        .contains("tuned values return to the committed configuration")
+        .contains(".steerKp(18.0)");
+    assertThat(camera.get()).as("the switch keeps its setting").isFalse();
+    assertThat(activeAlerts())
+        .anySatisfy(
+            text ->
+                assertThat(text)
+                    .isEqualTo(
+                        "On the field with settings changed since startup:"
+                            + " /Vision/front/enabled: false (was true)"));
+  }
+
+  private static List<String> activeAlerts() {
+    List<String> active = new ArrayList<>();
+    for (AlertDataJNI.AlertInfo alert : AlertDataJNI.getAlerts()) {
+      if (alert.activeStartTime != 0) {
+        active.add(alert.text);
+      }
+    }
+    return active;
   }
 
   /**
@@ -272,7 +290,7 @@ class PitwallRobotTest {
 
   private void loops(int count) {
     for (int i = 0; i < count; i++) {
-      SimTestSupport.stepLoop();
+      RobotSim.stepClock();
       pitwall.periodic();
       Scheduler.getDefault().run();
     }

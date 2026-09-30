@@ -3,10 +3,15 @@ package com.michaelgrundvig.frc.pitwall;
 import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,8 +37,6 @@ class PitwallServerTest {
 
   private final HttpClient client = HttpClient.newHttpClient();
   private final AtomicBoolean fieldConnected = new AtomicBoolean(false);
-  private final Tuning<Fixtures.Machine> tuning =
-      new Tuning<>("test", machine(), true, inputs -> {}, view -> {});
   private final AtomicBoolean homed = new AtomicBoolean(false);
   private final Status status =
       new Status().add("Robot", () -> "test").add("Arm homed", homed::get);
@@ -62,17 +65,28 @@ class PitwallServerTest {
               });
   private final TunableDouble shooterKp = TunableDouble.create(0.5);
   private final TunableTee tunables =
-      new TunableTee(
-          new MockTunableBackend(),
-          () -> fieldConnected.get() ? "the field system is connected" : null,
-          inputs -> {},
-          false);
+      new TunableTee(new MockTunableBackend(), this::whyLocked, inputs -> {}, false);
+  private final Tuning tuning =
+      new Tuning("test", tunables::configs, tunables::pathOf, true, inputs -> {}, view -> {});
   private final PitwallServer server = new PitwallServer(status, tuning, actions, tunables, 0);
+
+  private @Nullable String whyLocked() {
+    return tuning.whyLocked();
+  }
+
   private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
 
   @BeforeAll
   void start() throws Exception {
     tunables.publish("Shooter/kP", shooterKp);
+    TunableRegistry.registerBackend("", tunables);
+    TunableRegistry.publish(
+        "Machine",
+        LiveConfig.of("machine", machine())
+            .number("drive.gains.kP", Limits.between(0, 100))
+            .number("drive.limits.current", Limits.between(1, 80))
+            .number("travel.min", Limits.NONE)
+            .number("travel.max", Limits.NONE));
     server.start();
     loop.scheduleAtFixedRate(
         () -> {
@@ -173,7 +187,8 @@ class PitwallServerTest {
   void everyOtherWpilibTunableIsListedAndCanBeChanged() throws Exception {
     assertThat(get("/api/wpilib-tunables").body())
         .isEqualTo(
-            "[{\"path\":\"/Shooter/kP\",\"type\":\"double\",\"value\":0.5,\"editable\":true}]");
+            "[{\"path\":\"/Shooter/kP\",\"type\":\"double\",\"value\":0.5,\"editable\":true,"
+                + "\"limits\":\"\"}]");
 
     var changed = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.75}");
 
@@ -197,23 +212,30 @@ class PitwallServerTest {
   @Test
   void describesTheSession() throws Exception {
     assertThat(get("/api/tuning").body())
-        .isEqualTo("{\"name\":\"test\",\"enabled\":true,\"fieldConnected\":false}");
+        .isEqualTo("{\"name\":\"test\",\"enabled\":true,\"fieldConnected\":false,\"refused\":[]}");
   }
 
   @Test
   void listsWhatCanBeTunedAndItsValues() throws Exception {
     assertThat(get("/api/tunables").body())
-        .contains("\"drive.gains.kP\":{\"unit\":\"\",\"committed\":16.0}");
-    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":16.0");
+        .contains(
+            "\"/Machine/drive/gains/kP\":{\"config\":\"machine\",\"field\":\"drive.gains.kP\",\"unit\":\"\","
+                + "\"limits\":\"0 to 100\",\"committed\":16.0}");
+    assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
   }
 
   @Test
   void aMergePatchChangesSeveralValuesAtOnce() throws Exception {
     var changed =
-        send("PATCH", "/api/values", MERGE_PATCH, "{\"travel.min\": 12, \"travel.max\": 20}");
+        send(
+            "PATCH",
+            "/api/values",
+            MERGE_PATCH,
+            "{\"/Machine/travel/min\": 12, \"/Machine/travel/max\": 20}");
 
     assertThat(changed.statusCode()).isEqualTo(200);
-    assertThat(changed.body()).contains("\"travel.min\":12.0", "\"travel.max\":20.0");
+    assertThat(changed.body())
+        .contains("\"/Machine/travel/min\":12.0", "\"/Machine/travel/max\":20.0");
   }
 
   @Test
@@ -223,7 +245,7 @@ class PitwallServerTest {
             "PATCH",
             "/api/values",
             MERGE_PATCH,
-            "{\"drive.gains.kP\": 18.5, \"drive.limits.current\": -1}");
+            "{\"/Machine/drive/gains/kP\": 18.5, \"/Machine/drive/limits/current\": -1}");
 
     assertThat(refused.statusCode()).isEqualTo(422);
     assertThat(refused.headers().firstValue("Content-Type"))
@@ -231,23 +253,32 @@ class PitwallServerTest {
     assertThat(refused.body())
         .isEqualTo(
             "{\"type\":\"about:blank\",\"title\":\"Refused\",\"status\":422,"
-                + "\"detail\":\"current must be positive\"}");
-    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":16.0");
+                + "\"detail\":\"/Machine/drive/limits/current: -1 is below its limit of 1\"}");
+    assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
+  }
+
+  /** Within its limits, but the configuration's own checks refuse it: they say why. */
+  @Test
+  void aValueTheConfigurationRejectsSaysWhy() throws Exception {
+    var refused = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/travel/min\": 12}");
+
+    assertThat(refused.statusCode()).isEqualTo(422);
+    assertThat(refused.body()).contains("min must be below max, got 12.0 and 10.0");
   }
 
   @Test
   void nullReturnsAValueToItsCommittedOne() throws Exception {
-    send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+    send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": 18.5}");
 
-    var reverted = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": null}");
+    var reverted = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": null}");
 
     assertThat(reverted.statusCode()).isEqualTo(200);
-    assertThat(reverted.body()).contains("\"drive.gains.kP\":16.0");
+    assertThat(reverted.body()).contains("\"/Machine/drive/gains/kP\":16.0");
   }
 
   @Test
   void theChangesComeAsJsonOrAsAReport() throws Exception {
-    send("PATCH", "/api/values", "application/json", "{\"drive.gains.kP\": 18.5}");
+    send("PATCH", "/api/values", "application/json", "{\"/Machine/drive/gains/kP\": 18.5}");
 
     assertThat(get("/api/changes").body()).contains("\"builderCall\":\".kP(18.5)\"");
     assertThat(get("/api/changes", "text/plain").body())
@@ -256,19 +287,19 @@ class PitwallServerTest {
 
   @Test
   void deletingTheChangesRevertsEverything() throws Exception {
-    send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+    send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": 18.5}");
 
     var deleted = send("DELETE", "/api/changes", null, null);
 
     assertThat(deleted.statusCode()).isEqualTo(200);
     assertThat(deleted.body()).isEqualTo("[]");
-    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":16.0");
+    assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
   }
 
   @Test
   void switchingTuningOffLocksChanges() throws Exception {
     var off = send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": false}");
-    var locked = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+    var locked = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": 18.5}");
 
     assertThat(off.body()).contains("\"enabled\":false");
     assertThat(locked.statusCode()).isEqualTo(409);
@@ -279,7 +310,7 @@ class PitwallServerTest {
   void theFieldLocksTuning() throws Exception {
     fieldConnected.set(true);
 
-    var change = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 18.5}");
+    var change = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": 18.5}");
     var on = send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
 
     assertThat(change.statusCode()).isEqualTo(409);
@@ -294,7 +325,7 @@ class PitwallServerTest {
         .isEqualTo(415);
     assertThat(send("PATCH", "/api/values", MERGE_PATCH, "not json").statusCode()).isEqualTo(400);
     assertThat(send("PATCH", "/api/values", MERGE_PATCH, "[1, 2]").statusCode()).isEqualTo(400);
-    assertThat(send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": \"lots\"}"))
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": \"lots\"}"))
         .extracting(HttpResponse::statusCode)
         .isEqualTo(400);
     var unknown = send("PATCH", "/api/values", MERGE_PATCH, "{\"nothing\": 1}");
@@ -311,7 +342,7 @@ class PitwallServerTest {
   /** 1e999 parses to infinity: no number that isn't finite gets as far as the robot loop. */
   @Test
   void refusesNumbersThatArentFinite() throws Exception {
-    var config = send("PATCH", "/api/values", MERGE_PATCH, "{\"drive.gains.kP\": 1e999}");
+    var config = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": 1e999}");
     var wpilib = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": -1e999}");
 
     assertThat(config.statusCode()).isEqualTo(400);
@@ -353,7 +384,7 @@ class PitwallServerTest {
   @Test
   void aChangeTheLoopHasNotReachedIsAccepted() throws Exception {
     // A robot program whose loop never runs, as if paused in a debugger.
-    var idle = new Tuning<>("idle", machine(), true, inputs -> {}, view -> {});
+    var idle = new Tuning("idle", List::of, (config, field) -> null, true, inputs -> {}, v -> {});
     try (var paused =
         new PitwallServer(
             new Status(),
@@ -366,15 +397,14 @@ class PitwallServerTest {
       var accepted =
           client.send(
               HttpRequest.newBuilder(
-                      URI.create("http://localhost:" + paused.port() + "/api/values"))
+                      URI.create("http://localhost:" + paused.port() + "/api/tuning"))
                   .header("Content-Type", MERGE_PATCH)
-                  .method(
-                      "PATCH", HttpRequest.BodyPublishers.ofString("{\"drive.gains.kP\": 18.5}"))
+                  .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"enabled\": false}"))
                   .build(),
               HttpResponse.BodyHandlers.ofString());
 
       assertThat(accepted.statusCode()).isEqualTo(202);
-      assertThat(idle.isTunable("drive.gains.kP")).isTrue();
+      assertThat(idle.view().enabled()).as("the loop never got to it").isTrue();
     }
   }
 
@@ -403,6 +433,79 @@ class PitwallServerTest {
 
     assertThat(started).isEmpty();
     assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");
+  }
+
+  /**
+   * A web page on a laptop connected to the robot could point a name it controls at the robot's
+   * address (DNS rebinding) and use the page as its own: the name it sends gives it away.
+   */
+  @Test
+  void answersOnlyAtTheRobotsOwnAddress() throws Exception {
+    assertThat(statusLine("localhost:" + server.port())).endsWith(" 200 OK");
+    assertThat(statusLine("robot.local:5820")).endsWith(" 200 OK");
+    assertThat(statusLine("10.26.11.2:5820")).endsWith(" 200 OK");
+    assertThat(statusLine("rebinding.example.com:5820")).contains(" 403 ");
+  }
+
+  @Test
+  void changesComeOnlyFromThePagesOwnSite() throws Exception {
+    var own =
+        client.send(
+            HttpRequest.newBuilder(uri("/api/values"))
+                .header("Content-Type", MERGE_PATCH)
+                .header("Origin", "http://localhost:" + server.port())
+                .method(
+                    "PATCH",
+                    HttpRequest.BodyPublishers.ofString("{\"/Machine/drive/gains/kP\": 18}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    var another =
+        client.send(
+            HttpRequest.newBuilder(uri("/api/values"))
+                .header("Content-Type", MERGE_PATCH)
+                .header("Origin", "http://another.example.com")
+                .method(
+                    "PATCH",
+                    HttpRequest.BodyPublishers.ofString("{\"/Machine/drive/gains/kP\": 19}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+
+    assertThat(own.statusCode()).isEqualTo(200);
+    assertThat(another.statusCode()).isEqualTo(403);
+    assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":18.0");
+  }
+
+  @Test
+  void thePageCantBeFramedByAnotherSite() throws Exception {
+    var page = get("/", "text/html");
+
+    assertThat(page.headers().firstValue("X-Frame-Options")).hasValue("DENY");
+    assertThat(page.headers().firstValue("Content-Security-Policy"))
+        .hasValueSatisfying(policy -> assertThat(policy).contains("frame-ancestors 'none'"));
+    assertThat(page.headers().firstValue("X-Content-Type-Options")).hasValue("nosniff");
+  }
+
+  @Test
+  void refusesBodiesTooLargeOrOfNoType() throws Exception {
+    String large = "{\"note\": \"" + "x".repeat(64 * 1024) + "\"}";
+
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, large).statusCode()).isEqualTo(413);
+    assertThat(send("PATCH", "/api/values", null, "{}").statusCode()).isEqualTo(415);
+  }
+
+  /** The status line of a GET naming this host, sent by hand: Java's client won't set Host. */
+  private String statusLine(String host) throws Exception {
+    try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.port());
+        var reader =
+            new BufferedReader(
+                new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))) {
+      socket
+          .getOutputStream()
+          .write(
+              ("GET /api/tuning HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+                  .getBytes(StandardCharsets.US_ASCII));
+      return reader.readLine();
+    }
   }
 
   private HttpResponse<String> get(String path) throws Exception {

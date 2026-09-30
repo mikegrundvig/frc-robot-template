@@ -727,4 +727,19 @@ class PoseEstimatorTest {
   private static EstimatorConfigBuilder with() {
     return EstimatorConfigBuilder.builder(EstimatorConfig.DEFAULTS);
   }
+
+  /** What the estimate rests on, in order: each state overrides the ones after it. */
+  @Test
+  void theModeIsTheFirstThatApplies() {
+    assertThat(PoseEstimator.mode(false, false, true, true))
+        .isEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(PoseEstimator.mode(true, false, true, true))
+        .isEqualTo(LocalizationEstimate.Mode.INITIALIZING);
+    assertThat(PoseEstimator.mode(true, true, true, true))
+        .isEqualTo(LocalizationEstimate.Mode.LOST);
+    assertThat(PoseEstimator.mode(true, true, false, true))
+        .isEqualTo(LocalizationEstimate.Mode.TRACKING);
+    assertThat(PoseEstimator.mode(true, true, false, false))
+        .isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
+  }
 }

@@ -13,7 +13,7 @@ class TerrainCrossingTest {
   private static final double DEG = Math.toRadians(1);
   private static final long LOOP = 20_000_000L;
 
-  private final TerrainCrossing crossing = new TerrainCrossing(10 * DEG, 5 * DEG, 0.1, 1.5);
+  private final TerrainCrossing crossing = new TerrainCrossing(TerrainCrossing.Settings.DEFAULTS);
   private final List<TerrainCrossing.Phase> phases = new ArrayList<>();
   private long time;
   private int completed;
@@ -133,9 +133,13 @@ class TerrainCrossingTest {
 
   @Test
   void steepMustBeSteeperThanLevel() {
-    assertThatThrownBy(() -> new TerrainCrossing(5 * DEG, 5 * DEG, 0.1, 1.5))
+    assertThatThrownBy(() -> settings().steepDegrees(5).build())
         .isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(() -> new TerrainCrossing(10 * DEG, 5 * DEG, 0.1, 0))
+    assertThatThrownBy(() -> settings().topSeconds(0).build())
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  private static TerrainCrossingSettingsBuilder settings() {
+    return TerrainCrossingSettingsBuilder.builder(TerrainCrossing.Settings.DEFAULTS);
   }
 }

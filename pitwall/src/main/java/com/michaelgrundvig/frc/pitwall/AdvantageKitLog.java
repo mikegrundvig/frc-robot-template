@@ -47,18 +47,12 @@ final class AdvantageKitLog {
     public void toLog(LogTable table) {
       table.put("Enabled", inputs.enabled);
       table.put("Kinds", inputs.kinds);
-      table.put("Paths", inputs.paths);
-      table.put("Values", inputs.values);
-      table.put("Requests", inputs.requests);
     }
 
     @Override
     public void fromLog(LogTable table) {
       inputs.enabled = table.get("Enabled", inputs.enabled);
       inputs.kinds = table.get("Kinds", inputs.kinds);
-      inputs.paths = table.get("Paths", inputs.paths);
-      inputs.values = table.get("Values", inputs.values);
-      inputs.requests = table.get("Requests", inputs.requests);
     }
   }
 

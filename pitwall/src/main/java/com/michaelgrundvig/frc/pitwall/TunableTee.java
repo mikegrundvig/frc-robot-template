@@ -1,12 +1,12 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -32,7 +32,8 @@ import org.wpilib.tunable.util.PathUtil;
  *
  * <ul>
  *   <li>applies a change from a dashboard or the page only while tuning is allowed (on, and the
- *       field not connected); a refused change snaps back on the dashboard;
+ *       field not connected), and only within the tunable's {@link Limits}; a refused change snaps
+ *       back on the dashboard, and says why on the page;
  *   <li>logs every change it applies, so a replay makes the same changes at the same moments;
  *   <li>lists every tunable for the page, which can change the simple ones (numbers, booleans).
  * </ul>
@@ -41,8 +42,12 @@ import org.wpilib.tunable.util.PathUtil;
  * real value and sends writes through here. Unit-aware tunables ({@code
  * Tunable.create(Amps.of(30))}) are covered too: WPILib's registry unwraps them and publishes their
  * number in base units. Other kinds (structs, strings, arrays) pass straight through: published as
- * usual, but not locked or replayed. Pitwall's own configuration tunables pass straight through as
- * well, because their writes already go through {@link Tuning}.
+ * usual, but not locked or replayed.
+ *
+ * <p>A {@link LiveConfig}'s values are checked whole: before a change to one applies, the
+ * configuration says whether it would take it (its limits, then its records' own checks), and a
+ * page's changes to several of its values apply together, as one rebuild. {@link Tuning} puts them
+ * back as committed when the field connects.
  *
  * <p>WPILib calls {@link #update} once per loop, after {@code robotPeriodic()}; dashboard writes
  * and the page's requests are applied there, and so are the logged ones in a replay.
@@ -55,10 +60,22 @@ public final class TunableTee implements TunableBackend {
    * @param type {@code double}, {@code boolean}, and so on
    * @param value its value: a number, a boolean, or text
    * @param editable whether the page can change it
+   * @param limits the range a number may be tuned in
    */
-  public record Listed(String path, String type, Object value, boolean editable) {}
+  public record Listed(String path, String type, Object value, boolean editable, Limits limits) {}
 
-  private record Entry(TunableBase real, @Nullable TunableBase proxy, String type) {}
+  /**
+   * @param config the live configuration this is a value of, or null
+   * @param field its path in that configuration
+   */
+  private record Entry(
+      TunableBase real,
+      @Nullable TunableBase proxy,
+      String type,
+      Object startup,
+      Limits limits,
+      @Nullable LiveConfig<?> config,
+      String field) {}
 
   private record PageRequest(Map<String, Object> values, CompletableFuture<Outcome> outcome) {}
 
@@ -70,11 +87,19 @@ public final class TunableTee implements TunableBackend {
   private final Consumer<TunableInputs> logInputs;
   private final boolean replaying;
   private final Map<String, Entry> entries = new LinkedHashMap<>();
-  private final Set<TunableBase> own = Collections.newSetFromMap(new IdentityHashMap<>());
   private final ConcurrentLinkedQueue<PageRequest> queue = new ConcurrentLinkedQueue<>();
   private final TunableInputs inputs = new TunableInputs();
   private final List<String> appliedPaths = new ArrayList<>();
   private final List<String> appliedValues = new ArrayList<>();
+
+  /** How many refused dashboard writes {@link #refusals()} keeps. */
+  private static final int REFUSALS_KEPT = 10;
+
+  private final ArrayDeque<String> refusals = new ArrayDeque<>();
+
+  /** The live configurations published through here, in the order they were. */
+  private final List<LiveConfig<?>> configs = new ArrayList<>();
+
   private volatile List<Listed> view = List.of();
 
   /**
@@ -96,18 +121,66 @@ public final class TunableTee implements TunableBackend {
   }
 
   /**
-   * Passes a tunable straight through, unlocked and unlogged here, because its writes are already
-   * checked and logged elsewhere (Pitwall's own configuration tunables). Call it before publishing.
+   * Every tunable, as of the last update, except the values of live configurations (see {@link
+   * #configs()}). Safe to call from any thread.
    */
-  public void passThrough(TunableBase tunable) {
+  public List<Listed> view() {
+    return view;
+  }
+
+  /**
+   * The simple tunables (numbers, true or false) whose value differs from when they were published,
+   * such as a camera switched off in the pit, each as {@code "path: value (was startup)"}.
+   * Configuration values aren't listed: they return to their committed values when the field
+   * connects. Call it in the robot loop.
+   */
+  public List<String> changedSinceStartup() {
+    List<String> changed = new ArrayList<>();
     synchronized (entries) {
-      own.add(tunable);
+      for (Map.Entry<String, Entry> item : entries.entrySet()) {
+        Entry entry = item.getValue();
+        if (entry.proxy() == null || entry.config() != null) {
+          continue;
+        }
+        Object now = valueOf(entry.real());
+        if (!now.equals(entry.startup())) {
+          changed.add(item.getKey() + ": " + now + " (was " + entry.startup() + ")");
+        }
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * The latest dashboard writes that were refused, newest last, each as {@code "path = value:
+   * why"}. A dashboard can't show why a value snapped back; the page can. Safe to call from any
+   * thread.
+   */
+  public List<String> refusals() {
+    synchronized (refusals) {
+      return List.copyOf(refusals);
     }
   }
 
-  /** Every tunable, as of the last update, except Pitwall's own. Safe to call from any thread. */
-  public List<Listed> view() {
-    return view;
+  /**
+   * Where a configuration's value is published, or null if it isn't. Safe to call from any thread.
+   */
+  public @Nullable String pathOf(LiveConfig<?> config, String field) {
+    synchronized (entries) {
+      for (Map.Entry<String, Entry> item : entries.entrySet()) {
+        if (item.getValue().config() == config && item.getValue().field().equals(field)) {
+          return item.getKey();
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The live configurations published through here. Safe to call from any thread. */
+  public List<LiveConfig<?>> configs() {
+    synchronized (configs) {
+      return List.copyOf(configs);
+    }
   }
 
   /** Whether the page can change the tunable at a path. Safe to call from any thread. */
@@ -141,12 +214,32 @@ public final class TunableTee implements TunableBackend {
     String key = PathUtil.normalizeName(path);
     TunableBase proxy;
     synchronized (entries) {
-      proxy = own.contains(tunable) ? null : proxy(key, tunable);
+      proxy = proxy(key, tunable);
     }
     boolean published = inner.publish(key, proxy != null ? proxy : tunable);
     if (published) {
       synchronized (entries) {
-        entries.put(key, new Entry(tunable, proxy, typeOf(tunable)));
+        LiveConfig<?> config = null;
+        String field = "";
+        synchronized (configs) {
+          for (LiveConfig<?> candidate : configs) {
+            String known = candidate.pathOf(tunable);
+            if (known != null) {
+              config = candidate;
+              field = known;
+            }
+          }
+        }
+        entries.put(
+            key,
+            new Entry(
+                tunable,
+                proxy,
+                typeOf(tunable),
+                valueOf(tunable),
+                Limits.of(tunable.getConfig()),
+                config,
+                field));
       }
     }
     return published;
@@ -154,6 +247,15 @@ public final class TunableTee implements TunableBackend {
 
   @Override
   public boolean publishComplex(String path, ComplexTunable tunable) {
+    // Known before its values are published (the inner backend publishes them from here), so each
+    // is recognized as the configuration's.
+    if (tunable instanceof LiveConfig<?> config) {
+      synchronized (configs) {
+        if (configs.stream().noneMatch(known -> known == config)) {
+          configs.add(config);
+        }
+      }
+    }
     return inner.publishComplex(path, tunable);
   }
 
@@ -206,9 +308,7 @@ public final class TunableTee implements TunableBackend {
     inputs.values = appliedValues.toArray(String[]::new);
     logInputs.accept(inputs); // in replay, this replaces them with the logged ones
     if (replaying) {
-      for (int i = 0; i < inputs.paths.length && i < inputs.values.length; i++) {
-        applyLogged(inputs.paths[i], inputs.values[i]);
-      }
+      applyLogged(inputs.paths, inputs.values);
     }
     view = snapshot();
     for (int i = 0; i < outcomes.size(); i++) {
@@ -223,21 +323,66 @@ public final class TunableTee implements TunableBackend {
 
   /**
    * A dashboard's write, through a proxy: applied if tuning allows it and the value is one the
-   * tunable can take, then logged. A value that isn't a number (NaN, infinity) is refused, and so
-   * is a write its tunable's own setter throws on; either way the dashboard shows the real value
-   * again at the next update.
+   * tunable can take, within its limits, then logged. A refused write (tuning locked, a value that
+   * isn't a number, one outside the limits, one the tunable's own setter throws on) is recorded
+   * with its reason; the dashboard shows the real value again at the next update.
+   *
+   * @param number the value as a number, for the limits; NaN for a true-or-false
    */
-  private void write(String path, TunableBase real, String text, boolean valid, Runnable apply) {
-    if (!valid || replaying || whyLocked.get() != null) {
+  private void write(
+      String path, TunableBase real, String text, double number, boolean valid, Runnable apply) {
+    if (replaying) {
+      return;
+    }
+    String locked = whyLocked.get();
+    if (locked != null) {
+      refused(path, text, "tuning is locked: " + locked);
+      return;
+    }
+    if (!valid) {
+      refused(path, text, "not a number");
+      return;
+    }
+    Entry entry;
+    synchronized (entries) {
+      entry = entries.get(path);
+    }
+    String outside = Double.isNaN(number) || entry == null ? null : entry.limits().whyNot(number);
+    LiveConfig<?> config = entry != null ? entry.config() : null;
+    if (outside == null && entry != null && config != null) {
+      outside = config.whyNot(Map.of(entry.field(), number));
+    }
+    if (outside != null) {
+      refused(path, text, outside);
       return;
     }
     try {
       apply.run();
     } catch (RuntimeException e) {
-      TunableRegistry.reportWarning("Pitwall: " + path + " refused " + text + ": " + e);
+      String why = e.getMessage();
+      refused(path, text, why != null ? why : e.toString());
       return;
     }
     applied(path, real, text);
+  }
+
+  private void refused(String path, String text, String why) {
+    String refusal = path + " = " + text + ": " + why;
+    TunableRegistry.reportWarning("Pitwall refused " + refusal);
+    synchronized (refusals) {
+      refusals.addLast(refusal);
+      while (refusals.size() > REFUSALS_KEPT) {
+        refusals.removeFirst();
+      }
+    }
+  }
+
+  /** A configuration's value was set: logged like any tunable's (its reaction is the config's). */
+  private void appliedToConfig(@Nullable String path, String text) {
+    if (path != null) {
+      appliedPaths.add(path);
+      appliedValues.add(text);
+    }
   }
 
   private void applied(String path, TunableBase real, String text) {
@@ -266,8 +411,8 @@ public final class TunableTee implements TunableBackend {
   }
 
   /**
-   * The page's changes, all or none: every value is checked first, then each is applied, and if a
-   * tunable's own setter throws, the ones already applied are put back.
+   * The page's changes, all or none: every value is checked first (its type, and its limits), then
+   * each is applied, and if a tunable's own setter throws, the ones already applied are put back.
    */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
@@ -275,6 +420,9 @@ public final class TunableTee implements TunableBackend {
       return new Outcome(Outcome.Result.LOCKED, "Tuning is locked: " + why);
     }
     List<Change> changes = new ArrayList<>();
+    // A configuration's values, gathered to be checked and applied together.
+    Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();
+    Map<LiveConfig<?>, Map<String, String>> configuredPaths = new IdentityHashMap<>();
     for (Map.Entry<String, Object> value : values.entrySet()) {
       Entry entry;
       synchronized (entries) {
@@ -289,7 +437,46 @@ public final class TunableTee implements TunableBackend {
         return new Outcome(
             Outcome.Result.REFUSED, value.getKey() + " takes a " + entry.type() + " value");
       }
+      if (value.getValue() instanceof Number number) {
+        String outside = entry.limits().whyNot(number.doubleValue());
+        if (outside != null) {
+          return new Outcome(Outcome.Result.REFUSED, value.getKey() + ": " + outside);
+        }
+      }
+      LiveConfig<?> config = entry.config();
+      if (config != null && value.getValue() instanceof Number number) {
+        configured
+            .computeIfAbsent(config, c -> new LinkedHashMap<>())
+            .put(entry.field(), number.doubleValue());
+        configuredPaths
+            .computeIfAbsent(config, c -> new LinkedHashMap<>())
+            .put(entry.field(), value.getKey());
+        continue;
+      }
       changes.add(change);
+    }
+    for (Map.Entry<LiveConfig<?>, Map<String, Double>> group : configured.entrySet()) {
+      LiveConfig<?> config = group.getKey();
+      String refused = config.whyNot(group.getValue());
+      if (refused != null) {
+        return new Outcome(Outcome.Result.REFUSED, refused);
+      }
+      Map<String, Double> old = new LinkedHashMap<>();
+      group.getValue().keySet().forEach(field -> old.put(field, config.value(field)));
+      Map<String, String> paths = Objects.requireNonNull(configuredPaths.get(config));
+      changes.add(
+          new Change(
+              config.name(),
+              () -> {
+                config.set(group.getValue());
+                group
+                    .getValue()
+                    .forEach((field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
+              },
+              () -> {
+                config.set(old);
+                old.forEach((field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
+              }));
     }
     List<Change> done = new ArrayList<>();
     for (Change change : changes) {
@@ -374,6 +561,39 @@ public final class TunableTee implements TunableBackend {
         });
   }
 
+  /**
+   * Applies one update's logged changes during a replay, as the robot applied them: a
+   * configuration's values together, the rest one by one.
+   */
+  private void applyLogged(String[] paths, String[] texts) {
+    Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();
+    for (int i = 0; i < paths.length && i < texts.length; i++) {
+      Entry entry;
+      synchronized (entries) {
+        entry = entries.get(paths[i]);
+      }
+      LiveConfig<?> config = entry != null ? entry.config() : null;
+      if (entry == null || config == null) {
+        applyLogged(paths[i], texts[i]);
+        continue;
+      }
+      try {
+        configured
+            .computeIfAbsent(config, c -> new LinkedHashMap<>())
+            .put(entry.field(), Double.parseDouble(texts[i]));
+      } catch (NumberFormatException e) {
+        TunableRegistry.reportWarning("Pitwall: a logged change to " + paths[i] + " is unreadable");
+      }
+    }
+    configured.forEach(
+        (config, values) -> {
+          if (!config.set(values)) {
+            TunableRegistry.reportWarning(
+                "Pitwall: " + config.name() + " refused a logged change: " + config.whyNot(values));
+          }
+        });
+  }
+
   /** Applies a logged change during a replay, as the robot applied it. */
   private void applyLogged(String path, String text) {
     Entry entry;
@@ -420,22 +640,28 @@ public final class TunableTee implements TunableBackend {
       case TunableDouble t ->
           TunableDouble.createConfig(
               t::get,
-              v -> write(path, t, Double.toString(v), Double.isFinite(v), () -> t.set(v)),
+              v -> write(path, t, Double.toString(v), v, Double.isFinite(v), () -> t.set(v)),
               proxyConfig);
       case TunableFloat t ->
           TunableFloat.createConfig(
               t::get,
-              v -> write(path, t, Float.toString(v), Float.isFinite(v), () -> t.set(v)),
+              v -> write(path, t, Float.toString(v), v, Float.isFinite(v), () -> t.set(v)),
               proxyConfig);
       case TunableInt t ->
           TunableInt.createConfig(
-              t::get, v -> write(path, t, Integer.toString(v), true, () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Integer.toString(v), v, true, () -> t.set(v)),
+              proxyConfig);
       case TunableLong t ->
           TunableLong.createConfig(
-              t::get, v -> write(path, t, Long.toString(v), true, () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Long.toString(v), (double) v, true, () -> t.set(v)),
+              proxyConfig);
       case TunableBoolean t ->
           TunableBoolean.createConfig(
-              t::get, v -> write(path, t, Boolean.toString(v), true, () -> t.set(v)), proxyConfig);
+              t::get,
+              v -> write(path, t, Boolean.toString(v), Double.NaN, true, () -> t.set(v)),
+              proxyConfig);
       default -> null;
     };
   }
@@ -461,7 +687,7 @@ public final class TunableTee implements TunableBackend {
     synchronized (entries) {
       for (Map.Entry<String, Entry> item : entries.entrySet()) {
         Entry entry = item.getValue();
-        if (own.contains(entry.real())) {
+        if (entry.config() != null) {
           continue;
         }
         listed.add(
@@ -469,7 +695,8 @@ public final class TunableTee implements TunableBackend {
                 item.getKey(),
                 entry.type(),
                 valueOf(entry.real()),
-                entry.proxy() != null && isMutable(entry.real())));
+                entry.proxy() != null && isMutable(entry.real()),
+                entry.limits()));
       }
     }
     return List.copyOf(listed);

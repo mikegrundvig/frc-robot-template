@@ -3,6 +3,9 @@ package com.michaelgrundvig.frc.pitwall;
 import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Milliseconds;
+import static org.wpilib.units.Units.Volts;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -191,5 +194,38 @@ class LiveConfigTest {
     dashboard.setDouble("Machine/drive/gains/kP", 18);
     TunableRegistry.update();
     assertThat(live.get().drive().gains().kP()).isEqualTo(18);
+  }
+
+  @Test
+  void noValuesChangeNothingAndTheCommittedValueAgainIsNoChange() {
+    var live = live();
+
+    assertThat(live.set(Map.of())).isTrue();
+    assertThat(live.set(Map.of(KP, 16.0))).isTrue();
+
+    assertThat(live.changes()).isEmpty();
+  }
+
+  /** A measure's limits are measures: they mean the same however its value was written. */
+  @Test
+  void aMeasuresLimitsAreMeasuresInAnyUnit() {
+    var live =
+        LiveConfig.of("machine", machine())
+            .measure("drive.limits.current", Amps.of(1), Amps.of(80))
+            .measure("drive.gains.lookahead", Milliseconds.of(0), Milliseconds.of(100));
+
+    assertThat(live.knobs())
+        .containsExactly(
+            new LiveConfig.Knob("drive.limits.current", "A", Limits.between(1, 80)),
+            new LiveConfig.Knob("drive.gains.lookahead", "s", Limits.between(0, 0.1)));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> LiveConfig.of("machine", machine()).measure(KP, Amps.of(0), Amps.of(1)))
+        .withMessageContaining("isn't a measure of the same kind");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                LiveConfig.of("machine", machine())
+                    .measure("drive.limits.current", Volts.of(0), Volts.of(1)))
+        .withMessageContaining("isn't a measure of the same kind");
   }
 }

@@ -63,24 +63,31 @@ Also built in:
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
     `pitwall.actions().add("Home arm", arm::home)`.
-  - **Live tuning** of the values marked `@Tunable`, such as gains and current limits. Each tuned
-    value is checked exactly like a committed one and locked out while the field is connected.
-    Nothing is saved on the robot: the page lists each change as the builder call that commits it
-    to `Robots.java`. When the field connects, tuned values return to the committed ones (printed
-    first, so none are lost): a match runs the committed configuration.
-  - **Every WPILib tunable** in the program, through a tee around WPILib's own NetworkTables
-    backend: dashboards such as Elastic see and change them as always (the configuration's
-    `@Tunable` values too, under `Config/`), but a change to a number or a true/false applies only
-    while tuning is on, never on the field, and is logged for replay. These are switches (a camera
-    off, a hold time), and keep their setting into a match, with an alert naming each one that
-    differs from startup. Text, arrays, and structs pass straight through, unlocked, so choosers
-    keep working on the field.
+  - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
+    around WPILib's NetworkTables backend: dashboards such as Elastic see and change them as always,
+    but a change applies only while tuning is on, never on the field, and within the tunable's
+    limits, and it is logged for replay.
+    - **A mechanism's configuration** (gains, current limits, thresholds) is tuned as a
+      `LiveConfig`, a WPILib complex tunable the mechanism declares:
+      `LiveConfig.of("drivetrain", committed).number("gains.steerKp", Limits.between(0, 100))`.
+      Each value carries its tuning limits, the range that's safe to dial in live, as WPILib
+      properties any NetworkTables tool can read. Before a change applies, it is checked against
+      its limits and then by the configuration's own checks, so a refused value never reaches the
+      robot, and the page says why (a dashboard's snaps back, and the page shows why). Several
+      values change together, all or none. Nothing is saved on the robot: the page lists each
+      change as the builder call that commits it to `Robots.java`. When the field connects, every
+      configuration returns to committed (printed first, so nothing is lost): a match runs the
+      committed configuration.
+    - **A plain WPILib tunable** is a switch the drive team flips (a camera off, a hold time,
+      within its limits: `TunableDouble.createConfig(0.0, Limits.between(0, 30).config())`). A
+      switch keeps its setting into a match, with an alert naming each one that differs from
+      startup. Text, arrays, and structs pass straight through, unlocked, so choosers keep working
+      on the field.
 
   **Which one a new value is:** a value that describes the robot (a gain, a current limit, a
-  threshold, an uncertainty) is configuration. It goes in the robot's configuration record, set in
-  `Robots.java`, marked `@Tunable` if it may be tuned live, and the code reads it through
-  `pitwall.config()`. A WPILib tunable is only for a switch the drive team flips (a camera off, how
-  long autonomous holds the cameras back), which is why switches keep their setting on the field.
+  threshold, an uncertainty) is configuration: a field of the robot's configuration record, set in
+  `Robots.java`, and, to tune it live, declared in its mechanism's `LiveConfig` with its limits
+  (see `Drive.tuning`). A plain tunable is only for a switch.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver

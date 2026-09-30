@@ -1,155 +1,159 @@
 package com.michaelgrundvig.frc.pitwall;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
- * Live tuning of a configuration: the values marked {@link Tunable} can be changed while the robot
- * runs. Nothing is saved on the robot: what differs from the committed configuration is listed as
- * the builder calls that commit it.
+ * Live tuning's switch and what follows from it. The values themselves are WPILib tunables, changed
+ * through the tee, most of them the values of {@link LiveConfig live configurations}; this is the
+ * rest: whether tuning is on, the field's lock, putting every configuration back as committed, and
+ * saying what differs.
+ *
+ * <p>Nothing is saved on the robot: what differs from the committed configurations is listed as the
+ * builder calls that commit it. Changes need tuning switched on, and are refused while the field
+ * system is connected. When the field system connects, every configuration returns to committed: a
+ * match runs the committed configuration.
  *
  * <p>Only the robot loop changes anything. Requests, from the web server's threads, wait in a
- * queue; each loop, {@link #periodic} applies them in order, each one all or nothing, and logs
- * them, so the configuration changes only between loops and a replay makes the same changes at the
- * same moments. Each request's future completes with what became of it.
- *
- * <p>Changes need tuning switched on, and are refused while the field system is connected. When the
- * field system connects, every tuned value returns to its committed one: a match runs the committed
- * configuration.
- *
- * @param <T> the configuration record at the root
+ * queue; each loop, {@link #periodic} applies them in order and logs them, so a replay makes the
+ * same changes at the same moments. Each request's future completes with what became of it.
  */
-public final class Tuning<T extends Record> {
+public final class Tuning {
   /**
    * The state of tuning, as the page shows it. Safe to read from any thread.
    *
-   * @param name what is being tuned, such as the robot's name
+   * @param name what is being tuned: the robot's name
    * @param enabled whether tuning is switched on
    * @param fieldConnected whether the field system is connected, which locks tuning off
-   * @param values every tunable value
-   * @param changes the tuned values that differ from the committed configuration
+   * @param configs every live configuration
    */
   public record View(
-      String name,
-      boolean enabled,
-      boolean fieldConnected,
-      List<Value> values,
-      List<ConfigTuner.Change> changes) {
-    /** Whether any tuned value differs from the committed configuration. */
+      String name, boolean enabled, boolean fieldConnected, List<ConfigView> configs) {
+    /** Whether any tuned value differs from its committed one. */
     public boolean hasChanges() {
-      return !changes.isEmpty();
+      return configs.stream().anyMatch(config -> !config.changes().isEmpty());
     }
 
-    /** The paths of the tuned values that differ, for a warning. */
+    /** The tuned values that differ, as {@code "drivetrain gains.steerKp"}, for a warning. */
     public String changedPaths() {
-      return changes.stream().map(ConfigTuner.Change::path).collect(Collectors.joining(", "));
+      return configs.stream()
+          .flatMap(config -> config.changes().stream().map(c -> config.name() + " " + c.path()))
+          .collect(Collectors.joining(", "));
     }
   }
 
   /**
-   * One tunable value.
+   * A live configuration, as the page shows it.
    *
-   * @param path where it is in the configuration
+   * @param name what it configures
+   * @param values its tunable values
+   * @param changes what differs from committed, with the builder calls that commit it
+   */
+  public record ConfigView(String name, List<Value> values, List<LiveConfig.Change> changes) {}
+
+  /**
+   * One tunable value of a configuration.
+   *
+   * @param path the WPILib tunable it is published as, such as {@code /Drive/config/gains/steerKp}
+   * @param field where it is in the configuration, such as {@code gains.steerKp}
    * @param unit the unit it is tuned in; empty for a plain number
+   * @param limits the range it may be tuned in
    * @param committed its committed value
    * @param current its value now
    */
-  public record Value(String path, String unit, double committed, double current) {}
+  public record Value(
+      String path, String field, String unit, Limits limits, double committed, double current) {}
 
   /** A request from the page, waiting for the robot loop. */
-  private record Request(
-      TuningInputs.Kind kind, Map<String, Double> values, CompletableFuture<Outcome> outcome) {}
+  private record Request(TuningInputs.Kind kind, CompletableFuture<Outcome> outcome) {}
 
   private final String name;
-  private final ConfigTuner<T> tuner;
+  private final Supplier<List<LiveConfig<?>>> configs;
+  private final PathFinder paths;
   private final Consumer<TuningInputs> logInputs;
   private final Consumer<View> onChange;
-  private final Set<String> paths;
   private final ConcurrentLinkedQueue<Request> queue = new ConcurrentLinkedQueue<>();
   private final TuningInputs inputs = new TuningInputs();
-  private boolean enabled;
-  private boolean fieldConnected;
-  private volatile View view;
+  private volatile boolean enabled;
+  private volatile boolean fieldConnected;
 
   /**
-   * @param name what is being tuned, such as the robot's name; the page and the report show it
-   * @param committed the committed configuration
+   * What the last loop told {@code onChange}: whether tuning was on, the field, and each config.
+   */
+  private boolean toldEnabled;
+
+  private boolean toldFieldConnected;
+
+  /** Each configuration as last told: a change makes a new record, so identity tells. */
+  private List<Object> told;
+
+  /** Where a configuration's value is published as a WPILib tunable. */
+  @FunctionalInterface
+  interface PathFinder {
+    @Nullable String pathOf(LiveConfig<?> config, String field);
+  }
+
+  /**
+   * @param name what is being tuned: the robot's name, for the page and the report
+   * @param configs the live configurations, as published
+   * @param paths where each configuration value is published
    * @param enabled whether tuning starts switched on
    * @param logInputs logs the requests one loop applies, or in a replay replaces them with the
    *     logged ones (with AdvantageKit, through {@code Logger.processInputs})
    * @param onChange told, in the robot loop, each time the state changes
    */
-  public Tuning(
+  Tuning(
       String name,
-      T committed,
+      Supplier<List<LiveConfig<?>>> configs,
+      PathFinder paths,
       boolean enabled,
       Consumer<TuningInputs> logInputs,
       Consumer<View> onChange) {
     this.name = name;
-    this.tuner = new ConfigTuner<>(committed);
+    this.configs = configs;
+    this.paths = paths;
     this.enabled = enabled;
     this.logInputs = logInputs;
     this.onChange = onChange;
-    this.paths =
-        tuner.knobs().stream().map(ConfigTuner.Knob::path).collect(Collectors.toUnmodifiableSet());
-    this.view = snapshot();
+    this.toldEnabled = enabled;
+    this.told = configs.get().stream().map(config -> (Object) config.get()).toList();
   }
 
-  /** The configuration with every tuned value applied. Read it in the robot loop. */
-  public T config() {
-    return tuner.current();
-  }
-
-  /**
-   * A tunable value as it is now, in its unit. Read it in the robot loop.
-   *
-   * @throws IllegalArgumentException if no tunable value has this path
-   */
-  public double value(String path) {
-    return tuner.value(path);
-  }
-
-  /** The state of tuning. Safe to call from any thread. */
+  /** The state of tuning, as it is now. Safe to call from any thread. */
   public View view() {
-    return view;
-  }
-
-  /** Whether a path names a tunable value. Safe to call from any thread. */
-  public boolean isTunable(String path) {
-    return paths.contains(path);
+    return snapshot();
   }
 
   /**
-   * Asks the robot loop to change several values at once, all or none. Safe to call from any
-   * thread.
-   *
-   * @param values new values by path, each in its value's unit
-   * @return completes, in the robot loop, with what became of the request
+   * Why changes to tunables are refused right now, or null while they're allowed. Safe to call from
+   * any thread.
    */
-  public CompletableFuture<Outcome> requestChanges(Map<String, Double> values) {
-    return enqueue(TuningInputs.Kind.SET, new LinkedHashMap<>(values));
+  public @Nullable String whyLocked() {
+    if (fieldConnected) {
+      return "the field system is connected";
+    }
+    return enabled ? null : "tuning is off";
   }
 
-  /** Asks the robot loop to return every value to its committed value. */
+  /** Asks the robot loop to return every configuration value to its committed one. */
   public CompletableFuture<Outcome> requestReset() {
-    return enqueue(TuningInputs.Kind.RESET, Map.of());
+    return enqueue(TuningInputs.Kind.RESET);
   }
 
   /** Asks the robot loop to switch tuning on or off. */
   public CompletableFuture<Outcome> requestEnabled(boolean on) {
-    return enqueue(on ? TuningInputs.Kind.ENABLE : TuningInputs.Kind.DISABLE, Map.of());
+    return enqueue(on ? TuningInputs.Kind.ENABLE : TuningInputs.Kind.DISABLE);
   }
 
   /**
-   * Applies the requests queued since the last loop. Call it once per loop, before anything reads
-   * {@link #config()}.
+   * Applies the requests queued since the last loop. Call it once per loop, before anything reads a
+   * configuration.
    *
    * @param fieldConnected whether the field system is connected
    */
@@ -158,30 +162,25 @@ public final class Tuning<T extends Record> {
     List<CompletableFuture<Outcome>> outcomes = drainInto(inputs);
     logInputs.accept(inputs); // in replay, this replaces them with the logged ones
 
-    boolean before = enabled;
     enabled = inputs.enabled && !fieldConnected;
-    boolean changed = enabled != before || fieldConnected != this.fieldConnected;
-    if (fieldConnected && !this.fieldConnected && !tuner.changes().isEmpty()) {
+    if (fieldConnected && !this.fieldConnected) {
       // A match runs the committed configuration: what was tuned in the pit goes back, and the
       // report printed before (see Pitwall) keeps the numbers for committing.
-      tuner.reset();
-      changed = true;
+      configs.get().forEach(LiveConfig::revert);
     }
     this.fieldConnected = fieldConnected;
-    // Entries with the same request number are one request, applied all or none.
     List<Outcome> results = new ArrayList<>();
-    for (int start = 0, end; start < inputs.kinds.length; start = end) {
-      int request = inputs.requests[start];
-      end = start + 1;
-      while (end < inputs.kinds.length && inputs.requests[end] == request) {
-        end++;
-      }
-      results.add(apply(start, end));
-      changed = true;
+    for (String kind : inputs.kinds) {
+      results.add(apply(TuningInputs.Kind.valueOf(kind)));
     }
-    if (changed) {
-      view = snapshot();
-      onChange.accept(view);
+    List<Object> current = configs.get().stream().map(config -> (Object) config.get()).toList();
+    if (enabled != toldEnabled
+        || fieldConnected != toldFieldConnected
+        || !sameObjects(current, told)) {
+      toldEnabled = enabled;
+      toldFieldConnected = fieldConnected;
+      told = current;
+      onChange.accept(snapshot());
     }
     // Only now, so whoever is waiting sees the state their request left. In replay, no one is.
     for (int i = 0; i < outcomes.size() && i < results.size(); i++) {
@@ -190,36 +189,20 @@ public final class Tuning<T extends Record> {
   }
 
   /**
-   * The tuned values that differ from the committed configuration, as lines to print or log, each
+   * The tuned values that differ from the committed configurations, as lines to print or log, each
    * with the builder call that commits it. Empty when nothing differs.
    */
   public List<String> report() {
-    View now = view;
-    if (now.changes().isEmpty()) {
-      return List.of();
-    }
     List<String> lines = new ArrayList<>();
-    lines.add(
-        "Tuned values differ from the committed configuration of "
-            + now.name()
-            + ". To keep them, write these builder calls into it:");
-    for (ConfigTuner.Change change : now.changes()) {
-      lines.add(
-          "  "
-              + change.path()
-              + ": "
-              + change.committed()
-              + " -> "
-              + change.tuned()
-              + "   "
-              + change.builderCall());
+    for (LiveConfig<?> config : configs.get()) {
+      lines.addAll(config.report());
     }
     return lines;
   }
 
-  private CompletableFuture<Outcome> enqueue(TuningInputs.Kind kind, Map<String, Double> values) {
+  private CompletableFuture<Outcome> enqueue(TuningInputs.Kind kind) {
     CompletableFuture<Outcome> outcome = new CompletableFuture<>();
-    queue.add(new Request(kind, values, outcome));
+    queue.add(new Request(kind, outcome));
     return outcome;
   }
 
@@ -233,35 +216,12 @@ public final class Tuning<T extends Record> {
     for (Request request = queue.poll(); request != null; request = queue.poll()) {
       requests.add(request);
     }
-    List<String> kinds = new ArrayList<>();
-    List<String> paths = new ArrayList<>();
-    List<Double> values = new ArrayList<>();
-    List<Integer> numbers = new ArrayList<>();
-    for (int number = 0; number < requests.size(); number++) {
-      Request request = requests.get(number);
-      if (request.values().isEmpty()) {
-        kinds.add(request.kind().name());
-        paths.add("");
-        values.add(0.0);
-        numbers.add(number);
-      }
-      for (Map.Entry<String, Double> entry : request.values().entrySet()) {
-        kinds.add(request.kind().name());
-        paths.add(entry.getKey());
-        values.add(entry.getValue());
-        numbers.add(number);
-      }
-    }
-    inputs.kinds = kinds.toArray(String[]::new);
-    inputs.paths = paths.toArray(String[]::new);
-    inputs.values = values.stream().mapToDouble(Double::doubleValue).toArray();
-    inputs.requests = numbers.stream().mapToInt(Integer::intValue).toArray();
+    inputs.kinds = requests.stream().map(request -> request.kind().name()).toArray(String[]::new);
     return requests.stream().map(Request::outcome).toList();
   }
 
-  /** Applies one request: the entries from {@code start} to just before {@code end}. */
-  private Outcome apply(int start, int end) {
-    return switch (TuningInputs.Kind.valueOf(inputs.kinds[start])) {
+  private Outcome apply(TuningInputs.Kind kind) {
+    return switch (kind) {
       case ENABLE -> {
         if (fieldConnected) {
           yield locked("the field system is connected");
@@ -273,36 +233,29 @@ public final class Tuning<T extends Record> {
         enabled = false;
         yield Outcome.applied();
       }
-      case RESET -> change(tuner::reset);
-      case SET -> {
-        Map<String, Double> values = new LinkedHashMap<>();
-        for (int i = start; i < end; i++) {
-          if (!inputs.paths[i].isEmpty()) {
-            values.put(inputs.paths[i], inputs.values[i]);
-          }
+      case RESET -> {
+        if (fieldConnected) {
+          yield locked("the field system is connected");
         }
-        yield change(() -> tuner.set(values));
+        if (!enabled) {
+          yield locked("tuning is off");
+        }
+        configs.get().forEach(LiveConfig::revert);
+        yield Outcome.applied();
       }
     };
   }
 
-  /** Makes a change to the configuration, if tuning allows it, and says what became of it. */
-  private Outcome change(Runnable change) {
-    if (fieldConnected) {
-      return locked("the field system is connected");
+  private static boolean sameObjects(List<Object> a, List<Object> b) {
+    if (a.size() != b.size()) {
+      return false;
     }
-    if (!enabled) {
-      return locked("tuning is off");
+    for (int i = 0; i < a.size(); i++) {
+      if (a.get(i) != b.get(i)) {
+        return false;
+      }
     }
-    try {
-      change.run();
-      return Outcome.applied();
-    } catch (RuntimeException refused) {
-      // Whatever a configuration's checks throw refuses the change: a request from the page must
-      // never stop the robot loop.
-      String why = refused.getMessage();
-      return new Outcome(Outcome.Result.REFUSED, why != null ? why : refused.toString());
-    }
+    return true;
   }
 
   private static Outcome locked(String why) {
@@ -310,16 +263,24 @@ public final class Tuning<T extends Record> {
   }
 
   private View snapshot() {
-    List<Value> values =
-        tuner.knobs().stream()
-            .map(
-                knob ->
-                    new Value(
-                        knob.path(),
-                        knob.unit(),
-                        tuner.committedValue(knob.path()),
-                        tuner.value(knob.path())))
-            .toList();
-    return new View(name, enabled, fieldConnected, values, tuner.changes());
+    List<ConfigView> views = new ArrayList<>();
+    for (LiveConfig<?> config : configs.get()) {
+      List<Value> values = new ArrayList<>();
+      for (LiveConfig.Knob knob : config.knobs()) {
+        String path = paths.pathOf(config, knob.path());
+        if (path != null) {
+          values.add(
+              new Value(
+                  path,
+                  knob.path(),
+                  knob.unit(),
+                  knob.limits(),
+                  config.committedValue(knob.path()),
+                  config.value(knob.path())));
+        }
+      }
+      views.add(new ConfigView(config.name(), List.copyOf(values), config.changes()));
+    }
+    return new View(name, enabled, fieldConnected, List.copyOf(views));
   }
 }

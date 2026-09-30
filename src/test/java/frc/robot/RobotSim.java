@@ -58,7 +58,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   private @Nullable MockTelemetryBackend telemetry;
   private @Nullable Scheduler scheduler;
   private @Nullable GamepadSim driver;
-  private @Nullable Pitwall<RobotConfig> pitwall;
+  private @Nullable Pitwall pitwall;
   private @Nullable RobotContainer container;
   private @Nullable LoopHealth loopHealth;
 
@@ -107,7 +107,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   public RobotContainer build(Constants.Mode mode, RobotConfig robot, SensorErrors errors) {
     closeRobot();
     LoopHealth health = new LoopHealth();
-    Pitwall<RobotConfig> page = Pitwall.start(robot.name(), robot, 0);
+    Pitwall page = Pitwall.start(robot.name(), 0);
     pitwall = page;
     loopHealth = health;
     container = Robot.assemble(mode, scheduler(), robot, page, errors, health);
@@ -121,7 +121,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   }
 
   /** The robot's Pitwall: its page's status, actions, and tuning. */
-  public Pitwall<RobotConfig> pitwall() {
+  public Pitwall pitwall() {
     robot();
     return Objects.requireNonNull(pitwall);
   }
@@ -198,7 +198,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     if (built != null) {
       built.close();
     }
-    Pitwall<RobotConfig> page = pitwall;
+    Pitwall page = pitwall;
     if (page != null) {
       page.close();
     }

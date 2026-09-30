@@ -18,7 +18,7 @@ final class Fixtures {
   /** A fact about the hardware: not tunable. */
   record Motor(double freeSpeedMetersPerSecond) {}
 
-  record DriveLimits(@Tunable Current current, @Tunable LinearVelocity maxSpeed) {
+  record DriveLimits(Current current, LinearVelocity maxSpeed) {
     DriveLimits {
       if (!(current.baseUnitMagnitude() > 0)) {
         throw new IllegalArgumentException("current must be positive");
@@ -26,7 +26,7 @@ final class Fixtures {
     }
   }
 
-  record Gains(@Tunable double kP, @Tunable Time lookahead) {
+  record Gains(double kP, Time lookahead) {
     Gains {
       if (!(kP >= 0)) {
         throw new IllegalArgumentException("kP must be zero or more, got " + kP);
@@ -42,7 +42,7 @@ final class Fixtures {
     }
   }
 
-  record Range(@Tunable double min, @Tunable double max) {
+  record Range(double min, double max) {
     Range {
       if (!(min < max)) {
         throw new IllegalArgumentException("min must be below max, got " + min + " and " + max);

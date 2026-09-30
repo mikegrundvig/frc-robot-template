@@ -2,13 +2,11 @@ package com.michaelgrundvig.frc.pitwall;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -48,9 +46,8 @@ import org.wpilib.tunable.util.PathUtil;
  *
  * <p>A {@link LiveConfig}'s values are checked whole: before a change to one applies, the
  * configuration says whether it would take it (its limits, then its records' own checks), and a
- * page's changes to several of its values apply together, as one rebuild. Pitwall's own
- * configuration tunables pass straight through as well, because their writes already go through
- * {@link Tuning}.
+ * page's changes to several of its values apply together, as one rebuild. {@link Tuning} puts them
+ * back as committed when the field connects.
  *
  * <p>WPILib calls {@link #update} once per loop, after {@code robotPeriodic()}; dashboard writes
  * and the page's requests are applied there, and so are the logged ones in a replay.
@@ -90,7 +87,6 @@ public final class TunableTee implements TunableBackend {
   private final Consumer<TunableInputs> logInputs;
   private final boolean replaying;
   private final Map<String, Entry> entries = new LinkedHashMap<>();
-  private final Set<TunableBase> own = Collections.newSetFromMap(new IdentityHashMap<>());
   private final ConcurrentLinkedQueue<PageRequest> queue = new ConcurrentLinkedQueue<>();
   private final TunableInputs inputs = new TunableInputs();
   private final List<String> appliedPaths = new ArrayList<>();
@@ -125,16 +121,9 @@ public final class TunableTee implements TunableBackend {
   }
 
   /**
-   * Passes a tunable straight through, unlocked and unlogged here, because its writes are already
-   * checked and logged elsewhere (Pitwall's own configuration tunables). Call it before publishing.
+   * Every tunable, as of the last update, except the values of live configurations (see {@link
+   * #configs()}). Safe to call from any thread.
    */
-  public void passThrough(TunableBase tunable) {
-    synchronized (entries) {
-      own.add(tunable);
-    }
-  }
-
-  /** Every tunable, as of the last update, except Pitwall's own. Safe to call from any thread. */
   public List<Listed> view() {
     return view;
   }
@@ -150,7 +139,7 @@ public final class TunableTee implements TunableBackend {
     synchronized (entries) {
       for (Map.Entry<String, Entry> item : entries.entrySet()) {
         Entry entry = item.getValue();
-        if (entry.proxy() == null || own.contains(entry.real()) || entry.config() != null) {
+        if (entry.proxy() == null || entry.config() != null) {
           continue;
         }
         Object now = valueOf(entry.real());
@@ -171,6 +160,20 @@ public final class TunableTee implements TunableBackend {
     synchronized (refusals) {
       return List.copyOf(refusals);
     }
+  }
+
+  /**
+   * Where a configuration's value is published, or null if it isn't. Safe to call from any thread.
+   */
+  public @Nullable String pathOf(LiveConfig<?> config, String field) {
+    synchronized (entries) {
+      for (Map.Entry<String, Entry> item : entries.entrySet()) {
+        if (item.getValue().config() == config && item.getValue().field().equals(field)) {
+          return item.getKey();
+        }
+      }
+    }
+    return null;
   }
 
   /** The live configurations published through here. Safe to call from any thread. */
@@ -211,7 +214,7 @@ public final class TunableTee implements TunableBackend {
     String key = PathUtil.normalizeName(path);
     TunableBase proxy;
     synchronized (entries) {
-      proxy = own.contains(tunable) ? null : proxy(key, tunable);
+      proxy = proxy(key, tunable);
     }
     boolean published = inner.publish(key, proxy != null ? proxy : tunable);
     if (published) {
@@ -684,7 +687,7 @@ public final class TunableTee implements TunableBackend {
     synchronized (entries) {
       for (Map.Entry<String, Entry> item : entries.entrySet()) {
         Entry entry = item.getValue();
-        if (own.contains(entry.real())) {
+        if (entry.config() != null) {
           continue;
         }
         listed.add(

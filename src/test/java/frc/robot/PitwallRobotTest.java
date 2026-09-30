@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.Status;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
+import frc.robot.lib.config.SwerveConfig;
+import frc.robot.subsystems.drive.Drive;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
@@ -35,11 +38,15 @@ import org.wpilib.util.AlertDataJNI;
 /** Pitwall in the simulated robot program: its standard status, and actions that run commands. */
 @ExtendWith(RobotSim.class)
 class PitwallRobotTest {
-  private Pitwall<RobotConfig> pitwall;
+  private Pitwall pitwall;
+  private LiveConfig<SwerveConfig> drivetrain;
 
   @BeforeEach
   void setUp() {
-    pitwall = Pitwall.start(Robots.SIM.name(), Robots.SIM, 0);
+    pitwall = Pitwall.start(Robots.SIM.name(), 0);
+    // The drivetrain's tuning, published as the robot program publishes it.
+    drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+    TunableRegistry.publish("Drive/config", drivetrain);
   }
 
   @AfterEach
@@ -62,7 +69,7 @@ class PitwallRobotTest {
   }
 
   @Test
-  void everyWpilibTunableGoesThroughPitwallAndTheConfigurationIsOnNetworkTables() {
+  void everyWpilibTunableGoesThroughPitwallAndTheConfigurationIsOnNetworkTablesWithItsLimits() {
     TunableDouble gain = TunableDouble.create(1.0);
     TunableRegistry.publish("Shooter/gain", gain);
     TunableRegistry.update();
@@ -72,9 +79,10 @@ class PitwallRobotTest {
         .containsExactly("/Shooter/gain");
     try (var steerKp =
         NetworkTableInstance.getDefault()
-            .getDoubleTopic("/Tunables/Config/drivetrain/gains/steerKp")
+            .getDoubleTopic("/Tunables/Drive/config/gains/steerKp")
             .subscribe(-1)) {
       assertThat(steerKp.get()).as("dashboards see the configuration").isEqualTo(16.0);
+      assertThat(steerKp.getTopic().getProperties()).as("and its limits").contains("\"max\":100");
     }
   }
 
@@ -134,7 +142,7 @@ class PitwallRobotTest {
     pitwall.periodic();
 
     var page = patch("/api/wpilib-tunables", "{\"Shooter/gain\": 2.0}");
-    var config = patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
+    var config = patch("/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
     try (var dashboard =
         NetworkTableInstance.getDefault().getDoubleTopic("/Tunables/Shooter/gain").publish()) {
       dashboard.set(3.0);
@@ -144,7 +152,7 @@ class PitwallRobotTest {
       assertThat(page.body()).contains("the field system is connected");
       assertThat(config.statusCode()).isEqualTo(409);
       assertThat(gain.get()).as("neither the page nor a dashboard").isEqualTo(1.0);
-      assertThat(pitwall.config().drivetrain().gains().steerKp()).isEqualTo(16.0);
+      assertThat(drivetrain.get().gains().steerKp()).isEqualTo(16.0);
 
       // The same dashboard write, off the field with tuning switched back on (the field switched it
       // off): it gets through, so the lock is what held it.
@@ -178,7 +186,7 @@ class PitwallRobotTest {
   void disablingPrintsWhatTuningChanged() throws Exception {
     RobotSim.setEnabled(true);
     pitwall.periodic();
-    patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
+    patch("/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
     PrintStream console = System.out;
     ByteArrayOutputStream printed = new ByteArrayOutputStream();
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
@@ -190,7 +198,7 @@ class PitwallRobotTest {
     }
 
     assertThat(printed.toString(StandardCharsets.UTF_8))
-        .contains("drivetrain.gains.steerKp: 16.0 -> 18.0")
+        .contains("gains.steerKp: 16.0 -> 18.0")
         .contains(".steerKp(18.0)");
   }
 
@@ -203,7 +211,7 @@ class PitwallRobotTest {
   void theFieldConnectingRevertsTunedValuesAndNamesChangedSwitches() throws Exception {
     TunableBoolean camera = TunableBoolean.create(true);
     TunableRegistry.publish("Vision/front/enabled", camera);
-    patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
+    patch("/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
     patch("/api/wpilib-tunables", "{\"Vision/front/enabled\": false}");
     PrintStream console = System.out;
     ByteArrayOutputStream printed = new ByteArrayOutputStream();
@@ -216,7 +224,7 @@ class PitwallRobotTest {
       System.setOut(console);
     }
 
-    assertThat(pitwall.config().drivetrain().gains().steerKp()).as("reverted").isEqualTo(16.0);
+    assertThat(drivetrain.get().gains().steerKp()).as("reverted").isEqualTo(16.0);
     assertThat(printed.toString(StandardCharsets.UTF_8))
         .contains("tuned values return to the committed configuration")
         .contains(".steerKp(18.0)");

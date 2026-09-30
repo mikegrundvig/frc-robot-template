@@ -151,6 +151,42 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
     return this;
   }
 
+  /**
+   * Makes a measure tunable, within limits given as measures, so they mean the same whatever unit
+   * the committed value was written in: {@code measure("limits.driveStatorCurrent", Amps.of(10),
+   * Amps.of(120))}. Choose them all before publishing.
+   *
+   * @return this, to choose the next
+   * @throws IllegalArgumentException as {@link #number} does, or if the value isn't a measure of
+   *     the limits' kind
+   */
+  public LiveConfig<T> measure(String path, Measure<?> min, Measure<?> max) {
+    number(path, Limits.NONE); // finds and checks it
+    Slot slot = slot(path);
+    Unit unit = slot.unit();
+    if (unit == null
+        || min.unit().getBaseUnit() != unit.getBaseUnit()
+        || max.unit().getBaseUnit() != unit.getBaseUnit()) {
+      slots.remove(path);
+      throw new IllegalArgumentException(
+          name + ": " + path + " isn't a measure of the same kind as its limits");
+    }
+    Limits limits =
+        Limits.between(
+            unit.fromBaseUnits(min.baseUnitMagnitude()),
+            unit.fromBaseUnits(max.baseUnitMagnitude()));
+    Slot limited =
+        new Slot(new Knob(path, slot.knob().unit(), limits), slot.route(), slot.component(), unit);
+    String outside = limits.whyNot(number(limited, committed));
+    if (outside != null) {
+      slots.remove(path);
+      throw new IllegalArgumentException(
+          name + ": the committed " + path + " is outside its tuning limits: " + outside);
+    }
+    slots.put(path, limited);
+    return this;
+  }
+
   /** What it configures, as the report names it. */
   public String name() {
     return name;

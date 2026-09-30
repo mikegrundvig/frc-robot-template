@@ -1,5 +1,7 @@
 package frc.robot.subsystems.vision;
 
+import com.michaelgrundvig.frc.pitwall.Limits;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import frc.robot.lib.calibration.CameraMountCalibration;
 import frc.robot.lib.calibration.HeadingAverage;
 import frc.robot.lib.config.CameraConfig;
@@ -89,7 +91,8 @@ public final class Vision implements AutoCloseable {
    * start while the robot launches: 6328 held theirs 2 s. Off by default: the estimator gates every
    * measurement against the placed start anyway.
    */
-  private final TunableDouble autoStartHoldSeconds = TunableDouble.create(0.0);
+  private final TunableDouble autoStartHoldSeconds =
+      TunableDouble.createConfig(0.0, Limits.between(0, MAX_HOLD_SECONDS).config());
 
   /** Longer than any autonomous period has been. */
   private static final double MAX_HOLD_SECONDS = 30;
@@ -97,6 +100,19 @@ public final class Vision implements AutoCloseable {
   private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
   private VisionConfig current;
+
+  /**
+   * Vision's configuration as the pit tunes it: the main thresholds and uncertainties, each within
+   * the range that's safe to dial in. Publish it, and give vision its {@link LiveConfig#get}.
+   */
+  public static LiveConfig<VisionConfig> tuning(VisionConfig committed) {
+    return LiveConfig.of("vision", committed)
+        .number("maxAmbiguity", Limits.between(0, 1))
+        .number("maxHeightErrorMeters", Limits.between(0, 1))
+        .number("linearStdDevBaseline", Limits.between(0.001, 1)) // meters
+        .number("angularStdDevBaseline", Limits.between(0.001, 1)) // radians
+        .number("distanceExponent", Limits.between(0, 4));
+  }
 
   /**
    * @param cameras each camera's configuration, in the same order as its IO

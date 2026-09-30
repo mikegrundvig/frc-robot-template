@@ -1,9 +1,13 @@
 package frc.robot.subsystems.drive;
 
+import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RadiansPerSecond;
+import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.pitwall.Limits;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.localization.DrivetrainReadings;
@@ -82,6 +86,26 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /** Loops in a row that the wheels reported connected but sent no readings. */
   private int loopsWithoutReadings;
+
+  /**
+   * The drivetrain's configuration as the pit tunes it: its gains and limits, each within the range
+   * that's safe to dial in on a running robot (a range narrower than what's valid). Publish it, and
+   * give the drivetrain its {@link LiveConfig#get}.
+   */
+  public static LiveConfig<SwerveConfig> tuning(SwerveConfig committed) {
+    return LiveConfig.of("drivetrain", committed)
+        .number("gains.driveKs", Limits.between(0, 1)) // volts
+        .number("gains.driveKv", Limits.between(0, 5)) // volts per meter per second
+        .number("gains.driveKp", Limits.between(0, 20))
+        .number("gains.steerKp", Limits.between(0, 100))
+        .number("gains.steerKd", Limits.between(0, 5))
+        .measure("gains.skewLookahead", Seconds.of(0), Seconds.of(0.1))
+        .measure("limits.driveStatorCurrent", Amps.of(10), Amps.of(120))
+        .measure("limits.driveSupplyCurrent", Amps.of(10), Amps.of(80))
+        .measure("limits.steerStatorCurrent", Amps.of(5), Amps.of(80))
+        .measure("limits.maxLinearSpeed", MetersPerSecond.of(0.5), MetersPerSecond.of(6))
+        .measure("limits.maxAngularSpeed", RotationsPerSecond.of(0.1), RotationsPerSecond.of(3));
+  }
 
   /**
    * @param name alert group name: "Drive" on the robot, another name for a second instance

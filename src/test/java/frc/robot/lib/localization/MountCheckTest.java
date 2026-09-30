@@ -1,0 +1,138 @@
+package frc.robot.lib.localization;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
+
+import java.util.Random;
+import org.junit.jupiter.api.Test;
+import org.wpilib.math.geometry.Pose3d;
+import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Translation3d;
+
+/**
+ * Judging a camera's mount by where its tags land: the robot turns as it drives, so a mount that
+ * moved puts tags off a different way on the field each time, and the same way on the robot.
+ */
+class MountCheckTest {
+  private static final int SIGHTINGS = 500;
+  private static final double TOLERANCE = 0.05;
+  private static final Pose3d TAG = new Pose3d(4.0, 3.0, 1.1, Rotation3d.ZERO);
+
+  /** The robot at its k-th sighting: driving about, turned a different way each time. */
+  private static Pose3d robot(int k) {
+    return new Pose3d(1 + 0.01 * (k % 100), 2 + 0.02 * (k % 50), 0, new Rotation3d(0, 0, 0.37 * k));
+  }
+
+  /** A sighting from a camera whose tags land this far off, in the robot's frame. */
+  private static void see(MountCheck check, int k, Translation3d offRobot) {
+    Pose3d robot = robot(k);
+    Pose3d seen =
+        new Pose3d(
+            TAG.getTranslation().plus(offRobot.rotateBy(robot.getRotation())), TAG.getRotation());
+    check.add(robot, seen, TAG);
+  }
+
+  @Test
+  void aCameraWhereItsConfigurationSaysIsTrustedFully() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, Translation3d.ZERO);
+    }
+
+    assertThat(check.judged()).isTrue();
+    assertThat(check.offsetMeters()).isCloseTo(0, within(1e-12));
+    assertThat(check.outOfCalibration(TOLERANCE)).isFalse();
+    assertThat(check.doubtMeters(TOLERANCE)).isZero();
+  }
+
+  /** Each tag 10 cm off in some direction: noise, which averages out. */
+  @Test
+  void noiseAveragesOut() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    Random random = new Random(7);
+    for (int k = 0; k < 2 * SIGHTINGS; k++) {
+      see(
+          check,
+          k,
+          new Translation3d(
+              0.1 * random.nextGaussian(),
+              0.1 * random.nextGaussian(),
+              0.1 * random.nextGaussian()));
+    }
+
+    assertThat(check.offsetMeters()).isLessThan(0.02);
+    assertThat(check.outOfCalibration(TOLERANCE)).isFalse();
+    assertThat(check.doubtMeters(TOLERANCE)).isZero();
+  }
+
+  /**
+   * A camera 10 cm left of where it's configured puts every tag 10 cm right, on the robot, however
+   * the robot turns: out of calibration, and its measurements count for less by the part beyond the
+   * tolerance, taken off in squares.
+   */
+  @Test
+  void aCameraKnockedAsideIsOutOfCalibrationAndDoubted() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, new Translation3d(0, -0.1, 0));
+    }
+
+    assertThat(check.offsetMeters()).isCloseTo(0.1, within(1e-9));
+    assertThat(check.outOfCalibration(TOLERANCE)).isTrue();
+    assertThat(check.doubtMeters(TOLERANCE))
+        .isCloseTo(Math.sqrt(0.1 * 0.1 - TOLERANCE * TOLERANCE), within(1e-9));
+  }
+
+  /**
+   * A camera 10 cm lower than configured puts its tags 10 cm high: out of calibration, but on level
+   * ground it still places the robot right on the floor, so it isn't doubted.
+   */
+  @Test
+  void aCameraKnockedStraightDownIsOutOfCalibrationButNotDoubted() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, new Translation3d(0, 0, 0.1));
+    }
+
+    assertThat(check.offsetMeters()).isCloseTo(0.1, within(1e-9));
+    assertThat(check.outOfCalibration(TOLERANCE)).isTrue();
+    assertThat(check.doubtMeters(TOLERANCE)).isZero();
+  }
+
+  @Test
+  void aCameraIsJudgedOnlyOnceItHasSeenEnoughTags() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    for (int k = 0; k < SIGHTINGS - 1; k++) {
+      see(check, k, new Translation3d(0, -0.2, 0));
+    }
+
+    assertThat(check.judged()).isFalse();
+    assertThat(check.offsetMeters()).isNaN();
+    assertThat(check.outOfCalibration(TOLERANCE)).isFalse();
+    assertThat(check.doubtMeters(TOLERANCE)).isZero();
+    see(check, SIGHTINGS, new Translation3d(0, -0.2, 0));
+    assertThat(check.offsetMeters()).as("the average of all it saw").isCloseTo(0.2, within(1e-9));
+    assertThat(check.outOfCalibration(TOLERANCE)).isTrue();
+  }
+
+  /** A camera put back where it belongs is trusted again once its latest tags land right. */
+  @Test
+  void theOldestSightingsFade() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, new Translation3d(0, -0.1, 0));
+    }
+    for (int k = 0; k < 3 * SIGHTINGS; k++) {
+      see(check, k, Translation3d.ZERO);
+    }
+
+    assertThat(check.offsetMeters()).isLessThan(0.1 * Math.exp(-2.9));
+    assertThat(check.outOfCalibration(TOLERANCE)).isFalse();
+  }
+
+  @Test
+  void itJudgesByAtLeastOneSighting() {
+    assertThatThrownBy(() -> new MountCheck(0)).isInstanceOf(IllegalArgumentException.class);
+  }
+}

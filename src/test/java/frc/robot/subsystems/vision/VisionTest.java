@@ -1,12 +1,14 @@
 package frc.robot.subsystems.vision;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Milliseconds;
 
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.CameraConfigBuilder;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Symmetry;
@@ -381,5 +383,52 @@ class VisionTest {
     loop();
 
     assertThat(vision.meanTagResidualMeters("front")).isBetween(0.09, 0.11); // 4 in
+  }
+
+  /** Images from the front camera, one a loop, with odometry moving on to each one's time. */
+  private void imagesFrom(CameraConfig reallyMounted, int images) {
+    for (int k = 0; k < images; k++) {
+      long now = estimator.estimate().timestampNanos() + 20_000_000L;
+      estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
+      io.see(now, reallyMounted);
+      loop();
+    }
+  }
+
+  /**
+   * A camera knocked 4 in down since it was calibrated: once it has seen enough tags, every one of
+   * them 4 in high, it's out of calibration, and the alert says where to recalibrate it. Knocked
+   * straight down, it still places the robot right on the floor, so it counts as much as before.
+   */
+  @Test
+  void aCameraWhoseTagsLandOffIsOutOfCalibrationOnceJudged() {
+    CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+
+    imagesFrom(reallyLower, 200); // two tags an image: 400 seen, not enough to judge
+
+    assertThat(vision.mountOffsetMeters("front")).isNaN();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isFalse();
+    imagesFrom(reallyLower, 60);
+    assertThat(vision.mountOffsetMeters("front")).isCloseTo(0.1016, within(0.002));
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isTrue();
+    assertThat(vision.camera(0).outOfCalibrationAlertText())
+        .isEqualTo(
+            "Camera front is out of calibration: its tags land 10 cm off. Recalibrate its mount"
+                + " (Calibrate the front camera's mount)");
+    assertThat(vision.mountDoubtMeters("front")).as("still places the robot right").isZero();
+    assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+  }
+
+  /** The tolerance is the pit's to tune, and applies from the next loop. */
+  @Test
+  void theMountToleranceIsReadEveryLoop() {
+    CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+    imagesFrom(reallyLower, 260);
+
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.15).build();
+    loop();
+
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isFalse();
   }
 }

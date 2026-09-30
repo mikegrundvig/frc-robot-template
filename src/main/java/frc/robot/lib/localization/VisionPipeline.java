@@ -29,9 +29,11 @@ import org.wpilib.math.geometry.Translation2d;
  * </ol>
  *
  * <p>Uncertainty grows with the tags' distance (squared, by default), shrinks with their count, and
- * grows with the robot's speed and turning (blur). A result may correct heading only from a
- * multi-tag solution of several tags, with the robot barely turning and the solution fitting well;
- * otherwise the gyro keeps heading to itself. Everything thrown out says why, for the log.
+ * grows with the robot's speed and turning (blur). A camera whose mount is in doubt (its tags land
+ * off the same way every time: {@link MountCheck}) adds that doubt, as independent errors add. A
+ * result may correct heading only from a multi-tag solution of several tags, with the robot barely
+ * turning and the solution fitting well; otherwise the gyro keeps heading to itself. Everything
+ * thrown out says why, for the log.
  *
  * <p>Pure logic: the field's layout, the camera's mount, and the robot at the capture time all come
  * in as arguments.
@@ -43,9 +45,19 @@ public final class VisionPipeline {
     this.field = field;
   }
 
-  /** What to make of one image. */
+  /**
+   * What to make of one image.
+   *
+   * @param mountDoubtMeters how far the camera's measurements may be off from where its mount moved
+   *     since it was calibrated ({@link MountCheck#doubtMeters}): zero for a camera that sits where
+   *     its configuration says
+   */
   public VisionResult process(
-      TagDetections seen, CameraConfig camera, CaptureContext robot, VisionConfig config) {
+      TagDetections seen,
+      CameraConfig camera,
+      CaptureContext robot,
+      VisionConfig config,
+      double mountDoubtMeters) {
     List<TagDetections.Tag> known = new ArrayList<>();
     double distance = 0;
     for (TagDetections.Tag tag : seen.tags()) {
@@ -73,7 +85,8 @@ public final class VisionPipeline {
     }
     Rotation2d heading = robot.heading();
     if (heading != null && robot.headingStdDevRadians() <= config.maxHeadingStdDevToConstrain()) {
-      return headingConstrained(seen, known, camera, robot, heading, distance, config);
+      return headingConstrained(
+          seen, known, camera, robot, heading, distance, config, mountDoubtMeters);
     }
     TagDetections.MultiTag multiTag = seen.multiTag();
     if (multiTag != null) {
@@ -84,7 +97,15 @@ public final class VisionPipeline {
                   multiTag.fieldToCamera().getRotation()),
               camera.robotToCamera());
       return fullPose(
-          seen, pose, known, camera, robot, distance, VisionMeasurement.Solver.MULTI_TAG, config);
+          seen,
+          pose,
+          known,
+          camera,
+          robot,
+          distance,
+          VisionMeasurement.Solver.MULTI_TAG,
+          config,
+          mountDoubtMeters);
     }
     TagDetections.Tag clearest = known.get(0);
     for (TagDetections.Tag tag : known) {
@@ -112,7 +133,8 @@ public final class VisionPipeline {
         robot,
         clearest.bestCameraToTag().getTranslation().getNorm(),
         VisionMeasurement.Solver.SINGLE_TAG,
-        config);
+        config,
+        mountDoubtMeters);
   }
 
   private VisionResult headingConstrained(
@@ -122,7 +144,8 @@ public final class VisionPipeline {
       CaptureContext robot,
       Rotation2d heading,
       double distance,
-      VisionConfig config) {
+      VisionConfig config,
+      double mountDoubtMeters) {
     Transform3d robotToCamera = camera.robotToCamera();
     Rotation3d attitude =
         new Rotation3d(robot.rollRadians(), robot.pitchRadians(), heading.getRadians());
@@ -153,9 +176,11 @@ public final class VisionPipeline {
       return rejected(seen, "the solve isn't a number", distance, worstHeight);
     }
     double spread =
-        config.linearStdDevBaseline()
-            * config.headingConstrainedFactor()
-            * scale(known.size(), distance, camera, robot, config);
+        widened(
+            config.linearStdDevBaseline()
+                * config.headingConstrainedFactor()
+                * scale(known.size(), distance, camera, robot, config),
+            mountDoubtMeters);
 
     // Heading, too, only under strict conditions; otherwise the gyro keeps it to itself.
     Rotation2d measuredHeading = heading;
@@ -175,7 +200,10 @@ public final class VisionPipeline {
       if (Double.isFinite(solved.getRadians())) {
         measuredHeading = solved;
         headingStdDev =
-            config.angularStdDevBaseline() * scale(known.size(), distance, camera, robot, config);
+            widened(
+                config.angularStdDevBaseline()
+                    * scale(known.size(), distance, camera, robot, config),
+                mountDoubtMeters / distance);
       }
     }
     VisionMeasurement measurement =
@@ -232,7 +260,8 @@ public final class VisionPipeline {
       CaptureContext robot,
       double distance,
       VisionMeasurement.Solver solver,
-      VisionConfig config) {
+      VisionConfig config,
+      double mountDoubtMeters) {
     double height = pose.getZ();
     if (!Double.isFinite(pose.getX())
         || !Double.isFinite(pose.getY())
@@ -244,14 +273,15 @@ public final class VisionPipeline {
           seen, format("the solve puts the robot %.2f m off the floor", height), distance, height);
     }
     double scale = scale(used.size(), distance, camera, robot, config);
+    double linear = widened(config.linearStdDevBaseline() * scale, mountDoubtMeters);
     VisionMeasurement measurement =
         new VisionMeasurement(
             seen.timestampNanos(),
             pose.toPose2d(),
             PoseCovariance.fromStdDevs(
-                config.linearStdDevBaseline() * scale,
-                config.linearStdDevBaseline() * scale,
-                config.angularStdDevBaseline() * scale),
+                linear,
+                linear,
+                widened(config.angularStdDevBaseline() * scale, mountDoubtMeters / distance)),
             camera.name(),
             ids(used),
             solver);
@@ -279,6 +309,19 @@ public final class VisionPipeline {
             + config.speedStdDevFactor() * robot.speedMetersPerSecond()
             + config.yawRateStdDevFactor() * robot.recentYawRateRadiansPerSecond();
     return Math.pow(distance, config.distanceExponent()) / tags * camera.noiseScale() * motion;
+  }
+
+  /**
+   * A spread with the camera's mount doubt added, as independent errors add: in squares. For
+   * heading, a doubt in meters is a turn of the doubt over the tags' distance: a camera turned by
+   * an angle puts tags that far off at that distance.
+   *
+   * <p>Only widened, never shut off: a heading error in the estimate puts every camera's tags off
+   * as if each were turned on its mount, and from one camera the two look the same. A camera in
+   * doubt that couldn't correct heading at all would keep the estimate from ever turning back.
+   */
+  private static double widened(double spread, double doubt) {
+    return doubt > 0 ? Math.hypot(spread, doubt) : spread;
   }
 
   private static List<Integer> ids(List<TagDetections.Tag> tags) {

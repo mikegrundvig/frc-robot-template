@@ -34,6 +34,11 @@ import frc.robot.lib.config.ConfigRecord;
  *     least this many tags
  * @param maxYawRateForHeading and only while the robot turns slower than this
  * @param maxReprojectionErrorForHeadingPixels and only when the solution fits its tags this well
+ * @param mountToleranceMeters how far, on average, a camera's tags may land from where they are
+ *     before the camera counts as out of calibration: an alert says to recalibrate its mount, and
+ *     the level part beyond this makes its measurements that much less certain (see {@link
+ *     MountCheck}). Above what a calibrated camera shows while the robot drives, mostly the
+ *     estimate's own error.
  */
 @ConfigRecord
 public record VisionConfig(
@@ -50,7 +55,8 @@ public record VisionConfig(
     double maxHeadingStdDevToConstrain,
     int minTagsForHeading,
     double maxYawRateForHeading,
-    double maxReprojectionErrorForHeadingPixels) {
+    double maxReprojectionErrorForHeadingPixels,
+    double mountToleranceMeters) {
   /** Starting points: 2611's 2026 values where it had them, top teams' where it didn't. */
   public static final VisionConfig DEFAULTS =
       builder()
@@ -68,6 +74,7 @@ public record VisionConfig(
           .minTagsForHeading(2)
           .maxYawRateForHeading(0.5)
           .maxReprojectionErrorForHeadingPixels(1.0)
+          .mountToleranceMeters(0.05)
           .build();
 
   public VisionConfig {
@@ -89,6 +96,7 @@ public record VisionConfig(
             "maxReprojectionErrorForHeadingPixels",
             maxReprojectionErrorForHeadingPixels,
             positive())
+        .field("mountToleranceMeters", mountToleranceMeters, positive())
         .orThrow();
   }
 

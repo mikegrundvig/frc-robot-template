@@ -112,7 +112,7 @@ class VisionPipelineTest {
   }
 
   private VisionResult process(TagDetections seen, CaptureContext robot) {
-    return pipeline.process(seen, camera, robot, VisionConfig.DEFAULTS);
+    return pipeline.process(seen, camera, robot, VisionConfig.DEFAULTS, 0);
   }
 
   @Test
@@ -227,7 +227,8 @@ class VisionPipelineTest {
             seeing(farAway, camera, false, 25, 26),
             camera,
             steady(farAway.getRotation()),
-            VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(3.0).build());
+            VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(3.0).build(),
+            0);
     VisionResult unknownTag =
         process(
             new TagDetections(
@@ -284,8 +285,44 @@ class VisionPipelineTest {
     assertThat(moving).as("4 m/s doubles it").isCloseTo(2 * oneTag, within(1e-9));
   }
 
+  /**
+   * A camera whose mount is in doubt adds the doubt to every measurement's spread, as independent
+   * errors add, and a turn of the doubt over the tags' distance to its heading's.
+   */
+  @Test
+  void aCamerasMountDoubtWidensItsMeasurements() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    CaptureContext lost = new CaptureContext(null, Math.PI, 0, 0, 0, 0);
+    double doubt = 0.08;
+
+    VisionMeasurement constrained =
+        measured(
+            pipeline.process(
+                seen, camera, steady(ROBOT.getRotation()), VisionConfig.DEFAULTS, doubt));
+    VisionMeasurement calibrated = measured(process(seen, steady(ROBOT.getRotation())));
+    VisionMeasurement full =
+        measured(pipeline.process(seen, camera, lost, VisionConfig.DEFAULTS, doubt));
+    VisionMeasurement fullCalibrated = measured(process(seen, lost));
+    double distance = process(seen, lost).distanceMeters();
+
+    assertThat(constrained.covariance().xStdDev())
+        .isCloseTo(Math.hypot(calibrated.covariance().xStdDev(), doubt), within(1e-12));
+    assertThat(constrained.covariance().headingStdDev())
+        .isCloseTo(
+            Math.hypot(calibrated.covariance().headingStdDev(), doubt / distance), within(1e-12));
+    assertThat(full.covariance().yStdDev())
+        .isCloseTo(Math.hypot(fullCalibrated.covariance().yStdDev(), doubt), within(1e-12));
+    assertThat(full.covariance().headingStdDev())
+        .isCloseTo(
+            Math.hypot(fullCalibrated.covariance().headingStdDev(), doubt / distance),
+            within(1e-12));
+    assertThat(constrained.pose())
+        .as("where it puts the robot is the same")
+        .isEqualTo(calibrated.pose());
+  }
+
   private double spread(TagDetections seen, CaptureContext robot, CameraConfig mount) {
-    return measured(pipeline.process(seen, mount, robot, VisionConfig.DEFAULTS))
+    return measured(pipeline.process(seen, mount, robot, VisionConfig.DEFAULTS, 0))
         .covariance()
         .xStdDev();
   }

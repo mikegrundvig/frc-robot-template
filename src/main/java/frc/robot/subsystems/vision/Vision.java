@@ -10,6 +10,7 @@ import frc.robot.lib.localization.AttitudeHistory;
 import frc.robot.lib.localization.CameraLocalizer;
 import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.MountCheck;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
@@ -43,7 +44,9 @@ import org.wpilib.tunable.TunableRegistry;
  * <p>For the pit and the log, per camera: whether it's connected, what became of every image and
  * why, and each tag as the camera sees it (placed through the estimated pose and the camera's
  * configured mount) with how far that lands from the tag's real place. A camera whose tags land
- * consistently off is mounted differently than its configuration says: recalibrate it.
+ * consistently off is mounted differently than its configuration says: bumped at an event, say.
+ * Past a tolerance it raises an alert to recalibrate it, and until then its measurements count for
+ * less, by how far its tags land off across the floor (see {@link MountCheck}).
  *
  * <p>How far images are trusted is the robot's configuration ({@code RobotConfig.vision}), whose
  * main thresholds and uncertainties Pitwall tunes. Two switches are WPILib tunables, for the drive
@@ -65,8 +68,18 @@ public final class Vision implements AutoCloseable {
   /** Half a second of the robot's attitude, for each image's capture time. */
   private final AttitudeHistory attitudes = new AttitudeHistory(RobotLoop.loops(0.5));
 
-  /** The robot's pose is good enough to calibrate a camera against: within 5 cm. */
+  /**
+   * The robot's pose is good enough to calibrate a camera against, or to judge its mount by: within
+   * 5 cm.
+   */
   private static final double CALIBRATION_POSE_STD_DEV_METERS = 0.05;
+
+  /**
+   * A camera's mount is judged by the latest 500 tags it saw: eight seconds of seeing two tags in
+   * every image at 30 images a second, and long enough for the estimate's own errors to average out
+   * (over 200, a calibrated camera's tags in simulation landed up to 5 cm off; over 500, 3.5 cm).
+   */
+  private static final int MOUNT_SIGHTINGS = 500;
 
   /**
    * A camera is calibrated only from images taken standing still, this long: no blur, and no
@@ -111,7 +124,8 @@ public final class Vision implements AutoCloseable {
         .number("maxHeightErrorMeters", Limits.between(0, 1))
         .number("linearStdDevBaseline", Limits.between(0.001, 1)) // meters
         .number("angularStdDevBaseline", Limits.between(0.001, 1)) // radians
-        .number("distanceExponent", Limits.between(0, 4));
+        .number("distanceExponent", Limits.between(0, 4))
+        .number("mountToleranceMeters", Limits.between(0.01, 0.5));
   }
 
   /**
@@ -132,7 +146,7 @@ public final class Vision implements AutoCloseable {
     }
     List<Camera> each = new ArrayList<>();
     for (int i = 0; i < ios.length; i++) {
-      each.add(new Camera(cameras.get(i), ios[i]));
+      each.add(new Camera(cameras.get(i), ios[i], MOUNT_SIGHTINGS));
     }
     this.cameras = List.copyOf(each);
     this.localizer = localizer;
@@ -225,6 +239,7 @@ public final class Vision implements AutoCloseable {
 
     for (Camera camera : cameras) {
       camera.read();
+      camera.checkMount(current.mountToleranceMeters());
       int next = 0;
       for (CameraIO.Frame frame : camera.inputs.frames) {
         int first = next;
@@ -280,7 +295,8 @@ public final class Vision implements AutoCloseable {
                 tilted.rollRadians(),
                 motion.speed(),
                 motion.recentYawRate()),
-            current);
+            current,
+            camera.mountDoubtMeters());
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.outcome(result.outcome());
@@ -311,25 +327,28 @@ public final class Vision implements AutoCloseable {
                   && frame.timestampNanos() - movingUntil >= STILL_NANOS
               ? mountCalibration
               : null;
-      recordSightings(camera, robotThen, detections, sightings);
+      recordSightings(camera, robotThen, detections, motion.poseKnown(), sightings);
     }
   }
 
   /**
    * Places each tag an image saw on the field, through where the robot was and the camera's
-   * configured mount, for the camera's residual; and gives it to the mount calibration collecting
-   * this camera's sightings, if one is.
+   * configured mount, for the camera's residual and the check of its mount; and gives it to the
+   * mount calibration collecting this camera's sightings, if one is.
+   *
+   * @param poseKnown whether the robot's pose is known well enough to judge the mount by
    */
   private void recordSightings(
       Camera camera,
       Pose3d robotThen,
       TagDetections detections,
+      boolean poseKnown,
       @Nullable CameraMountCalibration sightings) {
     for (TagDetections.Tag tag : detections.tags()) {
       Pose3d seen =
           robotThen.transformBy(camera.config.robotToCamera()).transformBy(tag.bestCameraToTag());
       Pose3d real = field.tag(tag.id()).orElse(null);
-      camera.saw(seen, real);
+      camera.saw(robotThen, seen, real, poseKnown);
       if (real != null && sightings != null) {
         sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
       }
@@ -380,6 +399,25 @@ public final class Vision implements AutoCloseable {
    */
   public double meanTagResidualMeters(String camera) {
     return camera(camera).meanTagResidualMeters();
+  }
+
+  /**
+   * How far off, on average and lately, a camera's tags land: the latest 500 it saw while the
+   * robot's pose was known. Past the tolerance ({@code VisionConfig.mountToleranceMeters}), the
+   * camera is out of calibration.
+   *
+   * @return NaN until the camera has seen 500 tags
+   */
+  public double mountOffsetMeters(String camera) {
+    return camera(camera).mountOffsetMeters();
+  }
+
+  /**
+   * How much less a camera is trusted for its mount: the uncertainty, in meters, added to each of
+   * its measurements. Zero for a camera whose tags land within the tolerance.
+   */
+  public double mountDoubtMeters(String camera) {
+    return camera(camera).mountDoubtMeters();
   }
 
   private Camera camera(String name) {

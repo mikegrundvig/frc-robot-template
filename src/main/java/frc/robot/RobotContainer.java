@@ -1,6 +1,7 @@
 package frc.robot;
 
 import frc.robot.lib.config.Body;
+import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Place;
@@ -17,6 +18,10 @@ import frc.robot.subsystems.drive.DriveSimulation;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.SensorErrors;
+import frc.robot.subsystems.vision.CameraIO;
+import frc.robot.subsystems.vision.CameraIOPhotonVision;
+import frc.robot.subsystems.vision.Vision;
+import frc.robot.subsystems.vision.VisionSim;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -74,6 +79,11 @@ public final class RobotContainer implements AutoCloseable {
   /** The simulator's physics, which knows where the robot really is. Null unless simulating. */
   private final @Nullable DriveSimulation simulation;
 
+  /** The simulator's cameras, rendering from where the robot really is. Null unless simulating. */
+  private final @Nullable VisionSim visionSim;
+
+  private final Vision vision;
+
   private final PoseEstimator estimator;
   private final Drive drive;
   private final CommandGamepad driver;
@@ -111,6 +121,7 @@ public final class RobotContainer implements AutoCloseable {
    *
    * @param body the robot's frame and mass
    * @param drivetrain the drivetrain's configuration, with any values tuned while running
+   * @param cameras the robot's cameras, where they're mounted and what they are
    * @param field the field the robot plays on
    */
   public RobotContainer(
@@ -118,8 +129,9 @@ public final class RobotContainer implements AutoCloseable {
       Scheduler scheduler,
       Body body,
       Supplier<SwerveConfig> drivetrain,
+      List<CameraConfig> cameras,
       FieldModel field) {
-    this(mode, scheduler, body, drivetrain, field, SensorErrors.TYPICAL);
+    this(mode, scheduler, body, drivetrain, cameras, field, SensorErrors.TYPICAL);
   }
 
   /**
@@ -131,6 +143,7 @@ public final class RobotContainer implements AutoCloseable {
       Scheduler scheduler,
       Body body,
       Supplier<SwerveConfig> drivetrain,
+      List<CameraConfig> cameras,
       FieldModel field,
       SensorErrors simulatedErrors) {
     this.field = field;
@@ -180,6 +193,27 @@ public final class RobotContainer implements AutoCloseable {
       simulation.place(middle);
     }
 
+    // Cameras: PhotonVision on the robot, its simulation in the simulator, the log in a replay.
+    CameraIO[] cameraIOs = new CameraIO[cameras.size()];
+    if (mode == Constants.Mode.SIM) {
+      VisionSim simulatedCameras = new VisionSim(field);
+      for (int i = 0; i < cameras.size(); i++) {
+        CameraConfig camera = cameras.get(i);
+        cameraIOs[i] =
+            simulatedCameras.camera(camera, simulatedErrors.cameraMountError(camera.name()));
+      }
+      visionSim = simulatedCameras;
+    } else {
+      visionSim = null;
+      for (int i = 0; i < cameras.size(); i++) {
+        cameraIOs[i] =
+            mode == Constants.Mode.REAL
+                ? new CameraIOPhotonVision(cameras.get(i).name())
+                : new CameraIO() {};
+      }
+    }
+    vision = new Vision(cameras, cameraIOs, estimator, field);
+
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns.
     drive.setDefaultCommand(
@@ -217,6 +251,10 @@ public final class RobotContainer implements AutoCloseable {
       // reads its sensors, as on a robot between loops: its gyro feels the turn this loop.
       placed.ifPresent(sim::place);
       sim.step(LOOP_PERIOD_SECONDS, RobotController.getTime());
+      VisionSim cameras = visionSim;
+      if (cameras != null) {
+        cameras.update(sim.truePose());
+      }
     }
     start = chosen;
     startPose = chosenPose;
@@ -227,7 +265,8 @@ public final class RobotContainer implements AutoCloseable {
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
     placed.ifPresent(
         pose -> estimator.reset(new PoseReset(RobotController.getTime(), pose, PLACED, placedOn)));
-    estimator.update(); // applies the loop's camera measurements, once there are cameras
+    vision.periodic(estimator.estimate());
+    vision.record(estimator.update());
     estimate = estimator.estimate();
     Pose2d pose = estimate.pose();
     placement =
@@ -350,6 +389,15 @@ public final class RobotContainer implements AutoCloseable {
         Math.toDegrees(uncertainty.headingStdDev()));
   }
 
+  /** One line for the pit: the cameras, and how their measurements fare. */
+  String cameras() {
+    return vision.summary();
+  }
+
+  Vision vision() {
+    return vision;
+  }
+
   /** The localization estimate, as of the last loop. */
   LocalizationEstimate estimate() {
     return estimate;
@@ -386,6 +434,10 @@ public final class RobotContainer implements AutoCloseable {
     noHardware.close();
     allianceUnknown.close();
     offField.close();
+    vision.close();
+    if (visionSim != null) {
+      visionSim.close();
+    }
     if (fieldView != null) {
       fieldView.close();
     }

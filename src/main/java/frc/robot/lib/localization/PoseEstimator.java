@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Predicate;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
@@ -249,6 +250,40 @@ public final class PoseEstimator {
     }
     setState(reset);
     startHistoryHere();
+  }
+
+  /**
+   * Where the robot was at a moment in the history, as the estimate now has it: for tying a camera
+   * image to the robot's heading when the image was taken.
+   *
+   * @return empty outside the history
+   */
+  public Optional<Pose2d> poseAt(long timestampNanos) {
+    if (!started || timestampNanos < time[oldest]) {
+      return Optional.empty();
+    }
+    if (timestampNanos >= newestTime()) {
+      return timestampNanos <= newestTime() + futureToleranceNanos
+          ? Optional.of(pose())
+          : Optional.empty();
+    }
+    int j = size - 1;
+    while (j > 0 && time[index(j - 1)] >= timestampNanos) {
+      j--;
+    }
+    if (j == 0) {
+      int slot = index(0);
+      return Optional.of(
+          new Pose2d(xAfter[slot], yAfter[slot], new Rotation2d(yawAfter[slot] + offset)));
+    }
+    int before = index(j - 1);
+    int after = index(j);
+    double fraction = (double) (timestampNanos - time[before]) / (time[after] - time[before]);
+    return Optional.of(
+        new Pose2d(
+            xAfter[before] + fraction * (xAfter[after] - xAfter[before]),
+            yAfter[before] + fraction * (yAfter[after] - yAfter[before]),
+            new Rotation2d(yawAt(j, fraction) + offset)));
   }
 
   /** The current pose: cheap, for driving every loop. */

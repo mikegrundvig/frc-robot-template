@@ -1,6 +1,9 @@
 package frc.robot.subsystems.drive;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import org.wpilib.math.geometry.Transform3d;
 
 /**
  * How the simulated robot's wheels and sensors differ from what the code believes: the errors that
@@ -17,6 +20,8 @@ import java.util.List;
  * @param gyroDriftDegreesPerMinute a steady drift, from the gyro's bias
  * @param gyroNoiseDegrees random noise on each reading, as a standard deviation
  * @param seed for the noise, so a run repeats exactly
+ * @param cameraMountErrors by camera name, how each camera is really mounted off its configured
+ *     mount, in the robot's frame: a camera knocked 4 in low, or turned 2 degrees
  */
 public record SensorErrors(
     List<Double> wheelRadiusScale,
@@ -24,7 +29,8 @@ public record SensorErrors(
     double gyroScale,
     double gyroDriftDegreesPerMinute,
     double gyroNoiseDegrees,
-    long seed) {
+    long seed,
+    Map<String, Transform3d> cameraMountErrors) {
   /**
    * Wheels and sensors exactly as configured: odometry is the truth. For tests of exact numbers.
    */
@@ -40,7 +46,26 @@ public record SensorErrors(
       new SensorErrors(
           List.of(0.985, 0.99, 0.98, 0.988), List.of(0.5, -0.3, 0.0, 0.4), 1.003, 0.2, 0.02, 1);
 
+  /** Errors with every camera mounted exactly as configured. */
+  public SensorErrors(
+      List<Double> wheelRadiusScale,
+      List<Double> steerOffsetDegrees,
+      double gyroScale,
+      double gyroDriftDegreesPerMinute,
+      double gyroNoiseDegrees,
+      long seed) {
+    this(
+        wheelRadiusScale,
+        steerOffsetDegrees,
+        gyroScale,
+        gyroDriftDegreesPerMinute,
+        gyroNoiseDegrees,
+        seed,
+        Map.of());
+  }
+
   public SensorErrors {
+    cameraMountErrors = Map.copyOf(cameraMountErrors);
     if (wheelRadiusScale.size() != 4 || steerOffsetDegrees.size() != 4) {
       throw new IllegalArgumentException("one wheel radius scale and one steer offset per module");
     }
@@ -72,6 +97,26 @@ public record SensorErrors(
         gyroScale,
         gyroDriftDegreesPerMinute,
         gyroNoiseDegrees,
-        seed);
+        seed,
+        cameraMountErrors);
+  }
+
+  /** The same errors, with one camera mounted off its configuration. */
+  public SensorErrors withCameraMountError(String camera, Transform3d error) {
+    Map<String, Transform3d> errors = new HashMap<>(cameraMountErrors);
+    errors.put(camera, error);
+    return new SensorErrors(
+        wheelRadiusScale,
+        steerOffsetDegrees,
+        gyroScale,
+        gyroDriftDegreesPerMinute,
+        gyroNoiseDegrees,
+        seed,
+        errors);
+  }
+
+  /** How a camera is really mounted off its configuration: none, unless one was set. */
+  public Transform3d cameraMountError(String camera) {
+    return cameraMountErrors.getOrDefault(camera, Transform3d.ZERO);
   }
 }

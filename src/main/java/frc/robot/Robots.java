@@ -115,51 +115,32 @@ public final class Robots {
           .build();
 
   /**
-   * Four cameras, one near each corner, 9 in up and tilted 20 degrees up, facing out diagonally so
-   * that together they see all the way around the robot.
+   * Four cameras as a 2026 competition robot mounted them: two facing forward and out at 23
+   * degrees, two facing backward, all near the frame's sides about 21 in up and tilted up 8 to 12.5
+   * degrees. Positions as that team measured them, from the robot's origin on the floor.
    */
   private static final List<CameraConfig> CAMERAS =
       List.of(
-          CameraConfig.builder()
-              .name("front-left")
-              .forward(Inches.of(11.5))
-              .left(Inches.of(11.5))
-              .up(Inches.of(9))
-              .roll(Degrees.of(0))
-              .tiltUp(Degrees.of(20))
-              .yaw(Degrees.of(45))
-              .sensor(APRILTAG_CAMERA)
-              .build(),
-          CameraConfig.builder()
-              .name("front-right")
-              .forward(Inches.of(11.5))
-              .left(Inches.of(-11.5))
-              .up(Inches.of(9))
-              .roll(Degrees.of(0))
-              .tiltUp(Degrees.of(20))
-              .yaw(Degrees.of(-45))
-              .sensor(APRILTAG_CAMERA)
-              .build(),
-          CameraConfig.builder()
-              .name("back-left")
-              .forward(Inches.of(-11.5))
-              .left(Inches.of(11.5))
-              .up(Inches.of(9))
-              .roll(Degrees.of(0))
-              .tiltUp(Degrees.of(20))
-              .yaw(Degrees.of(135))
-              .sensor(APRILTAG_CAMERA)
-              .build(),
-          CameraConfig.builder()
-              .name("back-right")
-              .forward(Inches.of(-11.5))
-              .left(Inches.of(-11.5))
-              .up(Inches.of(9))
-              .roll(Degrees.of(0))
-              .tiltUp(Degrees.of(20))
-              .yaw(Degrees.of(-135))
-              .sensor(APRILTAG_CAMERA)
-              .build());
+          camera("front-left", -7.75, 12.25, 21, 0, 10, 23.162),
+          camera("front-right", -8.625, -12.25, 20.875, 0, 8.2, -23.162),
+          camera("back-left", -10.5, 12, 21, -2, 10, 180.985),
+          camera("back-right", -11.6875, -12, 20.705, 0, 12.5, 180.985));
+
+  /** A camera on this robot: position in inches, angles in degrees. */
+  private static CameraConfig camera(
+      String name, double forward, double left, double up, double roll, double tiltUp, double yaw) {
+    return CameraConfig.builder()
+        .name(name)
+        .forward(Inches.of(forward))
+        .left(Inches.of(left))
+        .up(Inches.of(up))
+        .roll(Degrees.of(roll))
+        .tiltUp(Degrees.of(tiltUp))
+        .yaw(Degrees.of(yaw))
+        .sensor(APRILTAG_CAMERA)
+        .noiseScale(1.0)
+        .build();
+  }
 
   /** The template's robot. */
   public static final RobotConfig SIM =

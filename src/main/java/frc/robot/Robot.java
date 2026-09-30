@@ -80,13 +80,15 @@ public class Robot extends LoggedRobot {
             Scheduler.getDefault(),
             Robots.SIM.body(),
             () -> pitwall.config().drivetrain(),
+            Robots.SIM.cameras(),
             Rebuilt.field(Robots.SIM.body()));
     pitwall.actions().add("Drive forward slowly (2 s)", container::driveCheck);
     pitwall
         .status()
         .add("Alliance", container::allianceStation)
         .add("Placement", () -> container.placement().describe())
-        .add("Localization", container::localization);
+        .add("Localization", container::localization)
+        .add("Cameras", container::cameras);
   }
 
   /** Pitwall, for tests that drive the robot program through it. */

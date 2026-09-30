@@ -99,6 +99,7 @@ public final class ConfigFixtures {
         .tiltUp(Degrees.of(0))
         .yaw(Degrees.of(0))
         .sensor(sensor())
+        .noiseScale(1.0)
         .build();
   }
 }

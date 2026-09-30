@@ -26,6 +26,8 @@ import org.wpilib.units.measure.Time;
  * @param tiltUp how far the camera is tilted up from level (negative: down)
  * @param yaw which way it faces: zero is straight ahead, positive turns it to the left
  * @param sensor the camera itself, often shared by several cameras on a robot
+ * @param noiseScale how much noisier this camera's results are than a typical one's: 1 for typical,
+ *     2 to trust it half as much. Fit it from the camera's logged residuals.
  */
 @ConfigRecord
 public record CameraConfig(
@@ -36,7 +38,8 @@ public record CameraConfig(
     Angle roll,
     Angle tiltUp,
     Angle yaw,
-    Sensor sensor) {
+    Sensor sensor,
+    double noiseScale) {
   public CameraConfig {
     Require.notBlank("camera name", name);
     Require.finite(name + " forward", forward);
@@ -45,6 +48,7 @@ public record CameraConfig(
     Require.finite(name + " roll", roll);
     Require.finite(name + " tiltUp", tiltUp);
     Require.finite(name + " yaw", yaw);
+    Require.positive(name + " noiseScale", noiseScale);
   }
 
   /** Starts building a camera, one named value at a time. */

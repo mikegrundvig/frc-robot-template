@@ -23,6 +23,8 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Queue;
 import java.util.function.Supplier;
 import org.wpilib.math.filter.Debouncer;
@@ -63,6 +65,9 @@ final class ModuleIOTalonFX implements ModuleIO {
   private final TalonFXConfiguration driveConfig = new TalonFXConfiguration();
   private final TalonFXConfiguration steerConfig = new TalonFXConfiguration();
   private boolean configured;
+
+  /** The devices that didn't confirm their configuration at startup, for the drivetrain's alert. */
+  private final List<String> unconfigured = new ArrayList<>();
 
   private final StatusSignal<Angle> drivePosition;
   private final StatusSignal<AngularVelocity> driveVelocity;
@@ -120,7 +125,10 @@ final class ModuleIOTalonFX implements ModuleIO {
             ? SensorDirectionValue.Clockwise_Positive
             : SensorDirectionValue.CounterClockwise_Positive;
     encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5;
-    tryUntilOk(() -> encoder.getConfigurator().apply(encoderConfig, STARTUP_TIMEOUT_SECONDS));
+    if (!tryUntilOk(
+        () -> encoder.getConfigurator().apply(encoderConfig, STARTUP_TIMEOUT_SECONDS))) {
+      unconfigured.add("CANcoder " + wiring.encoderId());
+    }
 
     // The drive reports and controls wheel rotations. Gains and limits come in configure().
     driveConfig.MotorOutput.NeutralMode = NeutralModeValue.Brake;
@@ -263,6 +271,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     inputs.odometryTimestampsNanos = times;
     inputs.odometryDrivePositionsRad = drivePositions;
     inputs.odometrySteerAnglesRad = steerAngles;
+    inputs.unconfigured = String.join(", ", unconfigured);
   }
 
   /**
@@ -280,8 +289,12 @@ final class ModuleIOTalonFX implements ModuleIO {
     steerConfig.Slot0.kD = gains.steerKd() * TWO_PI;
     steerConfig.CurrentLimits.StatorCurrentLimit = limits.steerStatorCurrent().in(Amps);
     if (!configured) {
-      tryUntilOk(() -> drive.getConfigurator().apply(driveConfig, STARTUP_TIMEOUT_SECONDS));
-      tryUntilOk(() -> steer.getConfigurator().apply(steerConfig, STARTUP_TIMEOUT_SECONDS));
+      if (!tryUntilOk(() -> drive.getConfigurator().apply(driveConfig, STARTUP_TIMEOUT_SECONDS))) {
+        unconfigured.add("drive motor " + drive.getDeviceID());
+      }
+      if (!tryUntilOk(() -> steer.getConfigurator().apply(steerConfig, STARTUP_TIMEOUT_SECONDS))) {
+        unconfigured.add("steering motor " + steer.getDeviceID());
+      }
       configured = true;
       return;
     }

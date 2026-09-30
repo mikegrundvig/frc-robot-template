@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Rotations;
 
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -92,6 +93,24 @@ class PhoenixIOTest {
     assertThat(settled).as("the readings settle where the gearing and coupling put them").isTrue();
     assertThat(inputs.steerAngle.getDegrees()).isCloseTo(90, within(0.5));
     assertThat(inputs.odometryTimestampsNanos).hasSameSizeAs(inputs.odometryDrivePositionsRad);
+    assertThat(inputs.unconfigured).as("every device took its configuration").isEmpty();
+  }
+
+  @Test
+  void configuringAtStartupTriesAFewTimesThenSaysItFailed() {
+    int[] attempts = {0};
+
+    boolean failed =
+        ModuleIOTalonFX.tryUntilOk(
+            () -> {
+              attempts[0]++;
+              return StatusCode.EcuIsNotPresent;
+            });
+    boolean ok = ModuleIOTalonFX.tryUntilOk(() -> StatusCode.OK);
+
+    assertThat(failed).isFalse();
+    assertThat(attempts[0]).isEqualTo(5);
+    assertThat(ok).isTrue();
   }
 
   @Test

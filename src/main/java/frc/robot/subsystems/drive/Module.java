@@ -72,6 +72,11 @@ public class Module {
     io.stop();
   }
 
+  /** The module's devices that didn't take their configuration at startup, or empty. */
+  String unconfigured() {
+    return inputs.unconfigured;
+  }
+
   /** Whether the drive motor hit its current limit since the last loop. */
   boolean isTorqueLimited() {
     return inputs.driveTorqueLimited;

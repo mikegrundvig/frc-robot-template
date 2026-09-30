@@ -45,6 +45,13 @@ public interface ModuleIO {
 
     public double[] odometryDrivePositionsRad = new double[] {};
     public double[] odometrySteerAnglesRad = new double[] {};
+
+    /**
+     * The module's devices that didn't take their configuration at startup, such as "drive motor 3,
+     * CANcoder 9", or empty: they run on their defaults, without the configured directions,
+     * gearing, or current limits.
+     */
+    public String unconfigured = "";
   }
 
   default void updateInputs(ModuleIOInputs inputs) {}

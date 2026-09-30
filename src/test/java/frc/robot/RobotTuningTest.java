@@ -66,7 +66,8 @@ class RobotTuningTest {
             "linearStdDevBaseline",
             "angularStdDevBaseline",
             "distanceExponent",
-            "mountToleranceMeters");
+            "mountToleranceMeters",
+            "latencyMarginSeconds");
     assertThat(vision.set(Map.of("maxAmbiguity", 0.1))).isTrue();
     assertThat(vision.get().maxAmbiguity()).isEqualTo(0.1);
   }

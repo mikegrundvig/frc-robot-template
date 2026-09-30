@@ -39,6 +39,10 @@ import frc.robot.lib.config.ConfigRecord;
  *     the level part beyond this makes its measurements that much less certain (see {@link
  *     MountCheck}). Above what a calibrated camera shows while the robot drives, mostly the
  *     estimate's own error.
+ * @param latencyMarginSeconds an image is thrown out when it reaches the robot more than this after
+ *     its camera's usual latency ({@code CameraConfig.Sensor.latency}), or before it was taken: the
+ *     camera's clock and the robot's are out of step (PhotonVision's time sync), or the coprocessor
+ *     is falling behind. Include the wait for the robot's next loop.
  */
 @ConfigRecord
 public record VisionConfig(
@@ -56,7 +60,8 @@ public record VisionConfig(
     int minTagsForHeading,
     double maxYawRateForHeading,
     double maxReprojectionErrorForHeadingPixels,
-    double mountToleranceMeters) {
+    double mountToleranceMeters,
+    double latencyMarginSeconds) {
   /** Starting points: 2611's 2026 values where it had them, top teams' where it didn't. */
   public static final VisionConfig DEFAULTS =
       builder()
@@ -75,6 +80,7 @@ public record VisionConfig(
           .maxYawRateForHeading(0.5)
           .maxReprojectionErrorForHeadingPixels(1.0)
           .mountToleranceMeters(0.05)
+          .latencyMarginSeconds(0.1)
           .build();
 
   public VisionConfig {
@@ -97,6 +103,7 @@ public record VisionConfig(
             maxReprojectionErrorForHeadingPixels,
             positive())
         .field("mountToleranceMeters", mountToleranceMeters, positive())
+        .field("latencyMarginSeconds", latencyMarginSeconds, positive())
         .orThrow();
   }
 

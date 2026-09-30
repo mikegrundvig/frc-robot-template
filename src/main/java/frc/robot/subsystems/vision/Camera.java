@@ -1,5 +1,7 @@
 package frc.robot.subsystems.vision;
 
+import static org.wpilib.units.Units.Seconds;
+
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.MountCheck;
 import frc.robot.lib.localization.VisionDecision;
@@ -27,6 +29,7 @@ final class Camera implements AutoCloseable {
   private final Alert disconnected;
   private final Alert unreadable;
   private final Alert outOfCalibration;
+  private final Alert outOfStep;
 
   /** Whether the camera still sits where its configuration says, from where its tags land. */
   private final MountCheck mount;
@@ -47,8 +50,10 @@ final class Camera implements AutoCloseable {
   private double residualSum;
   private int residualCount;
 
-  // This loop: what became of each image, and the tags seen, placed on the field.
+  // This loop: what became of each image, how late each arrived, and the tags seen, placed on the
+  // field.
   private final List<String> outcomes = new ArrayList<>();
+  private final List<Double> latencies = new ArrayList<>();
   private final List<Pose3d> seenTags = new ArrayList<>();
   private double loopResidualSum;
   private int loopResidualCount;
@@ -74,6 +79,12 @@ final class Camera implements AutoCloseable {
             name + "OutOfCalibration",
             "Camera " + name + " is out of calibration",
             Alert.Level.MEDIUM);
+    outOfStep =
+        new Alert(
+            "Vision",
+            name + "OutOfStep",
+            "Camera " + name + "'s images arrive out of step",
+            Alert.Level.HIGH);
     TunableRegistry.publish(key + "/enabled", enabled);
   }
 
@@ -108,6 +119,7 @@ final class Camera implements AutoCloseable {
     unreadable.set(!readable);
 
     outcomes.clear();
+    latencies.clear();
     seenTags.clear();
     loopResidualSum = 0;
     loopResidualCount = 0;
@@ -123,6 +135,43 @@ final class Camera implements AutoCloseable {
     }
     lastFrame = timestampNanos;
     return true;
+  }
+
+  /**
+   * Whether an image arrived within the camera's band: no earlier than it was taken, and no later
+   * than the camera's usual latency plus a margin. Outside it, the image is left out, and an alert
+   * stays up until one arrives within it again.
+   *
+   * @param latencySeconds from when the image was taken to this loop
+   * @param marginSeconds how much later than the camera's usual latency is still in time
+   */
+  boolean arrivedInTime(double latencySeconds, double marginSeconds) {
+    latencies.add(latencySeconds);
+    double latest = config.sensor().latency().in(Seconds) + marginSeconds;
+    boolean inTime = latencySeconds >= 0 && latencySeconds <= latest;
+    if (!inTime) {
+      String arrived =
+          latencySeconds < 0
+              ? String.format(Locale.ROOT, "%.0f ms before they're taken", -latencySeconds * 1000)
+              : String.format(Locale.ROOT, "%.0f ms after they're taken", latencySeconds * 1000);
+      outOfStep.setText(
+          String.format(
+              Locale.ROOT,
+              "Camera %s's images arrive %s, outside 0 to %.0f ms, and are left out: are its"
+                  + " clock and the robot's in step (time sync)? If it's just slower, measure its"
+                  + " latency",
+              name(),
+              arrived,
+              latest * 1000));
+      outcome(
+          String.format(
+              Locale.ROOT,
+              "arrived %.0f ms after it was taken, outside 0 to %.0f ms",
+              latencySeconds * 1000,
+              latest * 1000));
+    }
+    outOfStep.set(!inTime);
+    return inTime;
   }
 
   /** What became of one of this loop's images. */
@@ -187,6 +236,8 @@ final class Camera implements AutoCloseable {
    */
   void logLoop() {
     Logger.recordOutput(key + "/Outcomes", outcomes.toArray(String[]::new));
+    Logger.recordOutput(
+        key + "/LatencySeconds", latencies.stream().mapToDouble(Double::doubleValue).toArray());
     Logger.recordOutput(key + "/SeenTags", seenTags.toArray(Pose3d[]::new));
     Logger.recordOutput(key + "/MountOffsetMeters", mount.offsetMeters());
     Logger.recordOutput(key + "/MountDoubtMeters", mountDoubt);
@@ -259,12 +310,21 @@ final class Camera implements AutoCloseable {
     return outOfCalibration.getText();
   }
 
+  boolean isOutOfStepAlertActive() {
+    return outOfStep.get();
+  }
+
+  String outOfStepAlertText() {
+    return outOfStep.getText();
+  }
+
   @Override
   public void close() {
     io.close();
     disconnected.close();
     unreadable.close();
     outOfCalibration.close();
+    outOfStep.close();
     TunableRegistry.remove(key + "/enabled");
   }
 }

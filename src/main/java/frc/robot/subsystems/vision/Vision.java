@@ -207,6 +207,11 @@ public final class Vision implements AutoCloseable {
     mountCalibration = null;
   }
 
+  /** Whether a calibration is collecting from the cameras: headings, or one camera's mount. */
+  public boolean isCalibrating() {
+    return calibrating >= 0 || headings != null;
+  }
+
   /**
    * Autonomous just started: hold the cameras' measurements back for the tuned time, if any. They
    * are still read and logged, marked held.

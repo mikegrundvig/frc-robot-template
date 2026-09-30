@@ -27,7 +27,12 @@ final class AdvantageKitLog {
   }
 
   static Consumer<ActionInputs> actions() {
-    return new ActionLog();
+    return new ActionLog("Pitwall/Actions");
+  }
+
+  /** The experiments' starts and cancels, logged like actions' (they run as actions). */
+  static Consumer<ActionInputs> experiments() {
+    return new ActionLog("Pitwall/Experiments");
   }
 
   static Consumer<TunableInputs> tunables() {
@@ -79,12 +84,17 @@ final class AdvantageKitLog {
   }
 
   static final class ActionLog implements Consumer<ActionInputs>, LoggableInputs {
+    private final String key;
     private ActionInputs inputs = new ActionInputs();
+
+    ActionLog(String key) {
+      this.key = key;
+    }
 
     @Override
     public void accept(ActionInputs inputs) {
       this.inputs = inputs;
-      Logger.processInputs("Pitwall/Actions", this);
+      Logger.processInputs(key, this);
     }
 
     @Override

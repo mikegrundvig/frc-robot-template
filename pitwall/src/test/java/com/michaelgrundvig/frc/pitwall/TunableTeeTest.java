@@ -11,6 +11,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.wpilib.tunable.MockTunableBackend;
+import org.wpilib.tunable.Tunable;
 import org.wpilib.tunable.TunableBackend;
 import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableBoolean;
@@ -188,6 +189,36 @@ class TunableTeeTest {
 
     assertThat(dashboard.getTunable("Vision/layout")).isSameAs(other);
     assertThat(tee.isEditable("Vision/layout")).isFalse();
+  }
+
+  /** A unit-aware tunable, built like WPILib's own for measures: a wrapper around a number. */
+  static final class Wrapped extends TunableBase implements Tunable.CustomTunable {
+    final TunableDouble magnitude;
+
+    Wrapped(double initial) {
+      super(null);
+      magnitude = TunableDouble.create(initial);
+    }
+
+    @Override
+    public TunableBase getInnerTunable() {
+      return magnitude;
+    }
+  }
+
+  @Test
+  void unitAwareTunablesGoThroughAsTheirNumberInBaseUnits() {
+    // WPILib's registry unwraps them before any backend sees them.
+    TunableRegistry.registerBackend("", tee);
+    var limit = new Wrapped(30.0);
+    TunableRegistry.publish("Drive/limit", limit);
+
+    dashboard.setDouble("Drive/limit", 25.0);
+    TunableRegistry.update();
+
+    assertThat(limit.magnitude.get()).isEqualTo(25.0);
+    assertThat(logged).last().isEqualTo("/Drive/limit=25.0");
+    assertThat(tee.isEditable("Drive/limit")).isTrue();
   }
 
   @Test

@@ -26,6 +26,12 @@ import org.wpilib.util.Alert;
 public final class RobotContainer implements AutoCloseable {
   private static final int DRIVER_PORT = 0;
 
+  /**
+   * Where odometry starts, in every mode: on the field, clear of the walls. The same in every mode
+   * so a replay starts where the run it replays did; an auto routine or vision sets the real pose.
+   */
+  static final Pose2d START_POSE = new Pose2d(3, 3, Rotation2d.ZERO);
+
   /** The simulator's field view, showing where odometry puts the robot. Null unless simulating. */
   private final @Nullable Field2d field;
 
@@ -60,9 +66,7 @@ public final class RobotContainer implements AutoCloseable {
     // No gyro is simulated: there the heading comes from the wheels, as in AdvantageKit's template.
     drive = new Drive("Drive", new GyroIO() {}, modules, body, drivetrain, scheduler);
     field = mode == Constants.Mode.SIM ? new Field2d() : null;
-    if (field != null) {
-      drive.resetPose(new Pose2d(3, 3, Rotation2d.ZERO)); // on the field, clear of the walls
-    }
+    drive.resetPose(START_POSE);
 
     // Driver: left stick translates (field-relative), right stick turns. Gamepad Y is negative
     // when pushed forward, so negate to get +x away from the driver.

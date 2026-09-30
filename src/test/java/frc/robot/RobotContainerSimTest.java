@@ -112,7 +112,8 @@ class RobotContainerSimTest {
 
     tick(5);
 
-    assertEquals(new Pose2d(), container.drive().getPose(), "nothing to replay, nothing moves");
+    assertEquals(
+        RobotContainer.START_POSE, container.drive().getPose(), "nothing to replay, nothing moves");
     assertFalse(container.isNoHardwareAlertActive(), "replay's hardware is the log");
   }
 
@@ -129,6 +130,6 @@ class RobotContainerSimTest {
     tick(SimTestSupport.loops(0.5));
 
     assertTrue(container.isNoHardwareAlertActive());
-    assertEquals(new Pose2d(), container.drive().getPose(), "nothing moved");
+    assertEquals(RobotContainer.START_POSE, container.drive().getPose(), "nothing moved");
   }
 }

@@ -110,9 +110,12 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
     }
   }
 
-  /** Starts Pitwall and its page on {@link PitwallServer#PORT}. */
+  /**
+   * Starts Pitwall and its page on {@link PitwallServer#PORT}, or on the port the {@code
+   * pitwall.port} system property names (0 picks a free one).
+   */
   public static <T extends Record> Pitwall<T> start(String name, T config) {
-    return start(name, config, PitwallServer.PORT);
+    return start(name, config, Integer.getInteger("pitwall.port", PitwallServer.PORT));
   }
 
   /**

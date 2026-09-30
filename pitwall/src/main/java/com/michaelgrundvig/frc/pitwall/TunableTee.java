@@ -37,10 +37,12 @@ import org.wpilib.tunable.util.PathUtil;
  *   <li>lists every tunable for the page, which can change the simple ones (numbers, booleans).
  * </ul>
  *
- * <p>A simple tunable reaches the inner backend as a proxy that reads the real value and sends
- * writes through here. Other kinds (structs, measures, complex tunables) pass straight through:
- * they publish as usual but aren't locked or replayed. Pitwall's own configuration tunables pass
- * straight through too, because their writes already go through {@link Tuning}.
+ * <p>A simple tunable (a number or a boolean) reaches the inner backend as a proxy that reads the
+ * real value and sends writes through here. Unit-aware tunables ({@code
+ * Tunable.create(Amps.of(30))}) are covered too: WPILib's registry unwraps them and publishes their
+ * number in base units. Other kinds (structs, strings, arrays) pass straight through: published as
+ * usual, but not locked or replayed. Pitwall's own configuration tunables pass straight through as
+ * well, because their writes already go through {@link Tuning}.
  *
  * <p>WPILib calls {@link #update} once per loop, after {@code robotPeriodic()}; dashboard writes
  * and the page's requests are applied there, and so are the logged ones in a replay.

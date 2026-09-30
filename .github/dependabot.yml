@@ -1,5 +1,7 @@
 # Weekly pull requests for newer build tools, test libraries, and CI actions. Robot libraries
-# (WPILib, vendordeps) are updated deliberately, per WPILib release, not by this bot.
+# (WPILib, vendordeps) are updated deliberately, per WPILib release, not by this bot, and so is
+# Gradle itself: it follows the version WPILib's installer ships, which laptops set up with the
+# installer build with offline.
 version: 2
 updates:
   - package-ecosystem: gradle
@@ -7,7 +9,8 @@ updates:
     schedule:
       interval: weekly
     ignore:
-      - dependency-name: "org.wpilib.GradleRIO"
+      - dependency-name: "org.wpilib*"
+      - dependency-name: "gradle-wrapper"
   - package-ecosystem: github-actions
     directory: /
     schedule:

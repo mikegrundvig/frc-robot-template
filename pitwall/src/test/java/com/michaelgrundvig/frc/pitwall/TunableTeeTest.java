@@ -258,17 +258,6 @@ class TunableTeeTest {
   }
 
   @Test
-  void pitwallsOwnTunablesPassStraightThroughAndStayOffTheList() {
-    var config = TunableDouble.create(16.0);
-    tee.passThrough(config);
-    tee.publish("Config/steerKp", config);
-    tee.update();
-
-    assertThat(dashboard.getTunable("Config/steerKp")).isSameAs(config);
-    assertThat(tee.view()).extracting(TunableTee.Listed::path).doesNotContain("/Config/steerKp");
-  }
-
-  @Test
   void otherKindsPassStraightThroughReadOnly() {
     TunableBase other = new TunableBase(null) {};
     tee.publish("Vision/layout", other);
@@ -405,11 +394,15 @@ class TunableTeeTest {
   }
 
   @Test
-  void aLiveConfigurationIsKnownAndItsValuesAreListed() {
+  void aLiveConfigurationIsKnownWithWhereItsValuesArePublished() {
     var live = publishedMachine();
 
     assertThat(tee.configs()).containsExactly(live);
-    assertThat(tee.view()).extracting(TunableTee.Listed::path).contains("/Machine/travel/min");
+    assertThat(tee.pathOf(live, "travel.min")).isEqualTo("/Machine/travel/min");
+    assertThat(tee.view())
+        .as("shown with their configuration instead")
+        .extracting(TunableTee.Listed::path)
+        .doesNotContain("/Machine/travel/min");
   }
 
   /** A dashboard's change to a configuration value is checked by the whole configuration. */

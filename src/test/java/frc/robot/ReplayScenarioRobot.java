@@ -51,7 +51,7 @@ final class ReplayScenarioRobot extends Robot {
     }
     super.robotPeriodic();
     Logger.recordOutput("Scenario/Gain", gain.get());
-    Logger.recordOutput("Scenario/SteerKp", pitwall().config().drivetrain().gains().steerKp());
+    Logger.recordOutput("Scenario/SteerKp", container().drivetrainTuning().get().gains().steerKp());
     Logger.recordOutput("Scenario/Action", pitwall().actions().view().get(0).phase().name());
   }
 
@@ -75,7 +75,8 @@ final class ReplayScenarioRobot extends Robot {
                   .header("Content-Type", "application/merge-patch+json")
                   .method(
                       "PATCH",
-                      HttpRequest.BodyPublishers.ofString("{\"drivetrain.gains.steerKp\": 18.5}"))
+                      HttpRequest.BodyPublishers.ofString(
+                          "{\"/Drive/config/gains/steerKp\": 18.5}"))
                   .build(),
               HttpResponse.BodyHandlers.discarding());
       case 30 -> pitwall().tunables().requestChanges(Map.of(GAIN, 2.5));

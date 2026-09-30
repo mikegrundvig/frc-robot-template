@@ -91,6 +91,7 @@
     <span class="muted">Edits wait here until you apply them, then all change at once, or none do.</span>
   </div>
   <div id="message" class="message" hidden></div>
+  <p id="refused" class="muted" hidden></p>
 
   <h2>Changes
     <button id="copy" disabled>Copy</button>
@@ -191,10 +192,10 @@
 
   function build(tunables) {
     let group = null;
-    for (const [path, { unit }] of Object.entries(tunables)) {
+    for (const [path, { config, field, unit, limits }] of Object.entries(tunables)) {
       committed[path] = tunables[path].committed;
-      const cut = path.lastIndexOf(".");
-      const heading = path.slice(0, cut);
+      const cut = field.lastIndexOf(".");
+      const heading = cut < 0 ? config : config + "." + field.slice(0, cut);
       if (heading !== group) {
         group = heading;
         const row = element("values").insertRow();
@@ -204,13 +205,14 @@
         cell.textContent = heading.replaceAll(".", " › ");
       }
       const row = element("values").insertRow();
-      row.insertCell().textContent = path.slice(cut + 1);
+      row.insertCell().textContent = field.slice(cut + 1);
       const committedCell = row.insertCell();
       committedCell.className = "committed number";
       committedCell.textContent = shown(tunables[path].committed);
       const input = document.createElement("input");
       input.inputMode = "decimal";
-      input.setAttribute("aria-label", path);
+      input.setAttribute("aria-label", config + " " + field);
+      if (limits) input.title = "Limits: " + limits;
       input.addEventListener("input", refreshControls);
       input.addEventListener("keydown", (event) => { if (event.key === "Enter") apply(); });
       row.insertCell().append(input);
@@ -219,7 +221,7 @@
       revert.className = "small";
       revert.textContent = "↺";
       revert.title = "Back to the committed value";
-      revert.setAttribute("aria-label", "Revert " + path);
+      revert.setAttribute("aria-label", "Revert " + config + " " + field);
       revert.addEventListener("click", () => send("PATCH", "/api/values", { [path]: null }));
       row.insertCell().append(revert);
       rows.set(path, { row, input, revert });
@@ -235,6 +237,10 @@
     toggle.textContent = session.enabled ? "Switch off" : "Switch on";
     toggle.className = session.enabled ? "" : "primary";
     element("banner").hidden = !session.fieldConnected;
+    const refused = session.refused || [];
+    element("refused").hidden = refused.length === 0;
+    element("refused").textContent = refused.length === 0
+      ? "" : "Refused from a dashboard: " + refused[refused.length - 1];
 
     const { changes: waiting } = pending();
     for (const [path, { row, input, revert }] of rows) {
@@ -248,7 +254,8 @@
     }
     refreshControls();
 
-    const lines = changes.map((c) => `${c.path}: ${c.committed} -> ${c.tuned}   ${c.builderCall}`);
+    const lines = changes.map(
+      (c) => `${c.config} ${c.path}: ${c.committed} -> ${c.tuned}   ${c.builderCall}`);
     element("changes").textContent = lines.join("\n");
     element("changes").hidden = lines.length === 0;
     element("none").hidden = lines.length > 0;

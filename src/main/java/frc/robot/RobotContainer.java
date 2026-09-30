@@ -1,6 +1,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
@@ -18,6 +19,7 @@ import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
+import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
@@ -52,6 +54,7 @@ import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.Telemetry;
+import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.Alert;
 
 /**
@@ -79,6 +82,11 @@ public final class RobotContainer implements AutoCloseable {
   static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
   private final Scheduler scheduler;
+
+  /** The drivetrain's and vision's configurations as the pit tunes them. */
+  private final LiveConfig<SwerveConfig> drivetrainTuning;
+
+  private final LiveConfig<VisionConfig> visionTuning;
   private final FieldModel field;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
@@ -135,8 +143,6 @@ public final class RobotContainer implements AutoCloseable {
    *
    * @param scheduler runs every command: the controls', and the Pitwall page's actions
    * @param robot the robot: its frame, wiring, and cameras
-   * @param tuned the robot's configuration with any values tuned while running: the drivetrain and
-   *     vision read theirs every loop
    * @param field the field the robot plays on
    * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
    *     configuration ({@link SensorErrors#TYPICAL} makes its estimated pose drift from the truth
@@ -148,11 +154,16 @@ public final class RobotContainer implements AutoCloseable {
       Constants.Mode mode,
       Scheduler scheduler,
       RobotConfig robot,
-      Supplier<RobotConfig> tuned,
       FieldModel field,
       SensorErrors simulatedErrors,
       LoopHealth loopHealth) {
-    Supplier<SwerveConfig> drivetrain = () -> tuned.get().drivetrain();
+    // What the pit can tune, published where dashboards and the Pitwall page find it; the
+    // mechanisms read it every loop.
+    drivetrainTuning = Drive.tuning(robot.drivetrain());
+    TunableRegistry.publish("Drive/config", drivetrainTuning);
+    visionTuning = Vision.tuning(robot.vision());
+    TunableRegistry.publish("Vision/config", visionTuning);
+    Supplier<SwerveConfig> drivetrain = drivetrainTuning::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
     loop = loopHealth.monitor();
@@ -229,9 +240,7 @@ public final class RobotContainer implements AutoCloseable {
                 : new CameraIO() {};
       }
     }
-    vision =
-        new Vision(
-            cameras, cameraIOs, localization.forCameras(), field, () -> tuned.get().vision());
+    vision = new Vision(cameras, cameraIOs, localization.forCameras(), field, visionTuning::get);
     calibration =
         new Calibration(
             drive,
@@ -483,7 +492,7 @@ public final class RobotContainer implements AutoCloseable {
    * actions, and one status line each for the loop, the alliance, the placement, localization,
    * scoring, the last calibration, and the cameras.
    */
-  void addTo(Pitwall<?> pitwall) {
+  void addTo(Pitwall pitwall) {
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
@@ -501,6 +510,11 @@ public final class RobotContainer implements AutoCloseable {
     return drive;
   }
 
+  /** The drivetrain's configuration as the pit tunes it. */
+  LiveConfig<SwerveConfig> drivetrainTuning() {
+    return drivetrainTuning;
+  }
+
   /** The simulator's drivetrain physics, or null outside the simulator. */
   @Nullable DriveSimulation simulation() {
     SimulatedWorld sim = world;
@@ -515,6 +529,8 @@ public final class RobotContainer implements AutoCloseable {
   /** Releases what holds global resources (alerts), so a test can build another robot. */
   @Override
   public void close() {
+    TunableRegistry.remove(drivetrainTuning);
+    TunableRegistry.remove(visionTuning);
     drive.close();
     localization.close();
     noHardware.close();

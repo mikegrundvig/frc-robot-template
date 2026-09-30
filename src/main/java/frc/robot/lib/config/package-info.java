@@ -4,9 +4,11 @@
  * components' own settings records (vision's, the estimator's); components read them.
  *
  * <p>Every value that describes the robot (a dimension, a gain, a limit, a threshold) belongs in
- * that configuration, never in a WPILib tunable. Mark it {@code @Tunable} (Pitwall's) if it may be
- * tuned while the robot runs: Pitwall checks a tuned value like a committed one, logs it, and
- * reports the builder call that commits it. WPILib tunables are for the drive team's switches only.
+ * that configuration, committed in {@code Robots}. To tune some of it on a running robot, the
+ * mechanism that owns it declares them in a {@code LiveConfig} (Pitwall's), each with the range
+ * that's safe to dial in: they become WPILib tunables, checked like committed values before a
+ * change applies, returned to committed when the field connects, and reported as the builder calls
+ * that commit them. A plain WPILib tunable is for a switch the drive team flips.
  *
  * <p>Conventions:
  *

@@ -36,7 +36,7 @@ public class Robot extends LoggedRobot {
   /**
    * Pitwall, the robot's own web page: its status, actions, and live tuning of its configuration.
    */
-  private final Pitwall<RobotConfig> pitwall;
+  private final Pitwall pitwall;
 
   /** Every mechanism, and the controls that drive them. */
   private final RobotContainer container;
@@ -100,7 +100,7 @@ public class Robot extends LoggedRobot {
             && startedForDebugger(ManagementFactory.getRuntimeMXBean().getInputArguments()));
 
     RobotConfig robot = Robots.current();
-    pitwall = Pitwall.start(robot.name(), robot);
+    pitwall = Pitwall.start(robot.name());
     container =
         assemble(
             Constants.currentMode,
@@ -124,18 +124,12 @@ public class Robot extends LoggedRobot {
       Constants.Mode mode,
       Scheduler scheduler,
       RobotConfig robot,
-      Pitwall<RobotConfig> pitwall,
+      Pitwall pitwall,
       SensorErrors simulatedErrors,
       LoopHealth loopHealth) {
     RobotContainer container =
         new RobotContainer(
-            mode,
-            scheduler,
-            robot,
-            pitwall::config,
-            Rebuilt.field(robot.body()),
-            simulatedErrors,
-            loopHealth);
+            mode, scheduler, robot, Rebuilt.field(robot.body()), simulatedErrors, loopHealth);
     container.addTo(pitwall);
     return container;
   }
@@ -145,8 +139,13 @@ public class Robot extends LoggedRobot {
     return jvmArguments.stream().anyMatch(argument -> argument.contains("jdwp"));
   }
 
+  /** The mechanisms, for tests that drive the robot program. */
+  RobotContainer container() {
+    return container;
+  }
+
   /** Pitwall, for tests that drive the robot program through it. */
-  Pitwall<RobotConfig> pitwall() {
+  Pitwall pitwall() {
     return pitwall;
   }
 
@@ -160,7 +159,7 @@ public class Robot extends LoggedRobot {
    * command scheduler, each timed. Tests run the robot with this too ({@code RobotSim}).
    */
   static void loop(
-      Pitwall<?> pitwall, RobotContainer container, Scheduler scheduler, LoopHealth loopHealth) {
+      Pitwall pitwall, RobotContainer container, Scheduler scheduler, LoopHealth loopHealth) {
     loopHealth.start(System.nanoTime());
     pitwall.periodic();
     loopHealth.monitor().mark("Pitwall", System.nanoTime());

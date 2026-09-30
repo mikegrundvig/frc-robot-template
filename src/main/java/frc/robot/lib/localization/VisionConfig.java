@@ -1,6 +1,5 @@
 package frc.robot.lib.localization;
 
-import com.michaelgrundvig.frc.pitwall.Tunable;
 import frc.robot.lib.config.ConfigRecord;
 
 /**
@@ -33,13 +32,13 @@ import frc.robot.lib.config.ConfigRecord;
  */
 @ConfigRecord
 public record VisionConfig(
-    @Tunable double maxAmbiguity,
-    @Tunable double maxHeightErrorMeters,
+    double maxAmbiguity,
+    double maxHeightErrorMeters,
     double maxDistanceMeters,
     double maxYawRateRadiansPerSecond,
-    @Tunable double linearStdDevBaseline,
-    @Tunable double angularStdDevBaseline,
-    @Tunable double distanceExponent,
+    double linearStdDevBaseline,
+    double angularStdDevBaseline,
+    double distanceExponent,
     double headingConstrainedFactor,
     double speedStdDevFactor,
     double yawRateStdDevFactor,

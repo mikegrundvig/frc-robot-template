@@ -17,6 +17,7 @@ import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableConfig;
 import org.wpilib.tunable.TunableDouble;
+import org.wpilib.tunable.TunableInt;
 import org.wpilib.tunable.TunableLong;
 import org.wpilib.tunable.TunableRegistry;
 
@@ -112,8 +113,8 @@ class TunableTeeTest {
     tee.update();
     assertThat(tee.view())
         .containsExactly(
-            new TunableTee.Listed("/Shooter/kP", "double", 0.5, true),
-            new TunableTee.Listed("/Intake/enabled", "boolean", false, true));
+            new TunableTee.Listed("/Shooter/kP", "double", 0.5, true, Limits.NONE),
+            new TunableTee.Listed("/Intake/enabled", "boolean", false, true, Limits.NONE));
 
     Map<String, Object> values = new LinkedHashMap<>();
     values.put("Shooter/kP", 1.5);
@@ -152,6 +153,17 @@ class TunableTeeTest {
     assertThat(outcome.getNow(null))
         .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Intake/enabled takes a boolean value"));
     assertThat(kP.get()).as("all or none").isEqualTo(0.5);
+  }
+
+  /** A switch left changed in the pit (a camera off, say) is listed, for the field's alert. */
+  @Test
+  void listsWhatChangedSinceStartup() {
+    assertThat(tee.changedSinceStartup()).isEmpty();
+
+    dashboard.setBoolean("Intake/enabled", true);
+    tee.update();
+
+    assertThat(tee.changedSinceStartup()).containsExactly("/Intake/enabled: true (was false)");
   }
 
   /** A value that isn't a number would throw wherever the robot program uses it. */
@@ -246,17 +258,6 @@ class TunableTeeTest {
   }
 
   @Test
-  void pitwallsOwnTunablesPassStraightThroughAndStayOffTheList() {
-    var config = TunableDouble.create(16.0);
-    tee.passThrough(config);
-    tee.publish("Config/steerKp", config);
-    tee.update();
-
-    assertThat(dashboard.getTunable("Config/steerKp")).isSameAs(config);
-    assertThat(tee.view()).extracting(TunableTee.Listed::path).doesNotContain("/Config/steerKp");
-  }
-
-  @Test
   void otherKindsPassStraightThroughReadOnly() {
     TunableBase other = new TunableBase(null) {};
     tee.publish("Vision/layout", other);
@@ -311,5 +312,173 @@ class TunableTeeTest {
     tee.update();
 
     assertThat(tee.view()).extracting(TunableTee.Listed::path).containsExactly("/Intake/enabled");
+  }
+
+  /** A tunable's limits ride on it as WPILib properties, which dashboards see through the tee. */
+  @Test
+  void dashboardsSeeATunablesLimits() {
+    tee.publish("Vision/hold", TunableDouble.createConfig(0.0, Limits.between(0, 30).config()));
+
+    assertThat(Limits.of(dashboard.getTunable("Vision/hold").getConfig()))
+        .isEqualTo(Limits.between(0, 30));
+  }
+
+  @Test
+  void aDashboardWriteOutsideItsLimitsIsRefusedAndSaysWhy() {
+    TunableDouble hold = TunableDouble.createConfig(2.0, Limits.between(0, 30).config());
+    tee.publish("Vision/hold", hold);
+
+    dashboard.setDouble("Vision/hold", 45);
+    tee.update();
+    dashboard.setDouble("Vision/hold", 5);
+    tee.update();
+
+    assertThat(hold.get()).as("the second, within the limits").isEqualTo(5.0);
+    assertThat(tee.refusals()).containsExactly("/Vision/hold = 45.0: 45 is above its limit of 30");
+    assertThat(logged).as("only what was applied").containsExactly("=", "/Vision/hold=5.0");
+  }
+
+  @Test
+  void aDashboardWriteWhileLockedSaysWhyItWasRefused() {
+    whyLocked = "tuning is off";
+
+    dashboard.setDouble("Shooter/kP", 0.9);
+    tee.update();
+
+    assertThat(tee.refusals())
+        .containsExactly("/Shooter/kP = 0.9: tuning is locked: tuning is off");
+  }
+
+  /** The page's changes are checked against every limit before any of them applies. */
+  @Test
+  void thePageIsRefusedOutsideTheLimitsAndNothingChanges() {
+    TunableInt count = TunableInt.createConfig(3, Limits.atLeast(1).config());
+    tee.publish("Arm/count", count);
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("Shooter/kP", 0.7);
+    values.put("Arm/count", 0);
+
+    var outcome = tee.requestChanges(values);
+    tee.update();
+
+    assertThat(outcome.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Arm/count: 0 is below its limit of 1"));
+    assertThat(kP.get()).as("all or none").isEqualTo(0.5);
+    assertThat(count.get()).isEqualTo(3);
+  }
+
+  @Test
+  void theListCarriesEachTunablesLimits() {
+    tee.publish("Vision/hold", TunableDouble.createConfig(0.0, Limits.atMost(30).config()));
+    tee.update();
+
+    assertThat(tee.view())
+        .filteredOn(listed -> listed.path().equals("/Vision/hold"))
+        .singleElement()
+        .extracting(TunableTee.Listed::limits)
+        .isEqualTo(Limits.atMost(30));
+  }
+
+  /** The test machine's travel and gain, live, published through the tee as WPILib does. */
+  private LiveConfig<Fixtures.Machine> publishedMachine() {
+    var live =
+        LiveConfig.of("machine", Fixtures.machine())
+            .number("drive.gains.kP", Limits.between(0, 100))
+            .number("drive.limits.maxSpeed", Limits.atMost(10))
+            .number("travel.min", Limits.NONE)
+            .number("travel.max", Limits.NONE);
+    TunableRegistry.registerBackend("", tee);
+    TunableRegistry.publish("Machine", live);
+    tee.update();
+    return live;
+  }
+
+  @Test
+  void aLiveConfigurationIsKnownWithWhereItsValuesArePublished() {
+    var live = publishedMachine();
+
+    assertThat(tee.configs()).containsExactly(live);
+    assertThat(tee.pathOf(live, "travel.min")).isEqualTo("/Machine/travel/min");
+    assertThat(tee.view())
+        .as("shown with their configuration instead")
+        .extracting(TunableTee.Listed::path)
+        .doesNotContain("/Machine/travel/min");
+  }
+
+  /** A dashboard's change to a configuration value is checked by the whole configuration. */
+  @Test
+  void aDashboardChangeTheConfigurationRefusesSaysWhy() {
+    var live = publishedMachine();
+
+    dashboard.setDouble("Machine/drive/limits/maxSpeed", 5);
+    tee.update();
+
+    assertThat(live.get()).isEqualTo(Fixtures.machine());
+    assertThat(tee.refusals())
+        .containsExactly(
+            "/Machine/drive/limits/maxSpeed = 5.0: maxSpeed is faster than the motor's free speed");
+  }
+
+  /** From the page, a configuration's values change together: one rebuild, all or none. */
+  @Test
+  void thePageChangesAConfigurationsValuesTogether() {
+    var live = publishedMachine();
+    Map<String, Object> both = new LinkedHashMap<>();
+    both.put("Machine/travel/min", 12);
+    both.put("Machine/travel/max", 20);
+
+    var outcome = tee.requestChanges(both);
+    tee.update();
+
+    assertThat(outcome.getNow(null)).isEqualTo(Outcome.applied());
+    assertThat(live.get().travel()).isEqualTo(new Fixtures.Range(12, 20));
+    assertThat(logged).last().isEqualTo("/Machine/travel/min,/Machine/travel/max=12.0,20.0");
+  }
+
+  @Test
+  void thePageIsToldWhyTheConfigurationRefusedAChange() {
+    var live = publishedMachine();
+
+    var outcome = tee.requestChanges(Map.of("Machine/travel/min", 12));
+    tee.update();
+
+    assertThat(outcome.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "min must be below max, got 12.0 and 10.0"));
+    assertThat(live.get()).isEqualTo(Fixtures.machine());
+  }
+
+  @Test
+  void replayMakesAConfigurationsLoggedChangesTogether() {
+    var replayDashboard = new MockTunableBackend();
+    var replay =
+        new TunableTee(
+            replayDashboard,
+            () -> null,
+            inputs -> {
+              inputs.paths = new String[] {"/Machine/travel/min", "/Machine/travel/max"};
+              inputs.values = new String[] {"12.0", "20.0"};
+            },
+            true);
+    var live =
+        LiveConfig.of("machine", Fixtures.machine())
+            .number("travel.min", Limits.NONE)
+            .number("travel.max", Limits.NONE);
+    TunableRegistry.registerBackend("", replay);
+    TunableRegistry.publish("Machine", live);
+
+    replay.update();
+
+    assertThat(live.get().travel()).isEqualTo(new Fixtures.Range(12, 20));
+  }
+
+  /** Configuration values go back to committed on the field; they aren't switches. */
+  @Test
+  void aConfigurationsValuesAreNotSwitches() {
+    publishedMachine();
+
+    dashboard.setDouble("Machine/drive/gains/kP", 18);
+    tee.update();
+
+    assertThat(tee.changedSinceStartup()).isEmpty();
   }
 }

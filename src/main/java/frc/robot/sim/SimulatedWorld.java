@@ -1,0 +1,111 @@
+package frc.robot.sim;
+
+import frc.robot.lib.config.Body;
+import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.timing.RobotLoop;
+import frc.robot.subsystems.drive.DriveHardware;
+import frc.robot.subsystems.vision.CameraIO;
+import frc.robot.subsystems.vision.VisionSim;
+import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
+import org.littletonrobotics.junction.Logger;
+import org.wpilib.math.geometry.Pose2d;
+
+/**
+ * The world the simulated robot drives in: the drivetrain's physics, which knows where the robot
+ * really is, and PhotonVision's simulated cameras, rendering what they'd see from there. The
+ * robot's code sees it only through its IO interfaces ({@link #drivetrainHardware}, {@link
+ * #cameras}), as it would see real hardware.
+ *
+ * <p>The robot's wheels and sensors differ from its configuration as a real robot's do ({@link
+ * SensorErrors}), so its estimate drifts from the truth, and localization is tested against that
+ * gap, not against a perfect world.
+ */
+public final class SimulatedWorld implements AutoCloseable {
+  private final DriveSimulation drivetrain;
+  private final VisionSim vision;
+  private final CameraIO[] cameras;
+
+  /**
+   * @param field the field, with its tags and terrain
+   * @param drivetrain the drivetrain's configuration
+   * @param body the robot's frame, which places the wheels
+   * @param cameras the robot's cameras, as configured
+   * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
+   */
+  public SimulatedWorld(
+      FieldModel field,
+      SwerveConfig drivetrain,
+      Body body,
+      List<CameraConfig> cameras,
+      SensorErrors errors) {
+    this.drivetrain =
+        new DriveSimulation(drivetrain.modules(), drivetrain.moduleTranslations(body), errors);
+    this.drivetrain.setTerrain(field.terrain());
+    vision = new VisionSim(field);
+    this.cameras = new CameraIO[cameras.size()];
+    for (int i = 0; i < cameras.size(); i++) {
+      CameraConfig camera = cameras.get(i);
+      this.cameras[i] = vision.camera(camera, errors.cameraMountError(camera.name()));
+    }
+  }
+
+  /** The drivetrain's simulated modules and IMUs, for the drivetrain to read. */
+  public DriveHardware drivetrainHardware() {
+    return DriveHardware.builder()
+        .modules(List.of(drivetrain.modules()))
+        .gyro(drivetrain.gyro())
+        .backupImu(drivetrain.backupGyro())
+        .odometryLock(new ReentrantLock())
+        .build();
+  }
+
+  /** The simulated cameras, in the robot's configured order. */
+  public CameraIO[] cameras() {
+    return cameras.clone();
+  }
+
+  /** The drive team puts the robot here. */
+  public void place(Pose2d pose) {
+    drivetrain.place(pose);
+  }
+
+  /**
+   * One loop: the world moves on, and the cameras see where the robot now is. Before the robot
+   * reads its sensors, as on a robot between loops.
+   */
+  public void step(long nowNanos) {
+    drivetrain.step(RobotLoop.PERIOD_SECONDS, nowNanos);
+    vision.update(drivetrain.truePose3d());
+  }
+
+  /** Where the robot really is. */
+  public Pose2d truePose() {
+    return drivetrain.truePose();
+  }
+
+  /**
+   * Logs where the robot really is, and how far the estimate is from it: what localization has to
+   * close.
+   */
+  public void log(Pose2d estimated) {
+    Pose2d truth = drivetrain.truePose();
+    Logger.recordOutput("Sim/TruePose", truth);
+    Logger.recordOutput(
+        "Sim/PoseErrorMeters", truth.getTranslation().getDistance(estimated.getTranslation()));
+    Logger.recordOutput(
+        "Sim/HeadingErrorDegrees", estimated.getRotation().minus(truth.getRotation()).getDegrees());
+  }
+
+  /** The drivetrain's physics: for tests to shove, tilt, or trip it. */
+  public DriveSimulation drivetrain() {
+    return drivetrain;
+  }
+
+  @Override
+  public void close() {
+    vision.close();
+  }
+}

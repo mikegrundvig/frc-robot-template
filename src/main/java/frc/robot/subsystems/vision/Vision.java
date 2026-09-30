@@ -1,17 +1,18 @@
 package frc.robot.subsystems.vision;
 
+import com.michaelgrundvig.frc.pitwall.Limits;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import frc.robot.lib.calibration.CameraMountCalibration;
 import frc.robot.lib.calibration.HeadingAverage;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.AttitudeHistory;
+import frc.robot.lib.localization.CameraLocalizer;
 import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
@@ -20,8 +21,8 @@ import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
-import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Quaternion;
@@ -30,10 +31,8 @@ import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.TunableBase;
-import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
-import org.wpilib.util.Alert;
 
 /**
  * The robot's cameras: reads each one's results, turns them into measurements through the {@link
@@ -46,33 +45,20 @@ import org.wpilib.util.Alert;
  * configured mount) with how far that lands from the tag's real place. A camera whose tags land
  * consistently off is mounted differently than its configuration says: recalibrate it.
  *
- * <p>Tunable while tuning is on: the main thresholds and uncertainties, a switch per camera to
- * leave it out (a camera fogged over, knocked loose, or blinded by stage lights), and how long to
- * hold the cameras back when autonomous starts.
+ * <p>How far images are trusted is the robot's configuration ({@code RobotConfig.vision}), whose
+ * main thresholds and uncertainties Pitwall tunes. Two switches are WPILib tunables, for the drive
+ * team as much as the pit: one per camera to leave it out (a camera fogged over, knocked loose, or
+ * blinded by stage lights), and how long to hold the cameras back when autonomous starts.
  */
 public final class Vision implements AutoCloseable {
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
   private static final int YAW_RATE_LOOPS = RobotLoop.loops(0.3);
 
-  private final List<CameraConfig> cameras;
-  private final CameraIO[] ios;
-  private final CameraIOInputsAutoLogged[] inputs;
-  private final PoseEstimator estimator;
+  private final List<Camera> cameras;
+  private final CameraLocalizer localizer;
   private final FieldModel field;
   private final VisionPipeline pipeline;
-  private final Alert[] disconnected;
-  private final Alert[] unreadable;
-  private final Alert badSettings =
-      new Alert(
-          "Vision",
-          "badSettings",
-          "Vision settings out of range: keeping the last good ones",
-          Alert.Level.MEDIUM);
-  private final long[] lastFrame;
-  private final int[] accepted;
-  private final int[] rejected;
-  private final double[] residualSums;
-  private final int[] residualCounts;
+  private final Supplier<VisionConfig> settings;
   private final double[] recentYawRates = new double[YAW_RATE_LOOPS];
   private int yawRateLoop;
 
@@ -88,85 +74,72 @@ public final class Vision implements AutoCloseable {
    */
   private static final long STILL_NANOS = 500_000_000L;
 
+  /** Slower than this, the robot counts as standing still: 2 cm and about a degree a second. */
+  private static final double STILL_METERS_PER_SECOND = 0.02;
+
+  private static final double STILL_RADIANS_PER_SECOND = 0.02;
+
   private long movingUntil = Long.MIN_VALUE;
 
   // Calibration: headings the cameras measure, and one camera's sightings for its mount.
   private @Nullable HeadingAverage headings;
   private @Nullable CameraMountCalibration mountCalibration;
-  private int calibrating = -1;
-
-  private final TunableBoolean[] enabled;
-  private final TunableDouble maxAmbiguity =
-      TunableDouble.create(VisionConfig.DEFAULTS.maxAmbiguity());
-  private final TunableDouble maxHeightError =
-      TunableDouble.create(VisionConfig.DEFAULTS.maxHeightErrorMeters());
-  private final TunableDouble linearStdDevBaseline =
-      TunableDouble.create(VisionConfig.DEFAULTS.linearStdDevBaseline());
-  private final TunableDouble angularStdDevBaseline =
-      TunableDouble.create(VisionConfig.DEFAULTS.angularStdDevBaseline());
-  private final TunableDouble distanceExponent =
-      TunableDouble.create(VisionConfig.DEFAULTS.distanceExponent());
+  private @Nullable Camera calibrating;
 
   /**
    * How long to hold the cameras' measurements back when autonomous starts, trusting the placed
    * start while the robot launches: 6328 held theirs 2 s. Off by default: the estimator gates every
    * measurement against the placed start anyway.
    */
-  private final TunableDouble autoStartHoldSeconds = TunableDouble.create(0.0);
+  private final TunableDouble autoStartHoldSeconds =
+      TunableDouble.createConfig(0.0, Limits.between(0, MAX_HOLD_SECONDS).config());
 
   /** Longer than any autonomous period has been. */
   private static final double MAX_HOLD_SECONDS = 30;
 
   private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
-  private VisionConfig settings = VisionConfig.DEFAULTS;
+  private VisionConfig current;
+
+  /**
+   * Vision's configuration as the pit tunes it: the main thresholds and uncertainties, each within
+   * the range that's safe to dial in. Publish it, and give vision its {@link LiveConfig#get}.
+   */
+  public static LiveConfig<VisionConfig> tuning(VisionConfig committed) {
+    return LiveConfig.of("vision", committed)
+        .number("maxAmbiguity", Limits.between(0, 1))
+        .number("maxHeightErrorMeters", Limits.between(0, 1))
+        .number("linearStdDevBaseline", Limits.between(0.001, 1)) // meters
+        .number("angularStdDevBaseline", Limits.between(0.001, 1)) // radians
+        .number("distanceExponent", Limits.between(0, 4));
+  }
 
   /**
    * @param cameras each camera's configuration, in the same order as its IO
    * @param ios each camera's door to its vision software
-   * @param estimator where measurements go
+   * @param localizer where the robot was when each image was taken, and where measurements go
    * @param field the field, whose tags the cameras see
+   * @param settings how far images are trusted, as tuned: read once a loop
    */
   public Vision(
-      List<CameraConfig> cameras, CameraIO[] ios, PoseEstimator estimator, FieldModel field) {
+      List<CameraConfig> cameras,
+      CameraIO[] ios,
+      CameraLocalizer localizer,
+      FieldModel field,
+      Supplier<VisionConfig> settings) {
     if (cameras.size() != ios.length) {
       throw new IllegalArgumentException("one IO for each camera");
     }
-    this.cameras = List.copyOf(cameras);
-    this.ios = ios.clone();
-    this.estimator = estimator;
+    List<Camera> each = new ArrayList<>();
+    for (int i = 0; i < ios.length; i++) {
+      each.add(new Camera(cameras.get(i), ios[i]));
+    }
+    this.cameras = List.copyOf(each);
+    this.localizer = localizer;
     this.field = field;
     pipeline = new VisionPipeline(field);
-    inputs = new CameraIOInputsAutoLogged[ios.length];
-    disconnected = new Alert[ios.length];
-    unreadable = new Alert[ios.length];
-    enabled = new TunableBoolean[ios.length];
-    lastFrame = new long[ios.length];
-    accepted = new int[ios.length];
-    rejected = new int[ios.length];
-    residualSums = new double[ios.length];
-    residualCounts = new int[ios.length];
-    for (int i = 0; i < ios.length; i++) {
-      String name = cameras.get(i).name();
-      inputs[i] = new CameraIOInputsAutoLogged();
-      disconnected[i] =
-          new Alert(
-              "Vision",
-              name + "Disconnected",
-              "Camera " + name + " disconnected",
-              Alert.Level.HIGH);
-      unreadable[i] =
-          new Alert(
-              "Vision", name + "Unreadable", "Camera " + name + " can't be read", Alert.Level.HIGH);
-      enabled[i] = TunableBoolean.create(true);
-      publish("Vision/" + name + "/enabled", enabled[i]);
-      lastFrame[i] = Long.MIN_VALUE;
-    }
-    publish("Vision/maxAmbiguity", maxAmbiguity);
-    publish("Vision/maxHeightErrorMeters", maxHeightError);
-    publish("Vision/linearStdDevBaseline", linearStdDevBaseline);
-    publish("Vision/angularStdDevBaseline", angularStdDevBaseline);
-    publish("Vision/distanceExponent", distanceExponent);
+    this.settings = settings;
+    current = settings.get();
     publish("Vision/autoStartHoldSeconds", autoStartHoldSeconds);
   }
 
@@ -193,24 +166,18 @@ public final class Vision implements AutoCloseable {
    * of the estimator, so the pose comes from the others. Until stopped.
    */
   public void calibrateMount(String camera, CameraMountCalibration into) {
-    for (int i = 0; i < cameras.size(); i++) {
-      if (cameras.get(i).name().equals(camera)) {
-        calibrating = i;
-        mountCalibration = into;
-        return;
-      }
-    }
-    throw new IllegalArgumentException("no camera named " + camera);
+    calibrating = camera(camera);
+    mountCalibration = into;
   }
 
   public void stopCalibratingMount() {
-    calibrating = -1;
+    calibrating = null;
     mountCalibration = null;
   }
 
   /** Whether a calibration is collecting from the cameras: headings, or one camera's mount. */
   public boolean isCalibrating() {
-    return calibrating >= 0 || headings != null;
+    return calibrating != null || headings != null;
   }
 
   /**
@@ -238,8 +205,8 @@ public final class Vision implements AutoCloseable {
    */
   public void periodic(LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
     attitudes.add(estimate.timestampNanos(), pitchRadians, rollRadians);
-    if (estimate.fieldVelocity().getNorm() > 0.02
-        || Math.abs(estimate.yawRateRadiansPerSecond()) > 0.02) {
+    if (estimate.fieldVelocity().getNorm() > STILL_METERS_PER_SECOND
+        || Math.abs(estimate.yawRateRadiansPerSecond()) > STILL_RADIANS_PER_SECOND) {
       movingUntil = estimate.timestampNanos();
     }
     recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());
@@ -248,138 +215,123 @@ public final class Vision implements AutoCloseable {
     for (double rate : recentYawRates) {
       recentYawRate = Math.max(recentYawRate, rate);
     }
-    settings = currentSettings();
-    double speed = estimate.fieldVelocity().getNorm();
-    double headingStdDev = estimate.covariance().headingStdDev();
+    current = settings.get();
+    Motion motion =
+        new Motion(
+            estimate.fieldVelocity().getNorm(),
+            recentYawRate,
+            estimate.covariance().headingStdDev(),
+            poseKnown(estimate));
 
-    for (int i = 0; i < ios.length; i++) {
-      CameraConfig camera = cameras.get(i);
-      String key = "Vision/" + camera.name();
-      read(ios[i], inputs[i]);
-      Logger.processInputs(key, inputs[i]);
-      boolean readable = inputs[i].error.isEmpty();
-      disconnected[i].set(!inputs[i].connected && readable);
-      if (!readable) {
-        unreadable[i].setText("Camera " + camera.name() + " can't be read: " + inputs[i].error);
-      }
-      unreadable[i].set(!readable);
-
-      List<String> outcomes = new ArrayList<>();
-      if (inputs[i].skippedFrames > 0) {
-        outcomes.add(inputs[i].skippedFrames + " image(s) without a capture time, left out");
-      }
-      List<Pose3d> seenTags = new ArrayList<>();
-      double residualSum = 0;
-      int residualCount = 0;
+    for (Camera camera : cameras) {
+      camera.read();
       int next = 0;
-      for (CameraIO.Frame frame : inputs[i].frames) {
+      for (CameraIO.Frame frame : camera.inputs.frames) {
         int first = next;
         next += frame.tagCount();
         // One image's bad data costs that image, never the robot program: whatever a camera sends
-        // that the checks below miss ends here, logged as the image's outcome.
+        // that the checks miss ends here, logged as the image's outcome.
         try {
-          TagDetections detections = detections(frame, inputs[i].tags, first, camera.name());
-          if (!enabled[i].get()) {
-            outcomes.add("camera turned off");
-            continue;
-          }
-          if (frame.timestampNanos() <= lastFrame[i]) {
-            outcomes.add("the same image again");
-            continue;
-          }
-          lastFrame[i] = frame.timestampNanos();
-          Pose2d then = estimator.poseAt(frame.timestampNanos()).orElse(null);
-          Rotation2d heading = then != null ? then.getRotation() : null;
-          AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
-          VisionResult result =
-              pipeline.process(
-                  detections,
-                  camera,
-                  new CaptureContext(
-                      heading,
-                      headingStdDev,
-                      tilted.pitchRadians(),
-                      tilted.rollRadians(),
-                      speed,
-                      recentYawRate),
-                  settings);
-          VisionMeasurement measurement = result.measurement();
-          if (measurement == null) {
-            outcomes.add(result.outcome());
-          } else if (i == calibrating) {
-            outcomes.add("withheld while calibrating this camera: " + result.outcome());
-          } else if (frame.timestampNanos() < holdUntilNanos) {
-            outcomes.add("held, autonomous just started: " + result.outcome());
-          } else {
-            estimator.addVision(measurement);
-            outcomes.add(result.outcome());
-          }
-          HeadingAverage collecting = headings;
-          if (collecting != null && measurement != null && measurement.covariance().hasHeading()) {
-            collecting.add(measurement.pose().getRotation());
-          }
-          if (then != null) {
-            Pose3d robotThen =
-                new Pose3d(
-                    then.getX(),
-                    then.getY(),
-                    0,
-                    new Rotation3d(
-                        tilted.rollRadians(),
-                        tilted.pitchRadians(),
-                        then.getRotation().getRadians()));
-            CameraMountCalibration sightings =
-                i == calibrating
-                        && poseKnown(estimate)
-                        && frame.timestampNanos() - movingUntil >= STILL_NANOS
-                    ? mountCalibration
-                    : null;
-            for (TagDetections.Tag tag : detections.tags()) {
-              Pose3d seen =
-                  robotThen.transformBy(camera.robotToCamera()).transformBy(tag.bestCameraToTag());
-              seenTags.add(seen);
-              Pose3d real = field.tag(tag.id()).orElse(null);
-              if (real != null) {
-                residualSum += seen.getTranslation().getDistance(real.getTranslation());
-                residualCount++;
-                if (sightings != null) {
-                  sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
-                }
-              }
-            }
-          }
+          processFrame(camera, frame, first, motion);
         } catch (RuntimeException e) {
-          outcomes.add("unusable data from the camera: " + e.getMessage());
+          camera.outcome("unusable data from the camera: " + e.getMessage());
         }
       }
-      Logger.recordOutput(key + "/Outcomes", outcomes.toArray(String[]::new));
-      Logger.recordOutput(key + "/SeenTags", seenTags.toArray(Pose3d[]::new));
-      if (residualCount > 0) {
-        Logger.recordOutput(key + "/TagResidualMeters", residualSum / residualCount);
-        residualSums[i] += residualSum;
-        residualCounts[i] += residualCount;
-        Logger.recordOutput(key + "/MeanTagResidualMeters", meanTagResidualMeters(camera.name()));
-      }
+      camera.logLoop();
     }
   }
 
   /**
-   * Reads a camera. Nothing its IO throws gets past here: PhotonLib throws on purpose when the
-   * coprocessor runs a different PhotonVision version than the robot's library, and again every few
-   * seconds, which would end the robot program each time. Instead the camera reads as unreadable,
-   * with the reason, and the robot drives on its other sensors.
+   * How the robot moves this loop, and how well its pose is known: what every image is solved with.
+   *
+   * @param speed meters per second, over the field
+   * @param recentYawRate the fastest the robot turned lately, radians per second
+   * @param headingStdDev how sure the estimate's heading is, radians
+   * @param poseKnown whether the pose is held well enough to calibrate a camera against
    */
-  private static void read(CameraIO io, CameraIOInputsAutoLogged into) {
-    try {
-      io.updateInputs(into);
-      into.error = "";
-    } catch (RuntimeException e) {
-      into.connected = false;
-      into.frames = new CameraIO.Frame[] {};
-      into.tags = new CameraIO.SeenTag[] {};
-      into.skippedFrames = 0;
-      String why = e.getMessage();
-      into.error = why != null ? why.strip() : e.toString();
+  private record Motion(
+      double speed, double recentYawRate, double headingStdDev, boolean poseKnown) {}
+
+  /**
+   * One image: solved into a measurement for the estimator (unless it's held back), and its tags
+   * placed on the field, for the camera's residual and any calibration collecting them.
+   */
+  private void processFrame(Camera camera, CameraIO.Frame frame, int first, Motion motion) {
+    TagDetections detections = detections(frame, camera.inputs.tags, first, camera.name());
+    if (!camera.enabled.get()) {
+      camera.outcome("camera turned off");
+      return;
+    }
+    if (!camera.isNew(frame.timestampNanos())) {
+      camera.outcome("the same image again");
+      return;
+    }
+    Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);
+    Rotation2d heading = then != null ? then.getRotation() : null;
+    AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
+    VisionResult result =
+        pipeline.process(
+            detections,
+            camera.config,
+            new CaptureContext(
+                heading,
+                motion.headingStdDev(),
+                tilted.pitchRadians(),
+                tilted.rollRadians(),
+                motion.speed(),
+                motion.recentYawRate()),
+            current);
+    VisionMeasurement measurement = result.measurement();
+    if (measurement == null) {
+      camera.outcome(result.outcome());
+    } else if (camera == calibrating) {
+      camera.outcome("withheld while calibrating this camera: " + result.outcome());
+    } else if (frame.timestampNanos() < holdUntilNanos) {
+      camera.outcome("held, autonomous just started: " + result.outcome());
+    } else {
+      localizer.addVision(measurement);
+      camera.outcome(result.outcome());
+    }
+    HeadingAverage collecting = headings;
+    if (collecting != null && measurement != null && measurement.covariance().hasHeading()) {
+      collecting.add(measurement.pose().getRotation());
+    }
+    if (then != null) {
+      Pose3d robotThen =
+          new Pose3d(
+              then.getX(),
+              then.getY(),
+              0,
+              new Rotation3d(
+                  tilted.rollRadians(), tilted.pitchRadians(), then.getRotation().getRadians()));
+      CameraMountCalibration sightings =
+          camera == calibrating
+                  && motion.poseKnown()
+                  && frame.timestampNanos() - movingUntil >= STILL_NANOS
+              ? mountCalibration
+              : null;
+      recordSightings(camera, robotThen, detections, sightings);
+    }
+  }
+
+  /**
+   * Places each tag an image saw on the field, through where the robot was and the camera's
+   * configured mount, for the camera's residual; and gives it to the mount calibration collecting
+   * this camera's sightings, if one is.
+   */
+  private void recordSightings(
+      Camera camera,
+      Pose3d robotThen,
+      TagDetections detections,
+      @Nullable CameraMountCalibration sightings) {
+    for (TagDetections.Tag tag : detections.tags()) {
+      Pose3d seen =
+          robotThen.transformBy(camera.config.robotToCamera()).transformBy(tag.bestCameraToTag());
+      Pose3d real = field.tag(tag.id()).orElse(null);
+      camera.saw(seen, real);
+      if (real != null && sightings != null) {
+        sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
+      }
     }
   }
 
@@ -391,22 +343,8 @@ public final class Vision implements AutoCloseable {
 
   /** Counts and logs what the estimator decided about each camera's measurements. */
   public void record(List<VisionDecision> decisions) {
-    for (int i = 0; i < ios.length; i++) {
-      String name = cameras.get(i).name();
-      List<String> reasons = new ArrayList<>();
-      for (VisionDecision decision : decisions) {
-        if (decision.measurement().camera().equals(name)) {
-          reasons.add(decision.reason());
-          if (decision.accepted()) {
-            accepted[i]++;
-          } else {
-            rejected[i]++;
-          }
-        }
-      }
-      Logger.recordOutput("Vision/" + name + "/Decisions", reasons.toArray(String[]::new));
-      Logger.recordOutput("Vision/" + name + "/Accepted", accepted[i]);
-      Logger.recordOutput("Vision/" + name + "/Rejected", rejected[i]);
+    for (Camera camera : cameras) {
+      camera.record(decisions);
     }
   }
 
@@ -415,10 +353,10 @@ public final class Vision implements AutoCloseable {
     int connected = 0;
     int accepts = 0;
     int rejects = 0;
-    for (int i = 0; i < ios.length; i++) {
-      connected += inputs[i].connected ? 1 : 0;
-      accepts += accepted[i];
-      rejects += rejected[i];
+    for (Camera camera : cameras) {
+      connected += camera.isConnected() ? 1 : 0;
+      accepts += camera.accepted();
+      rejects += camera.rejected();
     }
     String fate =
         accepts + rejects == 0
@@ -428,7 +366,7 @@ public final class Vision implements AutoCloseable {
                 "%.0f%% of %d measurements accepted",
                 100.0 * accepts / (accepts + rejects),
                 accepts + rejects);
-    return connected + " of " + ios.length + " cameras connected, " + fate;
+    return connected + " of " + cameras.size() + " cameras connected, " + fate;
   }
 
   /**
@@ -440,12 +378,16 @@ public final class Vision implements AutoCloseable {
    * @return NaN until the camera has seen a tag
    */
   public double meanTagResidualMeters(String camera) {
-    for (int i = 0; i < cameras.size(); i++) {
-      if (cameras.get(i).name().equals(camera)) {
-        return residualCounts[i] == 0 ? Double.NaN : residualSums[i] / residualCounts[i];
+    return camera(camera).meanTagResidualMeters();
+  }
+
+  private Camera camera(String name) {
+    for (Camera camera : cameras) {
+      if (camera.name().equals(name)) {
+        return camera;
       }
     }
-    throw new IllegalArgumentException("no camera named " + camera);
+    throw new IllegalArgumentException("no camera named " + name);
   }
 
   /** How long autonomous's start holds the cameras back, in seconds: zero is off. */
@@ -453,45 +395,9 @@ public final class Vision implements AutoCloseable {
     return autoStartHoldSeconds;
   }
 
-  /** A camera's switch, by the camera's order: off leaves it out. */
-  TunableBoolean enabled(int camera) {
-    return enabled[camera];
-  }
-
-  boolean isDisconnectedAlertActive(int camera) {
-    return disconnected[camera].get();
-  }
-
-  boolean isUnreadableAlertActive(int camera) {
-    return unreadable[camera].get();
-  }
-
-  /** How many of a camera's measurements the estimator accepted, by the camera's order. */
-  int accepted(int camera) {
-    return accepted[camera];
-  }
-
-  int rejected(int camera) {
-    return rejected[camera];
-  }
-
-  /** The settings as tuned, or the last good ones if a tuned value is out of range. */
-  private VisionConfig currentSettings() {
-    try {
-      VisionConfig tuned =
-          VisionConfigBuilder.builder(VisionConfig.DEFAULTS)
-              .maxAmbiguity(maxAmbiguity.get())
-              .maxHeightErrorMeters(maxHeightError.get())
-              .linearStdDevBaseline(linearStdDevBaseline.get())
-              .angularStdDevBaseline(angularStdDevBaseline.get())
-              .distanceExponent(distanceExponent.get())
-              .build();
-      badSettings.set(false);
-      return tuned;
-    } catch (IllegalArgumentException e) {
-      badSettings.set(true);
-      return settings;
-    }
+  /** A camera, in the order of the cameras' configuration: its switch, alerts, and tallies. */
+  Camera camera(int index) {
+    return cameras.get(index);
   }
 
   /**
@@ -551,12 +457,9 @@ public final class Vision implements AutoCloseable {
 
   @Override
   public void close() {
-    for (int i = 0; i < ios.length; i++) {
-      ios[i].close();
-      disconnected[i].close();
-      unreadable[i].close();
+    for (Camera camera : cameras) {
+      camera.close();
     }
-    badSettings.close();
     for (String path : tunablePaths) {
       TunableRegistry.remove(path);
     }

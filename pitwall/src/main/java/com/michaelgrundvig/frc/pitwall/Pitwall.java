@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.pitwall;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.backend.NetworkTablesTunableBackend;
@@ -12,7 +11,6 @@ import org.wpilib.framework.RobotBase;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.system.RobotController;
-import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.Alert;
 
@@ -20,20 +18,20 @@ import org.wpilib.util.Alert;
  * Pitwall in a robot program, in two lines:
  *
  * <pre>{@code
- * pitwall = Pitwall.start(Robots.PRACTICE.name(), Robots.PRACTICE); // after Logger.start()
+ * pitwall = Pitwall.start(robot.name()); // after Logger.start(), before the mechanisms
  * pitwall.periodic(); // first thing in robotPeriodic()
  * }</pre>
  *
  * <p>That serves the page (http://robot.local:5820, or localhost in the simulator), shows the
- * standard status (which robot and code, the mode, the battery), tunes the configuration's {@link
- * Tunable} values, and runs actions. Read the configuration through {@link #config()}, which
- * includes tuned values, and add status items and actions through {@link #status()} and {@link
- * #actions()}.
+ * standard status (which robot and code, the mode, the battery), tunes, and runs actions. Add
+ * status items and actions through {@link #status()} and {@link #actions()}.
  *
- * <p>Every WPILib tunable in the program goes through Pitwall's {@link TunableTee}, around WPILib's
- * own NetworkTables backend: dashboards work as before, changes apply only while tuning is on and
- * never on the field, and the configuration's values are published as tunables under {@code
- * Config/}, where a change from a dashboard goes through the same checks as one from the page.
+ * <p>Tuning is WPILib's tunables. Every tunable in the program goes through Pitwall's {@link
+ * TunableTee}, around WPILib's own NetworkTables backend: dashboards work as before, while changes
+ * apply only while tuning is on, never on the field, and within each tunable's {@link Limits}. A
+ * mechanism's configuration is tuned as a {@link LiveConfig} it publishes, checked whole before a
+ * change applies, returned to committed when the field connects, and reported as the builder calls
+ * that commit it.
  *
  * <p>With AdvantageKit, every request from the page is logged as an input, so a replay makes the
  * same changes at the same moments; while replaying, the page doesn't start. Without AdvantageKit
@@ -41,32 +39,20 @@ import org.wpilib.util.Alert;
  *
  * @param <T> the robot's configuration record
  */
-public final class Pitwall<T extends Record> implements AutoCloseable {
-  private final Tuning<T> tuning;
+public final class Pitwall implements AutoCloseable {
+  private final Tuning tuning;
   private final Status status;
   private final Actions actions;
   private final TunableTee tee;
-  private final List<String> configTunables = new ArrayList<>();
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
+  private final Alert changedSwitches = new Alert("Pitwall", "", Alert.Level.HIGH);
   private final boolean advantageKit;
   private final @Nullable PitwallServer server;
   private boolean wasEnabled;
+  private boolean wasFieldConnected;
 
-  private Pitwall(String name, T config, int port, boolean advantageKit) {
+  private Pitwall(String name, int port, boolean advantageKit) {
     this.advantageKit = advantageKit;
-    // Tuning starts switched on in the simulator; on a robot, switch it on from the page. While a
-    // tuned value differs from the committed one, an alert says which.
-    tuning =
-        new Tuning<>(
-            name,
-            config,
-            RobotBase.isSimulation(),
-            advantageKit ? AdvantageKitLog.tuning() : inputs -> {},
-            view -> {
-              tuned.setText(
-                  "Tuned values differ from the committed configuration: " + view.changedPaths());
-              tuned.set(view.hasChanges());
-            });
     status = new Status().add("Robot", () -> name);
     Supplier<String> code = code();
     if (code != null) {
@@ -88,8 +74,21 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
             this::whyLocked,
             advantageKit ? AdvantageKitLog.tunables() : inputs -> {},
             replaying);
+    // Tuning starts switched on in the simulator; on a robot, switch it on from the page. While a
+    // tuned value differs from the committed one, an alert says which.
+    tuning =
+        new Tuning(
+            name,
+            tee::configs,
+            tee::pathOf,
+            RobotBase.isSimulation(),
+            advantageKit ? AdvantageKitLog.tuning() : inputs -> {},
+            view -> {
+              tuned.setText(
+                  "Tuned values differ from the committed configuration: " + view.changedPaths());
+              tuned.set(view.hasChanges());
+            });
     TunableRegistry.registerBackend("", tee);
-    publishConfigTunables();
     server = replaying ? null : startPage(status, tuning, actions, tee, port);
   }
 
@@ -98,9 +97,10 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
    * trimmed without it (the {@code jdk.httpserver} module) only loses the page.
    */
   private static @Nullable PitwallServer startPage(
-      Status status, Tuning<?> tuning, Actions actions, TunableTee tee, int port) {
+      Status status, Tuning tuning, Actions actions, TunableTee tee, int port) {
     try {
-      return PitwallServer.startOrExplain(status, tuning, actions, tee, port, System.out::println)
+      return PitwallServer.startOrExplain(
+              status, tuning, actions, tee, port, thisComputerOnly(), System.out::println)
           .orElse(null);
     } catch (LinkageError e) {
       System.out.println(
@@ -114,24 +114,24 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
    * Starts Pitwall and its page on {@link PitwallServer#PORT}, or on the port the {@code
    * pitwall.port} system property names (0 picks a free one).
    */
-  public static <T extends Record> Pitwall<T> start(String name, T config) {
-    return start(name, config, Integer.getInteger("pitwall.port", PitwallServer.PORT));
+  public static Pitwall start(String name) {
+    return start(name, Integer.getInteger("pitwall.port", PitwallServer.PORT));
   }
 
   /**
-   * Starts Pitwall and its page.
+   * Starts Pitwall and its page. Start it before the mechanisms, so the tunables they publish go
+   * through it.
    *
    * @param name the robot's name, for the page and the logs
-   * @param config the robot's committed configuration
    * @param port where to serve the page; 0 picks a free one
    */
-  public static <T extends Record> Pitwall<T> start(String name, T config, int port) {
-    return new Pitwall<>(name, config, port, advantageKitPresent());
+  public static Pitwall start(String name, int port) {
+    return new Pitwall(name, port, advantageKitPresent());
   }
 
-  /** The robot's configuration with every tuned value applied. Read it in the robot loop. */
-  public T config() {
-    return tuning.config();
+  /** Live tuning's switch, and the live configurations' state. */
+  public Tuning tuning() {
+    return tuning;
   }
 
   /** The status the page shows. Add items here: {@code status().add("Arm homed", arm::isHomed)}. */
@@ -159,25 +159,53 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
 
   /**
    * Applies the page's requests, then reads the status. Call it first thing in {@code
-   * robotPeriodic()}, before anything reads {@link #config()} and before the command scheduler
-   * runs. When the robot disables, it prints (and logs) what tuning changed, so it can be
-   * committed.
+   * robotPeriodic()}, before anything reads a configuration and before the command scheduler runs.
+   * When the robot disables, it prints (and logs) what tuning changed, so it can be committed.
    */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
     boolean fieldConnected = RobotState.isFMSAttached();
+    if (fieldConnected && !wasFieldConnected) {
+      // Tuning returns every tuned value to its committed one now: say what they were first.
+      report(
+          "The field system connected: tuned values return to the committed configuration",
+          tuning.report());
+    }
     tuning.periodic(fieldConnected);
     actions.periodic(
         new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected));
     status.periodic();
     if (wasEnabled && !enabled) {
-      List<String> report = tuning.report();
-      report.forEach(System.out::println);
-      if (advantageKit) {
-        AdvantageKitLog.recordOutput("Pitwall/TuningReport", report.toArray(String[]::new));
+      report("", tuning.report());
+    }
+    // Switches (a camera left off, say) keep their setting on the field: say which differ.
+    List<String> switches = fieldConnected ? tee.changedSinceStartup() : List.of();
+    if (!switches.isEmpty()) {
+      String text =
+          "On the field with settings changed since startup: " + String.join(", ", switches);
+      if (!text.equals(changedSwitches.getText())) {
+        changedSwitches.setText(text);
       }
     }
+    changedSwitches.set(!switches.isEmpty());
     wasEnabled = enabled;
+    wasFieldConnected = fieldConnected;
+  }
+
+  /** Prints what tuning changed, and logs it, when there's anything to say. */
+  private void report(String heading, List<String> lines) {
+    if (lines.isEmpty()) {
+      return;
+    }
+    List<String> all = new ArrayList<>();
+    if (!heading.isEmpty()) {
+      all.add(heading + ":");
+    }
+    all.addAll(lines);
+    all.forEach(System.out::println);
+    if (advantageKit) {
+      AdvantageKitLog.recordOutput("Pitwall/TuningReport", all.toArray(String[]::new));
+    }
   }
 
   /**
@@ -186,7 +214,6 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
    */
   @Override
   public void close() {
-    configTunables.forEach(TunableRegistry::remove);
     TunableRegistry.registerBackend(
         "", new NetworkTablesTunableBackend(NetworkTableInstance.getDefault(), "/Tunables"));
     PitwallServer running = server;
@@ -198,34 +225,12 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
       }
     }
     tuned.close();
-  }
-
-  /**
-   * Publishes each tunable configuration value as a WPILib tunable at {@code Config/<path>}, so
-   * dashboards show and change it too. A change from a dashboard goes through {@link Tuning},
-   * checked and logged like one from the page; a refused one snaps back.
-   */
-  private void publishConfigTunables() {
-    for (Tuning.Value value : tuning.view().values()) {
-      String path = value.path();
-      TunableDouble tunable =
-          TunableDouble.create(
-              () -> tuning.value(path), v -> tuning.requestChanges(Map.of(path, v)));
-      tee.passThrough(tunable);
-      String published = "Config/" + path.replace('.', '/');
-      if (TunableRegistry.publish(published, tunable)) {
-        configTunables.add(published);
-      }
-    }
+    changedSwitches.close();
   }
 
   /** Why changes to tunables are refused right now, or null while they're allowed. */
   private @Nullable String whyLocked() {
-    Tuning.View view = tuning.view();
-    if (view.fieldConnected()) {
-      return "the field system is connected";
-    }
-    return view.enabled() ? null : "tuning is off";
+    return tuning.whyLocked();
   }
 
   /** The mode as the status shows it: "Teleop, enabled", "Autonomous, disabled, on the field". */
@@ -261,6 +266,15 @@ public final class Pitwall<T extends Record> implements AutoCloseable {
     } catch (ReflectiveOperationException | ClassCastException | NullPointerException e) {
       return null;
     }
+  }
+
+  /**
+   * Whether the page serves only this computer: in the simulator, whose laptop may be on a school's
+   * or an event's network, unless {@code -Dpitwall.network=true} asks for the network too (to open
+   * it on a phone). On the robot it always serves the robot's network.
+   */
+  static boolean thisComputerOnly() {
+    return RobotBase.isSimulation() && !Boolean.getBoolean("pitwall.network");
   }
 
   /** Whether the robot program has AdvantageKit, checked without loading any of it. */

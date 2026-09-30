@@ -5,16 +5,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
+import frc.robot.SimulationTest;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.Terrain;
+import frc.robot.lib.localization.EstimatorConfig;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -26,25 +27,16 @@ import org.wpilib.math.geometry.Translation2d;
  * errors real ones have. Each test injects one error and checks that odometry drifts from the truth
  * the way a real robot's does: the gap localization has to close.
  */
+@SimulationTest
+@ExtendWith(RobotSim.class)
 class DriveSimulationTest {
   private @Nullable DriveSimHarness harness;
-
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
-  @BeforeEach
-  void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-  }
 
   @AfterEach
   void tearDown() {
     if (harness != null) {
       harness.close();
     }
-    SimTestSupport.resumeTime();
   }
 
   private DriveSimHarness robot(SensorErrors errors) {
@@ -52,14 +44,14 @@ class DriveSimulationTest {
     return harness;
   }
 
+  /** Both IMUs reading with this scale and drift, and no noise. */
   private static SensorErrors gyro(double scale, double driftDegreesPerMinute) {
-    return new SensorErrors(
-        List.of(1.0, 1.0, 1.0, 1.0),
-        List.of(0.0, 0.0, 0.0, 0.0),
-        scale,
-        driftDegreesPerMinute,
-        0,
-        1);
+    return SensorErrors.NONE.withGyros(
+        SensorErrors.GyroErrors.builder()
+            .scale(scale)
+            .driftDegreesPerMinute(driftDegreesPerMinute)
+            .noiseDegrees(0)
+            .build());
   }
 
   @Test
@@ -87,9 +79,9 @@ class DriveSimulationTest {
 
   @Test
   void aDriftingGyroTurnsTheEstimateWhileTheRobotSitsStill() {
-    DriveSimHarness robot = robot(gyro(1.0, 1.0));
+    DriveSimHarness robot = robot(gyro(1.0, 10.0));
 
-    robot.idle(60);
+    robot.idle(6); // a tenth of a minute
 
     assertThat(robot.headingErrorDegrees()).isCloseTo(1.0, within(0.01));
     assertThat(robot.positionError()).as("its wheels never turned").isLessThan(1e-9);
@@ -110,7 +102,9 @@ class DriveSimulationTest {
   @Test
   void anEncoderZeroedOffPointsItsModuleWrongAndOdometryDrifts() {
     SensorErrors oneOff =
-        new SensorErrors(List.of(1.0, 1.0, 1.0, 1.0), List.of(5.0, 0.0, 0.0, 0.0), 1.0, 0, 0, 1);
+        SensorErrorsBuilder.builder(SensorErrors.NONE)
+            .steerOffsetDegrees(List.of(5.0, 0.0, 0.0, 0.0))
+            .build();
     DriveSimHarness robot = robot(oneOff);
 
     robot.drive(2.0, 1.0, 0, 0);
@@ -148,7 +142,7 @@ class DriveSimulationTest {
 
     robot.simulation.place(start);
     robot.loop();
-    robot.drive.resetPose(start);
+    robot.localization.resetPose(start);
 
     assertThat(robot.positionError()).isLessThan(1e-9);
     assertThat(robot.headingErrorDegrees()).isCloseTo(0.0, within(1e-9));
@@ -185,13 +179,13 @@ class DriveSimulationTest {
   /** Up a ramp the wheels roll farther than the robot moves across the field; odometry knows. */
   @Test
   void onAKnownRampOdometryCountsTheWheelsTravelAtTheSlope() {
-    DriveSimHarness robot = robot(SensorErrors.NONE);
-    robot.simulation.setTerrain(RAMP);
-    robot.drive.setTerrain(RAMP);
+    DriveSimHarness robot =
+        new DriveSimHarness(Robots.SIM, SensorErrors.NONE, EstimatorConfig.DEFAULTS, RAMP);
+    harness = robot;
     Pose2d start = new Pose2d(3.4, 4, Rotation2d.ZERO);
     robot.simulation.place(start);
     robot.loop();
-    robot.drive.resetPose(start);
+    robot.localization.resetPose(start);
     double wheelBefore = robot.drive.wheelRotationsRadians()[0];
 
     robot.run(robot.drive.driveForward(1.0, 0.8), 1.0);
@@ -214,7 +208,7 @@ class DriveSimulationTest {
   }
 
   private static Pose2d drivenWith(SensorErrors errors) {
-    SimTestSupport.pauseTimeAndDisable();
+    RobotSim.setEnabled(false);
     try (DriveSimHarness robot = new DriveSimHarness(Robots.SIM, errors)) {
       robot.drive(1.0, 0.8, 0.2, 0.5);
       return robot.drive.getPose();
@@ -227,12 +221,15 @@ class DriveSimulationTest {
         .hasMessageContaining("positive");
     assertThatThrownBy(
             () ->
-                new SensorErrors(List.of(1.0, 1.0, 1.0), List.of(0.0, 0.0, 0.0, 0.0), 1.0, 0, 0, 1))
+                SensorErrorsBuilder.builder(SensorErrors.NONE)
+                    .wheelRadiusScale(List.of(1.0, 1.0, 1.0))
+                    .build())
         .hasMessageContaining("per module");
     assertThatThrownBy(
             () ->
-                new SensorErrors(
-                    List.of(1.0, 1.0, 1.0, 1.0), List.of(0.0, 0.0, 0.0, Double.NaN), 1.0, 0, 0, 1))
+                SensorErrorsBuilder.builder(SensorErrors.NONE)
+                    .steerOffsetDegrees(List.of(0.0, 0.0, 0.0, Double.NaN))
+                    .build())
         .hasMessageContaining("steer offset");
     assertThatThrownBy(() -> gyro(1.0, Double.NaN)).hasMessageContaining("gyro");
     assertThatThrownBy(() -> robot(SensorErrors.NONE).simulation.step(0, 0))

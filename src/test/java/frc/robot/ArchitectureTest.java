@@ -7,7 +7,6 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
-import com.michaelgrundvig.frc.pitwall.Tunable;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
@@ -59,14 +58,10 @@ class ArchitectureTest {
                     "org.jspecify..",
                     // The annotations on generated configuration builders; nothing at run time.
                     "io.soabase.recordbuilder..")
-                // Plain values from elsewhere in WPILib, and Pitwall's @Tunable, which marks the
-                // configuration values that can be dialed in.
+                // Plain values from elsewhere in WPILib.
                 .or(
                     belongToAnyOf(
-                        Alliance.class,
-                        CANPort.class,
-                        OnboardIMU.MountOrientation.class,
-                        Tunable.class)))
+                        Alliance.class, CANPort.class, OnboardIMU.MountOrientation.class)))
         .because(
             "components must work in any robot and be testable without one: no hardware, robot"
                 + " state, NetworkTables, telemetry, tunables, commands, or simulation inside")
@@ -150,7 +145,13 @@ class ArchitectureTest {
   void onlyTheTopLevelUsesTheTopLevel() {
     noClasses()
         .that()
-        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..")
+        .resideInAnyPackage(
+            "frc.robot.lib..",
+            "frc.robot.subsystems..",
+            "frc.robot.commands..",
+            "frc.robot.dashboard..",
+            "frc.robot.game..",
+            "frc.robot.sim..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot")

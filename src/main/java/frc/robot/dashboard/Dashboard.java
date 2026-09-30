@@ -1,6 +1,5 @@
-package frc.robot;
+package frc.robot.dashboard;
 
-import frc.robot.lib.field.Placement;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -20,7 +19,7 @@ import org.wpilib.util.AlertDataJNI;
  * renaming a logged value never blanks the dashboard, and the dashboard keeps its full rate on the
  * field, where the log's stream is thinned ({@link DashboardStream}).
  */
-final class Dashboard {
+public final class Dashboard {
   static final String MATCH_TIME = "Dashboard/MatchTime";
   static final String READY_TO_SCORE = "Dashboard/ReadyToScore";
   static final String SCORING = "Dashboard/Scoring";
@@ -41,17 +40,17 @@ final class Dashboard {
   private Dashboard() {}
 
   /** Publishes every value: once a loop, after the robot has updated them. */
-  static void publish(RobotContainer robot) {
+  public static void publish(RobotStatus robot) {
     Telemetry.log(MATCH_TIME, MatchState.getMatchTime());
     Telemetry.log(READY_TO_SCORE, robot.readyToScore());
     Telemetry.log(SCORING, robot.scoring());
-    Telemetry.log(STATION, robot.allianceStation());
-    Telemetry.log(ON_START, robot.placement().status() == Placement.Status.READY);
-    Telemetry.log(PLACEMENT, robot.placement().describe());
+    Telemetry.log(STATION, robot.station());
+    Telemetry.log(ON_START, robot.onStart());
+    Telemetry.log(PLACEMENT, robot.placement());
     Telemetry.log(LOCALIZATION, robot.localization());
     Telemetry.log(CAMERAS, robot.cameras());
     Telemetry.log(BATTERY_VOLTS, RobotController.getBatteryVoltage());
-    Telemetry.log(LOOP, robot.loopStatus());
+    Telemetry.log(LOOP, robot.loop());
     publishAlerts();
   }
 

@@ -16,6 +16,8 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.Motor;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.VisionConfig;
 import java.util.List;
 import java.util.Optional;
 
@@ -122,26 +124,50 @@ public final class Robots {
    */
   private static final List<CameraConfig> CAMERAS =
       List.of(
-          camera("front-left", -7.75, 12.25, 21, 0, 10, 23.162),
-          camera("front-right", -8.625, -12.25, 20.875, 0, 8.2, -23.162),
-          camera("back-left", -10.5, 12, 21, -2, 10, 180.985),
-          camera("back-right", -11.6875, -12, 20.705, 0, 12.5, 180.985));
-
-  /** A camera on this robot: position in inches, angles in degrees. */
-  private static CameraConfig camera(
-      String name, double forward, double left, double up, double roll, double tiltUp, double yaw) {
-    return CameraConfig.builder()
-        .name(name)
-        .forward(Inches.of(forward))
-        .left(Inches.of(left))
-        .up(Inches.of(up))
-        .roll(Degrees.of(roll))
-        .tiltUp(Degrees.of(tiltUp))
-        .yaw(Degrees.of(yaw))
-        .sensor(APRILTAG_CAMERA)
-        .noiseScale(1.0)
-        .build();
-  }
+          CameraConfig.builder()
+              .name("front-left")
+              .forward(Inches.of(-7.75))
+              .left(Inches.of(12.25))
+              .up(Inches.of(21))
+              .roll(Degrees.of(0))
+              .tiltUp(Degrees.of(10))
+              .yaw(Degrees.of(23.162))
+              .sensor(APRILTAG_CAMERA)
+              .noiseScale(1.0)
+              .build(),
+          CameraConfig.builder()
+              .name("front-right")
+              .forward(Inches.of(-8.625))
+              .left(Inches.of(-12.25))
+              .up(Inches.of(20.875))
+              .roll(Degrees.of(0))
+              .tiltUp(Degrees.of(8.2))
+              .yaw(Degrees.of(-23.162))
+              .sensor(APRILTAG_CAMERA)
+              .noiseScale(1.0)
+              .build(),
+          CameraConfig.builder()
+              .name("back-left")
+              .forward(Inches.of(-10.5))
+              .left(Inches.of(12))
+              .up(Inches.of(21))
+              .roll(Degrees.of(-2))
+              .tiltUp(Degrees.of(10))
+              .yaw(Degrees.of(180.985))
+              .sensor(APRILTAG_CAMERA)
+              .noiseScale(1.0)
+              .build(),
+          CameraConfig.builder()
+              .name("back-right")
+              .forward(Inches.of(-11.6875))
+              .left(Inches.of(-12))
+              .up(Inches.of(20.705))
+              .roll(Degrees.of(0))
+              .tiltUp(Degrees.of(12.5))
+              .yaw(Degrees.of(180.985))
+              .sensor(APRILTAG_CAMERA)
+              .noiseScale(1.0)
+              .build());
 
   /**
    * The template's robot. It has no wiring: on real hardware its drivetrain stays still and says
@@ -154,6 +180,8 @@ public final class Robots {
           .drivetrain(DRIVETRAIN)
           .drivetrainWiring(Optional.empty())
           .cameras(CAMERAS)
+          .vision(VisionConfig.DEFAULTS)
+          .estimator(EstimatorConfig.DEFAULTS)
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */

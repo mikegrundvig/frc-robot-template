@@ -9,12 +9,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -31,32 +33,36 @@ import org.jspecify.annotations.Nullable;
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
  * simulator, http://robot.local:5820 on the robot. Any browser works, a phone's included, and so
  * does anything else that speaks HTTP. It serves the robot's status ({@link Status}), actions
- * ({@link Actions}), live tuning of the configuration ({@link Tuning}), and every WPILib tunable in
- * the program ({@link TunableTee}):
+ * ({@link Actions}), live tuning of the mechanisms' configurations ({@link Tuning}, {@link
+ * LiveConfig}), and every WPILib tunable in the program ({@link TunableTee}):
  *
  * <ul>
  *   <li>{@code GET /api/status}: the status items as of the last loop, {@code [{"name", "value"}]}.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
  *       "detail"}]}. {@code POST} it {@code {"start": name}} or {@code {"cancel": name}}.
- *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected"}}. {@code
- *       PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
- *   <li>{@code GET /api/tunables}: what can be tuned, {@code {path: {"unit", "committed"}}}.
- *   <li>{@code GET /api/values}: the current values, {@code {path: number}}. {@code PATCH} it with
- *       a JSON merge patch (RFC 7396) to change several at once, all or none; {@code null} returns
- *       a value to its committed one.
- *   <li>{@code GET /api/changes}: what differs from the committed configuration, with the builder
- *       calls that commit it ({@code Accept: text/plain} for the report). {@code DELETE} it to
- *       return every value to its committed one.
+ *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected",
+ *       "refused"}}, the last being the latest dashboard changes refused and why (a dashboard can't
+ *       say). {@code PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
+ *   <li>{@code GET /api/tunables}: the configurations' tunable values, by the WPILib tunable each
+ *       is published as, {@code {path: {"config", "field", "unit", "limits", "committed"}}}.
+ *   <li>{@code GET /api/values}: their current values, {@code {path: number}}. {@code PATCH} it
+ *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
+ *       its configuration first; {@code null} returns a value to its committed one.
+ *   <li>{@code GET /api/changes}: what differs from the committed configurations, with the builder
+ *       calls that commit it, {@code [{"config", "path", "committed", "tuned", "builderCall"}]}
+ *       ({@code Accept: text/plain} for the report). {@code DELETE} it to return every value to its
+ *       committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
- *       "value", "editable"}]}. {@code PATCH} it with {@code {path: value}} to change several at
- *       once, all or none.
+ *       "value", "editable", "limits"}]}, the limits as text ({@code "0 to 30"}, empty for none).
+ *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
+ *       within its limits.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
- * when applied, 422 when the configuration's checks (or the action) refuse it, 409 when it is
- * locked out (tuning off, not enabled in utility mode, or the field system connected), and 202 when
- * the loop didn't get to it in time (the next GET shows the result). Errors are problem details
- * (RFC 9457).
+ * when applied, 422 when a limit or the configuration's checks (or the action) refuse it, 409 when
+ * it is locked out (tuning off, not enabled in utility mode, or the field system connected), and
+ * 202 when the loop didn't get to it in time (the next GET shows the result). Errors are problem
+ * details (RFC 9457).
  *
  * <p>The server's threads never change the robot: they read what the robot loop last published
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
@@ -93,17 +99,12 @@ public final class PitwallServer implements AutoCloseable {
    * @param port the port to serve on; 0 picks a free one
    */
   public PitwallServer(
-      Status status, Tuning<?> tuning, Actions actions, TunableTee tunables, int port) {
+      Status status, Tuning tuning, Actions actions, TunableTee tunables, int port) {
     this(status, tuning, actions, tunables, port, WAIT);
   }
 
   PitwallServer(
-      Status status,
-      Tuning<?> tuning,
-      Actions actions,
-      TunableTee tunables,
-      int port,
-      Duration wait) {
+      Status status, Tuning tuning, Actions actions, TunableTee tunables, int port, Duration wait) {
     this.port = port;
     try {
       server = HttpServer.create();
@@ -133,15 +134,32 @@ public final class PitwallServer implements AutoCloseable {
    */
   public static Optional<PitwallServer> startOrExplain(
       Status status,
-      Tuning<?> tuning,
+      Tuning tuning,
       Actions actions,
       TunableTee tunables,
       int port,
       Consumer<String> say) {
+    return startOrExplain(status, tuning, actions, tunables, port, false, say);
+  }
+
+  /**
+   * Starts the page, or says why it couldn't.
+   *
+   * @param thisComputerOnly serve only to this computer (the simulator on a laptop, where the
+   *     network may be a school's or an event's), not to the network the robot is on
+   */
+  public static Optional<PitwallServer> startOrExplain(
+      Status status,
+      Tuning tuning,
+      Actions actions,
+      TunableTee tunables,
+      int port,
+      boolean thisComputerOnly,
+      Consumer<String> say) {
     PitwallServer server = null;
     try {
       server = new PitwallServer(status, tuning, actions, tunables, port);
-      server.start();
+      server.start(thisComputerOnly);
       say.accept(
           "Pitwall: http://localhost:"
               + server.port()
@@ -158,8 +176,22 @@ public final class PitwallServer implements AutoCloseable {
     }
   }
 
+  /** Serves the page to the network the robot is on. */
   public void start() throws IOException {
-    server.bind(new InetSocketAddress(port), 0);
+    start(false);
+  }
+
+  /**
+   * Serves the page.
+   *
+   * @param thisComputerOnly serve only to this computer, not to the network
+   */
+  public void start(boolean thisComputerOnly) throws IOException {
+    server.bind(
+        thisComputerOnly
+            ? new InetSocketAddress(InetAddress.getLoopbackAddress(), port)
+            : new InetSocketAddress(port),
+        0);
     server.start();
   }
 
@@ -218,7 +250,7 @@ public final class PitwallServer implements AutoCloseable {
             "/api/wpilib-tunables", List.of("GET", "PATCH"));
 
     private final Status status;
-    private final Tuning<?> tuning;
+    private final Tuning tuning;
     private final Actions actions;
     private final TunableTee tunables;
     private final String page;
@@ -227,7 +259,7 @@ public final class PitwallServer implements AutoCloseable {
 
     Api(
         Status status,
-        Tuning<?> tuning,
+        Tuning tuning,
         Actions actions,
         TunableTee tunables,
         String page,
@@ -245,6 +277,7 @@ public final class PitwallServer implements AutoCloseable {
         String path = exchange.getRequestURI().getPath();
         String method = exchange.getRequestMethod();
         try {
+          checkAddressed(exchange, method);
           List<String> allowed = METHODS.get(path);
           if (allowed == null) {
             throw new Problem(404, "Not found", "There is nothing at " + path);
@@ -276,6 +309,42 @@ public final class PitwallServer implements AutoCloseable {
           sendProblem(exchange, new Problem(500, "Server error", String.valueOf(e)));
         }
       }
+    }
+
+    /**
+     * Refuses a request addressed to anything but the robot itself, and a change sent from another
+     * site's page. A web page open on a laptop connected to the robot could otherwise point a name
+     * it controls at the robot's address (DNS rebinding) and use the page as its own; the address
+     * the request names gives it away. The robot is reached by address, as localhost, or by its
+     * local name (robot.local).
+     */
+    private static void checkAddressed(HttpExchange exchange, String method) {
+      String host = exchange.getRequestHeaders().getFirst("Host");
+      if (host == null || !isRobotsOwn(withoutPort(host))) {
+        throw new Problem(
+            403, "Wrong address", "Pitwall answers only at the robot's own address or name");
+      }
+      String origin = exchange.getRequestHeaders().getFirst("Origin");
+      if (!method.equals("GET") && origin != null && !origin.equals("http://" + host)) {
+        throw new Problem(403, "Another site", "Changes come only from Pitwall's own page");
+      }
+    }
+
+    private static String withoutPort(String host) {
+      if (host.startsWith("[")) {
+        int end = host.indexOf(']');
+        return end < 0 ? host : host.substring(0, end + 1);
+      }
+      int colon = host.lastIndexOf(':');
+      return colon < 0 ? host : host.substring(0, colon);
+    }
+
+    private static boolean isRobotsOwn(String name) {
+      String host = name.toLowerCase(Locale.ROOT);
+      return host.equals("localhost")
+          || host.endsWith(".local")
+          || host.startsWith("[") // an IPv6 address
+          || host.matches("\\d{1,3}(\\.\\d{1,3}){3}"); // an IPv4 address
     }
 
     private void postAction(HttpExchange exchange) throws IOException {
@@ -318,10 +387,10 @@ public final class PitwallServer implements AutoCloseable {
     private void patchValues(HttpExchange exchange) throws IOException {
       Map<String, @Nullable Object> patch = readObject(exchange);
       Map<String, Tuning.Value> known = new LinkedHashMap<>();
-      for (Tuning.Value value : tuning.view().values()) {
+      for (Tuning.Value value : configValues()) {
         known.put(value.path(), value);
       }
-      Map<String, Double> values = new LinkedHashMap<>();
+      Map<String, Object> values = new LinkedHashMap<>();
       for (Map.Entry<String, @Nullable Object> field : patch.entrySet()) {
         Tuning.Value value = known.get(field.getKey());
         if (value == null) {
@@ -339,7 +408,8 @@ public final class PitwallServer implements AutoCloseable {
               value.path() + " must be a number, or null to return it to its committed value");
         }
       }
-      answer(exchange, tuning.requestChanges(values), this::values);
+      // A configuration's values are WPILib tunables: the tee checks them whole, and applies them.
+      answer(exchange, tunables.requestChanges(values), this::values);
     }
 
     private void patchWpilibTunables(HttpExchange exchange) throws IOException {
@@ -489,26 +559,37 @@ public final class PitwallServer implements AutoCloseable {
       session.put("name", view.name());
       session.put("enabled", view.enabled());
       session.put("fieldConnected", view.fieldConnected());
+      session.put("refused", tunables.refusals());
       return session;
     }
 
     private Map<String, Object> tunables() {
-      Map<String, Object> tunables = new LinkedHashMap<>();
-      for (Tuning.Value value : tuning.view().values()) {
-        Map<String, Object> description = new LinkedHashMap<>();
-        description.put("unit", value.unit());
-        description.put("committed", value.committed());
-        tunables.put(value.path(), description);
+      Map<String, Object> described = new LinkedHashMap<>();
+      for (Tuning.ConfigView config : tuning.view().configs()) {
+        for (Tuning.Value value : config.values()) {
+          Map<String, Object> description = new LinkedHashMap<>();
+          description.put("config", config.name());
+          description.put("field", value.field());
+          description.put("unit", value.unit());
+          description.put(
+              "limits", value.limits().equals(Limits.NONE) ? "" : value.limits().toString());
+          description.put("committed", value.committed());
+          described.put(value.path(), description);
+        }
       }
-      return tunables;
+      return described;
     }
 
     private Map<String, Object> values() {
       Map<String, Object> values = new LinkedHashMap<>();
-      for (Tuning.Value value : tuning.view().values()) {
+      for (Tuning.Value value : configValues()) {
         values.put(value.path(), value.current());
       }
       return values;
+    }
+
+    private List<Tuning.Value> configValues() {
+      return tuning.view().configs().stream().flatMap(config -> config.values().stream()).toList();
     }
 
     private List<Object> wpilibTunables() {
@@ -519,6 +600,8 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("type", tunable.type());
         shown.put("value", tunable.value());
         shown.put("editable", tunable.editable());
+        shown.put(
+            "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
         listed.add(shown);
       }
       return listed;
@@ -526,13 +609,16 @@ public final class PitwallServer implements AutoCloseable {
 
     private List<Object> changes() {
       List<Object> changes = new ArrayList<>();
-      for (ConfigTuner.Change change : tuning.view().changes()) {
-        Map<String, Object> shown = new LinkedHashMap<>();
-        shown.put("path", change.path());
-        shown.put("committed", change.committed());
-        shown.put("tuned", change.tuned());
-        shown.put("builderCall", change.builderCall());
-        changes.add(shown);
+      for (Tuning.ConfigView config : tuning.view().configs()) {
+        for (LiveConfig.Change change : config.changes()) {
+          Map<String, Object> shown = new LinkedHashMap<>();
+          shown.put("config", config.name());
+          shown.put("path", change.path());
+          shown.put("committed", change.committed());
+          shown.put("tuned", change.tuned());
+          shown.put("builderCall", change.builderCall());
+          changes.add(shown);
+        }
       }
       return changes;
     }
@@ -555,6 +641,17 @@ public final class PitwallServer implements AutoCloseable {
       byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
       exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
+      // The page may not be framed by another site's page (to trick a click on its buttons), and
+      // loads nothing from anywhere else.
+      exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+      exchange
+          .getResponseHeaders()
+          .set(
+              "Content-Security-Policy",
+              "default-src 'self'; script-src 'self' 'unsafe-inline';"
+                  + " style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
+      exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+      exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
       exchange.sendResponseHeaders(status, bytes.length > 0 ? bytes.length : -1);
       if (bytes.length > 0) {
         try (OutputStream out = exchange.getResponseBody()) {

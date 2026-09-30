@@ -45,7 +45,7 @@ catches a kind of bug that robot code otherwise accumulates quietly until it bit
 | **Compiler warnings as errors** (a curated set) | Unchecked casts, raw types, switch fall-through, and other near-certain bugs. |
 | **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, hardware, or the clock (so a replay would decide differently); vendor libraries outside the IO layer; subsystems reaching into each other; static mutable state that makes behavior depend on what ran before; and configuration written by position, where two values can swap unnoticed. |
 | **Tests** (JUnit 6, [AssertJ](https://assertj.github.io/doc/)) | Behavior regressions, including simulation tests that exercise physics. |
-| **Coverage floor** (JaCoCo) | Code with no tests at all. The build fails below 50% line or branch coverage (`coverage-floor.properties`): enough to catch untested code, low enough not to slow heavy development. |
+| **Coverage floor** (JaCoCo) | Code with no tests at all. The build fails below 50% line or branch coverage overall, or below 50% of the lines in any one file, so a file with no tests fails even while the rest carries the total (`coverage-floor.properties`). Enough to catch untested code, low enough not to slow heavy development. |
 | **Formatting** (google-java-format via Spotless) | Diff noise and review friction. Your local build formats automatically; CI only checks. |
 
 Also built in:
@@ -63,18 +63,38 @@ Also built in:
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
     `pitwall.actions().add("Home arm", arm::home)`.
-  - **Live tuning** of the values marked `@Tunable`, such as gains and current limits. Each tuned
-    value is checked exactly like a committed one and locked out while the field is connected.
-    Nothing is saved on the robot: the page lists each change as the builder call that commits it
-    to `Robots.java`.
-  - **Every WPILib tunable** in the program, through a tee around WPILib's own NetworkTables
-    backend: dashboards such as Elastic see and change them as always (the configuration's
-    `@Tunable` values too, under `Config/`), but a change to a number or a true/false applies only
-    while tuning is on, never on the field, and is logged for replay. Text, arrays, and structs pass
-    straight through, unlocked, so choosers keep working on the field.
+  - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
+    around WPILib's NetworkTables backend: dashboards such as Elastic see and change them as always,
+    but a change applies only while tuning is on, never on the field, and within the tunable's
+    limits, and it is logged for replay.
+    - **A mechanism's configuration** (gains, current limits, thresholds) is tuned as a
+      `LiveConfig`, a WPILib complex tunable the mechanism declares:
+      `LiveConfig.of("drivetrain", committed).number("gains.steerKp", Limits.between(0, 100))`.
+      Each value carries its tuning limits, the range that's safe to dial in live, as WPILib
+      properties any NetworkTables tool can read. Before a change applies, it is checked against
+      its limits and then by the configuration's own checks, so a refused value never reaches the
+      robot, and the page says why (a dashboard's snaps back, and the page shows why). Several
+      values change together, all or none. Nothing is saved on the robot: the page lists each
+      change as the builder call that commits it to `Robots.java`. When the field connects, every
+      configuration returns to committed (printed first, so nothing is lost): a match runs the
+      committed configuration.
+    - **A plain WPILib tunable** is a switch the drive team flips (a camera off, a hold time,
+      within its limits: `TunableDouble.createConfig(0.0, Limits.between(0, 30).config())`). A
+      switch keeps its setting into a match, with an alert naming each one that differs from
+      startup. Text, arrays, and structs pass straight through, unlocked, so choosers keep working
+      on the field.
+
+  **Which one a new value is:** a value that describes the robot (a gain, a current limit, a
+  threshold, an uncertainty) is configuration: a field of the robot's configuration record, set in
+  `Robots.java`, and, to tune it live, declared in its mechanism's `LiveConfig` with its limits
+  (see `Drive.tuning`). A plain tunable is only for a switch.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
-  in `pitwall/`.
+  in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver
+  Station and NetworkTables, so give the robot's Wi-Fi a strong password (or turn it off at events).
+  In the simulator it serves only the laptop it runs on (`-Dpitwall.network=true` serves the
+  network too, to open it on a phone), and it answers only requests addressed to the robot, so a
+  web page open on a connected laptop can't use it.
 - **A field model** (`lib/field`, filled in for 2026 in `Rebuilt.java`): the field's AprilTags and
   symmetry, and the start positions, targets, and zones robot code refers to by name. Everything is
   written once, for the blue alliance, and one tested transform gives red's; targets near tags are
@@ -97,6 +117,13 @@ Also built in:
   it is; AdvantageScope gets `Sim/PoseErrorMeters`. Localization is tested against that gap, not
   against a perfect world: on a 15-second drive, odometry alone ends 12 cm off, and with a camera
   the estimate stays within 3.4 cm.
+- **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
+  level, and each camera's mount, each measured on the robot and reported as the number to commit
+  and where it goes ([docs/calibration.md](docs/calibration.md)).
+- **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
+  match tab, checked against the code on every build, so no widget sits blank on the field.
+- **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
+  where the time went), when logging falls behind, and when the log drive is missing or filling.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
   without a team number.
 - **Dependency updates** for build tools and CI actions arrive as weekly pull requests (Dependabot).
@@ -106,17 +133,20 @@ Also built in:
 
 | Path | What |
 |---|---|
-| `src/main/java/frc/robot/` | The robot program. |
+| `src/main/java/frc/robot/` | The robot program. At the top: `Robot` (logging, Pitwall, and the loop), `RobotContainer` (builds every mechanism for the mode, real, simulated, or replayed from a log, and binds the controls), `Robots` and `RobotConfig` (below), and `LoopHealth`. |
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
-| `src/main/java/frc/robot/Rebuilt.java` | The field the robot plays on: 2026's, until kickoff. Its starts, targets, and zones, written for the blue alliance. |
-| `src/main/java/frc/robot/RobotContainer.java` | Builds each mechanism with the hardware for the mode (real, simulated, or replayed from a log) and binds the controls to commands. |
-| `src/main/java/frc/robot/subsystems/drive/` | The swerve drivetrain, in AdvantageKit's IO pattern: the drive logic, plus one IO class per kind of hardware: simulated, and CTRE's (`PhoenixDrivetrain`). A [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships. |
-| `src/main/java/frc/robot/lib/` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced), such as the typed configuration (`lib/config`), the field model (`lib/field`, which also writes down the field and robot frames), and localization: the pose estimator and everything that feeds it (`lib/localization`, whose package documentation is a reading map). |
-| `src/test/java/` | Tests, including the architecture rules (`ArchitectureTest`) and simulation tests that drive the robot (`RobotContainerSimTest`, `subsystems/drive`). |
+| `frc.robot.subsystems` | The mechanisms, in AdvantageKit's IO pattern (the logic, plus one IO class per kind of hardware): `drive`, the swerve drivetrain, simulated and CTRE's (a [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships); `localization`, where the robot is; `vision`, the cameras. |
+| `frc.robot.commands` | Commands that aren't one mechanism's: the calibration procedures. |
+| `frc.robot.game` | The game: the field the robot plays on, 2026's (`Rebuilt`) until [kickoff](docs/kickoff.md), with its starts, targets, and zones written for the blue alliance. |
+| `frc.robot.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
+| `frc.robot.sim` | The simulated world: the drivetrain's physics, and sensors that err as a season-worn robot's do. Only the simulator builds it. |
+| `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
+| `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
+| `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides, starting with [editors and commands](docs/editors.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License
@@ -124,3 +154,15 @@ Also built in:
 [BSD 3-Clause](LICENSE). Parts of `Main.java`, `Robot.java`, `Constants.java`, and `ModuleIOSim.java` derive from
 AdvantageKit's templates (BSD 3-Clause, Littleton Robotics); WPILib is BSD 3-Clause (FIRST and other
 WPILib contributors). Their licenses are in [`licenses/`](licenses/).
+
+The libraries the robot program uses come under their own licenses. None is in this repository
+(Gradle downloads them), so sharing the source shares none of them. A built robot program (the jar
+`deploy` sends) contains them all, so share source, never built jars:
+
+| Library | License |
+|---|---|
+| WPILib, including Commands v3 | BSD 3-Clause |
+| AdvantageKit | BSD 3-Clause |
+| PhotonLib | MIT |
+| PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
+| CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |

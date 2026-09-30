@@ -2,32 +2,60 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.pitwall.ConfigTuner;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.vision.Vision;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Every robot's configuration works with live tuning. */
+/** Every robot's configuration works with live tuning, within the limits its mechanisms declare. */
 class RobotTuningTest {
+  /**
+   * Declaring a mechanism's tuning fails if a committed value is outside its limits; setting each
+   * value to what it already is rebuilds the configuration through its checks, and changes nothing.
+   */
   @Test
-  void everyTunableValueCanBeDialedIn() {
+  void everyRobotsCommittedValuesCanBeDialedIn() {
     for (RobotConfig robot : Robots.all()) {
-      ConfigTuner<RobotConfig> tuner = new ConfigTuner<>(robot);
-      assertThat(tuner.knobs()).as(robot.name()).isNotEmpty();
-
-      // Setting each value to what it already is rebuilds the whole configuration through its
-      // checks, and changes nothing.
-      for (ConfigTuner.Knob knob : tuner.knobs()) {
-        tuner.set(knob.path(), tuner.committedValue(knob.path()));
+      List<LiveConfig<?>> tuning =
+          List.of(Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()));
+      for (LiveConfig<?> live : tuning) {
+        assertThat(live.knobs()).as(robot.name() + " " + live.name()).isNotEmpty();
+        for (LiveConfig.Knob knob : live.knobs()) {
+          assertThat(live.set(Map.of(knob.path(), live.committedValue(knob.path()))))
+              .as(robot.name() + " " + live.name() + " " + knob.path())
+              .isTrue();
+        }
+        assertThat(live.changes()).as(robot.name() + " " + live.name()).isEmpty();
       }
-      assertThat(tuner.changes()).as(robot.name()).isEmpty();
     }
   }
 
   @Test
-  void valuesAreFoundByTheirPathInTheConfiguration() {
-    ConfigTuner<RobotConfig> tuner = new ConfigTuner<>(Robots.SIM);
+  void aGainIsTunedByItsPathWithinItsLimits() {
+    var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
 
-    tuner.set("drivetrain.gains.steerKp", 18.5);
+    assertThat(drivetrain.set(Map.of("gains.steerKp", 18.5))).isTrue();
+    assertThat(drivetrain.get().gains().steerKp()).isEqualTo(18.5);
+    assertThat(drivetrain.whyNot(Map.of("gains.steerKp", 500.0)))
+        .isEqualTo("gains.steerKp: 500 is above its limit of 100");
+  }
 
-    assertThat(tuner.current().drivetrain().gains().steerKp()).isEqualTo(18.5);
+  /** Vision's thresholds are tuned like the drivetrain's gains: its configuration, live. */
+  @Test
+  void visionsThresholdsAreTunedThroughItsConfiguration() {
+    var vision = Vision.tuning(Robots.SIM.vision());
+
+    assertThat(vision.knobs())
+        .extracting(LiveConfig.Knob::path)
+        .containsExactly(
+            "maxAmbiguity",
+            "maxHeightErrorMeters",
+            "linearStdDevBaseline",
+            "angularStdDevBaseline",
+            "distanceExponent");
+    assertThat(vision.set(Map.of("maxAmbiguity", 0.1))).isTrue();
+    assertThat(vision.get().maxAmbiguity()).isEqualTo(0.1);
   }
 }

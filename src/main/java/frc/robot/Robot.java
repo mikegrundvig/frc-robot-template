@@ -8,10 +8,13 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
-import frc.robot.lib.timing.LoopMonitor;
+import frc.robot.dashboard.DashboardStream;
+import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.sim.SensorErrors;
 import java.io.File;
-import org.jspecify.annotations.Nullable;
+import java.lang.management.ManagementFactory;
+import java.util.List;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -33,7 +36,7 @@ public class Robot extends LoggedRobot {
   /**
    * Pitwall, the robot's own web page: its status, actions, and live tuning of its configuration.
    */
-  private final Pitwall<RobotConfig> pitwall;
+  private final Pitwall pitwall;
 
   /** Every mechanism, and the controls that drive them. */
   private final RobotContainer container;
@@ -41,10 +44,17 @@ public class Robot extends LoggedRobot {
   /** Where the robot's log goes: AdvantageKit writes to its logs folder. */
   static final String LOG_DRIVE = "/U";
 
-  /** Why this session isn't being logged, when it isn't; null when it is. */
-  private @Nullable String noLogDrive;
+  /** Whether the loop keeps up, and its log with it. */
+  private final LoopHealth loopHealth = new LoopHealth();
 
-  private @Nullable Alert noLogDriveAlert;
+  /** A debug deploy ({@code deploy -PdebugMode}) waits for a debugger every time it starts. */
+  private final Alert debugDeploy =
+      new Alert(
+          "Robot",
+          "debugDeploy",
+          "A debug deploy: after any restart the robot waits for a debugger. Deploy without"
+              + " -PdebugMode before a match",
+          Alert.Level.HIGH);
 
   public Robot() {
     super(RobotLoop.PERIOD_SECONDS);
@@ -68,7 +78,7 @@ public class Robot extends LoggedRobot {
         // where the radio's bandwidth is capped and the drive keeps everything).
         Logger.addDataReceiver(new WPILOGWriter());
         Logger.addDataReceiver(new DashboardStream(new NT4Publisher()));
-        noLogDrive = logDriveProblem(new File(LOG_DRIVE));
+        loopHealth.watchLogDrive(new File(LOG_DRIVE));
       }
       case SIM -> {
         // In the simulator: stream to AdvantageScope, and keep a log file (logs/) of every session.
@@ -85,59 +95,78 @@ public class Robot extends LoggedRobot {
     }
 
     Logger.start();
+    debugDeploy.set(
+        Constants.currentMode == Constants.Mode.REAL
+            && startedForDebugger(ManagementFactory.getRuntimeMXBean().getInputArguments()));
 
     RobotConfig robot = Robots.current();
-    pitwall = Pitwall.start(robot.name(), robot);
-
-    // The drivetrain reads its configuration through Pitwall, so tuned values take effect at once.
+    pitwall = Pitwall.start(robot.name());
     container =
-        new RobotContainer(
+        assemble(
             Constants.currentMode,
             Scheduler.getDefault(),
             robot,
-            () -> pitwall.config().drivetrain(),
-            Rebuilt.field(robot.body()));
-    container.addTo(pitwall);
-    if (noLogDrive != null) {
-      noLogDriveAlert = new Alert("Loop", "noLogDrive", noLogDrive, Alert.Level.HIGH);
-      noLogDriveAlert.set(true);
-    }
-  }
-
-  /** Pitwall, for tests that drive the robot program through it. */
-  Pitwall<RobotConfig> pitwall() {
-    return pitwall;
+            pitwall,
+            SensorErrors.TYPICAL,
+            loopHealth);
   }
 
   /**
-   * Why a session wouldn't be logged: no drive where the log goes, or one that can't be written.
+   * Puts the robot together: every mechanism, on the field it plays on, with its pit tools and
+   * status on the Pitwall page. The mechanisms read their configuration through Pitwall, so tuned
+   * values take effect at once. Tests build the robot here too ({@code RobotSim}), so they test the
+   * robot the robot runs.
    *
-   * @return null when the drive is there and writable
+   * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
+   *     configuration
    */
-  static @Nullable String logDriveProblem(File drive) {
-    if (!drive.isDirectory()) {
-      return "No USB drive at " + drive + ": this session isn't being logged";
-    }
-    if (!drive.canWrite()) {
-      return "The USB drive at " + drive + " can't be written: this session isn't being logged";
-    }
-    return null;
+  static RobotContainer assemble(
+      Constants.Mode mode,
+      Scheduler scheduler,
+      RobotConfig robot,
+      Pitwall pitwall,
+      SensorErrors simulatedErrors,
+      LoopHealth loopHealth) {
+    RobotContainer container =
+        new RobotContainer(
+            mode, scheduler, robot, Rebuilt.field(robot.body()), simulatedErrors, loopHealth);
+    container.addTo(pitwall);
+    return container;
+  }
+
+  /** Whether the program was started for a debugger to attach (JDWP), as a debug deploy is. */
+  static boolean startedForDebugger(List<String> jvmArguments) {
+    return jvmArguments.stream().anyMatch(argument -> argument.contains("jdwp"));
+  }
+
+  /** The mechanisms, for tests that drive the robot program. */
+  RobotContainer container() {
+    return container;
+  }
+
+  /** Pitwall, for tests that drive the robot program through it. */
+  Pitwall pitwall() {
+    return pitwall;
+  }
+
+  @Override
+  public void robotPeriodic() {
+    loop(pitwall, container, Scheduler.getDefault(), loopHealth);
   }
 
   /**
    * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
-   * command scheduler, each timed.
+   * command scheduler, each timed. Tests run the robot with this too ({@code RobotSim}).
    */
-  @Override
-  public void robotPeriodic() {
-    LoopMonitor loop = container.loop();
-    loop.start(System.nanoTime());
+  static void loop(
+      Pitwall pitwall, RobotContainer container, Scheduler scheduler, LoopHealth loopHealth) {
+    loopHealth.start(System.nanoTime());
     pitwall.periodic();
-    loop.mark("Pitwall", System.nanoTime());
+    loopHealth.monitor().mark("Pitwall", System.nanoTime());
     container.periodic();
-    Scheduler.getDefault().run();
-    loop.mark("Commands", System.nanoTime());
-    container.finishLoop(System.nanoTime());
+    scheduler.run();
+    loopHealth.monitor().mark("Commands", System.nanoTime());
+    loopHealth.finish(System.nanoTime(), Logger.getReceiverQueueFault());
   }
 
   /**

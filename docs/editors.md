@@ -15,7 +15,7 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 |---|---|
 | Every check CI runs; run it before pushing | `./gradlew ci` |
 | Rerun the tests on every save | `./gradlew test -Pquick --continuous` |
-| Run one test class | `./gradlew test --tests frc.robot.ArchitectureTest` |
+| Run one test class ([more on tests](testing.md)) | `./gradlew :test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, enabled and drivable from the keyboard | `./gradlew run` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
 | Start it waiting for a debugger on port 5005 | `./gradlew run --debug-jvm` |
@@ -26,6 +26,11 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Find the robot on the network | `./gradlew discoversystemcore` |
 | Add a vendor library | `./gradlew vendordep --url=<the vendor's JSON URL>` |
 | List every task | `./gradlew tasks` |
+
+**A debug deploy is for the pit only.** `deploy -PdebugMode` deploys a robot program that waits
+for a debugger before it starts, and takes one from any device on the robot's network. Until a
+debugger attaches, the robot does nothing, and after a brownout or a power cycle it waits again.
+When you're done, deploy again without `-PdebugMode`, and never take a debug deploy onto the field.
 
 ## IntelliJ IDEA
 

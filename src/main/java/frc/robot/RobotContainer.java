@@ -1,6 +1,11 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.pitwall.Actions;
+import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import frc.robot.commands.Calibration;
+import frc.robot.dashboard.Dashboard;
+import frc.robot.dashboard.RobotStatus;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
@@ -9,37 +14,30 @@ import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
-import frc.robot.lib.localization.CrestLandmarks;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.LandmarkDecision;
 import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.SwerveKinematicsModel;
+import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.timing.LoopMonitor;
-import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
+import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
-import frc.robot.subsystems.drive.GyroIO;
+import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
-import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
+import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
-import frc.robot.subsystems.vision.VisionSim;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
@@ -56,6 +54,7 @@ import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.Telemetry;
+import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.Alert;
 
 /**
@@ -82,34 +81,25 @@ public final class RobotContainer implements AutoCloseable {
 
   static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
-  /** How long "lately" covers for loop timing. */
-  private static final double RECENT_SECONDS = 10;
+  private final Scheduler scheduler;
 
+  /** The drivetrain's and vision's configurations as the pit tunes them. */
+  private final LiveConfig<SwerveConfig> drivetrainTuning;
+
+  private final LiveConfig<VisionConfig> visionTuning;
   private final FieldModel field;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
   /** The simulator's field view: the robot, its start, and the field's places. Null in a robot. */
   private final @Nullable Field2d fieldView;
 
-  /** The simulator's physics, which knows where the robot really is. Null unless simulating. */
-  private final @Nullable DriveSimulation simulation;
+  /** The simulator's world, which knows where the robot really is. Null unless simulating. */
+  private final @Nullable SimulatedWorld world;
 
-  /** The simulator's cameras, rendering from where the robot really is. Null unless simulating. */
-  private final @Nullable VisionSim visionSim;
-
+  private final Localization localization;
+  private final Drive drive;
   private final Vision vision;
   private final Calibration calibration;
-
-  private final PoseEstimator estimator;
-
-  /**
-   * Crests the robot passes, as landmarks: a crest places the robot's center within about 5 cm
-   * across it, and names its bump when the estimate is within a meter of it.
-   */
-  private final CrestLandmarks crestLandmarks;
-
-  private int landmarksAccepted;
-  private final Drive drive;
   private final CommandGamepad driver;
   private final Alert noHardware =
       new Alert(
@@ -129,21 +119,11 @@ public final class RobotContainer implements AutoCloseable {
           Alert.Level.MEDIUM);
   private final Alert offField =
       new Alert("Field", "offField", "Odometry puts the robot off the field", Alert.Level.MEDIUM);
-  private final Alert overrunning =
-      new Alert("Loop", "overrunning", "The loop is overrunning", Alert.Level.MEDIUM);
-  private final Alert loggingBehind =
-      new Alert(
-          "Loop",
-          "loggingBehind",
-          "Logging fell behind and dropped data: this log has gaps",
-          Alert.Level.HIGH);
 
   /** Every loop's time, section by section: the robot marks its sections, this marks its own. */
-  private final LoopMonitor loop =
-      new LoopMonitor(RobotLoop.PERIOD_SECONDS, RobotLoop.loops(RECENT_SECONDS));
+  private final LoopHealth loopHealth;
 
-  private LoopMonitor.Report lastLoop = new LoopMonitor.Report(0, false, List.of(), 0, 0);
-  private String lastOverrun = "";
+  private final LoopMonitor loop;
 
   /** This loop's alliance and station (1, 2, 3), from the Driver Station or the field system. */
   private Optional<Alliance> alliance = Optional.empty();
@@ -157,39 +137,36 @@ public final class RobotContainer implements AutoCloseable {
   private boolean enabledSinceBoot;
   private boolean wasAutonomous;
   private Placement placement = new Placement(Placement.Status.ALLIANCE_UNKNOWN, null, 0, 0);
-  private LocalizationEstimate estimate;
-
-  /** Why the estimate isn't good enough to score from this loop; null when it is. */
-  private @Nullable String notReadyToScore = "not started";
 
   /**
-   * In the simulator, the robot's wheels and sensors differ from its configuration as a real
-   * robot's do ({@link SensorErrors#TYPICAL}), so its estimated pose drifts from the truth.
+   * Built by {@link Robot#assemble}, for the robot and for tests alike.
    *
+   * @param scheduler runs every command: the controls', and the Pitwall page's actions
    * @param robot the robot: its frame, wiring, and cameras
-   * @param drivetrain the drivetrain's configuration, with any values tuned while running
    * @param field the field the robot plays on
-   */
-  public RobotContainer(
-      Constants.Mode mode,
-      Scheduler scheduler,
-      RobotConfig robot,
-      Supplier<SwerveConfig> drivetrain,
-      FieldModel field) {
-    this(mode, scheduler, robot, drivetrain, field, SensorErrors.TYPICAL);
-  }
-
-  /**
    * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
-   *     configuration
+   *     configuration ({@link SensorErrors#TYPICAL} makes its estimated pose drift from the truth
+   *     as a real robot's does)
+   * @param loopHealth the loop's timing, which the robot starts and finishes and this marks the
+   *     sections of; closed with this
    */
   RobotContainer(
       Constants.Mode mode,
       Scheduler scheduler,
       RobotConfig robot,
-      Supplier<SwerveConfig> drivetrain,
       FieldModel field,
-      SensorErrors simulatedErrors) {
+      SensorErrors simulatedErrors,
+      LoopHealth loopHealth) {
+    // What the pit can tune, published where dashboards and the Pitwall page find it; the
+    // mechanisms read it every loop.
+    drivetrainTuning = Drive.tuning(robot.drivetrain());
+    TunableRegistry.publish("Drive/config", drivetrainTuning);
+    visionTuning = Vision.tuning(robot.vision());
+    TunableRegistry.publish("Vision/config", visionTuning);
+    Supplier<SwerveConfig> drivetrain = drivetrainTuning::get;
+    this.scheduler = scheduler;
+    this.loopHealth = loopHealth;
+    loop = loopHealth.monitor();
     Body body = robot.body();
     List<CameraConfig> cameras = robot.cameras();
     this.field = field;
@@ -197,87 +174,65 @@ public final class RobotContainer implements AutoCloseable {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
     }
     driver = new CommandGamepad(scheduler, DRIVER_PORT);
-    ModuleIO[] modules;
-    GyroIO gyro;
-    GyroIO backupGyro = new GyroIO() {};
-    Lock odometryLock = new ReentrantLock();
+
+    // The drivetrain's hardware: the simulator's, the robot's own, or none (a replay reads the log,
+    // and a robot without wiring stays still rather than guess at motors, and says so).
+    DriveHardware driveHardware;
     if (mode == Constants.Mode.SIM) {
-      // The simulator knows where the robot really is, and its sensors report that with errors,
-      // so the robot's own estimate drifts from the truth as a real robot's does.
-      simulation =
-          new DriveSimulation(
-              drivetrain.get().modules(),
-              drivetrain.get().moduleTranslations(body),
-              simulatedErrors);
-      simulation.setTerrain(field.terrain());
+      world = new SimulatedWorld(field, drivetrain.get(), body, cameras, simulatedErrors);
       hardware = null;
-      modules = simulation.modules();
-      gyro = simulation.gyro();
-      backupGyro = simulation.backupGyro();
+      driveHardware = world.drivetrainHardware();
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
-      simulation = null;
+      world = null;
       PhoenixDrivetrain phoenix =
           new PhoenixDrivetrain(robot.drivetrainWiring().get(), drivetrain.get().modules());
       hardware = phoenix;
-      modules = phoenix.modules();
-      gyro = phoenix.gyro();
-      backupGyro = new GyroIOSystemcore(robot.drivetrainWiring().get().systemcoreMount());
-      odometryLock = phoenix.odometryLock();
+      driveHardware =
+          DriveHardware.builder()
+              .modules(List.of(phoenix.modules()))
+              .gyro(phoenix.gyro())
+              .backupImu(new GyroIOSystemcore(robot.drivetrainWiring().get().systemcoreMount()))
+              .odometryLock(phoenix.odometryLock())
+              .build();
     } else {
-      simulation = null;
+      world = null;
       hardware = null;
-      // In replay the inputs come from the log. On a robot without wiring the drivetrain stays
-      // still rather than guessing at motors, and says so.
-      modules =
-          new ModuleIO[] {
-            new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}, new ModuleIO() {}
-          };
-      gyro = new GyroIO() {};
+      driveHardware = DriveHardware.none();
       noHardware.set(mode == Constants.Mode.REAL);
     }
+
     // Until the robot is placed it could be anywhere: the middle of the field stands in, with an
     // uncertainty as big as the field, so the first camera measurement wins.
     Pose2d middle = new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO);
-    estimator =
-        new PoseEstimator(
-            EstimatorConfig.DEFAULTS,
-            field::contains,
-            new PoseReset(
-                0,
-                middle,
-                PoseCovariance.fromStdDevs(field.length(), field.width(), Math.PI),
-                "not placed yet"));
-    estimate = estimator.estimate();
-    drive =
-        new Drive(
-            "Drive",
-            gyro,
-            backupGyro,
-            modules,
-            body,
-            drivetrain,
-            scheduler,
-            estimator,
-            odometryLock);
-    drive.setTerrain(field.terrain());
-    crestLandmarks = new CrestLandmarks(field.terrain(), 0.05, 1.0);
+    Translation2d[] wheels = drivetrain.get().moduleTranslations(body);
+    double wheelReach = 0;
+    for (Translation2d wheel : wheels) {
+      wheelReach = Math.max(wheelReach, wheel.getNorm());
+    }
+    localization =
+        new Localization(
+            new PoseEstimator(
+                robot.estimator(),
+                field::contains,
+                new PoseReset(
+                    0,
+                    middle,
+                    PoseCovariance.fromStdDevs(field.length(), field.width(), Math.PI),
+                    "not placed yet")),
+            new SwerveKinematicsModel(wheels),
+            field.terrain(),
+            wheelReach);
+    drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
-    if (simulation != null) {
-      simulation.place(middle);
+    if (world != null) {
+      world.place(middle);
     }
 
     // Cameras: PhotonVision on the robot, its simulation in the simulator, the log in a replay.
     CameraIO[] cameraIOs = new CameraIO[cameras.size()];
-    if (mode == Constants.Mode.SIM) {
-      VisionSim simulatedCameras = new VisionSim(field);
-      for (int i = 0; i < cameras.size(); i++) {
-        CameraConfig camera = cameras.get(i);
-        cameraIOs[i] =
-            simulatedCameras.camera(camera, simulatedErrors.cameraMountError(camera.name()));
-      }
-      visionSim = simulatedCameras;
+    if (world != null) {
+      cameraIOs = world.cameras();
     } else {
-      visionSim = null;
       for (int i = 0; i < cameras.size(); i++) {
         cameraIOs[i] =
             mode == Constants.Mode.REAL
@@ -285,8 +240,16 @@ public final class RobotContainer implements AutoCloseable {
                 : new CameraIO() {};
       }
     }
-    vision = new Vision(cameras, cameraIOs, estimator, field);
-    calibration = new Calibration(drive, vision, robot, drivetrain, LocalDate::now);
+    vision = new Vision(cameras, cameraIOs, localization.forCameras(), field, visionTuning::get);
+    calibration =
+        new Calibration(
+            drive,
+            vision,
+            localization,
+            cameras,
+            robot.drivetrainWiring(),
+            drivetrain,
+            LocalDate::now);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns. Back, with the robot facing straight downfield, resets its heading: the fallback
@@ -302,11 +265,11 @@ public final class RobotContainer implements AutoCloseable {
   /**
    * The driver says the robot faces straight downfield, away from the driver's own wall: its
    * heading becomes the alliance's forward, as sure as lining up by eye allows. Its position stays.
-   * If the driver was wrong, the cameras' headings will agree against it and the estimator turns
+   * If the driver was wrong, the cameras' headings will agree against it and the estimate turns
    * back to them.
    */
   void faceDownfield() {
-    estimator.resetHeading(
+    localization.resetHeading(
         FieldModel.driverForward(alliance.orElse(Alliance.BLUE)), HEADING_BY_EYE_RADIANS);
   }
 
@@ -320,7 +283,10 @@ public final class RobotContainer implements AutoCloseable {
         .rotateBy(FieldModel.driverForward(alliance.orElse(Alliance.BLUE)));
   }
 
-  /** Mechanism periodic methods, called once per loop before the command scheduler runs. */
+  /**
+   * One loop of every mechanism, before the command scheduler runs: the drivetrain reads its
+   * sensors, localization takes them, the cameras theirs, and the field's checks follow.
+   */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
     alliance = MatchState.getAlliance();
@@ -334,16 +300,12 @@ public final class RobotContainer implements AutoCloseable {
         !chosenPose.equals(startPose) && (!enabled || !enabledSinceBoot)
             ? chosenPose
             : Optional.empty();
-    DriveSimulation sim = simulation;
+    SimulatedWorld sim = world;
     if (sim != null) {
       // In the simulator the drive team really moves it. Then the world moves on and the robot
       // reads its sensors, as on a robot between loops: its gyro feels the turn this loop.
       placed.ifPresent(sim::place);
-      sim.step(RobotLoop.PERIOD_SECONDS, RobotController.getTime());
-      VisionSim cameras = visionSim;
-      if (cameras != null) {
-        cameras.update(sim.truePose3d());
-      }
+      sim.step(RobotController.getTime());
       loop.mark("Simulation", System.nanoTime());
     }
     boolean autonomous = RobotState.isAutonomousEnabled();
@@ -357,39 +319,16 @@ public final class RobotContainer implements AutoCloseable {
 
     drive.periodic(enabled);
     loop.mark("Drive", System.nanoTime());
-    // Told where it is after reading its gyro, so a turn made in placing it isn't counted twice.
+    localization.periodic(drive.readings(), enabled);
+    // Told where it is after odometry, so a turn made in placing it isn't counted twice.
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
-    placed.ifPresent(
-        pose -> estimator.reset(new PoseReset(RobotController.getTime(), pose, PLACED, placedOn)));
-    // A crest passed puts the robot on its bump's crest line then.
-    drive
-        .crest()
-        .flatMap(
-            crest ->
-                estimator
-                    .poseAt(crest.timestampNanos())
-                    .flatMap(then -> crestLandmarks.landmark(crest, then.getTranslation())))
-        .ifPresent(estimator::addLandmark);
-    vision.periodic(estimator.estimate(), drive.pitchRadians(), drive.rollRadians());
+    placed.ifPresent(pose -> localization.place(pose, PLACED, placedOn));
+    vision.periodic(
+        localization.estimate(), localization.pitchRadians(), localization.rollRadians());
     loop.mark("Vision", System.nanoTime());
-    vision.record(estimator.update());
-    List<String> landmarks = new ArrayList<>();
-    for (LandmarkDecision decision : estimator.landmarkDecisions()) {
-      landmarks.add(
-          String.format(
-              Locale.ROOT,
-              "%s: %s, %.2f m across",
-              decision.landmark().name(),
-              decision.reason(),
-              decision.innovationMeters()));
-      landmarksAccepted += decision.accepted() ? 1 : 0;
-    }
-    Logger.recordOutput("Localization/Landmarks", landmarks.toArray(String[]::new));
-    Logger.recordOutput("Localization/LandmarksAccepted", landmarksAccepted);
-    estimate = estimator.estimate();
-    notReadyToScore = LocalizationGate.SCORING.whyNot(estimate);
+    vision.record(localization.update());
     loop.mark("Localization", System.nanoTime());
-    Pose2d pose = estimate.pose();
+    Pose2d pose = localization.pose();
     placement =
         Placement.check(
             field,
@@ -403,65 +342,13 @@ public final class RobotContainer implements AutoCloseable {
     updateZones(pose);
     show(pose);
     loop.mark("Field", System.nanoTime());
-    Dashboard.publish(this);
+    Dashboard.publish(status());
     loop.mark("Dashboard", System.nanoTime());
-  }
-
-  /**
-   * The loop's timing, for the robot to mark the sections it runs outside this class: the page's
-   * requests, and the commands.
-   */
-  LoopMonitor loop() {
-    return loop;
-  }
-
-  /**
-   * The loop is done: logs its timing section by section, alerts if loops are overrunning, naming
-   * the slowest section of the last one that did, and alerts if the log is dropping data.
-   */
-  void finishLoop(long nowNanos) {
-    lastLoop = loop.finish(nowNanos);
-    Logger.recordOutput("Loop/Milliseconds", lastLoop.seconds() * 1000);
-    Logger.recordOutput("Loop/OverrunsLately", lastLoop.overrunsLately());
-    Logger.recordOutput("Loop/WorstLatelyMilliseconds", lastLoop.worstLatelySeconds() * 1000);
-    for (LoopMonitor.Section section : lastLoop.sections()) {
-      Logger.recordOutput(
-          "Loop/Sections/" + section.name() + "Milliseconds", section.seconds() * 1000);
-    }
-    LoopMonitor.Section slowest = lastLoop.slowest();
-    if (lastLoop.overran() && slowest != null) {
-      lastOverrun =
-          String.format(
-              Locale.ROOT,
-              "; the last took %.0f ms, %.0f of them in %s",
-              lastLoop.seconds() * 1000,
-              slowest.seconds() * 1000,
-              slowest.name());
-    }
-    overrunning.setText(
-        String.format(
-            Locale.ROOT,
-            "The loop overran %.0f ms %d %s in the last %.0f s%s",
-            RobotLoop.PERIOD_SECONDS * 1000,
-            lastLoop.overrunsLately(),
-            lastLoop.overrunsLately() == 1 ? "time" : "times",
-            RECENT_SECONDS,
-            lastOverrun));
-    overrunning.set(lastLoop.overrunsLately() > 0);
-    loggingBehind.set(Logger.getReceiverQueueFault());
   }
 
   /** One line for the pit: how long loops take, and whether they keep up. */
   String loopStatus() {
-    return lastLoop.describe();
-  }
-
-  boolean isOverrunAlertActive() {
-    return overrunning.get();
-  }
-
-  String overrunAlertText() {
-    return overrunning.getText();
+    return loopHealth.describe();
   }
 
   /**
@@ -490,22 +377,6 @@ public final class RobotContainer implements AutoCloseable {
 
   /** Logs the robot's place on the field, and shows it in the simulator's field view. */
   private void show(Pose2d pose) {
-    PoseCovariance uncertainty = estimate.covariance();
-    Logger.recordOutput("Localization/Pose", pose);
-    Logger.recordOutput("Localization/Mode", estimate.mode().name());
-    Logger.recordOutput(
-        "Localization/PositionStdDevMeters",
-        Math.sqrt(Math.max(uncertainty.xx(), uncertainty.yy())));
-    Logger.recordOutput(
-        "Localization/HeadingStdDevDegrees", Math.toDegrees(uncertainty.headingStdDev()));
-    LocalizationEstimate.Health health = estimate.health();
-    Logger.recordOutput("Localization/ResidualMeters", health.residualMeters());
-    Logger.recordOutput("Localization/SuspectTravelMeters", health.suspectTravelMeters());
-    Logger.recordOutput("Localization/RecentDisagreementMeters", health.recentDisagreementMeters());
-    Logger.recordOutput("Localization/Recoveries", health.recoveries());
-    Logger.recordOutput("Localization/ReadyToScore", notReadyToScore == null);
-    Logger.recordOutput(
-        "Localization/NotReadyBecause", notReadyToScore == null ? "" : notReadyToScore);
     Logger.recordOutput("Field/Alliance", allianceStation());
     Logger.recordOutput("Field/Start", startPose.stream().toArray(Pose2d[]::new));
     Logger.recordOutput("Field/Placement", placement.describe());
@@ -514,15 +385,9 @@ public final class RobotContainer implements AutoCloseable {
           "Field/Places/" + place.name(),
           alliance.stream().map(ours -> place.on(field, ours)).toArray(Pose2d[]::new));
     }
-    DriveSimulation sim = simulation;
+    SimulatedWorld sim = world;
     if (sim != null) {
-      // How far the robot's estimate is from the truth: what localization has to close.
-      Pose2d truth = sim.truePose();
-      Logger.recordOutput("Sim/TruePose", truth);
-      Logger.recordOutput(
-          "Sim/PoseErrorMeters", truth.getTranslation().getDistance(pose.getTranslation()));
-      Logger.recordOutput(
-          "Sim/HeadingErrorDegrees", pose.getRotation().minus(truth.getRotation()).getDegrees());
+      sim.log(pose);
     }
     if (fieldView != null) {
       fieldView.setRobotPose(pose);
@@ -557,41 +422,33 @@ public final class RobotContainer implements AutoCloseable {
     return alliance.isPresent() && trigger != null && trigger.isActive();
   }
 
-  /** One line for the pit: what the pose rests on, and how sure it is. */
-  String localization() {
-    PoseCovariance uncertainty = estimate.covariance();
-    String basis =
-        switch (estimate.mode()) {
-          case INITIALIZING -> "Not placed yet";
-          case TRACKING -> "Tracking tags";
-          case DEAD_RECKONING -> "Dead reckoning";
-          case LOST -> "Lost: recovering";
-          case IMU_FAULT -> "Gyro lost";
-        };
-    return String.format(
-        Locale.ROOT,
-        "%s: within %.0f cm, %.1f°",
-        basis,
-        100 * Math.sqrt(Math.max(uncertainty.xx(), uncertainty.yy())),
-        Math.toDegrees(uncertainty.headingStdDev()));
+  /** The robot's state, as the drive team's dashboard shows it, as of this loop. */
+  RobotStatus status() {
+    return RobotStatus.builder()
+        .readyToScore(localization.readyToScore())
+        .scoring(localization.scoring())
+        .station(allianceStation())
+        .onStart(placement.status() == Placement.Status.READY)
+        .placement(placement.describe())
+        .localization(localization.describe())
+        .cameras(vision.summary())
+        .loop(loopStatus())
+        .build();
   }
 
-  /**
-   * Whether the estimate is good enough to score from, by {@link LocalizationGate#SCORING}: bind
-   * scoring and aiming commands to it.
-   */
+  /** One line for the pit: what the pose rests on, and how sure it is. */
+  String localizationStatus() {
+    return localization.describe();
+  }
+
+  /** Whether the estimate is good enough to score from: bind scoring and aiming to it. */
   boolean readyToScore() {
-    return notReadyToScore == null;
+    return localization.readyToScore();
   }
 
   /** One line for the pit and the drive team: ready to score, or why not. */
   String scoring() {
-    return notReadyToScore == null ? "Ready to score" : "Not ready: " + notReadyToScore;
-  }
-
-  /** How many crests the estimator has taken as landmarks since the robot started. */
-  int landmarksAccepted() {
-    return landmarksAccepted;
+    return localization.scoring();
   }
 
   /** One line for the pit: the cameras, and how their measurements fare. */
@@ -603,9 +460,13 @@ public final class RobotContainer implements AutoCloseable {
     return vision;
   }
 
+  Localization localization() {
+    return localization;
+  }
+
   /** The localization estimate, as of the last loop. */
   LocalizationEstimate estimate() {
-    return estimate;
+    return localization.estimate();
   }
 
   /** The pre-match placement check, as of the last loop. */
@@ -631,15 +492,15 @@ public final class RobotContainer implements AutoCloseable {
    * actions, and one status line each for the loop, the alliance, the placement, localization,
    * scoring, the last calibration, and the cameras.
    */
-  void addTo(Pitwall<?> pitwall) {
-    pitwall.actions().add(DRIVE_CHECK, this::driveCheck);
-    calibration.addTo(pitwall.actions());
+  void addTo(Pitwall pitwall) {
+    pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
+    calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .status()
         .add("Loop", this::loopStatus)
         .add("Alliance", this::allianceStation)
         .add("Placement", () -> placement.describe())
-        .add("Localization", this::localization)
+        .add("Localization", this::localizationStatus)
         .add("Scoring", this::scoring)
         .add("Calibration", calibration::lastResult)
         .add("Cameras", this::cameras);
@@ -649,9 +510,15 @@ public final class RobotContainer implements AutoCloseable {
     return drive;
   }
 
-  /** The simulator's physics, or null outside the simulator. */
+  /** The drivetrain's configuration as the pit tunes it. */
+  LiveConfig<SwerveConfig> drivetrainTuning() {
+    return drivetrainTuning;
+  }
+
+  /** The simulator's drivetrain physics, or null outside the simulator. */
   @Nullable DriveSimulation simulation() {
-    return simulation;
+    SimulatedWorld sim = world;
+    return sim != null ? sim.drivetrain() : null;
   }
 
   /** Whether the alert saying the drivetrain has no hardware code is active. */
@@ -662,15 +529,17 @@ public final class RobotContainer implements AutoCloseable {
   /** Releases what holds global resources (alerts), so a test can build another robot. */
   @Override
   public void close() {
+    TunableRegistry.remove(drivetrainTuning);
+    TunableRegistry.remove(visionTuning);
     drive.close();
+    localization.close();
     noHardware.close();
     allianceUnknown.close();
     offField.close();
-    overrunning.close();
-    loggingBehind.close();
+    loopHealth.close();
     vision.close();
-    if (visionSim != null) {
-      visionSim.close();
+    if (world != null) {
+      world.close();
     }
     if (hardware != null) {
       hardware.close();

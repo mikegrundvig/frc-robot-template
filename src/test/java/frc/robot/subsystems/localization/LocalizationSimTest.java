@@ -1,10 +1,11 @@
-package frc.robot.subsystems.drive;
+package frc.robot.subsystems.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.SimTestSupport;
+import frc.robot.SimulationTest;
 import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
@@ -19,9 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.estimator.SwerveDrivePoseEstimator;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -35,6 +35,8 @@ import org.wpilib.system.RobotController;
  * camera that sees the robot's true pose late and noisily. Does the estimate hold to the truth
  * where odometry alone drifts, and does it survive a shove, a slipping wheel, and a misread tag?
  */
+@SimulationTest
+@ExtendWith(RobotSim.class)
 class LocalizationSimTest {
   /** A match-like route: sprints, strafes, turns while driving, and a stop. */
   private static final double[][] ROUTE = {
@@ -48,22 +50,11 @@ class LocalizationSimTest {
 
   private @Nullable DriveSimHarness harness;
 
-  @BeforeAll
-  static void initHal() {
-    SimTestSupport.initHal();
-  }
-
-  @BeforeEach
-  void setUp() {
-    SimTestSupport.pauseTimeAndDisable();
-  }
-
   @AfterEach
   void tearDown() {
     if (harness != null) {
       harness.close();
     }
-    SimTestSupport.resumeTime();
   }
 
   private DriveSimHarness robot(SensorErrors errors) {
@@ -74,7 +65,6 @@ class LocalizationSimTest {
     if (harness != null) {
       harness.close();
     }
-    SimTestSupport.pauseTimeAndDisable();
     harness = new DriveSimHarness(Robots.SIM, errors, config);
     return harness;
   }
@@ -185,16 +175,16 @@ class LocalizationSimTest {
   void theDrivetrainReadsTiltJoltsAndStrainFromItsSensors() {
     DriveSimHarness robot = robot(SensorErrors.NONE);
     robot.idle(0.1);
-    boolean disabled = robot.drive.conditions().disabled();
+    boolean disabled = robot.localization.conditions().disabled();
 
     robot.drive(0.04, 1.0, 0, 0); // full stick from a standstill
-    boolean starting = robot.drive.conditions().tractionLimited();
+    boolean starting = robot.localization.conditions().tractionLimited();
     robot.drive(1.5, 1.0, 0, 0);
-    boolean cruising = robot.drive.conditions().tractionLimited();
+    boolean cruising = robot.localization.conditions().tractionLimited();
     robot.simulation.tilt(0.3, 0.1);
     robot.simulation.hit(new Transform2d(0.1, 0, Rotation2d.ZERO));
     robot.drive(0.02, 1.0, 0, 0);
-    DriveConditions hit = robot.drive.conditions();
+    DriveConditions hit = robot.localization.conditions();
     robot.drive(0.02, 1.0, 0, 0);
 
     assertThat(disabled).isTrue();
@@ -203,9 +193,9 @@ class LocalizationSimTest {
     assertThat(hit.tiltRadians()).isCloseTo(Math.acos(Math.cos(0.3) * Math.cos(0.1)), within(1e-9));
     assertThat(hit.collision()).isTrue();
     assertThat(hit.disabled()).isFalse();
-    assertThat(robot.drive.conditions().collision()).as("a loop later").isFalse();
-    assertThat(robot.drive.pitchRadians()).isEqualTo(0.3);
-    assertThat(robot.drive.rollRadians()).isEqualTo(0.1);
+    assertThat(robot.localization.conditions().collision()).as("a loop later").isFalse();
+    assertThat(robot.localization.pitchRadians()).isEqualTo(0.3);
+    assertThat(robot.localization.rollRadians()).isEqualTo(0.1);
   }
 
   /** Over a bump, nose up then nose down: the drivetrain follows the crossing from its IMU. */
@@ -213,10 +203,11 @@ class LocalizationSimTest {
   void theDrivetrainFollowsTheRobotOverABump() {
     DriveSimHarness robot = robot(SensorErrors.NONE);
     robot.drive(0.6, 0.5, 0, 0); // 1.1 m/s ahead
-    List<TerrainCrossing.Phase> phases = new ArrayList<>(List.of(robot.drive.terrainPhase()));
+    List<TerrainCrossing.Phase> phases =
+        new ArrayList<>(List.of(robot.localization.terrainPhase()));
     robot.eachLoop(
         () -> {
-          TerrainCrossing.Phase now = robot.drive.terrainPhase();
+          TerrainCrossing.Phase now = robot.localization.terrainPhase();
           if (phases.isEmpty() || phases.get(phases.size() - 1) != now) {
             phases.add(now);
           }
@@ -235,7 +226,7 @@ class LocalizationSimTest {
             TerrainCrossing.Phase.CLIMBING,
             TerrainCrossing.Phase.DESCENDING,
             TerrainCrossing.Phase.LEVEL);
-    assertThat(robot.drive.terrainCrossings()).isEqualTo(1);
+    assertThat(robot.localization.terrainCrossings()).isEqualTo(1);
   }
 
   /** Drives the route with the gyro unplugged a second in; returns the heading error at the end. */
@@ -256,9 +247,9 @@ class LocalizationSimTest {
 
     assertThat(backup).as("heading error on the backup IMU, degrees").isLessThan(1.5);
     assertThat(wheels).as("on the wheels alone").isGreaterThan(3 * backup);
-    assertThat(robot.drive.yawSource()).isEqualTo(Drive.YawSource.BACKUP);
-    assertThat(robot.drive.isUsingBackupAlertActive()).isTrue();
-    assertThat(robot.drive.isGyroDisconnectedAlertActive()).isFalse();
+    assertThat(robot.localization.yawSource()).isEqualTo(Localization.YawSource.BACKUP);
+    assertThat(robot.localization.isUsingBackupAlertActive()).isTrue();
+    assertThat(robot.localization.isGyroDisconnectedAlertActive()).isFalse();
     assertThat(robot.estimator.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
   }
 
@@ -277,8 +268,8 @@ class LocalizationSimTest {
 
     assertThat(onBackup).isCloseTo(before, within(0.2));
     assertThat(robot.headingErrorDegrees()).isCloseTo(before, within(0.2));
-    assertThat(robot.drive.yawSource()).isEqualTo(Drive.YawSource.GYRO);
-    assertThat(robot.drive.isUsingBackupAlertActive()).isFalse();
+    assertThat(robot.localization.yawSource()).isEqualTo(Localization.YawSource.GYRO);
+    assertThat(robot.localization.isUsingBackupAlertActive()).isFalse();
   }
 
   /** A gyro that freezes still reports: only the backup IMU's disagreement catches it. */
@@ -286,20 +277,20 @@ class LocalizationSimTest {
   void aFrozenGyroIsCaughtByTheBackupImu() {
     DriveSimHarness robot = robot(SensorErrors.TYPICAL);
     robot.drive(1.0, 0, 0, 0.4);
-    boolean beforeFreezing = robot.drive.isImuDisagreementAlertActive();
+    boolean beforeFreezing = robot.localization.isImuDisagreementAlertActive();
 
     robot.simulation.freezeGyro(true);
     robot.drive(0.3, 0, 0, 0.4);
 
     assertThat(beforeFreezing).isFalse();
-    assertThat(robot.drive.isImuDisagreementAlertActive()).isTrue();
+    assertThat(robot.localization.isImuDisagreementAlertActive()).isTrue();
   }
 
   @Test
   void drivingHardIsNeverMistakenForAHit() {
     DriveSimHarness robot = robot(SensorErrors.TYPICAL);
     boolean[] felt = {false};
-    robot.eachLoop(() -> felt[0] |= robot.drive.conditions().collision());
+    robot.eachLoop(() -> felt[0] |= robot.localization.conditions().collision());
 
     driveTheRoute(robot);
 
@@ -345,7 +336,7 @@ class LocalizationSimTest {
           long now = RobotController.getTime();
           wpilib.updateWithTime(now / 1e9, robot.drive.gyroYaw(), robot.drive.modulePositions());
           for (VisionMeasurement seen : camera.poll(now)) {
-            robot.estimator.addVision(seen);
+            robot.localization.forCameras().addVision(seen);
             wpilib.addVisionMeasurement(
                 seen.pose(), seen.timestampNanos() / 1e9, VecBuilder.fill(0.03, 0.03, 1e6));
           }

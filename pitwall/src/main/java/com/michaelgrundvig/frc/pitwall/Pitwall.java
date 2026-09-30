@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -23,8 +24,9 @@ import org.wpilib.util.Alert;
  * }</pre>
  *
  * <p>That serves the page (http://robot.local:5820, or localhost in the simulator), shows the
- * standard status (which robot and code, the mode, the battery), tunes, and runs actions. Add
- * status items and actions through {@link #status()} and {@link #actions()}.
+ * standard status (which robot and code, the mode, the battery), tunes, runs actions, and runs
+ * experiments. Add status items, actions, and experiments through {@link #status()}, {@link
+ * #actions()}, and {@link #experiments()}.
  *
  * <p>Tuning is WPILib's tunables. Every tunable in the program goes through Pitwall's {@link
  * TunableTee}, around WPILib's own NetworkTables backend: dashboards work as before, while changes
@@ -43,6 +45,7 @@ public final class Pitwall implements AutoCloseable {
   private final Tuning tuning;
   private final Status status;
   private final Actions actions;
+  private final Experiments experiments;
   private final TunableTee tee;
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
   private final Alert changedSwitches = new Alert("Pitwall", "", Alert.Level.HIGH);
@@ -65,6 +68,13 @@ public final class Pitwall implements AutoCloseable {
             () -> String.format(Locale.ROOT, "%.1f V", RobotController.getBatteryVoltage()));
     actions = new Actions(advantageKit ? AdvantageKitLog.actions() : inputs -> {});
     boolean replaying = advantageKit && AdvantageKitLog.replaying();
+    // Runs are timed on the robot's clock, which a replay reproduces.
+    experiments =
+        new Experiments(
+            new Experiments.Robot(name, RobotBase.isSimulation(), code != null ? code.get() : ""),
+            advantageKit ? AdvantageKitLog.experiments() : inputs -> {},
+            RobotController::getTime,
+            replaying);
     // Every WPILib tunable in the program goes through Pitwall's tee, wrapped around WPILib's own
     // NetworkTables backend: dashboards see what they always did, while changes are locked with
     // tuning and logged for replay, and the page lists every tunable.
@@ -150,6 +160,14 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
+   * The experiments the page can run on the robot's rigs. Add them here: {@code
+   * experiments().add(new Experiment("Step to 90° and back", steering, profile))}.
+   */
+  public Experiments experiments() {
+    return experiments;
+  }
+
+  /**
    * The port the page is served on, or -1 when it isn't (while replaying, or it couldn't start).
    */
   public int port() {
@@ -172,8 +190,10 @@ public final class Pitwall implements AutoCloseable {
           tuning.report());
     }
     tuning.periodic(fieldConnected);
-    actions.periodic(
-        new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected));
+    Actions.Gate gate =
+        new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected);
+    actions.periodic(gate);
+    experiments.periodic(gate);
     status.periodic();
     if (wasEnabled && !enabled) {
       report("", tuning.report());

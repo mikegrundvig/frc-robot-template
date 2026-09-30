@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
+import org.wpilib.units.Unit;
 
 /**
  * How a mechanism answered one jump in its setpoint: the scores that tell one run from another.
@@ -39,16 +40,30 @@ public record StepResponse(
    */
   public static List<Optional<StepResponse>> of(
       Series measured, Profile profile, long runStartNanos) {
+    return of(measured, profile, profile.baseUnit(), runStartNanos);
+  }
+
+  /**
+   * Scores each jump in a run, measured in any unit of the profile's kind: degrees for a profile in
+   * radians, say. The steady-state error comes out in that unit.
+   *
+   * @param measured what the mechanism did, in {@code unit}
+   * @param unit a unit whose base unit is the profile's
+   */
+  public static List<Optional<StepResponse>> of(
+      Series measured, Profile profile, Unit unit, long runStartNanos) {
     List<Profile.Edge> edges = profile.edges();
     List<Optional<StepResponse>> scores = new ArrayList<>();
     for (int e = 0; e < edges.size(); e++) {
+      Profile.Edge edge = edges.get(e);
       double endSeconds =
           e + 1 < edges.size() ? edges.get(e + 1).atSeconds() : profile.durationSeconds();
       scores.add(
           of(
               measured,
-              edges.get(e),
-              runStartNanos + nanos(edges.get(e).atSeconds()),
+              new Profile.Edge(
+                  edge.atSeconds(), unit.fromBaseUnits(edge.from()), unit.fromBaseUnits(edge.to())),
+              runStartNanos + nanos(edge.atSeconds()),
               runStartNanos + nanos(endSeconds)));
     }
     return scores;

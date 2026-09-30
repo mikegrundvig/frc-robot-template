@@ -66,15 +66,22 @@ Also built in:
   - **Live tuning** of the values marked `@Tunable`, such as gains and current limits. Each tuned
     value is checked exactly like a committed one and locked out while the field is connected.
     Nothing is saved on the robot: the page lists each change as the builder call that commits it
-    to `Robots.java`.
+    to `Robots.java`. When the field connects, tuned values return to the committed ones (printed
+    first, so none are lost): a match runs the committed configuration.
   - **Every WPILib tunable** in the program, through a tee around WPILib's own NetworkTables
     backend: dashboards such as Elastic see and change them as always (the configuration's
     `@Tunable` values too, under `Config/`), but a change to a number or a true/false applies only
-    while tuning is on, never on the field, and is logged for replay. Text, arrays, and structs pass
-    straight through, unlocked, so choosers keep working on the field.
+    while tuning is on, never on the field, and is logged for replay. These are switches (a camera
+    off, a hold time), and keep their setting into a match, with an alert naming each one that
+    differs from startup. Text, arrays, and structs pass straight through, unlocked, so choosers
+    keep working on the field.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
-  in `pitwall/`.
+  in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver
+  Station and NetworkTables, so give the robot's Wi-Fi a strong password (or turn it off at events).
+  In the simulator it serves only the laptop it runs on (`-Dpitwall.network=true` serves the
+  network too, to open it on a phone), and it answers only requests addressed to the robot, so a
+  web page open on a connected laptop can't use it.
 - **A field model** (`lib/field`, filled in for 2026 in `Rebuilt.java`): the field's AprilTags and
   symmetry, and the start positions, targets, and zones robot code refers to by name. Everything is
   written once, for the blue alliance, and one tested transform gives red's; targets near tags are

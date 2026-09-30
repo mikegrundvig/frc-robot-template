@@ -58,7 +58,8 @@ public final class TunableTee implements TunableBackend {
    */
   public record Listed(String path, String type, Object value, boolean editable) {}
 
-  private record Entry(TunableBase real, @Nullable TunableBase proxy, String type) {}
+  private record Entry(
+      TunableBase real, @Nullable TunableBase proxy, String type, Object startup) {}
 
   private record PageRequest(Map<String, Object> values, CompletableFuture<Outcome> outcome) {}
 
@@ -110,6 +111,29 @@ public final class TunableTee implements TunableBackend {
     return view;
   }
 
+  /**
+   * The simple tunables (numbers, true or false) whose value differs from when they were published,
+   * such as a camera switched off in the pit, each as {@code "path: value (was startup)"}.
+   * Pitwall's own configuration values aren't listed: they return to their committed values when
+   * the field connects. Call it in the robot loop.
+   */
+  public List<String> changedSinceStartup() {
+    List<String> changed = new ArrayList<>();
+    synchronized (entries) {
+      for (Map.Entry<String, Entry> item : entries.entrySet()) {
+        Entry entry = item.getValue();
+        if (entry.proxy() == null || own.contains(entry.real())) {
+          continue;
+        }
+        Object now = valueOf(entry.real());
+        if (!now.equals(entry.startup())) {
+          changed.add(item.getKey() + ": " + now + " (was " + entry.startup() + ")");
+        }
+      }
+    }
+    return changed;
+  }
+
   /** Whether the page can change the tunable at a path. Safe to call from any thread. */
   public boolean isEditable(String path) {
     String key = PathUtil.normalizeName(path);
@@ -146,7 +170,7 @@ public final class TunableTee implements TunableBackend {
     boolean published = inner.publish(key, proxy != null ? proxy : tunable);
     if (published) {
       synchronized (entries) {
-        entries.put(key, new Entry(tunable, proxy, typeOf(tunable)));
+        entries.put(key, new Entry(tunable, proxy, typeOf(tunable), valueOf(tunable)));
       }
     }
     return published;

@@ -16,6 +16,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -28,8 +30,10 @@ import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.telemetry.MockTelemetryBackend;
 import org.wpilib.telemetry.TelemetryRegistry;
+import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
+import org.wpilib.util.AlertDataJNI;
 
 /** Pitwall in the simulated robot program: its standard status, and actions that run commands. */
 class PitwallRobotTest {
@@ -229,6 +233,52 @@ class PitwallRobotTest {
     assertThat(printed.toString(StandardCharsets.UTF_8))
         .contains("drivetrain.gains.steerKp: 16.0 -> 18.0")
         .contains(".steerKp(18.0)");
+  }
+
+  /**
+   * When the field connects, a match runs the committed configuration: tuned gains go back (printed
+   * first, so they can be committed), while a switch left changed (a camera off) keeps its setting
+   * and raises an alert naming it.
+   */
+  @Test
+  void theFieldConnectingRevertsTunedValuesAndNamesChangedSwitches() throws Exception {
+    TunableBoolean camera = TunableBoolean.create(true);
+    TunableRegistry.publish("Vision/front/enabled", camera);
+    patch("/api/values", "{\"drivetrain.gains.steerKp\": 18}");
+    patch("/api/wpilib-tunables", "{\"Vision/front/enabled\": false}");
+    PrintStream console = System.out;
+    ByteArrayOutputStream printed = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      DriverStationSim.setFmsAttached(true);
+      DriverStationSim.notifyNewData();
+      pitwall.periodic();
+    } finally {
+      System.setOut(console);
+    }
+
+    assertThat(pitwall.config().drivetrain().gains().steerKp()).as("reverted").isEqualTo(16.0);
+    assertThat(printed.toString(StandardCharsets.UTF_8))
+        .contains("tuned values return to the committed configuration")
+        .contains(".steerKp(18.0)");
+    assertThat(camera.get()).as("the switch keeps its setting").isFalse();
+    assertThat(activeAlerts())
+        .anySatisfy(
+            text ->
+                assertThat(text)
+                    .isEqualTo(
+                        "On the field with settings changed since startup:"
+                            + " /Vision/front/enabled: false (was true)"));
+  }
+
+  private static List<String> activeAlerts() {
+    List<String> active = new ArrayList<>();
+    for (AlertDataJNI.AlertInfo alert : AlertDataJNI.getAlerts()) {
+      if (alert.activeStartTime != 0) {
+        active.add(alert.text);
+      }
+    }
+    return active;
   }
 
   /**

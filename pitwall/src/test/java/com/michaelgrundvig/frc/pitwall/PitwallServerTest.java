@@ -3,10 +3,15 @@ package com.michaelgrundvig.frc.pitwall;
 import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -403,6 +408,75 @@ class PitwallServerTest {
 
     assertThat(started).isEmpty();
     assertThat(said).singleElement().asString().startsWith("Pitwall's page couldn't start");
+  }
+
+  /**
+   * A web page on a laptop connected to the robot could point a name it controls at the robot's
+   * address (DNS rebinding) and use the page as its own: the name it sends gives it away.
+   */
+  @Test
+  void answersOnlyAtTheRobotsOwnAddress() throws Exception {
+    assertThat(statusLine("localhost:" + server.port())).endsWith(" 200 OK");
+    assertThat(statusLine("robot.local:5820")).endsWith(" 200 OK");
+    assertThat(statusLine("10.26.11.2:5820")).endsWith(" 200 OK");
+    assertThat(statusLine("rebinding.example.com:5820")).contains(" 403 ");
+  }
+
+  @Test
+  void changesComeOnlyFromThePagesOwnSite() throws Exception {
+    var own =
+        client.send(
+            HttpRequest.newBuilder(uri("/api/values"))
+                .header("Content-Type", MERGE_PATCH)
+                .header("Origin", "http://localhost:" + server.port())
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"drive.gains.kP\": 18}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    var another =
+        client.send(
+            HttpRequest.newBuilder(uri("/api/values"))
+                .header("Content-Type", MERGE_PATCH)
+                .header("Origin", "http://another.example.com")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"drive.gains.kP\": 19}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+
+    assertThat(own.statusCode()).isEqualTo(200);
+    assertThat(another.statusCode()).isEqualTo(403);
+    assertThat(get("/api/values").body()).contains("\"drive.gains.kP\":18.0");
+  }
+
+  @Test
+  void thePageCantBeFramedByAnotherSite() throws Exception {
+    var page = get("/", "text/html");
+
+    assertThat(page.headers().firstValue("X-Frame-Options")).hasValue("DENY");
+    assertThat(page.headers().firstValue("Content-Security-Policy"))
+        .hasValueSatisfying(policy -> assertThat(policy).contains("frame-ancestors 'none'"));
+    assertThat(page.headers().firstValue("X-Content-Type-Options")).hasValue("nosniff");
+  }
+
+  @Test
+  void refusesBodiesTooLargeOrOfNoType() throws Exception {
+    String large = "{\"note\": \"" + "x".repeat(64 * 1024) + "\"}";
+
+    assertThat(send("PATCH", "/api/values", MERGE_PATCH, large).statusCode()).isEqualTo(413);
+    assertThat(send("PATCH", "/api/values", null, "{}").statusCode()).isEqualTo(415);
+  }
+
+  /** The status line of a GET naming this host, sent by hand: Java's client won't set Host. */
+  private String statusLine(String host) throws Exception {
+    try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.port());
+        var reader =
+            new BufferedReader(
+                new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))) {
+      socket
+          .getOutputStream()
+          .write(
+              ("GET /api/tuning HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+                  .getBytes(StandardCharsets.US_ASCII));
+      return reader.readLine();
+    }
   }
 
   private HttpResponse<String> get(String path) throws Exception {

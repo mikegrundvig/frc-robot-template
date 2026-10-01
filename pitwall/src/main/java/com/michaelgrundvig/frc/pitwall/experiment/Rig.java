@@ -1,13 +1,14 @@
 package com.michaelgrundvig.frc.pitwall.experiment;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.pitwall.Numbers;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
@@ -36,16 +37,27 @@ import org.wpilib.units.Unit;
  *
  * <p>Its signals are read each loop an experiment runs. A signal hands over every sample taken
  * since the last loop, each with its own time, so a device's 250 Hz readings keep their rate: see
- * {@link Sampler}.
+ * {@link Sampler}. A signal reads the mechanism's logged inputs (its IO layer's, as AdvantageKit
+ * logs them), so a replay of the log records the same trace.
  */
 public final class Rig {
   /** What the trace calls the setpoint an experiment commands; no signal may take this name. */
   public static final String SETPOINT = "Setpoint";
 
   /**
+   * How many times a second a trace makes room for a signal read once a loop (and the setpoint):
+   * twice the usual 50 Hz loop. A signal handing over a device's own readings gets room for 1 kHz.
+   */
+  static final int LOOP_SAMPLES_PER_SECOND = 100;
+
+  /** Room for a device's own readings: 1 kHz. */
+  static final int DEVICE_SAMPLES_PER_SECOND = 1000;
+
+  /**
    * Reads one signal each loop an experiment runs: every sample taken since the last loop, oldest
    * first, into its series. A signal read once a loop adds one; the drivetrain's 250 Hz odometry
-   * adds five, each at the time it was taken. It runs on the robot loop's thread.
+   * adds five, each at the time it was taken. It runs on the robot loop's thread, and reads only
+   * logged inputs, so a replay reads the same.
    */
   @FunctionalInterface
   public interface Sampler {
@@ -56,7 +68,10 @@ public final class Rig {
     void sample(long nowNanos, Series series);
   }
 
-  private record Read(Trace.Signal signal, Sampler sampler) {}
+  /**
+   * @param onceALoop whether it's read once a loop, and needs room only for that
+   */
+  private record Read(Trace.Signal signal, Sampler sampler, boolean onceALoop) {}
 
   private final String name;
   private final LiveConfig<?> config;
@@ -97,12 +112,12 @@ public final class Rig {
     return config;
   }
 
-  /** Its gains: paths into its configuration, such as {@code gains.steerKp}. */
+  /** Its gains: fields of its configuration, such as {@code gains.steerKp}. */
   public List<String> gains() {
     return gains;
   }
 
-  /** Its gains as they are now, by path, each in its knob's unit. */
+  /** Its gains as they are now, by field, each in its knob's unit. */
   public Map<String, Double> gainValues() {
     Map<String, Double> values = new LinkedHashMap<>();
     for (String gain : gains) {
@@ -214,6 +229,19 @@ public final class Rig {
     return failed;
   }
 
+  /**
+   * How many samples a run of so many seconds records of a signal, and half a second to spare: at
+   * loop rate for the setpoint and a signal read once a loop, at a device's rate for the rest.
+   */
+  int capacity(Trace.Signal signal, double seconds) {
+    boolean onceALoop =
+        signal.name().equals(SETPOINT)
+            || Stream.concat(measurements.stream(), signals.stream())
+                .anyMatch(read -> read.signal().equals(signal) && read.onceALoop());
+    int perSecond = onceALoop ? LOOP_SAMPLES_PER_SECOND : DEVICE_SAMPLES_PER_SECOND;
+    return (int) Math.ceil((seconds + 0.5) * perSecond);
+  }
+
   /** Every signal a run records: the setpoint, then the measurements, then the rest. */
   List<Trace.Signal> traced() {
     List<Trace.Signal> traced = new ArrayList<>();
@@ -224,11 +252,7 @@ public final class Rig {
   }
 
   private static String shown(double value, Unit unit) {
-    String number =
-        value == Math.rint(value) && Math.abs(value) < 1e15
-            ? Long.toString((long) value)
-            : String.format(Locale.ROOT, "%.4g", value).replaceAll("\\.?0+(e|$)", "$1");
-    return number + " " + unit.symbol();
+    return Numbers.shown(value) + " " + unit.symbol();
   }
 
   private <V> V required(@Nullable V value, String what) {
@@ -262,22 +286,24 @@ public final class Rig {
     /**
      * Its gains: values of a live configuration, which the page tunes there.
      *
-     * @param paths each a tunable value of that configuration, such as {@code gains.steerKp}
+     * @param fields each a tunable value of that configuration, such as {@code gains.steerKp}
      * @throws IllegalArgumentException if one isn't
      */
-    public Builder gains(LiveConfig<?> config, String... paths) {
-      for (String path : paths) {
-        config.value(path); // throws, saying so, if it isn't one of the configuration's
+    public Builder gains(LiveConfig<?> config, String... fields) {
+      for (String field : fields) {
+        config.value(field); // throws, saying so, if it isn't one of the configuration's
       }
       this.config = config;
       gains.clear();
-      gains.addAll(List.of(paths));
+      gains.addAll(List.of(fields));
       return this;
     }
 
     /**
      * How an experiment commands it: the unit it takes a setpoint in, and what takes it. An
-     * experiment calls it every loop it runs, from the robot loop.
+     * experiment calls it every loop it runs, from the robot loop. It only commands the mechanism,
+     * as its own commands would: it changes no gain or other configuration (those go through the
+     * page's checks), and it moves nothing but this mechanism.
      */
     public Builder setpoint(Unit unit, DoubleConsumer command) {
       setpointUnit = unit;
@@ -300,24 +326,34 @@ public final class Rig {
      * speed. Several may be (each swerve module's angle); they share one unit.
      */
     public Builder measurement(String name, Unit unit, Sampler sampler) {
-      measurements.add(new Read(new Trace.Signal(name, unit), sampler));
+      measurements.add(new Read(new Trace.Signal(name, unit), sampler, false));
       return this;
     }
 
     /** A measurement read once a loop. */
     public Builder measurement(String name, Unit unit, DoubleSupplier onceALoop) {
-      return measurement(name, unit, (now, series) -> series.add(now, onceALoop.getAsDouble()));
+      measurements.add(
+          new Read(
+              new Trace.Signal(name, unit),
+              (now, series) -> series.add(now, onceALoop.getAsDouble()),
+              true));
+      return this;
     }
 
     /** Something recorded beside the measurements, such as a motor's voltage or current. */
     public Builder signal(String name, Unit unit, Sampler sampler) {
-      signals.add(new Read(new Trace.Signal(name, unit), sampler));
+      signals.add(new Read(new Trace.Signal(name, unit), sampler, false));
       return this;
     }
 
     /** Something recorded once a loop beside the measurements. */
     public Builder signal(String name, Unit unit, DoubleSupplier onceALoop) {
-      return signal(name, unit, (now, series) -> series.add(now, onceALoop.getAsDouble()));
+      signals.add(
+          new Read(
+              new Trace.Signal(name, unit),
+              (now, series) -> series.add(now, onceALoop.getAsDouble()),
+              true));
+      return this;
     }
 
     /** The mechanisms an experiment needs to itself, as any command requires them. */

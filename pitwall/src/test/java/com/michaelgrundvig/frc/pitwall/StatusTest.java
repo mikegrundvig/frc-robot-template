@@ -91,6 +91,13 @@ class StatusTest {
     assertThat(asked.getNow(null)).containsExactly(new Status.Item("Robot", "practice1"));
     status.periodic(false);
     assertThat(reads).as("only the loop it was asked").hasValue(1);
+
+    var first = status.requestRead();
+    var second = status.requestRead();
+    status.periodic(false);
+
+    assertThat(second).as("however many ask, one read").isSameAs(first);
+    assertThat(reads).hasValue(2);
   }
 
   @Test

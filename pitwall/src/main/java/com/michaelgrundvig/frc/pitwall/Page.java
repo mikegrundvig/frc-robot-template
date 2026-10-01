@@ -43,6 +43,13 @@ public final class Page {
   private Map<String, Object> valueSection = Map.of();
   private Map<String, Object> changeSection = Map.of();
 
+  /** The experiments the rig sections were built from, and whether every gain's tunable was. */
+  private @Nullable List<Experiment> rigsBuiltFor;
+
+  private boolean pathsFound;
+  private Map<String, Object> rigSection = Map.of();
+  private Map<String, Object> experimentSection = Map.of();
+
   public Page(
       Status status, Actions actions, Tuning tuning, TunableTee tunables, Experiments experiments) {
     this.status = status;
@@ -100,8 +107,9 @@ public final class Page {
     sections.put("values", valueSection);
     sections.put("changes", changeSection);
     sections.put("wpilibTunables", wpilibTunables());
-    sections.put("rigs", rigs());
-    sections.put("experiments", experimentList());
+    rebuildRigsIfChanged();
+    sections.put("rigs", rigSection);
+    sections.put("experiments", experimentSection);
     Run run = experiments.run();
     sections.put("run", run == null ? Map.of() : run(run));
     return sections;
@@ -178,7 +186,7 @@ public final class Page {
   /** What can be run: {@code {"rigs": {...}, "experiments": {...}}}. */
   Map<String, Object> experimentsView() {
     Map<String, Object> shown = new LinkedHashMap<>();
-    shown.put("rigs", rigs());
+    shown.put("rigs", rigs(gainPaths()));
     shown.put("experiments", experimentList());
     return shown;
   }
@@ -195,7 +203,8 @@ public final class Page {
     shown.put("rig", experiment.rig().name());
     shown.put("settings", experiment.settings());
     Map<String, Object> gains = new LinkedHashMap<>();
-    run.gains().forEach((field, value) -> gains.put(pathOf(experiment.rig(), field), value));
+    Map<String, String> paths = gainPaths().getOrDefault(experiment.rig().name(), Map.of());
+    run.gains().forEach((field, value) -> gains.put(paths.getOrDefault(field, field), value));
     shown.put("gains", gains);
     shown.put("startNanos", run.startNanos());
     shown.put("controller", run.controller());
@@ -250,12 +259,43 @@ public final class Page {
     return shown;
   }
 
-  private Map<String, Object> rigs() {
+  /**
+   * The rigs' and experiments' sections, rebuilt only when an experiment is added, or a gain's
+   * tunable is published at last: both happen as the robot starts.
+   */
+  private void rebuildRigsIfChanged() {
+    List<Experiment> now = experiments.experiments();
+    if (now == rigsBuiltFor && pathsFound) {
+      return;
+    }
+    Map<String, Map<String, String>> paths = gainPaths();
+    rigSection = rigs(paths);
+    experimentSection = experimentList();
+    rigsBuiltFor = now;
+    pathsFound =
+        paths.values().stream()
+            .allMatch(found -> found.values().stream().allMatch(p -> p.startsWith("/")));
+  }
+
+  /** Each rig's gains, by field, as the WPILib tunables they're published as; the field if not. */
+  private Map<String, Map<String, String>> gainPaths() {
+    Map<String, Map<String, String>> paths = new LinkedHashMap<>();
+    for (Rig rig : experiments.rigs()) {
+      Map<String, String> gains = new LinkedHashMap<>();
+      for (String gain : rig.gains()) {
+        gains.put(gain, Objects.requireNonNullElse(tunables.pathOf(rig.config(), gain), gain));
+      }
+      paths.put(rig.name(), gains);
+    }
+    return paths;
+  }
+
+  private Map<String, Object> rigs(Map<String, Map<String, String>> paths) {
     Map<String, Object> shown = new LinkedHashMap<>();
     for (Rig rig : experiments.rigs()) {
       Map<String, Object> described = new LinkedHashMap<>();
       described.put("config", rig.config().name());
-      described.put("gains", rig.gains().stream().map(gain -> pathOf(rig, gain)).toList());
+      described.put("gains", List.copyOf(paths.getOrDefault(rig.name(), Map.of()).values()));
       described.put("limits", rig.limits());
       described.put("unit", rig.measurementUnit().symbol());
       described.put("measurements", rig.measurements().stream().map(Trace.Signal::name).toList());
@@ -273,11 +313,6 @@ public final class Page {
           pair("rig", experiment.rig().name(), "settings", experiment.settings()));
     }
     return shown;
-  }
-
-  /** Where a rig's gain is published as a WPILib tunable; its path in the configuration if not. */
-  private String pathOf(Rig rig, String gain) {
-    return Objects.requireNonNullElse(tunables.pathOf(rig.config(), gain), gain);
   }
 
   private static List<Object> signals(List<Trace.Signal> signals) {

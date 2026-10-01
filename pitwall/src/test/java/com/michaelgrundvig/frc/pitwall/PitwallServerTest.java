@@ -420,6 +420,15 @@ class PitwallServerTest {
 
       assertThat(accepted.statusCode()).isEqualTo(202);
       assertThat(idle.view().enabled()).as("the loop never got to it").isTrue();
+      var status =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://localhost:" + paused.port() + "/api/status"))
+                  .GET()
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertThat(status.statusCode()).as("no reading passed off as now").isEqualTo(503);
+      assertThat(status.body()).contains("didn't read the status within 50 ms");
     }
   }
 

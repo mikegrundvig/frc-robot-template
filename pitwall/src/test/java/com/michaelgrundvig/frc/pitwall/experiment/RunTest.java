@@ -22,7 +22,7 @@ class RunTest {
   private final Lag lag = new Lag();
 
   private Run run(Rig rig, Profile profile) {
-    return new Run(1, new Experiment("Step and back", rig, profile), 4000, "7");
+    return new Run(1, new Experiment("Step and back", rig, profile), "7");
   }
 
   private static Run.Scores scores(Run run) {

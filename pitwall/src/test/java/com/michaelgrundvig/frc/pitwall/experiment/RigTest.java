@@ -152,6 +152,18 @@ class RigTest {
     assertThat(sent.get(1)).isCloseTo(100, within(1e-9));
   }
 
+  /** A signal read once a loop needs room only for its loops; a device's readings, for 1 kHz. */
+  @Test
+  void aRunMakesRoomForEachSignalAtItsOwnRate() {
+    Rig rig = lag.rig();
+    List<Trace.Signal> traced = rig.traced();
+
+    assertThat(traced)
+        .extracting(signal -> rig.capacity(signal, 2.1))
+        .as("the setpoint and the voltage once a loop; the angle at 250 Hz")
+        .containsExactly(260, 2600, 260);
+  }
+
   @Test
   void aSignalThatThrowsLosesOnlyItsOwnSamples() {
     Rig rig =

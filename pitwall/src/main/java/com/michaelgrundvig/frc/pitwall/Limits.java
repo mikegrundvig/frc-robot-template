@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.pitwall;
 import io.avaje.json.JsonException;
 import io.avaje.jsonb.JsonType;
 import io.avaje.jsonb.Jsonb;
-import java.util.Locale;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.tunable.TunableConfig;
@@ -133,9 +132,7 @@ public final class Limits {
   }
 
   private static String shown(double value) {
-    return value == Math.rint(value) && Math.abs(value) < 1e15
-        ? Long.toString((long) value)
-        : String.format(Locale.ROOT, "%.6g", value).replaceAll("\\.?0+(e|$)", "$1");
+    return Numbers.shown(value);
   }
 
   @Override

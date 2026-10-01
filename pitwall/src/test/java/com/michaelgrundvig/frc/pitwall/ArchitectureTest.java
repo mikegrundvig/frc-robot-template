@@ -3,10 +3,11 @@ package com.michaelgrundvig.frc.pitwall;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
-import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** Pitwall's boundaries, checked on every build: what keeps it a library any robot can use. */
@@ -54,18 +55,24 @@ class ArchitectureTest {
 
   /**
    * The one way a gain changes is the page's, through the tee: it checks the change (limits, the
-   * configuration's own checks, the robot's rules) and logs it for replay. An experiment only reads
-   * gains, so none can step a value past those checks, or change one a replay wouldn't.
+   * configuration's own checks, the robot's rules) and logs it for replay. An experiment may only
+   * read a configuration, so none can step a value past those checks, or change one a replay
+   * wouldn't. An allow-list, so a method LiveConfig gains later is refused until it's judged a
+   * read.
    */
   @Test
-  void experimentsNeverChangeAConfiguration() {
+  void experimentsOnlyReadAConfiguration() {
+    Set<String> reads = Set.of("get", "value", "name");
     noClasses()
         .that()
         .resideInAPackage("com.michaelgrundvig.frc.pitwall.experiment..")
         .should()
-        .callMethod(LiveConfig.class, "set", Map.class)
-        .orShould()
-        .callMethod(LiveConfig.class, "revert")
+        .callMethodWhere(
+            DescribedPredicate.describe(
+                "a method of LiveConfig other than " + reads,
+                call ->
+                    call.getTargetOwner().isEquivalentTo(LiveConfig.class)
+                        && !reads.contains(call.getName())))
         .orShould()
         .dependOnClassesThat()
         .resideInAPackage("org.wpilib.tunable..")

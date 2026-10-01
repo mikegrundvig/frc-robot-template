@@ -140,6 +140,9 @@ public final class CameraScoring {
     }
   }
 
+  /** Where the other robots' places come from, apart from the images' noise. */
+  private static final long OTHER_ROBOTS = 0x6f7468657273L; // "others"
+
   /** How many distinct cameras the layouts have among them: each takes its images once. */
   public int distinctCameras() {
     return cameras.size();
@@ -275,6 +278,13 @@ public final class CameraScoring {
         Seeds.mix(conditions.seed(), truth.getX(), truth.getY(), truth.getRotation().getRadians());
     for (int frame = 0; frame < config.frames(); frame++) {
       long frameSeed = Seeds.mix(poseSeed, frame);
+      // Other robots in the way, placed anew for each set of images, the same for every camera.
+      SplittableRandom placing = new SplittableRandom(Seeds.mix(frameSeed, OTHER_ROBOTS));
+      int others =
+          config.otherRobotsLeast()
+              + placing.nextInt(config.otherRobotsMost() - config.otherRobotsLeast() + 1);
+      List<OtherRobots.Blocker> blockers =
+          OtherRobots.around(truth, field, robot.body(), others, placing);
       // One gyro for the whole robot, off by a little, the same for every camera.
       double gyroError =
           Math.toRadians(conditions.gyroErrorDegrees())
@@ -295,7 +305,8 @@ public final class CameraScoring {
                 .image(
                     robotPose.transformBy(mounts[m]),
                     camera.name(),
-                    Seeds.mix(frameSeed, cameraSeeds[m]));
+                    Seeds.mix(frameSeed, cameraSeeds[m]),
+                    blockers);
         VisionMeasurement measurement =
             seen.tags().isEmpty()
                 ? null

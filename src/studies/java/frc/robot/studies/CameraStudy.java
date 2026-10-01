@@ -48,6 +48,7 @@ public final class CameraStudy {
         --gyro-error-degrees=D    the gyro heading's typical error (default 0.25)
         --mount-error-mm=M        cameras off their mounts by up to this (default 0)
         --mount-error-degrees=D   and turned by up to this (default 0)
+        --other-robots=N or N-M   other robots in the cameras' way around each pose (default 0)
         --trials=N                robustness trials, each drawing those errors (default 0)
         --robust                  robustness, with the usual trials (12: under ten minutes)
         --seed=N                  where every random draw starts (default 1)
@@ -72,6 +73,7 @@ public final class CameraStudy {
           "gyro-error-degrees",
           "mount-error-mm",
           "mount-error-degrees",
+          "other-robots",
           "trials",
           "seed",
           "threads",
@@ -181,6 +183,15 @@ public final class CameraStudy {
             config.frames(),
             config.frames() == 1 ? "image" : "images",
             config.seed()));
+    setup.add(
+        config.otherRobotsMost() == 0
+            ? "No other robots in the way."
+            : format(
+                "Other robots in the cameras' way: %s around each pose, each this robot's size,"
+                    + " placed anew for each set of images.",
+                config.otherRobotsLeast() == config.otherRobotsMost()
+                    ? Integer.toString(config.otherRobotsMost())
+                    : config.otherRobotsLeast() + " to " + config.otherRobotsMost()));
     Conditions nominal = Conditions.nominal(config);
     setup.add("Nominal conditions: " + nominal.described() + ".");
     out.println(setup.get(0));
@@ -287,6 +298,8 @@ public final class CameraStudy {
           .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
           .mountErrorMillimeters(number(options, "mount-error-mm", d.mountErrorMillimeters()))
           .mountErrorDegrees(number(options, "mount-error-degrees", d.mountErrorDegrees()))
+          .otherRobotsLeast(otherRobots(options, d)[0])
+          .otherRobotsMost(otherRobots(options, d)[1])
           .trials(
               count(
                   options,
@@ -332,6 +345,26 @@ public final class CameraStudy {
       return text == null ? otherwise : Double.parseDouble(text);
     } catch (NumberFormatException e) {
       throw new OptionException("--" + name + " must be a number: " + text, e);
+    }
+  }
+
+  /** How many other robots: {@code --other-robots=4}, or a range, {@code --other-robots=3-5}. */
+  private static int[] otherRobots(Map<String, String> options, CameraStudyConfig defaults) {
+    String text = options.get("other-robots");
+    if (text == null) {
+      return new int[] {defaults.otherRobotsLeast(), defaults.otherRobotsMost()};
+    }
+    String[] ends = text.split("-", -1);
+    try {
+      if (ends.length > 2) {
+        throw new NumberFormatException("more than two numbers");
+      }
+      int least = Integer.parseInt(ends[0].strip());
+      int most = Integer.parseInt(ends[ends.length - 1].strip());
+      return new int[] {least, most};
+    } catch (NumberFormatException e) {
+      throw new OptionException(
+          "--other-robots must be a whole number, or two with a dash between: " + text, e);
     }
   }
 

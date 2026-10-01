@@ -131,6 +131,7 @@ A finer grid costs the square: `--grid-meters=0.25` takes four times as long.
 | `--gyro-error-degrees=D` | 0.25 | The gyro heading's typical error (one standard deviation) |
 | `--mount-error-mm=M` | 0 | How far each camera really sits from its configured place, at most, along each axis |
 | `--mount-error-degrees=D` | 0 | How far each camera is really turned, at most, about each axis |
+| `--other-robots=N` or `N-M` | 0 | Other robots in the cameras' way around each pose (below) |
 | `--trials=N` | 0 | Robustness trials (below), each drawing all of these errors |
 | `--robust` | | Robustness with the usual 12 trials |
 | `--seed=N` | 1 | The seed every random draw comes from |
@@ -162,6 +163,33 @@ To turn it into requirements for CAD:
    at 30° to 45°, 16 to 24 in up, tilted up 10° to 20°".
 
 Rerun with weights once the strategy says where the robot must know where it is.
+
+## Other robots in the way
+
+On the field, other robots stand between the cameras and the tags. With `--other-robots=3-5`, each
+set of images has 3 to 5 other robots around the robot (as many as the seed draws), each a box the
+size of the robot being designed (its bumpers' outline, as tall as it is), placed at random within
+6 m (beyond that, the pipeline drops the tags anyway), turned at random, clear of the robot, of each
+other, and of the walls, and placed anew for every set of images. A tag is hidden when the line
+from the camera to any of its corners passes through one. Nothing about any game goes in, so field
+elements, which block views too, are left out; after kickoff they could be added from the new
+field's drawings.
+
+On the example (2026's field standing in), 3 to 5 other robots barely move the ranking (rank
+correlation 0.995 with the clear field; the top tens share 8 or 9 layouts), but they cost every
+layout, and they cost a layout with few cameras most, so each camera is worth more:
+
+| Cameras | 95% within, clear | 95% within, robots in the way | One lost, clear | One lost, robots in the way |
+|---:|---:|---:|---:|---:|
+| 3 | 3.3 cm | 5.7 cm | none | none |
+| 4 | 2.4 cm | 3.0 cm | 3.6 cm | none (94.2% measured) |
+| 5 | 2.1 cm | 2.4 cm | 2.9 cm | 3.5 cm |
+| 6 | 1.8 cm | 2.0 cm | 2.2 cm | 2.5 cm |
+
+(The best layout of each count at the eight places in "More than four cameras", below.) With other
+robots in the way, the best four cameras can't lose one and still measure 95% of the field; five
+can. The family's best four cameras go from 2.5 to 2.9 cm, and with one lost, from 3.7 to 8.9 cm.
+Robots in the way cost no measurable time.
 
 ## Robustness
 
@@ -312,8 +340,9 @@ with those cameras, and run with `--robot=<its name>`: its cameras are "the robo
 
 ## What it leaves out
 
-- **Anything blocking a tag:** field elements, other robots, the robot's own mechanisms. Every
-  layout's scores are an upper bound.
+- **Field elements and the robot's own mechanisms blocking a tag:** where they stand is the
+  game's, and the design's. Other robots are modeled when asked (`--other-robots`); without it,
+  and in any case for these, every layout's scores are an upper bound.
 - **Motion:** the robot stands still, so there's no blur and no latency. Motion costs every layout,
   more so for far tags.
 - **Tilt:** the robot is level.

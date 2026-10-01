@@ -23,6 +23,11 @@ final class AdvantageKitLog {
     Logger.recordOutput(key, value);
   }
 
+  /** Ends the log, writing what's left, before the program stops. */
+  static void end() {
+    Logger.end();
+  }
+
   static Consumer<TuningInputs> tuning() {
     return new TuningLog();
   }

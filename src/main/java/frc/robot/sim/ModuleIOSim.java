@@ -25,10 +25,12 @@ import org.wpilib.simulation.DCMotorSim;
  * A simulated swerve module: as in AdvantageKit's swerve templates, each motor turns a fixed load
  * through its gearing, under its motor controller's loop. A {@link DriveSimulation} steps it and
  * moves the robot with its true wheel motion; its absolute encoder can read off true ({@link
- * SensorErrors}). Both motors' stator current limits are modeled: the drive's caps the torque that
- * accelerates the robot and says when a wheel is at the edge of its grip, and the steering's caps
- * how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery is not, and
- * neither is the drive's supply current limit with Phoenix's step-down from it ({@code
+ * SensorErrors}), and its zero can be knocked further off while it runs. Its encoders' readings can
+ * go stale: the wheel turns on, and what the robot's code reads stops changing, as signals that
+ * stop arriving do. Both motors' stator current limits are modeled: the drive's caps the torque
+ * that accelerates the robot and says when a wheel is at the edge of its grip, and the steering's
+ * caps how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery is not,
+ * and neither is the drive's supply current limit with Phoenix's step-down from it ({@code
  * SwerveConfig.Limits.driveSupplyLowerCurrent}): the supply current it reports is what the motor
  * would draw from a steady 12 V with no supply limit. So this tests the code rather than the
  * robot's power; docs/stand-ins.md says when that matters.
@@ -81,7 +83,18 @@ final class ModuleIOSim implements ModuleIO {
   private final double wheelRadiusMeters;
 
   /** How far the absolute encoder's zero is off: it reads the true angle minus this. */
-  private final double steerOffsetRadians;
+  private double steerOffsetRadians;
+
+  /** How far it was off as the robot was built. */
+  private final double builtSteerOffsetRadians;
+
+  /** Whether the encoders' readings have stopped changing, and what they're stuck at. */
+  private boolean stale;
+
+  private double stalePositionRadians;
+  private double staleVelocityRadPerSec;
+  private double staleSteerRadians;
+  private double staleSteerRadPerSec;
 
   /**
    * Rotation the wheel spun without rolling the robot along: its encoder saw it, the floor didn't.
@@ -135,8 +148,43 @@ final class ModuleIOSim implements ModuleIO {
             modules.steerMotor().model(), STEER_INERTIA_KG_M2, modules.steerGearing());
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     this.steerOffsetRadians = steerOffsetRadians;
+    builtSteerOffsetRadians = steerOffsetRadians;
     heardSteerRadians = measuredSteerRadians();
     loopsUntilEncoderSends = (int) (encoderPhase * ENCODER_PERIOD_LOOPS);
+  }
+
+  /**
+   * Its absolute encoder's zero off by this much from now on: the steering's loop, which runs on
+   * the encoder, turns the wheel to match once the CANcoder next sends.
+   */
+  void setSteerOffset(double radians) {
+    steerOffsetRadians = radians;
+  }
+
+  double steerOffsetRadians() {
+    return steerOffsetRadians;
+  }
+
+  double builtSteerOffsetRadians() {
+    return builtSteerOffsetRadians;
+  }
+
+  /**
+   * The encoders' readings stop changing while the wheel turns on, or catch up again. The motor
+   * controllers' own loops keep their live readings: only what the robot's code reads is stale.
+   */
+  void setStale(boolean stale) {
+    if (stale && !this.stale) {
+      stalePositionRadians = drivePositionRadians();
+      staleVelocityRadPerSec = driveSim.getAngularVelocity();
+      staleSteerRadians = heardSteerRadians;
+      staleSteerRadPerSec = heardSteerRadPerSec;
+    }
+    this.stale = stale;
+  }
+
+  boolean isStale() {
+    return stale;
   }
 
   /** A motor turning a load. WPILib 2027 names this model for an arm; without gravity it's one. */
@@ -202,8 +250,8 @@ final class ModuleIOSim implements ModuleIO {
       sampleAngles = Arrays.copyOf(sampleAngles, samples * 2);
     }
     sampleTimes[samples] = timestampNanos;
-    samplePositions[samples] = driveSim.getAngularPosition() + spinRadians;
-    sampleAngles[samples] = heardSteerRadians;
+    samplePositions[samples] = drivePositionRadians();
+    sampleAngles[samples] = steerReadingRadians();
     samples++;
   }
 
@@ -219,8 +267,8 @@ final class ModuleIOSim implements ModuleIO {
     inputs.odometrySteerAnglesRad = Arrays.copyOf(sampleAngles, samples);
     samples = 0;
     inputs.driveConnected = true;
-    inputs.drivePositionRad = driveSim.getAngularPosition() + spinRadians;
-    inputs.driveVelocityRadPerSec = driveSim.getAngularVelocity();
+    inputs.drivePositionRad = drivePositionRadians();
+    inputs.driveVelocityRadPerSec = stale ? staleVelocityRadPerSec : driveSim.getAngularVelocity();
     inputs.driveAppliedVolts = driveAppliedVolts;
     inputs.driveStatorCurrentAmps = Math.abs(driveSim.getCurrentDraw());
     inputs.driveSupplyCurrentAmps =
@@ -229,8 +277,8 @@ final class ModuleIOSim implements ModuleIO {
     driveLimited = false;
     inputs.steerConnected = true;
     // The steering's angle and speed as the robot hears them: what the CANcoder last sent.
-    inputs.steerAngle = new Rotation2d(heardSteerRadians);
-    inputs.steerVelocityRadPerSec = heardSteerRadPerSec;
+    inputs.steerAngle = new Rotation2d(steerReadingRadians());
+    inputs.steerVelocityRadPerSec = stale ? staleSteerRadPerSec : heardSteerRadPerSec;
     inputs.steerAppliedVolts = steerSim.appliedVolts();
     // The steering's current is the most it drew since the last loop, not what it draws now. It
     // runs at its limit for a few milliseconds as the module starts and stops a turn, then falls to
@@ -240,6 +288,18 @@ final class ModuleIOSim implements ModuleIO {
     // shows it, and driveTorqueLimited says whether it reached the limit since the last loop.
     inputs.steerStatorCurrentAmps = steerPeakAmps;
     steerPeakAmps = 0;
+  }
+
+  /** What the drive encoder reads: every turn of the wheel, slips too, unless it's stale. */
+  private double drivePositionRadians() {
+    return stale ? stalePositionRadians : driveSim.getAngularPosition() + spinRadians;
+  }
+
+  /**
+   * The steering's angle as the robot's code reads it: what the CANcoder last sent, unless stale.
+   */
+  private double steerReadingRadians() {
+    return stale ? staleSteerRadians : heardSteerRadians;
   }
 
   /** The wheel's rotation since the start that rolled the robot along, in radians. */

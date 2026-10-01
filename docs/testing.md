@@ -9,20 +9,19 @@ it, fool its sensors, and check what it believes against where it really is.
 | Job | Command |
 |---|---|
 | Rerun the fast tests on every save while you work | `./gradlew test -Pquick --continuous` |
-| One robot test class, whatever its kind | `./gradlew :test --tests frc.robot.RobotContainerSimTest` |
-| A package's tests | `./gradlew :test --tests 'frc.robot.subsystems.drive.*'` |
-| The world model's tests (the kit, the field, the robot's definition) | `./gradlew :world:test` |
-| One of its packages, or classes | `./gradlew :world:test --tests 'com.michaelgrundvig.frc.world.field.*'` |
-| Localization's tests | `./gradlew :localization:test` |
-| Pitwall's tests | `./gradlew :pitwall:test` |
-| The tests of Pitwall's documentation processor | `./gradlew :pitwall:docs-processor:test` |
+| Rerun only the tests you're working on, on every save | `./gradlew test -Pquick --continuous --tests '*Arm*'` |
+| One test class, whatever its kind | `./gradlew test --tests frc.robot.RobotContainerSimTest` |
+| A package's tests | `./gradlew test --tests 'frc.robot.subsystems.drive.*'` |
+| One project's tests: the robot program's, the world model's, localization's | `./gradlew :test`, `:world:test`, `:localization:test` |
+| Pitwall's tests, and its documentation processor's | `./gradlew :pitwall:test`, `:pitwall:docs-processor:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
 
-The colon in `:test` means the robot project's tests only, and `:world:test` the world model's.
-Without one, `--tests` also applies to every other project (the libraries in `lib/`, and Pitwall's),
-which have no such test and fail the build saying so. `./gradlew test` with no `--tests` runs them
-all.
+`--tests` finds what it names in whichever project has it: the robot program, a library in `lib/`
+(whose packages are `com.michaelgrundvig.frc.world` and `.localization`), or Pitwall. A project
+with none of it passes; if no project has any, the build fails, naming what you asked for, so a
+misspelled name can't pass unnoticed. A project's name in front (`:world:test`) runs only its
+tests.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
 analysis and coverage report that `ci` runs. Each project has its own coverage report, the robot

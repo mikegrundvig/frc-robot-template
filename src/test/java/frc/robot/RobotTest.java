@@ -20,23 +20,38 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.hardware.hal.AllianceStationID;
+import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.simulation.DriverStationSim;
 
 /**
- * The robot program itself. {@code ./gradlew run} starts the simulator enabled in teleop so a
- * first-time driver can drive straight away; only a physics simulation that asked for it may enable
- * itself, since replay gets its enable state from the log.
+ * The robot program itself. {@code ./gradlew run} starts the simulator ready to drive, in teleop on
+ * a station, so a first-time driver is one press from driving; only a physics simulation that asked
+ * for it may enable itself, since replay gets its enable state from the log.
  */
 @ExtendWith(RobotSim.class)
 class RobotTest {
   @Test
-  void simulatorStartsEnabledWhenAsked() {
-    Robot.startEnabledIfRequested(Constants.Mode.SIM, true);
+  void withoutTheGuiTheSimulatorStartsReadyButDisabled() {
+    asARealRobotStarts();
+
+    Robot.startAsAsked(Constants.Mode.SIM, Robot.SimStart.READY);
+
+    assertFalse(DriverStationSim.getEnabled(), "disabled: the page enables it");
+    assertTrue(DriverStationSim.getDsAttached(), "driver station attached");
+    assertEquals(RobotMode.TELEOPERATED, DriverStationSim.getRobotMode(), "in teleop");
+    assertEquals(Optional.of(Alliance.BLUE), MatchState.getAlliance(), "on an alliance");
+    assertEquals(OptionalInt.of(2), MatchState.getLocation(), "at the center start's station");
+  }
+
+  @Test
+  void withTheGuiTheSimulatorStartsEnabled() {
+    asARealRobotStarts();
+
+    Robot.startAsAsked(Constants.Mode.SIM, Robot.SimStart.ENABLED);
 
     assertTrue(DriverStationSim.getEnabled(), "enabled");
     assertTrue(DriverStationSim.getDsAttached(), "driver station attached");
-    assertEquals(Optional.of(Alliance.BLUE), MatchState.getAlliance(), "on an alliance");
     assertEquals(OptionalInt.of(2), MatchState.getLocation(), "at the center start's station");
   }
 
@@ -45,24 +60,45 @@ class RobotTest {
     DriverStationSim.setAllianceStationId(AllianceStationID.RED_3);
     DriverStationSim.notifyNewData();
 
-    Robot.startEnabledIfRequested(Constants.Mode.SIM, true);
+    Robot.startAsAsked(Constants.Mode.SIM, Robot.SimStart.READY);
 
     assertEquals(Optional.of(Alliance.RED), MatchState.getAlliance());
     assertEquals(OptionalInt.of(3), MatchState.getLocation());
   }
 
   @Test
-  void simulatorStartsDisabledUnlessAsked() {
-    Robot.startEnabledIfRequested(Constants.Mode.SIM, false);
+  void startDisabledLeavesItAsARealRobotStarts() {
+    asARealRobotStarts();
+
+    Robot.startAsAsked(Constants.Mode.SIM, Robot.SimStart.DISABLED);
 
     assertFalse(DriverStationSim.getEnabled());
+    assertEquals(Optional.empty(), MatchState.getAlliance(), "no station");
+  }
+
+  @Test
+  void anUnknownOrMissingStartIsARealRobots() {
+    assertEquals(Robot.SimStart.DISABLED, Robot.SimStart.named(null));
+    assertEquals(Robot.SimStart.DISABLED, Robot.SimStart.named("sideways"));
+    assertEquals(Robot.SimStart.READY, Robot.SimStart.named("ready"));
+    assertEquals(Robot.SimStart.ENABLED, Robot.SimStart.named("ENABLED"));
   }
 
   @Test
   void replayNeverEnablesItself() {
-    Robot.startEnabledIfRequested(Constants.Mode.REPLAY, true);
+    asARealRobotStarts();
+
+    Robot.startAsAsked(Constants.Mode.REPLAY, Robot.SimStart.ENABLED);
 
     assertFalse(DriverStationSim.getEnabled());
+    assertEquals(Optional.empty(), MatchState.getAlliance(), "no station");
+  }
+
+  /** Disabled with no station, as a robot starts: not the tests' own default, blue 2. */
+  private static void asARealRobotStarts() {
+    DriverStationSim.setAllianceStationId(AllianceStationID.UNKNOWN);
+    DriverStationSim.setEnabled(false);
+    DriverStationSim.notifyNewData();
   }
 
   @Test

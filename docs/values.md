@@ -428,6 +428,31 @@ the new field's ramps.
 | `levelSeconds` | chosen | 0.1 s | guess | Why: five loops level is off the feature, not a wobble on its top. Lengthen it if a wobble on a feature's top ends a crossing early. |
 | `topSeconds` | chosen | 1.5 s | guess | Why: time to cross a feature's flat top; longer is two features, or a stop on top. Lengthen it if a wide feature's crossing isn't counted. |
 
+## The coprocessors
+
+### `Coprocessors.Settings`
+
+`frc.robot.subsystems.coprocessors.Coprocessors.Settings`: how the robot asks its vision
+coprocessors' health agents how they are, and when it raises alerts about them; the robot uses
+`Settings.DEFAULTS`. Each coprocessor's answers are logged under `Coprocessors/<name>`
+([the coprocessors](coprocessors.md)).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `pollPeriodSeconds` | chosen | 1 s | guess | Why: what the agent reports (heat, load, cameras, restarts) changes over seconds, and an answer is 3 to 4 KB, so once a second is fresh enough for the pit and nothing to the network. Lower it only if an alert must come sooner. |
+| `connectTimeoutSeconds` | chosen | 0.25 s | guess | Why: on the robot's own network a connection takes milliseconds; a quarter second is far past that, and fails a poll to a coprocessor that's gone well inside the period. Check: `Coprocessors/<name>/Error` never says "connect timed out" while the coprocessor is up. |
+| `answerTimeoutSeconds` | chosen | 0.5 s | guess | Why: the agent answers from what it has already read; half a second covers a busy board, and with the connect timeout fits in the period, so a slow poll never delays the next. Check: `Coprocessors/<name>/Error` never says "Read timed out" while the coprocessor is up. |
+| `staleAfterSeconds` | chosen | 3 s | guess | Why: three polls without an answer: one lost answer isn't a coprocessor missing, and one that's gone shows within seconds. Raise it if the missing alert flickers on a healthy robot (`Coprocessors/<name>/AgeSeconds` past it). |
+| `hotMarginCelsius` | chosen | 5 °C | guess | Why: a board this close to a zone's first passive trip point (its first trip point of any kind when it has no passive one) is about to slow its big cores, and PhotonVision with them. Check it against [coprocessor capacity](characterization.md#vision-coprocessor-capacity)'s ten minutes at full load, as mounted: the hottest zone (`Coprocessors/<name>/ZoneCelsius` against `ZoneTripCelsius`) should stay outside it. |
+| `hotClearMarginCelsius` | chosen | 2 °C | guess | Why: a hot board stays hot until it's this much clearer of its trip point than the margin, so one hovering at the margin doesn't flicker the alert on and off. Raise it if the hot alert still flickers on a board as mounted. |
+| `hotHoldSeconds` | chosen | 10 s | guess | Why: and until this long after its last answer within that, so a board cooling for a moment between loads isn't called cool. |
+| `turnsWindowSeconds` | chosen | 60 s | guess | Why: two boards at one address answer by turns as the robot's address table flips between them, which can take tens of seconds; a minute catches that. A board replaced by another never gives way to it again, so no window mistakes a swap for two boards. |
+| `downloadTimeoutSeconds` | chosen | 10 s | guess | Why: a settings backup, calibrations included, is a few megabytes, seconds over the robot's network. Raise it if a backup from Pitwall times out on a healthy coprocessor. |
+| `powerDownTimeoutSeconds` | chosen | 30 s | guess | Why: a board that hasn't taken the request is asked again each poll for this long, and one not gone after it is named in a high alert: switching the robot off then is the hard power cut powering down avoids. The agent gives PhotonVision up to two minutes to stop, so a slow stop can outlast it (the alert then says the board accepted, and is still answering). Check how long *Power down coprocessors* takes on the real boards, and keep this well above it. |
+| `haltedAfterSeconds` | chosen | 180 s | guess | Why: a halted board stays off while it has power, so a robot left on a few minutes after its coprocessors powered down has no vision until its power is cycled; the page says so instead of "Safe to switch off". |
+| `powerDownButton` | as built | -1 (none) | none | Which of Systemcore's digital inputs (0 to 31 allowed) a power-down button is wired to: a push button to ground, read pressed when the input reads false (pulled up, unverified on Systemcore's SmartIO). -1 for no button. It works only once it has read released, so a button stuck, shorted, or unwired reading pressed from the start does nothing, and a medium alert says to check its wiring. |
+| `powerDownButtonHoldSeconds` | chosen | 1 s | guess | Why: long enough that brushing the button does nothing, short enough to hold deliberately. It acts only while the robot is disabled and off the field, as Pitwall's action does. |
+
 ## The simulator
 
 ### `SensorErrors`
@@ -583,6 +608,9 @@ code's choices, explained beside them.
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |
 | `Vision`: how recently another camera must have agreed for a camera's tags to count toward its mount | 2 s | chosen | simulation (half a second left out cameras facing other ways, which see tags at other moments) | Why: the other cameras hold the pose a camera is judged against. |
+| `CoprocessorIOSim`: where the simulated board's zones trip | 85 °C | characterized | datasheet (mainline Linux's RK3588 device tree) | The real boards' trip points are read at run time by their agents, since the vendor kernel's may differ; the simulator only needs a plausible one. |
+| `AgentHttp`: how long to wait before asking a busy agent (503) once more | what its `Retry-After` says, at most 2 s | chosen | datasheet (the agent's `Retry-After: 1`) | Why: the agent is busy with one journal or settings request at a time; a second later it's free. Longer would hold the page's request (and a Pitwall slot) for nothing. |
+| `DeployCheck`: how long each coprocessor has to connect, and to answer with its stamp, before a deploy, and how long before it's asked once more | 1 s, and 2 s | chosen | guess | Why: on the robot's network a stamp takes milliseconds, and a coprocessor that isn't there shouldn't hold a deploy up long; one restarting answers two seconds on. A coprocessor that never answers holds the deploy about 8 s: a second to connect and one to answer, a second on PhotonVision's port, then the same again after 2 s. One whose agent is busy (503) is asked once more the same way, and left unchecked if it still is. |
 
 ## Records that aren't configuration
 

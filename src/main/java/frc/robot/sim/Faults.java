@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
 import frc.robot.lib.field.Bump;
+import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -22,10 +23,10 @@ import org.wpilib.math.geometry.Translation3d;
 
 /**
  * What can go wrong with the simulated world's parts while it runs, declared to Pitwall's simulator
- * controls: each camera, the gyro, the backup IMU, each module, the robot itself, and the field's
- * tags, with their faults. The page lists them, applies them, and undoes them; the scenarios
- * ({@link Scenarios}) are made of them. The robot's code is never told: it has to find out from its
- * sensors.
+ * controls: each camera, the gyro, the backup IMU, each module, the robot itself, the field's tags,
+ * and each coprocessor, with their faults. The page lists them, applies them, and undoes them; the
+ * scenarios ({@link Scenarios}) are made of them. The robot's code is never told: it has to find
+ * out from its sensors.
  *
  * <p>A fault that lasts (a camera unplugged) says whether it's on by asking the world, and undoing
  * it puts the part back as the world was built: a season-worn robot's sensors ({@link
@@ -65,6 +66,14 @@ public final class Faults {
   public static final String PLACED = "Placed";
   public static final String TO_A_BUMP = "Carried to a bump";
   public static final String TAG_MOVED = "Tag moved";
+  public static final String UNREACHABLE = "Unreachable";
+  public static final String WRONG_VERSION = "Wrong version";
+  public static final String HOT = "Hot";
+  public static final String CAMERA_UNPLUGGED = "Camera unplugged";
+  public static final String PHOTONVISION_RESTARTS = "PhotonVision restarts";
+  public static final String DUPLICATED = "Duplicated address";
+  public static final String SETTINGS_CHANGED = "Settings changed";
+  public static final String IGNORES_POWER_DOWN = "Ignores power-down";
 
   // Their parameters, as the scenarios give them.
   public static final String FORWARD = "Forward";
@@ -85,6 +94,8 @@ public final class Faults {
   public static final String Y = "Y";
   public static final String HEADING = "Heading";
   public static final String TAG = "Tag";
+  public static final String BELOW_TRIP = "Below its trip point";
+  public static final String CAMERA = "Camera";
 
   /** How far short of a bump's ramp the robot is set down, from its center: clear of the ramp. */
   static final double BUMP_CLEARANCE_METERS = 1.0;
@@ -103,6 +114,11 @@ public final class Faults {
   /** A camera's name on the page: {@code "Camera front-left"}. */
   public static String camera(String name) {
     return "Camera " + name;
+  }
+
+  /** A coprocessor's name on the page: {@code "Coprocessor vision-front"}. */
+  public static String coprocessor(String name) {
+    return "Coprocessor " + name;
   }
 
   /**
@@ -129,6 +145,100 @@ public final class Faults {
     if (!world.vision().tagIds().isEmpty()) {
       components.add(field(world.vision()));
     }
+    for (CoprocessorIOSim coprocessor : world.coprocessorSims()) {
+      components.add(coprocessor(coprocessor));
+    }
+  }
+
+  /** A coprocessor, as its health agent tells the robot of it. */
+  private static Component coprocessor(CoprocessorIOSim coprocessor) {
+    List<Fault> faults = new ArrayList<>();
+    faults.add(
+        Fault.lasting(UNREACHABLE)
+            .does(
+                "Its health agent stops answering, as a coprocessor unplugged, off, or off the"
+                    + " network: the robot's code finds it missing.")
+            .isOn(coprocessor::isUnreachable)
+            .apply(values -> coprocessor.unreachable(true))
+            .undo("Answers again.", () -> coprocessor.unreachable(false))
+            .build());
+    faults.add(
+        Fault.lasting(WRONG_VERSION)
+            .does(
+                "Its image carries PhotonVision "
+                    + CoprocessorIOSim.OTHER_VERSION
+                    + ", as a board left on last season's image would, and it publishes that"
+                    + " version.")
+            .isOn(coprocessor::hasWrongVersion)
+            .apply(values -> coprocessor.wrongVersion(true))
+            .undo("Back to this build's image.", () -> coprocessor.wrongVersion(false))
+            .build());
+    faults.add(
+        Fault.lasting(HOT)
+            .does(
+                "Its big cores run this far below their trip point; at it or past it, the kernel"
+                    + " caps their clock.")
+            .parameter(BELOW_TRIP, "°C", Limits.between(-10, 30), 2)
+            .isOn(coprocessor::isHot)
+            .apply(values -> coprocessor.heat(values.get(BELOW_TRIP)))
+            .undo("Back to its usual temperature.", () -> coprocessor.heat(Double.NaN))
+            .build());
+    if (coprocessor.cameraCount() > 0) {
+      faults.add(
+          Fault.lasting(CAMERA_UNPLUGGED)
+              .does(
+                  "One of its cameras, numbered from 1 in the table's order, is unplugged: its USB"
+                      + " port is empty.")
+              .parameter(CAMERA, "", Limits.between(1, coprocessor.cameraCount()), 1)
+              .isOn(coprocessor::isCameraUnplugged)
+              .apply(values -> coprocessor.unplugCamera(cameraIndex(values.get(CAMERA))))
+              .undo("Plugs it back in.", () -> coprocessor.unplugCamera(-1))
+              .build());
+    }
+    faults.add(
+        Fault.event(PHOTONVISION_RESTARTS)
+            .does("PhotonVision exits, and systemd restarts it: it's back after a few seconds.")
+            .apply(values -> coprocessor.restartPhotonVision())
+            .undoneBy(
+                "Nothing undoes it: the count of restarts since boot stays, until it reboots.")
+            .build());
+    faults.add(
+        Fault.lasting(DUPLICATED)
+            .does(
+                "A second board with its image answers at its address too, the two taking turns,"
+                    + " as a spare drive in another board would.")
+            .isOn(coprocessor::hasTwoBoards)
+            .apply(values -> coprocessor.twoBoards(true))
+            .undo("Only its own board answers.", () -> coprocessor.twoBoards(false))
+            .build());
+    faults.add(
+        Fault.lasting(SETTINGS_CHANGED)
+            .does(
+                "Its PhotonVision settings change from those it was stamped with, as calibrating or"
+                    + " tuning in PhotonVision's own page does: they differ from Git's, if Git has"
+                    + " any.")
+            .isOn(coprocessor::hasSettingsChanged)
+            .apply(values -> coprocessor.settingsChanged(true))
+            .undo("Back to its stamped settings.", () -> coprocessor.settingsChanged(false))
+            .build());
+    faults.add(
+        Fault.lasting(IGNORES_POWER_DOWN)
+            .does(
+                "Its image is older than powering down from the robot: asked, its agent refuses"
+                    + " (404), and it keeps running.")
+            .isOn(coprocessor::isIgnoringPowerDown)
+            .apply(values -> coprocessor.ignoresPowerDown(true))
+            .undo("Powers down when asked.", () -> coprocessor.ignoresPowerDown(false))
+            .build());
+    return new Component(coprocessor(coprocessor.name()), "coprocessor", faults);
+  }
+
+  /** A camera's number, from 1, as an index from 0. */
+  private static int cameraIndex(double number) {
+    if (number != Math.rint(number)) {
+      throw new IllegalArgumentException("a camera's number is a whole number, not " + number);
+    }
+    return (int) number - 1;
   }
 
   private static Component camera(CameraIOSim camera) {

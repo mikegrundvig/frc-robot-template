@@ -35,6 +35,8 @@ public final class Page {
   private final Experiments experiments;
   private final Supplier<String> mode;
   private final @Nullable Simulator simulator;
+  private final Devices devices;
+  private final Notices notices;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
   private final String program = UUID.randomUUID().toString();
@@ -62,7 +64,16 @@ public final class Page {
   /** A page that doesn't know the robot's mode, and has no simulator: a test's, say. */
   public Page(
       Status status, Actions actions, Tuning tuning, TunableTee tunables, Experiments experiments) {
-    this(status, actions, tuning, tunables, experiments, () -> "", null);
+    this(
+        status,
+        actions,
+        tuning,
+        tunables,
+        experiments,
+        () -> "",
+        null,
+        new Devices(System::nanoTime),
+        new Notices());
   }
 
   /**
@@ -78,7 +89,16 @@ public final class Page {
       TunableTee tunables,
       Experiments experiments,
       Supplier<String> mode) {
-    this(status, actions, tuning, tunables, experiments, mode, null);
+    this(
+        status,
+        actions,
+        tuning,
+        tunables,
+        experiments,
+        mode,
+        null,
+        new Devices(System::nanoTime),
+        new Notices());
   }
 
   /**
@@ -86,6 +106,8 @@ public final class Page {
    *     the robot loop, only while a page is open
    * @param simulator the simulator's controls, in the simulator; null on a robot, where the page
    *     has none
+   * @param devices the devices the robot reports on, for the Pit view's cards
+   * @param notices what the robot has to tell whoever is at the page, above everything else
    */
   Page(
       Status status,
@@ -94,7 +116,9 @@ public final class Page {
       TunableTee tunables,
       Experiments experiments,
       Supplier<String> mode,
-      @Nullable Simulator simulator) {
+      @Nullable Simulator simulator,
+      Devices devices,
+      Notices notices) {
     this.status = status;
     this.actions = actions;
     this.tuning = tuning;
@@ -102,6 +126,8 @@ public final class Page {
     this.experiments = experiments;
     this.mode = mode;
     this.simulator = simulator;
+    this.devices = devices;
+    this.notices = notices;
   }
 
   public Status status() {
@@ -124,6 +150,16 @@ public final class Page {
     return experiments;
   }
 
+  /** The devices the robot reports on: the Pit view's cards. */
+  public Devices devices() {
+    return devices;
+  }
+
+  /** What the robot has to tell whoever is at the page: shown in the state bar and atop Pit. */
+  public Notices notices() {
+    return notices;
+  }
+
   /** The simulator's controls; null on a robot. */
   public @Nullable Simulator simulator() {
     return simulator;
@@ -136,7 +172,8 @@ public final class Page {
    *   <li>{@code robot}: its name, the code, simulator or real, this program's id, its mode (empty
    *       when unknown), and why actions and experiments can't start now (empty while they can);
    *   <li>{@code status}, {@code units}: each item's value, and the unit of each number;
-   *   <li>{@code actions}: each action's phase and detail;
+   *   <li>{@code actions}: each action's phase, detail, why it can't start now (empty while it
+   *       can), and when it may run ({@code ENABLED_IN_UTILITY} or {@code DISABLED});
    *   <li>{@code tuning}: whether it's on, the field, and refused dashboard changes;
    *   <li>{@code configs}: each configuration's documentation, as {@code /api/configs} gives it;
    *   <li>{@code tunables}, {@code values}, {@code changes}: the configurations' tunable values, by
@@ -145,6 +182,9 @@ public final class Page {
    *   <li>{@code wpilibTunables}: every other WPILib tunable, by path;
    *   <li>{@code rigs}, {@code experiments}: what can be run;
    *   <li>{@code run}: the run in progress, or the latest to end;
+   *   <li>{@code devices}: each device's card, as of its last read: see {@link Devices#view};
+   *   <li>{@code notices}: what the robot has to tell whoever is at the page: see {@link
+   *       Notices#view};
    *   <li>in the simulator only, {@code simulator} (the Driver Station, the clock, and the
    *       joysticks the page drives), {@code components} (what can fail, and how), and {@code
    *       scenarios}: see {@link Simulator#view}.
@@ -174,6 +214,8 @@ public final class Page {
     sections.put("experiments", experimentSection);
     Run run = experiments.run();
     sections.put("run", run == null ? Map.of() : run(run));
+    sections.put("devices", devices.view());
+    sections.put("notices", notices.view());
     if (simulator != null) {
       sections.putAll(simulator.view());
     }
@@ -346,7 +388,10 @@ public final class Page {
   private Map<String, Object> actionStates() {
     Map<String, Object> shown = new LinkedHashMap<>();
     for (Actions.State state : actions.view()) {
-      shown.put(state.name(), pair("phase", state.phase().name(), "detail", state.detail()));
+      Map<String, Object> each = pair("phase", state.phase().name(), "detail", state.detail());
+      each.put("locked", state.locked());
+      each.put("when", state.when().name());
+      shown.put(state.name(), each);
     }
     return shown;
   }

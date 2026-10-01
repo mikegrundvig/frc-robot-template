@@ -64,7 +64,12 @@ Also built in:
     `pitwall.status().add("Arm homed", arm::isHomed)`.
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
-    `pitwall.actions().add("Home arm", arm::home)`.
+    `pitwall.actions().add("Home arm", arm::home)`. One that mustn't run while the robot can move,
+    such as powering the coprocessors down, runs only while it's disabled instead, and only until
+    the field system first connects (`Actions.When.DISABLED`).
+  - **Notices**: what the robot has to tell whoever is at the page right now, such as "Safe to
+    switch off", shown in the state bar on every view and atop Pit:
+    `pitwall.notices().add("Coprocessors", coprocessors::notice)`.
   - **Experiments**: tuning a mechanism by test motion. A mechanism describes itself as a *rig*:
     its gains (values of its `LiveConfig`), how to command it, how far it may go, and what to
     record (`Drive.steeringRig`). An experiment runs a test motion on it from the page, such as
@@ -74,6 +79,12 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to stage a run's gains again and the builder calls
     that commit them. A gain changes only the way any value does, through the checks below.
+  - **Devices**: a card in Pit for each device the robot program asks after (a vision
+    coprocessor, say), saying whether it's there and how it is, and ending in what can be done
+    about it: its own page, a file to download from it, or its log to read. The robot program asks
+    the device, on Pitwall's server threads, two requests at once at most and no downloads on the
+    field; the browser never reaches a device itself:
+    `pitwall.devices().add(Devices.Device.named("vision-front", "Coprocessor", card))`.
   - **The simulator's controls**, in the page's Sim view (in the simulator only; a robot has
     none), in place of WPILib's simulator GUI: the Driver Station (enable, the mode, the alliance
     station, the field system, the match time), driving from the keyboard or a gamepad, pausing
@@ -196,7 +207,7 @@ Also built in:
 |---|---|
 | `src/main/java/frc/robot/` | The robot program. At the top: `Robot` (logging, Pitwall, and the loop), `RobotContainer` (builds every mechanism for the mode, real, simulated, or replayed from a log, and binds the controls), `Robots` and `RobotConfig` (below), and `LoopHealth`. |
 | `src/main/java/frc/robot/Robots.java` | Your robots: size, mass, drivetrain, and cameras, one typed configuration each, every value set by name and checked when built. |
-| `frc.robot.subsystems` | The mechanisms, in AdvantageKit's IO pattern (the logic, plus one IO class per kind of hardware): `drive`, the swerve drivetrain, simulated and CTRE's (a [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships); `localization`, where the robot is; `vision`, the cameras. |
+| `frc.robot.subsystems` | The mechanisms, in AdvantageKit's IO pattern (the logic, plus one IO class per kind of hardware): `drive`, the swerve drivetrain, simulated and CTRE's (a [stand-in](docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships); `localization`, where the robot is; `vision`, the cameras; `coprocessors`, the vision coprocessors' health, polled from each one's agent ([docs/coprocessors.md](docs/coprocessors.md)). |
 | `frc.robot.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `frc.robot.game` | The game: the field the robot plays on, 2026's (`Rebuilt`) until [kickoff](docs/kickoff.md), with its starts, targets, and zones written for the blue alliance. |
 | `frc.robot.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
@@ -209,7 +220,7 @@ Also built in:
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | WPILib's simulator GUI's default settings, used on the first `./gradlew run -Pgui`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), [the coprocessors](docs/coprocessors.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

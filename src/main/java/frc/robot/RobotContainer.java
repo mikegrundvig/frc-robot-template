@@ -3,6 +3,8 @@ package frc.robot;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
+import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
@@ -32,6 +34,13 @@ import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SimulatedWorld;
+import frc.robot.subsystems.coprocessors.CoprocessorIO;
+import frc.robot.subsystems.coprocessors.CoprocessorIOHttp;
+import frc.robot.subsystems.coprocessors.Coprocessors;
+import frc.robot.subsystems.coprocessors.PhotonVisionIO;
+import frc.robot.subsystems.coprocessors.PhotonVisionIONetworkTables;
+import frc.robot.subsystems.coprocessors.PowerButtonIO;
+import frc.robot.subsystems.coprocessors.PowerButtonIODigitalInput;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
@@ -42,6 +51,7 @@ import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +70,7 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
+import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.Telemetry;
@@ -129,6 +140,7 @@ public final class RobotContainer implements AutoCloseable {
   private final Localization localization;
   private final Drive drive;
   private final Vision vision;
+  private final Coprocessors coprocessors;
   private final Calibration calibration;
   private final CommandGamepad driver;
   private final Alert noHardware =
@@ -284,6 +296,41 @@ public final class RobotContainer implements AutoCloseable {
             field,
             visionTuning::get,
             () -> alliance);
+    // The vision coprocessors' health agents: over the network on a robot, simulated in the
+    // simulator, the log in a replay. Each is asked on a thread of its own; the loop never waits.
+    // A robot watches none of the template's example table's (team 0): they'd all read missing.
+    CompiledTable table = Coprocessors.compiledTable();
+    Coprocessors.Settings coprocessorSettings = Coprocessors.Settings.DEFAULTS;
+    boolean watchNone = world == null && Coprocessors.isExample(table);
+    CoprocessorIO[] coprocessorIOs =
+        new CoprocessorIO[watchNone ? 0 : table.table().computers().size()];
+    PhotonVisionIO photonVision;
+    if (world != null) {
+      coprocessorIOs = world.coprocessors(table, coprocessorSettings);
+      photonVision = world.photonVision();
+    } else if (mode == Constants.Mode.REAL) {
+      for (int i = 0; i < coprocessorIOs.length; i++) {
+        Computer computer = table.table().computers().get(i);
+        coprocessorIOs[i] =
+            new CoprocessorIOHttp(
+                computer.name(),
+                table.table().ip(computer),
+                computer.agentPort(),
+                coprocessorSettings,
+                RobotController::getTime);
+      }
+      photonVision = new PhotonVisionIONetworkTables(NetworkTableInstance.getDefault());
+    } else {
+      Arrays.fill(coprocessorIOs, new CoprocessorIO() {});
+      photonVision = new PhotonVisionIO() {};
+    }
+    // A button that powers the coprocessors down, on a robot whose settings wire one.
+    PowerButtonIO powerButton =
+        mode == Constants.Mode.REAL && coprocessorSettings.powerDownButton() >= 0
+            ? new PowerButtonIODigitalInput(coprocessorSettings.powerDownButton())
+            : new PowerButtonIO() {};
+    coprocessors =
+        new Coprocessors(table, coprocessorIOs, photonVision, powerButton, coprocessorSettings);
     calibration =
         new Calibration(
             drive,
@@ -374,6 +421,8 @@ public final class RobotContainer implements AutoCloseable {
     loop.mark("Vision", System.nanoTime());
     vision.record(localization.update());
     loop.mark("Localization", System.nanoTime());
+    coprocessors.periodic(RobotController.getTime(), enabled);
+    loop.mark("Coprocessors", System.nanoTime());
     Pose2d pose = localization.pose();
     placement =
         Placement.check(
@@ -506,6 +555,10 @@ public final class RobotContainer implements AutoCloseable {
     return vision;
   }
 
+  Coprocessors coprocessors() {
+    return coprocessors;
+  }
+
   Localization localization() {
     return localization;
   }
@@ -560,6 +613,7 @@ public final class RobotContainer implements AutoCloseable {
               });
     }
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
+    coprocessors.addTo(pitwall);
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .experiments()
@@ -614,6 +668,7 @@ public final class RobotContainer implements AutoCloseable {
     offField.close();
     loopHealth.close();
     vision.close();
+    coprocessors.close();
     if (world != null) {
       world.close();
     }

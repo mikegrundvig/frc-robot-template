@@ -26,13 +26,13 @@ computers:
 
 | Key | Required | What it may be |
 |---|---|---|
-| `team` | yes | 0 to 25599. A computer's address is 10.TE.AM.x: team 2611's `.11` is 10.26.11.11 |
-| `agentPort` | no, 5808 | 1024 to 65535, except 5800 (PhotonVision's page) and 5810 (NetworkTables). 5808 sits in FRC's team range, 5800-5810 |
+| `team` | yes | 0 to 25599. A computer's address is 10.TE.AM.x: team 1234's `.11` is 10.12.34.11 |
+| `agentPort` | no, 5808 | 1024 to 65535, except 5800 (PhotonVision's page), 5810 (NetworkTables), and 1181 to 1200 (PhotonVision's camera streams, which start at 1181, two ports per camera). 5808 sits in FRC's team range, 5800-5810 |
 | `computers` | yes (`[]` for none) | A list of computers |
 | `computers[].name` | yes | A hostname: lowercase letters, digits, and hyphens, starting with a letter and not ending with a hyphen, at most 63 characters. Unique |
 | `computers[].address` | yes | 6 to 19: FRC's static range for devices on the robot (WPILib's "IP Configurations"; .20-.199 is the field's DHCP pool, .200-.219 the radio's). 11 and up by convention. Unique |
 | `computers[].board` | yes | One of the five boards above |
-| `computers[].cameras` | no, none | PhotonVision camera names: the names robot code gives `PhotonCamera`. Not empty, no `/` or control characters, at most 64 characters. Unique across the whole table, since PhotonVision publishes each one at `/photonvision/<camera>` |
+| `computers[].cameras` | no, none | PhotonVision camera names: the names robot code gives `PhotonCamera`. Printable ASCII (letters, digits, spaces, punctuation), not empty, no `/`, no leading or trailing space, at most 64 characters. Unique across the whole table, since PhotonVision publishes each one at `/photonvision/<camera>` |
 | `computers[].agentPort` | no, the table's | As `agentPort` |
 
 The build reads the table and refuses one with a problem, listing every problem with its line. A
@@ -46,9 +46,12 @@ lists at least one computer.
 program or the agent. It reads the YAML above and anything shaped like it: one `key: value` per
 line, nested by indenting with spaces; lists as `- item` lines (at the key's indent or deeper) or
 on one line in `[...]`; plain, `'single'`, and `"double"` quoted values; and `#` comments.
-Everything else YAML allows (tabs, `{...}` mappings, anchors, tags, multi-line values, more than
-one document) is refused with its line number, rather than read in a way you didn't mean. Values
-are never guessed at: a camera named `no` is the text "no", not false.
+Everything else YAML allows (tabs, `{...}` mappings, anchors, tags, directives, multi-line values,
+more than one document, nesting more than 16 deep) is refused with its line number, rather than
+read in a way you didn't mean. Numbers are written plainly, without leading zeros. A name, board,
+or camera that YAML would read as something other than text (`~`, `null`, `true`, `false`, a
+number) must be in quotes: `cameras: ["1"]`. So this reader and other YAML tools (the image
+workflow reads the table with yq) always agree on what the table says.
 
 In Java: `Table.readYaml(path)` (or `Table.parseYaml(text, name)`) gives a checked `Table`, or a
 `TableException` whose `problems()` are the messages. A `Table` is checked however it's made, from
@@ -98,7 +101,7 @@ belongs) is an error.
 ### `Stamp`
 
 ```json
-{"name": "vision-front", "team": 2611, "address": "10.26.11.11", "board": "orangepi-5",
+{"name": "vision-front", "team": 1234, "address": "10.12.34.11", "board": "orangepi-5",
  "cameras": ["front-left", "front-right"], "release": "coprocessors-2027.1",
  "recipeHash": "4f2c…", "photonvisionVersion": "v2027.1.0", "settingsHash": "9a8b…",
  "bootId": "3c1e6a2e-…", "mac": "c0:74:2b:fe:12:34"}
@@ -247,9 +250,17 @@ a fixed order (`SettingsHash.RULES`, each with its reason; `SettingsHashTest` pi
 |---|---|---|---|
 | `cameras`, `config_json` | `currentPipelineIndex` | left out | The robot program switches pipelines and driver mode, and PhotonVision saves the choice |
 | `cameras`, `config_json` | `streamIndex` | left out | PhotonVision assigns each camera's stream ports as it starts |
-| `cameras`, `config_json` | `matchedCameraInfo.dev` | left out | The `/dev/videoN` number the kernel gave the camera this boot |
-| `cameras`, `config_json` | `matchedCameraInfo.path` | left out | The `/dev/videoN` device; PhotonVision matches cameras by the by-path entry in `otherPaths` |
+| `cameras`, `config_json` | `matchedCameraInfo.dev` | left out, for a USB camera matched by its port | The `/dev/videoN` number the kernel gave the camera this boot |
+| `cameras`, `config_json` | `matchedCameraInfo.path` | left out, for a USB camera matched by its port | The `/dev/videoN` device; PhotonVision matches such a camera by the by-path entry in `otherPaths` |
 | `cameras`, `config_json` | `matchedCameraInfo.otherPaths` | any order | The camera's other paths, in an order PhotonVision notes can change; which ones (the USB port) still counts |
+
+"A USB camera matched by its port" is one whose `type` is `PVUsbCameraInfo` with a by-path entry
+in its `otherPaths`. For any other (a CSI camera, a file, a USB camera without one), the path is
+what identifies the camera, so it counts.
+
+**Identical cameras swapped between ports are invisible**, to PhotonVision and to the hash alike:
+two cameras of the same model without serial numbers look the same, and PhotonVision follows the
+port, so each port's calibration now applies to the other camera. Label cameras and their ports.
 
 **Unverified:** the list comes from reading PhotonVision's source. A bench test on a real board
 confirms it: the hash holding steady across reboots, replugs, and pipeline switches. Changing the

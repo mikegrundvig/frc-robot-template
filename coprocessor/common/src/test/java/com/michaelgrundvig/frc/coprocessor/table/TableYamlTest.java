@@ -26,7 +26,7 @@ class TableYamlTest {
     Table table =
         parse(
             """
-            team: 2611             # the team number; addresses are 10.TE.AM.x
+            team: 1234             # the team number; addresses are 10.TE.AM.x
             agentPort: 5808
             computers:
               - name: vision-front # hostname
@@ -40,14 +40,14 @@ class TableYamlTest {
                 cameras:
                   - back
             """);
-    assertThat(table.team()).isEqualTo(2611);
+    assertThat(table.team()).isEqualTo(1234);
     assertThat(table.agentPort()).isEqualTo(5808);
     assertThat(table.computers())
         .containsExactly(
             new Computer(
                 "vision-front", 11, Board.ORANGEPI_5, List.of("front-left", "front-right"), 5808),
             new Computer("vision-back", 12, Board.ORANGEPI_5_PLUS, List.of("back"), 5809));
-    assertThat(table.ip(table.computers().get(0))).isEqualTo("10.26.11.11");
+    assertThat(table.ip(table.computers().get(0))).isEqualTo("10.12.34.11");
   }
 
   @Test
@@ -61,7 +61,7 @@ class TableYamlTest {
             - name: 'vision'
               address: 11
               board: "orangepi-5b"
-              cameras: ["it's", 'say ''hi''', "caf\\u00e9", no]
+              cameras: ["it's", 'say ''hi''', "\\u0041BC", no]
             -
               name: other
               address: 12
@@ -69,8 +69,7 @@ class TableYamlTest {
               cameras:
             """);
     assertThat(table.agentPort()).isEqualTo(Table.DEFAULT_AGENT_PORT);
-    assertThat(table.computers().get(0).cameras())
-        .containsExactly("it's", "say 'hi'", "café", "no");
+    assertThat(table.computers().get(0).cameras()).containsExactly("it's", "say 'hi'", "ABC", "no");
     assertThat(table.computers().get(1).cameras()).isEmpty();
     assertThat(table.computers().get(1).board()).isEqualTo(Board.ORANGEPI_5_MAX);
   }
@@ -110,8 +109,8 @@ class TableYamlTest {
                 + " convention)",
             "coprocessors.yaml:6: unknown board \"raspberry-pi\"; known: orangepi-5, orangepi-5b,"
                 + " orangepi-5-plus, orangepi-5-pro, orangepi-5-max",
-            "coprocessors.yaml:7: camera \"a/b\" has a '/' or a control character; PhotonVision"
-                + " publishes each camera under /photonvision/<camera>",
+            "coprocessors.yaml:7: camera \"a/b\" has a '/'; PhotonVision publishes each camera"
+                + " under /photonvision/<camera>",
             "coprocessors.yaml:9: address must be a whole number, not \"12\"",
             "coprocessors.yaml:11: agentPort 5800 is taken: PhotonVision's page uses it");
   }
@@ -217,6 +216,69 @@ class TableYamlTest {
     assertError("team: 0\ncomputers: [a: b]\n", "2: unexpected \"a: b\" in [...]");
     assertError("team: 0\n- a\n", "2: a list item where a key was expected");
     assertError("computers:\n- a\n  - b\n", "3: unexpected indentation");
+  }
+
+  @Test
+  void valuesYamlReadsAsSomethingElseAreRefusedUnlessQuoted() {
+    for (String camera :
+        List.of("~", "null", "NULL", "true", "False", "1", "-2.5", "0x1f", ".inf")) {
+      assertThat(problems(computerWith("cameras: [front, " + camera + "]")))
+          .as(camera)
+          .containsExactly(
+              "coprocessors.yaml:6: camera "
+                  + camera
+                  + " isn't text to YAML (it's null, true or false, or a number): put it in"
+                  + " quotes");
+    }
+    assertThat(parse(computerWith("cameras: [\"true\", '1']")).computers().get(0).cameras())
+        .containsExactly("true", "1");
+    assertThat(
+            problems(
+                "team: 0\ncomputers:\n  - name: null\n    address: 11\n    board: orangepi-5\n"))
+        .containsExactly(
+            "coprocessors.yaml:3: name null isn't text to YAML (it's null, true or false, or a"
+                + " number): put it in quotes");
+  }
+
+  @Test
+  void flowItemsAreCheckedAsAnyValueIs() {
+    for (String camera :
+        List.of("*cam", "&a b", "!t c", "%e", "@x", "`x", "|x", ">x", "- x", "? x")) {
+      assertThatThrownBy(() -> parse(computerWith("cameras: [" + camera + "]")))
+          .as(camera)
+          .isInstanceOf(TableException.class)
+          .hasMessageStartingWith("coprocessors.yaml:6: ");
+    }
+  }
+
+  @Test
+  void numbersHaveNoLeadingZerosAndCamerasArePrintableAscii() {
+    assertThat(problems("team: 01234\ncomputers: []\n"))
+        .containsExactly("coprocessors.yaml:1: team must be a whole number, not \"01234\"");
+    assertThat(problems(computerWith("cameras: [\"caf\\u00e9\"]")))
+        .containsExactly(
+            "coprocessors.yaml:6: camera \"café\" has a character other than a letter, digit,"
+                + " space, or punctuation (printable ASCII)");
+    assertThat(problems("team: 0\nagentPort: 1183\ncomputers: []\n"))
+        .containsExactly(
+            "coprocessors.yaml:2: agentPort 1183 is taken: PhotonVision's camera streams use 1181"
+                + " and up, two ports per camera");
+  }
+
+  @Test
+  void nestingIsLimited() {
+    StringBuilder yaml = new StringBuilder("team:\n");
+    for (int i = 1; i <= 20; i++) {
+      yaml.append("  ".repeat(i)).append("k").append(i).append(":\n");
+    }
+    assertThatThrownBy(() -> parse(yaml.toString()))
+        .hasMessageContaining("nested deeper than 16 levels");
+  }
+
+  private static String computerWith(String line) {
+    return "team: 0\ncomputers:\n  - name: a\n    address: 11\n    board: orangepi-5\n    "
+        + line
+        + "\n";
   }
 
   @Test

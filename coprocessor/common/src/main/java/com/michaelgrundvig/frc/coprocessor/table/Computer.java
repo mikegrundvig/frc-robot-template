@@ -34,6 +34,15 @@ public record Computer(String name, int address, Board board, List<String> camer
   /** The highest address a computer may have: 10.TE.AM.19. */
   public static final int LAST_ADDRESS = 19;
 
+  /**
+   * The first of PhotonVision's camera-stream ports: its streams start at 1181, two ports per
+   * camera (PhotonVision's networking docs).
+   */
+  public static final int FIRST_STREAM_PORT = 1181;
+
+  /** The last port kept for PhotonVision's camera streams: ten cameras' worth. */
+  public static final int LAST_STREAM_PORT = 1200;
+
   /** The longest a camera's name may be. */
   public static final int MAX_CAMERA_NAME = 64;
 
@@ -90,22 +99,34 @@ public record Computer(String name, int address, Board board, List<String> camer
     if (camera.length() > MAX_CAMERA_NAME) {
       return "camera \"" + camera + "\" is longer than " + MAX_CAMERA_NAME + " characters";
     }
-    if (camera.chars().anyMatch(c -> c == '/' || Character.isISOControl(c))) {
+    if (camera.chars().anyMatch(c -> c < 0x20 || c > 0x7e)) {
       return "camera \""
           + camera
-          + "\" has a '/' or a control character; PhotonVision publishes each camera under"
-          + " /photonvision/<camera>";
+          + "\" has a character other than a letter, digit, space, or punctuation (printable"
+          + " ASCII)";
+    }
+    if (camera.indexOf('/') >= 0) {
+      return "camera \""
+          + camera
+          + "\" has a '/'; PhotonVision publishes each camera under /photonvision/<camera>";
     }
     return null;
   }
 
   /**
-   * What's wrong with an agent's port, or null if nothing. 5800 is PhotonVision's own page and 5810
-   * NetworkTables'.
+   * What's wrong with an agent's port, or null if nothing. 5800 is PhotonVision's own page, 5810
+   * NetworkTables', and 1181 to 1200 PhotonVision's camera streams.
    */
   public static @Nullable String portProblem(int port) {
     if (port < 1024 || port > 65535) {
       return "agentPort " + port + " is out of range: 1024 to 65535 (5801-5809 is the team range)";
+    }
+    if (port >= FIRST_STREAM_PORT && port <= LAST_STREAM_PORT) {
+      return "agentPort "
+          + port
+          + " is taken: PhotonVision's camera streams use "
+          + FIRST_STREAM_PORT
+          + " and up, two ports per camera";
     }
     if (port == 5800 || port == 5810) {
       return "agentPort "

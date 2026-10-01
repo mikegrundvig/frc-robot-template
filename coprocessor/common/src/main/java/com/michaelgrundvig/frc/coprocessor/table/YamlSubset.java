@@ -49,9 +49,13 @@ final class YamlSubset {
 
   private record Line(int number, int indent, String content) {}
 
+  /** The deepest a table nests: it needs three levels. */
+  static final int MAX_DEPTH = 16;
+
   private final String source;
   private final List<Line> lines;
   private int pos;
+  private int depth;
 
   private YamlSubset(String source, List<Line> lines) {
     this.source = source;
@@ -110,8 +114,15 @@ final class YamlSubset {
   }
 
   private Node block(int indent) {
-    Line first = lines.get(pos);
-    return isItem(first.content()) ? sequence(indent) : mapping(indent);
+    if (++depth > MAX_DEPTH) {
+      throw error(lines.get(pos), "nested deeper than " + MAX_DEPTH + " levels");
+    }
+    try {
+      Line first = lines.get(pos);
+      return isItem(first.content()) ? sequence(indent) : mapping(indent);
+    } finally {
+      depth--;
+    }
   }
 
   private Mapping mapping(int indent) {
@@ -222,23 +233,41 @@ final class YamlSubset {
   }
 
   private Node inline(Line line, String text) {
+    if (text.charAt(0) == '[') {
+      return flowSequence(line, text);
+    }
+    if (text.charAt(0) == '"' || text.charAt(0) == '\'') {
+      int end = quotedEnd(line, text, 0);
+      if (end != text.length() - 1) {
+        throw error(line, "unexpected text after the closing quote");
+      }
+      return new Scalar(line.number(), unquote(line, text), true, false);
+    }
+    return plain(line, text);
+  }
+
+  /**
+   * A plain (unquoted) value, refused when it starts with what YAML reads as something else: an
+   * anchor, alias, tag, directive, block, or mapping, or a character YAML reserves.
+   */
+  private Scalar plain(Line line, String text) {
     char c = text.charAt(0);
-    return switch (c) {
-      case '[' -> flowSequence(line, text);
+    switch (c) {
       case '{' -> throw error(line, "{...} mappings aren't supported: write one key per line");
+      case '[' -> throw error(line, "lists inside [...] aren't supported");
       case '&', '*' -> throw error(line, "anchors and aliases (& and *) aren't supported");
       case '!' -> throw error(line, "tags (!) aren't supported");
       case '|', '>' -> throw error(line, "multi-line values (| and >) aren't supported");
-      case '@', '`' -> throw error(line, "a value can't start with " + c + "; put it in quotes");
-      case '"', '\'' -> {
-        int end = quotedEnd(line, text, 0);
-        if (end != text.length() - 1) {
-          throw error(line, "unexpected text after the closing quote");
+      case '%', '@', '`' ->
+          throw error(line, "a value can't start with " + c + "; put it in quotes");
+      case '?', ':', '-' -> {
+        if (text.length() == 1 || text.charAt(1) == ' ') {
+          throw error(line, "a value can't start with \"" + c + " \"; put it in quotes");
         }
-        yield new Scalar(line.number(), unquote(line, text), true, false);
       }
-      default -> new Scalar(line.number(), text, false, false);
-    };
+      default -> {}
+    }
+    return new Scalar(line.number(), text, false, false);
   }
 
   private Sequence flowSequence(Line line, String text) {
@@ -281,6 +310,7 @@ final class YamlSubset {
         if (item.contains("]") || item.contains(": ")) {
           throw error(line, "unexpected \"" + item + "\" in [...]");
         }
+        plain(line, item);
         i = end;
       }
       items.add(new Scalar(line.number(), item, quoted, false));

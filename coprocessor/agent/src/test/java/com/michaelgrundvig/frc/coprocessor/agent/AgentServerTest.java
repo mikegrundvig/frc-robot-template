@@ -210,10 +210,10 @@ class AgentServerTest {
 
   @Test
   void onlyTheRobotControllerMayShutTheComputerDown() throws Exception {
-    // The stamp's team is 2611: the robot controller is 10.26.11.2, and this test isn't.
+    // The stamp's team is 1234: the robot controller is 10.12.34.2, and this test isn't.
     HttpResponse<byte[]> refused = post(AgentApi.SHUTDOWN);
     assertThat(refused.statusCode()).isEqualTo(403);
-    assertThat(text(refused)).contains("only the robot controller (10.26.11.2)");
+    assertThat(text(refused)).contains("only the robot controller (10.12.34.2)");
     assertThat(fixture.commands.ran()).noneMatch(command -> command.contains("poweroff"));
   }
 
@@ -297,7 +297,7 @@ class AgentServerTest {
   void onlyRequestsAddressedToTheComputerAreAnswered() throws Exception {
     for (String host :
         List.of(
-            "10.26.11.11:5808",
+            "10.12.34.11:5808",
             "10.0.0.11",
             "169.254.3.4:5808",
             "127.0.0.1",

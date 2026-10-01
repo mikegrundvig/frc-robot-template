@@ -293,6 +293,7 @@ public final class CameraStudy {
 
   static CameraStudyConfig config(Map<String, String> options) {
     CameraStudyConfig d = CameraStudyConfig.DEFAULTS;
+    int[] otherRobots = otherRobots(options, d);
     try {
       return CameraStudyConfigBuilder.builder(d)
           .gridMeters(number(options, "grid-meters", d.gridMeters()))
@@ -305,8 +306,8 @@ public final class CameraStudy {
           .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
           .mountErrorMillimeters(number(options, "mount-error-mm", d.mountErrorMillimeters()))
           .mountErrorDegrees(number(options, "mount-error-degrees", d.mountErrorDegrees()))
-          .otherRobotsLeast(otherRobots(options, d)[0])
-          .otherRobotsMost(otherRobots(options, d)[1])
+          .otherRobotsLeast(otherRobots[0])
+          .otherRobotsMost(otherRobots[1])
           .otherRobotsHeightMeters(
               number(options, "other-robots-height-meters", d.otherRobotsHeightMeters()))
           .trials(

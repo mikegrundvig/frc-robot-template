@@ -168,8 +168,9 @@ public record Score(
   /** The error that this share of the weight falls at or below. */
   static double percentile(double[] errors, double[] weights, double share) {
     // Each error's place, sorted by the error: packed in a long, the error's bits as a float above
-    // (none is negative, so they sort as the errors do) and its place below. Sorting plain numbers
-    // is fast, which matters with thousands of layouts.
+    // and its place below. None is negative, so the longs sort as the errors rounded to a float
+    // do, and errors equal as floats fall in order of place. Sorting plain numbers is fast, which
+    // matters with thousands of layouts.
     long[] order = new long[errors.length];
     double total = 0;
     for (int i = 0; i < order.length; i++) {

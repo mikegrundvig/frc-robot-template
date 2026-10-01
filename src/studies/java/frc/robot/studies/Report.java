@@ -186,12 +186,13 @@ final class Report {
 
   private static final String HEADER =
       "| Rank | Layout | 95% within | Within 2 cm | Within 5 cm | One tag | Two tags | Two cameras"
-          + " | Measured | Heading | Position RMS | Heading RMS |\n"
-          + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+          + " | Measured | Heading | Position RMS | Heading RMS | One lost: 95% within"
+          + " | One lost: measured |\n"
+          + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
 
   private static String row(int rank, Score score) {
     return format(
-        "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
+        "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
         rank,
         score.candidate().name(),
         centimeters(score.positionP95Meters()),
@@ -205,7 +206,9 @@ final class Report {
         centimeters(score.positionRmsMeters()),
         Double.isNaN(score.headingRmsDegrees())
             ? "none"
-            : format("%.2f°", score.headingRmsDegrees()));
+            : format("%.2f°", score.headingRmsDegrees()),
+        centimeters(score.oneLostP95Meters()),
+        percent(score.oneLostMeasured()));
   }
 
   /**
@@ -245,7 +248,7 @@ final class Report {
 
   private static final String SCORE_COLUMNS =
       "position_p95_m,within_2cm,within_5cm,one_tag,two_tags,two_cameras,measured,heading,"
-          + "position_rms_m,heading_rms_deg";
+          + "position_rms_m,heading_rms_deg,one_lost_p95_m,one_lost_measured";
 
   static List<String> candidates(List<Score> ranking) {
     List<String> lines = new ArrayList<>();
@@ -294,7 +297,7 @@ final class Report {
 
   private static String scoreColumns(Score score) {
     return format(
-        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s",
+        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s,%s,%.4f",
         number(score.positionP95Meters(), 4),
         score.withinTwoCentimeters(),
         score.withinFiveCentimeters(),
@@ -304,7 +307,9 @@ final class Report {
         score.measured(),
         score.heading(),
         number(score.positionRmsMeters(), 4),
-        number(score.headingRmsDegrees(), 3));
+        number(score.headingRmsDegrees(), 3),
+        number(score.oneLostP95Meters(), 4),
+        score.oneLostMeasured());
   }
 
   static List<String> poses(Run run) {

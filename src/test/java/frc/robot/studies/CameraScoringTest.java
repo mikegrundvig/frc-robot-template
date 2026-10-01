@@ -122,6 +122,37 @@ class CameraScoringTest {
     assertThat(off).isGreaterThan(exact + 0.02);
   }
 
+  /**
+   * Losing either of two cameras facing opposite ways leaves the robot blind half the time; losing
+   * either of two facing the same tags leaves it seeing them. A lone camera lost leaves nothing.
+   */
+  @Test
+  void losingAnyOneCamera() {
+    Candidate pair =
+        new Candidate(
+            "a pair",
+            List.of(StudyFixtures.camera("left", 0.3, 5), StudyFixtures.camera("right", 0.3, -5)));
+    List<Score> ranking =
+        ranking(ONE_THREAD, List.of(FACING_THE_WALL, FACING_AWAY), AHEAD, AHEAD_AND_BACK, pair);
+
+    Score aheadAndBack = only(ranking, AHEAD_AND_BACK);
+    assertThat(aheadAndBack.oneLostMeasured()).isEqualTo(0.5);
+    assertThat(aheadAndBack.oneLostP95Meters()).isInfinite();
+    Score ahead = only(ranking, AHEAD);
+    assertThat(ahead.oneLostMeasured()).isZero();
+    assertThat(ahead.oneLostP95Meters()).isInfinite();
+    Score twoAhead = only(ranking(ONE_THREAD, List.of(FACING_THE_WALL), pair), pair);
+    assertThat(twoAhead.oneLostMeasured()).isEqualTo(1.0);
+    assertThat(twoAhead.oneLostP95Meters()).isFinite().isGreaterThan(0);
+  }
+
+  private static Score only(List<Score> ranking, Candidate candidate) {
+    return ranking.stream()
+        .filter(score -> score.candidate().equals(candidate))
+        .findFirst()
+        .orElseThrow();
+  }
+
   @Test
   void aSpotWeighingNothingDoesntCount() {
     Sample ignored = new Sample(FACING_AWAY.pose(), 0, 1, 0);

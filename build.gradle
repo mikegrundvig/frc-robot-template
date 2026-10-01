@@ -170,3 +170,4 @@ apply from: "gradle/build-info.gradle"  // git SHA and build time, logged by the
 apply from: "gradle/simulation.gradle"  // simulator defaults for ./gradlew run
 apply from: "gradle/studies.gradle"     // simulation studies, such as camera placement
 apply from: "gradle/coprocessors.gradle" // the coprocessor table and the PhotonVision version lock
+apply from: "gradle/coprocessor-image.gradle"  // the coprocessor image scripts' tests

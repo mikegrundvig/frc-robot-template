@@ -69,6 +69,30 @@ class PageTest {
         .doesNotContainKey("max");
   }
 
+  /** Run is off beside its reason: the gate's own, as the robot would refuse a start with it. */
+  @Test
+  void theRobotSectionSaysWhyNothingCanRunNow() {
+    actions.periodic(new Actions.Gate(true, false, false));
+    byHand.experiments().periodic(new Actions.Gate(true, false, false));
+
+    assertThat(page.sections().get("robot"))
+        .containsEntry("actionsLocked", "actions run only with the robot enabled in utility mode")
+        .containsEntry(
+            "experimentsLocked", "experiments run only with the robot enabled in utility mode");
+
+    actions.periodic(new Actions.Gate(true, true, false));
+    byHand.experiments().periodic(new Actions.Gate(true, true, false));
+
+    assertThat(page.sections().get("robot"))
+        .containsEntry("actionsLocked", "")
+        .containsEntry("experimentsLocked", "");
+
+    actions.periodic(new Actions.Gate(true, true, true));
+
+    assertThat(page.sections().get("robot"))
+        .containsEntry("actionsLocked", "the field system is connected");
+  }
+
   @Test
   void aPageThatDoesntKnowTheModeSaysNothing() {
     Page unknowing = new Page(status, actions, tuning, tunables, byHand.experiments());

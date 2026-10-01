@@ -106,8 +106,8 @@ public final class Page {
    * The page's state now, section by section. Call it from the robot loop.
    *
    * <ul>
-   *   <li>{@code robot}: its name, the code, simulator or real, this program's id, and its mode
-   *       (empty when unknown);
+   *   <li>{@code robot}: its name, the code, simulator or real, this program's id, its mode (empty
+   *       when unknown), and why actions and experiments can't start now (empty while they can);
    *   <li>{@code status}, {@code units}: each item's value, and the unit of each number;
    *   <li>{@code actions}: each action's phase and detail;
    *   <li>{@code tuning}: whether it's on, the field, and refused dashboard changes;
@@ -155,6 +155,9 @@ public final class Page {
     shown.put("code", robot.code());
     shown.put("program", program);
     shown.put("mode", mode.get());
+    // Why Run is off, beside it: the gate's own reason, as the robot would refuse with it.
+    shown.put("actionsLocked", Objects.requireNonNullElse(actions.whyLocked(), ""));
+    shown.put("experimentsLocked", Objects.requireNonNullElse(experiments.whyLocked(), ""));
     return shown;
   }
 

@@ -130,6 +130,8 @@ input[readonly] { background: var(--surface-2); }
 .conn.up { color: var(--ok); }
 .conn.down { color: var(--bad); }
 .mode { font-weight: 600; color: inherit; }
+.mode.gated { color: var(--lock); }
+.mode.gated::before { content: "🔒 "; }
 .pill { display: inline-flex; align-items: center; gap: var(--s2); padding: 3px 4px 3px 10px;
         border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface);
         font-weight: 600; min-height: 34px; }

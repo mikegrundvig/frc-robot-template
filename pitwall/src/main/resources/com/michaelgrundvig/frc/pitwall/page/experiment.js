@@ -3,8 +3,9 @@
 // the tab's sessionStorage.
 
 import {
-  robot, onChange, onSamples, api, send, lastRequestAt, shown, h, say, replace,
+  robot, onChange, onConnection, onSamples, api, send, lastRequestAt, shown, h, say, replace,
 } from "./core.js";
+import { tuningOffBanner } from "./bar.js";
 import { onEdits, stageAll } from "./edits.js";
 import { load, save } from "./history.js";
 import { makeRow, updateRow } from "./rows.js";
@@ -37,6 +38,7 @@ function mount(view) {
     h("h1", { class: "view-title" }, "Experiment"),
     h("p", { class: "lede" }, "Change a gain, run a test motion through the mechanism's own "
         + "command, and compare the runs. Runs stay in this tab until it closes."),
+    tuningOffBanner("Gains"),
     chips, empty, panels);
   onChange((patch, snapshot) => {
     noteRun();
@@ -48,6 +50,9 @@ function mount(view) {
   });
   onEdits(() => {
     for (const view of rigViews.values()) view.rows.forEach((row) => updateGain(view, row));
+  });
+  onConnection(() => {
+    if (robot.doc) render({}, false);
   });
   // Plots take their colors from the theme: a new theme redraws them.
   document.addEventListener("pitwall-theme", redrawAll);
@@ -221,6 +226,7 @@ function buildRigs() {
     view.runButton = h("button", { type: "button", class: "big primary",
                                    onclick: () => runOrStop(name, view) });
     view.state = h("p", { class: "state" });
+    view.gate = h("p", { class: "gatemsg", id: "gate-" + name.replace(/[^a-zA-Z0-9]/g, "-") });
     view.calls = h("pre");
     view.commit = h("div", { class: "commit" },
       h("p", { class: "meta" }, "To keep the tuned gains, write these into the configuration:"),
@@ -243,7 +249,7 @@ function buildRigs() {
         gains,
         unpublished.length > 0 && h("p", { class: "meta" }, "Not tunable, so not shown: "
             + unpublished.join(", ")),
-        h("div", { class: "runbox" }, view.runButton, view.state,
+        h("div", { class: "runbox" }, view.runButton, view.gate, view.state,
           h("p", { class: "dead" }, "Stops if this page goes quiet for half a second, or the "
               + "robot disables. The gains at the start are recorded with the run.")),
         view.commit),
@@ -272,6 +278,10 @@ async function runOrStop(name, view) {
   } finally {
     starting = false;
   }
+}
+
+function capital(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** A rig's gain: as in Tune, except that it stays put while its run runs. */
@@ -303,6 +313,14 @@ function updateRig(name, view) {
   const running = view.busy;
   view.runButton.className = running ? "big danger" : "big primary";
   view.runButton.textContent = running ? "■ Stop" : "▶ Run";
+  // Run is off beside the gate's own reason, and the mode now. Stop is never locked.
+  const why = !robot.connected ? "Not connected to the robot." : doc.robot.experimentsLocked
+    ? capital(doc.robot.experimentsLocked) + (doc.robot.mode ? ". Now: " + doc.robot.mode : "") + "."
+    : null;
+  view.gate.hidden = running || !why;
+  view.gate.textContent = why ? "🔒 " + why : "";
+  view.runButton.disabled = !running && Boolean(why);
+  view.runButton.setAttribute("aria-describedby", view.gate.id);
   const described = doc.experiments[view.choice.value];
   view.state.textContent = current
     ? `Run ${current.id}, ${current.experiment}: ${current.detail}`

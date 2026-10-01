@@ -62,12 +62,17 @@ function render(patch, snapshot) {
     code.textContent = doc.robot.code;
     mode.hidden = !doc.robot.mode;
     mode.textContent = doc.robot.mode;
+    // Highlighted when it keeps actions and experiments from running: the way out is here.
+    mode.classList.toggle("gated", Boolean(doc.robot.actionsLocked));
     // In the simulator, Sim is the Driver Station: the mode is a way there.
     if (simulated) mode.setAttribute("href", "#sim"); else mode.removeAttribute("href");
     mode.title = simulated ? "The Driver Station's mode: change it in Sim" : "The Driver Station's mode";
     document.title = "Pitwall · " + doc.robot.name + " · " + (simulated ? "SIM" : "ROBOT");
   }
-  if (snapshot || "tuning" in patch) renderTuning();
+  if (snapshot || "tuning" in patch) {
+    renderTuning();
+    renderBand();
+  }
   if (snapshot || "changes" in patch) {
     const count = Object.keys(doc.changes).length;
     uncommitted.hidden = count === 0;
@@ -97,10 +102,46 @@ function renderTuning() {
 }
 
 async function switchTuning() {
-  const on = !robot.doc.tuning.enabled;
+  await setTuning(!robot.doc.tuning.enabled);
+}
+
+/** Switches tuning on or off, from the bar or from a banner where it's off. */
+export async function setTuning(on) {
   const result = await send("PATCH", "/api/tuning", { enabled: on });
   if (result.ok) say(on ? "Tuning is on." : "Tuning is off.");
   else say(result.problem.detail, true);
+}
+
+/**
+ * A banner where tuning's being off bites, with its own way out: "Tuning is off: values can't
+ * change until it's on", and Switch tuning on. Shown only while it's off and the field isn't
+ * connected (the field's band says that, and has no way out here).
+ *
+ * @param what what can't change: "values", "gains", "switches"
+ */
+export function tuningOffBanner(what) {
+  const button = h("button", { type: "button", class: "primary", onclick: () => setTuning(true) },
+    "Switch tuning on");
+  const banner = h("div", { class: "banner lock", hidden: true },
+    h("span", { class: "grow" }, "🔒 ", h("b", null, "Tuning is off: "),
+      h("span", { class: "why" }, what + " can't change until it's on. On a robot it starts off; "
+          + "switch it on in the pit.")),
+    button);
+  const update = () => {
+    const doc = robot.doc;
+    banner.hidden = !doc || doc.tuning.enabled || doc.tuning.fieldConnected;
+    button.disabled = !robot.connected;
+  };
+  onChange(update);
+  onConnection(update);
+  return banner;
+}
+
+/** Why something that changes the robot can't be pressed now, or null while it can. */
+export function whyNotNow() {
+  if (!robot.connected) return "Not connected to the robot.";
+  if (robot.doc && robot.doc.tuning.fieldConnected) return "The field system is connected.";
+  return null;
 }
 
 function renderConnection(connected) {
@@ -110,17 +151,42 @@ function renderConnection(connected) {
     connection.className = "conn up";
     // The robot program answers before its loop first runs: until then, there's nothing to show.
     connection.replaceChildren(robot.doc ? "● Connected" : "● Connected, waiting for the robot loop");
-    band.hidden = true;
     if (robot.doc) announce("Connected to the robot.");
-    return;
+  } else {
+    connection.className = "conn down";
+    connection.replaceChildren("✗ Not connected · ", since, " · retrying");
+    renderSince();
+    announce("Not connected to the robot.", true);
   }
-  connection.className = "conn down";
-  connection.replaceChildren("✗ Not connected · ", since, " · retrying");
-  band.className = "band down";
-  band.replaceChildren(h("b", null, "✗ Not connected"), h("span", { class: "sub" }, bandSince));
-  band.hidden = false;
-  renderSince();
-  announce("Not connected to the robot.", true);
+  renderBand();
+}
+
+let fieldShown = false;
+
+/**
+ * The band under the bar, for a lock that covers everything: a lost link, or the field. The
+ * field's is striped and large, unmistakable from across the pit.
+ */
+function renderBand() {
+  const field = Boolean(robot.connected && robot.doc && robot.doc.tuning.fieldConnected);
+  if (robot.connected === false) {
+    band.className = "band down";
+    band.replaceChildren(h("b", null, "✗ Not connected"), h("span", { class: "sub" }, bandSince));
+    band.hidden = false;
+  } else if (field) {
+    band.className = "band field";
+    band.replaceChildren(h("b", null, "🔒 FIELD CONNECTED"), h("span", { class: "sub" },
+      "Locked: every value is back to committed, and what was tuned was printed to the log. "
+        + "Tuning, actions, and experiments are off until the field disconnects."));
+    band.hidden = false;
+  } else {
+    band.hidden = true;
+  }
+  if (field !== fieldShown) {
+    fieldShown = field;
+    if (field) announce("The field system is connected: everything is locked and back to "
+        + "committed.", true);
+  }
 }
 
 function renderSince() {

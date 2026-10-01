@@ -6,7 +6,8 @@
 // tapped. The address names the value (#tune/drivetrain/gains.steerKp), so a reload comes back to
 // it and a link can be sent.
 
-import { robot, onChange, h, replace } from "./core.js";
+import { robot, onChange, onConnection, h, replace } from "./core.js";
+import { tuningOffBanner } from "./bar.js";
 import { onEdits, outcome } from "./edits.js";
 import { makeRow, updateRow, refuser } from "./rows.js";
 import { valueDocs, groupDocs, configDocs, groupOf } from "./docs.js";
@@ -33,6 +34,7 @@ function mount(view) {
     h("h1", { class: "view-title" }, "Tune"),
     h("p", { class: "lede" }, "Every value the mechanisms let you tune while the robot runs. "
         + "Edits wait here until you apply them; then they all change at once, or none do."),
+    tuningOffBanner("Values"),
     h("div", { class: "tune" },
       h("div", null,
         h("div", { class: "toolbar" }, filter,
@@ -49,6 +51,7 @@ function mount(view) {
     showDocs();
   });
   narrow.addEventListener("change", showDocs);
+  onConnection(() => rows.forEach(updateRow));
   // "/" finds a value, as in many tools, unless someone is typing.
   document.addEventListener("keydown", (event) => {
     if (!visible || event.key !== "/" || typing(event.target)) return;

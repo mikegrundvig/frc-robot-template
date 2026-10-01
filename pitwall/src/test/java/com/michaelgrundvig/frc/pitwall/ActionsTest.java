@@ -109,6 +109,18 @@ class ActionsTest {
     assertThat(outcome.getNow(null).detail()).isEqualTo("Actions are locked: " + NOT_UTILITY);
   }
 
+  /** The page shows why before anyone presses Run: the same reason a start would be refused. */
+  @Test
+  void theLockIsKnownBeforeAnythingIsAsked() {
+    assertThat(actions.whyLocked()).as("before the first loop").isEqualTo(NOT_UTILITY);
+
+    actions.periodic(READY);
+    assertThat(actions.whyLocked()).isNull();
+
+    actions.periodic(new Actions.Gate(true, true, true));
+    assertThat(actions.whyLocked()).isEqualTo("the field system is connected");
+  }
+
   @Test
   void disablingOrLeavingUtilityModeCancelsWhatIsRunning() {
     actions.requestStart("Home arm");

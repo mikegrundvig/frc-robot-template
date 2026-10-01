@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.coprocessor.table;
 
+import com.michaelgrundvig.frc.coprocessor.json.Json;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -327,14 +328,11 @@ final class YamlSubset {
         case 't' -> out.append('\t');
         case ' ' -> out.append(' ');
         case 'u' -> {
-          if (i + 5 > inner.length()) {
+          int code = i + 5 > inner.length() ? -1 : Json.hexValue(inner.substring(i + 1, i + 5));
+          if (code < 0) {
             throw error(line, "a \\u escape needs four hex digits");
           }
-          try {
-            out.append((char) Integer.parseInt(inner.substring(i + 1, i + 5), 16));
-          } catch (NumberFormatException e) {
-            throw error(line, "a \\u escape needs four hex digits");
-          }
+          out.append((char) code);
           i += 4;
         }
         default -> throw error(line, "unknown escape \\" + escape + " in a quoted value");

@@ -206,6 +206,7 @@ class TableYamlTest {
     assertError("team: \"\\q\"\n", "1: unknown escape \\q");
     assertError("team: \"\\u12\"\n", "1: a \\u escape needs four hex digits");
     assertError("team: \"\\uzzzz\"\n", "1: a \\u escape needs four hex digits");
+    assertError("team: \"\\u+123\"\n", "1: a \\u escape needs four hex digits");
     assertError("? team\n", "1: complex keys (?) aren't supported");
     assertError("just text\n", "1: expected a key and a colon");
     assertError("team: 0\n---\n", "2: only one document is allowed");

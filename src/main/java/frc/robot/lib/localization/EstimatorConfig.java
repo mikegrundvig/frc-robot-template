@@ -135,7 +135,7 @@ public record EstimatorConfig(
           .wheelHeadingStdDevDegreesPerTurn(10)
           .cameraTurnStdDevDegrees(0.25)
           .cameraShiftStdDevMeters(0.01)
-          .cameraShiftStdDevDegrees(1.0)
+          .cameraShiftStdDevDegrees(2.0)
           .cameraShiftCorrelationMeters(1.0)
           .cameraShiftCorrelationDegrees(45)
           .historySeconds(1.5)

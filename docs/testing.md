@@ -208,20 +208,20 @@ What to expect, today (12 matched seeds):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.67 | 0.83 | 0.08% | 0.07% | 1.8 cm | 0.24° |
-| standing | 1.98 | 0.41 | 0.05% | 0.04% | 1.4 cm | 0.16° |
-| turning | 1.90 | 1.41 | 1.88% | 0 | 2.1 cm | 0.81° |
-| gyro-scale | 3.25 | 2.05 | 4.88% | 2.62% | 2.6 cm | 1.47° |
-| collision | 2.82 | 0.87 | 0.70% | 0.67% | 1.9 cm | 0.22° |
-| camera-low | 1.68 | 0.91 | 0.01% | 0.01% | 1.8 cm | 0.25° |
-| camera-turned | 3.49 | 14.87 | 2.96% | 2.62% | 2.6 cm | 1.02° |
+| driving | 1.54 | 0.76 | 0 | 0 | 1.6 cm | 0.22° |
+| standing | 1.85 | 0.43 | 0 | 0 | 1.3 cm | 0.17° |
+| turning | 1.46 | 0.70 | 0 | 0 | 1.6 cm | 0.69° |
+| gyro-scale | 2.07 | 0.95 | 0.10% | 0.01% | 1.8 cm | 1.35° |
+| collision | 2.76 | 0.85 | 0.57% | 0.57% | 1.8 cm | 0.21° |
+| camera-low | 1.60 | 0.83 | 0 | 0 | 1.7 cm | 0.24° |
+| camera-turned | 3.40 | 14.17 | 2.45% | 2.20% | 2.5 cm | 0.98° |
 
-The collision's exceedances are the loops of the hit, before the jolt is read. Standing after the
-gyro-scale procedure, the estimate grows surer than it should: tags 1 cm off each turn a two-tag
-heading by about 2°, where the configuration allows 1° (`cameraShiftStdDevDegrees`). The
-`camera-turned` run's heading NEES is far above: a camera turned 2° is eight times what the
-configuration allows, and the estimator can't tell it from a heading error. Catching that is the
-mount check's job, and comparing cameras with each other would do it better.
+Every calibrated run is near its NEES, a little below: the floor for what a camera repeats is
+sized for the worst of what it allows. The collision's exceedances are the loops of the hit,
+before the jolt is read. The `camera-turned` run's heading NEES is far above: a camera turned 2°
+is eight times what the configuration allows, and the estimator can't tell it from a heading
+error. Catching that is the mount check's job, and comparing cameras with each other would do it
+better.
 
 ### What it proves, and what it doesn't
 
@@ -231,8 +231,9 @@ tolerances, a collision. It can't prove the real robot's numbers: that the noise
 real cameras, that the gyro's scale is as configured, that the field's tags are within half an
 inch. Those are measured ([characterization](characterization.md)), and on a robot the check is
 the same idea without the truth: a camera's normalized innovations (NIS), and the error at
-surveyed spots. A configured repeated error smaller than the real one shows here too, as the
-gyro-scale run's tags do above.
+surveyed spots. A configured repeated error smaller than the real one shows here too: with
+`cameraShiftStdDevDegrees` at 1°, half what tags 1 cm off put in a heading, the gyro-scale run read
+a heading NEES of 2.05 and had 4.9% of its loops outside the ellipse.
 
 ### Keeping it honest
 

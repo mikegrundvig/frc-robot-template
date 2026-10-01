@@ -27,11 +27,17 @@ import org.wpilib.vision.camera.OpenCvLoader;
  * A camera's images of the field's tags, taken as PhotonVision's simulation takes them ({@code
  * PhotonCameraSim.process}), with the camera model the simulator uses ({@link
  * VisionSim#properties}), step for step: which tags are in view, where their corners land in the
- * image, the same pixel noise from the same random draws, the same detection limits, and
- * PhotonVision's own solves. What it leaves out is the picture: PhotonVision draws every image into
- * native memory that only the garbage collector frees, which is harmless at a simulator's 30 images
- * a second, and exhausts the computer's memory at a study's hundreds of thousands. Its test checks
- * it against PhotonVision's own simulation over a sample of the field.
+ * image, the same model of pixel noise (given the same seed, the very same draws, which is how its
+ * test compares the two), the same detection limits, and PhotonVision's own solves. What it leaves
+ * out is the picture: PhotonVision draws every image into native memory that only the garbage
+ * collector frees, which is harmless at a simulator's 30 images a second and exhausts the
+ * computer's memory at a study's million and a half. Its test checks it against PhotonVision's own
+ * simulation over a sample of the field.
+ *
+ * <p>One difference is on purpose: a tag whose own solve fails is left out, as {@code Vision}
+ * leaves out a tag whose pose isn't a number, where PhotonVision's simulation would report it at
+ * the camera itself, with no ambiguity. Its corners still count in the multi-tag solve, as they do
+ * in PhotonVision's.
  *
  * <p>One per thread: its noise isn't thread-safe.
  */
@@ -40,6 +46,7 @@ final class CameraImageSim {
   static final double MIN_AREA_PIXELS = 100;
 
   private final SimCameraProperties camera;
+  private final double minAreaPercent;
   private final double fx;
   private final double fy;
   private final double cx;
@@ -49,14 +56,31 @@ final class CameraImageSim {
   private final List<Tag> tags = new ArrayList<>();
 
   /** A tag on the field, and where its corners are, in PhotonVision's order. */
-  private record Tag(int id, Pose3d pose, List<Translation3d> corners) {}
+  record Tag(int id, Pose3d pose, List<Translation3d> corners) {}
 
-  /** A tag in an image: where its corners landed, noise and all, and its pose solved from them. */
-  private record Seen(Tag tag, Point[] corners, PnpResult solved) {}
+  /**
+   * A tag in an image: where its corners landed, noise and all, and its pose solved from them.
+   *
+   * @param solved the tag's own solve, or null if it failed
+   */
+  record Seen(Tag tag, Point[] corners, @Nullable PnpResult solved) {
+    /** The same tag, its own solve failed. */
+    Seen unsolved() {
+      return new Seen(tag, corners, null);
+    }
+  }
 
   CameraImageSim(FieldModel field, CameraConfig.Sensor sensor) {
     OpenCvLoader.forceStaticLoad(); // the solves are OpenCV's
     camera = VisionSim.properties(sensor, 0);
+    for (double coefficient : camera.getDistCoeffs().getData()) {
+      if (coefficient != 0) {
+        throw new IllegalStateException(
+            "the projection here is a perfect lens's, and the camera model has distortion");
+      }
+    }
+    // PhotonVision compares a tag's share of the image, not its area.
+    minAreaPercent = MIN_AREA_PIXELS / camera.getResArea() * 100;
     var intrinsics = camera.getIntrinsics();
     fx = intrinsics.get(0, 0);
     fy = intrinsics.get(1, 1);
@@ -82,6 +106,11 @@ final class CameraImageSim {
    * @param seed where this image's noise starts
    */
   TagDetections image(Pose3d cameraPose, String cameraName, long seed) {
+    return detections(seen(cameraPose, seed), cameraName);
+  }
+
+  /** The tags an image has in it, each with its corners and its own solve. */
+  List<Seen> seen(Pose3d cameraPose, long seed) {
     camera.setRandomSeed(seed);
     RotTrlTransform3d toCamera = RotTrlTransform3d.makeRelativeTo(cameraPose);
     // Farthest first, as PhotonVision takes them, so each tag's noise comes from the same draws.
@@ -96,7 +125,8 @@ final class CameraImageSim {
         continue;
       }
       Point[] corners = camera.estPixelNoise(project(toCamera, tag.corners()));
-      if (!inImage(corners) || area(corners) < MIN_AREA_PIXELS) {
+      // PhotonVision's own measure of a tag's size; it frees what it takes in native memory.
+      if (!inImage(corners) || !(camera.getContourAreaPercent(corners) >= minAreaPercent)) {
         continue;
       }
       PnpResult solved =
@@ -105,9 +135,14 @@ final class CameraImageSim {
                   camera.getDistCoeffs(),
                   TargetModel.kAprilTag36h11.vertices,
                   corners)
-              .orElseGet(PnpResult::new);
+              .orElse(null);
       seen.add(new Seen(tag, corners, solved));
     }
+    return seen;
+  }
+
+  /** An image's tags as the robot reads them, and the multi-tag solve from all of them. */
+  TagDetections detections(List<Seen> seen, String cameraName) {
     List<TagDetections.Tag> detected = detected(seen);
     return new TagDetections(0, cameraName, detected, multiTag(seen, detected));
   }
@@ -151,60 +186,28 @@ final class CameraImageSim {
     return true;
   }
 
-  /** The area of the corners' convex hull, in square pixels, as PhotonVision measures a tag. */
-  static double area(Point[] corners) {
-    List<Point> hull = hull(corners);
-    double twice = 0;
-    for (int i = 0; i < hull.size(); i++) {
-      Point a = hull.get(i);
-      Point b = hull.get((i + 1) % hull.size());
-      twice += a.x * b.y - b.x * a.y;
-    }
-    return Math.abs(twice) / 2;
-  }
-
-  /** The convex hull, by Andrew's monotone chain: its lower half, then its upper. */
-  private static List<Point> hull(Point[] points) {
-    List<Point> sorted = new ArrayList<>(List.of(points));
-    sorted.sort(Comparator.comparingDouble((Point p) -> p.x).thenComparingDouble(p -> p.y));
-    List<Point> hull = new ArrayList<>();
-    for (int half = 0; half < 2; half++) {
-      int start = hull.size();
-      for (Point p : sorted) {
-        while (hull.size() >= start + 2
-            && cross(hull.get(hull.size() - 2), hull.get(hull.size() - 1), p) <= 0) {
-          hull.remove(hull.size() - 1);
-        }
-        hull.add(p);
-      }
-      hull.remove(hull.size() - 1); // the other half starts with it
-      sorted = sorted.reversed();
-    }
-    return hull;
-  }
-
-  private static double cross(Point o, Point a, Point b) {
-    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  }
-
-  /** Each tag seen, as the robot reads it; one whose pose isn't a number is left out. */
+  /**
+   * Each tag seen, as the robot reads it. One whose own solve failed, or whose pose isn't a number,
+   * is left out.
+   */
   private static List<TagDetections.Tag> detected(List<Seen> seen) {
     List<TagDetections.Tag> detected = new ArrayList<>();
     for (Seen tag : seen) {
-      if (!isFinite(tag.solved().best) || !isFinite(tag.solved().alt)) {
+      PnpResult solved = tag.solved();
+      if (solved == null || !isFinite(solved.best) || !isFinite(solved.alt)) {
         continue;
       }
       List<Translation2d> corners = new ArrayList<>();
       for (Point corner : tag.corners()) {
         corners.add(new Translation2d(corner.x, corner.y));
       }
-      double ambiguity = tag.solved().ambiguity;
+      double ambiguity = solved.ambiguity;
       detected.add(
           new TagDetections.Tag(
               tag.tag().id(),
               corners,
-              tag.solved().best,
-              tag.solved().alt,
+              solved.best,
+              solved.alt,
               // PhotonVision's -1 means it has none to give: a coin toss, as Vision reads it.
               !(ambiguity >= 0) ? 1 : Math.min(ambiguity, 1)));
     }

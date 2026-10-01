@@ -47,15 +47,17 @@ small random amount (a quarter degree, typically), as a real one is. The measure
 cameras are combined as the estimator combines them, each weighed by its uncertainty. Each camera
 takes two images at each pose, each with its own noise.
 
-**PhotonVision's simulation, without the pictures.** PhotonVision's simulation draws every image,
-into memory only the garbage collector frees: fine at the simulator's 30 images a second, but a
-study takes over a million, and that exhausts a computer's memory. So the study takes its images
-step for step as PhotonVision's does (`CameraImageSim`): the same test of which tags are in view,
-the same projection, the same noise from the same random draws, the same detection limits, and
-PhotonVision's own solves, without drawing anything. Its test checks it against PhotonVision's
-simulation, image for image, over a sample of 2026's field: in 160 images from the template
-robot's four cameras, the same 274 tags seen and the same 75 multi-tag solves, with corners within
-a thousandth of a pixel and solves within 0.03 mm.
+**PhotonVision's simulation, without the pictures.** PhotonVision's simulation draws every image
+into native memory that only the garbage collector frees: fine at the simulator's 30 images a
+second, but the default run takes about a million and a half, and that exhausts a computer's
+memory. So the study takes its images step for step as PhotonVision's does (`CameraImageSim`): the
+same test of which tags are in view, the same projection, the same model of pixel noise, the same
+detection limits, and PhotonVision's own solves, without drawing anything. Its test
+(`CameraImageSimTest`) gives the two the same seeds, so they draw the same noise, and compares
+them image for image over a sample of 2026's field: they must see the same tags and make the same
+multi-tag solves, with corners within 0.01 px and solves within a millimeter and a milliradian. In
+the last run, 160 images from the template robot's four cameras saw the same 274 tags and made the
+same 75 multi-tag solves, with corners within 0.001 px and solves within 0.03 mm.
 
 **Scores.** For each candidate, each a share of the field (of the poses, weighted):
 
@@ -181,5 +183,9 @@ with those cameras, and run with `--robot=<its name>`: its cameras are "the robo
 - **Time:** the estimator combines many images over time, and the wheels between them, so the
   robot does better than one set of images. The study compares layouts; it doesn't predict the
   robot's accuracy on the field.
+- **Small and failed tags:** a tag smaller than 100 square pixels in the image isn't detected,
+  PhotonVision's default; a real camera's limit depends on its lens, exposure, and settings. A tag
+  whose own solve fails is left out, as the robot leaves out a pose that isn't a number
+  (PhotonVision's simulation would report it at the camera itself); none failed in the example run.
 - **The lens:** a perfect lens, with PhotonVision's model of corner noise. Measure a real camera's
   noise before trusting the absolute numbers.

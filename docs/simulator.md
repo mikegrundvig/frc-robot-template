@@ -62,8 +62,9 @@ Three sections, beside the page's others, sent as JSON merge patches when they c
 - **`simulator`**: `enabled`, `mode` (`AUTONOMOUS`, `TELEOPERATED`, `UTILITY`, or `UNKNOWN` before
   a Driver Station set one), `allianceStation` (`RED_1` to `BLUE_3`, or `UNKNOWN`), `fmsAttached`,
   `dsAttached`, `matchTime` (whole seconds left, counting down while enabled; -1 for none),
-  `paused`, and `joysticks`: for `"0"` and `"1"`, `fromPage` (the page drives it) and
-  `centeredByDeadman` (the page went quiet, and it was centered).
+  `paused`, and `joysticks`: for `"0"` and `"1"`, `fromPage` (a page drives it),
+  `centeredByDeadman` (the page went quiet, and it was centered), and `stream` (the event stream
+  of the page whose input it took last, or empty).
 - **`components`**: each part that can fail, by name: `{"kind", "faults": {name: {"does",
   "lasting", "undo", "parameters": [{"name", "unit", "min", "max", "initial"}], "on", "values"}}}`.
   A lasting fault has `on`, and while on, the `values` it was applied with; an event has neither.
@@ -100,8 +101,10 @@ was built changes nothing, and is refused (422, "changes nothing: as built"), ne
 most 12; buttons pressed or not, at most 64; POVs in degrees clockwise from up, in steps of 45, or
 -1 centered, at most 8. A joystick is declared a gamepad, with at least a gamepad's 6 axes, 26
 buttons, and 1 POV, the first time the page drives it. `null` lets it go: centered, and no longer
-the page's. A joystick the page never drove is never touched, so the GUI's keyboard or a real
-Driver Station still can. The page sends a joystick's input when it changes, at most once a frame,
+the page's. Only the page that drives it now can: when two pages drive one joystick, the latest
+input wins, and `null` from the other is ignored, so a page that stops driving never lets go of a
+joystick another page drives. A joystick the page never drove is never touched, so the GUI's
+keyboard or a real Driver Station still can. The page sends a joystick's input when it changes, at most once a frame,
 and again every 200 ms while anything is pressed; after 500 ms of silence on the robot's clock the
 robot centers it (`centeredByDeadman`), and when the page's event stream closes it lets it go.
 
@@ -207,10 +210,11 @@ is filled in while the simulated robot is enabled, and leads here. Attaching the
 when values are tuned, listing them, since the field returns them to committed; the field's band
 then points back to the switch, its way out in the simulator.
 
-**Esc disables the robot** in *Sim*, and from any view while the keyboard drives it, unless the
-focus is in a field, where Esc drops what was typed. Elsewhere Esc keeps its meaning: it stops a
-run or an action. Disabling there would also end the enable an experiment's next run needs, turning
-"stop this run" into "stop it, and enable again".
+**Esc disables the robot** in *Sim* always, even with the focus in a field; and from any other view
+while this page drives it, with the keyboard or a gamepad, unless the focus is in a field, where
+Esc drops what was typed. Elsewhere Esc keeps its meaning: it stops a run or an action. Disabling
+there would also end the enable an experiment's next run needs, turning "stop this run" into "stop
+it, and enable again". When a disable fails, the page says so at once, wherever Esc was pressed.
 
 **Keyboard driving is switched on explicitly** ("Drive with the keyboard"), and shows in the state
 bar while on: "⌨ Driving", or why not now. One fixed layout for this template's driving, by
@@ -225,7 +229,11 @@ physical key, so it's where it is on any keyboard layout:
 
 The keys pause, and the joystick is centered, while the focus is in a field (typing `w` into a
 value never drives), when the window loses the keyboard, and when the tab is hidden; a key held
-then counts as released, since its release can't be heard. Switching it off lets the joystick go.
+then counts as released, since its release can't be heard. So do Cmd, the Windows key, and Alt,
+pressed or let go, and a context menu: a key let go while one is down may never say so (on macOS,
+never while Cmd is down), and a key held that the page thinks is held forever would keep the
+robot's deadman from ever stopping it. Hold it again to drive on. Switching driving off lets the
+joystick go.
 
 **Gamepads** drive through the browser's Gamepad API, switched on in *Sim* too, with the standard
 mapping to WPILib's `Gamepad`:
@@ -243,12 +251,16 @@ mapping to WPILib's `Gamepad`:
 
 The first gamepad drives the joystick chosen in *Sim* (0 or 1, remembered in this browser), and a
 second one the other. A gamepad this browser doesn't know the standard layout of can't drive, and
-*Sim* says so. Axes go in a Driver Station's steps, 1/127, so a stick at rest stops twitching.
+*Sim* says so. Axes go in a Driver Station's steps of 1/127.
 
 **What's sent:** each joystick's whole input when it changes, at most once a frame, and again every
-200 ms while anything is pressed, naming the page's stream; centered on blur and when the tab is
-hidden, and `null` when driving is switched off. *Sim* shows each joystick the page drives, its
-axes and the buttons held, and says when the robot's deadman centered it.
+200 ms while anything on it is pressed, each joystick by its own clock, naming the page's stream.
+The keyboard's joystick is centered on blur (a gamepad keeps driving a visible page); every
+joystick the page drives is centered when the tab is hidden; and `null` lets one go when driving
+is switched off. Input the robot didn't answer (it timed out, or the robot was busy) is sent again
+shortly, a let-go included, and *Sim* says so meanwhile. *Sim* shows each joystick the page drives,
+its axes and the buttons held, and says when the robot's deadman centered it, or when another page
+drives it too.
 
 **An unfocused or hidden page.** Keys reach only a focused page, as they reached only a focused GUI
 window. The page polls gamepads each frame only while the tab is visible (the W3C spec also hides a
@@ -258,13 +270,14 @@ suggesting side-by-side windows. Whether a gamepad keeps reaching a page that's 
 unfocused, beside AdvantageScope, is unverified: test it in Chrome and Firefox before calling the
 view a strict improvement for gamepad users.
 
-**Time:** Pause and Resume; Step, one loop, only while paused; and Stop, after asking (it names
-any tuned values not committed, which end with the program). A paused simulator runs no loops, so
+**Time:** Pause and Resume; Step, one loop, only while paused; and Stop, after asking (it lists
+the tuned values not committed, which end with the program). A paused simulator runs no loops, so
 the stream goes quiet but for heartbeats: a request made while paused says it waits for a Step or
-Resume, and that note goes once a loop has run. A page that opens while the simulator is paused
-gets no snapshot; after a second and a half it asks `GET /api/simulator`, answered at once while
-paused, offers *Sim*, says why the rest is empty, and offers Resume and Step. The rest fills in
-when a loop runs.
+Resume (one the loop was slow to answer, that it waits for the next loop), and that note goes once
+a loop has run. A page that opens while the simulator is paused gets no snapshot; after a second
+and a half it asks `GET /api/simulator`, answered at once while paused, and if the simulator says
+it's paused, offers *Sim*, says why the rest is empty, and offers Resume and Step. The rest fills
+in when a loop runs.
 
 **Stop** ends the program, and the stream with it: the page that stopped it says "Stopped", in the
 state bar, its band, and *Sim*, not that the link was lost, and reconnects by itself when the

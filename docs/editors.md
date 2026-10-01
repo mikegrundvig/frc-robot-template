@@ -88,8 +88,10 @@ run the same Gradle tasks; *Set Team Number* writes the same file as `setTeamNum
 *Simulate Robot Code* uses Gradle only to prepare, then starts the robot itself under the debugger,
 with whichever simulation extensions it offers you (WPILib's simulator GUI among them). The robot
 then starts as a real robot does, disabled with no station or mode, and without the GUI's
-first-run layout. Pitwall's Sim view drives it either way; `./gradlew run` starts it ready to
-drive, in teleop on a start.
+first-run layout. Pitwall's Sim view's Driver Station works either way, but when you choose the GUI
+it overwrites Sim's joysticks every frame, unless you turn on the GUI's *Disable DS*
+([why](simulator.md)). `./gradlew run` starts it ready to drive, in teleop on a start, without the
+GUI.
 
 ## Any other editor
 

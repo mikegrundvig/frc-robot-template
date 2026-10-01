@@ -98,10 +98,13 @@ function render(patch, snapshot) {
  * @param hidden whether it would, but the tab is hidden
  */
 export function showDriving(text, live, hidden) {
-  driving.hidden = !text;
-  driving.textContent = text || "";
-  driving.className = "pill driving " + (live ? "on" : "locked");
-  driving.title = "Driving the simulator from this page: see Sim";
+  const className = "pill driving " + (live ? "on" : "locked");
+  if (driving.textContent !== (text || "") || driving.className !== className) {
+    driving.hidden = !text;
+    driving.textContent = text || "";
+    driving.className = className;
+    driving.title = "Driving the simulator from this page: see Sim";
+  }
   notDriving = Boolean(text) && hidden;
   showTitle();
 }
@@ -117,7 +120,8 @@ function showEnabled() {
 }
 
 function showTitle() {
-  document.title = (notDriving ? "⏸ Not driving · " : "") + title;
+  const next = (notDriving ? "⏸ Not driving · " : "") + title;
+  if (document.title !== next) document.title = next;
 }
 
 function renderTuning() {

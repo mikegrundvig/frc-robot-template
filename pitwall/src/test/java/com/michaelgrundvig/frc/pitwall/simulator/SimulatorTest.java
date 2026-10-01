@@ -166,8 +166,8 @@ class SimulatorTest {
     assertThat(Objects.requireNonNull(simulator.view().get("simulator")).get("joysticks"))
         .isEqualTo(
             Map.of(
-                "0", Map.of("fromPage", true, "centeredByDeadman", true),
-                "1", Map.of("fromPage", false, "centeredByDeadman", false)));
+                "0", Map.of("fromPage", true, "centeredByDeadman", true, "stream", "1"),
+                "1", Map.of("fromPage", false, "centeredByDeadman", false, "stream", "")));
 
     simulator.joystick(0, input(0.3), "1"); // back in touch
     loop();
@@ -204,6 +204,37 @@ class SimulatorTest {
     assertThat(Objects.requireNonNull(simulator.view().get("simulator")).get("joysticks"))
         .asString()
         .contains("1={fromPage=false");
+  }
+
+  /**
+   * Two pages drive one joystick: the latest input wins, and only the page driving it now can let
+   * it go. The other page switching its driving off changes nothing.
+   */
+  @Test
+  void onlyThePageDrivingAJoystickNowLetsItGo() {
+    simulator.joystick(0, input(0.5), "1");
+    loop();
+    simulator.joystick(0, input(-0.5), "2"); // another page drives it too, and is now the latest
+    loop();
+    assertThat(hal.joystick(0)).isEqualTo(input(-0.5));
+
+    simulator.joystick(0, null, "1"); // the first page switches its driving off
+    loop();
+    assertThat(hal.joystick(0)).as("still the second page's").isEqualTo(input(-0.5));
+    assertThat(joysticks()).contains("0={fromPage=true, centeredByDeadman=false, stream=2}");
+
+    simulator.lost("1"); // and closes: nothing of its own to let go
+    loop();
+    assertThat(hal.joystick(0)).isEqualTo(input(-0.5));
+
+    simulator.joystick(0, null, "2");
+    loop();
+    assertThat(hal.joystick(0)).isEqualTo(JoystickInput.CENTERED);
+    assertThat(joysticks()).contains("0={fromPage=false, centeredByDeadman=false, stream=}");
+
+    simulator.joystick(0, null, "3"); // a let go of a joystick nobody drives changes nothing
+    loop();
+    assertThat(hal.joystick(0)).isEqualTo(JoystickInput.CENTERED);
   }
 
   /** The loop pauses the clock, so its own last view says it's paused. */
@@ -395,6 +426,12 @@ class SimulatorTest {
 
     assertThat(asked).isDone();
     assertThat(asked.join()).containsKey("components");
+  }
+
+  /** The joysticks as the view shows them, as text. */
+  private String joysticks() {
+    return String.valueOf(
+        Objects.requireNonNull(simulator.view().get("simulator")).get("joysticks"));
   }
 
   private static JoystickInput input(double leftX) {

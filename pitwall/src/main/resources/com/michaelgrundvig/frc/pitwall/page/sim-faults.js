@@ -7,7 +7,8 @@
 // once, so it's only a button. The cards are built once, and again only when the parts change, so
 // a value being typed is kept.
 
-import { robot, send, shown, h, replace, announce } from "./core.js";
+import { send, shown, h, replace } from "./core.js";
+import { note, outcome } from "./sim-outcome.js";
 
 let cards;
 let onNow;
@@ -17,7 +18,8 @@ let scenarioList;
 let builtFaults = "";
 let builtScenarios = "";
 let locked = false;
-let asked = false; // a request is waiting for the robot's next loop, said where it was made
+let undoing = false; // Undo all is waiting for its answer
+let context = { state: () => null, paused: () => false };
 const rows = new Map(); // "component\nfault" -> its row's parts
 const cardParts = new Map(); // component -> its card's parts
 const scenarioRows = new Map(); // scenario -> its row's parts
@@ -25,8 +27,12 @@ const scenarioRows = new Map(); // scenario -> its row's parts
 /**
  * What fails: what's on now with Undo all, the scenarios, then a card for each part with its
  * faults.
+ *
+ * @param from {state(), paused()}: the simulator's sections as Sim has them, and whether it's
+ *     paused
  */
-export function makeFaults() {
+export function makeFaults(from) {
+  context = from;
   onNow = h("p", { class: "onnow" });
   undoAllButton = h("button", { type: "button", onclick: undoAll }, "Undo all");
   undoAllMessage = h("p", { class: "message", hidden: true });
@@ -47,19 +53,6 @@ export function makeFaults() {
           + "undone below, one at a time or all together."),
       scenarioList),
     cards);
-}
-
-/**
- * Forgets what was said of requests waiting for the robot's next loop: a loop has run since. Call
- * it when anything arrives from the robot.
- */
-export function loopRan() {
-  if (!asked) return;
-  asked = false;
-  for (const message of document.querySelectorAll(".faults .message[data-asked]")) {
-    message.hidden = true;
-    delete message.dataset.asked;
-  }
 }
 
 /** Shows the parts and their faults as the robot sent them. */
@@ -91,7 +84,7 @@ export function renderFaults(components) {
   replace(onNow, on.length === 0
     ? h("span", { class: "muted" }, "Nothing on: the robot as built.")
     : [h("b", { class: "onword" }, "● " + on.length + " on: "), on.join(" · ")]);
-  undoAllButton.disabled = locked || on.length === 0;
+  undoAllButton.disabled = locked || undoing || on.length === 0;
   undoAllButton.textContent = on.length > 0 ? "Undo all " + on.length : "Undo all";
 }
 
@@ -210,12 +203,12 @@ async function applyFault(parts) {
     const text = parameter.input.value.trim();
     const number = Number(text);
     if (text === "" || !Number.isFinite(number)) {
-      tell(parts.message, "✗ " + parameter.name + " takes a number.", true);
+      note(parts.message, "✗ " + parameter.name + " takes a number.", true);
       parameter.input.focus();
       return;
     }
     if (number < parameter.min || number > parameter.max) {
-      tell(parts.message, "✗ " + parameter.name + " is from " + parameter.range
+      note(parts.message, "✗ " + parameter.name + " is from " + parameter.range
           + (parameter.unit ? " " + parameter.unit : "") + ". Checked here, before sending.", true);
       parameter.input.focus();
       return;
@@ -232,49 +225,34 @@ async function undoFault(parts) {
     parts.component + ": " + parts.name + ", undone.");
 }
 
+/**
+ * Applies or undoes a fault, saying what became of it under its row. An event says, for a while,
+ * that it happened, since nothing else on the page changes.
+ */
 async function act(parts, body, done) {
   parts.busy = true;
   updateButtons(parts);
   const result = await send("POST", "/api/simulator/faults", body);
   parts.busy = false;
   updateButtons(parts);
-  outcome(parts.message, result, done, !parts.lasting && !body.undo);
+  outcome(parts.message, result,
+    { done, shown: !parts.lasting && !body.undo, paused: context.paused() });
 }
 
 async function undoAll() {
-  if (locked) return;
+  if (locked || undoing) return;
+  undoing = true;
   undoAllButton.disabled = true;
-  const result = await send("DELETE", "/api/simulator/faults");
-  outcome(undoAllMessage, result, "Every fault undone: the robot as built.", false);
-  undoAllButton.disabled = locked;
-}
-
-/**
- * Says what became of a request, where it was made: a refusal in the robot's words, under what was
- * pressed, and to a screen reader when it's free. An event says it happened, since nothing else on
- * the page changes.
- */
-function outcome(message, result, done, happened) {
-  if (result.ok && result.status === 202) {
-    tell(message, "Asked: it happens with the robot's next loop (Step or Resume, while paused).",
-      false);
-    message.dataset.asked = "true";
-    asked = true;
-  } else if (result.ok) {
-    tell(message, happened ? "✓ " + done : "", false);
-    announce(done);
-    if (happened) setTimeout(() => (message.hidden = true), 5000);
-  } else {
-    tell(message, "✗ " + (result.problem.detail || result.problem.title), true);
-    announce("Refused: " + (result.problem.detail || result.problem.title));
+  try {
+    const result = await send("DELETE", "/api/simulator/faults");
+    outcome(undoAllMessage, result,
+      { done: "Every fault undone: the robot as built.", paused: context.paused() });
+  } finally {
+    undoing = false;
+    const now = context.state();
+    if (now && now.components) renderFaults(now.components); // Undo all's count, and whether any
+    else undoAllButton.disabled = locked;
   }
-}
-
-function tell(message, text, bad) {
-  delete message.dataset.asked;
-  message.hidden = !text;
-  message.textContent = text;
-  message.className = "message" + (bad ? " bad" : "");
 }
 
 // ---- Scenarios ----
@@ -298,15 +276,14 @@ async function applyScenario(name, parts) {
   const result = await send("POST", "/api/simulator/scenarios", { apply: name });
   parts.busy = false;
   parts.apply.disabled = locked;
-  if (result.ok && result.status === 200) {
-    // What it did, as the answer says: which faults it put on, which happened, and which it passed
-    // over, the part being that way as built.
-    const scenario = robot.doc ? robot.doc.scenarios[name] : null;
-    const said = scenario ? didWhat(scenario, result.body) : "";
-    tell(parts.message, "✓ Applied" + (said ? ": " + said : "."), false);
-    announce(name + " applied" + (said ? ": " + said : "."));
-  } else {
-    outcome(parts.message, result, name + " applied.", false);
+  // What it did, as the answer says: which faults it put on, which happened, and which it passed
+  // over, the part being that way as built. Kept under it, beside the faults it marks as on.
+  const now = context.state();
+  const scenario = now && now.scenarios ? now.scenarios[name] : null;
+  const said = result.ok && result.status === 200 && scenario ? didWhat(scenario, result.body) : "";
+  const done = name + " applied" + (said ? ": " + said : ".");
+  if (outcome(parts.message, result, { done, paused: context.paused() })) {
+    note(parts.message, "✓ " + done);
   }
 }
 

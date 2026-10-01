@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.pitwall;
 
 import com.michaelgrundvig.frc.pitwall.push.Reading;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -9,7 +10,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.DoubleSupplier;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The robot's status, as the page shows it: named items, each read in the robot loop. It answers
@@ -21,7 +24,9 @@ import java.util.function.Supplier;
  * true} and {@code false} as a check and a cross, anything else as text. A number that wanders (the
  * battery) is added with its unit and the resolution worth showing, {@code status.add("Battery",
  * RobotController::getBatteryVoltage, "V", 0.1)}, so the page hears of it only once it has really
- * moved.
+ * moved. Each change goes to every open page, so write a line to change only when something worth
+ * reading does; one that still moves faster than anyone reads it (a running count) can say how
+ * often it may change: {@code status.add("Loop", loop::describe, Duration.ofSeconds(1))}.
  *
  * <p>Items are read in {@link #periodic}, on the robot loop's thread, so they may read robot state
  * freely; keep each one cheap. They're read only while someone is looking: a page has its event
@@ -42,14 +47,36 @@ public final class Status {
    *
    * @param unit for a number with a resolution, its unit; empty for the rest
    * @param resolution for a number, the smallest change worth showing; 0 for the rest
+   * @param intervalNanos the shortest time between changes shown; 0 for none
    */
-  private record Source(Supplier<?> value, String unit, double resolution) {}
+  private record Source(Supplier<?> value, String unit, double resolution, long intervalNanos) {}
 
+  /** What an item last showed, and when that changed. */
+  private static final class Shown {
+    @Nullable Object value;
+    long sinceNanos;
+  }
+
+  private final LongSupplier clock;
   private final Map<String, Source> items = new LinkedHashMap<>();
+  private final Map<String, Shown> shown = new LinkedHashMap<>();
   private final ConcurrentLinkedQueue<CompletableFuture<List<Item>>> asked =
       new ConcurrentLinkedQueue<>();
   private volatile List<Item> view = List.of();
   private volatile Map<String, Object> read = Map.of();
+
+  /** Status on the computer's own clock. */
+  public Status() {
+    this(System::nanoTime);
+  }
+
+  /**
+   * @param clock the time in nanoseconds, for how often an item may change: the robot's clock, so
+   *     the simulator's tests step it
+   */
+  public Status(LongSupplier clock) {
+    this.clock = clock;
+  }
 
   /**
    * Adds an item, shown in the order added.
@@ -58,7 +85,22 @@ public final class Status {
    * @throws IllegalArgumentException if the name is blank or already used
    */
   public Status add(String name, Supplier<?> value) {
-    return add(name, new Source(value, "", 0));
+    return add(name, new Source(value, "", 0, 0));
+  }
+
+  /**
+   * Adds an item that changes at most once an interval: between changes, the page shows the value
+   * it last changed to. For a line that moves faster than anyone reads it.
+   *
+   * @return this, to add the next item
+   * @throws IllegalArgumentException if the name is blank or already used, or the interval is
+   *     negative
+   */
+  public Status add(String name, Supplier<?> value, Duration interval) {
+    if (interval.isNegative()) {
+      throw new IllegalArgumentException("an interval can't be negative: " + interval);
+    }
+    return add(name, new Source(value, "", 0, interval.toNanos()));
   }
 
   /**
@@ -73,7 +115,7 @@ public final class Status {
    */
   public Status add(String name, DoubleSupplier value, String unit, double resolution) {
     Reading.of(0).toNearest(resolution); // checks the resolution
-    return add(name, new Source(value::getAsDouble, unit, resolution));
+    return add(name, new Source(value::getAsDouble, unit, resolution, 0));
   }
 
   private Status add(String name, Source source) {
@@ -96,7 +138,8 @@ public final class Status {
     if (!watched && asked.isEmpty()) {
       return;
     }
-    List<Item> shown = new ArrayList<>(items.size());
+    long nowNanos = clock.getAsLong();
+    List<Item> lines = new ArrayList<>(items.size());
     Map<String, Object> values = new LinkedHashMap<>();
     for (Map.Entry<String, Source> item : items.entrySet()) {
       Source source = item.getValue();
@@ -105,11 +148,12 @@ public final class Status {
         values.put(item.getKey(), Reading.of(number.doubleValue()).toNearest(source.resolution()));
         value = shown(number.doubleValue(), source);
       } else {
+        value = held(item.getKey(), value, source.intervalNanos(), nowNanos);
         values.put(item.getKey(), value);
       }
-      shown.add(new Item(item.getKey(), value));
+      lines.add(new Item(item.getKey(), value));
     }
-    List<Item> now = List.copyOf(shown);
+    List<Item> now = List.copyOf(lines);
     view = now;
     read = values;
     for (var request = asked.poll(); request != null; request = asked.poll()) {
@@ -154,6 +198,18 @@ public final class Status {
           }
         });
     return units;
+  }
+
+  /** The value to show: the new one, unless the last change was less than an interval ago. */
+  private Object held(String name, Object value, long intervalNanos, long nowNanos) {
+    Shown last = shown.computeIfAbsent(name, n -> new Shown());
+    Object was = last.value;
+    if (was == null || (!was.equals(value) && nowNanos - last.sinceNanos >= intervalNanos)) {
+      last.value = value;
+      last.sinceNanos = nowNanos;
+      return value;
+    }
+    return was;
   }
 
   private static Object read(Supplier<?> item) {

@@ -119,6 +119,11 @@ public final class Localization implements AutoCloseable {
 
   private int landmarksAccepted;
 
+  /** The uncertainty as {@link #describe()} last showed it; NaN before it did. */
+  private double shownCentimeters = Double.NaN;
+
+  private double shownDegrees = Double.NaN;
+
   private final Alert gyroDisconnected =
       new Alert(
           "Localization",
@@ -264,9 +269,15 @@ public final class Localization implements AutoCloseable {
     return notReadyToScore == null ? "Ready to score" : "Not ready: " + notReadyToScore;
   }
 
-  /** One line for the pit: what the pose rests on, and how sure it is. */
+  /**
+   * One line for the pit: what the pose rests on, and how sure it is, to the centimeter and the
+   * tenth of a degree. Each number shown moves only once the real one has moved that much from it,
+   * so the line doesn't flicker as the uncertainty wanders within a step.
+   */
   public String describe() {
     PoseCovariance uncertainty = estimate.covariance();
+    shownCentimeters = held(shownCentimeters, 100 * uncertainty.largestPositionStdDev(), 1);
+    shownDegrees = held(shownDegrees, Math.toDegrees(uncertainty.headingStdDev()), 0.1);
     String basis =
         switch (estimate.mode()) {
           case INITIALIZING -> "Not placed yet";
@@ -276,11 +287,12 @@ public final class Localization implements AutoCloseable {
           case IMU_FAULT -> "Gyro lost";
         };
     return String.format(
-        Locale.ROOT,
-        "%s: within %.0f cm, %.1f°",
-        basis,
-        100 * uncertainty.largestPositionStdDev(),
-        Math.toDegrees(uncertainty.headingStdDev()));
+        Locale.ROOT, "%s: within %.0f cm, %.1f°", basis, shownCentimeters, shownDegrees);
+  }
+
+  /** A number as shown, to a step: it moves only once the value has moved a step from it. */
+  private static double held(double shown, double value, double step) {
+    return Math.abs(value - shown) < step ? shown : Math.round(value / step) * step;
   }
 
   /** The robot's pitch, from the IMU: zero without one. Positive is nose down. */

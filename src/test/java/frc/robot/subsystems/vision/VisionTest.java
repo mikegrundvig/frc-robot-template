@@ -142,7 +142,7 @@ class VisionTest {
 
     assertThat(vision.camera(0).accepted()).isEqualTo(1);
     assertThat(vision.summary())
-        .isEqualTo("1 of 1 cameras connected, 100% of 1 measurements accepted");
+        .isEqualTo("1 of 1 cameras connected, 100% of measurements accepted");
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
   }
 

@@ -4,9 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import com.michaelgrundvig.frc.pitwall.push.Reading;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class StatusTest {
@@ -101,6 +105,30 @@ class StatusTest {
     assertThat(status.units()).isEqualTo(Map.of("Battery", Map.of("unit", "V", "resolution", 0.1)));
     assertThatIllegalArgumentException()
         .isThrownBy(() -> status.add("Pressure", () -> 1, "psi", 0));
+  }
+
+  /** A line that moves faster than anyone reads it changes at most once an interval. */
+  @Test
+  void anItemWithAnIntervalChangesAtMostOnceAnInterval() {
+    var clock = new AtomicLong();
+    var count = new AtomicInteger();
+    var status =
+        new Status(clock::get)
+            .add("Seen", () -> count.incrementAndGet() + " frames", Duration.ofSeconds(1));
+    List<Object> shown = new ArrayList<>();
+
+    for (int loop = 0; loop < 150; loop++) {
+      status.periodic(true);
+      shown.add(status.view().get(0).value());
+      clock.addAndGet(Duration.ofMillis(20).toNanos());
+    }
+
+    assertThat(shown.stream().distinct()).as("three seconds: three changes").hasSize(3);
+    assertThat(shown.get(49)).as("held a second").isEqualTo("1 frames");
+    assertThat(shown.get(50)).as("then the latest").isEqualTo("51 frames");
+    assertThat(status.values()).containsEntry("Seen", shown.get(149));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> status.add("Other", () -> 1, Duration.ofSeconds(-1)));
   }
 
   @Test

@@ -446,6 +446,28 @@ class SlipCheckTest {
     assertThat(robot.check.collisionShare()).isZero();
   }
 
+  /**
+   * The same as the wheels and the robot meet: the slide over by the speed comparison, the IMU
+   * still feels the robot catching up for a moment after (its filter lags a little). Just done
+   * sliding, the wheels still say nothing of the robot: no collision.
+   */
+  @Test
+  void justDoneSlidingTheWheelsStillExplainNothingOfAJolt() {
+    Robot robot = new Robot();
+    for (int i = 1; i <= 10; i++) {
+      robot.slide(0.1 * i, 0).loop(0, 0, 0, 0); // wheels spinning up to 1 m/s, the robot still
+    }
+    assertThat(robot.check.speedSlipMetersPerSecond()).as("sliding").isPositive();
+    for (int i = 0; i < 3; i++) {
+      robot.slide(robot.slideX - 0.23 - 0.088, 0).loop(0.23, 0, 0, 0);
+    }
+    assertThat(robot.check.speedSlipMetersPerSecond()).as("met").isZero();
+
+    robot.slide(robot.slideX - 0.23 - 0.088, 0).loop(0.23, 0, 0, 0);
+
+    assertThat(robot.check.collisionShare()).isZero();
+  }
+
   /** Without a checked accelerometer, a jolt's size alone decides. */
   @Test
   void anUncheckedAccelerometersJoltIsJudgedByItsSize() {

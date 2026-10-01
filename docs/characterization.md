@@ -431,7 +431,7 @@ distance between the two.
 
 **What good looks like:** a calibrated swerve drivetrain on carpet ends within about 1 to 2% of the
 distance it drove. Much more means a wheel radius or the gyro's scale needs calibrating again, or
-the wheels slip: the log's `Localization/TractionLimited` and `ResidualMeters` show where.
+the wheels slip: the log's `Localization/SlipMetersPerSecond` and `ResidualMeters` show where.
 
 ## Battery internal resistance
 

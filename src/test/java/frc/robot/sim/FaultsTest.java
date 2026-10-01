@@ -5,6 +5,7 @@ import static frc.robot.sim.Faults.GYRO;
 import static frc.robot.sim.Faults.ROBOT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
@@ -354,6 +355,86 @@ class FaultsTest {
 
     assertThat(read(module).drivePositionRad - before).isCloseTo(2 * Math.PI, within(1e-9));
     assertThat(world.truePose()).isEqualTo(STANDING);
+  }
+
+  /** A wheel spinning past the floor: its encoder counts it every loop, until it grips again. */
+  @Test
+  void aSpinningWheelCountsTravelTheFloorNeverSawUntilItGrips() {
+    SimulatedWorld world = world();
+    ModuleIO module = world.drivetrainHardware().modules().get(2);
+    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    double before = read(module).drivePositionRad;
+
+    apply(Faults.module(2), Faults.SPINNING, Map.of(Faults.SPEED, 0.5));
+    for (int i = 0; i < 10; i++) {
+      step(world);
+    }
+    ModuleIOInputs spinning = read(module);
+    undo(Faults.module(2), Faults.SPINNING);
+    step(world);
+    step(world);
+
+    assertThat((spinning.drivePositionRad - before) * radius)
+        .as("a fifth of a second at 0.5 m/s")
+        .isCloseTo(0.1, within(1e-9));
+    assertThat(spinning.driveVelocityRadPerSec * radius).isCloseTo(0.5, within(1e-9));
+    assertThat(read(module).drivePositionRad).isCloseTo(spinning.drivePositionRad, within(1e-9));
+    assertThat(world.truePose()).isEqualTo(STANDING);
+    assertThat(components.on()).isEmpty();
+  }
+
+  /**
+   * Pushed sideways: the robot slides, getting going at 3 m/s², while its wheels see nothing and
+   * its IMU feels the push; stopped, it slows as it got going.
+   */
+  @Test
+  void aPushSlidesTheRobotUnseenByItsWheelsAndFeltByItsImu() {
+    SimulatedWorld world = world();
+    ModuleIO module = world.drivetrainHardware().modules().get(0);
+    double before = read(module).drivePositionRad;
+
+    apply(ROBOT, Faults.PUSHED, Map.of(Faults.FORWARD, 0.0, Faults.LEFT, 1.0));
+    step(world);
+    GyroIO.GyroIOInputs starting = read(world.drivetrain().gyro());
+    for (int i = 0; i < 49; i++) {
+      step(world);
+    }
+    double slid = world.truePose().getY() - STANDING.getY();
+    undo(ROBOT, Faults.PUSHED);
+    step(world);
+    GyroIO.GyroIOInputs stopping = read(world.drivetrain().gyro());
+    for (int i = 0; i < 20; i++) {
+      step(world);
+    }
+
+    assertThat(starting.accelerationYMetersPerSecSq)
+        .isCloseTo(DriveSimulation.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
+    assertThat(stopping.accelerationYMetersPerSecSq)
+        .isCloseTo(-DriveSimulation.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
+    // A second's push: a third of a second getting going, the rest at 1 m/s.
+    assertThat(slid).isCloseTo(1.0 - 1.0 / (2 * 3), within(0.01));
+    assertThat(world.truePose().getX()).isCloseTo(STANDING.getX(), within(1e-9));
+    assertThat(read(module).drivePositionRad).as("the wheels never turned").isEqualTo(before);
+    assertThat(read(world.drivetrain().gyro()).accelerationYMetersPerSecSq)
+        .as("stopped")
+        .isCloseTo(0, within(1e-9));
+    assertThat(components.on()).isEmpty();
+  }
+
+  /** Tilted, the IMU feels the floor hold it up along its tipped axes, as a real one does. */
+  @Test
+  void aTiltedImuFeelsGravitysShare() {
+    SimulatedWorld world = world();
+
+    apply(ROBOT, Faults.TILTED, Map.of(Faults.PITCH, -10.0, Faults.ROLL, 5.0));
+    step(world);
+    GyroIO.GyroIOInputs tilted = read(world.drivetrain().gyro());
+
+    // Nose up (a negative pitch): forward. Left side up (a positive roll): left.
+    assertThat(tilted.accelerationXMetersPerSecSq)
+        .isCloseTo(9.81 * Math.sin(Math.toRadians(10)), within(1e-9));
+    assertThat(tilted.accelerationYMetersPerSecSq)
+        .isCloseTo(9.81 * Math.sin(Math.toRadians(5)) * Math.cos(Math.toRadians(10)), within(1e-9));
   }
 
   @Test

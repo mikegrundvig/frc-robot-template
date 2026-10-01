@@ -14,8 +14,8 @@ import org.wpilib.system.RobotController;
  * <p>WPILib reports no connection status for it, so it counts as connected; a failure shows as the
  * drivetrain's cross-check disagreeing with the gyro. Its pitch and roll are WPILib's angles about
  * the board's axes for the chosen mount, and its accelerometer reads the board's axes, so it
- * reports acceleration only when mounted flat. Unconfirmed on a real unit until checked against
- * another IMU: its axes, signs, scale, and drift.
+ * reports acceleration only when mounted flat: otherwise not a number, which says it can't.
+ * Unconfirmed on a real unit until checked against another IMU: its axes, signs, scale, and drift.
  */
 public final class GyroIOSystemcore implements GyroIO {
   private final OnboardIMU imu;
@@ -48,8 +48,8 @@ public final class GyroIOSystemcore implements GyroIO {
     lastTime = now;
     inputs.pitchRad = imu.getAngleY();
     inputs.rollRad = imu.getAngleX();
-    inputs.accelerationXMetersPerSecSq = flat ? imu.getAccelX() : 0;
-    inputs.accelerationYMetersPerSecSq = flat ? imu.getAccelY() : 0;
+    inputs.accelerationXMetersPerSecSq = flat ? imu.getAccelX() : Double.NaN;
+    inputs.accelerationYMetersPerSecSq = flat ? imu.getAccelY() : Double.NaN;
     inputs.odometryTimestampsNanos = new long[] {now};
     inputs.odometryYawsRad = new double[] {yaw};
   }

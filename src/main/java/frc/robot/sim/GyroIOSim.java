@@ -10,9 +10,11 @@ import org.wpilib.math.geometry.Translation2d;
  * A simulated gyro: the robot's true rotation, reported with the scale error, drift, and noise of
  * {@link SensorErrors}. Like a real gyro, it reads zero wherever the robot pointed when it started,
  * and it follows the robot when someone picks it up and turns it. The rest of the IMU reads the
- * robot's attitude and acceleration as they truly are. It can fail as a real one does, at any
- * moment: disconnected (no readings at all), frozen (still reporting, the same yaw every time),
- * erring differently from now on, or reset to zero, as one that browns out and restarts does.
+ * robot's attitude as it truly is, and its acceleration as a filtered accelerometer read once a
+ * loop does: over the loop, with gravity's share as the robot tilts ({@link
+ * DriveSimulation#feltAcceleration}). It can fail as a real one does, at any moment: disconnected
+ * (no readings at all), frozen (still reporting, the same yaw every time), erring differently from
+ * now on, or reset to zero, as one that browns out and restarts does.
  */
 final class GyroIOSim implements GyroIO {
   private final DriveSimulation robot;

@@ -161,7 +161,9 @@ it finds out from its sensors, as on a robot.
 | | Zeroed off: its absolute encoder's zero | lasts | offset (°) |
 | | Worn tread: its wheel's true radius over the configured one | lasts | scale |
 | | Slips: spins without moving the robot | happens | turns |
+| | Spinning: its wheel keeps spinning faster than the floor moves it, as one losing its grip does | lasts | speed (m/s) |
 | Robot | Shoved, without its wheels turning; only its gyro feels a turn | happens | forward, left (m), turn (°) |
+| | Pushed, its wheels skidding: they never see it, and its IMU feels the push get going and stop (3 m/s²) | lasts | forward, left (m/s) |
 | | Hit, with a 4 g jolt its IMU feels | happens | forward, left (m) |
 | | Tilted by hand, whatever the ground | lasts | pitch, roll (°) |
 | | Slipping: only a share of its wheels' rolling moves it | lasts | grip |

@@ -13,9 +13,11 @@ package frc.robot.lib.localization;
  *     slope's cosine across the field. Zero on flat ground, or where the terrain isn't known.
  * @param collision whether the IMU just felt a jolt beyond anything driving explains: the robot may
  *     have been moved without its wheels seeing it (6800 flagged 20 m/s²)
- * @param tractionLimited whether the wheels are at the edge of their grip: drive motors at their
- *     current limit, or well short of the speed they were commanded (581 and 1678 watched for that
- *     shortfall). Wheels slip here.
+ * @param slipMetersPerSecond how fast the wheels may be sliding over the floor together, as the IMU
+ *     sees them ({@link SlipCheck}): the gyro turning the robot less or more than they do, the
+ *     accelerometer feeling it speed up less or more. Zero when the IMU agrees with them, or there
+ *     is none. Slip that sets the wheels against each other shows in their residual instead ({@link
+ *     BodyMotion#residualMeters}). The travel it may have added counts as suspect.
  * @param disabled whether the robot is disabled, when people pick it up and carry it where its
  *     wheels can't see: the position's uncertainty grows with time, so the cameras lead until it's
  *     enabled (254 trusted vision loosely while disabled, tightly once enabled)
@@ -24,10 +26,10 @@ public record DriveConditions(
     double tiltRadians,
     double groundSlopeRadians,
     boolean collision,
-    boolean tractionLimited,
+    double slipMetersPerSecond,
     boolean disabled) {
   /** Level, nothing hit, wheels gripping, enabled. */
-  public static final DriveConditions NORMAL = new DriveConditions(0, 0, false, false, false);
+  public static final DriveConditions NORMAL = new DriveConditions(0, 0, false, 0, false);
 
   public DriveConditions {
     if (!(tiltRadians >= 0) || Double.isInfinite(tiltRadians)) {
@@ -36,6 +38,9 @@ public record DriveConditions(
     if (!(groundSlopeRadians >= 0) || !(groundSlopeRadians <= tiltRadians)) {
       throw new IllegalArgumentException(
           "the ground explains some or all of the tilt, never more: " + groundSlopeRadians);
+    }
+    if (!(slipMetersPerSecond >= 0) || Double.isInfinite(slipMetersPerSecond)) {
+      throw new IllegalArgumentException("a slip is a speed, zero or more: " + slipMetersPerSecond);
     }
   }
 

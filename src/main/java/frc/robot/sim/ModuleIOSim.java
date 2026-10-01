@@ -119,6 +119,9 @@ final class ModuleIOSim implements ModuleIO {
    */
   private double spinRadians;
 
+  /** How fast it keeps spinning beyond what rolls the robot along, in radians per second. */
+  private double spinRadPerSec;
+
   // Readings taken since the last loop, for odometry.
   private long[] sampleTimes = new long[8];
   private double[] samplePositions = new double[8];
@@ -253,6 +256,7 @@ final class ModuleIOSim implements ModuleIO {
     driveLimited |= driveAppliedVolts != driveVolts;
     driveSim.setInputVoltage(driveAppliedVolts);
     driveSim.update(seconds);
+    spinRadians += spinRadPerSec * seconds;
     int loops = Math.max(1, (int) Math.round(seconds / STEER_LOOP_SECONDS));
     for (int i = 0; i < loops; i++) {
       steer(seconds / loops);
@@ -301,6 +305,19 @@ final class ModuleIOSim implements ModuleIO {
     spinRadians += radians;
   }
 
+  /**
+   * From now on the wheel spins this much faster than the floor moves it, in meters per second at
+   * its configured radius, as one losing its grip does: its encoder counts it, the floor doesn't.
+   */
+  void spinAt(double metersPerSecond) {
+    spinRadPerSec = metersPerSecond / wheelRadiusMeters;
+  }
+
+  /** How much faster than the floor moves it the wheel spins, in meters per second. */
+  double spinMetersPerSecond() {
+    return spinRadPerSec * wheelRadiusMeters;
+  }
+
   @Override
   public void updateInputs(ModuleIOInputs inputs) {
     inputs.odometryTimestampsNanos = Arrays.copyOf(sampleTimes, samples);
@@ -309,7 +326,8 @@ final class ModuleIOSim implements ModuleIO {
     samples = 0;
     inputs.driveConnected = true;
     inputs.drivePositionRad = drivePositionRadians();
-    inputs.driveVelocityRadPerSec = stale ? staleVelocityRadPerSec : driveSim.getAngularVelocity();
+    inputs.driveVelocityRadPerSec =
+        stale ? staleVelocityRadPerSec : driveSim.getAngularVelocity() + spinRadPerSec;
     inputs.driveAppliedVolts = driveAppliedVolts;
     inputs.driveStatorCurrentAmps = Math.abs(driveSim.getCurrentDraw());
     inputs.driveSupplyCurrentAmps =

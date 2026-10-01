@@ -29,8 +29,10 @@ import org.wpilib.math.geometry.Twist2d;
  * at 250 Hz and takes the modules' and gyro's readings at each of those steps, as a robot's
  * high-rate odometry does. The robot moves as its wheels roll, at their true radius and true angle;
  * it doesn't slip on its own, since traction isn't modeled yet (see docs/stand-ins.md), but faults
- * can be made: {@link #spin} slips a wheel, {@link #shove} moves the robot the way a push does,
- * {@link #hit} the way a collision does, and {@link #tilt} with {@link #grip} lifts it onto a bump.
+ * can be made: {@link #spin} slips a wheel (and a module can keep spinning faster than the floor),
+ * {@link #shove} moves the robot the way a push does, at once, and {@link #push} as one does over
+ * time, {@link #hit} the way a collision does, and {@link #tilt} with {@link #grip} lifts it onto a
+ * bump.
  *
  * <p>Each wheel carries an equal share of the robot's configured mass ({@code Body.mass}), as
  * inertia on its drive motor ({@link ModuleIOSim#driveInertiaKgM2}), so the robot speeds up and
@@ -47,6 +49,12 @@ public final class DriveSimulation {
 
   /** A hard hit's jolt, as an IMU feels it: 4 g. */
   static final double HIT_JOLT_METERS_PER_SECOND_SQUARED = 4 * 9.81;
+
+  /**
+   * How quickly a push gets the robot sliding, and lets it stop, in m/s²: about a third of g, as
+   * one robot driving into another starts it moving.
+   */
+  static final double PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED = 3.0;
 
   private static final double GRAVITY_METERS_PER_SECOND_SQUARED = 9.81;
 
@@ -67,9 +75,6 @@ public final class DriveSimulation {
   private double yawRateRadiansPerSecond;
   private double elapsedSeconds;
 
-  /** The most acceleration the floor's grip allows the robot: its wheels' friction times g. */
-  private final double gripLimit;
-
   private double grip = 1;
   private double pitchRadians;
   private double rollRadians;
@@ -83,9 +88,15 @@ public final class DriveSimulation {
   private double riseForward;
   private double riseLeft;
 
-  // The robot's motion on the field, for what its IMU feels.
+  // The robot's motion on the field, for what its IMU feels: its velocity over the last physics
+  // step, and how that changed over the last loop.
   private Translation2d lastVelocity = Translation2d.ZERO;
-  private Translation2d acceleration = Translation2d.ZERO;
+  private Translation2d loopAcceleration = Translation2d.ZERO;
+
+  /** A push the wheels don't see, in the field's frame: the velocity it's headed for, and now. */
+  private Translation2d pushTarget = Translation2d.ZERO;
+
+  private Translation2d pushVelocity = Translation2d.ZERO;
 
   /** A hit's jolt, in the robot's frame, until the IMU reads it. */
   private Translation2d jolt = Translation2d.ZERO;
@@ -121,7 +132,6 @@ public final class DriveSimulation {
     gyro = new GyroIOSim(this, errors.gyro(), errors.seed());
     backupGyro = new GyroIOSim(this, errors.backupGyro(), errors.seed() + BACKUP_SEED_OFFSET);
     lastTrue = trueWheels();
-    gripLimit = config.wheelCoefficientOfFriction() * GRAVITY_METERS_PER_SECOND_SQUARED;
   }
 
   /** The modules' motor controllers and encoders, for the drivetrain. */
@@ -231,6 +241,7 @@ public final class DriveSimulation {
     }
     double dt = seconds / STEPS_PER_LOOP;
     long dtNanos = Math.round(dt * 1e9);
+    Translation2d loopStartVelocity = lastVelocity;
     for (int remaining = STEPS_PER_LOOP - 1; remaining >= 0; remaining--) {
       for (ModuleIOSim module : modules) {
         module.step(dt);
@@ -253,12 +264,15 @@ public final class DriveSimulation {
                       level * motion.dyMeters(),
                       grip * motion.dthetaRadians())
                   .exp());
+      pushVelocity =
+          toward(pushVelocity, pushTarget, PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED * dt);
+      truePose =
+          new Pose2d(
+              truePose.getTranslation().plus(pushVelocity.times(dt)), truePose.getRotation());
       settle();
       yawTurnedRadians += grip * motion.dthetaRadians();
       yawRateRadiansPerSecond = grip * motion.dthetaRadians() / dt;
-      Translation2d velocity = truePose.getTranslation().minus(before).div(dt);
-      acceleration = velocity.minus(lastVelocity).div(dt);
-      lastVelocity = velocity;
+      lastVelocity = truePose.getTranslation().minus(before).div(dt);
       lastTrue = wheels;
       elapsedSeconds += dt;
       long readingTime = nowNanos - remaining * dtNanos;
@@ -270,6 +284,14 @@ public final class DriveSimulation {
         backupGyro.sample(readingTime);
       }
     }
+    loopAcceleration = lastVelocity.minus(loopStartVelocity).div(seconds);
+  }
+
+  /** A velocity moved toward another by at most so much. */
+  private static Translation2d toward(Translation2d from, Translation2d to, double most) {
+    Translation2d change = to.minus(from);
+    double size = change.getNorm();
+    return size <= most ? to : from.plus(change.times(most / size));
   }
 
   /** Where the robot really is. */
@@ -362,6 +384,20 @@ public final class DriveSimulation {
   }
 
   /**
+   * Pushes the robot at this velocity, in its own frame as it faces now, as another robot pushing
+   * it does: its wheels skid, never seeing it, while its IMU feels the push get going, and stop, at
+   * {@link #PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED}. Zero stops it.
+   */
+  public void push(Translation2d robotRelativeVelocity) {
+    pushTarget = robotRelativeVelocity.rotateBy(truePose.getRotation());
+  }
+
+  /** Whether a push is on. Once it's stopped, the robot still slows to its wheels' pace. */
+  boolean isPushed() {
+    return pushTarget.getNorm() > 0;
+  }
+
+  /**
    * Moves the robot as a collision does ({@link #shove}), with the jolt a hit gives: its IMU feels
    * {@link #HIT_JOLT_METERS_PER_SECOND_SQUARED} the way it was knocked.
    */
@@ -413,6 +449,16 @@ public final class DriveSimulation {
     modules[module].spin(radians);
   }
 
+  /**
+   * From now on one wheel spins this much faster than the floor moves it, in meters per second: a
+   * wheel losing its grip, which its encoder counts and the floor never sees. Zero grips again.
+   *
+   * @param module front left, front right, back left, back right: 0 to 3
+   */
+  public void spinAt(int module, double metersPerSecond) {
+    modules[module].spinAt(metersPerSecond);
+  }
+
   /** Every true turn since the start, driving or placed: what a gyro integrates. */
   double yawTurnedRadians() {
     return yawTurnedRadians;
@@ -435,19 +481,22 @@ public final class DriveSimulation {
   }
 
   /**
-   * What the IMU feels, in the robot's frame: the robot's acceleration, and the jolt of any hit
-   * since it last read. The simulated robot follows its wheels without slipping, so it can turn a
-   * corner harder than a real robot's grip allows; what driving makes the IMU feel is capped at
-   * that grip. Gravity's share when tilted is left out: at the tilts a robot drives, it's far below
-   * a collision's jolt.
+   * What the IMU feels, in the robot's frame: the robot's acceleration over the last loop, as an
+   * IMU's filter reads it once a loop, gravity's share as the robot tilts, and the jolt of any hit
+   * since it last read. The simulated robot follows its wheels without slipping, so where it turns
+   * or stops harder than a real robot's grip allows (a module steering at speed sends it the new
+   * way at once), its IMU feels that too: what the simulated robot does, not what a real one would,
+   * so the wheels and the IMU agree as they would on a robot that really moved so.
    */
   Translation2d feltAcceleration() {
-    Translation2d driving = acceleration.rotateBy(truePose.getRotation().unaryMinus());
-    double size = driving.getNorm();
-    if (size > gripLimit) {
-      driving = driving.times(gripLimit / size);
-    }
-    Translation2d felt = driving.plus(jolt);
+    Translation2d driving = loopAcceleration.rotateBy(truePose.getRotation().unaryMinus());
+    // WPILib's attitude: a positive pitch is nose down, a positive roll the left side up. The IMU
+    // feels the floor holding it up, tipped along the robot's axes.
+    Translation2d gravity =
+        new Translation2d(
+            -GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(pitchRadians),
+            GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(rollRadians) * Math.cos(pitchRadians));
+    Translation2d felt = driving.plus(gravity).plus(jolt);
     jolt = Translation2d.ZERO;
     return felt;
   }

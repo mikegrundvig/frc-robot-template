@@ -30,14 +30,19 @@ class GyroIOSystemcoreTest {
     assertThat(inputs.yawVelocityRadPerSec).isFinite();
   }
 
+  /**
+   * On its edge, its accelerometer's axes aren't the robot's: it says it can't tell, rather than
+   * that the robot isn't accelerating, which the slip check would take the wheels' every change of
+   * speed against.
+   */
   @Test
-  void onEdgeItReportsNoAcceleration() {
+  void onEdgeItSaysItCantTellTheAcceleration() {
     GyroIOSystemcore onEdge = new GyroIOSystemcore(OnboardIMU.MountOrientation.PORTRAIT);
     GyroIOInputsAutoLogged inputs = new GyroIOInputsAutoLogged();
 
     onEdge.updateInputs(inputs);
 
-    assertThat(inputs.accelerationXMetersPerSecSq).isZero();
-    assertThat(inputs.accelerationYMetersPerSecSq).isZero();
+    assertThat(inputs.accelerationXMetersPerSecSq).isNaN();
+    assertThat(inputs.accelerationYMetersPerSecSq).isNaN();
   }
 }

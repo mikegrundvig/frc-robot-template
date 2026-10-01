@@ -19,6 +19,7 @@ import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import org.wpilib.math.estimator.SwerveDrivePoseEstimator;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.SwerveDriveKinematics;
 import org.wpilib.math.linalg.VecBuilder;
 import org.wpilib.system.RobotController;
@@ -88,9 +90,9 @@ class LocalizationSimTest {
   /**
    * 15 s of driving: odometry alone drifts past 15 cm; with the camera, within the design's 8 cm
    * while moving. At the ends of the legs that turn while driving, the heavy robot is still
-   * changing course, its wheels at the edge of their grip as the drivetrain reads it, so the
-   * estimate doubts them and leans on the camera's noisy fixes: 7.4 cm off at worst, inside the
-   * 14.5 cm it claims.
+   * changing course, its wheels disagreeing with each other as they speed up and slow down to their
+   * new speeds, so the estimate doubts them and leans on the camera's noisy fixes: 5.9 cm off at
+   * worst, about the 6.2 cm it claims.
    */
   @Test
   void odometryAloneDriftsAndTheCameraHoldsTheEstimateToTheTruth() {
@@ -179,15 +181,13 @@ class LocalizationSimTest {
   }
 
   @Test
-  void theDrivetrainReadsTiltJoltsAndStrainFromItsSensors() {
+  void theDrivetrainReadsTiltAndJoltsFromItsSensors() {
     DriveSimHarness robot = robot(SensorErrors.NONE);
     robot.idle(0.1);
     boolean disabled = robot.localization.conditions().disabled();
 
     robot.drive(0.04, 1.0, 0, 0); // full stick from a standstill
-    boolean starting = robot.localization.conditions().tractionLimited();
-    robot.drive(1.5, 1.0, 0, 0);
-    boolean cruising = robot.localization.conditions().tractionLimited();
+    double starting = robot.localization.conditions().slipMetersPerSecond();
     robot.simulation.tilt(0.3, 0.1);
     robot.simulation.hit(new Transform2d(0.1, 0, Rotation2d.ZERO));
     robot.drive(0.02, 1.0, 0, 0);
@@ -195,8 +195,7 @@ class LocalizationSimTest {
     robot.drive(0.02, 1.0, 0, 0);
 
     assertThat(disabled).isTrue();
-    assertThat(starting).as("motors at their current limit").isTrue();
-    assertThat(cruising).isFalse();
+    assertThat(starting).as("motors at their current limit, wheels gripping").isZero();
     assertThat(hit.tiltRadians()).isCloseTo(Math.acos(Math.cos(0.3) * Math.cos(0.1)), within(1e-9));
     assertThat(hit.collision()).isTrue();
     assertThat(hit.disabled()).isFalse();
@@ -322,6 +321,148 @@ class LocalizationSimTest {
     assertThat(falseMove).as("odometry was fooled").isGreaterThan(0.02);
     assertThat(uncertainty).as("but knew to doubt itself").isGreaterThan(falseMove);
     assertThat(robot.positionError()).as("half a second later").isLessThan(0.02);
+  }
+
+  /**
+   * Full stick from a standstill: the drive motors sit at their current limit for most of a second
+   * while the robot speeds up, its wheels gripping. That's no slip, so the estimate stays as sure
+   * as odometry over that distance is.
+   */
+  @Test
+  void aHardLaunchAtTheCurrentLimitIsNoSlip() {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    robot.idle(0.2);
+    Translation2d start = robot.simulation.truePose().getTranslation();
+    double[] most = new double[2]; // the most slip any loop saw, and the most suspect travel
+    boolean[] hit = {false};
+    robot.eachLoop(
+        () -> {
+          most[0] = Math.max(most[0], robot.localization.conditions().slipMetersPerSecond());
+          most[1] = Math.max(most[1], robot.estimator.estimate().health().suspectTravelMeters());
+          hit[0] |= robot.localization.conditions().collision();
+        });
+
+    robot.drive(0.5, 1.0, 0, 0);
+    double speed = robot.drive.getRobotRelativeVelocities().vx;
+    robot.drive(1.0, 1.0, 0, 0);
+
+    double traveled = robot.simulation.truePose().getTranslation().getDistance(start);
+    double odometry = EstimatorConfig.DEFAULTS.translationStdDevPerMeter() * Math.sqrt(traveled);
+    assertThat(speed).as("speeding up at its current limit, about 4.4 m/s²").isBetween(1.9, 2.3);
+    assertThat(most[0]).as("no slip").isZero();
+    assertThat(most[1]).as("nothing suspect").isLessThan(0.005);
+    assertThat(hit[0]).as("no collision").isFalse();
+    assertThat(robot.estimator.estimate().covariance().largestPositionStdDev())
+        .as("as sure as odometry over %.1f m", traveled)
+        .isBetween(0.9 * odometry, 1.2 * odometry);
+  }
+
+  /** The uncertainty, the error, and the most slip seen, at the end of a run. */
+  private record Outcome(double stdDev, double error, double mostSlip) {}
+
+  /** Runs a script on a fresh robot, and says how it ended. */
+  private Outcome outcome(SensorErrors errors, Consumer<DriveSimHarness> script) {
+    DriveSimHarness robot = robot(errors);
+    double[] most = {0};
+    robot.eachLoop(
+        () -> most[0] = Math.max(most[0], robot.localization.conditions().slipMetersPerSecond()));
+    script.accept(robot);
+    return new Outcome(
+        robot.estimator.estimate().covariance().largestPositionStdDev(),
+        robot.positionError(),
+        most[0]);
+  }
+
+  /** A second at half stick, then a second with the front left wheel spinning past the floor. */
+  private Outcome spinningAWheel(double metersPerSecond) {
+    return outcome(
+        SensorErrors.NONE,
+        robot -> {
+          robot.drive(1.0, 0.5, 0, 0);
+          robot.simulation.spinAt(0, metersPerSecond);
+          robot.drive(1.0, 0.5, 0, 0);
+          robot.simulation.spinAt(0, 0);
+        });
+  }
+
+  /**
+   * One wheel spinning faster than the floor moves it: the wheels disagree with each other and with
+   * the gyro, and the estimate doubts itself by about as far as the wheel put it off.
+   */
+  @Test
+  void aWheelSpinningPastTheFloorIsDoubtedAsFarAsItPutTheEstimateOff() {
+    Outcome gripping = spinningAWheel(0);
+    Outcome slow = spinningAWheel(0.5);
+    Outcome fast = spinningAWheel(1.0);
+
+    assertThat(gripping.mostSlip()).isZero();
+    assertThat(slow.mostSlip()).as("the gyro sees it").isPositive();
+    assertThat(slow.stdDev()).isGreaterThan(3 * gripping.stdDev());
+    assertThat(fast.stdDev()).as("the doubt grows with it").isGreaterThan(1.6 * slow.stdDev());
+    for (Outcome spun : List.of(slow, fast)) {
+      assertThat(spun.error()).as("off by").isBetween(0.5 * spun.stdDev(), 1.5 * spun.stdDev());
+    }
+  }
+
+  /** A launch at full stick with only this share of the wheels' rolling moving the robot. */
+  private Outcome launchingWithGrip(double grip) {
+    return outcome(
+        SensorErrors.TYPICAL,
+        robot -> {
+          robot.idle(0.2);
+          robot.simulation.grip(grip);
+          robot.drive(1.5, 1.0, 0, 0);
+        });
+  }
+
+  /**
+   * Every wheel spinning in a launch: they agree with each other, but the accelerometer feels the
+   * robot speed up slower than they do. The doubt grows the less they grip. It covers only what the
+   * accelerometer felt: the robot falling ever further behind wheels at a steady speed is the
+   * cameras' to find.
+   */
+  @Test
+  void wheelsSpinningInALaunchAreDoubtedTheMoreTheLessTheyGrip() {
+    Outcome gripping = launchingWithGrip(1);
+    Outcome threeQuarters = launchingWithGrip(0.75);
+    Outcome half = launchingWithGrip(0.5);
+
+    assertThat(gripping.mostSlip()).isZero();
+    assertThat(threeQuarters.mostSlip()).isPositive();
+    assertThat(threeQuarters.stdDev()).isGreaterThan(2 * gripping.stdDev());
+    assertThat(half.stdDev()).isGreaterThan(1.5 * threeQuarters.stdDev());
+    assertThat(half.error()).as("the slide").isGreaterThan(threeQuarters.error());
+  }
+
+  /** Standing, then pushed sideways at this speed for a second, its wheels skidding. */
+  private Outcome pushedSideways(double metersPerSecond) {
+    return outcome(
+        SensorErrors.TYPICAL,
+        robot -> {
+          robot.drive(0.5, 0, 0, 0);
+          robot.simulation.push(new Translation2d(0, metersPerSecond));
+          robot.drive(1.0, 0, 0, 0);
+          robot.simulation.push(Translation2d.ZERO);
+          robot.drive(0.5, 0, 0, 0);
+        });
+  }
+
+  /**
+   * Pushed sideways by another robot, its wheels never turning: only the accelerometer feels it, as
+   * the push gets going and stops. The doubt grows with the push; how far the robot slid at a
+   * steady speed in between, the cameras find.
+   */
+  @Test
+  void aPushSidewaysIsDoubtedTheMoreTheFasterItSlides() {
+    Outcome standing = pushedSideways(0);
+    Outcome pushed = pushedSideways(1.0);
+    Outcome shoved = pushedSideways(2.0);
+
+    assertThat(standing.mostSlip()).isZero();
+    assertThat(pushed.mostSlip()).isPositive();
+    assertThat(pushed.stdDev()).isGreaterThan(5 * standing.stdDev());
+    assertThat(shoved.stdDev()).isGreaterThan(2 * pushed.stdDev());
+    assertThat(shoved.error()).as("slid").isGreaterThan(1.5);
   }
 
   /**

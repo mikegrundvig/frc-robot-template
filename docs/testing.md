@@ -335,14 +335,16 @@ mount check blames depends on how the robot drives as much as on what corrects t
 `VisionSimTest`'s mount-check tests run under each, on one route with one seed. For a camera
 turned 4°, `every` keeps two of the original promises (out of calibration and counting for less,
 the back cameras never doubted) and breaks two (doubted by more than 8 cm, the last lap a fifth
-closer than trusting it as before): doubted by 2.6 cm, its last lap is 5.0 cm off against 5.7 cm
+closer than trusting it as before): doubted by 1.3 cm, its last lap is 5.1 cm off against 5.5 cm
 trusted as before. `measurements` and `doubt` break three: the camera is never doubted, so nothing
-says it counts for less, and the last lap is 5.8 and 5.4 cm off against 5.8 cm trusted as before.
-A camera turned 2° stands out in its tag residuals under all three, most under `every` (2.4 times
-its worst neighbour's, against 1.6). Each test says which, and changes when one does. One route
+says it counts for less, and the last lap is 5.6 and 5.7 cm off against 5.6 cm trusted as before.
+A camera turned 2° stands out in its tag residuals under all three, most under `every` (2.5 times
+its worst neighbour's, against 1.7). Each test says which, and changes when one does. One route
 is a narrow look: before the simulated drivetrain carried the robot's mass, the robot drove the
 same sticks 75% quicker off the line, and `every` doubted the 4° camera by 9.2 cm, `measurements`
-by 5.5, and the 2° camera stood out only under `every`.
+by 5.5, and the 2° camera stood out only under `every`; on the same route, while the estimate
+still doubted a quarter of the wheels' travel whenever the drive motors were at their current
+limit, `every` doubted it by 2.6 cm, and `doubt` brought the last lap to 5.4 cm.
 
 #### The simulator's late stamps
 

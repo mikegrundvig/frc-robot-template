@@ -56,7 +56,6 @@ class LocalizationTest {
         .gyro(gyro)
         .backupImu(backup)
         .velocities(new ChassisVelocities())
-        .tractionLimited(false)
         .build();
   }
 

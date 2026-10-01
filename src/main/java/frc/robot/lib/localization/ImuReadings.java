@@ -16,7 +16,8 @@ import java.util.List;
  *     positive is nose down
  * @param rollRadians the robot's roll, turning about its forward axis
  * @param forwardAccelerationMetersPerSecSq acceleration along the robot's forward axis, as the IMU
- *     feels it
+ *     feels it: over the loop, as its filter reads it, with gravity's share as the robot tilts. Not
+ *     a number from an IMU that can't say.
  * @param leftAccelerationMetersPerSecSq acceleration along the robot's left axis
  * @param yawTimesNanos when each yaw reading since the last loop was taken, oldest first
  * @param yawsRadians those readings, one for each time

@@ -16,6 +16,7 @@ import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.SlipCheck;
 import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionDecision;
@@ -29,6 +30,7 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
+import org.wpilib.math.util.MathUtil;
 import org.wpilib.system.RobotController;
 import org.wpilib.util.Alert;
 
@@ -40,8 +42,8 @@ import org.wpilib.util.Alert;
  *
  * <ol>
  *   <li>{@link #periodic}, with what the drivetrain read: picks what turns odometry (the gyro, the
- *       backup IMU while the gyro is lost, or the wheels), weighs the wheels by what the IMU and
- *       the motors say (a tilt, a jolt, a grip at its limit), feeds every wheel reading to the
+ *       backup IMU while the gyro is lost, or the wheels), weighs the wheels by what the IMU says
+ *       (a tilt, a jolt, the wheels sliding: {@link SlipCheck}), feeds every wheel reading to the
  *       estimator, follows the robot over raised terrain, and takes a crest it crossed as a
  *       landmark;
  *   <li>the cameras, through {@link #forCameras()}: each image's measurement, at its capture time;
@@ -55,10 +57,12 @@ import org.wpilib.util.Alert;
  */
 public final class Localization implements AutoCloseable {
   /**
-   * A jolt beyond this, in m/s², is a collision (6800's threshold): hard driving stays near the
-   * wheels' grip, about 1 g.
+   * A jolt beyond this, in m/s², that the wheels' own change of velocity doesn't explain, is a
+   * collision (6800's threshold): hard driving stays near the wheels' grip, about 1 g.
    */
   private static final double COLLISION_ACCELERATION = 20.0;
+
+  private static final double GRAVITY_METERS_PER_SECOND_SQUARED = 9.81;
 
   /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
   private static final double MOVING = 0.25;
@@ -97,6 +101,20 @@ public final class Localization implements AutoCloseable {
 
   /** Crossings of raised terrain, from the IMU. */
   private final TerrainCrossing terrain = new TerrainCrossing(TerrainCrossing.Settings.DEFAULTS);
+
+  /** The wheels against the IMU: whether they slide over the floor together. */
+  private final SlipCheck slipCheck;
+
+  /** The last wheel reading's time, last loop, and which IMU read its yaw, and what it read. */
+  private long lastStepNanos = Long.MIN_VALUE;
+
+  private YawSource lastStepSource = YawSource.WHEELS;
+  private double lastStepYaw = Double.NaN;
+
+  /** The wheels' velocity last loop, in the IMU's fixed frame: what this loop's change is from. */
+  private double lastVelocityX = Double.NaN;
+
+  private double lastVelocityY = Double.NaN;
 
   private YawSource yawSource = YawSource.GYRO;
 
@@ -163,6 +181,7 @@ public final class Localization implements AutoCloseable {
     this.ground = terrain;
     this.wheelReach = wheelReachMeters;
     crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
+    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters);
     estimate = estimator.estimate();
   }
 
@@ -176,9 +195,12 @@ public final class Localization implements AutoCloseable {
     ImuReadings gyro = readings.gyro();
     ImuReadings backup = readings.backupImu();
     attitude = gyro.usable() ? gyro : backup.usable() ? backup : null;
-    conditions = conditions(readings, enabled);
+    Steps steps = steps(readings.wheels(), gyro, backup);
+    conditions = conditions(steps, readings.velocities(), enabled);
     estimator.setConditions(conditions);
-    addOdometry(readings.wheels(), gyro, backup);
+    for (Step step : steps.steps()) {
+      estimator.addOdometry(step.timestampNanos(), step.motion(), step.yaw(), steps.source());
+    }
     watchTerrain(readings.velocities());
     checkImus(gyro, backup);
     gyroDisconnected.set(!gyro.usable() && !backup.usable());
@@ -187,7 +209,14 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput(
         "Localization/GroundSlopeDegrees", Math.toDegrees(conditions.groundSlopeRadians()));
     Logger.recordOutput("Localization/Collision", conditions.collision());
-    Logger.recordOutput("Localization/TractionLimited", conditions.tractionLimited());
+    Logger.recordOutput("Localization/SlipMetersPerSecond", conditions.slipMetersPerSecond());
+    Logger.recordOutput(
+        "Localization/TurnSlipMetersPerSecond", slipCheck.turnSlipMetersPerSecond());
+    Logger.recordOutput(
+        "Localization/SpeedSlipMetersPerSecond", slipCheck.speedSlipMetersPerSecond());
+    Logger.recordOutput(
+        "Localization/TurnApartDegrees", Math.toDegrees(slipCheck.turnApartRadians()));
+    Logger.recordOutput("Localization/SlideMetersPerSecond", slipCheck.slideMetersPerSecond());
     estimate = estimator.estimate();
   }
 
@@ -324,7 +353,7 @@ public final class Localization implements AutoCloseable {
     return yawSource;
   }
 
-  /** What the IMU and the motors said about trusting the wheels this loop. */
+  /** What the IMU said about trusting the wheels this loop. */
   public DriveConditions conditions() {
     return conditions;
   }
@@ -348,23 +377,106 @@ public final class Localization implements AutoCloseable {
   }
 
   /**
-   * What the IMU and the motors say about trusting the wheels: the robot's tilt, a jolt beyond
-   * driving, wheels at the edge of their grip, and whether people might be carrying it. The gyro's
-   * IMU says, or the backup's while the gyro is lost; without either, only the motors can say.
+   * What the IMU says about trusting the wheels: the robot's tilt, a jolt beyond driving, the
+   * wheels sliding over the floor, and whether people might be carrying it. The gyro's IMU says, or
+   * the backup's while the gyro is lost; without either, nothing can.
+   *
+   * @param wheels the robot's velocity as its wheels measure it, robot-relative
    */
-  private DriveConditions conditions(DrivetrainReadings readings, boolean enabled) {
+  private DriveConditions conditions(Steps steps, ChassisVelocities wheels, boolean enabled) {
     ImuReadings imu = attitude;
-    if (imu == null) {
-      return new DriveConditions(0, 0, false, readings.tractionLimited(), !enabled);
-    }
-    // The angle between the robot's up and straight up.
     double tilt =
-        Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
-    boolean collision =
-        Math.hypot(imu.forwardAccelerationMetersPerSecSq(), imu.leftAccelerationMetersPerSecSq())
-            > COLLISION_ACCELERATION;
+        imu == null
+            ? 0
+            // The angle between the robot's up and straight up.
+            : Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
+    boolean collision = compareWithTheImu(steps, imu, wheels);
     return new DriveConditions(
-        tilt, groundSlope(tilt), collision, readings.tractionLimited(), !enabled);
+        tilt,
+        imu == null ? 0 : groundSlope(tilt),
+        collision,
+        slipCheck.slipMetersPerSecond(),
+        !enabled);
+  }
+
+  /**
+   * Compares the loop's wheel readings with the IMU ({@link SlipCheck}), and says whether the IMU
+   * felt a collision: a jolt beyond {@link #COLLISION_ACCELERATION} that the wheels' own change of
+   * velocity over the loop doesn't explain. A robot stopping hard is felt by both; a hit only by
+   * the IMU. A jolt is left out of the slip check, whose speed comparison starts over: the
+   * collision's own doubt covers it.
+   *
+   * @param imu the IMU the robot's attitude and acceleration come from, or null without one
+   */
+  private boolean compareWithTheImu(
+      Steps steps, @Nullable ImuReadings imu, ChassisVelocities wheels) {
+    double[] felt = imu == null ? null : driving(imu);
+    boolean jolt = felt != null && Math.hypot(felt[0], felt[1]) > COLLISION_ACCELERATION;
+    List<Step> loop = steps.steps();
+    if (loop.isEmpty()) {
+      return jolt;
+    }
+    Step last = loop.get(loop.size() - 1);
+    YawSource source = steps.source();
+    boolean sameImu =
+        source != YawSource.WHEELS
+            && source == lastStepSource
+            && lastStepNanos < last.timestampNanos();
+    double seconds = sameImu ? Timestamps.toSeconds(last.timestampNanos() - lastStepNanos) : 0;
+    // The wheels' velocity in the IMU's fixed frame, which holds still while the robot turns.
+    double cos = Math.cos(last.yaw());
+    double sin = Math.sin(last.yaw());
+    double velocityX = cos * wheels.vx - sin * wheels.vy;
+    double velocityY = sin * wheels.vx + cos * wheels.vy;
+    if (jolt
+        && felt != null
+        && sameImu
+        && Double.isFinite(lastVelocityX)
+        && Double.isFinite(velocityX)) {
+      double feltX = cos * felt[0] - sin * felt[1];
+      double feltY = sin * felt[0] + cos * felt[1];
+      double wheelsX = (velocityX - lastVelocityX) / seconds;
+      double wheelsY = (velocityY - lastVelocityY) / seconds;
+      jolt = Math.hypot(feltX - wheelsX, feltY - wheelsY) > COLLISION_ACCELERATION;
+    }
+    if (sameImu) {
+      double wheelTurn = 0;
+      for (Step step : loop) {
+        wheelTurn += step.motion().dthetaRadians();
+      }
+      slipCheck.update(
+          seconds,
+          wheelTurn,
+          MathUtil.angleModulus(last.yaw() - lastStepYaw),
+          last.yaw(),
+          wheels,
+          felt == null || jolt ? Double.NaN : felt[0],
+          felt == null || jolt ? Double.NaN : felt[1]);
+    } else {
+      slipCheck.reset();
+    }
+    lastStepNanos = last.timestampNanos();
+    lastStepSource = source;
+    lastStepYaw = last.yaw();
+    lastVelocityX = velocityX;
+    lastVelocityY = velocityY;
+    return jolt;
+  }
+
+  /**
+   * What the IMU felt of the robot's own motion, robot-relative (forward, left): its reading less
+   * gravity's share, which it feels along the robot's axes as the robot tilts (WPILib's attitude: a
+   * positive pitch is nose down, a positive roll the left side up). Not a number where the IMU
+   * can't say.
+   */
+  private static double[] driving(ImuReadings imu) {
+    double pitch = imu.pitchRadians();
+    double roll = imu.rollRadians();
+    return new double[] {
+      imu.forwardAccelerationMetersPerSecSq() + GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(pitch),
+      imu.leftAccelerationMetersPerSecSq()
+          - GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(roll) * Math.cos(pitch)
+    };
   }
 
   /**
@@ -385,13 +497,21 @@ public final class Localization implements AutoCloseable {
   }
 
   /**
-   * Feeds every wheel reading since the last loop to the estimator, as the robot's motion between
-   * readings, with the yaw at each: the gyro's, or while it's lost the backup IMU's (interpolated
-   * between its readings), or with neither, the wheels' turning, which the estimator says drifts.
-   * The estimator is told which, so it keeps each IMU's scale error apart, and turns the step where
-   * the source changes by the wheels, rather than take the two IMUs' different zeros as a turn.
+   * One wheel reading, as the estimator takes it: when, how the robot moved since, the yaw then.
    */
-  private void addOdometry(List<OdometrySample> wheels, ImuReadings gyro, ImuReadings backup) {
+  private record Step(long timestampNanos, BodyMotion motion, double yaw) {}
+
+  /** A loop's wheel readings as steps, and what turns them. */
+  private record Steps(List<Step> steps, YawSource source) {}
+
+  /**
+   * Every wheel reading since the last loop, as the robot's motion between readings, with the yaw
+   * at each: the gyro's, or while it's lost the backup IMU's (interpolated between its readings),
+   * or with neither, none, and the wheels' turning stands in, which the estimator says drifts. The
+   * estimator is told which, so it keeps each IMU's scale error apart, and turns the step where the
+   * source changes by the wheels, rather than take the two IMUs' different zeros as a turn.
+   */
+  private Steps steps(List<OdometrySample> wheels, ImuReadings gyro, ImuReadings backup) {
     track(gyroYaws, gyro);
     track(backupYaws, backup);
     YawSource source =
@@ -402,14 +522,16 @@ public final class Localization implements AutoCloseable {
     if (!wheels.isEmpty()) {
       yawSource = source;
     }
+    List<Step> steps = new ArrayList<>(wheels.size());
     for (OdometrySample reading : wheels) {
       OdometrySample previous = lastReading;
       BodyMotion motion =
           previous == null ? new BodyMotion(0, 0, 0, 0) : kinematics.motion(previous, reading);
       double yaw = source == YawSource.WHEELS ? Double.NaN : yaws.at(reading.timestampNanos());
-      estimator.addOdometry(reading.timestampNanos(), motion, yaw, source);
+      steps.add(new Step(reading.timestampNanos(), motion, yaw));
       lastReading = reading;
     }
+    return new Steps(steps, source);
   }
 
   /** Takes an IMU's yaw readings this loop, or forgets them all while it's lost. */

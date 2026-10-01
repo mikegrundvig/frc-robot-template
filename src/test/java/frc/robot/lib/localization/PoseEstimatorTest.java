@@ -136,12 +136,15 @@ class PoseEstimatorTest {
   }
 
   private static DriveConditions tilted(double degrees) {
-    return new DriveConditions(Math.toRadians(degrees), 0, false, false, false);
+    return new DriveConditions(Math.toRadians(degrees), 0, false, 0, false);
   }
 
-  private static final DriveConditions HIT = new DriveConditions(0, 0, true, false, false);
-  private static final DriveConditions AT_THE_GRIP = new DriveConditions(0, 0, false, true, false);
-  private static final DriveConditions DISABLED = new DriveConditions(0, 0, false, false, true);
+  private static final DriveConditions HIT = new DriveConditions(0, 0, true, 0, false);
+
+  /** The IMU says the wheels slide over the floor at half a meter a second. */
+  private static final DriveConditions SLIDING = new DriveConditions(0, 0, false, 0.5, false);
+
+  private static final DriveConditions DISABLED = new DriveConditions(0, 0, false, 0, true);
 
   private static boolean field(Translation2d point) {
     return point.getX() >= 0 && point.getX() <= 16 && point.getY() >= 0 && point.getY() <= 8;
@@ -610,16 +613,30 @@ class PoseEstimatorTest {
   }
 
   @Test
-  void slipAtTheEdgeOfGripAddsUpAsOneErrorNotManySmallOnes() {
+  void slipTheImuSeesAddsUpAsOneErrorNotManySmallOnes() {
     Robot gripping = new Robot().drive(62, 2.0, 0, 0); // half a meter in a quarter second
-    Robot slipping = new Robot().under(AT_THE_GRIP).drive(62, 2.0, 0, 0);
+    Robot slipping = new Robot().under(SLIDING).drive(62, 2.0, 0, 0);
 
     double added =
         Math.sqrt(slipping.estimate().covariance().xx() - gripping.estimate().covariance().xx());
-    // A quarter of the half meter is suspect. Squared step by step it would add only 1.6 cm; as one
-    // error building in one direction it adds nearly all of it.
+    // The wheels may have slid 12 cm in the quarter second. Squared step by step it would add only
+    // 1.6 cm; as one error building in one direction it adds nearly all of it.
     assertThat(added).isBetween(0.09, 0.125);
     assertThat(slipping.estimate().health().suspectTravelMeters()).isGreaterThan(0.09);
+  }
+
+  @Test
+  void theDoubtGrowsWithHowFastTheWheelsSlide() {
+    Robot gripping = new Robot().drive(62, 2.0, 0, 0);
+    Robot sliding = new Robot().under(SLIDING).drive(62, 2.0, 0, 0);
+    Robot slidingFaster =
+        new Robot().under(new DriveConditions(0, 0, false, 1.0, false)).drive(62, 2.0, 0, 0);
+
+    double base = gripping.estimate().covariance().xx();
+    double slow = Math.sqrt(sliding.estimate().covariance().xx() - base);
+    double fast = Math.sqrt(slidingFaster.estimate().covariance().xx() - base);
+
+    assertThat(fast / slow).as("twice as fast, twice the doubt").isCloseTo(2.0, within(0.01));
   }
 
   @Test
@@ -659,7 +676,7 @@ class PoseEstimatorTest {
     for (Robot robot : List.of(inTime, late)) {
       robot.under(tilted(12)).drive(40, 1.0, 0.2, 0.3);
       robot.under(HIT).drive(10, 0.5, 0, 0);
-      robot.under(AT_THE_GRIP).drive(40, 2.0, -0.5, 0);
+      robot.under(SLIDING).drive(40, 2.0, -0.5, 0);
       robot.under(DriveConditions.NORMAL).drive(10, 1.0, 0, 0);
     }
     late.see(seen, captured, position(0.05));
@@ -832,7 +849,7 @@ class PoseEstimatorTest {
   @Test
   void onAKnownRampTheWheelsTravelCountsAtTheSlopesCosine() {
     double slope = Math.toRadians(15);
-    Robot ramp = new Robot().under(new DriveConditions(slope, slope, false, false, false));
+    Robot ramp = new Robot().under(new DriveConditions(slope, slope, false, 0, false));
     Robot unknown = new Robot().under(tilted(15));
 
     ramp.drive(250, 1.0, 0, 0); // a meter along the ramp
@@ -845,10 +862,20 @@ class PoseEstimatorTest {
 
   @Test
   void theGroundExplainsSomeOrAllOfATiltNeverMore() {
-    assertThatThrownBy(() -> new DriveConditions(0.1, 0.2, false, false, false))
+    assertThatThrownBy(() -> new DriveConditions(0.1, 0.2, false, 0, false))
         .hasMessageContaining("never more");
-    assertThat(new DriveConditions(0.3, 0.2, false, false, false).unexplainedTiltRadians())
+    assertThat(new DriveConditions(0.3, 0.2, false, 0, false).unexplainedTiltRadians())
         .isCloseTo(0.1, within(1e-12));
+  }
+
+  @Test
+  void aSlipIsASpeed() {
+    assertThatThrownBy(() -> new DriveConditions(0, 0, false, -0.1, false))
+        .hasMessageContaining("zero or more");
+    assertThatThrownBy(() -> new DriveConditions(0, 0, false, Double.NaN, false))
+        .hasMessageContaining("zero or more");
+    assertThatThrownBy(() -> new DriveConditions(0, 0, false, Double.POSITIVE_INFINITY, false))
+        .hasMessageContaining("zero or more");
   }
 
   @Test
@@ -859,8 +886,6 @@ class PoseEstimatorTest {
         .hasMessage("EstimatorConfig.historySeconds: 0 must be positive");
     assertThatThrownBy(() -> with().recoveryMeasurements(1).build())
         .hasMessage("EstimatorConfig.recoveryMeasurements: 1 must be at least 2");
-    assertThatThrownBy(() -> with().tractionLimitedSlipFraction(1.5).build())
-        .hasMessage("EstimatorConfig.tractionLimitedSlipFraction: 1.5 must be from 0 to 1");
     assertThatThrownBy(() -> with().tiltStartDegrees(30).build())
         .hasMessageStartingWith(
             "EstimatorConfig.tiltZeroDegrees: 25 must be above tiltStartDegrees (30)");

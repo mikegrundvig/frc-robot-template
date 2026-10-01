@@ -9,9 +9,9 @@ package frc.robot.lib.localization;
  * @param dyMeters to the left
  * @param dthetaRadians counterclockwise. The estimator takes rotation from the gyro, and uses this
  *     only to check it, and when the gyro is lost.
- * @param residualMeters how far the wheels disagree with any one rigid motion of the robot: zero
- *     when they all agree, more when a wheel slips, lifts, or is pushed. The estimator trusts the
- *     motion less as it grows.
+ * @param residualMeters how far the wheels' disagreement with any one rigid motion of the robot may
+ *     have put this motion off: zero when they all agree, more when a wheel slips, lifts, or is
+ *     pushed. The estimator doubts the motion by as much.
  */
 public record BodyMotion(
     double dxMeters, double dyMeters, double dthetaRadians, double residualMeters) {

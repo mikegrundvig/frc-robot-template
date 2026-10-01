@@ -17,8 +17,10 @@
  *       {@code Recovery} judges when the cameras agree that odometry is wrong.
  *   <li><b>Wheels:</b> an {@link frc.robot.lib.localization.OdometrySample} of every wheel, turned
  *       into the robot's {@link frc.robot.lib.localization.BodyMotion} by the drivetrain's {@link
- *       frc.robot.lib.localization.DriveKinematicsModel} (swerve or differential). {@link
- *       frc.robot.lib.localization.DriveConditions} says how far to trust them right now.
+ *       frc.robot.lib.localization.DriveKinematicsModel} (swerve or differential), whose residual
+ *       says how far the wheels' disagreement with each other may have put it off. {@link
+ *       frc.robot.lib.localization.DriveConditions} says how far to trust them right now, and
+ *       {@link frc.robot.lib.localization.SlipCheck} whether the IMU sees them sliding together.
  *   <li><b>IMUs:</b> {@link frc.robot.lib.localization.YawTrack} places yaw readings in time,
  *       {@link frc.robot.lib.localization.ImuCrossCheck} compares two IMUs, and {@link
  *       frc.robot.lib.localization.TerrainCrossing} follows the robot over raised terrain.

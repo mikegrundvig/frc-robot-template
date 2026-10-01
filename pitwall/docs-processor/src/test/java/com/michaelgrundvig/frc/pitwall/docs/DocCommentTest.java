@@ -17,6 +17,9 @@ class DocCommentTest {
         .as("nor does a period in code")
         .isEqualTo("Built by `Gains.builder(). steerKp(16)`.");
     assertThat(traditional(" @param x a value\n").summary()).isEmpty();
+    assertThat(traditional(" A ` mark. More.").summary())
+        .as("a stray backtick is just a character")
+        .isEqualTo("A ` mark.");
   }
 
   @Test
@@ -58,7 +61,22 @@ class DocCommentTest {
         .isEqualTo("5° ± 0.5°, 2 × 3 µs, 4.7 kΩ");
     assertThat(plain("0 &le; x &ge; 1 &rarr; y &mdash; z &ndash; w"))
         .isEqualTo("0 ≤ x ≥ 1 → y — z – w");
-    assertThat(plain("a&#7;b&#x1F;c")).as("control characters are dropped").isEqualTo("abc");
+  }
+
+  @Test
+  void controlCharactersAreDroppedAndWhitespaceIsSpace() {
+    assertThat(plain("a&#9;b&#10;c&#13;d")).isEqualTo("a b c d");
+    assertThat(plain("a&#7;b&#x1F;c&#127;d&#x80;e&#159;f")).isEqualTo("abcdef");
+    assertThat(plain("a\u0007b\u007Fc\u0085d")).as("written as they are").isEqualTo("abcd");
+    assertThat(plain("{@code a\u0007b}")).isEqualTo("`ab`");
+    assertThat(plain("&#xD800; &#99999999999; &#x110000; &#-5; &#xZZ;"))
+        .as("numbers that aren't characters stay as written")
+        .isEqualTo("&#xD800; &#99999999999; &#x110000; &#-5; &#xZZ;");
+  }
+
+  @Test
+  void codeHoldingABacktickGetsMoreOfThem() {
+    assertThat(plain("{@code a`b} and {@code `c}")).isEqualTo("``a`b`` and `` `c ``");
   }
 
   @Test
@@ -92,6 +110,60 @@ class DocCommentTest {
                 + "- drive, `List<Double>` of them\n"
                 + "- steer, `Map<K, V>` Then [] and [unclosed.");
     assertThat(doc.params()).containsExactly(Map.entry("steerKp", "volts per radian of error"));
+  }
+
+  /** Brackets are a link only when they name something: otherwise they're text. */
+  @Test
+  void markdownBracketsThatArentLinksStay() {
+    assertThat(markdown("in [0, 1], values[0], matrix[0][1], [], [a b], and [unclosed"))
+        .isEqualTo("in [0, 1], values[0], matrix[0][1], [], [a b], and [unclosed");
+    assertThat(markdown("[SwerveConfig], [#steerKp], [Limits#between(double, double)]"))
+        .isEqualTo("SwerveConfig, steerKp, between(double, double)");
+    assertThat(markdown("[the gains][SwerveConfig.Gains], [a page](https://wpilib.org), [x][1]"))
+        .isEqualTo("the gains, a page, x[1]");
+    assertThat(markdown("[`steerKp`][#steerKp]")).isEqualTo("`steerKp`");
+  }
+
+  /** Code holds anything, braces and at signs included, but only within its paragraph. */
+  @Test
+  void markdownCodeIsCodeWithinItsParagraph() {
+    assertThat(markdown("`{` opens, `}` closes, and `a{b` is text: {@code x}"))
+        .isEqualTo("`{` opens, `}` closes, and `a{b` is text: `x`");
+    assertThat(markdown("one `tick\n\nthen` another")).isEqualTo("one `tick\n\nthen` another");
+    assertThat(markdown("``a `b` c`` and ```d``")).isEqualTo("``a `b` c`` and ```d``");
+
+    DocComment doc =
+        DocComment.parse(
+            """
+            Built so:
+            ```java
+            @ConfigRecord
+            record X(double kP) {}
+            ```
+            and `
+            @Override` too.
+            \\@not a tag
+            @param kP volts
+            """,
+            true);
+
+    assertThat(doc.text())
+        .isEqualTo(
+            "Built so:\n\n`@ConfigRecord record X(double kP) {}`\n\nand `@Override` too. @not a tag");
+    assertThat(doc.params()).containsExactly(Map.entry("kP", "volts"));
+  }
+
+  @Test
+  void markdownEscapesAndNumberedLists() {
+    assertThat(markdown("\\[x\\] \\`y\\` \\& \\a")).isEqualTo("[x] `y` & \\a");
+    assertThat(markdown("Steps:\n1. home\n2. zero\n\n3) run"))
+        .isEqualTo("Steps:\n- home\n- zero\n- run");
+    assertThat(markdown("Bought in\n2020. Then sold")).isEqualTo("Bought in 2020. Then sold");
+    assertThat(markdown("+ one\n  more of it\n2. two")).isEqualTo("- one more of it\n- two");
+  }
+
+  private static String markdown(String text) {
+    return DocComment.plain(text, true);
   }
 
   private static DocComment traditional(String comment) {

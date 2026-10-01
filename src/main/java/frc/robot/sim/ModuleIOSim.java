@@ -187,7 +187,11 @@ final class ModuleIOSim implements ModuleIO {
     steerPeakAmps = Math.max(steerPeakAmps, steerMotor.run(volts, steerStatorLimitAmps, seconds));
   }
 
-  /** Takes a reading for odometry, as a motor controller's high-rate signals would. */
+  /**
+   * Takes a reading for odometry, as a motor controller's high-rate signals would. The steering's
+   * angle is the one its motor controller last heard from the CANcoder, as on a robot without
+   * Phoenix Pro: up to a CANcoder's period old.
+   */
   void sample(long timestampNanos) {
     if (samples == sampleTimes.length) {
       sampleTimes = Arrays.copyOf(sampleTimes, samples * 2);
@@ -196,7 +200,7 @@ final class ModuleIOSim implements ModuleIO {
     }
     sampleTimes[samples] = timestampNanos;
     samplePositions[samples] = driveSim.getAngularPosition() + spinRadians;
-    sampleAngles[samples] = measuredSteerRadians();
+    sampleAngles[samples] = heardSteerRadians;
     samples++;
   }
 
@@ -221,8 +225,9 @@ final class ModuleIOSim implements ModuleIO {
     inputs.driveTorqueLimited = driveLimited;
     driveLimited = false;
     inputs.steerConnected = true;
-    inputs.steerAngle = new Rotation2d(measuredSteerRadians());
-    inputs.steerVelocityRadPerSec = steerMotor.velocityRadPerSec();
+    // The steering's angle and speed as the robot hears them: what the CANcoder last sent.
+    inputs.steerAngle = new Rotation2d(heardSteerRadians);
+    inputs.steerVelocityRadPerSec = heardSteerRadPerSec;
     inputs.steerAppliedVolts = steerMotor.appliedVolts();
     // The steering's current is the most it drew since the last loop, not what it draws now. It
     // runs at its limit for a few milliseconds as the module starts and stops a turn, then falls to

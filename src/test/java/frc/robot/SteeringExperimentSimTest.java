@@ -337,7 +337,10 @@ class SteeringExperimentSimTest {
   /**
    * Damping from the page: at a steerKp that overshoots, steerKd brings the overshoot down. Too
    * much, and the module never settles: the loop damps on a speed up to 10 ms old, so it pushes
-   * against motion that has already changed.
+   * against motion that has already changed. Past about 0.2, at this steerKp, the module already
+   * buzzes about its target between the CANcoder's frames, but the angle the robot hears catches
+   * the buzz at the same point each time, so the page sees it settle a few tenths of a degree
+   * short; by 1 the buzz is plain, on nearly every jump of every wheel.
    */
   @Test
   void raisingSteerKdDampsTheOvershootUntilItNeverSettles() throws Exception {
@@ -348,7 +351,7 @@ class SteeringExperimentSimTest {
     Run loose = page.run();
     page.send("PATCH", "/api/values", "{\"" + STEER_KD + "\": 0.15}");
     Run damped = page.run();
-    page.send("PATCH", "/api/values", "{\"" + STEER_KD + "\": 0.3}");
+    page.send("PATCH", "/api/values", "{\"" + STEER_KD + "\": 1}");
     Run overdamped = page.run();
 
     assertThat(undamped.statusCode()).as(undamped.body()).isEqualTo(200);
@@ -360,6 +363,10 @@ class SteeringExperimentSimTest {
         .isLessThan(loose.worst("overshoot") / 2);
     assertThat(damped.worst("settling")).as("settling, s").isLessThan(loose.worst("settling"));
     assertThat(overdamped.worst("settling")).as("settling: never").isNaN();
+    assertThat(overdamped.jumps())
+        .as("jumps that never settled, of eight")
+        .filteredOn(jump -> Double.isNaN(number(jump.get("settling"))))
+        .hasSizeGreaterThanOrEqualTo(6);
   }
 
   /**

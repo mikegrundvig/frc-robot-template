@@ -1,9 +1,15 @@
 // The apply bar, at the bottom of Tune and Experiment while anything is staged: how many edits,
-// and Apply and Discard. Applying sends them all at once, and the robot applies all or none. When
-// it refuses, every reason is listed here, grouped by the check that gave it, each a way to its
-// value; the same reasons show beside the values.
+// and Apply and Discard (Enter and Esc). Applying sends them all at once, and the robot applies
+// all or none. Edits outside their limits are caught here first. When it refuses, every reason is
+// listed here, grouped by the check that gave it, each a way to its value; the same reasons show
+// beside the values.
+//
+// A big step changes the bar, and nothing pops up (decided): while any staged edit moves its value
+// by more than a quarter of its tuning range, the bar turns to a warning, names each, and its
+// button says so. One press still applies everything: the warning is there from the moment the
+// edit is staged, not sprung at the press.
 
-import { robot, onChange, onConnection, h, byId, go, replace } from "./core.js";
+import { robot, onChange, onConnection, h, byId, go, replace, shown } from "./core.js";
 import { onEdits, pending, apply, discard, closeRefusal, outcome } from "./edits.js";
 import { setTuning } from "./bar.js";
 
@@ -27,6 +33,7 @@ let applyButton;
 let discardButton;
 let switchOn;
 let what;
+let bigSteps;
 
 export function mountApplyBar() {
   bar = byId("applybar");
@@ -37,7 +44,8 @@ export function mountApplyBar() {
   switchOn = h("button", { type: "button", class: "primary", hidden: true,
                            onclick: () => setTuning(true) }, "Switch tuning on");
   line = h("div", { class: "ab-line" }, what, discardButton, switchOn, applyButton);
-  bar.append(refusalBox, line);
+  bigSteps = h("div", { class: "bigsteps", role: "status" });
+  bar.append(refusalBox, bigSteps, line);
   onEdits(render);
   onChange((patch, snapshot) => {
     if (snapshot || "tuning" in patch || "tunables" in patch) render();
@@ -53,7 +61,7 @@ export function showIn(id) {
 
 function render() {
   if (!bar || !robot.doc) return;
-  const { changes, invalid, count } = pending();
+  const { changes, invalid, outside, big, count } = pending();
   const refusal = outcome.refusal;
   bar.hidden = !VIEWS.has(view) || (count === 0 && !refusal);
   if (bar.hidden) return;
@@ -66,15 +74,33 @@ function render() {
   const lock = !robot.connected ? "Not connected to the robot: the edits wait here."
     : session.fieldConnected ? "The field system is connected: nothing can change."
     : !session.enabled ? "Tuning is off: switch it on to apply them." : null;
+  const blocked = invalid.length + outside.length;
   replace(what, h("b", null, count + (count === 1 ? " edit" : " edits")),
     " staged, applied together or not at all.",
     lock && h("span", { class: "lockword" }, " 🔒 " + lock),
-    !lock && invalid.length > 0 && h("span", { class: "bad" },
-      " ✗ " + invalid.length + " isn't a number: fix it to apply."));
+    !lock && blocked > 0 && h("span", { class: "bad" }, " ✗ " + blocked
+        + (blocked === 1 ? " is" : " are") + " outside " + (blocked === 1 ? "its" : "their")
+        + " limits or not a number: fix " + (blocked === 1 ? "it" : "them") + " to apply."),
+    !lock && blocked === 0 && h("span", { class: "keys" }, " Enter applies all · Esc drops the "
+        + "focused edit"));
+  // The big steps, named, the bar in a warning style while there are any.
+  bar.classList.toggle("big", big.length > 0 && !lock);
+  bigSteps.hidden = big.length === 0 || Boolean(lock);
+  replace(bigSteps, big.length === 0 ? [] : [
+    h("b", null, "▲ " + (big.length === 1 ? "A big step" : big.length + " big steps") + ": "),
+    big.map((step, index) => {
+      const value = robot.doc.tunables[step.path];
+      const name = value.field.slice(value.field.lastIndexOf(".") + 1);
+      return [index > 0 ? "; " : "", h("span", { class: "mono" }, name), " " + shown(step.from)
+          + " → " + shown(step.to) + ": " + Math.round(step.share * 100) + "% of its range"];
+    }),
+    ". More than a quarter of a value's tuning range: check it before applying."]);
   switchOn.hidden = !(robot.connected && !session.enabled && !session.fieldConnected);
   applyButton.hidden = !switchOn.hidden;
-  applyButton.disabled = Boolean(lock) || invalid.length > 0 || outcome.applying;
-  applyButton.textContent = outcome.applying ? "Applying…" : "Apply " + ready;
+  applyButton.disabled = Boolean(lock) || blocked > 0 || outcome.applying;
+  applyButton.textContent = outcome.applying ? "Applying…" : "Apply " + ready
+      + (big.length > 0 ? ", including " + big.length + (big.length === 1 ? " big step"
+        : " big steps") : "");
 }
 
 /**

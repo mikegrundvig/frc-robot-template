@@ -3,8 +3,10 @@
 // marked on them; the committed value; and a note on its state. Every part shows at every width.
 // Built once and updated in place, so a row someone is typing in is never rebuilt under them.
 
-import { robot, shown, h, replace, withUnit } from "./core.js";
-import { described, edit, stage, stageNumber, apply, reasonsFor } from "./edits.js";
+import { robot, shown, h, replace, withUnit, running } from "./core.js";
+import {
+  described, edit, stage, stageNumber, unstage, nudge, apply, reasonsFor,
+} from "./edits.js";
 import { firstSentence, nameOf } from "./docs.js";
 
 /**
@@ -38,9 +40,18 @@ export function makeRow(path, context, options = {}) {
     } else if (event.key === "?") {
       event.preventDefault(); // a number has no "?": it asks what the value means
       select("key");
+    } else if (event.key === "Escape" && running().length === 0) {
+      // Esc stops whatever is running, anywhere (main.js); when nothing is, it drops this edit.
+      event.preventDefault();
+      unstage(path);
+      row.input.value = shown(robot.doc.values[path]);
     }
   });
   row.unit = h("span", { class: "unit" }, value.unit);
+  row.down = h("button", { type: "button", class: "nudge", "aria-label": name + " down a tenth",
+                           onclick: () => nudge(path, -1) }, "−10%");
+  row.up = h("button", { type: "button", class: "nudge", "aria-label": name + " up a tenth",
+                         onclick: () => nudge(path, 1) }, "+10%");
   row.range = makeRange();
   row.limits = h("span", { class: "limits-text", id: "limits-" + id });
   row.committed = h("span");
@@ -52,7 +63,8 @@ export function makeRow(path, context, options = {}) {
   row.el = h("div", { class: "row", role: "group", "aria-label": value.config + " " + value.field },
     h("div", { class: "c-name" }, h("div", { class: "nameline" }, row.nameButton, row.tags),
       row.meaning),
-    h("div", { class: "c-value" }, row.input, row.unit),
+    h("div", { class: "c-value" }, row.input, row.unit,
+      h("span", { class: "nudges" }, row.down, row.up)),
     h("div", { class: "c-range" }, row.range.el, row.limits),
     h("div", { class: "c-committed" }, row.committed, row.revert),
     row.note);
@@ -69,7 +81,8 @@ export function updateRow(row) {
   const tuned = row.path in doc.changes;
   const reasons = reasonsFor(row.path);
   const notNumber = state.text !== null && !state.valid;
-  const bad = notNumber || reasons.length > 0;
+  const outside = state.valid && state.isEdit ? state.outside : null;
+  const bad = notNumber || Boolean(outside) || reasons.length > 0;
   const edited = state.isEdit && state.valid && !bad;
   row.el.classList.toggle("tuned", tuned);
   row.el.classList.toggle("edited", edited);
@@ -78,6 +91,7 @@ export function updateRow(row) {
     tuned && h("span", { class: "tag tuned" }, "● tuned"),
     edited && h("span", { class: "tag edit" }, "✎ edit"),
     notNumber && h("span", { class: "tag refused" }, "✗ not a number"),
+    outside && h("span", { class: "tag refused" }, "✗ outside limits"),
     reasons.length > 0 && h("span", { class: "tag refused" }, "✗ refused"));
   // What it means, its first sentence: reading the list teaches. A robot whose Pitwall sends
   // documentation says so when there's none, so the gap gets filled.
@@ -107,10 +121,15 @@ export function updateRow(row) {
   replace(row.committed, "committed ", h("b", null, shown(value.committed)));
   row.revert.hidden = !tuned;
   row.revert.disabled = locked || !robot.connected;
+  row.down.disabled = row.up.disabled = locked || !robot.connected;
   replace(row.note,
     state.isEdit && state.valid && h("div", { class: "edit" }, "✎ " + withUnit(now, value) + " → "
         + withUnit(state.number, value) + ", staged: not applied yet"),
+    state.big && h("div", { class: "big" }, "▲ A big step: " + Math.round(state.share * 100)
+        + "% of its tuning range"),
     notNumber && h("div", { class: "why" }, "✗ Only numbers can be applied."),
+    outside && h("div", { class: "why" }, "✗ Outside its tuning limits: ",
+      h("span", null, outside + ". Checked here, before sending.")),
     reasons.map((reason) => h("div", { class: "why" }, "✗ Refused by " + refuser(reason) + ": ",
       h("span", null, reason.text))));
 }

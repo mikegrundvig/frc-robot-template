@@ -135,6 +135,23 @@ export function api(method, path, body, more = {}) {
   return fetch(path, options);
 }
 
+/**
+ * What's running on the robot, which Esc stops: the experiment's run, and each action, as
+ * {kind, name, run}.
+ */
+export function running() {
+  const doc = robot.doc;
+  if (!doc) return [];
+  const now = [];
+  if (doc.run && doc.run.phase === "RUNNING") {
+    now.push({ kind: "experiment", name: doc.run.experiment, run: doc.run.id });
+  }
+  for (const [name, action] of Object.entries(doc.actions || {})) {
+    if (action.phase === "RUNNING") now.push({ kind: "action", name });
+  }
+  return now;
+}
+
 /** When this page last sent the robot anything. */
 export function lastRequestAt() {
   return lastRequest;

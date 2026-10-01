@@ -307,6 +307,7 @@ table { border-collapse: collapse; }
 .note .why { color: var(--bad); font-weight: 600; }
 .note .why span { font-weight: 400; color: var(--text); }
 .note .else { color: var(--text-2); }
+.note .big { color: var(--warn); font-weight: 600; }
 .row > .docs-inline { grid-area: docs; }
 @container rows (max-width: 640px) {
   .row { grid-template-columns: minmax(0, 1fr) auto;

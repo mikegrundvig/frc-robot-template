@@ -117,7 +117,10 @@ export function discard() {
 
 /**
  * A value's edit: {text} as typed, or null when nothing is staged; {number} and {valid} when it
- * reads as a number; {isEdit} when that differs from the value now.
+ * reads as a number; {isEdit} when that differs from the value now; {outside}, why it's outside
+ * the value's tuning limits, checked here before sending (the robot checks again); and {share}
+ * and {big}, how far it moves the value as a share of its limits' span, and whether that's a big
+ * step, more than a quarter of it.
  */
 export function edit(path) {
   const text = staged.has(path) ? staged.get(path) : null;
@@ -127,24 +130,73 @@ export function edit(path) {
   const valid = trimmed !== "" && Number.isFinite(number);
   if (!valid) return { text, valid: false, isEdit: true };
   const now = robot.doc.values[path];
-  return { text, number, valid: true, isEdit: now === undefined || !near(number, now) };
+  const isEdit = now === undefined || !near(number, now);
+  const value = described(path);
+  const outside = value ? whyOutside(number, value) : null;
+  const span = value && typeof value.min === "number" && typeof value.max === "number"
+    ? value.max - value.min : 0;
+  const share = span > 0 && typeof now === "number" ? Math.abs(number - now) / span : 0;
+  return { text, number, valid: true, isEdit, outside, share, big: isEdit && !outside && share > BIG };
+}
+
+/**
+ * A big step: a quarter of a value's tuning range (decided). Measured against the range, not the
+ * value now, so zeroing a gain, or editing one committed as zero, never misfires; a value with no
+ * range has no big steps.
+ */
+const BIG = 0.25;
+
+/** Why a number is outside a value's tuning limits, in the robot's words; null when it's within. */
+function whyOutside(number, value) {
+  if (typeof value.min === "number" && number < value.min) {
+    return shown(number) + " is below its limit of " + shown(value.min);
+  }
+  if (typeof value.max === "number" && number > value.max) {
+    return shown(number) + " is above its limit of " + shown(value.max);
+  }
+  return null;
 }
 
 /**
  * Everything staged: {changes} to send, {path: number}; {invalid}, the paths whose text isn't a
- * number; and {count}, how many edits there are.
+ * number; {outside}, those outside their limits; {big}, the big steps; and {count}, how many
+ * edits there are.
  */
 export function pending() {
   const changes = {};
   const invalid = [];
+  const outside = [];
+  const big = [];
   for (const path of staged.keys()) {
     if (!(path in robot.doc.values)) continue; // no longer tunable: a redeploy took it away
     const state = edit(path);
     if (!state.isEdit) continue;
     if (!state.valid) invalid.push(path);
+    else if (state.outside) outside.push(path);
     else changes[path] = state.number;
+    if (state.big) big.push({ path, from: robot.doc.values[path], to: state.number, share: state.share });
   }
-  return { changes, invalid, count: Object.keys(changes).length + invalid.length };
+  return { changes, invalid, outside, big,
+           count: Object.keys(changes).length + invalid.length + outside.length };
+}
+
+/**
+ * Nudges a value a step: a tenth of itself (or of its edit), up or down, which is how gains get
+ * tuned, and quicker than typing on a phone. At zero, a hundredth of its limits' span. Kept within
+ * its limits.
+ *
+ * @param direction 1 for up, -1 for down
+ */
+export function nudge(path, direction) {
+  const value = described(path);
+  const state = edit(path);
+  const base = state.valid && state.text !== null ? state.number : robot.doc.values[path];
+  const span = typeof value.min === "number" && typeof value.max === "number"
+    ? value.max - value.min : 0;
+  let next = base === 0 ? direction * (span > 0 ? span / 100 : 0.1) : base * (1 + direction * 0.1);
+  if (typeof value.min === "number") next = Math.max(value.min, next);
+  if (typeof value.max === "number") next = Math.min(value.max, next);
+  stage(path, shown(Number(next.toPrecision(4))));
 }
 
 /**
@@ -156,8 +208,11 @@ export function pending() {
  * @return whether they were applied
  */
 export async function apply(source = "this page") {
-  const { changes, invalid } = pending();
-  if (invalid.length > 0 || Object.keys(changes).length === 0 || outcome.applying) return false;
+  const { changes, invalid, outside } = pending();
+  if (invalid.length > 0 || outside.length > 0 || Object.keys(changes).length === 0
+      || outcome.applying) {
+    return false;
+  }
   outcome.applying = true;
   outcome.refusal = null;
   changed();

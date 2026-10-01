@@ -6,7 +6,7 @@ import {
   robot, onChange, onConnection, onSamples, api, send, lastRequestAt, shown, h, say, replace,
 } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
-import { onEdits, stageAll } from "./edits.js";
+import { onEdits, stageAll, pending, apply } from "./edits.js";
 import { load, save } from "./history.js";
 import { makeRow, updateRow } from "./rows.js";
 import { valueDocs } from "./docs.js";
@@ -49,7 +49,7 @@ function mount(view) {
     drawSoon();
   });
   onEdits(() => {
-    for (const view of rigViews.values()) view.rows.forEach((row) => updateGain(view, row));
+    for (const [name, view] of rigViews) updateRig(name, view);
   });
   onConnection(() => {
     if (robot.doc) render({}, false);
@@ -263,7 +263,11 @@ function buildRigs() {
   }
 }
 
-/** Starts a run, keeping it going from the click; or stops the one running. */
+/**
+ * Starts a run, keeping it going from the click; or stops the one running. With edits staged, it
+ * applies them first, through the same checks, all or none, and runs only if they applied: one
+ * press, so a run is never of the gains before the edit.
+ */
 async function runOrStop(name, view) {
   const run = robot.doc.run;
   if (run && run.rig === name && run.phase === "RUNNING") {
@@ -271,6 +275,7 @@ async function runOrStop(name, view) {
     if (!result.ok) say(result.problem.detail, true);
     return;
   }
+  if (pending().count > 0 && !(await apply())) return; // the apply bar says why
   starting = true;
   try {
     const result = await send("POST", "/api/experiments", { start: view.choice.value });
@@ -311,15 +316,18 @@ function updateRig(name, view) {
   view.rows.forEach((row) => updateGain(view, row));
   const current = doc.run && doc.run.rig === name ? doc.run : null;
   const running = view.busy;
+  const staged = pending();
+  const blocked = staged.invalid.length + staged.outside.length > 0 || !doc.tuning.enabled;
   view.runButton.className = running ? "big danger" : "big primary";
-  view.runButton.textContent = running ? "■ Stop" : "▶ Run";
+  view.runButton.textContent = running ? "■ Stop  (Esc)"
+    : staged.count > 0 ? "Apply " + staged.count + " and run" : "▶ Run";
   // Run is off beside the gate's own reason, and the mode now. Stop is never locked.
   const why = !robot.connected ? "Not connected to the robot." : doc.robot.experimentsLocked
     ? capital(doc.robot.experimentsLocked) + (doc.robot.mode ? ". Now: " + doc.robot.mode : "") + "."
     : null;
   view.gate.hidden = running || !why;
   view.gate.textContent = why ? "🔒 " + why : "";
-  view.runButton.disabled = !running && Boolean(why);
+  view.runButton.disabled = !running && (Boolean(why) || (staged.count > 0 && blocked));
   view.runButton.setAttribute("aria-describedby", view.gate.id);
   const described = doc.experiments[view.choice.value];
   view.state.textContent = current

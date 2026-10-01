@@ -3,8 +3,8 @@
 // marked on them; the committed value; and a note on its state. Every part shows at every width.
 // Built once and updated in place, so a row someone is typing in is never rebuilt under them.
 
-import { robot, send, shown, h, say, replace, withUnit } from "./core.js";
-import { described, edit, stage, apply, reasonsFor } from "./edits.js";
+import { robot, shown, h, replace, withUnit } from "./core.js";
+import { described, edit, stage, stageNumber, apply, reasonsFor } from "./edits.js";
 import { firstSentence, nameOf } from "./docs.js";
 
 /**
@@ -44,12 +44,10 @@ export function makeRow(path, context, options = {}) {
   row.range = makeRange();
   row.limits = h("span", { class: "limits-text", id: "limits-" + id });
   row.committed = h("span");
+  // Stages the committed value, as any other edit: nothing changes until it's applied.
   row.revert = h("button", { type: "button", class: "revert",
-    title: "Back to the committed value", "aria-label": name + ": back to the committed value",
-    onclick: async () => {
-      const result = await send("PATCH", "/api/values", { [path]: null });
-      if (!result.ok) say(result.problem.detail, true);
-    } }, "↺");
+    title: "Stage the committed value", "aria-label": name + ": stage the committed value",
+    onclick: () => stageNumber(path, described(path).committed) }, "↺");
   row.note = h("div", { class: "note", id: "note-" + id });
   row.el = h("div", { class: "row", role: "group", "aria-label": value.config + " " + value.field },
     h("div", { class: "c-name" }, h("div", { class: "nameline" }, row.nameButton, row.tags),

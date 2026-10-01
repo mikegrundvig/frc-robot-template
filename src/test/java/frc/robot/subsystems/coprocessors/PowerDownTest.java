@@ -154,7 +154,10 @@ class PowerDownTest {
     assertThat(coprocessors.card("vision-back").lines().get(0).value())
         .isEqualTo("asked to power down, answered 404; its agent and PhotonVision still answering");
     assertThat(coprocessors.card("vision-back").lines().get(0).level()).isEqualTo(Level.WARNING);
-    assertThat(notice()).startsWith("PROBLEM: Powering down coprocessors: waiting on vision-back");
+    assertThat(notice())
+        .isEqualTo(
+            "PROBLEM: Don't switch off: vision-back still answering after being asked to power"
+                + " down");
     assertThat(phase()).as("still waiting").isEqualTo(Actions.Phase.RUNNING);
   }
 

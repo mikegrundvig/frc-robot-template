@@ -88,7 +88,10 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   private int restarts;
   private long restartedAtNanos;
 
-  // The robot's clock, as the world steps it, and the agent's polls on it.
+  // The robot's clock, as the world steps it (from wherever it starts: the simulator's clock may
+  // not start at zero), and the agent's polls on it.
+  private boolean started;
+  private long startNanos;
   private long nowNanos;
   private long nextPollNanos;
   private long polls;
@@ -126,6 +129,11 @@ public final class CoprocessorIOSim implements CoprocessorIO {
 
   /** The robot's clock moves on: the agent answers if a poll is due. */
   public void step(long nowNanos) {
+    if (!started) {
+      started = true;
+      startNanos = nowNanos;
+      nextPollNanos = nowNanos;
+    }
     this.nowNanos = nowNanos;
     if (nowNanos < nextPollNanos) {
       return;
@@ -187,7 +195,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
 
   /** Its health now, as its agent would answer. */
   private Health health() {
-    double uptime = UP_BEFORE_SECONDS + nowNanos / 1e9;
+    double uptime = UP_BEFORE_SECONDS + (nowNanos - startNanos) / 1e9;
     String version = wrongVersion ? OTHER_VERSION : table.photonvisionVersion();
     String settingsHash = table.settingsHash(computer);
     String liveHash = settingsChanged ? "changed-" + settingsHash : settingsHash;
@@ -311,7 +319,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
 
   /** The agent's monotonic clock now, in microseconds since the simulated boot. */
   private long micros() {
-    return Math.round((UP_BEFORE_SECONDS + nowNanos / 1e9) * 1e6);
+    return Math.round((UP_BEFORE_SECONDS + (nowNanos - startNanos) / 1e9) * 1e6);
   }
 
   // ---- Faults, as the simulator's controls apply them ----

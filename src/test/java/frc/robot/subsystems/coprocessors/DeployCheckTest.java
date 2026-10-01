@@ -151,16 +151,21 @@ class DeployCheckTest {
     boolean failed =
         DeployCheck.report(List.of(new Finding("vision-front", Verdict.FAIL, "wrong")), print);
     boolean empty = DeployCheck.report(List.of(), print);
+    boolean silent =
+        DeployCheck.report(List.of(new Finding("vision-front", Verdict.WARN, "nothing")), print);
 
     assertThat(ok).isTrue();
     assertThat(failed).isFalse();
     assertThat(empty).isTrue();
+    assertThat(silent).isTrue();
     assertThat(out.toString(StandardCharsets.UTF_8))
         .contains(
             "Coprocessor check: OK vision-front: fine",
             "Coprocessor check: WARN vision-back: nothing answers",
+            "Coprocessor check: 1 answered, running this build's image.",
             "Coprocessor check: FAILED. Nothing was deployed.",
-            "the table has no coprocessors");
+            "the table has no coprocessors",
+            "none answered, so none was compared with this build");
   }
 
   @Test

@@ -97,9 +97,13 @@ tasks.named("test") {
     def work = layout.buildDirectory.dir("test-work")
     workingDir = work
     systemProperty "frc.projectDir", projectDir.absolutePath
-    // The values register is checked against the code (ValuesRegisterTest), so editing it alone
-    // reruns the tests.
+    // Project files the tests check against the code, declared so Gradle knows the tests depend
+    // on them: the values register (ValuesRegisterTest) and the drive team's dashboard
+    // (DashboardLayoutTest). Today the tests rerun on every build anyway, since BuildConstants
+    // compiles in the build's time; an undeclared file would let Gradle skip them once it doesn't.
     inputs.file("docs/values.md").withPropertyName("valuesRegister")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("layouts/elastic-layout.json").withPropertyName("dashboardLayout")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     doFirst { work.get().asFile.mkdirs() }
     // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the

@@ -114,7 +114,10 @@ What it offers:
   really needs longer says so with `@Timeout`.
 - **Tests run in `build/test-work`.** What simulated devices write (CTRE's `ctre_sim/`, for one)
   stays out of the project. To read a project file, start from the `frc.projectDir` system
-  property, as `DashboardLayoutTest` does.
+  property, as `DashboardLayoutTest` does, and declare the file an input of the test task in
+  `build.gradle`, so Gradle knows the tests depend on it. Today the tests run on every build
+  anyway (the build's time is compiled in), but if that changes, Gradle would call them up to
+  date after a change to an undeclared file, and skip them.
 - **Coverage has a floor.** The build fails below the floors in `coverage-floor.properties`. They
   catch code with no tests at all; they are not a target to chase.
 

@@ -16,6 +16,10 @@ let tuningButton;
 let uncommitted;
 let band;
 let bandSince;
+let themeButton;
+
+/** The theme: the system's, or light or dark whatever the system says (a bright pit). */
+const THEMES = { system: "◐ System", light: "☀ Light", dark: "☾ Dark" };
 
 /** Builds the bar into the page's header, and the band below it for a lost link. */
 export function mountBar() {
@@ -29,11 +33,13 @@ export function mountBar() {
   tuningButton = h("button", { type: "button", onclick: switchTuning });
   tuningPill = h("span", { class: "pill", hidden: true });
   uncommitted = h("a", { href: "#changes", class: "uncommitted", hidden: true });
+  themeButton = h("button", { type: "button", class: "theme", onclick: nextTheme });
+  showTheme();
   byId("bar").append(
     h("span", { class: "brand" }, "Pitwall", name, badge),
     code,
     h("span", { class: "spacer" }),
-    connection, mode, tuningPill, uncommitted);
+    connection, mode, tuningPill, uncommitted, themeButton);
   bandSince = h("span");
   band = byId("band");
   onChange(render);
@@ -65,7 +71,7 @@ function render(patch, snapshot) {
   if (snapshot || "changes" in patch) {
     const count = Object.keys(doc.changes).length;
     uncommitted.hidden = count === 0;
-    uncommitted.textContent = "● " + count + " to commit";
+    uncommitted.replaceChildren(h("b", null, "● " + count), " to commit");
     uncommitted.title = count + (count === 1 ? " tuned value differs" : " tuned values differ")
         + " from the committed configuration: see Changes";
   }
@@ -132,4 +138,33 @@ function ago(seconds) {
   if (seconds < 60) return seconds + " s ago";
   const minutes = Math.floor(seconds / 60);
   return minutes < 60 ? minutes + " min ago" : Math.floor(minutes / 60) + " h ago";
+}
+
+/** The theme chosen here, kept in this browser; the system's until someone chooses. */
+function theme() {
+  try {
+    const chosen = localStorage.getItem("pitwall.theme");
+    return chosen in THEMES ? chosen : "system";
+  } catch (error) {
+    return "system";
+  }
+}
+
+function nextTheme() {
+  const names = Object.keys(THEMES);
+  const next = names[(names.indexOf(theme()) + 1) % names.length];
+  try {
+    localStorage.setItem("pitwall.theme", next);
+  } catch (error) {
+    // Kept for this page only: storage is off in this browser.
+  }
+  showTheme(next);
+}
+
+function showTheme(chosen = theme()) {
+  if (chosen === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = chosen;
+  themeButton.textContent = THEMES[chosen];
+  themeButton.setAttribute("aria-label", "Theme: " + chosen + ". Change it.");
+  document.dispatchEvent(new Event("pitwall-theme"));
 }

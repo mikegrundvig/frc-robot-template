@@ -4,6 +4,7 @@
 
 import { robot, connect, onChange, byId, h } from "./core.js";
 import { mountBar } from "./bar.js";
+import { mountApplyBar, showIn } from "./applybar.js";
 import pit from "./pit.js";
 import tune from "./tune.js";
 import experiment from "./experiment.js";
@@ -12,6 +13,7 @@ import sim from "./sim.js";
 
 const views = [pit, tune, experiment, changes, sim];
 mountBar();
+mountApplyBar();
 const sections = new Map(); // view id -> its section
 const tabs = new Map(); // view id -> its tab
 let current = null;
@@ -50,11 +52,21 @@ function show(view, rest) {
     }
     current = view;
     if (view.show) view.show();
+    showIn(view.id);
   }
   if (view.route) view.route(rest);
 }
 
+const count = h("span", { class: "count", hidden: true });
+tabs.get("changes").append(count);
+
 onChange((patch, snapshot) => {
+  if (snapshot || "changes" in patch) {
+    const tuned = Object.keys(robot.doc.changes).length;
+    count.hidden = tuned === 0;
+    count.textContent = String(tuned);
+    count.setAttribute("aria-label", tuned + " to commit");
+  }
   if (snapshot || "robot" in patch) {
     for (const view of views) tabs.get(view.id).hidden = !offered(view);
     route(); // the address may name a view offered only now, such as #sim

@@ -1,8 +1,9 @@
 // Experiment: run a test motion on a rig, see how it answered, change a gain, run again, compare.
 // Runs stay in this tab: they outlive reconnects and restarts of the robot.
 
-import { robot, onChange, onSamples, api, send, lastRequestAt, shown, h } from "./core.js";
-import { applyEdits, builderLines, sayResult } from "./edits.js";
+import { robot, onChange, onSamples, api, send, lastRequestAt, shown, h, say } from "./core.js";
+import { onEdits } from "./edits.js";
+import { makeRow, updateRow, replace } from "./rows.js";
 
 // Every run this tab has seen, oldest first.
 const runs = [];
@@ -14,23 +15,23 @@ const OVERLAID = 4;
 const TRACES_KEPT = 8;
 
 const rigViews = new Map(); // rig name -> its panel's parts
-let shownRigs = "";
-let container;
+let builtFrom = "";
+let chips;
+let panels;
 let empty;
+let chosen = null; // the rig shown, by name
 let visible = false;
 
 function mount(view) {
-  container = h("div");
+  chips = h("div", { class: "chips", role: "group", "aria-label": "Rig" });
+  panels = h("div");
   empty = h("p", { class: "muted", hidden: true }, "This robot has no rigs to experiment on yet. "
       + "A mechanism adds one in code: pitwall.experiments().add(new Experiment(...)).");
   view.append(
-    h("h1", null, "Experiment"),
-    h("p", { class: "muted" }, "Each runs a test motion on its mechanism and scores how it "
-        + "answered. They run only with the robot enabled in utility mode, never on the field, "
-        + "and only while this page stays open and in touch: close it, or lose the link, and the "
-        + "run stops. Change a gain, run again, and compare. Runs stay here until this tab closes."),
-    empty,
-    container);
+    h("h1", { class: "view-title" }, "Experiment"),
+    h("p", { class: "lede" }, "Change a gain, run a test motion through the mechanism's own "
+        + "command, and compare the runs. Runs stay in this tab until it closes."),
+    chips, empty, panels);
   onChange((patch, snapshot) => {
     noteRun();
     render(patch, snapshot);
@@ -39,15 +40,33 @@ function mount(view) {
     takeSamples(trace, fromStart);
     drawSoon();
   });
+  onEdits(() => {
+    for (const view of rigViews.values()) view.rows.forEach((row) => updateGain(view, row));
+  });
+  // Plots take their colors from the theme: a new theme redraws them.
+  document.addEventListener("pitwall-theme", redrawAll);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redrawAll);
 }
 
 function show() {
   visible = true;
-  for (const [name, view] of rigViews) drawRig(name, view, true);
+  redrawAll();
 }
 
 function hide() {
   visible = false;
+}
+
+/** The rest of the address names a rig: #experiment/Steering. */
+function route(rest) {
+  if (rest && rest !== chosen) {
+    chosen = rest;
+    if (robot.doc) render({}, false);
+  }
+}
+
+function redrawAll() {
+  for (const [name, view] of rigViews) drawRig(name, view, true);
 }
 
 // ---- The deadman ----
@@ -125,149 +144,136 @@ function takeSamples(trace, fromStart) {
 
 function render(patch, snapshot) {
   const doc = robot.doc;
-  const key = JSON.stringify([doc.rigs, doc.experiments]);
-  if (snapshot || key !== shownRigs) {
-    shownRigs = key;
+  const key = JSON.stringify([doc.rigs, doc.experiments, Object.keys(doc.tunables)]);
+  if (snapshot || key !== builtFrom) {
+    builtFrom = key;
     buildRigs();
   }
-  empty.hidden = rigViews.size > 0;
-  for (const [name, view] of rigViews) updateRig(name, view);
+  const names = [...rigViews.keys()];
+  if (!rigViews.has(chosen)) chosen = names[0] || null;
+  empty.hidden = names.length > 0;
+  chips.hidden = names.length < 2;
+  replace(chips, names.map((name) => h("a", { class: "chip", href: "#experiment/" + name,
+    "aria-current": name === chosen ? "true" : null }, name)));
+  for (const [name, view] of rigViews) {
+    view.panel.hidden = name !== chosen;
+    updateRig(name, view);
+  }
 }
 
 function buildRigs() {
   const doc = robot.doc;
-  container.replaceChildren();
+  panels.replaceChildren();
   for (const built of rigViews.values()) if (built.plot) built.plot.destroy();
   rigViews.clear();
   for (const [name, rig] of Object.entries(doc.rigs)) {
-    const view = { rig, gains: new Map(), plot: null, plotKey: "", scoresKey: "", runsPlotted: "",
+    const view = { rig, rows: [], plot: null, plotKey: "", scoresKey: "", runsPlotted: "",
                    expanded: new Set() };
-    const gainInputs = () => [...view.gains].map(([path, gain]) => [path, gain.input]);
 
-    // Its gains, beside its plot: the same values as the tuning table, checked the same way.
-    const body = h("tbody");
+    // Its gains, beside its plot: the same values, and the same rows, as Tune's.
+    const gains = h("div", { class: "rowlist" });
+    const unpublished = [];
     for (const path of rig.gains) {
-      const described = doc.tunables[path] || { field: path, unit: "", limits: "" };
-      const committed = h("td", { class: "number" });
-      const input = h("input", { inputmode: "decimal", "aria-label": name + " " + described.field,
-                                 title: described.limits ? "Limits: " + described.limits : null });
-      input.addEventListener("input", () => (input.dataset.edited = "yes"));
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") applyEdits(gainInputs(), view.say);
-      });
-      const row = h("tr", null,
-        h("td", null, described.field.slice(described.field.lastIndexOf(".") + 1)),
-        committed, h("td", null, input), h("td", null, described.unit));
-      body.append(row);
-      view.gains.set(path, { row, input, committed });
+      if (!doc.tunables[path]) {
+        unpublished.push(path);
+        continue;
+      }
+      const row = makeRow(path, "exp");
+      view.rows.push(row);
+      gains.append(row.el);
     }
-    view.apply = h("button", { class: "primary", onclick: () => applyEdits(gainInputs(), view.say) },
-      "Apply gains");
 
-    // Pick an experiment; run it; cancel it.
-    view.choice = h("select", { "aria-label": name + " experiment",
+    // Pick an experiment; run it, or stop it.
+    view.choice = h("select", { "aria-label": name + ": experiment",
                                 onchange: () => updateRig(name, view) });
     for (const [experiment, described] of Object.entries(doc.experiments)) {
       if (described.rig === name) view.choice.append(h("option", { value: experiment }, experiment));
     }
-    view.runButton = h("button", { class: "primary", onclick: () => startRun(view.choice.value, view) },
-      "Run");
-    // Cancels the run in progress, whichever experiment is chosen now.
-    view.cancelButton = h("button", { onclick: async () => {
-      const run = robot.doc.run;
-      if (run && run.phase === "RUNNING") {
-        sayResult(await send("POST", "/api/experiments", { cancel: run.experiment, run: run.id }),
-            view.say);
-      }
-    } }, "Cancel");
-    view.settings = h("div", { class: "muted" });
-    view.state = h("div", { style: "margin-top: 8px" });
-    const message = h("div", { class: "message bad", hidden: true });
-    view.say = (text, bad) => {
-      message.hidden = !text;
-      message.textContent = text || "";
-      message.classList.toggle("bad", Boolean(bad));
-    };
-
-    // The builder calls that commit its tuned gains.
-    view.commitTitle = h("div", { class: "muted", style: "margin-top: 16px" },
-      "To keep the tuned gains, write these into the configuration:");
+    view.runButton = h("button", { type: "button", class: "big primary",
+                                   onclick: () => runOrStop(name, view) });
+    view.state = h("p", { class: "state" });
     view.calls = h("pre");
+    view.commit = h("div", { class: "commit" },
+      h("p", { class: "meta" }, "To keep the tuned gains, write these into the configuration:"),
+      view.calls);
 
     // Its plot: the chosen signal of its last few runs, the latest in bold, over the setpoint.
-    view.pick = h("select", { "aria-label": name + " signal to plot",
+    view.pick = h("select", { "aria-label": name + ": signal to plot",
                               onchange: () => drawRig(name, view, true) });
     for (const signal of [...rig.measurements, ...rig.signals.map((s) => s.name)]) {
       view.pick.append(h("option", { value: signal }, signal));
     }
     view.plotElement = h("div", { class: "plot" });
-
-    // Every run of this rig, the latest first, with the best in each column marked.
     view.scores = h("table", { class: "scores" });
 
-    container.append(h("section", { class: "rig" },
-      h("h3", null, name, h("span", { class: "muted" }, "limits " + rig.limits)),
-      h("div", { class: "rig-grid" },
-        h("div", null,
-          h("table", null,
-            h("thead", null, h("tr", null, h("th", null, "Gain"), h("th", null, "Committed"),
-              h("th", null, "Now"), h("th"))),
-            body),
-          h("div", { class: "controls", style: "margin-top: 8px" }, view.apply),
-          h("div", { class: "controls", style: "margin-top: 16px" },
-            view.choice, view.runButton, view.cancelButton),
-          view.settings, view.state, message, view.commitTitle, view.calls),
-        h("div", null,
-          h("label", { class: "controls muted" }, "Plot ", view.pick),
-          view.plotElement)),
-      h("div", { class: "scroll" }, view.scores)));
+    view.panel = h("div", { class: "exp", hidden: true },
+      h("section", { class: "card" },
+        h("h2", null, name, h("span", { class: "meta" }, "within " + rig.limits)),
+        h("label", { class: "field" }, "Experiment", view.choice),
+        h("h3", { class: "meta" }, "Gains"),
+        gains,
+        unpublished.length > 0 && h("p", { class: "meta" }, "Not tunable, so not shown: "
+            + unpublished.join(", ")),
+        h("div", { class: "runbox" }, view.runButton, view.state,
+          h("p", { class: "dead" }, "Stops if this page goes quiet for half a second, or the "
+              + "robot disables. The gains at the start are recorded with the run.")),
+        view.commit),
+      h("section", { class: "card" },
+        h("div", { class: "plotbar" }, h("h2", null, "Runs"),
+          h("label", { class: "meta" }, "Plot ", view.pick)),
+        view.plotElement,
+        h("div", { class: "scroll" }, view.scores)));
+    panels.append(view.panel);
     rigViews.set(name, view);
   }
 }
 
-/** Starts a run, keeping it going from the click: the robot answers once it has started. */
-async function startRun(experiment, view) {
+/** Starts a run, keeping it going from the click; or stops the one running. */
+async function runOrStop(name, view) {
+  const run = robot.doc.run;
+  if (run && run.rig === name && run.phase === "RUNNING") {
+    const result = await send("POST", "/api/experiments", { cancel: run.experiment, run: run.id });
+    if (!result.ok) say(result.problem.detail, true);
+    return;
+  }
   starting = true;
   try {
-    sayResult(await send("POST", "/api/experiments", { start: experiment }), view.say);
+    const result = await send("POST", "/api/experiments", { start: view.choice.value });
+    if (!result.ok) say(result.problem.detail, true);
   } finally {
     starting = false;
   }
 }
 
+/** A rig's gain: as in Tune, except that it stays put while its run runs. */
+function updateGain(view, row) {
+  updateRow(row);
+  if (view.busy) row.input.disabled = true;
+}
+
 function updateRig(name, view) {
   const doc = robot.doc;
-  const session = doc.tuning;
   // While its run runs, its gains stay put here: a run is scored for the gains it started with.
-  const busy = Boolean(doc.run && doc.run.rig === name && doc.run.phase === "RUNNING");
-  view.apply.disabled = !session.enabled || busy;
-  for (const [path, { row, input, committed }] of view.gains) {
-    const described = doc.tunables[path];
-    committed.textContent = described ? shown(described.committed) : "";
-    row.classList.toggle("changed", path in doc.changes);
-    input.disabled = !session.enabled || busy;
-    if (!input.dataset.edited && document.activeElement !== input) {
-      input.value = shown(doc.values[path]);
-    }
-  }
-  const described = doc.experiments[view.choice.value];
-  view.settings.textContent = described ? described.settings : "";
+  view.busy = Boolean(doc.run && doc.run.rig === name && doc.run.phase === "RUNNING");
+  view.rows.forEach((row) => updateGain(view, row));
   const current = doc.run && doc.run.rig === name ? doc.run : null;
-  const running = Boolean(current) && current.phase === "RUNNING";
-  view.runButton.disabled = running;
-  view.cancelButton.disabled = !running;
-  view.state.textContent = current ? `Run ${current.id}, ${current.experiment}: ${current.detail}` : "";
-  const lines = builderLines(view.rig.gains);
+  const running = view.busy;
+  view.runButton.className = running ? "big danger" : "big primary";
+  view.runButton.textContent = running ? "■ Stop" : "▶ Run";
+  const described = doc.experiments[view.choice.value];
+  view.state.textContent = current
+    ? `Run ${current.id}, ${current.experiment}: ${current.detail}`
+    : described ? described.settings : "";
+  const lines = view.rig.gains.filter((path) => doc.changes[path])
+    .map((path) => doc.changes[path].builderCall + "   // was " + doc.changes[path].committed);
   view.calls.textContent = lines.join("\n");
-  view.calls.hidden = lines.length === 0;
-  view.commitTitle.hidden = lines.length === 0;
+  view.commit.hidden = lines.length === 0;
   // The scores only when a run or the lock changed; the plot only when a run came or went
   // (samples arriving redraw it too: see drawSoon).
   const mine = runs.filter((run) => run.rig === name);
   const scoresKey = JSON.stringify([
     mine.map((run) => [run.key, run.phase, run.detail, Boolean(run.scores), run.gainsChanged]),
-    session.enabled, busy, doc.robot.program, doc.robot.code, [...view.expanded]]);
-  view.busy = busy;
+    doc.tuning.enabled, view.busy, doc.robot.program, doc.robot.code, [...view.expanded]]);
   if (scoresKey !== view.scoresKey) {
     view.scoresKey = scoresKey;
     renderScores(name, view);
@@ -317,7 +323,10 @@ function renderScores(name, view) {
   const mine = runs.filter((run) => run.rig === name).reverse();
   const table = view.scores;
   table.replaceChildren();
-  if (mine.length === 0) return;
+  if (mine.length === 0) {
+    table.append(h("caption", { class: "muted" }, "No runs yet: press Run."));
+    return;
+  }
   const summaries = mine.map((run) => summary(run));
   const units = [...new Set(summaries.flatMap((s) => (s ? Object.keys(s.peaks) : [])))];
   const unit = view.rig.unit;
@@ -330,9 +339,9 @@ function renderScores(name, view) {
                            show: (x) => small(x) + " " + u })),
   ];
   const head = table.createTHead().insertRow();
-  head.append(h("th", null, "Run"), h("th", null, "Gains"));
+  head.append(h("th", { scope: "col" }, "Run"), h("th", { scope: "col" }, "Gains"));
   for (const column of columns) {
-    head.append(h("th", { class: "number", title: "The worst of every jump of every "
+    head.append(h("th", { scope: "col", title: "The worst of every jump of every "
         + (view.rig.measurements.length > 1
           ? "measurement (" + view.rig.measurements.join(", ") + "): ▸ shows each" : "jump") },
       column.label));
@@ -349,21 +358,24 @@ function renderScores(name, view) {
   const body = table.createTBody();
   mine.forEach((run, index) => {
     const row = body.insertRow();
-    if (index === 0) row.className = "latest";
+    if (index === 0) row.className = "sel";
     const label = row.insertCell();
     if (summaries[index] && view.rig.measurements.length > 1) {
       const open = view.expanded.has(run.key);
-      label.append(h("button", { class: "small",
+      label.append(h("button", { type: "button", class: "small",
         "aria-label": (open ? "Hide" : "Show") + " each measurement of run " + run.id,
+        "aria-expanded": String(open),
         onclick: () => {
           if (open) view.expanded.delete(run.key); else view.expanded.add(run.key);
           updateRig(name, view);
         } }, open ? "▾" : "▸"), " ");
     }
-    label.append(`${run.id} ${run.experiment}`);
-    if (run.gainsChanged) label.append(" ", h("span", { class: "tag", title: run.detail }, "gains changed"));
+    label.append(`#${run.id} ${run.experiment}`);
+    if (run.gainsChanged) {
+      label.append(" ", h("span", { class: "tag refused", title: run.detail }, "gains changed"));
+    }
     if (run.program !== doc.robot.program) {
-      label.append(" ", h("span", { class: "tag",
+      label.append(" ", h("span", { class: "tag plain",
         title: "Ran on " + run.robot + (run.simulated ? " (simulator)" : "") + ", code " + run.code },
         run.code !== doc.robot.code ? "other code" : "before a restart"));
     }
@@ -374,27 +386,32 @@ function renderScores(name, view) {
     const show = (values, cells) => columns.forEach((column, c) => {
       const value = column.get(values);
       const cell = cells.insertCell();
-      cell.className = "number" + (cells === row && !run.gainsChanged && Number.isFinite(value)
-          && value === best[c] ? " best" : "");
+      const isBest = cells === row && !run.gainsChanged && Number.isFinite(value) && value === best[c];
+      if (isBest) {
+        cell.className = "best";
+        cell.title = "The best of these runs";
+      }
       cell.textContent = Number.isFinite(value) ? column.show(value)
           : value === Infinity ? "never" : "—";
     });
     if (!s) {
       const cell = row.insertCell();
       cell.colSpan = columns.length;
-      cell.className = "muted";
+      cell.className = run.phase === "RUNNING" ? "muted" : "stopped";
       cell.textContent = run.phase === "RUNNING" ? "Running…" : run.detail;
     } else {
       show(s, row);
     }
-    row.insertCell().append(h("button", { class: "small", title: "Put this run's gains back",
-      disabled: !doc.tuning.enabled || view.busy,
-      onclick: async () => sayResult(await send("PATCH", "/api/values", run.gains), view.say) },
-      "Restore"));
+    row.insertCell().append(h("button", { type: "button", class: "small",
+      title: "Put this run's gains back", disabled: !doc.tuning.enabled || view.busy,
+      onclick: async () => {
+        const result = await send("PATCH", "/api/values", run.gains);
+        if (!result.ok) say(result.problem.detail, true);
+      } }, "Restore"));
     if (s && view.expanded.has(run.key)) {
       for (const measurement of view.rig.measurements) {
         const wheel = body.insertRow();
-        wheel.className = "muted";
+        wheel.className = "sub";
         wheel.insertCell();
         wheel.insertCell().textContent = measurement;
         show(summary(run, measurement), wheel);
@@ -432,7 +449,8 @@ function aligned(lines) {
 }
 
 function drawRig(name, view, rebuild) {
-  if (!visible) return; // drawn when the view is shown: a hidden plot has no width
+  // Drawn when it's on screen: a hidden plot has no width.
+  if (!visible || name !== chosen) return;
   if (typeof uPlot === "undefined") {
     if (!view.plotElement.firstChild) {
       view.plotElement.append(h("div", { class: "notice muted" },
@@ -446,7 +464,7 @@ function drawRig(name, view, rebuild) {
   if (overlaid.length === 0) return;
   const latest = overlaid[overlaid.length - 1];
   const lines = overlaid.map((run) => ({
-    label: `Run ${run.id}`, t: run.trace[signal].t, v: run.trace[signal].v, latest: run === latest }));
+    label: `#${run.id}`, t: run.trace[signal].t, v: run.trace[signal].v, latest: run === latest }));
   const setpoint = view.rig.measurements.includes(signal) && latest.trace.Setpoint;
   if (setpoint) lines.unshift({ label: "Setpoint", t: setpoint.t, v: setpoint.v, setpoint: true });
   const data = aligned(lines);
@@ -459,8 +477,8 @@ function drawRig(name, view, rebuild) {
   view.plotElement.replaceChildren();
   const unit = (latest.signals || []).find((s) => s.name === signal)?.unit || "";
   const stepped = uPlot.paths && uPlot.paths.stepped ? uPlot.paths.stepped({ align: 1 }) : undefined;
-  const axis = { stroke: color("--muted"), grid: { stroke: color("--line") },
-                 ticks: { stroke: color("--line") } };
+  const axis = { stroke: color("--muted"), grid: { stroke: color("--line"), width: 1 },
+                 ticks: { stroke: color("--line"), width: 1 } };
   view.plot = new uPlot({
     width: Math.max(280, view.plotElement.clientWidth),
     height: 280,
@@ -469,7 +487,7 @@ function drawRig(name, view, rebuild) {
     cursor: { drag: { x: true, y: false } },
     series: [{ label: "t" }, ...lines.map((line) => ({
       label: line.label,
-      stroke: line.setpoint ? color("--setpoint") : line.latest ? color("--accent") : color("--older"),
+      stroke: line.setpoint ? color("--text-2") : line.latest ? color("--accent") : color("--run-other"),
       width: line.latest ? 2.5 : line.setpoint ? 1.5 : 1,
       dash: line.setpoint ? [6, 4] : undefined,
       paths: line.setpoint ? stepped : undefined,
@@ -486,4 +504,4 @@ window.addEventListener("resize", () => {
   }
 });
 
-export default { id: "experiment", title: "Experiment", mount, show, hide };
+export default { id: "experiment", title: "Experiment", mount, show, hide, route };

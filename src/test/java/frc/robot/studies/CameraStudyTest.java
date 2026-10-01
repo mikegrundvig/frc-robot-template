@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -137,6 +138,45 @@ class CameraStudyTest {
         .contains("## The robot's own layout, across the trials")
         .contains("## In the nominal conditions");
     assertThat(printed()).contains("Trial 2 of 2: ").contains("Most robust: ");
+
+    // Each row's worst is the worst of its trials; down the ranking, the worst never improves (to
+    // the millimeter, the ranking's own resolution: a tie there goes to fewer cameras).
+    List<String> header = columns(candidates.get(0));
+    int worst = header.indexOf("worst_p95_m");
+    int first = header.indexOf("trial_1_p95_m");
+    long previous = Long.MIN_VALUE;
+    for (String line : candidates.subList(1, candidates.size())) {
+      List<String> row = columns(line);
+      double most = Math.max(meters(row.get(first)), meters(row.get(first + 1)));
+      assertThat(meters(row.get(worst))).as(line).isEqualTo(most);
+      long millimeters = Math.round(meters(row.get(worst)) * 1000);
+      assertThat(millimeters).as(line).isGreaterThanOrEqualTo(previous);
+      previous = millimeters;
+    }
+  }
+
+  /** A CSV line's values, a quoted one's commas kept. */
+  private static List<String> columns(String line) {
+    List<String> columns = new ArrayList<>();
+    StringBuilder column = new StringBuilder();
+    boolean quoted = false;
+    for (char c : line.toCharArray()) {
+      if (c == '"') {
+        quoted = !quoted;
+      } else if (c == ',' && !quoted) {
+        columns.add(column.toString());
+        column.setLength(0);
+      } else {
+        column.append(c);
+      }
+    }
+    columns.add(column.toString());
+    return columns;
+  }
+
+  /** A distance as the CSV writes it: empty when there's none, which is past any distance. */
+  private static double meters(String value) {
+    return value.isEmpty() ? Double.POSITIVE_INFINITY : Double.parseDouble(value);
   }
 
   @Test

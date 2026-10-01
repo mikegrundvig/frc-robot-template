@@ -66,14 +66,17 @@ public final class Robustness {
   private final List<Layout> ranking;
 
   /**
-   * @param nominal every layout's score in the nominal conditions, ranked
+   * @param nominal every layout's score in the nominal conditions, in any order
    * @param trials each trial's conditions
-   * @param trialScores each trial's scores, every layout's, in any order
+   * @param trialScores each trial's scores, every layout's, in any order: a layout is known by its
+   *     own object, as scored, so two layouts alike in every way stay two
    */
   public Robustness(List<Score> nominal, List<Conditions> trials, List<List<Score>> trialScores) {
     if (trials.isEmpty() || trials.size() != trialScores.size()) {
       throw new IllegalArgumentException("one list of scores for each trial, and a trial at least");
     }
+    List<Score> ranked = new ArrayList<>(nominal);
+    ranked.sort(Score.RANKING);
     this.trials = List.copyOf(trials);
     List<Map<Candidate, Score>> byTrial = new ArrayList<>();
     for (List<Score> scores : trialScores) {
@@ -82,8 +85,8 @@ public final class Robustness {
       byTrial.add(byCandidate);
     }
     List<Layout> layouts = new ArrayList<>();
-    for (int rank = 0; rank < nominal.size(); rank++) {
-      Score score = nominal.get(rank);
+    for (int rank = 0; rank < ranked.size(); rank++) {
+      Score score = ranked.get(rank);
       List<Double> p95s = new ArrayList<>();
       double worstWithin = 1;
       for (Map<Candidate, Score> trial : byTrial) {

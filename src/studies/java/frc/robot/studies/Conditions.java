@@ -67,7 +67,11 @@ public record Conditions(
         .orThrow();
   }
 
-  /** The study's settings: by default, the simulator's own errors, and cameras mounted exactly. */
+  /**
+   * The study's settings: by default, the simulator's own errors, and cameras mounted exactly.
+   *
+   * @param config the study's settings
+   */
   static Conditions nominal(CameraStudyConfig config) {
     return new Conditions(
         config.seed(),
@@ -80,13 +84,20 @@ public record Conditions(
   }
 
   /**
+   * Where the trials' seeds come from, apart from everything else the run's seed starts: so another
+   * run's seed gives other trials, never the same ones shifted along.
+   */
+  private static final long TRIALS = 0x747269616c73L; // "trials"
+
+  /**
    * One robustness trial's conditions, each drawn from its range. The corner noise's spread keeps
    * the simulator's proportion to its mean.
    *
+   * @param config the study's settings, whose seed every trial's draws start from
    * @param trial which trial, from 0: each has its own draws, and its own seed for the images
    */
   static Conditions trial(CameraStudyConfig config, int trial) {
-    long seed = Seeds.mix(config.seed(), trial + 1L);
+    long seed = Seeds.mix(Seeds.mix(config.seed(), TRIALS), trial);
     SplittableRandom random = new SplittableRandom(seed);
     double corners = CORNER_NOISE_PIXELS.draw(random);
     return new Conditions(

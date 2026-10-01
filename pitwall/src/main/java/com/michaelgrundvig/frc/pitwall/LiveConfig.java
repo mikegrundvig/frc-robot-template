@@ -78,6 +78,56 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    */
   public record Change(String path, String committed, String tuned, String builderCall) {}
 
+  /**
+   * What the records' Javadoc says about this configuration, for the page and for dashboards: read
+   * once, when the configuration is published, so the robot loop never reads it.
+   *
+   * @param record the root record's display name, such as {@code SwerveConfig} ({@link
+   *     ParameterDocs#nameOf})
+   * @param doc the root record's own Javadoc
+   * @param groups the records the tunable values are in, below the root, in the order the knobs
+   *     reach them
+   * @param values each tunable value's, by its path
+   */
+  public record Documentation(
+      String record, ParameterDocs doc, List<Group> groups, Map<String, Value> values) {
+    /**
+     * A record the tunable values are in, below the root.
+     *
+     * @param path where it is, such as {@code gains}
+     * @param record its display name, such as {@code SwerveConfig.Gains}
+     * @param doc its own Javadoc
+     * @param meaning what it is to the record that holds it: that record's {@code @param} for it,
+     *     such as {@code "control gains"}; empty when there's none
+     */
+    public record Group(String path, String record, ParameterDocs doc, String meaning) {}
+
+    /**
+     * A tunable value.
+     *
+     * @param record the display name of the record that declares it, such as {@code
+     *     SwerveConfig.Gains}
+     * @param group the path of that record, the group it's in, such as {@code gains}; empty at the
+     *     root
+     * @param meaning what it means, its {@code @param} there, such as {@code "volts per radian of
+     *     error"}; empty when there's none
+     */
+    public record Value(String record, String group, String meaning) {}
+
+    /**
+     * A tunable value's.
+     *
+     * @throws IllegalArgumentException if no tunable value has this path
+     */
+    public Value value(String path) {
+      Value value = values.get(path);
+      if (value == null) {
+        throw new IllegalArgumentException("no tunable value at " + path);
+      }
+      return value;
+    }
+  }
+
   /** Where a tunable value is: the components leading to it from the root, then its own. */
   private record Slot(
       Knob knob, List<RecordComponent> route, RecordComponent component, @Nullable Unit unit) {}
@@ -92,6 +142,9 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
       Collections.synchronizedMap(new IdentityHashMap<>());
   private final List<ConfigRules> rules = new ArrayList<>();
   private volatile T current;
+
+  /** What the records' Javadoc says, once it's been read; again after a value is chosen. */
+  private volatile @Nullable Documentation documentation;
 
   private LiveConfig(String name, T committed) {
     this.name = name;
@@ -153,6 +206,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
             name + ": the committed " + path + " is outside its tuning limits: " + outside);
       }
       slots.put(path, slot);
+      documentation = null;
     }
     return this;
   }
@@ -190,6 +244,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
           name + ": the committed " + path + " is outside its tuning limits: " + outside);
     }
     slots.put(path, limited);
+    documentation = null;
     return this;
   }
 
@@ -225,32 +280,25 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
 
   /**
    * What a tunable value means: its {@code @param} in the Javadoc of the record that declares it
-   * ({@link ParameterDocs}), such as {@code "volts per radian of error"}; empty when it has none.
+   * ({@link ParameterDocs}), such as {@code "volts per radian of error"}; empty when there's none.
    *
    * @throws IllegalArgumentException if no tunable value has this path
    */
   public String meaning(String path) {
-    String name = slot(path).component().getName();
-    return ParameterDocs.of(recordOf(path)).params().getOrDefault(name, "");
+    return documentation().value(slot(path).knob().path()).meaning();
   }
 
   /**
-   * The records the tunable values are in, below the root, each by its path, in the order the knobs
-   * reach them: {@code {"gains": SwerveConfig.Gains.class}}.
+   * What the records' Javadoc says about this configuration. It's read when the configuration is
+   * published, or when first asked for before that. Safe to call from any thread.
    */
-  public Map<String, Class<? extends Record>> groups() {
-    Map<String, Class<? extends Record>> groups = new LinkedHashMap<>();
-    for (Slot slot : slots.values()) {
-      List<RecordComponent> route = slot.route();
-      StringBuilder path = new StringBuilder();
-      for (int i = 0; i < route.size(); i++) {
-        path.append(i == 0 ? "" : ".").append(route.get(i).getName());
-        // The record at this path declares the next step: its components came from its class.
-        RecordComponent next = i + 1 < route.size() ? route.get(i + 1) : slot.component();
-        groups.putIfAbsent(path.toString(), next.getDeclaringRecord().asSubclass(Record.class));
-      }
+  public Documentation documentation() {
+    Documentation known = documentation;
+    if (known == null) {
+      known = describe();
+      documentation = known;
     }
-    return groups;
+    return known;
   }
 
   /**
@@ -388,13 +436,14 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    */
   @Override
   public void publishTunable(TunableTable table) {
+    Documentation docs = documentation(); // read now, at startup, never in the robot loop
     for (Slot slot : slots.values()) {
       String path = slot.knob().path();
       TunableConfig config = new TunableConfig();
       if (!slot.knob().unit().isEmpty()) {
-        config = config.withProperty("unit", '"' + slot.knob().unit().replace("\"", "") + '"');
+        config = config.withProperty("unit", TEXT.toJson(slot.knob().unit()));
       }
-      String meaning = meaning(path);
+      String meaning = docs.value(path).meaning();
       if (!meaning.isEmpty()) {
         config = config.withProperty("description", TEXT.toJson(meaning));
       }
@@ -425,6 +474,47 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   /** Which tunable value a published tunable is, or null if it isn't one of these. */
   @Nullable String pathOf(TunableBase tunable) {
     return children.get(tunable);
+  }
+
+  /** Reads what the records' Javadoc says, following each value's route as it was found. */
+  private Documentation describe() {
+    Class<? extends Record> root = committed.getClass();
+    Map<String, Documentation.Group> groups = new LinkedHashMap<>();
+    Map<String, Documentation.Value> values = new LinkedHashMap<>();
+    for (Slot slot : slots.values()) {
+      List<RecordComponent> route = slot.route();
+      StringBuilder path = new StringBuilder();
+      for (int i = 0; i < route.size(); i++) {
+        RecordComponent step = route.get(i);
+        path.append(i == 0 ? "" : ".").append(step.getName());
+        // The record at this path declares the next step: its components came from its class.
+        Class<?> record =
+            (i + 1 < route.size() ? route.get(i + 1) : slot.component()).getDeclaringRecord();
+        groups.computeIfAbsent(
+            path.toString(),
+            at ->
+                new Documentation.Group(
+                    at, ParameterDocs.nameOf(record), ParameterDocs.of(record), meaningOf(step)));
+      }
+      values.put(
+          slot.knob().path(),
+          new Documentation.Value(
+              ParameterDocs.nameOf(slot.component().getDeclaringRecord()),
+              path.toString(),
+              meaningOf(slot.component())));
+    }
+    return new Documentation(
+        ParameterDocs.nameOf(root),
+        ParameterDocs.of(root),
+        List.copyOf(groups.values()),
+        Collections.unmodifiableMap(values));
+  }
+
+  /** What a component means: its {@code @param} in the record that declares it, or empty. */
+  private static String meaningOf(RecordComponent component) {
+    return ParameterDocs.of(component.getDeclaringRecord())
+        .params()
+        .getOrDefault(component.getName(), "");
   }
 
   private Slot slot(String path) {

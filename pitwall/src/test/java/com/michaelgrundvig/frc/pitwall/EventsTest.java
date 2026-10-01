@@ -245,7 +245,8 @@ class EventsTest {
         .containsEntry("record", "Fixtures.Machine");
     assertThat(asMap(asMap(document.get("tunables")).get(KP)))
         .containsEntry("record", "Fixtures.Gains")
-        .containsEntry("doc", "volts per meter per second of error");
+        .containsEntry("group", "drive.gains")
+        .containsEntry("meaning", "volts per meter per second of error");
 
     for (int i = 0; i < 500; i++) {
       loop();
@@ -273,6 +274,25 @@ class EventsTest {
   }
 
   /** An event, not a comment line: a browser's EventSource never shows the page a comment. */
+  /**
+   * The documentation section is built when the set of configurations changes, never for a value:
+   * it was read when they were published.
+   */
+  @Test
+  void documentationIsBuiltOnlyForNewConfigurations() {
+    Map<String, Map<String, Object>> before = page.sections();
+
+    tunables.requestChanges(Map.of(KP, 18.5));
+    loop();
+    Map<String, Map<String, Object>> after = page.sections();
+
+    assertThat(after.get("values")).containsEntry(KP, 18.5);
+    assertThat(after.get("tunables"))
+        .as("rebuilt for the change")
+        .isNotSameAs(before.get("tunables"));
+    assertThat(after.get("configs")).isSameAs(before.get("configs"));
+  }
+
   @Test
   void aQuietStreamSaysItsStillThereWithAHeartbeat() throws Exception {
     Listener page = new Listener(start(Duration.ofMillis(50)));

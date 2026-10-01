@@ -52,29 +52,10 @@ public final class Tuning {
    * A live configuration, as the page shows it.
    *
    * @param name what it configures
-   * @param record its root record's name, such as {@code SwerveConfig} ({@link
-   *     ParameterDocs#nameOf})
-   * @param doc its root record's documentation
-   * @param groups the records its values are in, below the root
    * @param values its tunable values
    * @param changes what differs from committed, with the builder calls that commit it
    */
-  public record ConfigView(
-      String name,
-      String record,
-      ParameterDocs doc,
-      List<Group> groups,
-      List<Value> values,
-      List<LiveConfig.Change> changes) {}
-
-  /**
-   * A record a configuration's values are in, below its root.
-   *
-   * @param path where it is in the configuration, such as {@code gains}
-   * @param record its name, such as {@code SwerveConfig.Gains}
-   * @param doc its documentation
-   */
-  public record Group(String path, String record, ParameterDocs doc) {}
+  public record ConfigView(String name, List<Value> values, List<LiveConfig.Change> changes) {}
 
   /**
    * One tunable value of a configuration.
@@ -85,8 +66,11 @@ public final class Tuning {
    * @param limits the range it may be tuned in
    * @param committed its committed value
    * @param current its value now
-   * @param record the name of the record that declares it, such as {@code SwerveConfig.Gains}
-   * @param doc what it means, its {@code @param} there; empty when it has none
+   * @param record the display name of the record that declares it, such as {@code
+   *     SwerveConfig.Gains}
+   * @param group the path of that record in the configuration, such as {@code gains}; empty at the
+   *     root
+   * @param meaning what it means, its {@code @param} there; empty when there's none
    */
   public record Value(
       String path,
@@ -96,7 +80,8 @@ public final class Tuning {
       double committed,
       double current,
       String record,
-      String doc) {}
+      String group,
+      String meaning) {}
 
   /** A request from the page, waiting for the robot loop. */
   private record Request(TuningInputs.Kind kind, CompletableFuture<Outcome> outcome) {}
@@ -309,9 +294,11 @@ public final class Tuning {
     List<ConfigView> views = new ArrayList<>();
     for (LiveConfig<?> config : configs.get()) {
       List<Value> values = new ArrayList<>();
+      LiveConfig.Documentation docs = config.documentation(); // read when it was published
       for (LiveConfig.Knob knob : config.knobs()) {
         String path = paths.pathOf(config, knob.path());
         if (path != null) {
+          LiveConfig.Documentation.Value doc = docs.value(knob.path());
           values.add(
               new Value(
                   path,
@@ -320,26 +307,12 @@ public final class Tuning {
                   knob.limits(),
                   config.committedValue(knob.path()),
                   config.value(knob.path()),
-                  ParameterDocs.nameOf(config.recordOf(knob.path())),
-                  config.meaning(knob.path())));
+                  doc.record(),
+                  doc.group(),
+                  doc.meaning()));
         }
       }
-      List<Group> groups = new ArrayList<>();
-      config
-          .groups()
-          .forEach(
-              (path, record) ->
-                  groups.add(
-                      new Group(path, ParameterDocs.nameOf(record), ParameterDocs.of(record))));
-      Class<?> root = config.committed().getClass();
-      views.add(
-          new ConfigView(
-              config.name(),
-              ParameterDocs.nameOf(root),
-              ParameterDocs.of(root),
-              List.copyOf(groups),
-              List.copyOf(values),
-              config.changes()));
+      views.add(new ConfigView(config.name(), List.copyOf(values), config.changes()));
     }
     return new View(name, enabled, fieldConnected, List.copyOf(views));
   }

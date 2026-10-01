@@ -3,7 +3,6 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
-import com.michaelgrundvig.frc.pitwall.ParameterDocs;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
 import java.util.List;
@@ -60,7 +59,7 @@ class RobotTuningTest {
                 live.name(),
                 knob.path(),
                 component,
-                ParameterDocs.nameOf(live.recordOf(knob.path())))
+                live.documentation().value(knob.path()).record())
             .isNotBlank();
       }
     }

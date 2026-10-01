@@ -8,14 +8,6 @@ import org.junit.jupiter.api.Test;
 
 /** Reads what the documentation processor wrote for the test fixtures as they compiled. */
 class ParameterDocsTest {
-  /**
-   * What a configuration writes that JSON must escape, or that isn't ASCII.
-   *
-   * @param heading the "zero" heading, in ° from C:\field's corner
-   * @param resistance in Ω, or &Omega;
-   */
-  record Symbols(double heading, double resistance) {}
-
   // Their resources are written by hand (src/test/resources), damaged as a jar's might be. They
   // have no Javadoc, so the processor writes nothing over them.
   record Broken(double x) {}
@@ -46,8 +38,16 @@ class ParameterDocsTest {
   /** The page names a record this way to say whose Javadoc to write. */
   @Test
   void aRecordIsNamedAsCodeInItsPackageWritesIt() {
+    record Local(double x) {}
+
     assertThat(ParameterDocs.nameOf(Fixtures.Gains.class)).isEqualTo("Fixtures.Gains");
     assertThat(ParameterDocs.nameOf(String.class)).isEqualTo("String");
+    assertThat(ParameterDocs.nameOf(Local.class))
+        .as("declared in a method: with its class")
+        .isEqualTo("ParameterDocsTest.Local");
+    assertThat(ParameterDocs.nameOf(new Object() {}.getClass()))
+        .as("anonymous: its class's")
+        .isEqualTo("ParameterDocsTest");
   }
 
   @Test
@@ -61,7 +61,7 @@ class ParameterDocsTest {
   /** The processor escapes them for JSON, and they come back as written. */
   @Test
   void quotesBackslashesAndSymbolsComeBackAsWritten() {
-    assertThat(ParameterDocs.of(Symbols.class).params())
+    assertThat(ParameterDocs.of(Fixtures.Symbols.class).params())
         .containsExactly(
             entry("heading", "the \"zero\" heading, in ° from C:\\field's corner"),
             entry("resistance", "in Ω, or Ω"));

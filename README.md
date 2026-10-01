@@ -138,7 +138,8 @@ Also built in:
   and where it goes ([docs/calibration.md](docs/calibration.md)).
 - **Where every value comes from** ([docs/values.md](docs/values.md)): every configuration value,
   whether it's calibrated, characterized, chosen, or as built, where today's number came from, and
-  how to measure it or why it is what it is.
+  how to measure it or why it is what it is. A test keeps the register complete: a new value fails
+  the build until it has a row.
 - **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
   match tab, checked against the code on every build, so no widget sits blank on the field.
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and

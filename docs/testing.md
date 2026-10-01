@@ -121,6 +121,9 @@ checked by the tests `deploy` runs first:
   (`RobotTuningTest`).
 - **Its rules across mechanisms** (`RobotRules`): the committed configuration keeps every one
   (`RobotRulesTest`).
+- **Its register:** every configuration value, and every value a mechanism tunes, has a row in
+  [docs/values.md](values.md) saying what kind it is and where its number came from, and no row
+  names one that's gone (`ValuesRegisterTest`).
 
 A new rule gets a test of its own: a change that breaks it is refused, one that keeps it isn't,
 and changing both sides together works. Pitwall's `ConfigRulesTest` works one through, two arms

@@ -9,9 +9,10 @@
 /**
  * The robot as this page knows it. {@code doc} is its state as sent: the snapshot, with every patch
  * since merged in. {@code stream} names this page's event stream in every request, so the robot
- * knows who's asking (the deadman). {@code lastHeard} is when anything last arrived.
+ * knows who's asking (the deadman). {@code connected} is null until the first answer, or the first
+ * failure; {@code lastHeard} is when anything last arrived (0 for never).
  */
-export const robot = { doc: null, stream: "", connected: false, lastHeard: 0 };
+export const robot = { doc: null, stream: "", connected: null, lastHeard: 0 };
 
 const changeListeners = [];
 const sampleListeners = [];
@@ -190,4 +191,29 @@ export function h(tag, props, ...children) {
 /** The element with this id. */
 export function byId(id) {
   return document.getElementById(id);
+}
+
+/** Tells a screen reader, through a live region: urgently for a lock or a lost link. */
+export function announce(text, urgent = false) {
+  const live = byId(urgent ? "live-urgent" : "live");
+  live.textContent = "";
+  setTimeout(() => (live.textContent = text), 30); // a change, so it's read even when repeated
+}
+
+let toastTimer = null;
+
+/**
+ * Says what became of something done here: always to a screen reader, and on screen for a while
+ * when it went wrong (a refusal of the request, say), since the page then looks as it did before.
+ */
+export function say(text, bad = false) {
+  announce(text, bad);
+  if (!bad) return;
+  const toast = byId("toast");
+  toast.replaceChildren(h("span", null, "✗ " + text),
+    h("button", { type: "button", class: "link", "aria-label": "Close",
+                  onclick: () => (toast.hidden = true) }, "✕"));
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toast.hidden = true), 8000);
 }

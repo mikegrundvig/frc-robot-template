@@ -7,8 +7,6 @@ import { pending, applyEdits, sayResult, sayIn } from "./edits.js";
 const rows = new Map(); // path -> {row, input, revert}
 let shownTunables = "";
 let say;
-let statusText;
-let toggle;
 let banner;
 let valuesBody;
 let applyButton;
@@ -16,9 +14,6 @@ let discardButton;
 let refused;
 
 function mount(view) {
-  statusText = h("span", { class: "muted" });
-  toggle = h("button", { hidden: true, onclick: async () =>
-    sayResult(await send("PATCH", "/api/tuning", { enabled: !robot.doc.tuning.enabled }), say) });
   banner = h("div", { class: "banner", hidden: true },
     "The field system is connected, so tuning is locked off.");
   valuesBody = h("tbody");
@@ -29,7 +24,7 @@ function mount(view) {
   say = sayIn(message);
   refused = h("p", { class: "muted", style: "white-space: pre-line", hidden: true });
   view.append(
-    h("h1", null, "Tune ", statusText, " ", toggle),
+    h("h1", null, "Tune"),
     banner,
     h("table", null,
       h("thead", null, h("tr", null,
@@ -115,11 +110,6 @@ function render(patch, snapshot) {
     buildTable();
   }
   const session = doc.tuning;
-  statusText.textContent = session.enabled ? "Tuning is on" : "Tuning is off";
-  toggle.hidden = false;
-  toggle.disabled = session.fieldConnected;
-  toggle.textContent = session.enabled ? "Switch off" : "Switch on";
-  toggle.className = session.enabled ? "" : "primary";
   banner.hidden = !session.fieldConnected;
   const refusals = session.refused || [];
   refused.hidden = refusals.length === 0;

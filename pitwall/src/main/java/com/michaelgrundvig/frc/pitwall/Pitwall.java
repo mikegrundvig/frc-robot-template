@@ -105,7 +105,7 @@ public final class Pitwall implements AutoCloseable {
               tuned.set(view.hasChanges());
             });
     TunableRegistry.registerBackend("", tee);
-    page = new Page(status, actions, tuning, tee, experiments);
+    page = new Page(status, actions, tuning, tee, experiments, Pitwall::mode);
     // A page whose stream closes can't keep an experiment it started going.
     broadcaster = new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, experiments::lost);
     server = replaying ? null : startPage(page, broadcaster, port);

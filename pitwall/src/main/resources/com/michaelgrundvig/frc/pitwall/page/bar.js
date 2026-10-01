@@ -1,7 +1,8 @@
 // The state bar, on every view: which robot (the simulator or a real one), whether this page hears
 // it and how long since it last did, its mode, whether tuning is on, and how many tuned values
-// aren't committed yet. It answers "can I, and on what?", the question asked most, whose wrong
-// answer costs most (tuning the simulator while the robot sits unchanged).
+// aren't committed yet; in the simulator, whether this page drives it. It answers "can I, and on
+// what?", the question asked most, whose wrong answer costs most (tuning the simulator while the
+// robot sits unchanged).
 
 import { robot, onChange, onConnection, send, h, byId, say, announce } from "./core.js";
 
@@ -11,6 +12,9 @@ let code;
 let connection;
 let since;
 let mode;
+let driving;
+let notDriving = false;
+let title = "Pitwall";
 let tuningPill;
 let tuningButton;
 let uncommitted;
@@ -30,6 +34,7 @@ export function mountBar() {
   since = h("span");
   connection = h("span", { class: "conn" }, "Connecting to the robot…");
   mode = h("a", { class: "mode", hidden: true });
+  driving = h("a", { href: "#sim", class: "pill driving", hidden: true });
   tuningButton = h("button", { type: "button", onclick: switchTuning });
   tuningPill = h("span", { class: "pill", hidden: true });
   uncommitted = h("a", { href: "#changes", class: "uncommitted", hidden: true });
@@ -39,7 +44,7 @@ export function mountBar() {
     h("span", { class: "brand" }, "Pitwall", name, badge),
     code,
     h("span", { class: "spacer" }),
-    connection, mode, tuningPill, uncommitted, themeButton);
+    connection, mode, driving, tuningPill, uncommitted, themeButton);
   bandSince = h("span");
   band = byId("band");
   onChange(render);
@@ -67,8 +72,10 @@ function render(patch, snapshot) {
     // In the simulator, Sim is the Driver Station: the mode is a way there.
     if (simulated) mode.setAttribute("href", "#sim"); else mode.removeAttribute("href");
     mode.title = simulated ? "The Driver Station's mode: change it in Sim" : "The Driver Station's mode";
-    document.title = "Pitwall · " + doc.robot.name + " · " + (simulated ? "SIM" : "ROBOT");
+    title = "Pitwall · " + doc.robot.name + " · " + (simulated ? "SIM" : "ROBOT");
+    showTitle();
   }
+  if (snapshot || "robot" in patch || "simulator" in patch) showEnabled();
   if (snapshot || "tuning" in patch) {
     renderTuning();
     renderBand();
@@ -80,6 +87,41 @@ function render(patch, snapshot) {
     uncommitted.title = count + (count === 1 ? " tuned value differs" : " tuned values differ")
         + " from the committed configuration: see Changes";
   }
+}
+
+/**
+ * Says in the bar whether this page drives the simulator: "⌨ Driving", or why it isn't now. While
+ * the tab is hidden, its title says so too: that's all of the page anyone sees then.
+ *
+ * @param text what to say; null when this page doesn't drive
+ * @param live whether it drives right now
+ * @param hidden whether it would, but the tab is hidden
+ */
+export function showDriving(text, live, hidden) {
+  const className = "pill driving " + (live ? "on" : "locked");
+  if (driving.textContent !== (text || "") || driving.className !== className) {
+    driving.hidden = !text;
+    driving.textContent = text || "";
+    driving.className = className;
+    driving.title = "Driving the simulator from this page: see Sim";
+  }
+  notDriving = Boolean(text) && hidden;
+  showTitle();
+}
+
+/**
+ * In the simulator an enabled robot's mode is filled in, unmistakable from across the room; never
+ * while the robot isn't heard, when it may be anything.
+ */
+function showEnabled() {
+  const doc = robot.doc;
+  mode.classList.toggle("enabled", Boolean(robot.connected && doc && doc.robot.simulated
+      && doc.simulator && doc.simulator.enabled));
+}
+
+function showTitle() {
+  const next = (notDriving ? "⏸ Not driving · " : "") + title;
+  if (document.title !== next) document.title = next;
 }
 
 function renderTuning() {
@@ -142,7 +184,13 @@ export function tuningOffBanner(what) {
 function renderConnection(connected) {
   document.body.classList.toggle("stale", !connected);
   tuningButton.disabled = !connected;
-  if (connected) {
+  showEnabled();
+  if (robot.stopped) {
+    // Stopped from this page: the program ended on purpose, so it isn't a lost link.
+    connection.className = "conn stopped";
+    connection.replaceChildren(connected ? "■ Stopping…" : "■ Stopped");
+    if (!connected) announce("The simulator stopped.", true);
+  } else if (connected) {
     connection.className = "conn up";
     // The robot program answers before its loop first runs: until then, there's nothing to show.
     connection.replaceChildren(robot.doc ? "● Connected" : "● Connected, waiting for the robot loop");
@@ -164,15 +212,25 @@ let fieldShown = false;
  */
 function renderBand() {
   const field = Boolean(robot.connected && robot.doc && robot.doc.tuning.fieldConnected);
-  if (robot.connected === false) {
+  if (robot.connected === false && robot.stopped) {
+    band.className = "band stopped";
+    band.replaceChildren(h("b", null, "■ Stopped"), h("span", { class: "sub" },
+      "This page stopped the simulator. Start it again (./gradlew run), and this page reconnects "
+        + "by itself."));
+    band.hidden = false;
+  } else if (robot.connected === false) {
     band.className = "band down";
     band.replaceChildren(h("b", null, "✗ Not connected"), h("span", { class: "sub" }, bandSince));
     band.hidden = false;
   } else if (field) {
     band.className = "band field";
+    // In the simulator, Sim is the field: the way out is its FMS attached switch.
+    const simulated = robot.doc.robot.simulated;
     band.replaceChildren(h("b", null, "🔒 FIELD CONNECTED"), h("span", { class: "sub" },
       "Locked: every value is back to committed, and what was tuned was printed to the log. "
-        + "Tuning, actions, and experiments are off until the field disconnects."));
+        + "Tuning, actions, and experiments are off until the field disconnects"
+        + (simulated ? ": in the simulator, switch off " : "."),
+      simulated && h("a", { href: "#sim" }, "FMS attached in Sim"), simulated && "."));
     band.hidden = false;
   } else {
     band.hidden = true;

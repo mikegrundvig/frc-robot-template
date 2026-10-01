@@ -49,22 +49,32 @@ final class CameraSource {
       if (!name.endsWith("-video-index0") || cameras.size() >= MAX_CAMERAS) {
         continue;
       }
-      String path = BY_PATH + "/" + name;
+      cameras.add(camera(BY_PATH + "/" + name));
+    }
+    return cameras;
+  }
+
+  /**
+   * A camera by its stable path, with what its USB device says; just its path when that can't be
+   * followed (unplugged as it was read, or not a USB device), since it's plugged in all the same.
+   */
+  private UsbCamera camera(String path) {
+    try {
       String node = host.resolve(path);
       String video = node.substring(node.lastIndexOf('/') + 1);
       // The video device's USB interface (7-1:1.0), whose parent is the USB device (7-1).
       String usbInterface = host.resolve(VIDEO + "/" + video + "/device");
       String device = usbInterface.substring(0, usbInterface.lastIndexOf('/'));
-      cameras.add(
-          new UsbCamera(
-              path,
-              device.substring(device.lastIndexOf('/') + 1),
-              host.line(device + "/speed").map(CameraSource::speed).orElse(0.0),
-              host.line(device + "/idVendor").orElse(""),
-              host.line(device + "/idProduct").orElse(""),
-              host.line(device + "/product").orElse("")));
+      return new UsbCamera(
+          path,
+          device.substring(device.lastIndexOf('/') + 1),
+          host.line(device + "/speed").map(CameraSource::speed).orElse(0.0),
+          host.line(device + "/idVendor").orElse(""),
+          host.line(device + "/idProduct").orElse(""),
+          host.line(device + "/product").orElse(""));
+    } catch (IOException e) {
+      return new UsbCamera(path, "", 0, "", "", "");
     }
-    return cameras;
   }
 
   private static double speed(String mbps) {

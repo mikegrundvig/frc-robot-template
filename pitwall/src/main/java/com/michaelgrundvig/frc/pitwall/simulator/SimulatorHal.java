@@ -15,12 +15,15 @@ public interface SimulatorHal {
    */
   void driverStation(DriverStationState state);
 
+  /** Sets the match time alone, in seconds left; -1 for none. Announced like the rest. */
+  void matchTime(double seconds);
+
   /** Sets a joystick's input; the robot program sees it once it's announced ({@link #announce}). */
   void joystick(int port, JoystickInput input);
 
   /**
    * Tells the robot program the Driver Station has new data, as a Driver Station's packet does: it
-   * sees the changes at once.
+   * sees the changes as its next loop begins, not partway through this one.
    */
   void announce();
 
@@ -35,6 +38,10 @@ public interface SimulatorHal {
   /** Runs the simulator's clock again. */
   void resume();
 
-  /** While paused, moves the clock on to the robot loop's next loop, which then runs. */
+  /**
+   * While paused, moves the clock on to the next alarm any notifier waits for, which then fires.
+   * Between loops that's the robot loop's own, so its next loop runs; a team's own notifier due
+   * sooner would fire instead.
+   */
   void step();
 }

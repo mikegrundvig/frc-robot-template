@@ -109,7 +109,8 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code POST /api/simulator/stop}: ends the program, as closing the GUI's window did.
  *   <li>{@code PUT /api/simulator/joysticks}: {@code {"0": {"axes": [...], "buttons": [...],
  *       "povs": [...]}, "1": null}}, each joystick's whole input (null lets it go), at most once a
- *       frame and again every 200 ms while anything is pressed; 204 at once.
+ *       frame and again every 200 ms while anything is pressed, naming the page's event stream; 204
+ *       at once.
  *   <li>{@code POST /api/simulator/faults}: {@code {"component", "fault", "values": {name:
  *       number}}} applies a fault, {@code {"component", "fault", "undo": true}} undoes a lasting
  *       one. {@code DELETE} it to undo every lasting fault.
@@ -330,7 +331,10 @@ public final class PitwallServer implements AutoCloseable {
     private static final Set<RobotMode> MODES =
         Set.of(RobotMode.AUTONOMOUS, RobotMode.TELEOPERATED, RobotMode.UTILITY);
 
-    /** The longest match time the page may set: a match is 2 min 30 s. */
+    /**
+     * The longest match time the page may set: ten minutes, room for any match period (a match is 2
+     * min 30 s) and a long practice run.
+     */
     private static final double MAX_MATCH_SECONDS = 600;
 
     private static final Map<String, List<String>> METHODS =
@@ -719,6 +723,9 @@ public final class PitwallServer implements AutoCloseable {
      */
     private Map<String, Map<String, Object>> simulatorView() {
       Simulator simulator = simulator();
+      if (simulator.isPaused()) {
+        return simulator.lastView(); // no loop is coming to read it
+      }
       try {
         return simulator.requestView().get(wait.toMillis(), TimeUnit.MILLISECONDS);
       } catch (TimeoutException | ExecutionException e) {
@@ -793,21 +800,33 @@ public final class PitwallServer implements AutoCloseable {
           change = before == null ? next : station -> next.apply(before.apply(station));
         }
       }
-      CompletableFuture<Outcome> pending = null;
+      List<CompletableFuture<Outcome>> pending = new ArrayList<>();
       if (Boolean.FALSE.equals(paused)) {
-        pending = simulator.resume(); // now: a paused clock runs no loop to do it
+        pending.add(simulator.resume()); // now: a paused clock runs no loop to do it
       }
       if (change != null) {
-        pending = simulator.requestDriverStation(change);
+        pending.add(simulator.requestDriverStation(change));
       }
       if (Boolean.TRUE.equals(paused)) {
-        pending = simulator.requestPause(); // once the rest is applied, in the same loop
+        pending.add(simulator.requestPause()); // once the rest is applied, in the same loop
       }
-      if (pending == null) {
+      if (pending.isEmpty()) {
         sendJson(exchange, 200, simulatorState()); // an empty patch changes nothing
         return;
       }
-      answer(exchange, pending, this::simulatorState);
+      answer(exchange, all(pending), this::simulatorState);
+    }
+
+    /** Done once every one is, with the first that wasn't applied, or applied. */
+    private static CompletableFuture<Outcome> all(List<CompletableFuture<Outcome>> pending) {
+      return CompletableFuture.allOf(pending.toArray(CompletableFuture<?>[]::new))
+          .thenApply(
+              done ->
+                  pending.stream()
+                      .map(CompletableFuture::join)
+                      .filter(outcome -> outcome.result() != Outcome.Result.APPLIED)
+                      .findFirst()
+                      .orElse(Outcome.applied()));
     }
 
     /** Says it's stopping, then has the loop stop the program: the answer goes out first. */
@@ -835,6 +854,14 @@ public final class PitwallServer implements AutoCloseable {
         }
       }
       String stream = exchange.getRequestHeaders().getFirst(STREAM);
+      if (stream == null || stream.isBlank()) {
+        throw new Problem(
+            400,
+            "No page to drive it",
+            "Drive from Pitwall's page: a joystick's input names the page's event stream ("
+                + STREAM
+                + "), and the joystick is let go when that page goes");
+      }
       inputs.forEach((port, input) -> simulator.joystick(port, input, stream));
       send(exchange, 204, "text/plain", "");
     }
@@ -907,16 +934,19 @@ public final class PitwallServer implements AutoCloseable {
       return bool;
     }
 
-    /** One of an enum's names, among those allowed. */
+    /** One of an enum's names, among those allowed: not text is 400, a name not allowed 422. */
     private static <E extends Enum<E>> E named(
         String name, @Nullable Object value, Class<E> type, Set<E> allowed) {
+      if (!(value instanceof String given)) {
+        throw new Problem(400, "Not a name", name + " is a name, such as " + type.getSimpleName());
+      }
       for (E each : allowed) {
-        if (each.name().equals(value)) {
+        if (each.name().equals(given)) {
           return each;
         }
       }
       throw new Problem(
-          400,
+          422,
           "Not a " + name,
           name
               + " is one of "
@@ -926,10 +956,12 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     private static double matchTime(Object value) {
-      if (!(value instanceof Number number)
-          || !(number.doubleValue() >= 0 && number.doubleValue() <= MAX_MATCH_SECONDS)) {
+      if (!(value instanceof Number number)) {
+        throw new Problem(400, "Not a number", "matchTime is a number of seconds, or null");
+      }
+      if (!(number.doubleValue() >= 0 && number.doubleValue() <= MAX_MATCH_SECONDS)) {
         throw new Problem(
-            400,
+            422,
             "Not a match time",
             "matchTime is seconds from 0 to " + MAX_MATCH_SECONDS + ", or null for none");
       }
@@ -969,14 +1001,32 @@ public final class PitwallServer implements AutoCloseable {
         buttons.add(pressed);
       }
       for (Object pov : list(input.get("povs"))) {
-        if (!(pov instanceof Number number) || number.doubleValue() != number.intValue()) {
-          throw new Problem(400, "Not a joystick's input", "Each POV is a whole number of degrees");
+        if (!(pov instanceof Number number)) {
+          throw new Problem(400, "Not a joystick's input", "Each POV is a number of degrees");
+        }
+        if (number.doubleValue() != number.intValue()) {
+          throw new Problem(
+              422, "Not a POV", "Joystick " + port + ": a POV is a whole number of degrees");
         }
         povs.add(number.intValue());
       }
+      if (axes.size() > JoystickInput.MAX_AXES
+          || buttons.size() > JoystickInput.MAX_BUTTONS
+          || povs.size() > JoystickInput.MAX_POVS) {
+        throw new Problem(
+            400,
+            "Not a joystick's input",
+            "A joystick has at most "
+                + JoystickInput.MAX_AXES
+                + " axes, "
+                + JoystickInput.MAX_BUTTONS
+                + " buttons, and "
+                + JoystickInput.MAX_POVS
+                + " POVs");
+      }
       String why = JoystickInput.whyNot(axes, buttons, povs);
       if (why != null) {
-        throw new Problem(400, "Not a joystick's input", "Joystick " + port + ": " + why);
+        throw new Problem(422, "Out of range", "Joystick " + port + ": " + why);
       }
       return new JoystickInput(axes, buttons, povs);
     }

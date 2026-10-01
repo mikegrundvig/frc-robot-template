@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.internal.DriverStationBackend;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.HAL;
 import org.wpilib.hardware.hal.RobotMode;
@@ -183,12 +184,15 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   }
 
   /**
-   * One robot loop: the clock moves a loop's time, then the robot runs {@link Robot#loop}, then
-   * WPILib's tunables update, as WPILib's own loop does after the robot's.
+   * One robot loop, as WPILib's runs it: the clock moves a loop's time, WPILib reads the Driver
+   * Station's newest data (which is how the simulator's controls on the Pitwall page reach the
+   * robot, a loop after they're asked), then the robot runs {@link Robot#loop}, then WPILib's
+   * tunables update.
    */
   public void loop() {
     RobotContainer robot = robot();
     stepClock();
+    DriverStationBackend.refreshData();
     Robot.loop(pitwall(), robot, scheduler(), Objects.requireNonNull(loopHealth));
     TunableRegistry.update();
   }

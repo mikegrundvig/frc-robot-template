@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -144,7 +145,8 @@ class PitwallRobotTest {
 
   /**
    * On a robot, Pitwall has no simulator controls: nothing answers at their routes, so nothing can
-   * write the Driver Station's state. The Driver Station is the robot's safety switch.
+   * write the Driver Station's state, and the page's event stream has none of their sections. The
+   * Driver Station is the robot's safety switch.
    */
   @Test
   void aRealRobotHasNoSimulatorControls() throws Exception {
@@ -154,12 +156,60 @@ class PitwallRobotTest {
       pitwall = Pitwall.start(Robots.SIM.name(), 0);
 
       var enable = patch("/api/simulator", "{\"enabled\": true}");
+      for (int i = 0; i < 5; i++) {
+        pitwall.periodic(); // loops that would apply it, if anything had queued it
+        DriverStationSim.notifyNewData();
+      }
+      String snapshot = snapshot();
 
       assertThat(pitwall.simulator()).isEmpty();
       assertThat(enable.statusCode()).isEqualTo(404);
       assertThat(DriverStationSim.getEnabled()).isFalse();
+      assertThat(snapshot)
+          .contains("\"robot\":{")
+          .doesNotContain("\"simulator\":{")
+          .doesNotContain("\"components\":{")
+          .doesNotContain("\"scenarios\":{");
     } finally {
       SimHooks.setHALRuntimeType(HALUtil.RUNTIME_SIMULATION);
+    }
+  }
+
+  /** In the simulator, the same page has them. */
+  @Test
+  void theSimulatorHasSimulatorControls() throws Exception {
+    assertThat(pitwall.simulator()).isPresent();
+    assertThat(snapshot()).contains("\"simulator\":{").contains("\"components\":{");
+  }
+
+  /** The page's event stream's first event, its snapshot, as the robot loop sends it. */
+  private String snapshot() throws Exception {
+    try (HttpClient client = HttpClient.newHttpClient()) {
+      var opened =
+          client.sendAsync(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + pitwall.port() + "/api/events"))
+                  .build(),
+              HttpResponse.BodyHandlers.ofLines());
+      List<String> lines = new CopyOnWriteArrayList<>();
+      Thread reader =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      opened.get().body().forEach(lines::add);
+                    } catch (Exception closed) {
+                      // The test is over.
+                    }
+                  });
+      long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+      while (lines.stream().noneMatch(line -> line.startsWith("data: "))
+          && System.nanoTime() < end) {
+        pitwall.periodic();
+        Thread.sleep(5); // waiting on the network, not the robot's clock
+      }
+      reader.interrupt();
+      return lines.stream().filter(line -> line.startsWith("data: ")).findFirst().orElseThrow();
     }
   }
 

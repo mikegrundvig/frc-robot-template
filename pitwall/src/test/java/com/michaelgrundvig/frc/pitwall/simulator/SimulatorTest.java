@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.pitwall.simulator;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.Outcome;
@@ -50,8 +51,14 @@ class SimulatorTest {
   private final Simulator simulator =
       new Simulator(hal, clock::get, components, stops::incrementAndGet, logged::add);
 
-  /** One robot loop: the clock moves a loop's time, then the simulator's part of it. */
+  /**
+   * One robot loop, if one comes: the clock moves a loop's time, then the simulator's part of it. A
+   * paused clock runs none, until a step lets one through.
+   */
   private void loop() {
+    if (!hal.runsLoop()) {
+      return;
+    }
     clock.addAndGet(LOOP_NANOS);
     simulator.periodic();
   }
@@ -121,6 +128,8 @@ class SimulatorTest {
 
     loops(1000);
     assertThat(hal.driverStation().matchTime()).as("never below zero").isZero();
+    assertThat(hal.writes()).as("counting writes the match time alone").isEqualTo(2);
+    assertThat(hal.matchTimes()).isPositive();
   }
 
   @Test
@@ -221,18 +230,108 @@ class SimulatorTest {
         .isCompletedWithValue(
             new Outcome(
                 Outcome.Result.LOCKED, "Step runs one loop of a paused simulator: pause it"));
+    simulator.requestPause();
+    loop();
+    CompletableFuture<Outcome> enabled =
+        simulator.requestDriverStation(state -> state.withEnabled(true));
+    loops(10);
+    assertThat(enabled).as("paused: no loop comes").isNotDone();
 
-    hal.pause();
     CompletableFuture<Outcome> stepped = simulator.step();
     assertThat(hal.steps()).isEqualTo(1);
     assertThat(stepped).as("done once the loop has run").isNotDone();
-    loop();
+    loops(10);
     assertThat(stepped).isCompletedWithValue(Outcome.applied());
+    assertThat(enabled).as("asked while paused, applied by the step").isCompleted();
+    assertThat(hal.isPaused()).as("one loop, then paused still").isTrue();
 
     CompletableFuture<Outcome> resumed = simulator.resume();
     assertThat(hal.isPaused()).isFalse();
     loop();
     assertThat(resumed).isCompleted();
+  }
+
+  /**
+   * A pause asked while paused is answered at once: it would wait for a loop that never comes, and
+   * then pause again right after a resume.
+   */
+  @Test
+  void aPauseAskedWhilePausedIsAnsweredAtOnceAndAResumeHolds() {
+    simulator.requestPause();
+    loop();
+    assertThat(hal.isPaused()).isTrue();
+
+    CompletableFuture<Outcome> again = simulator.requestPause(); // a second page, a double click
+    CompletableFuture<Outcome> resumed = simulator.resume();
+    loops(3);
+
+    assertThat(again).isCompletedWithValue(Outcome.applied());
+    assertThat(resumed).isCompletedWithValue(Outcome.applied());
+    assertThat(hal.isPaused()).as("the resume holds").isFalse();
+  }
+
+  /** A resume drops a pause asked before it that the loop hasn't got to yet. */
+  @Test
+  void aResumeDropsAPauseAskedBeforeIt() {
+    CompletableFuture<Outcome> paused = simulator.requestPause();
+    simulator.resume();
+    loops(3);
+
+    assertThat(hal.isPaused()).isFalse();
+    assertThat(paused)
+        .isCompletedWithValue(
+            new Outcome(Outcome.Result.LOCKED, "Resumed since it was asked: not paused"));
+  }
+
+  /**
+   * Stop asked while the loop is between its check for a Stop and its pause (the server's thread
+   * can land there): the loop doesn't pause, so the next loop runs, and stops the program.
+   */
+  @Test
+  void aStopAskedMidLoopIsntLostToAPause() {
+    components.add(
+        Component.of(
+            "Server",
+            "a stand-in",
+            Fault.event("Stops")
+                .does("Asks to stop partway through the loop, as the server's thread could.")
+                .apply(values -> simulator.stop())
+                .undoneBy("Nothing.")
+                .build()));
+    simulator.requestFault(Setting.of("Server", "Stops"));
+    simulator.requestPause();
+    loop();
+
+    assertThat(hal.isPaused()).as("a Stop is due: no pause").isFalse();
+    assertThat(stops).hasValue(0);
+    loop();
+    assertThat(stops).hasValue(1);
+  }
+
+  /** Something in the loop that throws leaves no request waiting for an answer. */
+  @Test
+  void aLoopThatThrowsStillAnswersEveryRequest() {
+    components.add(
+        Component.of(
+            "Broken",
+            "a stand-in",
+            Fault.lasting("Throws")
+                .does("Can't say whether it's on.")
+                .isOn(
+                    () -> {
+                      throw new IllegalStateException("broken");
+                    })
+                .apply(values -> {})
+                .undo("Nothing.", () -> {})
+                .build()));
+    CompletableFuture<Outcome> enabled =
+        simulator.requestDriverStation(state -> state.withEnabled(true));
+    CompletableFuture<Map<String, Map<String, Object>>> view = simulator.requestView();
+
+    assertThatThrownBy(this::loop).hasMessage("broken");
+
+    assertThat(enabled).isCompletedWithValue(Outcome.applied());
+    assertThat(view).isCompletedExceptionally();
   }
 
   /** Stop asks the loop to end the program, resuming a paused clock so a loop runs to do it. */

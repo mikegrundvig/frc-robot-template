@@ -44,6 +44,7 @@ class ReplayEndToEndTest {
       List.of(
           "Session/Gain",
           "Session/Operator",
+          "Session/UtilityInits",
           "Session/SteerKp",
           "Session/Action",
           "Session/Experiment",
@@ -78,6 +79,9 @@ class ReplayEndToEndTest {
     // The session happened: each change took effect while recording.
     assertThat(values(original, "Session/Gain")).contains(1.0, 2.5);
     assertThat(values(original, "Session/Operator")).as("the page's stick").contains(0.0, 0.5);
+    assertThat(values(original, "Session/UtilityInits"))
+        .as("enabled in utility once")
+        .contains(1.0);
     assertThat(values(original, "Session/SteerKp")).contains(16.0, 18.5);
     assertThat(values(original, "Session/Action")).contains("READY", "RUNNING", "ENDED");
     assertThat(values(original, "Session/Experiment")).contains("NONE", "RUNNING", "ENDED");

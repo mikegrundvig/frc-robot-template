@@ -24,7 +24,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
 ./gradlew run                                # the simulator, enabled on a start and drivable from the keyboard
-./gradlew run -Pgui=false                    # the simulator without WPILib's GUI: Pitwall's page drives it
+./gradlew run -Pgui=false                    # the simulator without WPILib's GUI, disabled (docs/simulator.md)
 ./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
@@ -74,11 +74,12 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to put a run's gains back and the builder calls that
     commit them. A gain changes only the way any value does, through the checks below.
-  - **The simulator's controls** (in the simulator only; a robot has none): the Driver Station
-    (enable, the mode, the alliance station, the field system, the match time), driving from the
-    keyboard or a gamepad, pausing and stepping, Stop, and failing the simulated robot's parts
-    while it runs, which WPILib's simulator GUI can't do: a camera unplugged or knocked, the gyro
-    frozen, a module's encoder gone stale, the robot hit. See [docs/simulator.md](docs/simulator.md).
+  - **The simulator's controls** (in the simulator only; a robot has none), so far the server
+    side, an API the page's Sim view (coming) will drive: the Driver Station (enable, the mode,
+    the alliance station, the field system, the match time), joysticks from the keyboard or a
+    gamepad, pausing and stepping, Stop, and failing the simulated robot's parts while it runs,
+    which WPILib's simulator GUI can't do: a camera unplugged or knocked, the gyro frozen, a
+    module's encoder gone stale, the robot hit. See [docs/simulator.md](docs/simulator.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee

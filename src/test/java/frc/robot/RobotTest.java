@@ -114,6 +114,44 @@ class RobotTest {
     }
   }
 
+  /** Asked for by name, a scenario stops a program that has nothing to apply it through. */
+  @Test
+  void aScenarioWithoutTheSimulatorsControlsStopsTheProgram() {
+    IllegalStateException refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> Robot.startScenario(Scenarios.named("collision"), null, null));
+
+    assertTrue(
+        String.valueOf(refused.getMessage()).contains("needs the simulated world"),
+        refused.getMessage());
+    assertNull(Robot.startScenario(null, null, null), "none asked for: nothing to do");
+  }
+
+  /**
+   * Started as ./gradlew run starts it: its sensor faults now, on a season-worn robot, even where
+   * one leaves a part as it was built; what happens in it, later.
+   */
+  @Test
+  void aScenarioStartsWithItsSensorFaults() {
+    try (SimulatedWorld world =
+        new SimulatedWorld(
+            RobotSim.FIELD,
+            Robots.SIM.drivetrain(),
+            Robots.SIM.body(),
+            List.of(),
+            SensorErrors.TYPICAL)) {
+      Components components = new Components(said -> {});
+      world.addTo(components);
+
+      List<Setting> events =
+          Robot.startScenario(Scenarios.named("exact-sensors"), world, components);
+
+      assertEquals(List.of(), events);
+      assertTrue(components.on().contains("Gyro: Errors"), components.on().toString());
+    }
+  }
+
   /** A scenario asked for by name that can't happen stops the program, saying why. */
   @Test
   void aScenarioThatCantHappenStopsTheProgram() {

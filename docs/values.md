@@ -139,7 +139,7 @@ The values that move the robot most, and are least known today:
    exponent decide how far the estimate trusts every image, and the gate decides from them which
    images are wrong. Today's are the 2026 code's, for a different camera and coprocessor.
 3. **Tread friction and the center of gravity's height**
-   ([friction](characterization.md#tread-friction), [CG](characterization.md#a-robots-mass-center-of-gravity-and-inertia)).
+   ([friction](characterization.md#tread-friction), [CG](calibration.md#the-robots-mass-center-of-gravity-and-inertia)).
    Together they set where the wheels slip, so the drive's current limit, and both are guesses.
 4. **Gyro drift and noise** ([procedure](characterization.md#gyro-drift-and-noise)). The gyro owns
    the heading; the estimator should be exactly as sure of it as it deserves.
@@ -168,9 +168,9 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 | `frameWidth` | as built | 27.5 in | rules (2026, as `frameLength`) | As `frameLength`, side to side. |
 | `height` | as built | 30 in | guess (typical) | From CAD: the tallest point in the starting configuration. |
 | `bumperThickness` | as built | 4 in | rules (2026: R403's most) | From the outside of the frame to the outside of the bumper, cover on. |
-| `mass` | calibrated | 149.5 lb | rules (2026: 135 lb with bumpers, R408, and a 14.5 lb battery, R601) | [Weigh it](characterization.md#a-robots-mass-center-of-gravity-and-inertia), bumpers and battery on; again after big changes. |
-| `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](characterization.md#a-robots-mass-center-of-gravity-and-inertia) (M5). Nothing reads it yet; a simulator that models traction will. |
-| `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](characterization.md#a-robots-mass-center-of-gravity-and-inertia) (M3). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
+| `mass` | calibrated | 149.5 lb | rules (2026: 135 lb with bumpers, R408, and a 14.5 lb battery, R601) | [Weigh it](calibration.md#the-robots-mass-center-of-gravity-and-inertia), bumpers and battery on; again after big changes. |
+| `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia) (M5). Nothing reads it yet; a simulator that models traction will. |
+| `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](calibration.md#the-robots-mass-center-of-gravity-and-inertia) (M3). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
 
 ## The drivetrain
 
@@ -332,7 +332,7 @@ off by half of it is too unsure, and the cameras pull it around.
 | `residualScale` | chosen | 1 | guess (all of it) | Why: wheels that disagree with each other put the robot's travel in doubt by about as much. Lower it if the uncertainty balloons in clean driving (`Localization/ResidualMeters` high, the cameras finding little to correct). |
 | `tractionLimitedSlipFraction` | chosen | 0.25 | guess | Why: wheels at the edge of their grip slip some of the time. Check how far the cameras correct the estimate after stretches of `Localization/TractionLimited`. |
 | `tiltStartDegrees` | chosen | 5° | guess | Why: a small tilt is carpet and bumpers, not wheels off the floor. Check: `Localization/TiltDegrees` stays under it in flat driving. |
-| `tiltZeroDegrees` | chosen | 25° | top team (6328) | Why: by this tilt, some wheels are off the floor. Check with a [terrain crossing](characterization.md#terrain-crossings). |
+| `tiltZeroDegrees` | chosen | 25° | top team (6328) | Why: by this tilt, some wheels are off the floor. Check with a [terrain crossing](calibration.md#a-terrain-crossing). |
 | `slipCorrelationSeconds` | chosen | 0.5 s | guess | Why: a slip (a push, a launch) keeps its direction for a while, so its errors add up rather than average out. Check: after a push or a launch, the cameras' correction should fall inside the uncertainty the estimate claimed (`PositionStdDevMeters`). Lengthen it if corrections often land outside; shorten it if they're always far inside. |
 | `collisionStdDevMeters` | chosen | 0.25 m | guess | Why: a hit moves the robot further than its wheels see. Check: after logged hits (`Localization/Collision`), how far the cameras moved the estimate; it should cover the largest. |
 | `collisionWindowSeconds` | chosen | 0.25 s | guess | Why: one hit jolts for several loops; count it once. Check: one hit's jolts span less than it. |
@@ -387,7 +387,7 @@ for a real fault.
 
 `frc.robot.lib.localization.TerrainCrossing.Settings`: what counts as climbing, level, and one
 feature; the robot uses `Settings.DEFAULTS`. Check them with a
-[terrain crossing](characterization.md#terrain-crossings) (M7), and set them again at kickoff from
+[terrain crossing](calibration.md#a-terrain-crossing) (M7), and set them again at kickoff from
 the new field's ramps.
 
 | Value | Kind | Today | Source | How to measure it, or why |
@@ -510,8 +510,8 @@ code's choices, explained beside them.
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
 | `ModuleIOSim`: drive and steering inertia | 0.025 and 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's simulation defaults, as AdvantageKit's template uses) | [Feedforward](characterization.md#feedforward): SysId on one module (M4). |
 | `Localization`: a jolt that's a collision | 20 m/s² | chosen | top team (6800) | Why: hard driving stays near 1 g. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
-| `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [Terrain crossings](characterization.md#terrain-crossings) (M7): bumpers, suspension, and the IMU's mount. |
-| `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [Terrain crossings](characterization.md#terrain-crossings) (M7). |
+| `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing) (M7): bumpers, suspension, and the IMU's mount. |
+| `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing) (M7). |
 | `Drive`: a wheel this far short of its speed is at its grip's edge | 0.5 m/s | chosen | unknown (the idea: 581 and 1678) | Why: a wheel that can't keep up is slipping or stalled. Check: `Localization/TractionLimited` turns on in pushing matches, and not in clean driving. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |

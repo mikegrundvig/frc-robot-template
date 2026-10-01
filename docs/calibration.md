@@ -16,6 +16,12 @@ Run them in this order, since each leans on the ones before it:
 Run every procedure in utility mode, enabled, with the robot on the floor. The page refuses to run
 them on the field.
 
+Two more have nothing to run on the page: [the robot's mass, center of gravity, and
+inertia](#the-robots-mass-center-of-gravity-and-inertia), measured by hand, and [a terrain
+crossing](#a-terrain-crossing), read from a log. Put what they find in `Robots.java` the same way,
+with the date: `.mass(Pounds.of(131.2)) // measured 2027-02-14` ([docs/values.md](values.md) says
+how every value is measured, and where each belongs).
+
 ## The IMU reads level
 
 *Check the IMU reads level (2 s, on a level floor).*
@@ -121,6 +127,75 @@ turns) puts every camera's tags off as if each had turned, until the cameras cor
 several cameras out of calibration at once more likely means that than several knocks. A badly
 knocked camera also pulls the pose a little, so a camera beside it can read a few centimeters off
 too: recalibrate the one farthest off first, and the other comes back with it.
+
+## The robot's mass, center of gravity, and inertia
+
+*By hand, with nothing to run.*
+
+These set the robot's body: `Body.mass`, `Body.cgHeight`, and `Body.yawMomentOfInertia`. Measure
+with the bumpers and battery on.
+
+**Mass:** two bathroom scales, one under the front wheels and one under the back (a board across
+each pair). The mass is the sum. The two readings also say how far forward the center of gravity
+is.
+
+**The center of gravity's height** (M3), from CAD if the CAD is complete, or by tilting:
+
+1. With the robot level, front wheels on a scale and the back on the floor at the same height (a
+   board as thick as the scale), read the scale: `F₀`. Measure `L`, the distance between the front
+   and back axles, and weigh the robot, `W`.
+2. Raise the back wheels by a block, about 15 cm, so the robot tilts by `θ`, where `sin θ` is the
+   block's height over `L`. Stop the wheels from rolling. Read the scale again: `F`.
+3. The center of gravity's height above the axles is `L × (F - F₀) / (W × tan θ)`. Add the wheel
+   radius for its height above the floor.
+
+A bigger tilt gives a bigger change to read; check that nothing on the robot moves or hangs as it
+tilts. With the tread's friction ([characterization](characterization.md#tread-friction)), the
+height sets where the wheels slip as the robot accelerates, and so the drive's current limit.
+
+**The yaw moment of inertia** (M5): from CAD's mass properties, with the bumpers and battery
+modeled; or from SysId's rotation routine, which fits the robot's angular kA. Nothing in the code
+reads it yet; a simulator that models traction will.
+
+When: once the robot is built, and after a big change.
+
+## A terrain crossing
+
+*From a log of driving over a bump, with nothing to run (M7).*
+
+How the robot's IMU reads crossing a bump or a ramp: how far past the ramp's slope it tilts
+(bumpers, suspension, the IMU's mount), and how closely the moment the IMU says it crossed the
+crest matches where the robot was. It checks the terrain thresholds (`TerrainCrossing.Settings`)
+and the tilts at which the estimator trusts the wheels less (`EstimatorConfig.tiltStartDegrees`
+and `tiltZeroDegrees`), and sets the slope margin and the crest's spread in `Localization` (3° and
+5 cm today).
+
+You need a bump or ramp built to the field's drawings, on field carpet, with tags in the cameras'
+view of it.
+
+1. Drive over it straight across at a crawl, at a medium speed, and at match speed, three times
+   each, logging every run.
+2. Again at 30° and at 60° from straight across, and backward.
+
+Then, from the logs:
+
+- **The slope margin:** the most `Localization/TiltDegrees` read on the bump, less the ramp's
+  slope. The margin should be above it.
+- **The thresholds:** in each run, `Localization/ClimbDegrees` should pass `steepDegrees` going up
+  and coming down, `Localization/Terrain` should go from climbing to descending to level, and
+  `Localization/TerrainCrossings` should count each crossing once, and never in flat driving.
+- **The crest's spread:** each crossing logs the crest time (`Localization/CrestSeconds`). Where was
+  the robot's center then, across the crest? To see it from the cameras alone, replay the log with
+  the crest's spread in `Localization` set far larger (a meter), so the cameras place the robot and
+  the crest barely moves it. The standard deviation of the robot's distances from the crest line,
+  at the crest times, is the spread.
+
+Every crossing should be counted and none in flat driving, the tilt past the slope within a few
+degrees, and the crest within a few centimeters at every speed. If fast crossings read differently
+from slow ones, the robot's bumpers or suspension are moving the IMU more than the ground is.
+
+When: once the robot's bumpers, suspension, and IMU mount are final, and at kickoff, when the new
+field's bumps and ramps are known.
 
 ## Done elsewhere
 

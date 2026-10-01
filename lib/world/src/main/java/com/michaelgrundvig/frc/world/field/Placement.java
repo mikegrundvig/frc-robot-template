@@ -3,7 +3,6 @@ package com.michaelgrundvig.frc.world.field;
 import java.util.Locale;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Pose2d;
 
 /**

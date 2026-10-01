@@ -47,12 +47,6 @@ dependencies {
     ])
     api libs.jspecify
 
-    // Which alliance a place is for is WPILib's Driver Station enum, in WPILib's main library: only
-    // compiled against (every robot program has it), so the rest of that library, its hardware and
-    // NetworkTables, reaches nothing that reads the model. ArchitectureTest allows the one enum.
-    compileOnly wpilibJava(["wpilibj-java"])
-    testImplementation wpilibJava(["wpilibj-java"])
-
     // Configuration records are built by name, through builders generated as they compile.
     compileOnly libs.recordbuilder.core
     testCompileOnly libs.recordbuilder.core

@@ -17,6 +17,7 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
 import com.michaelgrundvig.frc.pitwall.experiment.Profile;
 import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
+import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.field.Placement;
@@ -54,7 +55,6 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.button.CommandGamepad;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
@@ -350,7 +350,7 @@ public final class RobotContainer implements AutoCloseable {
    */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
-    alliance = MatchState.getAlliance();
+    alliance = MatchState.getAlliance().map(RobotContainer::alliance);
     location = MatchState.getLocation();
     Optional<Place> chosen = chosenStart();
     Optional<Pose2d> chosenPose = alliance.flatMap(ours -> chosen.map(s -> s.on(field, ours)));
@@ -466,6 +466,17 @@ public final class RobotContainer implements AutoCloseable {
       }
       Telemetry.log("Field", fieldView);
     }
+  }
+
+  /**
+   * The Driver Station's alliance, as the field model names it: the model has its own, so that
+   * nothing reading it needs WPILib's Driver Station.
+   */
+  static Alliance alliance(org.wpilib.driverstation.Alliance driverStation) {
+    return switch (driverStation) {
+      case BLUE -> Alliance.BLUE;
+      case RED -> Alliance.RED;
+    };
   }
 
   /** The alliance and station, such as "Red 2", or "Unknown". */

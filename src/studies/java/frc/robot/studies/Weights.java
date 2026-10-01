@@ -7,12 +7,12 @@ import static com.michaelgrundvig.frc.world.config.Rules.shown;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigException;
+import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Translation2d;
 
 /**

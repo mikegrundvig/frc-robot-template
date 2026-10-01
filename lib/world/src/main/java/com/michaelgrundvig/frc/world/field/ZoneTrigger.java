@@ -1,6 +1,5 @@
 package com.michaelgrundvig.frc.world.field;
 
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Translation2d;
 
 /**

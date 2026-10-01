@@ -1,6 +1,5 @@
 package com.michaelgrundvig.frc.world;
 
-import static com.tngtech.archunit.core.domain.JavaClass.Predicates.belongToAnyOf;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
@@ -24,7 +23,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.jspecify.annotations.NullMarked;
 import org.junit.jupiter.api.Test;
-import org.wpilib.driverstation.Alliance;
 
 /**
  * The world model's boundaries, checked on every build. Gradle keeps the robot program, the
@@ -58,6 +56,24 @@ class ArchitectureTest {
   /** The robot's definition: what the robot is, from its frame to its sensors' mounts. */
   private static final String DEFINITION = "com.michaelgrundvig.frc.world.robot..";
 
+  /**
+   * The whole model, whatever package it gains (the writers for other tools come next): Gradle
+   * keeps the robot program and the other libraries out of reach, and WPILib's main library isn't
+   * on its classpath, but the math brings WPILib's utilities along (their logs, their own clock).
+   */
+  @Test
+  void theModelSeesOnlyWpilibsMathAndFieldLayouts() {
+    classes()
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH)
+                .or(resideInAnyPackage("com.michaelgrundvig.frc.world..", "org.wpilib.fields..")))
+        .because(
+            "everything reads the model, on the robot, in the simulator, and in a replay, so it"
+                + " holds no hardware, robot state, NetworkTables, logs, or clock")
+        .check(WORLD);
+  }
+
   @Test
   void theKitSeesOnlyItself() {
     classes()
@@ -80,10 +96,7 @@ class ArchitectureTest {
         .should()
         .onlyDependOnClassesThat(
             resideInAnyPackage(PLAIN_JAVA_AND_MATH)
-                .or(resideInAnyPackage(KIT, FIELD, "org.wpilib.fields.."))
-                // Which alliance a place is for: a plain value from WPILib's Driver Station, the
-                // one thing of WPILib's main library the model may name.
-                .or(belongToAnyOf(Alliance.class)))
+                .or(resideInAnyPackage(KIT, FIELD, "org.wpilib.fields..")))
         .because(
             "the field is the same whatever robot plays on it, so it knows nothing of the robot's"
                 + " definition, as the definition knows nothing of the field")

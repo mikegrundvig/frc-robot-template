@@ -2,7 +2,6 @@ package com.michaelgrundvig.frc.world.field;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.shape.Rectangle2d;

@@ -7,7 +7,7 @@ the robot polls. This folder holds what they share with the robot program.
 | Path | What |
 |---|---|
 | `coprocessors/coprocessors.yaml` (at the repository's root) | The table: the team's coprocessors, the one place they're described |
-| `coprocessor/common/` (Gradle `:coprocessor-common`) | What the robot program, the agent, and the build share: the table, the agent's API records, and the JSON they're written in |
+| `coprocessor/common/` (Gradle `:coprocessor-common`) | What the robot program, the agent, and the build share: the table, the agent's API records, the settings' canonical form and hash, and the JSON they're written in |
 
 ## The table: `coprocessors/coprocessors.yaml`
 
@@ -107,6 +107,71 @@ image, empty when it was built with none.
 (whether more were waiting). Without a `cursor`, the page is the latest entries; `priority` (0-7)
 gives that priority and worse, `unit` one systemd unit, and `limit` the page size (100 unless
 asked, at most 500). A message longer than 2048 characters is cut.
+
+## Settings in Git
+
+PhotonVision keeps all its settings, calibrations included, in one SQLite database,
+`photon.sqlite`: a `global` table (network, hardware, field layout, ...) and a `cameras` table
+(each camera's configuration, pipelines, and calibrations), with JSON text in their columns. In
+Git, they're one file per row, under `coprocessors/<computer>/settings/`:
+
+```
+database.json                  {"userVersion": 2}: the database's schema version
+global/networkConfig.json      {"contents": {...}}
+cameras/<unique name>.json     {"config_json": {...}, "drivermode_json": null, ...}
+```
+
+Each file is the row's columns, each column's JSON as JSON (so a diff shows a calibration's
+changed member, not a changed line of escaped text), sorted and indented by `Json.pretty`. A key
+becomes a file name with everything but letters, digits, `.`, `_`, and `-` written as `%XX`, as
+are a leading dot and the names Windows reserves, so every key makes a file on every system; two
+keys that differ only in case would be one file on Windows, and are refused. A column whose text
+isn't JSON is kept as text, under its name plus `.text`.
+
+Sorted members are safe for PhotonVision to read back: its JSON library (avaje-jsonb) generates
+readers that take members in any order, the type member of a polymorphic value included (checked
+in avaje-jsonb's generator source). It matters, because PhotonVision's own order isn't stable: some
+of its maps are keyed by enums, whose order changes from run to run.
+
+In Java (`com.michaelgrundvig.frc.coprocessor.settings`): `Settings` and `SettingsRow` are the
+rows; `SettingsFiles` reads and writes the folder (`read`, `write`, and `render`/`parse` for the
+files as text); `SettingsDatabase` reads and writes the database through JDBC's own API, so this
+project needs no driver (the agent brings xerial's sqlite-jdbc, and the tests use it too). It reads
+every table, with its primary key as the key and every other column as JSON, so a column a new
+PhotonVision adds comes along unasked. Writing replaces every row in one transaction, and refuses a
+database at another schema version, or without a table or column the settings name.
+`SettingsText` is the rows as the database's text, parsed a row at a time: a calibration is about a
+megabyte of JSON, many times that parsed, and the agent has 64 MB.
+
+**The tests' database** is made from PhotonVision's schema (its `DatabaseSchema` migrations,
+transcribed in `src/testFixtures/resources/photonvision/`) with example rows written from its
+configuration classes' fields; no PhotonVision jar is downloaded. A round trip against a database
+the pinned version's own jar made (its `--smoketest` makes an empty one) is a follow-up for CI, once
+the jar is archived.
+
+### The settings hash
+
+`SettingsHash.of(settings)` (or `settings.hash()`) is the SHA-256, in lowercase hex, of
+`Json.hashable` of `{"tables": {<table>: {<key>: <columns>}}, "userVersion": <n>}`, after the rules
+below. So rewriting doesn't change it (members reordered, `70.0` written `70`), files and the
+database give the same hash, and a changed setting changes it. The robot's build hashes each
+computer's committed settings into the program; each agent hashes the live database; empty means
+none are committed.
+
+Some values PhotonVision changes by itself, as it runs. The hash leaves them out, or reads them in
+a fixed order (`SettingsHash.RULES`, each with its reason; `SettingsHashTest` pins the list):
+
+| Table, column | Value | Rule | Why |
+|---|---|---|---|
+| `cameras`, `config_json` | `currentPipelineIndex` | left out | The robot program switches pipelines and driver mode, and PhotonVision saves the choice |
+| `cameras`, `config_json` | `streamIndex` | left out | PhotonVision assigns each camera's stream ports as it starts |
+| `cameras`, `config_json` | `matchedCameraInfo.dev` | left out | The `/dev/videoN` number the kernel gave the camera this boot |
+| `cameras`, `config_json` | `matchedCameraInfo.path` | left out | The `/dev/videoN` device; PhotonVision matches cameras by the by-path entry in `otherPaths` |
+| `cameras`, `config_json` | `matchedCameraInfo.otherPaths` | any order | The camera's other paths, in an order PhotonVision notes can change; which ones (the USB port) still counts |
+
+**Unverified:** the list comes from reading PhotonVision's source. A bench test on a real board
+confirms it: the hash holding steady across reboots, replugs, and pipeline switches. Changing the
+list changes every hash, so every image needs stamping again.
 
 ## The compiled table
 

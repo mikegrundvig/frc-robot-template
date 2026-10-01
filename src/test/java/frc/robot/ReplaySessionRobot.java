@@ -24,23 +24,23 @@ import org.wpilib.tunable.TunableRegistry;
  * a trench, and runs the steering's experiment, keeping it going as the page would. It records what
  * those affect, then stops. Replayed, it only records, and the replay must match.
  */
-final class ReplayScenarioRobot extends Robot {
+final class ReplaySessionRobot extends Robot {
   /** How many loops the recorded session runs, about five and a half seconds. */
   static final int LOOPS = 280;
 
-  static final String GAIN = "Scenario/gain";
+  static final String GAIN = "Session/gain";
 
   private final TunableDouble gain = TunableDouble.create(1.0);
   private final HttpClient http = HttpClient.newHttpClient();
   private int loop;
 
-  ReplayScenarioRobot() {
+  ReplaySessionRobot() {
     TunableRegistry.publish(GAIN, gain);
   }
 
-  /** Runs the scenario robot: {@code java frc.robot.ReplayScenarioRobot}. */
+  /** Runs the session robot: {@code java frc.robot.ReplaySessionRobot}. */
   public static void main(String... args) {
-    RobotBase.startRobot(ReplayScenarioRobot::new);
+    RobotBase.startRobot(ReplaySessionRobot::new);
   }
 
   @Override
@@ -54,14 +54,14 @@ final class ReplayScenarioRobot extends Robot {
       pitwall().experiments().heard(null); // the page keeping its experiment going
     }
     super.robotPeriodic();
-    Logger.recordOutput("Scenario/Gain", gain.get());
-    Logger.recordOutput("Scenario/SteerKp", container().drivetrainTuning().get().gains().steerKp());
-    Logger.recordOutput("Scenario/Action", pitwall().actions().view().get(0).phase().name());
+    Logger.recordOutput("Session/Gain", gain.get());
+    Logger.recordOutput("Session/SteerKp", container().drivetrainTuning().get().gains().steerKp());
+    Logger.recordOutput("Session/Action", pitwall().actions().view().get(0).phase().name());
     Run run = pitwall().experiments().run();
-    Logger.recordOutput("Scenario/Experiment", run == null ? "NONE" : run.state().phase().name());
+    Logger.recordOutput("Session/Experiment", run == null ? "NONE" : run.state().phase().name());
     Run.@Nullable Scores scores = run == null ? null : run.state().scores();
     Logger.recordOutput(
-        "Scenario/ExperimentRise",
+        "Session/ExperimentRise",
         scores == null
             ? 0.0
             : Objects.requireNonNull(scores.steps().get("Front left"))

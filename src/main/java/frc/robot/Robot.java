@@ -11,10 +11,14 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import frc.robot.dashboard.DashboardStream;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.sim.Scenario;
+import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
+import frc.robot.sim.SimulatedWorld;
 import java.io.File;
 import java.lang.management.ManagementFactory;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
 import org.littletonrobotics.junction.Logger;
@@ -23,6 +27,7 @@ import org.littletonrobotics.junction.wpilog.WPILOGReader;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
@@ -32,6 +37,12 @@ import org.wpilib.util.Alert;
 public class Robot extends LoggedRobot {
   /** Set by {@code ./gradlew run}: start the simulator enabled in teleop. */
   static final String AUTO_ENABLE_PROPERTY = "frc.sim.autoEnable";
+
+  /** Set by {@code ./gradlew run -Pscenario=<name>}: the simulator scenario to start in. */
+  static final String SCENARIO_PROPERTY = "frc.sim.scenario";
+
+  /** In the simulator, the scenario asked for, until the robot is first enabled and it starts. */
+  private @Nullable Scenario pendingScenario;
 
   /**
    * Pitwall, the robot's own web page: its status, actions, and live tuning of its configuration.
@@ -71,6 +82,14 @@ public class Robot extends LoggedRobot {
           case 1 -> "Uncommitted changes";
           default -> "Unknown";
         });
+    // In the simulator, the scenario asked for (./gradlew run -Pscenario=<name>), which every log
+    // of it names. A name no scenario has stops the program here, listing them.
+    Scenario asked = scenarioAskedFor(Constants.currentMode, System.getProperty(SCENARIO_PROPERTY));
+    if (asked != null) {
+      Logger.recordMetadata("SimScenario", asked.name());
+      System.out.println("Simulator: scenario " + asked.name() + ": " + asked.description());
+    }
+    pendingScenario = asked;
 
     switch (Constants.currentMode) {
       case REAL -> {
@@ -101,14 +120,21 @@ public class Robot extends LoggedRobot {
 
     RobotConfig robot = Robots.current();
     pitwall = Pitwall.start(robot.name());
+    // A season-worn robot's sensors, with the scenario's faults in them.
+    SensorErrors errors = asked != null ? asked.errorsOn(robot.cameras()) : SensorErrors.TYPICAL;
     container =
-        assemble(
-            Constants.currentMode,
-            Scheduler.getDefault(),
-            robot,
-            pitwall,
-            SensorErrors.TYPICAL,
-            loopHealth);
+        assemble(Constants.currentMode, Scheduler.getDefault(), robot, pitwall, errors, loopHealth);
+  }
+
+  /**
+   * The simulator scenario asked for, in a physics simulation only: a replay runs what its log
+   * recorded, and a robot has no simulator.
+   *
+   * @param name the scenario's name, or null when none was asked for
+   * @throws IllegalArgumentException listing every scenario, when none has this name
+   */
+  static @Nullable Scenario scenarioAskedFor(Constants.Mode mode, @Nullable String name) {
+    return mode == Constants.Mode.SIM && name != null ? Scenarios.named(name) : null;
   }
 
   /**
@@ -207,6 +233,29 @@ public class Robot extends LoggedRobot {
   @Override
   public void utilityPeriodic() {}
 
+  /**
+   * The scenario's event (a collision, a slip) happens on the first loop the robot is enabled, so
+   * the fault finds it where the drive team put it. That relies on two things: WPILib runs this
+   * after {@link #robotPeriodic}, and the robot's container puts the robot on its start in that
+   * loop at the latest.
+   */
   @Override
-  public void simulationPeriodic() {}
+  public void simulationPeriodic() {
+    pendingScenario = startWhenEnabled(pendingScenario, container.world(), RobotState.isEnabled());
+  }
+
+  /**
+   * Starts a scenario's event in the simulated world, if the robot is enabled.
+   *
+   * @param world the simulated world, or null outside the simulator
+   * @return the scenario still waiting to start: null once it has
+   */
+  static @Nullable Scenario startWhenEnabled(
+      @Nullable Scenario pending, @Nullable SimulatedWorld world, boolean enabled) {
+    if (pending == null || world == null || !enabled) {
+      return pending;
+    }
+    pending.startIn(world);
+    return null;
+  }
 }

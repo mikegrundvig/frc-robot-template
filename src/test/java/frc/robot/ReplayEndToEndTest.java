@@ -25,7 +25,7 @@ import org.wpilib.datalog.DataLogRecord;
 
 /**
  * AdvantageKit replay, end to end, with Pitwall in the loop. The real robot program records a
- * session in the simulator ({@link ReplayScenarioRobot}): a tuning change from Pitwall's page, a
+ * session in the simulator ({@link ReplaySessionRobot}): a tuning change from Pitwall's page, a
  * WPILib tunable changed through Pitwall's tee, an action started from the page, which drives the
  * robot, and an experiment on the steering, scored from its trace. Then it replays its own log.
  * Every output the session recorded must come out of the replay the same, at the same moments,
@@ -41,11 +41,11 @@ class ReplayEndToEndTest {
 
   private static final List<String> OUTPUTS =
       List.of(
-          "Scenario/Gain",
-          "Scenario/SteerKp",
-          "Scenario/Action",
-          "Scenario/Experiment",
-          "Scenario/ExperimentRise",
+          "Session/Gain",
+          "Session/SteerKp",
+          "Session/Action",
+          "Session/Experiment",
+          "Session/ExperimentRise",
           "Drive/Pose",
           "Field/Alliance",
           "Field/Placement",
@@ -74,11 +74,11 @@ class ReplayEndToEndTest {
     Map<String, List<Sample>> replay = outputs(replayed, "ReplayOutputs/");
 
     // The session happened: each change took effect while recording.
-    assertThat(values(original, "Scenario/Gain")).contains(1.0, 2.5);
-    assertThat(values(original, "Scenario/SteerKp")).contains(16.0, 18.5);
-    assertThat(values(original, "Scenario/Action")).contains("READY", "RUNNING", "ENDED");
-    assertThat(values(original, "Scenario/Experiment")).contains("NONE", "RUNNING", "ENDED");
-    assertThat(values(original, "Scenario/ExperimentRise"))
+    assertThat(values(original, "Session/Gain")).contains(1.0, 2.5);
+    assertThat(values(original, "Session/SteerKp")).contains(16.0, 18.5);
+    assertThat(values(original, "Session/Action")).contains("READY", "RUNNING", "ENDED");
+    assertThat(values(original, "Session/Experiment")).contains("NONE", "RUNNING", "ENDED");
+    assertThat(values(original, "Session/ExperimentRise"))
         .as("the steering's rise, scored from its trace")
         .anySatisfy(rise -> assertThat((Double) rise).isBetween(0.02, 0.3));
     assertThat(values(original, "Field/Alliance")).contains("Red 1");
@@ -113,7 +113,7 @@ class ReplayEndToEndTest {
     }
   }
 
-  /** Runs the scenario robot in its own process, in the test's temporary directory. */
+  /** Runs the session robot in its own process, in the test's temporary directory. */
   private void run(String name, Map<String, String> properties, Map<String, String> environment)
       throws IOException, InterruptedException {
     List<String> command = new ArrayList<>();
@@ -128,7 +128,7 @@ class ReplayEndToEndTest {
     properties.forEach((key, value) -> command.add("-D" + key + "=" + value));
     command.add("-cp");
     command.add(System.getProperty("java.class.path"));
-    command.add(ReplayScenarioRobot.class.getName());
+    command.add(ReplaySessionRobot.class.getName());
 
     Path output = dir.resolve(name + ".out");
     ProcessBuilder builder =

@@ -536,6 +536,11 @@ public final class RobotContainer implements AutoCloseable {
     return drivetrainTuning;
   }
 
+  /** The simulator's world, or null outside the simulator. */
+  @Nullable SimulatedWorld world() {
+    return world;
+  }
+
   /** The simulator's drivetrain physics, or null outside the simulator. */
   @Nullable DriveSimulation simulation() {
     SimulatedWorld sim = world;

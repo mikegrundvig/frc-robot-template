@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.FakeHal;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -63,7 +64,8 @@ class SimulatorApiTest {
                       .parameter("Times", "", Limits.between(1, 10), 3)
                       .apply(values -> {})
                       .undoneBy("It's over.")
-                      .build()));
+                      .build()))
+          .scenario("blackout", "The lamp goes out.", List.of(Setting.of("Lamp", "Out")));
   private final Simulator simulator =
       new Simulator(hal, System::nanoTime, components, stops::incrementAndGet, on -> {});
   private final TunableTee tunables =
@@ -114,13 +116,14 @@ class SimulatorApiTest {
   }
 
   @Test
-  void theSimulatorsStateComesWithWhatCanFail() throws Exception {
+  void theSimulatorsStateComesWithWhatCanFailAndTheScenarios() throws Exception {
     var answer = send("GET", "/api/simulator", null, null);
 
     assertThat(answer.statusCode()).isEqualTo(200);
     assertThat(answer.body())
         .contains("\"simulator\":{\"enabled\":false")
-        .contains("\"components\":{\"Lamp\":{\"kind\":\"light\"");
+        .contains("\"components\":{\"Lamp\":{\"kind\":\"light\"")
+        .contains("\"scenarios\":{\"blackout\":{\"description\":\"The lamp goes out.\"");
   }
 
   @Test
@@ -288,6 +291,18 @@ class SimulatorApiTest {
 
     assertThat(undone.statusCode()).isEqualTo(200);
     assertThat(lampOut).isFalse();
+  }
+
+  @Test
+  void thePageAppliesAScenario() throws Exception {
+    var applied = send("POST", "/api/simulator/scenarios", JSON, "{\"apply\": \"blackout\"}");
+    var unknown = send("POST", "/api/simulator/scenarios", JSON, "{\"apply\": \"brownout\"}");
+    var malformed = send("POST", "/api/simulator/scenarios", JSON, "{\"start\": \"blackout\"}");
+
+    assertThat(applied.statusCode()).isEqualTo(200);
+    assertThat(lampOut).isTrue();
+    assertThat(unknown.statusCode()).isEqualTo(422);
+    assertThat(malformed.statusCode()).isEqualTo(400);
   }
 
   private HttpResponse<String> put(String json) throws Exception {

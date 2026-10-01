@@ -17,7 +17,7 @@ panel stays usable to detach it again.
 
 ### In the event stream
 
-Two sections, beside the page's others, sent as JSON merge patches when they change:
+Three sections, beside the page's others, sent as JSON merge patches when they change:
 
 - **`simulator`**: `enabled`, `mode` (`AUTONOMOUS`, `TELEOPERATED`, `UTILITY`, or `UNKNOWN` before
   a Driver Station set one), `allianceStation` (`RED_1` to `BLUE_3`, or `UNKNOWN`), `fmsAttached`,
@@ -28,6 +28,7 @@ Two sections, beside the page's others, sent as JSON merge patches when they cha
   "lasting", "undo", "parameters": [{"name", "unit", "min", "max", "initial"}], "on", "values"}}}`.
   A lasting fault has `on`, and while on, the `values` it was applied with; an event has neither.
   `undo` says what undoing a lasting fault does, or for an event, how the robot recovers.
+- **`scenarios`**: each by name: `{"description", "faults": [{"component", "fault", "values"}]}`.
 
 ### Requests
 
@@ -38,13 +39,14 @@ that can't be done now.
 
 | Request | Body | Answer |
 |---|---|---|
-| `GET /api/simulator` | | `{"simulator", "components"}`, read by the next loop; while paused, as the last loop left it |
+| `GET /api/simulator` | | `{"simulator", "components", "scenarios"}`, read by the next loop; while paused, as the last loop left it |
 | `PATCH /api/simulator` | any of `enabled`, `mode`, `allianceStation`, `fmsAttached`, `dsAttached`, `matchTime` (0 to 600 s, or `null` for none), `paused` | the `simulator` section, once the loop has applied it all; 202 if it didn't within a second |
 | `POST /api/simulator/step` | | one loop of a paused simulator, then the `simulator` section; 409 while it runs |
 | `POST /api/simulator/stop` | | 202, then the program ends: the stream closes |
 | `PUT /api/simulator/joysticks` | `{"0": {"axes": [...], "buttons": [...], "povs": [...]}, "1": null}` | 204 at once |
 | `POST /api/simulator/faults` | `{"component", "fault", "values": {name: number}}` to apply; `{"component", "fault", "undo": true}` to undo | the `components` section |
 | `DELETE /api/simulator/faults` | | every lasting fault undone: the robot as built |
+| `POST /api/simulator/scenarios` | `{"apply": name}` | the `components` section |
 
 A `PATCH` applies its changes in one loop, in the order given. Enabling also attaches the Driver
 Station, as a real one would be, and detaching it disables the robot. A parameter a fault request
@@ -116,13 +118,21 @@ dropping off the bus or browning out (the simulated modules have no bus); the ba
 (the simulated world models no battery); a camera's axes swapped in the configuration, or one with
 the wrong tag layout; and ramp crossings (the terrain has bumps only).
 
+## Scenarios
+
+A scenario is a named set of these faults (`frc.robot.sim.Scenarios`). `./gradlew run
+-Pscenario=<name>` applies its sensor faults before the robot's first loop and makes what happens
+in it happen once the robot is enabled; the page applies all of it at once, to a running
+simulation (`POST /api/simulator/scenarios`), and shows its lasting faults as on, each undone on its
+own or all together. A robot without cameras isn't offered the camera scenarios.
+
 ## What the *Sim* view needs
 
 The server side is done; the page builds on it.
 
 - **The minimal panel first:** enabled or disabled; teleop, autonomous, or utility; Driver Station
   attached; the alliance station; FMS attached; keyboard and gamepad driving of joystick 0 (and 1);
-  Stop. Then pause, resume, and step; match time; the faults.
+  Stop. Then pause, resume, and step; match time; the faults and scenarios.
 - **Keyboard driving is switched on explicitly** ("Drive with keyboard"), shows in the state bar
   while on, and pauses whenever focus is in a text field, so typing `w` into a value never drives
   the robot. One fixed layout for this template's driving: W/S and A/D the left stick (W is -1 on

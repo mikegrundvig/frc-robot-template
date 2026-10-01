@@ -11,16 +11,28 @@ import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The simulated robot's components that can fail, with their faults: the registry the page applies
- * faults through.
+ * The simulated robot's components that can fail, with their faults, and the scenarios made of
+ * them: the registry the page applies faults through, and the simulator applies a scenario through
+ * when it starts in one.
  *
- * <p>The robot's simulation declares its components ({@link #add}) as the robot starts. From then
- * on, only the robot loop applies or undoes a fault ({@link #apply}, {@link #undo}), since a fault
- * changes the simulated world, which the loop steps. Looking a name up ({@link #whyNot}) is safe
- * from any thread.
+ * <p>The robot's simulation declares its components ({@link #add}) and scenarios ({@link
+ * #scenario}) as the robot starts. From then on, only the robot loop applies or undoes a fault
+ * ({@link #apply}, {@link #undo}), since a fault changes the simulated world, which the loop steps.
+ * Looking a name up ({@link #whyNot}) is safe from any thread.
+ *
+ * <p>A scenario is a named set of faults ({@link Setting}s): applying it applies each in turn, and
+ * the page shows the lasting ones as on, each undone on its own or all together ({@link #undoAll}).
  */
 public final class Components {
+  /**
+   * A named set of faults.
+   *
+   * @param description what it does to the robot
+   */
+  private record Scenario(String name, String description, List<Setting> faults) {}
+
   private final Map<String, Component> components = new LinkedHashMap<>();
+  private final Map<String, Scenario> scenarios = new LinkedHashMap<>();
   private final Consumer<String> say;
 
   /** The values each lasting fault was last applied with, by component and fault. */
@@ -28,6 +40,8 @@ public final class Components {
 
   /** What was declared, for lookups from any thread: replaced whole on each addition. */
   private volatile Map<String, Component> declared = Map.of();
+
+  private volatile Map<String, Scenario> declaredScenarios = Map.of();
 
   /** Each component as the page shows it, and what it was built from, rebuilt when that changes. */
   private final Map<String, List<Object>> shownFrom = new LinkedHashMap<>();
@@ -52,6 +66,32 @@ public final class Components {
       throw new IllegalArgumentException("two components are named " + component.name());
     }
     declared = Collections.unmodifiableMap(new LinkedHashMap<>(components));
+    return this;
+  }
+
+  /**
+   * Declares a scenario: a named set of faults on the components already declared. Call it as the
+   * robot starts, from the robot's thread.
+   *
+   * @param description what it does to the robot
+   * @return this, to declare the next
+   * @throws IllegalArgumentException if a scenario already has its name, or one of its faults isn't
+   *     a declared component's fault with values it takes
+   */
+  public Components scenario(String name, String description, List<Setting> faults) {
+    if (name.isBlank() || description.isBlank()) {
+      throw new IllegalArgumentException("a scenario needs a name, and to say what it does");
+    }
+    for (Setting setting : faults) {
+      String why = whyNot(setting);
+      if (why != null) {
+        throw new IllegalArgumentException("the scenario " + name + ": " + why);
+      }
+    }
+    if (scenarios.putIfAbsent(name, new Scenario(name, description, List.copyOf(faults))) != null) {
+      throw new IllegalArgumentException("two scenarios are named " + name);
+    }
+    declaredScenarios = Collections.unmodifiableMap(new LinkedHashMap<>(scenarios));
     return this;
   }
 
@@ -101,6 +141,11 @@ public final class Components {
       return component + ": " + fault + " happens once, and nothing undoes it: " + named.undo();
     }
     return null;
+  }
+
+  /** Whether a scenario has this name. Safe from any thread. */
+  public boolean hasScenario(String name) {
+    return declaredScenarios.containsKey(name);
   }
 
   /**
@@ -178,6 +223,31 @@ public final class Components {
     return problems.isEmpty() ? null : String.join("; ", problems);
   }
 
+  /**
+   * Applies a scenario's faults, in order. Call it from the robot loop. One that fails doesn't stop
+   * the rest; the answer names it.
+   *
+   * @return why the scenario, or any of its faults, couldn't be applied; null when all were
+   */
+  public @Nullable String applyScenario(String name) {
+    Scenario scenario = scenarios.get(name);
+    if (scenario == null) {
+      return "There is no scenario named "
+          + name
+          + "; there are "
+          + String.join(", ", scenarios.keySet());
+    }
+    say.accept("scenario " + name + ": " + scenario.description());
+    List<String> problems = new ArrayList<>();
+    for (Setting setting : scenario.faults()) {
+      String why = apply(setting);
+      if (why != null) {
+        problems.add(why);
+      }
+    }
+    return problems.isEmpty() ? null : name + ": " + String.join("; ", problems);
+  }
+
   /** The lasting faults on now, as "Component: Fault", in the order declared. */
   public List<String> on() {
     List<String> on = new ArrayList<>();
@@ -211,6 +281,29 @@ public final class Components {
       }
     }
     return new LinkedHashMap<>(shown);
+  }
+
+  /**
+   * Every scenario as the page shows it, by name: {@code {"description", "faults": [{"component",
+   * "fault", "values"}]}}.
+   */
+  public Map<String, Object> scenarioView() {
+    Map<String, Object> view = new LinkedHashMap<>();
+    for (Scenario scenario : declaredScenarios.values()) {
+      List<Object> faults = new ArrayList<>();
+      for (Setting setting : scenario.faults()) {
+        Map<String, Object> fault = new LinkedHashMap<>();
+        fault.put("component", setting.component());
+        fault.put("fault", setting.fault());
+        fault.put("values", setting.values());
+        faults.add(fault);
+      }
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("description", scenario.description());
+      shown.put("faults", faults);
+      view.put(scenario.name(), shown);
+    }
+    return view;
   }
 
   private Map<String, Object> shown(Component component) {

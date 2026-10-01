@@ -125,6 +125,17 @@ class SimulatorControlsSimTest {
     assertThat(sim.robot().localization().yawSource()).isEqualTo(Localization.YawSource.GYRO);
   }
 
+  /** A scenario from the page happens now, to the running robot. */
+  @Test
+  void aScenarioFromThePageHappensToTheRunningRobot() throws Exception {
+    Pose2d start = placedAndEnabled();
+
+    var collision = send("POST", "/api/simulator/scenarios", "{\"apply\": \"collision\"}");
+
+    assertThat(collision.statusCode()).isEqualTo(200);
+    assertThat(travelled(start)).isGreaterThan(0.5);
+  }
+
   /** With the clock paused, a step moves it on to the next loop's time, and no further. */
   @Test
   void aStepMovesThePausedClockOnOneLoop() {

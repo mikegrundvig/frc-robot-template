@@ -8,18 +8,21 @@ import com.michaelgrundvig.frc.pitwall.simulator.Component;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
+import frc.robot.lib.field.Bump;
+import java.util.Comparator;
 import java.util.List;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
 
 /**
  * What can go wrong with the simulated world's parts while it runs, declared to Pitwall's simulator
  * controls: each camera, the gyro, the backup IMU, each module, and the robot itself, with its
- * faults. The page lists them, applies them, and undoes them. The robot's code is never told: it
- * has to find out from its sensors.
+ * faults. The page lists them, applies them, and undoes them; the scenarios ({@link Scenarios}) are
+ * made of them. The robot's code is never told: it has to find out from its sensors.
  *
  * <p>A fault that lasts (a camera unplugged) says whether it's on by asking the world, and undoing
  * it puts the part back as the world was built: a season-worn robot's sensors ({@link
@@ -71,6 +74,9 @@ public final class Faults {
   public static final String TURNS = "Turns";
   public static final String GRIP = "Grip";
   public static final String EXTRA = "Extra";
+
+  /** How far short of a bump's ramp the robot is set down, from its center: clear of the ramp. */
+  static final double BUMP_CLEARANCE_METERS = 1.0;
 
   /** The farthest the page may knock a camera, or push the robot, in one go. */
   private static final double MOUNT_INCHES = 12;
@@ -352,7 +358,7 @@ public final class Faults {
                 "Carried to 1 m short of the nearest bump's ramp, facing across it, to drive over."
                     + " Its gyro feels the turn but its wheels see no move, so only its cameras can"
                     + " say where it is. Needs a field with bumps.")
-            .apply(values -> Scenarios.beforeTheNearestBump(world))
+            .apply(values -> beforeTheNearestBump(world))
             .undoneBy("Place it again.")
             .build());
   }
@@ -365,5 +371,34 @@ public final class Faults {
   /** A range that holds what the robot was built with, however far out that is. */
   private static Limits around(double min, double max, double built) {
     return Limits.between(Math.min(min, built), Math.max(max, built));
+  }
+
+  /**
+   * Puts the robot down short of the bump nearest it, on the side it's on, facing across the crest:
+   * the drive team carrying it there. Its wheels don't turn, so odometry doesn't see the move; its
+   * gyro feels any turn.
+   *
+   * @throws IllegalStateException on a field without bumps
+   */
+  static void beforeTheNearestBump(SimulatedWorld world) {
+    Translation2d robot = world.truePose().getTranslation();
+    Bump bump =
+        world.drivetrain().terrain().bumps().stream()
+            .min(Comparator.comparingDouble(each -> middle(each).getDistance(robot)))
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "carrying the robot to a bump needs a field with bumps, and this one has"
+                            + " none"));
+    boolean onTheAcrossSide = bump.acrossOffset(robot) >= 0;
+    double out = bump.depthMeters() / 2 + BUMP_CLEARANCE_METERS;
+    Rotation2d across = bump.across();
+    Translation2d spot = middle(bump).plus(new Translation2d(onTheAcrossSide ? out : -out, across));
+    world.place(new Pose2d(spot, onTheAcrossSide ? across.plus(Rotation2d.PI) : across));
+  }
+
+  /** The middle of a bump's crest. */
+  private static Translation2d middle(Bump bump) {
+    return bump.crestStart().interpolate(bump.crestEnd(), 0.5);
   }
 }

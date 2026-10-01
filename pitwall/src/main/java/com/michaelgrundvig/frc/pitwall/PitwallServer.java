@@ -92,12 +92,12 @@ import org.wpilib.hardware.hal.RobotMode;
  * field lock: in the simulator, they are the field. See docs/simulator.md for the details.
  *
  * <ul>
- *   <li>{@code GET /api/simulator}: {@code {"simulator", "components"}}, as the event stream's
- *       sections of those names carry them. {@code PATCH} it with any of {@code "enabled"}, {@code
- *       "mode"} ({@code "AUTONOMOUS"}, {@code "TELEOPERATED"}, {@code "UTILITY"}), {@code
- *       "allianceStation"} ({@code "RED_1"} to {@code "BLUE_3"}, or {@code "UNKNOWN"}), {@code
- *       "fmsAttached"}, {@code "dsAttached"}, {@code "matchTime"} (seconds, or null for none), and
- *       {@code "paused"}.
+ *   <li>{@code GET /api/simulator}: {@code {"simulator", "components", "scenarios"}}, as the event
+ *       stream's sections of those names carry them. {@code PATCH} it with any of {@code
+ *       "enabled"}, {@code "mode"} ({@code "AUTONOMOUS"}, {@code "TELEOPERATED"}, {@code
+ *       "UTILITY"}), {@code "allianceStation"} ({@code "RED_1"} to {@code "BLUE_3"}, or {@code
+ *       "UNKNOWN"}), {@code "fmsAttached"}, {@code "dsAttached"}, {@code "matchTime"} (seconds, or
+ *       null for none), and {@code "paused"}.
  *   <li>{@code POST /api/simulator/step}: one loop of a paused simulator; 409 while it runs.
  *   <li>{@code POST /api/simulator/stop}: ends the program, as closing the GUI's window did.
  *   <li>{@code PUT /api/simulator/joysticks}: {@code {"0": {"axes": [...], "buttons": [...],
@@ -106,6 +106,7 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code POST /api/simulator/faults}: {@code {"component", "fault", "values": {name:
  *       number}}} applies a fault, {@code {"component", "fault", "undo": true}} undoes a lasting
  *       one. {@code DELETE} it to undo every lasting fault.
+ *   <li>{@code POST /api/simulator/scenarios}: {@code {"apply": name}} applies a scenario's faults.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
@@ -344,6 +345,7 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/simulator/stop", List.of("POST")),
             Map.entry("/api/simulator/joysticks", List.of("PUT")),
             Map.entry("/api/simulator/faults", List.of("POST", "DELETE")),
+            Map.entry("/api/simulator/scenarios", List.of("POST")),
             Map.entry("/uPlot.iife.min.js", List.of("GET")),
             Map.entry("/uPlot.min.css", List.of("GET")));
 
@@ -429,6 +431,7 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/simulator/faults" -> postFault(exchange);
             case "DELETE /api/simulator/faults" ->
                 answer(exchange, simulator().requestUndoAll(), this::componentsView);
+            case "POST /api/simulator/scenarios" -> postScenario(exchange);
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
             default -> throw new IllegalStateException("unrouted: " + method + " " + path);
           }
@@ -873,6 +876,19 @@ public final class PitwallServer implements AutoCloseable {
         throw new Problem(422, "Can't be applied", why);
       }
       answer(exchange, simulator.requestFault(setting), this::componentsView);
+    }
+
+    /** Applies a scenario's faults. */
+    private void postScenario(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Map<String, @Nullable Object> body = readObject(exchange);
+      if (body.size() != 1 || !(body.get("apply") instanceof String name)) {
+        throw new Problem(400, "Apply a scenario", "Send {\"apply\": name}");
+      }
+      if (!simulator.components().hasScenario(name)) {
+        throw new Problem(422, "Not a scenario", "There is no scenario named " + name);
+      }
+      answer(exchange, simulator.requestScenario(name), this::componentsView);
     }
 
     private static boolean bool(String name, @Nullable Object value) {

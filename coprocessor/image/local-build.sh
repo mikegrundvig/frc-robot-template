@@ -103,15 +103,15 @@ trap on_exit EXIT
 
 pv_jar=$(fetch "$jar_url" "$jar_sha")
 while IFS= read -r row <&3; do
-  board=$(yq -p json -r '.board' <<<"$row")
+  board=$(yq -p json -o yaml -r '.board' <<<"$row")
   # shellcheck source=boards/orangepi-5.env
   . "$here/boards/$board.env"
   common="$out/common-$board.img"
   say "$board: the common image"
-  base=$(fetch "$(yq -p json -r '.url' <<<"$row")" "$(yq -p json -r '.sha256' <<<"$row")")
+  base=$(fetch "$(yq -p json -o yaml -r '.url' <<<"$row")" "$(yq -p json -o yaml -r '.sha256' <<<"$row")")
   xz -dc "$base" >"$common"
   # The root grown by the headroom PhotonVision's own build gives it.
-  truncate -s "+$(yq -p json -r '.minimumFreeMb' <<<"$row")M" "$common"
+  truncate -s "+$(yq -p json -o yaml -r '.minimumFreeMb' <<<"$row")M" "$common"
   if [[ $(sfdisk --dump "$common" | sed -n 's/^label: *//p') == gpt ]]; then
     sfdisk --quiet --relocate gpt-bak-std "$common"
   fi
@@ -153,8 +153,8 @@ done 3< <(yq -p json -o=json -I=0 '.[]' <<<"$boards")
 
 mkdir -p "$out/release"
 while IFS= read -r row <&3; do
-  name=$(yq -p json -r '.name' <<<"$row")
-  board=$(yq -p json -r '.board' <<<"$row")
+  name=$(yq -p json -o yaml -r '.name' <<<"$row")
+  board=$(yq -p json -o yaml -r '.board' <<<"$row")
   image="$out/$team-$name-pv$version-$release.img"
   say "$name: stamping"
   cp --sparse=always "$out/common-$board.img" "$image"

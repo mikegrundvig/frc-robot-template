@@ -47,7 +47,7 @@ done
 ((${#entries[@]})) || die "no images in $dir"
 all="[$(IFS=,; echo "${entries[*]}")]"
 for field in team release photonvisionVersion recipeHash; do
-  [[ $(FIELD=$field yq -p json -r '[.[] | .[strenv(FIELD)]] | unique | length' <<<"$all") == 1 ]] ||
+  [[ $(FIELD=$field yq -p json -o yaml -r '[.[] | .[strenv(FIELD)]] | unique | length' <<<"$all") == 1 ]] ||
     die "the images don't share one $field"
 done
 

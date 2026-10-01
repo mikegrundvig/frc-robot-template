@@ -131,7 +131,7 @@ table_get() {
 
 # Reads a value from the lock (needs yq). The board, for per-board values, comes in BOARD.
 lock_get() {
-  yq -p yaml -r "$1 // \"\"" "$2"
+  yq -p yaml -o yaml -r "$1 // \"\"" "$2"
 }
 
 # A port number: 1 to 65535, written without leading zeros.

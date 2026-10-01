@@ -233,7 +233,7 @@ test_provision_sandboxes_the_facts_helper() {
 
 test_provision_refuses_an_agent_that_would_run_as_root() {
   setup_provision
-  sed -i '/^DynamicUser=/d' "$TMP/coprocessor-agent.service"
+  sed -i '/^User=/d; /^Group=/d' "$TMP/coprocessor-agent.service"
   assert_fails "would run the agent as root" run_provision
   printf '[Service]\nUser=root\n' >>"$TMP/coprocessor-agent.service"
   assert_fails "would run the agent as root" run_provision
@@ -241,8 +241,23 @@ test_provision_refuses_an_agent_that_would_run_as_root() {
 
 test_provision_refuses_an_agent_account_the_soft_off_rule_doesnt_name() {
   setup_provision
-  sed -i 's/^DynamicUser=yes$/User=someone-else/' "$TMP/coprocessor-agent.service"
+  sed -i 's/^User=coprocessor-agent$/User=someone-else/' "$TMP/coprocessor-agent.service"
   assert_fails "but the soft-off rule is for 'coprocessor-agent'" run_provision
+}
+
+test_provision_accepts_a_dynamic_account_named_after_the_unit() {
+  setup_provision
+  sed -i 's/^User=coprocessor-agent$/DynamicUser=yes/; /^Group=/d' "$TMP/coprocessor-agent.service"
+  run_provision
+}
+
+# The agent's own unit, from coprocessor/agent/, as the image installs it.
+test_provision_accepts_the_agents_own_unit() {
+  setup_provision
+  local unit=$IMAGE/../agent/coprocessor-agent.service
+  [[ -f $unit ]] || skip "no coprocessor/agent/coprocessor-agent.service in this checkout"
+  run_provision --agent-unit "$unit"
+  cmp -s "$TMP/root/etc/systemd/system/coprocessor-agent.service" "$unit" || fail "the agent's unit wasn't installed"
 }
 
 test_provision_installs_the_soft_off_rule_for_the_agents_account() {
@@ -277,6 +292,7 @@ const cases = [
   ["coprocessor-agent", "org.freedesktop.systemd1.manage-units", { unit: "ssh.service", verb: "stop" }, "no"],
   ["coprocessor-agent", "org.freedesktop.systemd1.manage-unit-files", {}, "no"],
   ["coprocessor-agent", "org.freedesktop.login1.reboot", {}, "no"],
+  ["coprocessor-agent", "org.freedesktop.login1.power-off-multiple-sessions", {}, "yes"],
   ["coprocessor-agent", "org.freedesktop.login1.power-off-ignore-inhibit", {}, "no"],
   ["photon", "org.freedesktop.login1.power-off", {}, "null"],
   ["root", "org.freedesktop.systemd1.manage-units", { unit: "photonvision.service", verb: "stop" }, "null"],

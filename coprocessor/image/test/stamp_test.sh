@@ -291,6 +291,20 @@ test_stamp_fails_when_the_settings_tool_fails() {
   assert_fails "settings tool failed" run_stamp vision-front
 }
 
+# A JVM can print its own warnings to standard output before the tool's hash.
+test_stamp_takes_the_settings_tools_last_line_as_the_hash() {
+  setup_stamp
+  mv "$TMP/settings-tool" "$TMP/settings-tool-quiet"
+  printf '#!/bin/sh\necho "[0.002s][warning][os,container] Cgroup memory controller path moved"\nexec "%s" "$@"\n' \
+    "$TMP/settings-tool-quiet" >"$TMP/settings-tool"
+  chmod +x "$TMP/settings-tool"
+  local output
+  output=$(run_stamp vision-front 2>&1)
+  [[ $output == *"also said: [0.002s][warning]"* ]] || fail "the extra line wasn't passed on: $output"
+  [[ $(yq -r '.settingsHash' "$TMP/out/root/etc/coprocessor/stamp.json") =~ ^[0-9a-f]{64}$ ]] ||
+    fail "settingsHash isn't the tool's hash"
+}
+
 test_stamp_refuses_a_settings_hash_that_isnt_one() {
   setup_stamp
   # shellcheck disable=SC2016 # the stand-in's own $2 and $3

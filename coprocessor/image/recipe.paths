@@ -8,8 +8,10 @@
 #   as lowercase hex. Lines here that are blank or start with # are ignored.
 #
 # Documentation and tests are left out on purpose: changing them changes no image. The build files
-# are in, because they build the agent's jar: a change to the root build or the version catalog
-# (a dependency update) changes the recipe too, and the coprocessors need a new release.
+# that build the agent's jar are in: a change to them changes the recipe, and the coprocessors need
+# a new release. The version catalog (gradle/libs.versions.toml) is left out on purpose, so the
+# weekly dependency updates don't each demand one: an updated library (the agent's SQLite driver)
+# reaches the boards with the next image built for another reason.
 # test/recipe_test.sh checks that everything provision.sh reads from the repository is covered.
 coprocessor/image/provision.sh
 coprocessor/image/layout.sh
@@ -26,4 +28,6 @@ coprocessor/common/src/main
 coprocessor/common/build.gradle
 build.gradle
 settings.gradle
-gradle
+gradle/quality.gradle
+gradle/gradle-daemon-jvm.properties
+gradle/wrapper

@@ -245,7 +245,8 @@ Description=Coprocessor health agent
 
 [Service]
 ExecStart=/usr/bin/java -Xmx64m -XX:+UseSerialGC -jar /opt/coprocessor/coprocessor-agent.jar
-DynamicUser=yes
+User=coprocessor-agent
+Group=coprocessor-agent
 SupplementaryGroups=systemd-journal
 Nice=10
 AllowedCPUs=0-3

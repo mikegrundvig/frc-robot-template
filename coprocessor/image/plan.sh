@@ -47,7 +47,7 @@ team=$(table_get '.team' "$table")
 
 # PhotonVision's version: the lock's must be the robot code's.
 version=$(lock_get "$LOCK_VERSION_PATH" "$lock")
-robot_version=$(yq -p json -r '.version // ""' "$vendordep")
+robot_version=$(yq -p json -o yaml -r '.version // ""' "$vendordep")
 [[ -n $version ]] || die "$COPROC_LOCK gives no PhotonVision version ($LOCK_VERSION_PATH)"
 [[ $version == "$robot_version" ]] ||
   die "$COPROC_LOCK is for PhotonVision $version, but the robot code uses $robot_version ($COPROC_VENDORDEP): update the lock"

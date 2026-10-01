@@ -341,10 +341,11 @@ step_agent() {
   fi
   [[ $user == "$IMG_AGENT_USER" ]] ||
     die "$agent_unit runs the agent as '$user', but the soft-off rule is for '$IMG_AGENT_USER' (IMG_AGENT_USER, lib/common.sh)"
-  # A fixed account (not DynamicUser) is made here, able to read the journal.
+  # A fixed account (not DynamicUser) is made here, with its own group, able to read the journal.
   if [[ $dynamic == no && $offline == no ]]; then
     if ! getent passwd "$user" >/dev/null; then
-      useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$user"
+      useradd --system --user-group --no-create-home --home-dir /nonexistent \
+        --shell /usr/sbin/nologin "$user"
     fi
     usermod -a -G systemd-journal "$user"
   fi

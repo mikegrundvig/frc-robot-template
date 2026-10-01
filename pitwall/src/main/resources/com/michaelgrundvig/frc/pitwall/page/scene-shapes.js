@@ -22,6 +22,10 @@ const GAP = 0.08;
 /** A turn in degrees as three.js takes it, in radians. */
 const RAD = Math.PI / 180;
 
+/** Scratch for measuring dashes. */
+const FROM = new THREE.Vector3();
+const TO = new THREE.Vector3();
+
 /**
  * The materials every shape shares, one per color and kind, so a change of theme recolors every
  * shape at once without rebuilding any.
@@ -107,13 +111,47 @@ export function build(def, kit, label) {
   return built;
 }
 
+/**
+ * Measures how far along a dashed line each of its points is, which places its dashes: what
+ * three.js's computeLineDistances does, but written into the line's own attribute once it has one,
+ * rather than a new one each time (a line kept between two frames is measured at every patch).
+ */
+export function measureDashes(line) {
+  const geometry = line.geometry;
+  const position = geometry.getAttribute("position");
+  if (!position) return;
+  let along = geometry.getAttribute("lineDistance");
+  if (!along || along.count !== position.count) {
+    along = new THREE.Float32BufferAttribute(new Float32Array(position.count), 1);
+    geometry.setAttribute("lineDistance", along);
+  }
+  let distance = 0;
+  if (line.isLineSegments) {
+    // Each segment on its own, starting where the last ended, as three.js measures them.
+    for (let i = 0; i + 1 < position.count; i += 2) {
+      along.setX(i, distance);
+      FROM.fromBufferAttribute(position, i);
+      distance += FROM.distanceTo(TO.fromBufferAttribute(position, i + 1));
+      along.setX(i + 1, distance);
+    }
+  } else {
+    along.setX(0, 0);
+    for (let i = 1; i < position.count; i++) {
+      FROM.fromBufferAttribute(position, i - 1);
+      distance += FROM.distanceTo(TO.fromBufferAttribute(position, i));
+      along.setX(i, distance);
+    }
+  }
+  along.needsUpdate = true;
+}
+
 /** Draws a built shape in a style; dashed lines need their lengths measured. */
 export function restyle(built, style, kit, selected = false) {
   built.style = style;
   for (const line of built.lines) {
     line.material = selected ? (isDashed(style) ? kit.selectedDashed : kit.selected)
       : kit.line(style);
-    if (line.material.isLineDashedMaterial) line.computeLineDistances();
+    if (line.material.isLineDashedMaterial) measureDashes(line);
   }
   for (const fill of built.fills) {
     fill.material = (fill.userData.faint ? kit.faint : kit.fills).get(tokenOf(style));
@@ -240,7 +278,7 @@ const BUILDERS = {
       const tip = from.clone().addScaledVector(way, Math.abs(length));
       const base = tip.clone().addScaledVector(way, -size);
       shaft.geometry.setFromPoints([from, base]);
-      if (shaft.material && shaft.material.isLineDashedMaterial) shaft.computeLineDistances();
+      if (shaft.material && shaft.material.isLineDashedMaterial) measureDashes(shaft);
       head.scale.set(size * 0.35, size, size * 0.35);
       head.position.copy(base).addScaledVector(way, size / 2);
       head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), way);

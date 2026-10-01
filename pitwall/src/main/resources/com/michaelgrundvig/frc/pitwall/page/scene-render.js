@@ -9,7 +9,7 @@
 
 import * as THREE from "/three/three.module.min.js";
 import { OrbitControls } from "/three/OrbitControls.js";
-import { Kit, TOKENS, build, restyle, setPose } from "./scene-shapes.js";
+import { Kit, TOKENS, build, measureDashes, restyle, setPose } from "./scene-shapes.js";
 
 /** How far from a thin line a click still picks it, in CSS pixels. */
 const PICK_PIXELS = 12;
@@ -262,7 +262,7 @@ export class SceneRenderer {
       const line = built.lines[0];
       line.geometry.setFromPoints([a, b]);
       line.geometry.computeBoundingSphere();
-      if (line.material.isLineDashedMaterial) line.computeLineDistances();
+      if (line.material.isLineDashedMaterial) measureDashes(line);
     }
   }
 

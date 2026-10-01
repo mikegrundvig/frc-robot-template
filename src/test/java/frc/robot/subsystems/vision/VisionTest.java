@@ -7,6 +7,7 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Milliseconds;
 
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Symmetry;
 import frc.robot.lib.localization.BodyMotion;
@@ -28,6 +29,7 @@ import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.MockTunableBackend;
 import org.wpilib.tunable.TunableRegistry;
 
@@ -321,6 +323,43 @@ class VisionTest {
         tag.altCameraToTag(),
         ambiguity,
         tag.inMultiTag());
+  }
+
+  /**
+   * On a bump the robot stands as high as the ground under it, and its tags are placed from there:
+   * from the floor, every one would land as far off as the bump is tall.
+   */
+  @Test
+  void onABumpTagsArePlacedFromAsHighAsTheGround() {
+    double crest = 0.165;
+    FieldModel bumpy =
+        new FieldModel(
+            Fields.FRC_2026_REBUILT_WELDED.loadField(),
+            Symmetry.ROTATED,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new Bump(
+                    "Test bump",
+                    new Translation2d(ROBOT.getX(), 3.0),
+                    new Translation2d(ROBOT.getX(), 5.0),
+                    crest,
+                    1.0)));
+    vision.close();
+    vision = new Vision(List.of(camera), new CameraIO[] {io}, estimator, bumpy, () -> tuned);
+    io.see(
+        T0 + 200_000_000L,
+        camera,
+        new Pose3d(
+            ROBOT.getX(),
+            ROBOT.getY(),
+            crest,
+            new Rotation3d(0, 0, ROBOT.getRotation().getRadians())));
+
+    loop();
+
+    assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
   }
 
   @Test

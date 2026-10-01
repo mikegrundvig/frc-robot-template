@@ -297,11 +297,12 @@ public final class Vision implements AutoCloseable {
       collecting.add(measurement.pose().getRotation());
     }
     if (then != null) {
+      // On raised terrain, the robot stands as high as the ground under it.
       Pose3d robotThen =
           new Pose3d(
               then.getX(),
               then.getY(),
-              0,
+              field.terrain().heightAt(then.getTranslation()),
               new Rotation3d(
                   tilted.rollRadians(), tilted.pitchRadians(), then.getRotation().getRadians()));
       CameraMountCalibration sightings =

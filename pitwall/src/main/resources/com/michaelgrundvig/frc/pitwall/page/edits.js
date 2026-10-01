@@ -2,7 +2,7 @@
 // whole on the robot, all or none. Tune and Experiment share them, so a value staged in one shows
 // staged in the other, and the apply bar counts them all.
 
-import { robot, onChange, send, shown, say } from "./core.js";
+import { robot, onChange, send, shown, say, announce } from "./core.js";
 
 /** What's staged, by the value's tunable path: the text as typed, so a typo stays to be fixed. */
 const staged = new Map();
@@ -10,7 +10,9 @@ const listeners = [];
 
 /**
  * What became of the last apply: {@code applying} while it waits for the robot; {@code refusal},
- * the robot's problem details when it refused or was locked, until the next apply or discard.
+ * the robot's problem details when it refused or was locked ({status, title, detail, errors}),
+ * until the next apply or discard. Its errors are each a reason tied to the values it concerns
+ * ({layer, by, paths, config, group, text}).
  */
 export const outcome = { applying: false, refusal: null };
 
@@ -51,6 +53,31 @@ export function stage(path, text) {
   } else {
     staged.set(path, String(text));
   }
+  forget(path);
+  changed();
+}
+
+/**
+ * Forgets the last refusal's reasons that concern a value being edited again: each was about the
+ * value as it was. The robot checks it afresh at the next apply.
+ */
+function forget(path) {
+  const refusal = outcome.refusal;
+  if (!refusal || !refusal.errors) return;
+  refusal.errors = refusal.errors.filter((error) => !(error.paths || []).includes(path));
+  if (refusal.errors.length === 0) outcome.refusal = null;
+}
+
+/** The last refusal's reasons that concern a value, as the robot gave them. */
+export function reasonsFor(path) {
+  const refusal = outcome.refusal;
+  if (!refusal || !refusal.errors) return [];
+  return refusal.errors.filter((error) => (error.paths || []).includes(path));
+}
+
+/** Closes the last refusal, leaving the edits staged. */
+export function closeRefusal() {
+  outcome.refusal = null;
   changed();
 }
 
@@ -131,9 +158,18 @@ export async function apply() {
     changed();
     return true;
   }
+  if (result.status === 0) {
+    say(result.problem.detail, true); // not answering: nothing to show beside the values
+    changed();
+    return false;
+  }
+  // Shown above the apply bar, and each reason beside its value: the edits stay staged, so fixing
+  // one and applying again is the whole loop.
   outcome.refusal = { status: result.status, ...result.problem };
-  say(result.status === 422 ? "Refused: nothing changed. " + (result.problem.detail || "")
-      : result.problem.detail || result.problem.title, true);
+  const reasons = (result.problem.errors || []).length;
+  announce(result.status === 422
+    ? "Refused: nothing changed. " + reasons + (reasons === 1 ? " reason." : " reasons.")
+    : "Nothing changed. " + (result.problem.detail || result.problem.title), true);
   changed();
   return false;
 }

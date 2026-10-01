@@ -83,8 +83,16 @@ public final class TunableTee implements TunableBackend {
 
   private record PageRequest(Map<String, Object> values, CompletableFuture<Outcome> outcome) {}
 
-  /** One tunable's change from the page, and how to take it back if a later one fails. */
-  private record Change(String path, Runnable apply, Runnable undo) {}
+  /**
+   * One tunable's change from the page, or one configuration's, and how to take it back if a later
+   * one fails.
+   *
+   * @param name the tunable's path, or the configuration's name
+   * @param config the configuration it changes; empty for a tunable of none
+   * @param paths the tunables it changes
+   */
+  private record Change(
+      String name, String config, List<String> paths, Runnable apply, Runnable undo) {}
 
   private final TunableBackend inner;
   private final Supplier<@Nullable String> whyLocked;
@@ -417,63 +425,79 @@ public final class TunableTee implements TunableBackend {
   /**
    * The page's changes, all or none. Everything is checked before anything applies: each value (a
    * tunable the page can change, its type, and its limits), then each configuration it changes,
-   * rebuilt with all of its new values. A refusal gives every reason, one per line. Then each is
-   * applied, and if a tunable's own setter throws, the ones already applied are put back.
+   * rebuilt with all of its new values, then the robot's rules the change touches. A refusal gives
+   * every reason, one per line, each tied to the values it concerns. Then each is applied, and if a
+   * tunable's own setter throws, the ones already applied are put back.
    */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
     if (why != null) {
       return new Outcome(Outcome.Result.LOCKED, "Tuning is locked: " + why);
     }
-    List<String> problems = new ArrayList<>();
+    List<Outcome.Reason> problems = new ArrayList<>();
     List<Change> changes = new ArrayList<>();
     // A configuration's values, gathered to be checked and applied together.
     Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();
     Map<LiveConfig<?>, Map<String, String>> configuredPaths = new IdentityHashMap<>();
     for (Map.Entry<String, Object> value : values.entrySet()) {
+      String path = value.getKey();
       Entry entry;
       synchronized (entries) {
-        entry = entries.get(value.getKey());
+        entry = entries.get(path);
       }
       if (entry == null || entry.proxy() == null || !isMutable(entry.real())) {
-        problems.add("There is no tunable the page can change at " + value.getKey());
+        String text = "There is no tunable the page can change at " + path;
+        problems.add(Outcome.Reason.of(Outcome.Layer.VALUE, path, "", text, text));
         continue;
       }
-      Change change = change(value.getKey(), entry, value.getValue());
+      LiveConfig<?> config = entry.config();
+      String configName = config != null ? config.name() : "";
+      Change change = change(path, entry, value.getValue());
       if (change == null) {
-        problems.add(value.getKey() + " takes a " + entry.type() + " value");
+        String text = path + " takes a " + entry.type() + " value";
+        problems.add(Outcome.Reason.of(Outcome.Layer.VALUE, path, configName, text, text));
         continue;
       }
       if (value.getValue() instanceof Number number) {
         String outside = entry.limits().whyNot(number.doubleValue());
         if (outside != null) {
-          problems.add(value.getKey() + ": " + outside);
+          problems.add(
+              Outcome.Reason.of(
+                  Outcome.Layer.LIMIT, path, configName, outside, path + ": " + outside));
           continue;
         }
       }
-      LiveConfig<?> config = entry.config();
       if (config != null && value.getValue() instanceof Number number) {
         configured
             .computeIfAbsent(config, c -> new LinkedHashMap<>())
             .put(entry.field(), number.doubleValue());
         configuredPaths
             .computeIfAbsent(config, c -> new LinkedHashMap<>())
-            .put(entry.field(), value.getKey());
+            .put(entry.field(), path);
         continue;
       }
       changes.add(change);
     }
     if (!problems.isEmpty()) {
-      return new Outcome(Outcome.Result.REFUSED, String.join("\n", problems));
+      return Outcome.refused(problems);
     }
     Map<LiveConfig<?>, Record> candidates = new IdentityHashMap<>();
     for (Map.Entry<LiveConfig<?>, Map<String, Double>> group : configured.entrySet()) {
       LiveConfig<?> config = group.getKey();
-      Record candidate;
-      try {
-        candidate = config.candidate(group.getValue());
-      } catch (IllegalArgumentException refused) {
-        problems.add(Objects.requireNonNullElse(refused.getMessage(), refused.toString()));
+      List<LiveConfig.Problem> refused = new ArrayList<>();
+      Record candidate = config.candidate(group.getValue(), refused);
+      if (candidate == null) {
+        for (LiveConfig.Problem problem : refused) {
+          problems.add(
+              new Outcome.Reason(
+                  problem.layer(),
+                  problem.record(),
+                  pathsOf(config, problem.fields()),
+                  config.name(),
+                  problem.group(),
+                  problem.text(),
+                  problem.line()));
+        }
         continue;
       }
       candidates.put(config, candidate);
@@ -484,6 +508,8 @@ public final class TunableTee implements TunableBackend {
       changes.add(
           new Change(
               config.name(),
+              config.name(),
+              List.copyOf(paths.values()),
               () -> {
                 config.accept(candidate);
                 group
@@ -500,7 +526,7 @@ public final class TunableTee implements TunableBackend {
       problems.addAll(brokenRules(configured, candidates));
     }
     if (!problems.isEmpty()) {
-      return new Outcome(Outcome.Result.REFUSED, String.join("\n", problems));
+      return Outcome.refused(problems);
     }
     List<Change> done = new ArrayList<>();
     for (Change change : changes) {
@@ -513,13 +539,20 @@ public final class TunableTee implements TunableBackend {
             applied.undo().run();
           } catch (RuntimeException alsoFailed) {
             TunableRegistry.reportWarning(
-                "Pitwall: couldn't put " + applied.path() + " back: " + alsoFailed);
+                "Pitwall: couldn't put " + applied.name() + " back: " + alsoFailed);
           }
         }
-        String reason = e.getMessage();
-        return new Outcome(
-            Outcome.Result.REFUSED,
-            change.path() + " refused the value: " + (reason != null ? reason : e.toString()));
+        String reason = e.getMessage() != null ? e.getMessage() : e.toString();
+        return Outcome.refused(
+            List.of(
+                new Outcome.Reason(
+                    Outcome.Layer.TUNABLE,
+                    "",
+                    change.paths(),
+                    change.config(),
+                    "",
+                    reason,
+                    change.name() + " refused the value: " + reason)));
       }
     }
     return Outcome.applied();
@@ -527,9 +560,10 @@ public final class TunableTee implements TunableBackend {
 
   /**
    * Why a change breaks the rules across configurations it touches: each registry of rules that
-   * reads a configuration the change sets, asked once, with every candidate.
+   * reads a configuration the change sets, asked once, with every candidate. Each reason names
+   * every value its rule reads.
    */
-  private static List<String> brokenRules(
+  private List<Outcome.Reason> brokenRules(
       Map<LiveConfig<?>, Map<String, Double>> configured, Map<LiveConfig<?>, Record> candidates) {
     List<ConfigRules> registries = new ArrayList<>();
     for (LiveConfig<?> config : configured.keySet()) {
@@ -541,11 +575,37 @@ public final class TunableTee implements TunableBackend {
     }
     Map<LiveConfig<?>, Set<String>> changes = new IdentityHashMap<>();
     configured.forEach((config, values) -> changes.put(config, values.keySet()));
-    List<String> broken = new ArrayList<>();
+    List<Outcome.Reason> broken = new ArrayList<>();
     for (ConfigRules registry : registries) {
-      broken.addAll(registry.whyNot(changes, candidates));
+      for (ConfigRules.Broken rule : registry.broken(changes, candidates)) {
+        List<String> paths = new ArrayList<>();
+        rule.reads()
+            .forEach(
+                (config, fields) ->
+                    paths.addAll(
+                        pathsOf(
+                            config,
+                            fields.isEmpty()
+                                ? config.knobs().stream().map(LiveConfig.Knob::path).toList()
+                                : fields.stream().sorted().toList())));
+        broken.add(
+            new Outcome.Reason(
+                Outcome.Layer.RULE, rule.rule(), paths, "", "", rule.text(), rule.line()));
+      }
     }
     return broken;
+  }
+
+  /** Where a configuration's values are published, those that are, in the order given. */
+  private List<String> pathsOf(LiveConfig<?> config, List<String> fields) {
+    List<String> paths = new ArrayList<>();
+    for (String field : fields) {
+      String path = pathOf(config, field);
+      if (path != null) {
+        paths.add(path);
+      }
+    }
+    return paths;
   }
 
   /**
@@ -598,6 +658,8 @@ public final class TunableTee implements TunableBackend {
       String path, TunableBase real, Runnable set, String text, Runnable restore, Object old) {
     return new Change(
         path,
+        "",
+        List.of(path),
         () -> {
           set.run();
           applied(path, real, text);

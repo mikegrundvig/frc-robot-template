@@ -85,7 +85,9 @@ import org.jspecify.annotations.Nullable;
  * when applied, 422 when a limit or the configuration's checks (or the action) refuse it, 409 when
  * it is locked out (tuning off, not enabled in utility mode, or the field system connected), and
  * 202 when the loop didn't get to it in time (the next GET shows the result). Errors are problem
- * details (RFC 9457).
+ * details (RFC 9457). A refused change to tunables also lists each reason in {@code errors}, tied
+ * to the tunables it concerns ({@code [{"layer", "by", "path", "paths", "config", "group", "text",
+ * "line"}]}), while {@code detail} keeps every reason as a line, as it always has.
  *
  * <p>The server's threads never change the robot: they read what the robot loop last published
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
@@ -299,10 +301,18 @@ public final class PitwallServer implements AutoCloseable {
     private final int status;
     private final String title;
 
+    /** For a refused change to tunables, each reason with the values it concerns. */
+    private final transient List<Outcome.Reason> reasons;
+
     Problem(int status, String title, String detail) {
+      this(status, title, detail, List.of());
+    }
+
+    Problem(int status, String title, String detail, List<Outcome.Reason> reasons) {
       super(detail);
       this.status = status;
       this.title = title;
+      this.reasons = reasons;
     }
   }
 
@@ -700,7 +710,7 @@ public final class PitwallServer implements AutoCloseable {
       }
       switch (outcome.result()) {
         case APPLIED -> sendJson(exchange, 200, state.get());
-        case REFUSED -> throw new Problem(422, "Refused", outcome.detail());
+        case REFUSED -> throw new Problem(422, "Refused", outcome.detail(), outcome.reasons());
         case LOCKED -> throw new Problem(409, "Locked", outcome.detail());
       }
     }
@@ -878,7 +888,33 @@ public final class PitwallServer implements AutoCloseable {
       body.put("title", problem.title);
       body.put("status", problem.status);
       body.put("detail", String.valueOf(problem.getMessage()));
+      if (!problem.reasons.isEmpty()) {
+        // An extension member (RFC 9457 allows them): each reason, tied to its values.
+        body.put("errors", problem.reasons.stream().map(Api::error).toList());
+      }
       send(exchange, problem.status, "application/problem+json", json.toJson(body));
+    }
+
+    /**
+     * A reason a change was refused, as the page reads it: which check ({@code layer}: value,
+     * limit, record, rule, or tunable), who refused it ({@code by}: a record or a rule), the
+     * tunables it concerns ({@code paths}, and {@code path} when it's one), its configuration and,
+     * for a record's check that names no value, where the record is ({@code group}), why ({@code
+     * text}), and its line of {@code detail} ({@code line}).
+     */
+    private static Map<String, Object> error(Outcome.Reason reason) {
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("layer", reason.layer().name().toLowerCase(Locale.ROOT));
+      shown.put("by", reason.by());
+      if (reason.paths().size() == 1) {
+        shown.put("path", reason.paths().getFirst());
+      }
+      shown.put("paths", reason.paths());
+      shown.put("config", reason.config());
+      shown.put("group", reason.group());
+      shown.put("text", reason.text());
+      shown.put("line", reason.line());
+      return shown;
     }
 
     private static void send(HttpExchange exchange, int status, String type, String body)

@@ -3,7 +3,7 @@
 // so a row someone is typing in is never rebuilt under them.
 
 import { robot, send, shown, h, say } from "./core.js";
-import { described, edit, stage, apply } from "./edits.js";
+import { described, edit, stage, apply, reasonsFor } from "./edits.js";
 
 /**
  * Makes a value's row.
@@ -55,15 +55,18 @@ export function updateRow(row) {
   const now = doc.values[row.path];
   const state = edit(row.path);
   const tuned = row.path in doc.changes;
-  const edited = state.isEdit && state.valid;
-  const bad = state.text !== null && !state.valid;
+  const reasons = reasonsFor(row.path);
+  const notNumber = state.text !== null && !state.valid;
+  const bad = notNumber || reasons.length > 0;
+  const edited = state.isEdit && state.valid && !bad;
   row.el.classList.toggle("tuned", tuned);
   row.el.classList.toggle("edited", edited);
   row.el.classList.toggle("refused", bad);
   replace(row.tags,
     tuned && h("span", { class: "tag tuned" }, "● tuned"),
     edited && h("span", { class: "tag edit" }, "✎ edit"),
-    bad && h("span", { class: "tag refused" }, "✗ not a number"));
+    notNumber && h("span", { class: "tag refused" }, "✗ not a number"),
+    reasons.length > 0 && h("span", { class: "tag refused" }, "✗ refused"));
   // Never overwrite what someone is typing.
   if (document.activeElement !== row.input) {
     const text = state.text !== null ? state.text : shown(now);
@@ -77,9 +80,22 @@ export function updateRow(row) {
   row.revert.hidden = !tuned;
   row.revert.disabled = locked;
   replace(row.note,
-    edited && h("div", { class: "edit" }, "✎ " + withUnit(now, value) + " → "
+    state.isEdit && state.valid && h("div", { class: "edit" }, "✎ " + withUnit(now, value) + " → "
         + withUnit(state.number, value) + ", staged: not applied yet"),
-    bad && h("div", { class: "why" }, "✗ Only numbers can be applied."));
+    notNumber && h("div", { class: "why" }, "✗ Only numbers can be applied."),
+    reasons.map((reason) => h("div", { class: "why" }, "✗ Refused by " + refuser(reason) + ": ",
+      h("span", null, reason.text))));
+}
+
+/** Who refused a change, as the row says it: "its tuning limits", "SwerveConfig.Gains's check". */
+export function refuser(reason) {
+  switch (reason.layer) {
+    case "limit": return "its tuning limits";
+    case "record": return (reason.by || "its record") + "'s own check";
+    case "rule": return "the robot rule “" + reason.by + "”";
+    case "tunable": return "its tunable";
+    default: return "the robot";
+  }
 }
 
 /** A number with its unit, as the row shows it. */

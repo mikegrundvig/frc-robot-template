@@ -99,7 +99,10 @@ public final class PoseEstimator implements CameraLocalizer {
   // What the wheels are going through, and the doubt it adds up to.
   private DriveConditions conditions = DriveConditions.NORMAL;
   private double suspectTravel;
-  private boolean collisionPending;
+
+  /** The doubt of a collision felt since the last step, for the next to take. */
+  private double collisionPendingVariance;
+
   private long collisionUntilNanos = Long.MIN_VALUE;
 
   private PoseReset initial;
@@ -261,12 +264,22 @@ public final class PoseEstimator implements CameraLocalizer {
    * until the next call. A new collision makes the next step uncertain by {@link
    * EstimatorConfig#collisionStdDevMeters}: the robot may have moved without its wheels seeing it.
    * Jolts within {@link EstimatorConfig#collisionWindowSeconds} of the last are the same collision.
+   * A share of one (a jolt the wheels partly explain) adds that share of its spread, outside a
+   * collision's window, and opens none.
    */
   public void setConditions(DriveConditions conditions) {
     this.conditions = conditions;
-    if (conditions.collision() && started) {
-      collisionPending |= !(history.newestTime() <= collisionUntilNanos);
+    if (!started) {
+      return;
+    }
+    boolean inWindow = history.newestTime() <= collisionUntilNanos;
+    if (conditions.collision()) {
+      if (!inWindow) {
+        collisionPendingVariance += collisionVariance;
+      }
       collisionUntilNanos = history.newestTime() + collisionWindowNanos;
+    } else if (!inWindow) {
+      collisionPendingVariance += square(conditions.collisionShare()) * collisionVariance;
     }
   }
 
@@ -824,10 +837,8 @@ public final class PoseEstimator implements CameraLocalizer {
     if (conditions.disabled()) {
       variance += handlingVariancePerSecond * seconds;
     }
-    if (collisionPending) {
-      variance += collisionVariance;
-      collisionPending = false;
-    }
+    variance += collisionPendingVariance;
+    collisionPendingVariance = 0;
     return variance;
   }
 

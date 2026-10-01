@@ -136,15 +136,15 @@ class PoseEstimatorTest {
   }
 
   private static DriveConditions tilted(double degrees) {
-    return new DriveConditions(Math.toRadians(degrees), 0, false, 0, false);
+    return new DriveConditions(Math.toRadians(degrees), 0, 0, 0, false);
   }
 
-  private static final DriveConditions HIT = new DriveConditions(0, 0, true, 0, false);
+  private static final DriveConditions HIT = new DriveConditions(0, 0, 1, 0, false);
 
   /** The IMU says the wheels slide over the floor at half a meter a second. */
-  private static final DriveConditions SLIDING = new DriveConditions(0, 0, false, 0.5, false);
+  private static final DriveConditions SLIDING = new DriveConditions(0, 0, 0, 0.5, false);
 
-  private static final DriveConditions DISABLED = new DriveConditions(0, 0, false, 0, true);
+  private static final DriveConditions DISABLED = new DriveConditions(0, 0, 0, 0, true);
 
   private static boolean field(Translation2d point) {
     return point.getX() >= 0 && point.getX() <= 16 && point.getY() >= 0 && point.getY() <= 8;
@@ -630,7 +630,7 @@ class PoseEstimatorTest {
     Robot gripping = new Robot().drive(62, 2.0, 0, 0);
     Robot sliding = new Robot().under(SLIDING).drive(62, 2.0, 0, 0);
     Robot slidingFaster =
-        new Robot().under(new DriveConditions(0, 0, false, 1.0, false)).drive(62, 2.0, 0, 0);
+        new Robot().under(new DriveConditions(0, 0, 0, 1.0, false)).drive(62, 2.0, 0, 0);
 
     double base = gripping.estimate().covariance().xx();
     double slow = Math.sqrt(sliding.estimate().covariance().xx() - base);
@@ -654,6 +654,29 @@ class PoseEstimatorTest {
     assertThat(robot.estimate().covariance().xx()).isCloseTo(hit, within(1e-12));
     assertThat(duringWindow).isTrue();
     assertThat(robot.estimate().health().collisionActive()).isFalse();
+  }
+
+  /**
+   * A jolt the wheels partly explain is a share of a collision, and adds that share of its spread:
+   * half a collision, half its 25 cm. It isn't a hit, and within a hit's window it adds nothing.
+   */
+  @Test
+  void aShareOfACollisionAddsThatShareOfItsSpread() {
+    DriveConditions halfAHit = new DriveConditions(0, 0, 0.5, 0, false);
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    double before = robot.estimate().covariance().xx();
+
+    robot.under(halfAHit).drive(1, 0, 0, 0);
+    double half = robot.estimate().covariance().xx();
+    boolean hit = robot.estimate().health().collisionActive();
+    robot.under(HIT).drive(1, 0, 0, 0);
+    double whole = robot.estimate().covariance().xx();
+    robot.under(halfAHit).drive(5, 0, 0, 0);
+
+    assertThat(Math.sqrt(half - before)).isCloseTo(0.125, within(1e-9));
+    assertThat(hit).isFalse();
+    assertThat(whole - half).as("a whole one after it").isCloseTo(0.0625, within(1e-9));
+    assertThat(robot.estimate().covariance().xx()).isCloseTo(whole, within(1e-12));
   }
 
   @Test
@@ -849,7 +872,7 @@ class PoseEstimatorTest {
   @Test
   void onAKnownRampTheWheelsTravelCountsAtTheSlopesCosine() {
     double slope = Math.toRadians(15);
-    Robot ramp = new Robot().under(new DriveConditions(slope, slope, false, 0, false));
+    Robot ramp = new Robot().under(new DriveConditions(slope, slope, 0, 0, false));
     Robot unknown = new Robot().under(tilted(15));
 
     ramp.drive(250, 1.0, 0, 0); // a meter along the ramp
@@ -862,20 +885,25 @@ class PoseEstimatorTest {
 
   @Test
   void theGroundExplainsSomeOrAllOfATiltNeverMore() {
-    assertThatThrownBy(() -> new DriveConditions(0.1, 0.2, false, 0, false))
+    assertThatThrownBy(() -> new DriveConditions(0.1, 0.2, 0, 0, false))
         .hasMessageContaining("never more");
-    assertThat(new DriveConditions(0.3, 0.2, false, 0, false).unexplainedTiltRadians())
+    assertThat(new DriveConditions(0.3, 0.2, 0, 0, false).unexplainedTiltRadians())
         .isCloseTo(0.1, within(1e-12));
   }
 
+  /**
+   * Built inside the robot's loop, the conditions don't stop it for a slip or a share of a
+   * collision that can't be one: a slip that isn't a speed, zero or more, is none, and a share
+   * outside zero to one is the nearest of them.
+   */
   @Test
-  void aSlipIsASpeed() {
-    assertThatThrownBy(() -> new DriveConditions(0, 0, false, -0.1, false))
-        .hasMessageContaining("zero or more");
-    assertThatThrownBy(() -> new DriveConditions(0, 0, false, Double.NaN, false))
-        .hasMessageContaining("zero or more");
-    assertThatThrownBy(() -> new DriveConditions(0, 0, false, Double.POSITIVE_INFINITY, false))
-        .hasMessageContaining("zero or more");
+  void aSlipIsASpeedAndACollisionShareAtMostAWholeOne() {
+    for (double notASpeed : new double[] {-0.1, Double.NaN, Double.POSITIVE_INFINITY}) {
+      assertThat(new DriveConditions(0, 0, 0, notASpeed, false).slipMetersPerSecond()).isZero();
+    }
+    assertThat(new DriveConditions(0, 0, 1.5, 0, false).collisionShare()).isOne();
+    assertThat(new DriveConditions(0, 0, -0.5, 0, false).collisionShare()).isZero();
+    assertThat(new DriveConditions(0, 0, Double.NaN, 0, false).collision()).isFalse();
   }
 
   @Test

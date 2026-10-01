@@ -108,7 +108,7 @@ class SlipCheckTest {
 
     assertThat(robot.check.slipMetersPerSecond()).isZero();
     assertThat(robot.check.slideMetersPerSecond()).isLessThan(1e-9);
-    assertThat(robot.check.jolt()).isFalse();
+    assertThat(robot.check.collisionShare()).isZero();
   }
 
   /**
@@ -310,10 +310,30 @@ class SlipCheckTest {
     stopping.loop(-0.36, 0, 0, 0); // slows as fast, its wheels with it
     slammed.loop(-0.8, 0, 0, 0); // 40 m/s², past the range, its wheels with it
 
-    assertThat(hit.check.jolt()).isTrue();
-    assertThat(stopping.check.jolt()).isFalse();
-    assertThat(slammed.check.jolt()).isTrue();
+    assertThat(hit.check.collisionShare()).isOne();
+    assertThat(stopping.check.collisionShare()).isCloseTo(0, within(1e-12));
+    assertThat(slammed.check.collisionShare()).isOne();
     assertThat(hit.check.speedSlipMetersPerSecond()).as("the collision's doubt covers it").isZero();
+  }
+
+  /**
+   * Hit from the side as it stops hard: the IMU feels 17 m/s², past the limit. The wheels explain
+   * the 12 m/s² it slows along its way, not the 12 sideways, which is under the limit on its own:
+   * still a share of a collision, as large as it is against the limit. Only a share, the speed
+   * comparison goes on with it, so a slide it starts is still seen.
+   */
+  @Test
+  void aHitTheWheelsPartlyExplainIsAShareOfACollision() {
+    Robot robot = new Robot();
+    robot.fieldVx = 2;
+    robot.loops(10, 0, 0, 0, 0);
+
+    robot.slide(0, -0.24).loop(-0.24, 0.24, 0, 0);
+
+    assertThat(robot.check.collisionShare()).isCloseTo(12 / 15.0, within(1e-9));
+    assertThat(robot.check.slideMetersPerSecond())
+        .as("the speed comparison keeps the sideways 0.24 m/s the wheels didn't see")
+        .isCloseTo(0.24, within(0.01));
   }
 
   /** Without a checked accelerometer, a jolt's size alone decides. */
@@ -325,7 +345,7 @@ class SlipCheckTest {
 
     stopping.loop(-0.36, 0, 0, 0);
 
-    assertThat(stopping.check.jolt()).isTrue();
+    assertThat(stopping.check.collisionShare()).isOne();
   }
 
   @Test
@@ -340,13 +360,13 @@ class SlipCheckTest {
     robot.check.startOver(Double.NaN, Double.NaN);
     assertThat(robot.check.slipMetersPerSecond()).isZero();
     assertThat(robot.check.slideMetersPerSecond()).isZero();
-    assertThat(robot.check.jolt()).isFalse();
+    assertThat(robot.check.collisionShare()).isZero();
 
     // Starting over, one loop is only the comparison's start.
     robot.loop(2.2 * LOOP, 0, 0, 0.004);
     assertThat(robot.check.speedSlipMetersPerSecond()).isZero();
     robot.check.startOver(40, 0);
-    assertThat(robot.check.jolt()).as("a jolt, by its size").isTrue();
+    assertThat(robot.check.collisionShare()).as("a jolt, by its size").isOne();
   }
 
   @Test

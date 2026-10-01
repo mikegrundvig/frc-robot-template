@@ -212,7 +212,7 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput("Localization/TiltDegrees", Math.toDegrees(conditions.tiltRadians()));
     Logger.recordOutput(
         "Localization/GroundSlopeDegrees", Math.toDegrees(conditions.groundSlopeRadians()));
-    Logger.recordOutput("Localization/Collision", conditions.collision());
+    Logger.recordOutput("Localization/CollisionShare", conditions.collisionShare());
     Logger.recordOutput("Localization/SlipMetersPerSecond", conditions.slipMetersPerSecond());
     Logger.recordOutput(
         "Localization/TurnSlipMetersPerSecond", slipCheck.turnSlipMetersPerSecond());
@@ -395,7 +395,7 @@ public final class Localization implements AutoCloseable {
     return new DriveConditions(
         tilt,
         imu == null ? 0 : groundSlope(tilt),
-        slipCheck.jolt(),
+        slipCheck.collisionShare(),
         slipCheck.slipMetersPerSecond(),
         !enabled);
   }

@@ -30,9 +30,12 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       the accelerometer's noise, that's how fast the wheels slide. Only on a robot whose
  *       accelerometer is known to read along its axes ({@link ImuPlacement#accelerometerChecked}).
  *   <li><b>A jolt.</b> The accelerometer feeling more than {@link Settings#joltMetersPerSecSq} is a
- *       collision, unless the wheels' own change of velocity explains it as well (a robot stopping
- *       hard is felt by both, a hit only by the IMU). Without a checked accelerometer, its size
- *       alone decides. The speed comparison starts over after one: the collision's doubt covers it.
+ *       collision, as far as the wheels' own change of velocity doesn't explain it (a robot
+ *       stopping hard is felt by both, a hit only by the IMU): what they don't explain, against the
+ *       limit, is its share of one. A reading at the accelerometer's range is a whole one, whatever
+ *       the wheels did, and without a checked accelerometer its size alone decides. The speed
+ *       comparison starts over after a whole one: the collision's doubt covers it. A share of one
+ *       stays in it as well, so a slide it started is still seen.
  * </ul>
  *
  * <p>The turn and the speed each say how fast the wheels may be sliding over the floor; together,
@@ -61,8 +64,8 @@ public final class SlipCheck {
    * @param speedToleranceMetersPerSecond how far the wheels' speed and the accelerometer's
    *     reckoning of the robot's may drift apart without a slide: its noise, and its lag as the
    *     robot's acceleration changes
-   * @param joltMetersPerSecSq an acceleration past this, which the wheels don't explain, is a
-   *     collision
+   * @param joltMetersPerSecSq an acceleration past this is a collision, as far as the wheels don't
+   *     explain it: what they don't, against this, is its share of one
    * @param accelerometerRangeMetersPerSecSq the most the accelerometer reports on each axis: a
    *     reading at it is a jolt past what it can say, whatever the wheels did
    */
@@ -183,7 +186,7 @@ public final class SlipCheck {
   private double turnApart;
   private double turnSlip;
   private double speedSlip;
-  private boolean jolt;
+  private double collision;
 
   /**
    * @param settings how closely the wheels must agree with the IMU
@@ -232,7 +235,8 @@ public final class SlipCheck {
     forgetSpeeds();
     lastVelocityX = Double.NaN;
     lastVelocityY = Double.NaN;
-    jolt = joltBySize(forwardAccelerationMetersPerSecSq, leftAccelerationMetersPerSecSq);
+    collision =
+        joltBySize(forwardAccelerationMetersPerSecSq, leftAccelerationMetersPerSecSq) ? 1 : 0;
   }
 
   /** Whether an acceleration is a jolt by its size alone: past the limit, or at the range. */
@@ -279,9 +283,13 @@ public final class SlipCheck {
     return Math.hypot(turnSlip, speedSlip);
   }
 
-  /** Whether the last loop's IMU felt a collision. */
-  public boolean jolt() {
-    return jolt;
+  /**
+   * How much of a collision the last loop's IMU felt, from none to a whole one: a jolt the wheels
+   * don't explain past the limit, or one at the accelerometer's range, is a whole one; a jolt past
+   * the limit the wheels partly explain, what they don't against the limit.
+   */
+  public double collisionShare() {
+    return collision;
   }
 
   private void forgetSpeeds() {
@@ -341,16 +349,19 @@ public final class SlipCheck {
     double feltY = sin * forward + cos * left;
     double seconds = sample.seconds();
     boolean before = Double.isFinite(lastVelocityX);
-    jolt = joltBySize(forward, left);
-    if (jolt && accelerometerChecked && before && !saturated(forward, left)) {
-      // Felt by the wheels too, it's driving; only what they don't explain is a jolt.
-      jolt =
+    collision = joltBySize(forward, left) ? 1 : 0;
+    if (collision > 0 && accelerometerChecked && before && !saturated(forward, left)) {
+      // What the wheels felt too is driving; what they don't explain, the hit's share.
+      double unexplained =
           Math.hypot(
-                  feltX - (velocityX - lastVelocityX) / seconds,
-                  feltY - (velocityY - lastVelocityY) / seconds)
-              > joltLimit;
+              feltX - (velocityX - lastVelocityX) / seconds,
+              feltY - (velocityY - lastVelocityY) / seconds);
+      collision = Math.min(1, unexplained / joltLimit);
     }
-    if (!accelerometerChecked || jolt || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
+    if (!accelerometerChecked
+        || collision >= 1
+        || !Double.isFinite(feltX)
+        || !Double.isFinite(feltY)) {
       forgetSpeeds();
     } else if (before) {
       // How the wheels' velocity changed over the loop, less what the accelerometer felt...

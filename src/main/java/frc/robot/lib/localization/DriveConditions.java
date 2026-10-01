@@ -11,13 +11,18 @@ package frc.robot.lib.localization;
  * @param groundSlopeRadians how much of that tilt the ground under the robot explains: on a known
  *     bump's ramp the wheels still roll on the ground, and their travel counts in full, at the
  *     slope's cosine across the field. Zero on flat ground, or where the terrain isn't known.
- * @param collision whether the IMU just felt a jolt beyond anything driving explains: the robot may
- *     have been moved without its wheels seeing it (6800 flagged 20 m/s²)
+ * @param collisionShare how much of a collision the IMU just felt, from none to a whole one ({@link
+ *     SlipCheck#collisionShare}): the robot may have been moved without its wheels seeing it. A
+ *     whole one is a jolt beyond anything driving explains, and the robot counts as just hit; a
+ *     jolt the wheels partly explain is the share they don't, and adds that share of a collision's
+ *     spread. Outside zero to one, or not a number, it's taken as the nearest of them, or none.
  * @param slipMetersPerSecond how fast the wheels may be sliding over the floor together, as the IMU
  *     sees them ({@link SlipCheck}): the gyro turning the robot less or more than they do, the
  *     accelerometer feeling it speed up less or more. Zero when the IMU agrees with them, or there
  *     is none. Slip that sets the wheels against each other shows in their residual instead ({@link
- *     BodyMotion#residualMeters}). The travel it may have added counts as suspect.
+ *     BodyMotion#residualMeters}). The travel it may have added counts as suspect. Negative, not a
+ *     number or infinite, it's taken as none: it's built inside the robot's loop, which mustn't
+ *     stop for it, and an infinite doubt would leave the estimate nothing to stand on.
  * @param disabled whether the robot is disabled, when people pick it up and carry it where its
  *     wheels can't see: the position's uncertainty grows with time, so the cameras lead until it's
  *     enabled (254 trusted vision loosely while disabled, tightly once enabled)
@@ -25,11 +30,11 @@ package frc.robot.lib.localization;
 public record DriveConditions(
     double tiltRadians,
     double groundSlopeRadians,
-    boolean collision,
+    double collisionShare,
     double slipMetersPerSecond,
     boolean disabled) {
   /** Level, nothing hit, wheels gripping, enabled. */
-  public static final DriveConditions NORMAL = new DriveConditions(0, 0, false, 0, false);
+  public static final DriveConditions NORMAL = new DriveConditions(0, 0, 0, 0, false);
 
   public DriveConditions {
     if (!(tiltRadians >= 0) || Double.isInfinite(tiltRadians)) {
@@ -39,9 +44,14 @@ public record DriveConditions(
       throw new IllegalArgumentException(
           "the ground explains some or all of the tilt, never more: " + groundSlopeRadians);
     }
-    if (!(slipMetersPerSecond >= 0) || Double.isInfinite(slipMetersPerSecond)) {
-      throw new IllegalArgumentException("a slip is a speed, zero or more: " + slipMetersPerSecond);
-    }
+    collisionShare = collisionShare > 0 ? Math.min(collisionShare, 1) : 0;
+    slipMetersPerSecond =
+        slipMetersPerSecond > 0 && Double.isFinite(slipMetersPerSecond) ? slipMetersPerSecond : 0;
+  }
+
+  /** Whether the IMU just felt a whole collision: a jolt beyond anything driving explains. */
+  public boolean collision() {
+    return collisionShare >= 1;
   }
 
   /** How far the robot tilts beyond what the ground explains. */

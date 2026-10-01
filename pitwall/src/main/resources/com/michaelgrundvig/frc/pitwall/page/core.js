@@ -10,9 +10,11 @@
  * The robot as this page knows it. {@code doc} is its state as sent: the snapshot, with every patch
  * since merged in. {@code stream} names this page's event stream in every request, so the robot
  * knows who's asking (the deadman). {@code connected} is null until the first answer, or the first
- * failure; {@code lastHeard} is when anything last arrived (0 for never).
+ * failure; {@code lastHeard} is when anything last arrived (0 for never). {@code stopped} is true
+ * once this page stopped the simulator, until a robot program answers again: its stream ending
+ * then is the program ending, not a lost link.
  */
-export const robot = { doc: null, stream: "", connected: null, lastHeard: 0 };
+export const robot = { doc: null, stream: "", connected: null, lastHeard: 0, stopped: false };
 
 const changeListeners = [];
 const sampleListeners = [];
@@ -67,6 +69,7 @@ export function connect() {
     const snapshot = JSON.parse(event.data);
     robot.stream = snapshot.stream;
     robot.doc = snapshot.document;
+    robot.stopped = false; // a robot program is running again
     heard();
     tell(changeListeners, robot.doc, true);
     if (snapshot.trace) tell(sampleListeners, snapshot.trace, true);
@@ -101,6 +104,16 @@ function setConnected(connected) {
   if (robot.connected === connected) return;
   robot.connected = connected;
   tell(connectionListeners, connected);
+}
+
+/**
+ * Says this page is stopping the simulator (or isn't, after all: its Stop failed). The stream's end
+ * that follows shows as "stopped", not as a lost link; the page still reconnects by itself when
+ * the simulator starts again.
+ */
+export function stopping(yes = true) {
+  robot.stopped = yes;
+  tell(connectionListeners, robot.connected);
 }
 
 function tell(listeners, ...args) {
@@ -243,6 +256,15 @@ export function replace(element, ...children) {
 /** A number with its value's unit, as the page shows it: "40 A", or "16" for a plain number. */
 export function withUnit(number, value) {
   return shown(number) + (value.unit ? " " + value.unit : "");
+}
+
+/**
+ * Whether keys pressed in this element are typing: a value, a filter, a choice. Shortcuts and the
+ * simulator's keyboard driving leave those keys alone.
+ */
+export function typing(target) {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement;
 }
 
 /** The element with this id. */

@@ -181,7 +181,15 @@ class PitwallServerTest {
     }
 
     assertThat(seen)
-        .contains("core.js", "pit.js", "tune.js", "experiment.js", "changes.js", "sim.js");
+        .contains(
+            "core.js",
+            "pit.js",
+            "tune.js",
+            "experiment.js",
+            "changes.js",
+            "sim.js",
+            "sim-drive.js",
+            "sim-faults.js");
   }
 
   @Test

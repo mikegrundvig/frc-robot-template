@@ -74,16 +74,16 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to stage a run's gains again and the builder calls
     that commit them. A gain changes only the way any value does, through the checks below.
-  - **The simulator's controls** (in the simulator only; a robot has none), so far the server
-    side, an API the page's Sim view (coming) will drive: the Driver Station (enable, the mode,
-    the alliance station, the field system, the match time), joysticks from the keyboard or a
-    gamepad, pausing and stepping, Stop, and failing the simulated robot's parts while it runs,
-    which WPILib's simulator GUI can't do: a camera unplugged or knocked, the gyro frozen, a
-    module's encoder gone stale, the robot hit. See [docs/simulator.md](docs/simulator.md).
+  - **The simulator's controls**, in the page's Sim view (in the simulator only; a robot has
+    none), in place of WPILib's simulator GUI: the Driver Station (enable, the mode, the alliance
+    station, the field system, the match time), driving from the keyboard or a gamepad, pausing
+    and stepping, Stop, and failing the simulated robot's parts while it runs, which the GUI can't
+    do: a camera unplugged or knocked, the gyro frozen, a module's encoder gone stale, the robot
+    hit. Each is an API too. See [docs/simulator.md](docs/simulator.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
-  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and, in the
-    simulator, the Sim view to come), under a state bar that always says which robot (SIM or ROBOT), whether it's
+  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim, in the
+    simulator), under a state bar that always says which robot (SIM or ROBOT), whether it's
     heard, its mode, whether tuning is on, and what isn't committed. Edits are staged and applied
     together; a refusal's reasons show beside the values they concern, an edit outside its limits
     is caught before it's sent, and a big step (over a quarter of a value's range) is warned of.

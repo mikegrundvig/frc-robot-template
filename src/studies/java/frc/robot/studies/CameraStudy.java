@@ -133,11 +133,21 @@ public final class CameraStudy {
     CameraConfig.Sensor sensor = robot.cameras().get(0).sensor();
     String mountsFile = options.get("mounts");
     List<Candidate> candidates = new ArrayList<>(List.of(own));
-    candidates.addAll(
-        mountsFile == null
-            ? Candidates.family(robot.body(), sensor, config.mostCameras())
-            : MountOptions.read(Path.of(mountsFile))
-                .candidates(robot, sensor, config.mostCameras()));
+    String layouts;
+    if (mountsFile == null) {
+      candidates.addAll(Candidates.family(robot.body(), sensor, config.mostCameras()));
+      layouts =
+          format(
+              "Layouts: the robot's own, and the family around its frame, of up to %d cameras.",
+              config.mostCameras());
+    } else {
+      MountOptions places = MountOptions.read(Path.of(mountsFile));
+      candidates.addAll(places.candidates(robot, sensor, config.mostCameras()));
+      layouts =
+          format(
+              "Layouts: the robot's own, and all of up to %d cameras at the places in `%s`.",
+              Math.min(config.mostCameras(), places.options().size()), mountsFile);
+    }
     CameraScoring scoring = new CameraScoring(robot, field, candidates, config);
 
     List<String> setup = new ArrayList<>();
@@ -158,14 +168,7 @@ public final class CameraStudy {
                 weights.regions().stream()
                     .map(region -> region.name() + " " + region.weight())
                     .collect(Collectors.joining(", "))));
-    setup.add(
-        mountsFile == null
-            ? format(
-                "Layouts: the robot's own, and the family around its frame, of up to %d cameras.",
-                config.mostCameras())
-            : format(
-                "Layouts: the robot's own, and all of up to %d cameras at the places in `%s`.",
-                config.mostCameras(), mountsFile));
+    setup.add(layouts);
     setup.add(
         format(
             "%d poses: %d x %d positions %.2f m apart, at %d headings; %d %s per camera at"

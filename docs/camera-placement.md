@@ -185,22 +185,27 @@ layout of one camera up to `--cameras` (four, unless you say otherwise) at diffe
 facing any of its place's ways:
 
 ```csv
-# name,      forward, left,   up, yaws (left of ahead), tilts (up)
-front-left,  12.25,   12.25,  20, 0 30 45,              10 20
-front-right, 12.25,   -12.25, 20, 0 -30 -45,            10 20
-back-left,   -12.25,  12.25,  20, 180 150 135,          10 20
-back-right,  -12.25,  -12.25, 20, 180 -150 -135,        10 20
-shooter-top, 0,       0,      28, 0 180,                15
+name,        forward (in), left (in), up (in), yaws (deg),     tilts (deg)
+front-left,  12.25,        12.25,     20,      0 30 45,        10 20
+front-right, 12.25,        -12.25,    20,      0 -30 -45,      10 20
+back-left,   -12.25,       12.25,     20,      180 150 135,    10 20
+back-right,  -12.25,       -12.25,    20,      180 -150 -135,  10 20
+shooter-top, 0,            0,         28,      0 180,          15
 ```
 
-Positions are in inches from the robot's origin (the frame's center, on the floor; forward, left,
-and up, as `CameraConfig` measures them), and angles in degrees: a yaw of 0 faces ahead and
-positive turns left; a tilt is how far up from level. Lists of yaws and tilts are separated by
-spaces. Each place must be within the robot, or the study names it and stops.
+The first line names the columns and their units, so a file in another unit can't be read as
+inches by mistake: lengths in `in`, `mm`, `cm`, or `m`, angles in `deg` or `rad`, whatever CAD
+works in. Positions are from the robot's origin (the frame's center, on the floor; forward, left,
+and up, as `CameraConfig` measures them); a yaw of 0 faces ahead and positive turns left, and a
+tilt is how far up from level. Lists of yaws and tilts are separated by spaces, each angle once.
+Lines starting with `#` are comments. A place must be within the robot and at least an inch off
+the floor (a lower one was measured in another unit), or the study names it, in its own units,
+and stops. `--cameras` above the number of places means a camera at every place.
 
 Every way of facing multiplies the layouts: five places with six ways each make over 9,000 layouts
-of up to four cameras, and the study scores at most 5,000 in one run, saying how many there were
-when there are more. Offer the ways that are really in question, and narrow them run by run.
+of up to four cameras, and the study scores at most 5,000 in one run. When there are more, it says
+how many, and the most cameras that would make few enough, if any would. Offer the ways that are
+really in question, and narrow them run by run.
 
 How CAD uses it while designing:
 

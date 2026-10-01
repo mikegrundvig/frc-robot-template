@@ -124,12 +124,13 @@ known places, and room to spin.
    in a clear space, a dashboard open. Latency grows when the coprocessor or the network is busy
    ([coprocessor capacity](#vision-coprocessor-capacity) measures how much).
 
-**Working out the numbers:** each loop, the robot logs the results that arrived since the last
-loop (`Vision/<camera>`), each with its capture time (`timestampNanos`, on the robot's clock). A
-result's latency is the loop's time less its capture time. The robot reads its cameras once a loop,
-so a result also waits for the loop, up to 20 ms: take the median latency less 10 ms (half a loop).
-Use the loaded run's for **`latency`**, and its standard deviation for the simulator's spread. The
-**`frameRate`** is the results logged in a minute, over 60; PhotonVision's dashboard shows the same.
+**Working out the numbers:** the robot logs each image's latency, from its capture to the loop
+that read it (`Vision/<camera>/LatencySeconds`). The robot reads its cameras once a loop, so an
+image also waits for the loop, up to 20 ms: take the median latency less 10 ms (half a loop). Use
+the loaded run's for **`latency`**, and its standard deviation for the simulator's spread. The
+**`frameRate`** is the images logged in a minute, over 60; PhotonVision's dashboard shows the same.
+With `latency` measured, set `VisionConfig.latencyMarginSeconds` a little above the latencies'
+spread: images later than both are left out.
 
 **Steps, turning (the capture time):**
 

@@ -541,7 +541,7 @@ final class ConsistencyRuns {
     private void loop() {
       robot.loop();
       LocalizationEstimate estimate = robot.estimate();
-      samples.add(Consistency.Sample.of(estimate.pose(), estimate.covariance(), robot.truePose()));
+      samples.add(Consistency.Sample.of(estimate, robot.truePose()));
       for (CameraConfig camera : Robots.SIM.cameras()) {
         mostDoubt.merge(camera.name(), robot.mountDoubtMeters(camera.name()), Math::max);
       }

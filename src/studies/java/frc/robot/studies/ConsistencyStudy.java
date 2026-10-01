@@ -318,6 +318,35 @@ public final class ConsistencyStudy {
       }
       md.append('\n');
     }
+    md.append(
+        """
+
+        ## The gates
+
+        How often the robot's code would act on the estimate's claimed uncertainty: the share of
+        loops each gate on it passes. Calibrating a camera needs the pose tracking and sure within
+        5 cm; judging a camera's mount needs it tracking, and its position and heading together
+        sure within the mount tolerance at the tag's distance (here 3 m); scoring needs it sure
+        within 15 cm (`LocalizationGate`, beside its other tests); the vision pipeline solves with
+        the gyro's heading while the heading is sure within 5°; and a robot placed on its start
+        claims its heading to 2°.
+
+        """);
+    md.append("| Run | Calibrating (σ ≤ 5 cm) | Judging a mount (3 m) | Scoring (σ ≤ 15 cm)");
+    md.append(" | Constraining (σθ ≤ 5°) | As placed (σθ ≤ 2°) |\n");
+    md.append("|---|---|---|---|---|---|\n");
+    for (Result result : results) {
+      Consistency consistency = result.consistency();
+      md.append(
+          format(
+              "| %s | %s | %s | %s | %s | %s |%n",
+              result.run().name(),
+              percent(consistency.share(Gates::calibrating)),
+              percent(consistency.share(Gates::judgingMounts)),
+              percent(consistency.share(Gates::scoring)),
+              percent(consistency.share(Gates::constraining)),
+              percent(consistency.share(Gates::asPlaced))));
+    }
     md.append("\n## The runs\n\n");
     for (Result result : results) {
       md.append(format("- **%s:** %s%n", result.run().name(), result.run().description()));

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseCovariance;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 
 /**
  * The consistency measures, on made-up estimators whose honesty is known: errors drawn from one
@@ -174,17 +176,25 @@ class ConsistencyTest {
   @Test
   void theMeasuresFollowTheirDefinitions() {
     PoseCovariance round = PoseCovariance.fromStdDevs(0.1, 0.1, 0.02);
-    Consistency.Sample sample =
-        Consistency.Sample.of(
+    LocalizationEstimate estimate =
+        new LocalizationEstimate(
+            0,
             new Pose2d(1.3, 2.4, Rotation2d.fromDegrees(1)),
             round,
-            new Pose2d(1.0, 2.0, Rotation2d.ZERO));
+            Translation2d.ZERO,
+            0,
+            LocalizationEstimate.Mode.DEAD_RECKONING,
+            new LocalizationEstimate.Health(
+                1, 0, 0, Double.NaN, Double.NaN, 0, 0, 0, false, 0, true));
+    Consistency.Sample sample =
+        Consistency.Sample.of(estimate, new Pose2d(1.0, 2.0, Rotation2d.ZERO));
 
     // 0.5 m off where 0.1 m is claimed: NEES (0.3² + 0.4²) / 0.01 = 25, and 5 spreads.
     assertThat(sample.positionNees()).isCloseTo(25, within(1e-9));
     assertThat(sample.ratio()).isCloseTo(5, within(1e-9));
     assertThat(sample.headingNees()).isCloseTo(Math.pow(Math.toRadians(1) / 0.02, 2), within(1e-9));
     assertThat(sample.errorMeters()).isCloseTo(0.5, within(1e-9));
+    assertThat(sample.tracking()).as("dead reckoning").isFalse();
   }
 
   @Test

@@ -93,7 +93,7 @@ class CameraStudyTest {
         Files.write(
             folder.resolve("mounts.csv"),
             List.of(
-                "# name, forward, left, up, yaws, tilts",
+                "name, forward (in), left (in), up (in), yaws (deg), tilts (deg)",
                 "front, 12, 0, 20, 0 20, 10",
                 "back, -12, 0, 20, 180, 10 20",
                 "left, 0, 12, 20, 90, 10"));

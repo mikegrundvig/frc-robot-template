@@ -1,5 +1,6 @@
 package frc.robot.subsystems.coprocessors;
 
+import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.pitwall.Devices.Card;
 import com.michaelgrundvig.frc.pitwall.Devices.Level;
 import com.michaelgrundvig.frc.pitwall.Devices.Line;
@@ -15,8 +16,10 @@ import java.util.Locale;
  * so an open page isn't sent a change every second.
  */
 final class CoprocessorCard {
-  /** How the table's comparison names a PhotonVision mismatch. */
-  private static final String PHOTONVISION = "PhotonVision ";
+  /** How the table's comparison names the PhotonVision version, and the recipe. */
+  private static final String PHOTONVISION = "photonvisionVersion";
+
+  private static final String RECIPE = "recipeHash";
 
   private final Coprocessor coprocessor;
   private final CoprocessorIO.CoprocessorIOInputs inputs;
@@ -90,25 +93,52 @@ final class CoprocessorCard {
 
   /** Its PhotonVision, against this build's: wrong when the judgment's mismatches say so. */
   private Line versionLine() {
-    List<String> wrong =
-        coprocessor.mismatches.stream().filter(m -> m.startsWith(PHOTONVISION)).toList();
+    List<CompiledTable.Mismatch> wrong =
+        coprocessor.mismatches.stream().filter(m -> m.field().equals(PHOTONVISION)).toList();
     return wrong.isEmpty()
         ? new Line(
             "Version",
             "PhotonVision " + orNone(inputs.photonVisionVersion) + ", as this build's",
             Level.OK)
-        : new Line("Version", String.join("; ", wrong), Level.PROBLEM);
+        : new Line("Version", messages(wrong), Level.PROBLEM);
   }
 
-  /** The rest of its stamp (name, team, address, recipe), against this build's. */
+  /**
+   * The rest of its stamp, against this build's, as the judgment's mismatches say: the wrong name,
+   * team, or address is a problem; another recipe a warning; a recipe this build can't judge (it
+   * has no recipe hash) a note.
+   */
   private Line stampLine() {
-    List<String> wrong =
-        coprocessor.mismatches.stream().filter(m -> !m.startsWith(PHOTONVISION)).toList();
+    List<CompiledTable.Mismatch> rest =
+        coprocessor.mismatches.stream().filter(m -> !m.field().equals(PHOTONVISION)).toList();
     String release =
         "release " + orNone(inputs.release) + ", recipe " + shortHash(inputs.recipeHash);
-    return wrong.isEmpty()
-        ? new Line("Stamp", release + ", as this build's", Level.OK)
-        : new Line("Stamp", release + "; " + String.join("; ", wrong), Level.PROBLEM);
+    if (rest.isEmpty()) {
+      return new Line("Stamp", release + ", as this build's", Level.OK);
+    }
+    Level level = Level.NOTE;
+    for (CompiledTable.Mismatch mismatch : rest) {
+      Level its =
+          switch (mismatch.severity()) {
+            case ERROR -> Level.PROBLEM;
+            case WARNING -> Level.WARNING;
+            case UNKNOWN -> Level.NOTE;
+          };
+      level = its.compareTo(level) > 0 ? its : level;
+    }
+    List<String> said = new ArrayList<>();
+    for (CompiledTable.Mismatch mismatch : rest) {
+      said.add(
+          mismatch.field().equals(RECIPE) && mismatch.severity() == CompiledTable.Severity.UNKNOWN
+              ? "the recipe can't be checked: this build has no recipe hash"
+              : mismatch.message());
+    }
+    return new Line("Stamp", release + "; " + String.join("; ", said), level);
+  }
+
+  /** Mismatches' sentences, joined. */
+  private static String messages(List<CompiledTable.Mismatch> mismatches) {
+    return String.join("; ", mismatches.stream().map(CompiledTable.Mismatch::message).toList());
   }
 
   /** Where powering it down stands: what its agent said, and which ports still answer. */

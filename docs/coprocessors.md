@@ -33,7 +33,8 @@ settings.
 | Alert | Level | When |
 |---|---|---|
 | Missing | high while enabled, medium while disabled | No answer for 3 s, or none since the robot program started, with why (no connection, no answer in time); one that took a request to power down says so instead |
-| The wrong image | high | Its stamp names another PhotonVision, recipe, name, team, or address than this build's: both are named |
+| The wrong image | high | Its stamp names another PhotonVision, name, team, or address than this build's: both are named, by the table's own comparison |
+| Another recipe | medium | Its image was built from another recipe than this build's: flash this build's release when convenient. A build without a recipe hash (no Git, or not the repository's own folder) can't judge the recipe: its card says so, and nothing is alerted |
 | Two boards answer | high | MACs take turns answering at its address: a spare drive with its image in another board, say. A board replaced by another isn't two boards, since the first never answers again |
 | A camera missing | medium | A camera the table gives it isn't plugged in where its settings expect it |
 | Hot | medium | Its hottest zone within 5 °C of its trip point (each zone's first passive trip point, else its first), or its big cores held below their most; unsaid only once 7 °C clear for 10 s, so a board at the margin doesn't flicker it |
@@ -66,10 +67,12 @@ journal's errors. Each card ends in what can be done:
 - **Open PhotonVision**: its own page, by address (`http://10.TE.AM.x:5800`).
 - **Download settings backup**: the agent's `/v1/settings.zip`, laid out like the repository's
   folder for the computer: unzip it into the repository, review the diff, and commit it.
-- **Download logs**: its journal, filtered by priority and unit, each entry on the robot's clock
-  when it's from the coprocessor's current boot; or saved as text. The agent pages forward only:
-  the viewer starts at the latest 500 entries, and **Newer** fetches those since. Older entries
-  aren't reachable from the page yet.
+- **Download logs**: its journal (the kernel's, PhotonVision's, and the agent's entries, as the
+  agent serves them), filtered by priority and unit, each entry on the robot's clock when it's from
+  the coprocessor's current boot; or saved as text. The viewer starts at the latest 500 entries,
+  and **Newer** fetches those since; the text is the same, from there on. Older entries aren't
+  reachable from the page yet: the agent can page back now (`before=`, and `from=boot` for a
+  whole boot), which the page doesn't use yet.
 
 Pitwall asks the agent for these on its own server threads, when the page asks, never in the robot
 loop; the browser never talks to a coprocessor. Only the page can ask (its requests name its event
@@ -115,8 +118,10 @@ stamp: a second to connect and a second to answer, then, for one that didn't ans
 once more two seconds on, as one restarting would answer then. A coprocessor that never answers
 holds the deploy about 8 s.
 
-- A coprocessor whose stamp names another PhotonVision, recipe, name, team, or address than this
-  build's **fails** the deploy, naming both.
+- A coprocessor whose stamp names another PhotonVision, name, team, or address than this build's
+  **fails** the deploy, naming both (the table's own comparison). One built from another recipe
+  only **warns** (flash this build's release when convenient), as does one this build can't judge
+  the recipe of, having no recipe hash; the rest is still compared.
 - So does something else answering on the agent's port (a 404, or no stamp): a different image.
 - So does PhotonVision answering (5800) without its agent (refused, or no answer in time): the
   agent isn't running, or it isn't this repository's image.

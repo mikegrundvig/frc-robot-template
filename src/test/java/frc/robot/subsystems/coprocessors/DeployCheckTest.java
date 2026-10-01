@@ -69,13 +69,31 @@ class DeployCheckTest {
     assertThat(finding.text()).contains("v2026.3.4", "v2027.1.0", "10.246.80.11");
   }
 
+  /** An image from another recipe is worth flashing when convenient, not a failed deploy. */
   @Test
-  void anotherRecipeFails() {
+  void anotherRecipeAloneWarns() {
     Finding finding =
         DeployCheck.judge(TABLE, FRONT, new Asked.Stamped(stampOf(FRONT, "v2027.1.0", "recipe-0")));
 
-    assertThat(finding.verdict()).isEqualTo(Verdict.FAIL);
-    assertThat(finding.text()).contains("recipe-0", "recipe-1");
+    assertThat(finding.verdict()).isEqualTo(Verdict.WARN);
+    assertThat(finding.text()).contains("recipe-0", "recipe-1", "when convenient");
+  }
+
+  /** A build without a recipe hash can't judge the recipe: it says so, and judges the rest. */
+  @Test
+  void aBuildWithoutARecipeHashWarnsAndJudgesTheRest() {
+    CompiledTable unhashed =
+        new CompiledTable(new Table(24680, 5808, List.of(FRONT, BACK)), "v2027.1.0", "", Map.of());
+
+    Finding right =
+        DeployCheck.judge(unhashed, FRONT, new Asked.Stamped(stampOf(FRONT, "v2027.1.0", "x")));
+    Finding wrong =
+        DeployCheck.judge(unhashed, FRONT, new Asked.Stamped(stampOf(FRONT, "v2026.3.4", "x")));
+
+    assertThat(right.verdict()).isEqualTo(Verdict.WARN);
+    assertThat(right.text()).contains("recipe can't be checked");
+    assertThat(wrong.verdict()).isEqualTo(Verdict.FAIL);
+    assertThat(wrong.text()).contains("v2026.3.4");
   }
 
   @Test

@@ -201,9 +201,34 @@ class CoprocessorsTest {
 
     run(2);
 
-    assertThat(alerts()).singleElement().asString().contains("recipe-1", "recipe-2");
-    assertThat(line("Stamp").level()).isEqualTo(Level.PROBLEM);
+    assertThat(alerts())
+        .singleElement()
+        .asString()
+        .startsWith("MEDIUM: Coprocessor vision-front's image was built from another recipe:")
+        .contains("recipe-1", "recipe-2", "when convenient");
+    assertThat(line("Stamp").level()).isEqualTo(Level.WARNING);
     assertThat(line("Stamp").value()).contains("recipe-2");
+  }
+
+  /** A build without a recipe hash can't judge the recipe: a note on the card, no alert. */
+  @Test
+  void aBuildWithoutARecipeHashNotesItAndJudgesTheRest() {
+    CompiledTable unhashed =
+        new CompiledTable(
+            new Table(24680, 5808, List.of(FRONT)), PhotonVersion.versionString, "", Map.of());
+    build(unhashed);
+    run(2);
+    List<String> right = alerts();
+    Line stamp = line("Stamp");
+
+    agent.wrongVersion(true);
+    run(2);
+
+    assertThat(right).isEmpty();
+    assertThat(stamp.level()).isEqualTo(Level.NOTE);
+    assertThat(stamp.value()).contains("recipe can't be checked");
+    assertThat(alerts())
+        .anySatisfy(alert -> assertThat(alert).startsWith("HIGH: Coprocessor vision-front runs"));
   }
 
   @Test

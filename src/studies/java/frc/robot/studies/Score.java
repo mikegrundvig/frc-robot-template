@@ -3,6 +3,7 @@ package frc.robot.studies;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * How well a layout of cameras does over the whole field. Each share is of the poses, weighted, and
@@ -24,6 +25,8 @@ import java.util.List;
  * @param heading the share where an image corrects the gyro's heading
  * @param positionRmsMeters the position error where measured, root mean square; NaN if never
  * @param headingRmsDegrees the heading error where corrected, root mean square; NaN if never
+ * @param oneLost how the layout does with any one of its cameras lost (blocked, knocked, or
+ *     unplugged); null where it isn't scored, as in the robustness trials
  */
 public record Score(
     Candidate candidate,
@@ -36,12 +39,13 @@ public record Score(
     double measured,
     double heading,
     double positionRmsMeters,
-    double headingRmsDegrees) {
+    double headingRmsDegrees,
+    @Nullable OneLost oneLost) {
   static final double FIVE_CENTIMETERS = 0.05;
   static final double TWO_CENTIMETERS = 0.02;
 
   /**
-   * The ranking: the smallest error that 95% of the field is within, to the millimeter, which is
+   * The ranking: the smallest error that 95% of the field is within, rounded to the millimeter,
    * about the sampling's own noise. A tie goes to fewer cameras, which cost less and weigh less,
    * then to the smaller error, then by name, so ties always fall the same way. A layout that
    * measures less than 95% of the field has no such error; those rank after the rest, by how much
@@ -53,6 +57,37 @@ public record Score(
           .thenComparingInt(Score::cameras)
           .thenComparingDouble(Score::positionP95Meters)
           .thenComparing(score -> score.candidate().name());
+
+  /**
+   * How a layout does with any one of its cameras lost: the worst over each camera left out in
+   * turn. The worst 95% error and the least share measured may come from losing different cameras.
+   * A lone camera lost leaves nothing: no 95% error, and nothing measured.
+   *
+   * @param p95Meters the worst of the 95% errors, infinite when a camera lost leaves more than 5%
+   *     of the field unmeasured
+   * @param measured the least share of the field still measured
+   */
+  public record OneLost(double p95Meters, double measured) {
+    /** A layout of one camera, lost. */
+    static final OneLost NOTHING_LEFT = new OneLost(Double.POSITIVE_INFINITY, 0);
+  }
+
+  /** The same score, with how the layout does when it loses any one camera. */
+  public Score withOneCameraLost(OneLost lost) {
+    return new Score(
+        candidate,
+        positionP95Meters,
+        withinFiveCentimeters,
+        withinTwoCentimeters,
+        oneTag,
+        twoTags,
+        twoCameras,
+        this.measured,
+        heading,
+        positionRmsMeters,
+        headingRmsDegrees,
+        lost);
+  }
 
   /** How many cameras the layout has. */
   public int cameras() {
@@ -126,25 +161,31 @@ public record Score(
         measured / total,
         heading / total,
         measured > 0 ? Math.sqrt(squaredPosition / measured) : Double.NaN,
-        heading > 0 ? Math.sqrt(squaredHeading / heading) : Double.NaN);
+        heading > 0 ? Math.sqrt(squaredHeading / heading) : Double.NaN,
+        null);
   }
 
   /** The error that this share of the weight falls at or below. */
   static double percentile(double[] errors, double[] weights, double share) {
-    Integer[] order = new Integer[errors.length];
+    // Each error's place, sorted by the error: packed in a long, the error's bits as a float above
+    // (none is negative, so they sort as the errors do) and its place below. Sorting plain numbers
+    // is fast, which matters with thousands of layouts.
+    long[] order = new long[errors.length];
     double total = 0;
     for (int i = 0; i < order.length; i++) {
-      order[i] = i;
+      order[i] = ((long) Float.floatToIntBits((float) errors[i]) << 32) | i;
       total += weights[i];
     }
-    Arrays.sort(order, Comparator.comparingDouble(i -> errors[i]));
+    Arrays.sort(order);
     double reached = 0;
-    for (int i : order) {
-      reached += weights[i];
+    int last = 0;
+    for (long packed : order) {
+      last = (int) packed;
+      reached += weights[last];
       if (reached >= share * total) {
-        return errors[i];
+        return errors[last];
       }
     }
-    return errors[order[order.length - 1]];
+    return errors[last];
   }
 }

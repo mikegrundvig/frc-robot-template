@@ -8,6 +8,7 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.Volts;
 
+import io.avaje.jsonb.Jsonb;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +27,16 @@ class LiveConfigTest {
   }
 
   /** The test machine, its drive's gains and limits and its travel tunable. */
+  /** A property of a published tunable, from the JSON its configuration carries them in. */
+  private static String property(MockTunableBackend dashboard, String path, String name) {
+    Object properties =
+        Jsonb.builder()
+            .build()
+            .type(Object.class)
+            .fromJson(dashboard.getTunable(path).getConfig().getProperties());
+    return String.valueOf(((Map<?, ?>) properties).get(name));
+  }
+
   private static LiveConfig<Fixtures.Machine> live() {
     return LiveConfig.of("machine", machine())
         .number(KP, Limits.between(0, 100))
@@ -340,6 +351,97 @@ class LiveConfigTest {
         .isEqualTo(Limits.between(0, 100));
     assertThat(dashboard.getTunable("Machine/drive/limits/current").getConfig().getProperties())
         .contains("\"unit\":\"A\"");
+    assertThat(dashboard.getTunable("Machine/drive/gains/kP").getConfig().getProperties())
+        .as("what it means, from its record's Javadoc")
+        .contains("\"description\":\"volts per meter per second of error\"");
+    assertThat(dashboard.getTunable("Machine/travel/min").getConfig().getProperties())
+        .as("undocumented")
+        .doesNotContain("description");
+  }
+
+  /** The description property is JSON: what JSON escapes comes back exactly. */
+  @Test
+  void theDescriptionPropertyIsTheMeaningAsJson() {
+    var dashboard = new MockTunableBackend();
+    TunableRegistry.registerBackend("", dashboard);
+
+    TunableRegistry.publish(
+        "Symbols",
+        LiveConfig.of("symbols", new Fixtures.Symbols(0, 0))
+            .number("heading", Limits.NONE)
+            .number("resistance", Limits.NONE));
+
+    assertThat(property(dashboard, "Symbols/heading", "description"))
+        .isEqualTo("the \"zero\" heading, in ° from C:\\field's corner");
+    assertThat(property(dashboard, "Symbols/resistance", "description")).isEqualTo("in Ω, or Ω");
+  }
+
+  /**
+   * The page says what each value means: its {@code @param} in the record that declares it, found
+   * as the value is, through the records that hold it.
+   */
+  @Test
+  void eachValueMeansWhatItsRecordsJavadocSays() {
+    var live = live();
+    LiveConfig.Documentation docs = live.documentation();
+
+    assertThat(live.recordOf(KP)).isEqualTo(Fixtures.Gains.class);
+    assertThat(live.meaning(KP)).isEqualTo("volts per meter per second of error");
+    assertThat(docs.value(KP))
+        .isEqualTo(
+            new LiveConfig.Documentation.Value(
+                "Fixtures.Gains", "drive.gains", "volts per meter per second of error"));
+    assertThat(live.meaning("drive.limits.current"))
+        .isEqualTo("the most current through the motor");
+    assertThat(live.meaning("drive.limits.maxSpeed")).as("no @param").isEmpty();
+    assertThat(live.meaning("travel.min")).as("no Javadoc").isEmpty();
+    assertThatIllegalArgumentException().isThrownBy(() -> live.meaning("drive.motor.kP"));
+    assertThat(docs.record()).isEqualTo("Fixtures.Machine");
+    assertThat(docs.doc()).isEqualTo(ParameterDocs.NONE);
+    assertThat(docs.groups())
+        .extracting(LiveConfig.Documentation.Group::path, LiveConfig.Documentation.Group::record)
+        .containsExactly(
+            tuple("drive", "Fixtures.Drive"),
+            tuple("drive.gains", "Fixtures.Gains"),
+            tuple("drive.limits", "Fixtures.DriveLimits"),
+            tuple("travel", "Fixtures.Range"));
+    assertThat(docs.groups().get(1).doc().summary()).isEqualTo("How the drive is controlled.");
+    assertThat(live.documentation()).as("read once").isSameAs(docs);
+  }
+
+  /** A value behind a component declared by its interface is documented by what's really there. */
+  @Test
+  void aComponentDeclaredByItsInterfaceIsDocumentedByWhatItHolds() {
+    var live =
+        LiveConfig.of("carriage", new Fixtures.Carriage(new Fixtures.Lift(3)))
+            .number("stage.kP", Limits.between(0, 10));
+
+    assertThat(live.recordOf("stage.kP")).isEqualTo(Fixtures.Lift.class);
+    assertThat(live.documentation().groups())
+        .containsExactly(
+            new LiveConfig.Documentation.Group(
+                "stage",
+                "Fixtures.Lift",
+                ParameterDocs.of(Fixtures.Lift.class),
+                "the stage it rides"));
+    assertThat(live.documentation().value("stage.kP"))
+        .isEqualTo(
+            new LiveConfig.Documentation.Value(
+                "Fixtures.Lift", "stage", "volts per meter of error"));
+    assertThat(live.set(Map.of("stage.kP", 4.0))).isTrue();
+    assertThat(live.get()).isEqualTo(new Fixtures.Carriage(new Fixtures.Lift(4)));
+  }
+
+  /** Choosing another value reads the documentation again, to take it in. */
+  @Test
+  void aValueChosenLaterIsDocumentedToo() {
+    var live = LiveConfig.of("machine", machine()).number(KP, Limits.between(0, 100));
+    live.documentation();
+
+    live.number("drive.limits.current", Limits.between(1, 80));
+
+    assertThat(live.meaning("drive.limits.current"))
+        .isEqualTo("the most current through the motor");
   }
 
   /** WPILib's contract: a setter never throws. A refused value is declined, and nothing breaks. */

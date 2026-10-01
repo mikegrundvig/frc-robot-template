@@ -76,7 +76,7 @@ public record Table(int team, int agentPort, List<Computer> computers) {
     return computers.stream().filter(computer -> computer.name().equals(name)).findFirst();
   }
 
-  /** A computer's address: {@code 10.26.11.11} for team 2611's .11. */
+  /** A computer's address: {@code 10.12.34.11} for team 1234's .11. */
   public String ip(Computer computer) {
     return ip(team, computer.address());
   }

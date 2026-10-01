@@ -24,22 +24,22 @@ class TableTest {
 
   @Test
   void addressesAreBuiltFromTheTeamNumber() {
-    assertThat(Table.ip(2611, 11)).isEqualTo("10.26.11.11");
-    assertThat(Table.ip(254, 12)).isEqualTo("10.2.54.12");
+    assertThat(Table.ip(1234, 11)).isEqualTo("10.12.34.11");
+    assertThat(Table.ip(123, 12)).isEqualTo("10.1.23.12");
     assertThat(Table.ip(0, 11)).isEqualTo("10.0.0.11");
     assertThat(Table.ip(12345, 13)).isEqualTo("10.123.45.13");
   }
 
   @Test
   void aTableFindsItsComputersByName() {
-    Table table = new Table(2611, 5808, List.of(FRONT, BACK));
+    Table table = new Table(1234, 5808, List.of(FRONT, BACK));
     assertThat(table.computer("vision-back")).contains(BACK);
     assertThat(table.computer("nope")).isEmpty();
   }
 
   @Test
   void aTableRoundTripsThroughJson() {
-    Table table = new Table(2611, 5808, List.of(FRONT, BACK));
+    Table table = new Table(1234, 5808, List.of(FRONT, BACK));
     assertThat(Table.fromJson(Json.parse(Json.compact(table.toJson())))).isEqualTo(table);
   }
 
@@ -82,7 +82,7 @@ class TableTest {
   void theCompiledTableRoundTripsAndSaysHowAStampDiffers() {
     CompiledTable compiled =
         new CompiledTable(
-            new Table(2611, 5808, List.of(FRONT, BACK)),
+            new Table(1234, 5808, List.of(FRONT, BACK)),
             "v2027.1.0",
             "abc",
             Map.of("vision-front", "f00d"));
@@ -93,8 +93,8 @@ class TableTest {
     Stamp stamp =
         new Stamp(
             "vision-front",
-            2611,
-            "10.26.11.11",
+            1234,
+            "10.12.34.11",
             "orangepi-5",
             List.of("front-left"),
             "r1",
@@ -107,8 +107,8 @@ class TableTest {
     Stamp other =
         new Stamp(
             "vision-back",
-            2611,
-            "10.26.11.12",
+            1234,
+            "10.12.34.12",
             "orangepi-5",
             List.of(),
             "r1",
@@ -120,19 +120,19 @@ class TableTest {
     assertThat(compiled.mismatches(FRONT, other))
         .containsExactly(
             "name is \"vision-back\" on the coprocessor and \"vision-front\" in this build",
-            "address is \"10.26.11.12\" on the coprocessor and \"10.26.11.11\" in this build",
+            "address is \"10.12.34.12\" on the coprocessor and \"10.12.34.11\" in this build",
             "PhotonVision is \"v2027.0.9\" on the coprocessor and \"v2027.1.0\" in this build",
             "recipe hash is \"abd\" on the coprocessor and \"abc\" in this build");
   }
 
   @Test
   void eachMismatchSaysHowMuchItMatters() {
-    Table table = new Table(2611, 5808, List.of(FRONT));
+    Table table = new Table(1234, 5808, List.of(FRONT));
     Stamp stamp =
         new Stamp(
             "vision-front",
-            2611,
-            "10.26.11.11",
+            1234,
+            "10.12.34.11",
             "orangepi-5",
             List.of(),
             "r1",

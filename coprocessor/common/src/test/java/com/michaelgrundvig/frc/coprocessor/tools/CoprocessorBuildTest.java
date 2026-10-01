@@ -63,7 +63,7 @@ class CoprocessorBuildTest {
     write(
         "coprocessors/coprocessors.yaml",
         """
-        team: 2611
+        team: 1234
         computers:
           - name: vision-front
             address: 11
@@ -177,7 +177,7 @@ class CoprocessorBuildTest {
     assertThat(printed.toString(StandardCharsets.UTF_8)).startsWith("No recipe hash");
     assertThat(status).isZero();
     CompiledTable compiled = CompiledTable.parse(Files.readString(out, StandardCharsets.UTF_8));
-    assertThat(compiled.table().team()).isEqualTo(2611);
+    assertThat(compiled.table().team()).isEqualTo(1234);
     assertThat(compiled.photonvisionVersion()).isEqualTo(VERSION);
     // Not a Git checkout, so no recipe hash.
     assertThat(compiled.recipeHash()).isEmpty();

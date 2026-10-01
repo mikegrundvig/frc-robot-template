@@ -16,8 +16,8 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Every check CI runs; run it before pushing | `./gradlew ci` |
 | Rerun the tests on every save | `./gradlew test -Pquick --continuous` |
 | Run one test class ([more on tests](testing.md)) | `./gradlew :test --tests frc.robot.ArchitectureTest` |
-| Start the simulator, enabled and drivable from the keyboard | `./gradlew run` |
-| Start it without WPILib's simulator GUI, disabled; Pitwall's simulator API drives it ([more](simulator.md)) | `./gradlew run -Pgui=false` |
+| Start the simulator, driven from Pitwall's Sim view at http://localhost:5820/#sim ([more](simulator.md)) | `./gradlew run` |
+| Start it with WPILib's simulator GUI too, enabled and drivable from its keyboard | `./gradlew run -Pgui` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
 | Start it in a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the simulator's scenarios | `./gradlew scenarios` |
@@ -86,8 +86,12 @@ Day to day:
 It works as-is. This is the standard WPILib project layout, and its Build, Test, and Deploy commands
 run the same Gradle tasks; *Set Team Number* writes the same file as `setTeamNumber`. One difference:
 *Simulate Robot Code* uses Gradle only to prepare, then starts the robot itself under the debugger,
-so the robot starts disabled and without the template's first-run simulator layout. `./gradlew run`
-gives you both.
+with whichever simulation extensions it offers you (WPILib's simulator GUI among them). The robot
+then starts as a real robot does, disabled with no station or mode, and without the GUI's
+first-run layout. Pitwall's Sim view's Driver Station works either way, but when you choose the GUI
+it overwrites Sim's joysticks every frame, unless you turn on the GUI's *Disable DS*
+([why](simulator.md)). `./gradlew run` starts it ready to drive, in teleop on a start, without the
+GUI.
 
 ## Any other editor
 

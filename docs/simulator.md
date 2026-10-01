@@ -4,28 +4,36 @@
 simulated world (`frc.robot.sim`): a drivetrain that really moves, cameras that render what they'd
 see, and sensors that err as a season-worn robot's do. AdvantageScope shows the field.
 
-Pitwall serves the simulator's controls (http://localhost:5820/api/simulator): the Driver Station,
-joysticks, pausing and stepping, and failing the robot's parts live, which WPILib's simulator GUI
-can't do. So far that's the server side, the API below; the Pitwall page's *Sim* view, which will
-drive it in place of the GUI, is coming. Until then, drive the simulator from the GUI, and use the
-API by hand (`curl`) for what the GUI can't do.
+Pitwall's page drives the simulator from its *Sim* view (http://localhost:5820/#sim): the Driver
+Station, joysticks from the keyboard or a gamepad, pausing and stepping, Stop, and failing the
+robot's parts live, which WPILib's simulator GUI can't do. The view is a client of the simulator's
+API (http://localhost:5820/api/simulator), below, which anything else that speaks HTTP can use too.
 
 | Job | Command |
 |---|---|
-| The simulator, enabled on a start and drivable from the GUI's keyboard | `./gradlew run` |
-| Without WPILib's simulator GUI, disabled: drive it through the API | `./gradlew run -Pgui=false` |
-| With the GUI, whatever the default | `./gradlew run -Pgui` |
+| The simulator, driven from *Sim*: in teleop on a start, disabled until you press Enable | `./gradlew run` |
+| With WPILib's simulator GUI too, enabled and drivable from its keyboard | `./gradlew run -Pgui` |
 | Disabled, with no alliance station, like a real robot | `./gradlew run -PstartDisabled` |
 | In a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the scenarios | `./gradlew scenarios` |
 
-**The GUI is on by default for now**, and turns off by default once the *Sim* view replaces it;
-`-Pgui` then brings it back. A real Driver Station can connect to the simulator either way
-(`halsim_ds_socket` stays loaded). Without the GUI the robot starts disabled, since nothing on
-screen could disable it yet; enable it through the API or a real Driver Station. Without the GUI
-you also lose its HAL device views, its NetworkTables browser and plots, its `Field2d` window
-(AdvantageScope and Elastic show the same), its notifier table, keyboard remapping, and its
-joystick reading, which works whatever window has focus.
+**WPILib's simulator GUI is off unless you ask for it** with `-Pgui` (and `-Pgui=false` is the
+default spelled out). *Sim* does its job. A real Driver Station can connect to the simulator
+either way (`halsim_ds_socket` stays loaded). The GUI's default settings in `sim/` are copied
+into the project folder only when it runs, and only when missing. Without it you lose its HAL
+device views, its NetworkTables browser and plots, its `Field2d` window (AdvantageScope and
+Elastic show the same), its notifier table, keyboard remapping, and its joystick reading, which
+works whatever window has focus.
+
+**The robot starts ready to drive, but disabled:** in teleop, on the blue alliance's station 2 (the
+center start) unless one was chosen, with a Driver Station attached, so it stands on its start and
+*Sim*'s Enable is one press from driving. It doesn't enable itself. To drive you come to *Sim*
+anyway, to switch the keyboard or a gamepad on, and Enable is there beside them; a robot that
+enabled itself would be enabled before anyone was watching, and a scenario's events, which happen
+once it's enabled, would be over before the page or AdvantageScope was open. With the GUI it starts
+enabled, as it always has: the GUI's keyboard drives it at once, and the GUI is on screen to
+disable it. `-PstartDisabled` starts it as a real robot starts, before its Driver Station connects:
+disabled, with no station or mode.
 
 **The GUI and the API's joysticks don't mix.** Read in alpha-7's `DriverStationGui.cpp`
 (`DriverStationExecute`): while the Driver Station is attached and not in autonomous, the GUI
@@ -33,12 +41,12 @@ writes all six joysticks every frame, zeros for a slot it has no device for, and
 data every 20 ms. Its *Zero disconnected joysticks* setting doesn't stop that: the check tests the
 setting's pointer, not its value, so it always zeros. The GUI's own match time counts down while
 enabled too. So with the GUI on, the API's joystick input is overwritten within a frame, and its
-match time fights the GUI's. Drive through the API with `-Pgui=false`, or turn the GUI's Driver
-Station off (its *Disable DS* setting), which makes it only read.
+match time fights the GUI's. So drive from *Sim* without the GUI, the default, or with `-Pgui` turn
+the GUI's Driver Station off (its *Disable DS* setting), which makes it only read.
 
 ## Pitwall's simulator controls
 
-Everything the *Sim* view will do to the simulator goes through an API Pitwall serves only in
+Everything the *Sim* view does to the simulator goes through an API Pitwall serves only in
 WPILib's simulation, asked of the HAL itself (its runtime type is simulation; anything else counts
 as a robot), and not while replaying a log. On a robot none of it exists: every route answers 404
 and the event stream has none of its sections, so nothing can write the Driver Station's state
@@ -54,8 +62,9 @@ Three sections, beside the page's others, sent as JSON merge patches when they c
 - **`simulator`**: `enabled`, `mode` (`AUTONOMOUS`, `TELEOPERATED`, `UTILITY`, or `UNKNOWN` before
   a Driver Station set one), `allianceStation` (`RED_1` to `BLUE_3`, or `UNKNOWN`), `fmsAttached`,
   `dsAttached`, `matchTime` (whole seconds left, counting down while enabled; -1 for none),
-  `paused`, and `joysticks`: for `"0"` and `"1"`, `fromPage` (the page drives it) and
-  `centeredByDeadman` (the page went quiet, and it was centered).
+  `paused`, and `joysticks`: for `"0"` and `"1"`, `fromPage` (a page drives it),
+  `centeredByDeadman` (the page went quiet, and it was centered), and `stream` (the event stream
+  of the page whose input it took last, or empty).
 - **`components`**: each part that can fail, by name: `{"kind", "faults": {name: {"does",
   "lasting", "undo", "parameters": [{"name", "unit", "min", "max", "initial"}], "on", "values"}}}`.
   A lasting fault has `on`, and while on, the `values` it was applied with; an event has neither.
@@ -92,8 +101,10 @@ was built changes nothing, and is refused (422, "changes nothing: as built"), ne
 most 12; buttons pressed or not, at most 64; POVs in degrees clockwise from up, in steps of 45, or
 -1 centered, at most 8. A joystick is declared a gamepad, with at least a gamepad's 6 axes, 26
 buttons, and 1 POV, the first time the page drives it. `null` lets it go: centered, and no longer
-the page's. A joystick the page never drove is never touched, so the GUI's keyboard or a real
-Driver Station still can. The page sends a joystick's input when it changes, at most once a frame,
+the page's. Only the page that drives it now can: when two pages drive one joystick, the latest
+input wins, and `null` from the other is ignored, so a page that stops driving never lets go of a
+joystick another page drives. A joystick the page never drove is never touched, so the GUI's
+keyboard or a real Driver Station still can. The page sends a joystick's input when it changes, at most once a frame,
 and again every 200 ms while anything is pressed; after 500 ms of silence on the robot's clock the
 robot centers it (`centeredByDeadman`), and when the page's event stream closes it lets it go.
 
@@ -187,41 +198,104 @@ own or all together. A fault in a scenario that changes nothing (the part is tha
 passed over. A robot without cameras isn't offered the camera scenarios, nor a field without bumps
 the bump one. `-Pscenario` in a program without the simulator's controls stops it, saying so.
 
-## What the *Sim* view needs
+## The *Sim* view
 
-The server side is done; the page's *Sim* view is built on it next.
+The page's *Sim* view, offered only in the simulator, does what the GUI did and what it couldn't,
+through the API above (`page/sim.js`, with `sim-drive.js` for driving and `sim-faults.js` for what
+fails).
 
-- **The minimal panel first:** enabled or disabled; teleop, autonomous, or utility; Driver Station
-  attached; the alliance station; FMS attached; keyboard and gamepad driving of joystick 0 (and 1);
-  Stop. Then pause, resume, and step; match time; the faults and scenarios.
-- **Keyboard driving is switched on explicitly** ("Drive with keyboard"), shows in the state bar
-  while on, and pauses whenever focus is in a text field, so typing `w` into a value never drives
-  the robot. One fixed layout for this template's driving: W/S and A/D the left stick (W is -1 on
-  axis 1, A is -1 on axis 0), J/L or the arrows the right stick's X (axis 2), and a key for each
-  button the template binds (Back, button 4, resets the heading).
-- **A gamepad** through the browser's Gamepad API, standard mapping to WPILib's indices: face
-  buttons 0-3 to buttons 0-3; bumpers 4-5 to buttons 9-10; triggers 6-7 to axes 4-5; back and start
-  8-9 to buttons 4 and 6; stick clicks 10-11 to buttons 7-8; the D-pad 12-15 to buttons 11-14; home
-  16 to button 5; axes 0-3 to axes 0-3, same sign. A slot picker (joystick 0 or 1) remembered per
-  browser.
-- **Send on change, at most once a frame, and every 200 ms while anything is pressed**, naming the
-  page's stream (required); send the joystick centered (or `null`) on blur, when the tab is hidden, and when
-  driving is switched off. The robot's deadman covers a page that can't.
-- **An unfocused page.** Keys reach only a focused page, as they reach only a focused GUI window
-  today. Whether a gamepad keeps reaching a page that's unfocused or covered by AdvantageScope is
-  unverified: the W3C spec hides gamepads until a button is pressed, and browsers throttle hidden
-  tabs. So the page polls the gamepad each animation frame only while `document.visibilityState`
-  is visible, centers the joystick when the page is hidden, says so ("Not driving: this tab is
-  hidden"), and suggests side-by-side windows. Test it in Chrome and Firefox before calling the
-  panel a strict improvement for gamepad users.
-- **Paused, the stream goes quiet:** a paused simulator runs no loops, so no patches arrive, only
-  heartbeats; the page's own pause answer says it's paused. A page that opens while the simulator
-  is paused gets no snapshot until a loop runs: when none arrives within a second or two, it asks
-  `GET /api/simulator` (answered at once while paused), and offers Resume and Step.
-- **Changes show a loop later:** the robot program sees a Driver Station change as its next loop
-  begins, as with a real Driver Station; the page's answer already shows it.
-- **Without the GUI the robot starts disabled**; once the *Sim* view is the way to enable it, the
-  build can start it enabled again.
-- **Stop** ends the program, and the stream with it: show "stopped", not "lost connection".
-- The match time arrives in whole seconds; count down between them while enabled, if smoothness
-  matters.
+**The Driver Station** is at the top, and stays there as the view scrolls: whether the robot is
+enabled (filled in) or disabled (an outline), its mode, station, and match time, with Enable and a
+large Disable. Enable needs a mode, as a real Driver Station always has one. Below are the mode,
+the alliance station, Driver Station attached, FMS attached, and the match time (set, cleared, and
+counting down while enabled, in whole seconds as a Driver Station shows it). The state bar's mode
+is filled in while the simulated robot is enabled, and leads here. Attaching the field asks first
+when values are tuned, listing them, since the field returns them to committed; the field's band
+then points back to the switch, its way out in the simulator.
+
+**Esc disables the robot** in *Sim* always, even with the focus in a field; and from any other view
+while this page drives it, with the keyboard or a gamepad, unless the focus is in a field, where
+Esc drops what was typed. Elsewhere Esc keeps its meaning: it stops a run or an action. Disabling
+there would also end the enable an experiment's next run needs, turning "stop this run" into "stop
+it, and enable again". When a disable fails, the page says so at once, wherever Esc was pressed.
+
+**Keyboard driving is switched on explicitly** ("Drive with the keyboard"), and shows in the state
+bar while on: "⌨ Driving", or why not now. One fixed layout for this template's driving, by
+physical key, so it's where it is on any keyboard layout:
+
+| Keys | Joystick 0 |
+|---|---|
+| W, S | the left stick's Y, axis 1: W is -1 |
+| A, D | the left stick's X, axis 0: A is -1 |
+| J, L, or ← → | the right stick's X, axis 2: turning |
+| R | Back, button 4, which resets the heading |
+
+The keys pause, and the joystick is centered, while the focus is in a field (typing `w` into a
+value never drives), when the window loses the keyboard, and when the tab is hidden; a key held
+then counts as released, since its release can't be heard. So do Cmd, the Windows key, and Alt,
+pressed or let go, and a context menu: a key let go while one is down may never say so (on macOS,
+never while Cmd is down), and a key held that the page thinks is held forever would keep the
+robot's deadman from ever stopping it. Hold it again to drive on. Switching driving off lets the
+joystick go.
+
+**Gamepads** drive through the browser's Gamepad API, switched on in *Sim* too, with the standard
+mapping to WPILib's `Gamepad`:
+
+| Standard gamepad | WPILib |
+|---|---|
+| axes 0-3 | axes 0-3, the same sign |
+| face buttons 0-3 | buttons 0-3 |
+| bumpers 4-5 | buttons 9-10 |
+| triggers 6-7 | axes 4-5, from 0 to 1 |
+| back 8, start 9 | buttons 4 and 6 |
+| stick clicks 10-11 | buttons 7-8 |
+| the D-pad 12-15 | buttons 11-14 |
+| home 16 | button 5 |
+
+The first gamepad drives the joystick chosen in *Sim* (0 or 1, remembered in this browser), and a
+second one the other. A gamepad this browser doesn't know the standard layout of can't drive, and
+*Sim* says so. Axes go in a Driver Station's steps of 1/127.
+
+**What's sent:** each joystick's whole input when it changes, at most once a frame, and again every
+200 ms while anything on it is pressed, each joystick by its own clock, naming the page's stream.
+The keyboard's joystick is centered on blur (a gamepad keeps driving a visible page); every
+joystick the page drives is centered when the tab is hidden; and `null` lets one go when driving
+is switched off. Input the robot didn't answer (it timed out, or the robot was busy) is sent again
+shortly, a let-go included, and *Sim* says so meanwhile. *Sim* shows each joystick the page drives,
+its axes and the buttons held, and says when the robot's deadman centered it, or when another page
+drives it too.
+
+**An unfocused or hidden page.** Keys reach only a focused page, as they reached only a focused GUI
+window. The page polls gamepads each frame only while the tab is visible (the W3C spec also hides a
+gamepad until a button is pressed, and browsers throttle hidden tabs), centers its joysticks when
+the tab is hidden, and says so in the tab's title ("⏸ Not driving"), then in *Sim* on return,
+suggesting side-by-side windows. Whether a gamepad keeps reaching a page that's visible but
+unfocused, beside AdvantageScope, is unverified: test it in Chrome and Firefox before calling the
+view a strict improvement for gamepad users.
+
+**Time:** Pause and Resume; Step, one loop, only while paused; and Stop, after asking (it lists
+the tuned values not committed, which end with the program). A paused simulator runs no loops, so
+the stream goes quiet but for heartbeats: a request made while paused says it waits for a Step or
+Resume (one the loop was slow to answer, that it waits for the next loop), and that note goes once
+a loop has run. A page that opens while the simulator is paused gets no snapshot; after a second
+and a half it asks `GET /api/simulator`, answered at once while paused, and if the simulator says
+it's paused, offers *Sim*, says why the rest is empty, and offers Resume and Step. The rest fills
+in when a loop runs.
+
+**Stop** ends the program, and the stream with it: the page that stopped it says "Stopped", in the
+state bar, its band, and *Sim*, not that the link was lost, and reconnects by itself when the
+simulator starts again. Another page open on the simulator sees only the link lost.
+
+**What fails:** a card for each part (each camera, the gyro, the backup IMU, each module, and the
+robot), each fault with what it does and what undoing it does, as `frc.robot.sim.Faults` declares
+them; each parameter with its unit and limits, checked on the page before it's sent; Apply, and
+Undo for a fault that's on. A lasting fault that's on is marked as a tuned value is, an amber bar,
+●, and "on", with the values it was applied with; an event is a button that makes it happen once.
+What's on is listed above the cards, with Undo all. The scenarios are listed there too, each with
+what it does and its faults, those it put on marked as on while they are; Apply says which faults
+it put on, which happened, and which it passed over, the part being that way as built. A refusal
+(400, 409, or 422) is shown where it was asked, in the simulator's words, and read out when the
+reader is free.
+
+**Changes show a loop later:** the robot program sees a Driver Station change as its next loop
+begins, as with a real Driver Station; *Sim* shows the simulator's answer.

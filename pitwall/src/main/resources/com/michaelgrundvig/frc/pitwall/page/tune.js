@@ -6,7 +6,7 @@
 // tapped. The address names the value (#tune/drivetrain/gains.steerKp), so a reload comes back to
 // it and a link can be sent.
 
-import { robot, onChange, onConnection, h, replace } from "./core.js";
+import { robot, onChange, onConnection, h, replace, typing } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
 import { onEdits } from "./edits.js";
 import { makeRow, updateRow, changedElsewhere } from "./rows.js";
@@ -107,11 +107,6 @@ function route(rest) {
   showDocs();
   row.el.scrollIntoView({ block: "center" });
   row.input.focus({ preventScroll: true });
-}
-
-function typing(target) {
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
-      || target instanceof HTMLSelectElement;
 }
 
 function render(patch, snapshot) {

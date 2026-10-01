@@ -23,8 +23,8 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ```bash
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
-./gradlew run                                # the simulator, enabled on a start and drivable from the keyboard
-./gradlew run -Pgui=false                    # the simulator without WPILib's GUI, disabled (docs/simulator.md)
+./gradlew run                                # the simulator, driven from Pitwall's Sim view (http://localhost:5820/#sim)
+./gradlew run -Pgui                          # with WPILib's simulator GUI too, enabled and drivable from its keyboard
 ./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
@@ -74,16 +74,16 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to stage a run's gains again and the builder calls
     that commit them. A gain changes only the way any value does, through the checks below.
-  - **The simulator's controls** (in the simulator only; a robot has none), so far the server
-    side, an API the page's Sim view (coming) will drive: the Driver Station (enable, the mode,
-    the alliance station, the field system, the match time), joysticks from the keyboard or a
-    gamepad, pausing and stepping, Stop, and failing the simulated robot's parts while it runs,
-    which WPILib's simulator GUI can't do: a camera unplugged or knocked, the gyro frozen, a
-    module's encoder gone stale, the robot hit. See [docs/simulator.md](docs/simulator.md).
+  - **The simulator's controls**, in the page's Sim view (in the simulator only; a robot has
+    none), in place of WPILib's simulator GUI: the Driver Station (enable, the mode, the alliance
+    station, the field system, the match time), driving from the keyboard or a gamepad, pausing
+    and stepping, Stop, and failing the simulated robot's parts while it runs, which the GUI can't
+    do: a camera unplugged or knocked, the gyro frozen, a module's encoder gone stale, the robot
+    hit. Each is an API too. See [docs/simulator.md](docs/simulator.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
-  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and, in the
-    simulator, the Sim view to come), under a state bar that always says which robot (SIM or ROBOT), whether it's
+  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim, in the
+    simulator), under a state bar that always says which robot (SIM or ROBOT), whether it's
     heard, its mode, whether tuning is on, and what isn't committed. Edits are staged and applied
     together; a refusal's reasons show beside the values they concern, an edit outside its limits
     is caught before it's sent, and a big step (over a quarter of a value's range) is warned of.
@@ -206,7 +206,7 @@ Also built in:
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`); whether the pose estimator's uncertainty tells the truth ([docs/testing.md](docs/testing.md#is-the-estimator-honest-the-consistency-study), `./gradlew consistencyStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
-| `sim/` | Default simulator GUI settings, used on the first `./gradlew run` with the GUI. |
+| `sim/` | WPILib's simulator GUI's default settings, used on the first `./gradlew run -Pgui`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |

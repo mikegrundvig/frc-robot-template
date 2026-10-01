@@ -1,6 +1,7 @@
 package frc.robot.lib.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
@@ -112,7 +113,7 @@ class VisionPipelineTest {
   }
 
   private VisionResult process(TagDetections seen, CaptureContext robot) {
-    return pipeline.process(seen, camera, robot, VisionConfig.DEFAULTS);
+    return pipeline.process(seen, camera, robot, VisionConfig.DEFAULTS, VisionPipeline.Trust.FULL);
   }
 
   @Test
@@ -227,7 +228,8 @@ class VisionPipelineTest {
             seeing(farAway, camera, false, 25, 26),
             camera,
             steady(farAway.getRotation()),
-            VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(3.0).build());
+            VisionConfigBuilder.builder(VisionConfig.DEFAULTS).maxDistanceMeters(3.0).build(),
+            VisionPipeline.Trust.FULL);
     VisionResult unknownTag =
         process(
             new TagDetections(
@@ -284,8 +286,118 @@ class VisionPipelineTest {
     assertThat(moving).as("4 m/s doubles it").isCloseTo(2 * oneTag, within(1e-9));
   }
 
+  /**
+   * A camera whose mount is in doubt adds the doubt to every measurement's spread, as independent
+   * errors add, and a turn of the doubt over the tags' distance to its heading's.
+   */
+  @Test
+  void aCamerasMountDoubtWidensItsMeasurements() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    CaptureContext lost = new CaptureContext(null, Math.PI, 0, 0, 0, 0);
+    double doubt = 0.08;
+
+    VisionMeasurement constrained =
+        measured(
+            pipeline.process(
+                seen,
+                camera,
+                steady(ROBOT.getRotation()),
+                VisionConfig.DEFAULTS,
+                new VisionPipeline.Trust(doubt, null)));
+    VisionMeasurement calibrated = measured(process(seen, steady(ROBOT.getRotation())));
+    VisionMeasurement full =
+        measured(
+            pipeline.process(
+                seen, camera, lost, VisionConfig.DEFAULTS, new VisionPipeline.Trust(doubt, null)));
+    VisionMeasurement fullCalibrated = measured(process(seen, lost));
+    double distance = process(seen, lost).distanceMeters();
+
+    assertThat(constrained.covariance().xStdDev())
+        .isCloseTo(Math.hypot(calibrated.covariance().xStdDev(), doubt), within(1e-12));
+    assertThat(constrained.covariance().headingStdDev())
+        .isCloseTo(
+            Math.hypot(calibrated.covariance().headingStdDev(), doubt / distance), within(1e-12));
+    assertThat(full.covariance().yStdDev())
+        .isCloseTo(Math.hypot(fullCalibrated.covariance().yStdDev(), doubt), within(1e-12));
+    assertThat(full.covariance().headingStdDev())
+        .isCloseTo(
+            Math.hypot(fullCalibrated.covariance().headingStdDev(), doubt / distance),
+            within(1e-12));
+    assertThat(constrained.pose())
+        .as("where it puts the robot is the same")
+        .isEqualTo(calibrated.pose());
+  }
+
+  /**
+   * A task that trusts only some tags gets measurements from those alone; an image without any is
+   * thrown out, saying which it wanted.
+   */
+  @Test
+  void aTaskTrustsOnlyItsOwnTags() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    CaptureContext steady = steady(ROBOT.getRotation());
+
+    VisionResult onlyOne =
+        pipeline.process(
+            seen,
+            camera,
+            steady,
+            VisionConfig.DEFAULTS,
+            new VisionPipeline.Trust(0, TagAllowlist.of("Hub", List.of(26, 27))));
+    VisionResult none =
+        pipeline.process(
+            seen,
+            camera,
+            steady,
+            VisionConfig.DEFAULTS,
+            new VisionPipeline.Trust(0, TagAllowlist.of("Hub", List.of(10))));
+
+    assertThat(measured(onlyOne).tagIds()).containsExactly(26);
+    assertThat(measured(onlyOne).pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+    assertThat(measured(onlyOne).covariance().hasHeading())
+        .as("the multi-tag solution used tag 25 too")
+        .isFalse();
+    assertThat(none.measurement()).isNull();
+    assertThat(none.outcome()).isEqualTo("no tags this task trusts (Hub: 10)");
+  }
+
+  /**
+   * A multi-tag solution from trusted tags alone still corrects heading, and solves a lost robot.
+   */
+  @Test
+  void aMultiTagSolutionOfTrustedTagsIsKept() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    VisionPipeline.Trust hub = new VisionPipeline.Trust(0, TagAllowlist.of("Hub", List.of(25, 26)));
+
+    VisionMeasurement steady =
+        measured(
+            pipeline.process(
+                seen, camera, steady(ROBOT.getRotation()), VisionConfig.DEFAULTS, hub));
+    VisionMeasurement lost =
+        measured(
+            pipeline.process(
+                seen,
+                camera,
+                new CaptureContext(null, Math.PI, 0, 0, 0, 0),
+                VisionConfig.DEFAULTS,
+                hub));
+
+    assertThat(steady.covariance().hasHeading()).isTrue();
+    assertThat(lost.solver()).isEqualTo(VisionMeasurement.Solver.MULTI_TAG);
+  }
+
+  @Test
+  void aMountsDoubtIsZeroOrMore() {
+    assertThatThrownBy(() -> new VisionPipeline.Trust(-0.1, null))
+        .hasMessage("a mount's doubt is zero or more: -0.1");
+    assertThatThrownBy(() -> new VisionPipeline.Trust(Double.NaN, null))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
   private double spread(TagDetections seen, CaptureContext robot, CameraConfig mount) {
-    return measured(pipeline.process(seen, mount, robot, VisionConfig.DEFAULTS))
+    return measured(
+            pipeline.process(seen, mount, robot, VisionConfig.DEFAULTS, VisionPipeline.Trust.FULL))
         .covariance()
         .xStdDev();
   }

@@ -1,33 +1,46 @@
 package frc.robot.subsystems.vision;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Milliseconds;
 
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.CameraConfigBuilder;
+import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Symmetry;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
+import frc.robot.lib.localization.TagAllowlist;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
+import frc.robot.lib.localization.VisionDecision;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.wpilib.command3.Command;
+import org.wpilib.command3.Mechanism;
+import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.MockTunableBackend;
 import org.wpilib.tunable.TunableRegistry;
 
@@ -106,13 +119,18 @@ class VisionTest {
           new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed"));
   private Vision vision;
 
+  /** The robot's alliance, as the Driver Station would say it: unknown until set. */
+  private Optional<Alliance> ourAlliance = Optional.empty();
+
   /** The vision settings as Pitwall would hand them over, tuned or not. */
   private VisionConfig tuned = VisionConfig.DEFAULTS;
 
   @BeforeEach
   void setUp() {
     TunableRegistry.registerBackend("", new MockTunableBackend());
-    vision = new Vision(List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned);
+    vision =
+        new Vision(
+            List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned, () -> ourAlliance);
     for (int k = 0; k <= 10; k++) {
       estimator.addOdometry(T0 + k * 20_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
     }
@@ -130,7 +148,7 @@ class VisionTest {
   }
 
   private void loop(double pitch, double roll) {
-    vision.periodic(estimator.estimate(), pitch, roll);
+    vision.periodic(estimator.estimate().timestampNanos(), estimator.estimate(), pitch, roll);
     vision.record(estimator.update());
   }
 
@@ -323,6 +341,45 @@ class VisionTest {
         tag.inMultiTag());
   }
 
+  /**
+   * On a bump the robot stands as high as the ground under it, and its tags are placed from there:
+   * from the floor, every one would land as far off as the bump is tall.
+   */
+  @Test
+  void onABumpTagsArePlacedFromAsHighAsTheGround() {
+    double crest = 0.165;
+    FieldModel bumpy =
+        new FieldModel(
+            Fields.FRC_2026_REBUILT_WELDED.loadField(),
+            Symmetry.ROTATED,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new Bump(
+                    "Test bump",
+                    new Translation2d(ROBOT.getX(), 3.0),
+                    new Translation2d(ROBOT.getX(), 5.0),
+                    crest,
+                    1.0)));
+    vision.close();
+    vision =
+        new Vision(
+            List.of(camera), new CameraIO[] {io}, estimator, bumpy, () -> tuned, () -> ourAlliance);
+    io.see(
+        T0 + 200_000_000L,
+        camera,
+        new Pose3d(
+            ROBOT.getX(),
+            ROBOT.getY(),
+            crest,
+            new Rotation3d(0, 0, ROBOT.getRotation().getRadians())));
+
+    loop();
+
+    assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
+  }
+
   @Test
   void aCameraWhoseTagsLandOffShowsItInItsResidual() {
     CameraConfig reallyHigher =
@@ -342,5 +399,369 @@ class VisionTest {
     loop();
 
     assertThat(vision.meanTagResidualMeters("front")).isBetween(0.09, 0.11); // 4 in
+  }
+
+  /**
+   * An image stamped far earlier than its camera's images take to arrive, or after the robot read
+   * it, has the wrong capture time: the camera's clock and the robot's are out of step. It's left
+   * out before the estimator sees it, counted, and an alert says so.
+   */
+  @Test
+  void anImageOutsideItsCamerasLatencyBandIsLeftOut() {
+    loop(); // the loop before, which every image read later arrived after
+    long now = estimator.estimate().timestampNanos();
+    io.see(now - 300_000_000L, camera); // the camera takes 30 ms; 100 ms more is the margin
+
+    loop();
+
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
+    assertThat(vision.camera(0).outOfStepAlertText())
+        .isEqualTo(
+            "Camera front's images are out of step, and left out: one arrived at least 300 ms"
+                + " after it was taken, more than 130 ms. Are its clock and the robot's in step"
+                + " (time sync)? If it's just slower, measure its latency");
+    io.see(now + 5_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+    assertThat(vision.summary()).endsWith("no measurements yet, 2 images left out of step");
+  }
+
+  /**
+   * The alert stays up two seconds after the last image out of step, however many arrive in time.
+   */
+  @Test
+  void theOutOfStepAlertStaysUpTwoSecondsAfterTheLast() {
+    loop();
+    io.see(estimator.estimate().timestampNanos() - 300_000_000L, camera);
+    loop();
+
+    imagesFrom(camera, 95); // 1.9 s of images in time
+
+    assertThat(vision.camera(0).accepted()).isEqualTo(95);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).as("still held").isTrue();
+    imagesFrom(camera, 10);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+  }
+
+  /**
+   * A loop that ran long (here 400 ms) reads images that arrived just after the loop before: they
+   * waited on the robot, not the camera, and are in time.
+   */
+  @Test
+  void aLoopThatRanLongDoesNotMakeItsImagesLate() {
+    loop();
+    long before = estimator.estimate().timestampNanos();
+    long now = before + 400_000_000L;
+    estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    io.see(before + 20_000_000L, camera); // arrived 30 ms later, then waited 350 ms for the loop
+
+    vision.periodic(now, estimator.estimate(), 0, 0);
+    vision.record(estimator.update());
+
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+  }
+
+  /** A camera turned off, or gone, says so itself: its out-of-step alert comes down at once. */
+  @Test
+  void aCameraTurnedOffOrGoneTakesDownItsOutOfStepAlert() {
+    loop();
+    io.see(estimator.estimate().timestampNanos() - 300_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
+
+    vision.camera(0).enabled.set(false);
+    loop();
+
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+    vision.camera(0).enabled.set(true);
+    io.see(estimator.estimate().timestampNanos() - 299_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
+    io.connected = false;
+    loop();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+  }
+
+  /** One loop, and the tags each of its measurements came from. */
+  private List<List<Integer>> tagsMeasuredFrom() {
+    vision.periodic(estimator.estimate().timestampNanos(), estimator.estimate(), 0, 0);
+    List<VisionDecision> decisions = estimator.update();
+    vision.record(decisions);
+    return decisions.stream().map(decision -> decision.measurement().tagIds()).toList();
+  }
+
+  /** The next image of the hub's near face, each a millisecond after the last. */
+  private long nextImage = T0 + 200_000_000L;
+
+  /** The tags the next image's measurements came from, with the scheduler run first. */
+  private List<List<Integer>> nextImageAfter(Scheduler scheduler) {
+    scheduler.run();
+    io.see(nextImage++, camera);
+    return tagsMeasuredFrom();
+  }
+
+  /** A task that drives until it's interrupted: an approach that never quite arrives. */
+  private static Command approach(Mechanism drive, String name) {
+    return drive
+        .run(
+            coroutine -> {
+              while (true) {
+                coroutine.yield();
+              }
+            })
+        .named(name);
+  }
+
+  /**
+   * A task lining up on the hub trusts only the hub's tags while it runs; when it ends, or is
+   * canceled partway, the cameras trust every tag again.
+   */
+  @Test
+  void aTaskTrustsOnlyItsTagsWhileItRuns() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Command approach =
+        Command.noRequirements(
+                coroutine -> {
+                  coroutine.yield();
+                  coroutine.yield();
+                })
+            .named("Approach the hub");
+    Command task = vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach);
+    scheduler.schedule(task);
+
+    assertThat(task.name()).isEqualTo("Approach the hub (trusting Hub: 26)");
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    assertThat(vision.trustingFewerTagsAlertText()).isEqualTo("The cameras trust only Hub: 26");
+    for (int k = 0; k < 5; k++) {
+      scheduler.run();
+    }
+    assertThat(scheduler.isScheduledOrRunning(task)).as("done").isFalse();
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+    assertThat(vision.trustingFewerTagsAlertText()).as("not active").isEmpty();
+
+    Command canceled = vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach);
+    scheduler.schedule(canceled);
+    scheduler.run();
+    scheduler.cancel(canceled);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+  }
+
+  /**
+   * A task that interrupts another on the same mechanism ends it first, so the one ending lets go
+   * of its tags before the one starting takes its own.
+   */
+  @Test
+  void aTaskThatInterruptsAnotherTrustsItsOwnTags() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Mechanism drive = new Mechanism() {};
+    Command first =
+        vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach(drive, "Approach"));
+    Command second =
+        vision.trustingOnly(TagAllowlist.of("Left face", List.of(25)), approach(drive, "Swerve"));
+    scheduler.schedule(first);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+
+    scheduler.schedule(second);
+
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25));
+    assertThat(scheduler.isScheduledOrRunning(first)).isFalse();
+    scheduler.cancel(second);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+  }
+
+  /** A task the scheduler refuses (a higher priority one holds the mechanism) never takes tags. */
+  @Test
+  void aTaskRefusedLeavesTheRunningTasksTags() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Mechanism drive = new Mechanism() {};
+    Command important =
+        vision.trustingOnly(
+            TagAllowlist.of("Hub", List.of(26)),
+            drive
+                .run(
+                    coroutine -> {
+                      while (true) {
+                        coroutine.yield();
+                      }
+                    })
+                .withPriority(10)
+                .named("Score"));
+    Command refused =
+        vision.trustingOnly(TagAllowlist.of("Left face", List.of(25)), approach(drive, "Swerve"));
+    scheduler.schedule(important);
+    scheduler.run();
+
+    assertThat(scheduler.schedule(refused).successful()).as("refused outright").isFalse();
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    assertThat(scheduler.isScheduledOrRunning(important)).isTrue();
+    assertThat(scheduler.isScheduledOrRunning(refused)).isFalse();
+  }
+
+  /**
+   * Two tasks on different mechanisms both run: the later one's tags are in effect, and when it
+   * ends, the earlier one's are again.
+   */
+  @Test
+  void whenTheLaterTaskEndsTheEarlierOnesTagsAreBack() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Command aiming =
+        vision.trustingOnly(
+            TagAllowlist.of("Hub", List.of(26)), approach(new Mechanism() {}, "Aim"));
+    Command reaching =
+        vision.trustingOnly(
+            TagAllowlist.of("Left face", List.of(25)), approach(new Mechanism() {}, "Reach"));
+    scheduler.schedule(aiming);
+    scheduler.run();
+    scheduler.schedule(reaching);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25));
+
+    scheduler.cancel(reaching);
+
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    scheduler.cancel(aiming);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+  }
+
+  /**
+   * A task lining up on a place trusts that place's tags for the alliance the robot is on when it
+   * starts: a binding is made before the alliance is known.
+   */
+  @Test
+  void aTaskOnAPlaceTrustsItsAlliancesTagsWhenItStarts() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Place face = Place.facing("Hub face", 26, 1.0);
+    Command beforeTheAlliance = vision.trustingOnly(face, approach(new Mechanism() {}, "Line up"));
+    assertThat(beforeTheAlliance.name()).isEqualTo("Line up (trusting Hub face's tags)");
+
+    scheduler.schedule(beforeTheAlliance);
+    assertThat(nextImageAfter(scheduler))
+        .as("no alliance: every tag")
+        .containsExactly(List.of(25, 26));
+    assertThat(vision.trustingFewerTagsAlertText())
+        .isEqualTo("Hub face: the alliance isn't known, so every tag is trusted");
+    scheduler.cancel(beforeTheAlliance);
+
+    ourAlliance = Optional.of(Alliance.BLUE);
+    scheduler.schedule(beforeTheAlliance);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    scheduler.cancel(beforeTheAlliance);
+
+    ourAlliance = Optional.of(Alliance.RED);
+    scheduler.schedule(beforeTheAlliance);
+    assertThat(nextImageAfter(scheduler)).as("red's face is across the field").isEmpty();
+  }
+
+  @Test
+  void aPlaceWrittenAsAPoseHasNoTagsToTrust() {
+    assertThatThrownBy(
+            () ->
+                vision.trustingOnly(
+                    Place.at("Start", Pose2d.ZERO), approach(new Mechanism() {}, "Line up")))
+        .hasMessage("Start is written as a pose, not found from tags: it has no tags to trust");
+  }
+
+  @Test
+  void anImageWithNoTagTheTaskTrustsIsLeftOut() {
+    Vision.TagLease lease = vision.trustOnly(TagAllowlist.of("Loading", List.of(13)));
+    io.see(T0 + 200_000_000L, camera);
+
+    assertThat(tagsMeasuredFrom()).isEmpty();
+    lease.release();
+    lease.release(); // twice changes nothing more
+    io.see(T0 + 210_000_000L, camera);
+    assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
+  }
+
+  /** Images from the front camera, one a loop, with odometry moving on to each one's time. */
+  private void imagesFrom(CameraConfig reallyMounted, int images) {
+    for (int k = 0; k < images; k++) {
+      long now = estimator.estimate().timestampNanos() + 20_000_000L;
+      estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
+      io.see(now, reallyMounted);
+      if (second != null) {
+        secondIo.see(now, second);
+      }
+      loop();
+    }
+  }
+
+  /** A second camera, mounted as configured beside the front one, to hold the pose. */
+  private @Nullable CameraConfig second;
+
+  private final ScriptedCamera secondIo = new ScriptedCamera();
+
+  /** Vision with the front camera and a second one, as configured, that sees the same tags. */
+  private void withASecondCamera() {
+    second = CameraConfigBuilder.builder(camera).name("second").build();
+    vision.close();
+    vision =
+        new Vision(
+            List.of(camera, second),
+            new CameraIO[] {io, secondIo},
+            estimator,
+            FIELD,
+            () -> tuned,
+            () -> ourAlliance);
+  }
+
+  /** A camera on its own has nothing to hold the pose it'd be judged against: it never is. */
+  @Test
+  void aCameraAloneIsNeverJudged() {
+    CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+
+    imagesFrom(reallyLower, 300);
+
+    assertThat(vision.mountOffsetMeters("front")).isNaN();
+  }
+
+  /**
+   * A camera knocked 4 in down since it was calibrated: once it has seen enough tags, every one of
+   * them 4 in high, it's out of calibration, and the alert says where to recalibrate it. Knocked
+   * straight down, it still places the robot right on the floor, so it counts as much as before.
+   */
+  @Test
+  void aCameraWhoseTagsLandOffIsOutOfCalibrationOnceJudged() {
+    CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+    withASecondCamera();
+
+    imagesFrom(reallyLower, 200); // two tags an image: 400 seen, not enough to judge
+
+    assertThat(vision.mountOffsetMeters("front")).isNaN();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isFalse();
+    imagesFrom(reallyLower, 60);
+    assertThat(vision.mountOffsetMeters("front")).isCloseTo(0.1016, within(0.002));
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isTrue();
+    assertThat(vision.camera(0).outOfCalibrationAlertText())
+        .isEqualTo(
+            "Camera front is out of calibration: its tags land 10 cm off. Recalibrate its mount"
+                + " (Calibrate the front camera's mount)");
+    assertThat(vision.mountDoubtMeters("front")).as("still places the robot right").isZero();
+    assertThat(estimator.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-6);
+  }
+
+  /**
+   * The tolerance is the pit's to tune, and applies from the next loop; the alert holds still
+   * around it.
+   */
+  @Test
+  void theMountToleranceIsReadEveryLoop() {
+    CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+    withASecondCamera();
+    imagesFrom(reallyLower, 260);
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isTrue();
+
+    // 10 cm off. Up past the tolerance, the alert comes down only under 0.8 of it.
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.11).build();
+    loop();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).as("8.8 cm: still up").isTrue();
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.13).build();
+    loop();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).as("10.4 cm: down").isFalse();
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.11).build();
+    loop();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).as("11 cm: stays down").isFalse();
   }
 }

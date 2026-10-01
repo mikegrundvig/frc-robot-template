@@ -152,3 +152,4 @@ tasks.register("setTeamNumber") {
 apply from: "gradle/quality.gradle"     // formatting, static analysis, coverage, the ci task
 apply from: "gradle/build-info.gradle"  // git SHA and build time, logged by the robot at startup
 apply from: "gradle/simulation.gradle"  // simulator defaults for ./gradlew run
+apply from: "gradle/studies.gradle"     // simulation studies, such as camera placement

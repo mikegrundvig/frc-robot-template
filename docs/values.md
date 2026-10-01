@@ -342,8 +342,8 @@ runs (`./gradlew consistencyStudy`), and one run's log compares `Localization/Po
 with `Sim/PoseErrorMeters`; on a robot, compare it with how far the cameras move the estimate when
 they see tags again after a stretch without. Honest is a position NEES (the error squared, over the
 covariance the estimate claimed) averaging 2 and a heading NEES averaging 1, with the error outside
-the claimed covariance's 99.9% ellipse in about a thousandth of loops; the defaults read 0.97 to
-2.1 and 0.36 to 1.05 in the study's calibrated runs, the collision's 1.47 among them. Well
+the claimed covariance's 99.9% ellipse in about a thousandth of loops; the defaults read 1.04 to
+2.1 and 0.36 to 1.05 in the study's calibrated runs, the collision's 1.66 among them. Well
 above, the estimate is too sure of itself, and its gate rejects good measurements; well below, it's
 too unsure, and the cameras pull it around. On a robot, without the truth, the same test is a
 camera's correction squared over the covariance claimed for it (the estimate's and the camera's
@@ -424,14 +424,14 @@ before the estimate doubts them for sliding over the floor together, which their
 each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be sliding counts as
 suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current limit isn't asked:
 at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the tread's 11.8 m/s²
-(`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain read as at its
-grip's edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500 loops with
-the wheels gripping. Doubting a quarter of the travel there made the
-estimate claim up to 65 cm through the hard driving (31 cm on average over those loops), and let a
-tag misread by 1.5 m through its gate. Check in a log of hard driving: `Localization/TurnApartDegrees` and `SlideMetersPerSecond`
-stay under their tolerances through clean launches, turns, and stops, and `TurnSlipMetersPerSecond`
-and `SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels spin in a launch, or the
-robot is pushed, with the cameras then finding the estimate off by about as much as it doubted.
+(`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain read as at its grip's
+edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500 loops with the wheels
+gripping. Doubting a quarter of the travel there made the estimate claim up to 65 cm through the
+hard driving (31 cm on average over those loops), and let a tag misread by 1.5 m through its gate.
+Check in a log of hard driving: `Localization/TurnApartDegrees` and `SlideMetersPerSecond` stay
+under their tolerances through clean launches, turns, and stops, and `TurnSlipMetersPerSecond` and
+`SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels spin in a launch, or the robot
+is pushed, with the cameras then finding the estimate off by about as much as it doubted.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|

@@ -115,6 +115,11 @@ public final class DriveSimHarness implements AutoCloseable {
     this.camera = camera;
   }
 
+  /** From now on, no camera's results reach the estimator: blinded, until watching again. */
+  public void stopWatching() {
+    camera = null;
+  }
+
   /** Something to do at the end of every loop, such as feeding another estimator to compare. */
   public void eachLoop(Runnable action) {
     eachLoop = action;

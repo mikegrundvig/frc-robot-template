@@ -26,8 +26,9 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       robot the wheels roll: wheels spinning in a launch, or a push they don't see. It's let go
  *       no faster than the most the accelerometer's bias could add, so a bias can't build up, while
  *       a slide that holds at a steady speed stays seen; when it stops (the robot catches up with
- *       its wheels, or the push lets go), the accelerometer feels that too, and it's gone. Beyond
- *       the accelerometer's noise, that's how fast the wheels slide. Only on a robot whose
+ *       its wheels, or the push lets go), the accelerometer feels that too, and it's gone. Once
+ *       past the accelerometer's noise, all of it is how fast the wheels slide: the tolerance tells
+ *       a slide from the noise, it isn't a share of every slide. Only on a robot whose
  *       accelerometer is known to read along its axes ({@link ImuPlacement#accelerometerChecked}).
  *   <li><b>A jolt.</b> The accelerometer feeling more than {@link Settings#joltMetersPerSecSq} is a
  *       collision, as far as the wheels' own change of velocity doesn't explain it (a robot
@@ -63,7 +64,7 @@ public final class SlipCheck {
    *     seen until it stops
    * @param speedToleranceMetersPerSecond how far the wheels' speed and the accelerometer's
    *     reckoning of the robot's may drift apart without a slide: its noise, and its lag as the
-   *     robot's acceleration changes
+   *     robot's acceleration changes. Past it, the whole of it is the slide's speed.
    * @param joltMetersPerSecSq an acceleration past this is a collision, as far as the wheels don't
    *     explain it: what they don't, against this, is its share of one
    * @param accelerometerRangeMetersPerSecSq the most the accelerometer reports on each axis: a
@@ -372,7 +373,8 @@ public final class SlipCheck {
       double kept = size > speedBias * seconds ? 1 - speedBias * seconds / size : 0;
       slideX *= kept;
       slideY *= kept;
-      speedSlip = Math.max(0, size * kept - speedTolerance);
+      // Past the tolerance, all of it: the doubt keeps up with the slide from where it's seen.
+      speedSlip = size * kept > speedTolerance ? size * kept : 0;
     }
     lastVelocityX = velocityX;
     lastVelocityY = velocityY;

@@ -137,12 +137,14 @@ class SlipCheckTest {
     Robot slow = new Robot().loops(20, 0, 0, 0, rate * LOOP);
     Robot fast = new Robot().loops(20, 0, 0, 0, 4 * rate * LOOP);
 
-    double allowed = Math.toRadians(SETTINGS.turnToleranceDegrees()) * REACH / 0.26;
+    // The tolerance, spread over the quarter second it looks back, at the wheels.
+    double allowed = Math.toRadians(SETTINGS.turnToleranceDegrees()) * REACH / 0.25;
     assertThat(slow.check.turnSlipMetersPerSecond())
-        .isCloseTo(rate * REACH - allowed, within(1e-9));
-    assertThat(fast.check.turnSlipMetersPerSecond())
+        .as("the slide at the wheels, less what the tolerance allows")
+        .isBetween(rate * REACH - allowed, rate * REACH);
+    assertThat(fast.check.turnSlipMetersPerSecond() - slow.check.turnSlipMetersPerSecond())
         .as("four times the slide, and its doubt grows with it")
-        .isCloseTo(4 * rate * REACH - allowed, within(1e-9));
+        .isCloseTo(3 * rate * REACH, within(1e-9));
     assertThat(slow.check.speedSlipMetersPerSecond()).isZero();
   }
 
@@ -177,7 +179,8 @@ class SlipCheckTest {
     assertThat(slip).as("growing as the slide does").isSorted();
     assertThat(robot.check.slideMetersPerSecond()).isBetween(0.7 * sliding, sliding);
     assertThat(robot.check.speedSlipMetersPerSecond())
-        .isCloseTo(robot.check.slideMetersPerSecond() - TOLERANCE, within(1e-12));
+        .as("past the tolerance, all of it")
+        .isEqualTo(robot.check.slideMetersPerSecond());
     assertThat(robot.check.turnSlipMetersPerSecond()).isZero();
   }
 

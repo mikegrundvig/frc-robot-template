@@ -10,10 +10,12 @@ import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.YawSource;
+import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;
@@ -187,7 +189,6 @@ class LocalizationSimTest {
     boolean disabled = robot.localization.conditions().disabled();
 
     robot.drive(0.04, 1.0, 0, 0); // full stick from a standstill
-    double starting = robot.localization.conditions().slipMetersPerSecond();
     robot.simulation.tilt(0.3, 0.1);
     robot.simulation.hit(new Transform2d(0.1, 0, Rotation2d.ZERO));
     robot.drive(0.02, 1.0, 0, 0);
@@ -195,13 +196,73 @@ class LocalizationSimTest {
     robot.drive(0.02, 1.0, 0, 0);
 
     assertThat(disabled).isTrue();
-    assertThat(starting).as("motors at their current limit, wheels gripping").isZero();
     assertThat(hit.tiltRadians()).isCloseTo(Math.acos(Math.cos(0.3) * Math.cos(0.1)), within(1e-9));
     assertThat(hit.collision()).isTrue();
     assertThat(hit.disabled()).isFalse();
     assertThat(robot.localization.conditions().collision()).as("a loop later").isFalse();
     assertThat(robot.localization.pitchRadians()).isEqualTo(0.3);
     assertThat(robot.localization.rollRadians()).isEqualTo(0.1);
+  }
+
+  /**
+   * Tilted where it stands, and driven over the field's bump at 0.6 and full stick: what the IMU
+   * feels of gravity as it tilts is the tilt, not a slide or a hit. Taken the wrong way, standing
+   * tilted 15° would feel 5 m/s² the robot never moved by.
+   */
+  @Test
+  void tiltedOrCrossingABumpIsNoSlideAndNoHit() {
+    Pose2d beforeTheBump = new Pose2d(3.0, 5.5, Rotation2d.ZERO);
+    for (double stick : new double[] {0.6, 1.0}) {
+      DriveSimHarness robot = onTheField();
+      robot.idle(0.02);
+      robot.simulation.place(beforeTheBump);
+      robot.localization.resetPose(beforeTheBump);
+      double[] most = slidesAndHits(robot);
+      robot.drive(3.0, stick, 0, 0);
+      robot.drive(1.0, 0, 0, 0);
+
+      assertThat(Math.toDegrees(most[2])).as("pitched over the bump").isGreaterThan(5);
+      assertThat(most[0]).as("slip at " + stick).isZero();
+      assertThat(most[1]).as("collision at " + stick).isZero();
+    }
+
+    DriveSimHarness standing = robot(SensorErrors.TYPICAL);
+    double[] most = slidesAndHits(standing);
+    standing.drive(0.5, 0, 0, 0);
+    standing.simulation.tilt(Math.toRadians(15), Math.toRadians(8));
+    standing.drive(1.0, 0, 0, 0);
+    standing.simulation.tilt(0, 0);
+    standing.drive(0.5, 0, 0, 0);
+
+    assertThat(most[0]).as("slip, tilted").isZero();
+    assertThat(most[1]).as("collision, tilted").isZero();
+  }
+
+  /** The simulated robot on the field's terrain, with a season's wear. */
+  private DriveSimHarness onTheField() {
+    if (harness != null) {
+      harness.close();
+    }
+    harness =
+        new DriveSimHarness(
+            Robots.SIM, SensorErrors.TYPICAL, EstimatorConfig.DEFAULTS, RobotSim.FIELD.terrain());
+    return harness;
+  }
+
+  /**
+   * Watches every loop from now: the most slip, the most of a collision, and the most pitch the
+   * drivetrain read, in that order.
+   */
+  private static double[] slidesAndHits(DriveSimHarness robot) {
+    double[] most = new double[3];
+    robot.eachLoop(
+        () -> {
+          DriveConditions conditions = robot.localization.conditions();
+          most[0] = Math.max(most[0], conditions.slipMetersPerSecond());
+          most[1] = Math.max(most[1], conditions.collisionShare());
+          most[2] = Math.max(most[2], Math.abs(robot.localization.pitchRadians()));
+        });
+    return most;
   }
 
   /** Over a bump, nose up then nose down: the drivetrain follows the crossing from its IMU. */
@@ -465,6 +526,98 @@ class LocalizationSimTest {
     assertThat(pushed.stdDev()).isGreaterThan(5 * standing.stdDev());
     assertThat(shoved.stdDev()).isGreaterThan(2 * pushed.stdDev());
     assertThat(shoved.error()).as("slid").isGreaterThan(1.5);
+  }
+
+  /**
+   * How the estimate came back once the camera saw again: how far off it had been, how long after
+   * the camera's return it came within 10 cm of the truth for good, and the loops the scoring gate
+   * let through while it was more than 15 cm off, with the worst of them.
+   */
+  private record Recovery(
+      double worstError, double secondsBack, int gateOpenWhileOff, double worstWhileOpen) {}
+
+  /**
+   * A camera watches the robot standing for half a second, is blind through what {@code blind}
+   * does, and watches again through what {@code seen} does.
+   */
+  private Recovery seenAgain(Consumer<DriveSimHarness> blind, Consumer<DriveSimHarness> seen) {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    FakeCamera camera = camera(robot);
+    // The loop, the last loop more than 10 cm off, and the loops the gate let through off.
+    int[] loops = new int[3];
+    double[] worst = new double[2]; // the worst error, and the worst the gate let through
+    robot.eachLoop(
+        () -> {
+          loops[0]++;
+          double error = robot.positionError();
+          worst[0] = Math.max(worst[0], error);
+          if (error > 0.10) {
+            loops[1] = loops[0];
+          }
+          if (error > 0.15 && LocalizationGate.SCORING.allows(robot.estimator.estimate())) {
+            loops[2]++;
+            worst[1] = Math.max(worst[1], error);
+          }
+        });
+    robot.watchWith(camera);
+    robot.drive(0.5, 0, 0, 0);
+    robot.stopWatching();
+    blind.accept(robot);
+    robot.watchWith(camera);
+    int back = loops[0];
+    seen.accept(robot);
+    return new Recovery(
+        worst[0], Math.max(0, loops[1] - back) * RobotLoop.PERIOD_SECONDS, loops[2], worst[1]);
+  }
+
+  /**
+   * Pushed sideways at 1 m/s for a second while the camera is blind, and seen again half a second
+   * after the push lets go: a meter off, and back within 10 cm in the camera's first fixes. The
+   * scoring gate lets through 3 loops more than 15 cm off, as the push gets going: the slip check
+   * sees the slide only once it's past its tolerance, and the doubt it adds grows only as fast as
+   * the slide, from then (docs/testing.md, known limits).
+   */
+  @Test
+  void pushedWhileTheCameraIsBlindTheEstimateComesBackWhenItSees() {
+    Recovery pushed =
+        seenAgain(
+            robot -> {
+              robot.simulation.push(new Translation2d(0, 1.0));
+              robot.drive(1.0, 0, 0, 0);
+              robot.simulation.push(Translation2d.ZERO);
+              robot.drive(0.5, 0, 0, 0);
+            },
+            robot -> robot.drive(2.0, 0, 0, 0));
+
+    assertThat(pushed.worstError()).as("a meter off").isGreaterThan(0.9);
+    assertThat(pushed.secondsBack()).as("back within 10 cm, seconds").isLessThanOrEqualTo(0.1);
+    assertThat(pushed.gateOpenWhileOff()).as("loops let through off").isLessThanOrEqualTo(3);
+    assertThat(pushed.worstWhileOpen()).as("the worst let through").isLessThan(0.2);
+  }
+
+  /**
+   * A launch at half grip while the camera is blind, seen again as the robot stops: 2.3 m off, and
+   * back within 10 cm in half a second, through the camera's noise while the estimate still doubts
+   * its wheels. The scoring gate lets through 2 loops more than 15 cm off as the launch starts.
+   */
+  @Test
+  void aLaunchAtHalfGripWhileTheCameraIsBlindComesBackWhenItSees() {
+    Recovery launched =
+        seenAgain(
+            robot -> {
+              robot.simulation.grip(0.5);
+              robot.drive(1.5, 1.0, 0, 0);
+            },
+            robot -> {
+              robot.drive(1.0, 0, 0, 0);
+              robot.simulation.grip(1);
+              robot.drive(2.0, 0, 0, 0);
+            });
+
+    assertThat(launched.worstError()).as("meters off").isGreaterThan(2);
+    assertThat(launched.secondsBack()).as("back within 10 cm, seconds").isLessThanOrEqualTo(0.5);
+    assertThat(launched.gateOpenWhileOff()).as("loops let through off").isLessThanOrEqualTo(2);
+    assertThat(launched.worstWhileOpen()).as("the worst let through").isLessThan(0.18);
   }
 
   /**

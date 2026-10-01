@@ -31,9 +31,6 @@ Each row's source starts with one of these words, with any detail after it in pa
 | unknown | Nothing records where the number came from. |
 | none | No number to trace: the template's robot doesn't have one (it has no wiring), or it's a name or a seed. |
 
-IDs such as M1 and S13 name the open question a value waits on, in the team's list of open
-questions.
-
 ## The register describes values; `Robots.java` holds a robot's numbers
 
 A row here describes a value: what kind it is and how to measure it. It never holds your robot's
@@ -169,8 +166,8 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 | `height` | as built | 30 in | guess (typical) | From CAD: the tallest point in the starting configuration. |
 | `bumperThickness` | as built | 4 in | rules (2026: R403's most) | From the outside of the frame to the outside of the bumper, cover on. |
 | `mass` | calibrated | 149.5 lb | rules (2026: 135 lb with bumpers, R408, and a 14.5 lb battery, R601) | [Weigh it](calibration.md#the-robots-mass-center-of-gravity-and-inertia), bumpers and battery on; again after big changes. |
-| `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia) (M5). Nothing reads it yet; a simulator that models traction will. |
-| `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](calibration.md#the-robots-mass-center-of-gravity-and-inertia) (M3). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
+| `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). Nothing reads it yet; a simulator that models traction will. |
+| `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
 
 ## The drivetrain
 
@@ -193,7 +190,7 @@ The module hardware, the same at every corner.
 | `wheelRadius` | calibrated | 2 in | datasheet (a 4 in wheel) | [The wheel radius](calibration.md#the-wheel-radius), before each event: tread wears. |
 | `driveGearing` | as built | 6.75 | datasheet (SDS MK4i L2) | The module's datasheet: motor turns per wheel turn. |
 | `steerGearing` | as built | 150/7 | datasheet (SDS MK4i) | The module's datasheet: motor turns per turn of the module. |
-| `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread (M1). The simulator's grip; with `cgHeight`, it sets the drive's current limit. |
+| `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread. The simulator's grip; with `cgHeight`, it sets the drive's current limit. |
 
 ### `SwerveConfig.Limits`
 
@@ -206,7 +203,7 @@ with each other).
 | Value | Kind | Today | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `driveStatorCurrent` | chosen | 30 A | math (weight transfer: slip near 31 A with worn tread and a 0.3 m center of gravity, 47 A at best) | Why: torque past the tread's grip only spins the wheels and drains the battery. Measure friction and the center of gravity first; they set it. Change if the wheels slip at full stick (traction-limited, with the residual rising), or never come near it and the drivers want more push. |
-| `driveSupplyCurrent` | chosen | 60 A | unknown | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. Set it from the weakest battery's [internal resistance](characterization.md#battery-internal-resistance) (M2): the voltage with four drive motors at the limit, about the rest voltage less 4 × limit × resistance, must stay above Systemcore's brownout (S5) and the vision coprocessor's [ride-through voltage](characterization.md#coprocessor-brownout-ride-through) (Q33). Change if the battery sags toward either in hard driving. |
+| `driveSupplyCurrent` | chosen | 60 A | unknown | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. Set it from the weakest battery's [internal resistance](characterization.md#battery-internal-resistance): the voltage with four drive motors at the limit, about the rest voltage less 4 × limit × resistance, must stay above Systemcore's brownout voltage (still to measure on a real Systemcore) and the vision coprocessor's [ride-through voltage](characterization.md#coprocessor-brownout-ride-through). Change if the battery sags toward either in hard driving. |
 | `steerStatorCurrent` | chosen | 40 A | guess (steering needs little torque) | Why: steering needs little torque, and less current is less heat. Change if modules lag their angle setpoints under load (`Drive/Module<name>/SteerAngle` against `Drive/SetpointsOptimized`). |
 | `maxLinearSpeed` | chosen | 4.4 m/s | guess (headroom under the 4.73 m/s free speed) | Why: velocity control needs headroom under the free speed to correct with. Lower it if modules can't reach their setpoints at full stick (`Drive/ModuleVelocities` against `Drive/SetpointsOptimized`). |
 | `maxAngularSpeed` | chosen | 1 rotation/s | guess (driver-friendly) | Why: fast enough to turn around, slow enough to control. Ask the drivers. At full spin (6.3 rad/s) the cameras' images are thrown out: they're over `VisionConfig.maxYawRateRadiansPerSecond`. |
@@ -238,7 +235,7 @@ across. The template's robot runs only in simulation and has no wiring, so nothi
 | `gyroId` | as built | none | none | Tuner X: the Pigeon 2's CAN ID. |
 | `gyroYawScale` | calibrated | none (1 until measured) | none | [The gyro's scale](calibration.md#the-gyros-scale), once per gyro, and after replacing or remounting it. |
 | `couplingRatio` | as built | none | none | Tuner X's swerve generator, or the module's datasheet: drive motor turns per turn of the module, wheel held still. |
-| `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts (S13). |
+| `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
 
 ### `SwerveWiring.ModuleWiring`
 
@@ -381,13 +378,13 @@ for a real fault.
 |---|---|---|---|---|
 | `windowSeconds` | chosen | 1 s | guess | Why: long enough to see two IMUs turn apart, short enough to catch a frozen one in a second. Change if a frozen gyro (the `gyro-frozen` scenario) takes too long to flag, or hard turns set off the alert. |
 | `toleranceDegrees` | chosen | 3° | guess | Why: above what the two drift and scatter apart in the window ([gyro drift and noise](characterization.md#gyro-drift-and-noise), for both). Change if the alert comes on in normal driving. |
-| `scaleTolerance` | chosen | 0.05 | guess | Why: above the two IMUs' difference in scale; the gyro's is calibrated, the backup's isn't ([the backup's scale](characterization.md#repeatability-of-the-gyros-scale), S13). Change if fast spins set off the alert with both IMUs healthy. |
+| `scaleTolerance` | chosen | 0.05 | guess | Why: above the two IMUs' difference in scale; the gyro's is calibrated, the backup's isn't ([the backup's scale](characterization.md#repeatability-of-the-gyros-scale)). Change if fast spins set off the alert with both IMUs healthy. |
 
 ### `TerrainCrossing.Settings`
 
 `frc.robot.lib.localization.TerrainCrossing.Settings`: what counts as climbing, level, and one
 feature; the robot uses `Settings.DEFAULTS`. Check them with a
-[terrain crossing](calibration.md#a-terrain-crossing) (M7), and set them again at kickoff from
+[terrain crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from
 the new field's ramps.
 
 | Value | Kind | Today | Source | How to measure it, or why |
@@ -419,8 +416,8 @@ One gyro's errors. TYPICAL gives the gyro and the backup IMU each their own; EXA
 
 | Value | Kind | Today | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `scale` | characterized | 1.003 (backup 1.005) | guess | [The gyro's scale](calibration.md#the-gyros-scale) before it's calibrated (one over its first `gyroYawScale`), and [the backup's](characterization.md#repeatability-of-the-gyros-scale) (S13). |
-| `driftDegreesPerMinute` | characterized | 0.2 (backup 1.0) | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise), a typical run (S13 for the backup). |
+| `scale` | characterized | 1.003 (backup 1.005) | guess | [The gyro's scale](calibration.md#the-gyros-scale) before it's calibrated (one over its first `gyroYawScale`), and [the backup's](characterization.md#repeatability-of-the-gyros-scale). |
+| `driftDegreesPerMinute` | characterized | 0.2 (backup 1.0) | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise), a typical run. The backup's is unknown until measured. |
 | `noiseDegrees` | characterized | 0.02 (backup 0.05) | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise), a typical run. |
 
 ## Tuning limits
@@ -508,10 +505,10 @@ code's choices, explained beside them.
 | `VisionSim`: the farthest tag a simulated camera detects | 7 m | characterized | unknown | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
 | `VisionSim`: tag corner noise | 0.25 px average, 0.08 px spread | characterized | datasheet (PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise): how far the corners scatter, standing still. |
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
-| `ModuleIOSim`: drive and steering inertia | 0.025 and 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's simulation defaults, as AdvantageKit's template uses) | [Feedforward](characterization.md#feedforward): SysId on one module (M4). |
+| `ModuleIOSim`: drive and steering inertia | 0.025 and 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's simulation defaults, as AdvantageKit's template uses) | [Feedforward](characterization.md#feedforward): SysId on one module. |
 | `Localization`: a jolt that's a collision | 20 m/s² | chosen | top team (6800) | Why: hard driving stays near 1 g. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
-| `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing) (M7): bumpers, suspension, and the IMU's mount. |
-| `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing) (M7). |
+| `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |
+| `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot. |
 | `Drive`: a wheel this far short of its speed is at its grip's edge | 0.5 m/s | chosen | unknown (the idea: 581 and 1678) | Why: a wheel that can't keep up is slipping or stalled. Check: `Localization/TractionLimited` turns on in pushing matches, and not in clean driving. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |

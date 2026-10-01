@@ -159,7 +159,7 @@ PhotonVision's agree. Results applied "too late" or "from the future" in
 **What it measures:** how many cameras one vision coprocessor can run before their frame rate
 drops or their latency grows. It sets the frame rate and latency each camera gets on the robot
 (`CameraConfig.Sensor.frameRate` and `latency`, for that many cameras on one coprocessor), and how
-many coprocessors the robot needs. The coprocessor's model is still to confirm (Q7).
+many coprocessors the robot needs. Measure it on the model of coprocessor the robot will use.
 
 More images is more measurements, closer together: when it comes to a choice, keep the frame rate
 and add a coprocessor.
@@ -225,7 +225,8 @@ apart in its window.
 
 **What good looks like:** a still gyro drifting well under a degree a minute, about the same every
 run. More, or a drift that changes from run to run, means a loose mount, vibration, or a failing
-gyro. The simulator assumes 0.2° a minute for the gyro and 1° for the backup IMU (S13).
+gyro. The simulator assumes 0.2° a minute for the gyro and 1° for the backup IMU; how Systemcore's
+onboard IMU drifts is unknown until measured.
 
 ### Repeatability of the gyro's scale
 
@@ -239,7 +240,7 @@ full turn, once its scale is calibrated.
 
 **The backup IMU's scale:** during those spins, the log has both IMUs. The backup's turn over the
 gyro's, across all five turns, is the backup's scale (`SensorErrors.TYPICAL`'s `backupGyro.scale`).
-How far it is from 1 is what `ImuCrossCheck.Settings.scaleTolerance` must stay above (S13). The
+How far it is from 1 is what `ImuCrossCheck.Settings.scaleTolerance` must stay above. The
 headings wrap at ±180°: count the whole turns.
 
 ## Tread friction
@@ -247,7 +248,7 @@ headings wrap at ±180°: count the whole turns.
 **What it measures:** the tread's grip on carpet, new and worn: the coefficient of friction,
 `SwerveConfig.Modules.wheelCoefficientOfFriction`. The simulator's grip comes from it, and with the
 center of gravity's height it sets where the wheels slip under acceleration, which the drive's
-current limit is chosen to stay under (M1).
+current limit is chosen to stay under.
 
 **Equipment:**
 
@@ -288,7 +289,7 @@ friction, and `driveKv`, the volts per meter per second. Per drivetrain: modules
 voltage steps, and fits kS, kV, and kA from the log. Follow
 [WPILib's SysId guide](https://docs.wpilib.org/en/stable/docs/software/advanced-controls/system-identification/index.html);
 the template doesn't have a SysId routine yet. The same tests on one module, lifted off the floor,
-give its inertia, which the simulator assumes today (`ModuleIOSim`, M4).
+give its inertia, which the simulator assumes today (`ModuleIOSim`).
 
 **Units:** SysId reports in the units the routine logged; the template's gains are in volts per
 meter per second.
@@ -366,8 +367,7 @@ the wheels slip: the log's `Localization/TractionLimited` and `ResidualMeters` s
 resistance, in milliohms. It belongs to each battery, not to a model: batteries age differently, so
 measure every one, and label each with its own name. It sets how far the voltage sags in a hard
 acceleration, and so how much current the drivetrain may draw before the robot browns out:
-`SwerveConfig.Limits.driveSupplyCurrent` is chosen for the weakest battery the team plays with
-(M2).
+`SwerveConfig.Limits.driveSupplyCurrent` is chosen for the weakest battery the team plays with.
 
 **Equipment:** a battery analyzer that measures internal resistance; or the robot, its log, and a
 clear floor.
@@ -392,7 +392,7 @@ really sees, and a loose connection shows in it.
 **Where it goes:** on the battery's label and in the team's battery log, with the date, not in the
 code. For the drive's supply limit: with four drive motors at their limit, the voltage is about the
 rest voltage less `4 × limit × resistance`. For the weakest battery, that must stay above both
-Systemcore's brownout voltage (S5) and the [vision coprocessor's](#coprocessor-brownout-ride-through).
+Systemcore's brownout voltage (still to measure on a real Systemcore) and the [vision coprocessor's](#coprocessor-brownout-ride-through).
 
 **What good looks like:** batteries of one model, bought together, reading alike. One that reads
 well above the rest is aging or damaged: keep it for practice, or retire it. Measure again before
@@ -402,7 +402,7 @@ each event.
 
 **What it measures:** the lowest input voltage at which a vision coprocessor keeps running, powered
 the way the robot powers it. Below it, the coprocessor resets, and its cameras are gone for its
-whole reboot, far longer than the sag that caused it (Q33). No configuration value holds it; it
+whole reboot, far longer than the sag that caused it. No configuration value holds it; it
 sets a floor the drive's supply current limit must keep the battery above
 ([battery internal resistance](#battery-internal-resistance)).
 
@@ -424,6 +424,6 @@ network, to watch PhotonVision.
    tenth of a second, as a brownout does, and find the lowest dip it survives.
 
 **What good looks like:** the coprocessor riding through to below Systemcore's own brownout
-voltage (S5), so a sag costs the robot its motors before it costs its cameras. If it resets higher,
+voltage, so a sag costs the robot its motors before it costs its cameras. If it resets higher,
 power it through a regulator that keeps its output up as its input sags (a buck-boost), and measure
 again.

@@ -116,5 +116,8 @@ halted until the simulator starts again. *Open PhotonVision* has no page behind 
 
 - The vendor kernel's thermal trip points: the agent reads each board's at run time.
 - Whether Systemcore's SmartIO inputs are pulled up, as a roboRIO's are, for the button.
+- How long a board takes to power down. The agent stops PhotonVision first, which it allows up to
+  two minutes to save its settings, so a slow stop can outlast the 30 s alert: the alert then says
+  "accepted", and the board is still on its way down.
 - How quickly two boards at one address take turns answering: it depends on how often the robot
   renews its address table, so the window (a minute) may need tuning against a real pair.

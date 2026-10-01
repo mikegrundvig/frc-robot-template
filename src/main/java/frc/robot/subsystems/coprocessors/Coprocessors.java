@@ -346,11 +346,14 @@ public final class Coprocessors implements AutoCloseable {
               "Coprocessors halted: cycle the robot's power to restart them", Devices.Level.WARNING)
           : new Notice("Safe to switch off", Devices.Level.OK);
     }
-    List<String> waiting =
-        coprocessors.stream().filter(c -> !c.isGone()).map(Coprocessor::name).toList();
-    return new Notice(
-        "Powering down coprocessors: waiting on " + String.join(", ", waiting),
-        stillAnswering.get() ? Devices.Level.PROBLEM : Devices.Level.NOTE);
+    String waiting =
+        String.join(
+            ", ", coprocessors.stream().filter(c -> !c.isGone()).map(Coprocessor::name).toList());
+    return stillAnswering.get()
+        ? new Notice(
+            "Don't switch off: " + waiting + " still answering after being asked to power down",
+            Devices.Level.PROBLEM)
+        : new Notice("Powering down coprocessors: waiting on " + waiting, Devices.Level.NOTE);
   }
 
   /** Pitwall's action: asks them all, and runs until every one is gone. */

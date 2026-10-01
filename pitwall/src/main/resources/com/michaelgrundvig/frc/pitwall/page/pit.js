@@ -72,7 +72,7 @@ function renderNotices() {
   replace(notices, shown);
 }
 
-const NOTICE_MARKS = { ok: ["✓", "ok"], note: ["•", "note"], warning: ["▲", "warn"],
+const NOTICE_MARKS = { ok: ["✓", "ok"], note: ["•", "info"], warning: ["▲", "warn"],
                        problem: ["✗", "bad"] };
 
 /** The status items: true and false as a mark and a word, a number with its unit. */

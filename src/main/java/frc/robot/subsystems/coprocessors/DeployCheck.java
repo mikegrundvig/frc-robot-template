@@ -200,14 +200,21 @@ public final class DeployCheck {
       return true;
     }
     boolean failed = false;
+    int passed = 0;
     for (Finding finding : findings) {
       out.println("Coprocessor check: " + finding);
       failed |= finding.verdict() == Verdict.FAIL;
+      passed += finding.verdict() == Verdict.OK ? 1 : 0;
     }
     out.println(
         failed
             ? "Coprocessor check: FAILED. Nothing was deployed."
-            : "Coprocessor check: the coprocessors that answered run this build's image.");
+            : passed == 0
+                ? "Coprocessor check: none answered, so none was compared with this build."
+                : "Coprocessor check: "
+                    + passed
+                    + (passed == 1 ? " answered, running" : " answered, each running")
+                    + " this build's image.");
     return !failed;
   }
 

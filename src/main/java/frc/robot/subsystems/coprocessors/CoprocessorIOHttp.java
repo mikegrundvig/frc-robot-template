@@ -38,9 +38,6 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
   private record PowerDown(
       boolean asked, String answer, boolean tried, boolean agentOpen, boolean photonVisionOpen) {}
 
-  /** Where its agent takes a request to power down. */
-  static final String SHUTDOWN = "/v1/shutdown";
-
   private final AgentHttp agent;
   private final AgentHttp downloads;
   private final LongSupplier robotClock;
@@ -150,7 +147,7 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
   private void powerDownNow() {
     String answer;
     try {
-      int status = agent.post(SHUTDOWN);
+      int status = agent.post(AgentApi.SHUTDOWN);
       answer = status == 202 ? "accepted" : "answered " + status;
     } catch (IOException e) {
       answer = CoprocessorPoller.why(e);

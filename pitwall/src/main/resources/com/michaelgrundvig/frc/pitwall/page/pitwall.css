@@ -274,7 +274,7 @@ table { border-collapse: collapse; }
 .banner.notice .nmark { font-weight: 700; }
 .banner.notice.ok { color: var(--ok); border-color: var(--ok); border-width: 2px; }
 .banner.notice.ok b { color: var(--text); }
-.banner.notice.note { border-color: var(--line-strong); }
+.banner.notice.info { border-color: var(--line-strong); }
 .banner.notice.warn { background: var(--warn-tint); border-color: var(--warn); }
 .banner.notice.bad { color: var(--bad); background: var(--bad-tint); border-color: var(--bad); }
 .notice-pills { display: inline-flex; flex-wrap: wrap; gap: var(--s2); }
@@ -300,7 +300,7 @@ a.button { display: inline-flex; align-items: center; min-height: var(--row); pa
            color: var(--text); text-decoration: none; }
 a.button:hover { background: var(--surface-2); }
 @media (pointer: coarse) { a.button { min-height: 44px; } }
-.logdialog { width: min(960px, calc(100vw - 32px)); }
+dialog.logdialog { width: min(960px, calc(100vw - 32px)); max-width: none; }
 .logdialog .toolbar label { display: inline-flex; gap: 6px; align-items: center; }
 .logview { list-style: none; margin: var(--s2) 0; padding: var(--s2); max-height: 55vh; overflow: auto;
            background: var(--surface-2); border-radius: 8px; font: var(--meta)/1.5 var(--mono); }

@@ -107,7 +107,8 @@ class CoprocessorsTest {
     assertThat(line("Version").value()).contains(PhotonVersion.versionString, "as this build's");
     assertThat(line("Stamp").level()).isEqualTo(Level.OK);
     assertThat(line("Cameras").value()).isEqualTo("2 of 2: front-left, front-right");
-    assertThat(line("Heat").value()).contains("trips at 85 °C");
+    assertThat(line("Heat").value()).isEqualTo("bigcore0-thermal about 55 °C, trips at 85 °C");
+    assertThat(line("Load").value()).startsWith("big cores about 40% busy");
     assertThat(line("Load").value()).contains("free to run at 2400 MHz");
     assertThat(line("Since boot").value()).contains("restarted never", "last shutdown clean");
     // No settings in Git yet: worth saying, not wrong.

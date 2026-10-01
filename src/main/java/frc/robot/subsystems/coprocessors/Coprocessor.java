@@ -260,6 +260,23 @@ final class Coprocessor implements AutoCloseable {
         inputs.zoneTripCelsius[hottest]);
   }
 
+  /**
+   * Its hottest zone, to the nearest 5 °C: on the card, which a board's degree-by-degree wobble
+   * would otherwise change every second. Near its trip point, the card says it exactly ({@link
+   * #heat}).
+   */
+  private String roughHeat() {
+    if (hottest < 0) {
+      return heat();
+    }
+    return String.format(
+        Locale.ROOT,
+        "%s about %.0f °C, trips at %.0f °C",
+        hottest < inputs.zones.length ? inputs.zones[hottest] : "zone " + hottest,
+        Math.round(inputs.zoneCelsius[hottest] / 5) * 5.0,
+        inputs.zoneTripCelsius[hottest]);
+  }
+
   private String capped() {
     return String.format(
         Locale.ROOT,
@@ -363,11 +380,15 @@ final class Coprocessor implements AutoCloseable {
                           + shortHash(table.recipeHash())),
               stampRight ? Level.OK : Level.PROBLEM));
       lines.add(settingsLine());
-      lines.add(new Line("Heat", heat(), hotNow ? Level.WARNING : Level.OK));
+      lines.add(new Line("Heat", hotNow ? heat() : roughHeat(), hotNow ? Level.WARNING : Level.OK));
       lines.add(
           new Line(
               "Load",
-              String.format(Locale.ROOT, "big cores %.0f%% busy, ", inputs.bigCoreBusyPercent)
+              // To the nearest 10%, so the card changes when the load does, not with every poll.
+              String.format(
+                      Locale.ROOT,
+                      "big cores about %.0f%% busy, ",
+                      Math.round(inputs.bigCoreBusyPercent / 10) * 10.0)
                   + (throttled
                       ? capped()
                       : String.format(
@@ -468,10 +489,11 @@ final class Coprocessor implements AutoCloseable {
     return new Line("Since boot", text, trouble ? Level.WARNING : Level.OK);
   }
 
+  /** How long it's been up, to the minute: the card changes once a minute for it, at most. */
   private String uptime() {
     long seconds = (long) inputs.uptimeSeconds;
-    return seconds < 120
-        ? seconds + " s"
+    return seconds < 60
+        ? "under a minute"
         : seconds < 7200 ? seconds / 60 + " min" : seconds / 3600 + " h";
   }
 

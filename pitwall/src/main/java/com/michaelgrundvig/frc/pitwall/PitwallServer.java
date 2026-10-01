@@ -65,9 +65,10 @@ import org.jspecify.annotations.Nullable;
  *       values are in, with what the record holding it says it is. A {@code record} is a display
  *       name, such as {@code SwerveConfig.Gains}.
  *   <li>{@code GET /api/tunables}: the configurations' tunable values, by the WPILib tunable each
- *       is published as, {@code {path: {"config", "field", "unit", "limits", "committed", "record",
- *       "group", "meaning"}}}, the last three the record that declares the value, its path, and
- *       what its {@code @param} says the value means (empty when there's none).
+ *       is published as, {@code {path: {"config", "field", "unit", "limits", "min", "max",
+ *       "committed", "record", "group", "meaning"}}}: its tuning limits as text and their ends as
+ *       numbers (an open end has none), and the record that declares the value, its path, and what
+ *       its {@code @param} says the value means (empty when there's none).
  *   <li>{@code GET /api/values}: their current values, {@code {path: number}}. {@code PATCH} it
  *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
  *       its configuration first; {@code null} returns a value to its committed one.
@@ -76,9 +77,9 @@ import org.jspecify.annotations.Nullable;
  *       ({@code Accept: text/plain} for the report). {@code DELETE} it to return every value to its
  *       committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
- *       "value", "editable", "limits"}]}, the limits as text ({@code "0 to 30"}, empty for none).
- *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
- *       within its limits.
+ *       "value", "editable", "limits", "min", "max"}]}, the limits as text ({@code "0 to 30"},
+ *       empty for none) and their ends as numbers. {@code PATCH} it with {@code {path: value}} to
+ *       change several at once, all or none, each within its limits.
  *   <li>{@code GET /api/experiments}: the rigs and the experiments that run on them. {@code POST}
  *       it {@code {"start": name}}, naming the page's stream, or {@code {"cancel": name, "run": id,
  *       "reason": why}}; canceling what isn't running is 409.
@@ -839,6 +840,7 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("editable", tunable.editable());
         shown.put(
             "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
+        Page.ends(shown, tunable.limits());
         listed.add(shown);
       }
       return listed;

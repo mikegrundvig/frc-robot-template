@@ -3,9 +3,8 @@
 // it refuses, every reason is listed here, grouped by the check that gave it, each a way to its
 // value; the same reasons show beside the values.
 
-import { robot, onChange, onConnection, h, byId, go } from "./core.js";
+import { robot, onChange, onConnection, h, byId, go, replace } from "./core.js";
 import { onEdits, pending, apply, discard, closeRefusal, outcome } from "./edits.js";
-import { replace } from "./rows.js";
 
 /** The views it shows in: those with values to stage. */
 const VIEWS = new Set(["tune", "experiment"]);

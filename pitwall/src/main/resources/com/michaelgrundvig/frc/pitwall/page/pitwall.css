@@ -1,0 +1,69 @@
+/* Pitwall's page: its look. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --panel: #f5f6f8; --fg: #1b1c1e; --muted: #5f6368; --line: #dcdfe3;
+  --accent: #0b62c4; --accent-fg: #ffffff; --changed: #fff3cd; --pending: #dbe9fb; --bad: #b3261e;
+  --ok: #1e7b34; --older: #8a94a6; --setpoint: #9aa0a6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141517; --panel: #1e2023; --fg: #e8eaed; --muted: #9aa0a6; --line: #34373b;
+    --accent: #8ab4f8; --accent-fg: #0b1a2e; --changed: #3b3217; --pending: #1c3350; --bad: #f28b82;
+    --ok: #81c995; --older: #6b7280; --setpoint: #80868b;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 16px; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+h1 { margin: 0; font-size: 20px; }
+.view h1 { margin: 20px 0 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+h2 { margin: 28px 0 8px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+h3 { margin: 0 0 8px; font-size: 15px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.tabs { display: flex; gap: 4px; margin-top: 12px; border-bottom: 1px solid var(--line); }
+.tab { padding: 8px 14px; color: var(--muted); text-decoration: none; border-bottom: 3px solid transparent; }
+.tab[aria-current="page"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.banner { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--changed); }
+.message { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel);
+           white-space: pre-line; } /* a refusal gives each reason on its own line */
+.message.bad { color: var(--bad); }
+#connection { font-size: 13px; }
+#connection.bad { color: var(--bad); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+th { font-size: 13px; font-weight: 600; color: var(--muted); }
+td.number, th.number { font-variant-numeric: tabular-nums; text-align: right; }
+table.status td:first-child { width: 40%; color: var(--muted); }
+td.ok { color: var(--ok); font-weight: 600; }
+td.bad { color: var(--bad); font-weight: 600; }
+td.best { color: var(--ok); font-weight: 700; }
+tr.group td { padding-top: 16px; font-weight: 600; border-bottom: none; }
+tr.changed td { background: var(--changed); }
+tr.pending td { background: var(--pending); }
+tr.latest td { font-weight: 600; }
+input, select { padding: 4px 6px; font: inherit; color: var(--fg); background: var(--bg);
+                border: 1px solid var(--line); border-radius: 6px; }
+input { width: 8.5em; font-variant-numeric: tabular-nums; }
+input:disabled { opacity: 0.6; }
+input.invalid { border-color: var(--bad); }
+button { padding: 6px 12px; font: inherit; color: var(--fg); background: var(--panel);
+         border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+button.primary { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+button.small { padding: 2px 8px; }
+button:disabled { opacity: 0.5; cursor: default; }
+pre { margin: 0; padding: 12px; overflow-x: auto; background: var(--panel); border-radius: 8px;
+      font: 13px/1.5 ui-monospace, monospace; white-space: pre; }
+.rig { margin-top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+.rig-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 20px; }
+.rig-grid table { margin-top: 0; }
+.rig-grid input { width: 6.5em; }
+.plot { min-height: 280px; }
+.plot .notice { padding: 40px 12px; text-align: center; }
+.tag { font-size: 12px; padding: 1px 6px; border-radius: 10px; background: var(--changed); color: var(--fg); }
+.scores td, .scores th { white-space: nowrap; }
+.scroll { overflow-x: auto; }
+@media (max-width: 760px) { .rig-grid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .committed { display: none; } }

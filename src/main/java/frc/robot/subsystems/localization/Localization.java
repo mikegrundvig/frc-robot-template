@@ -139,6 +139,12 @@ public final class Localization implements AutoCloseable {
           "imusDisagree",
           "The gyro and the backup IMU disagree",
           Alert.Level.MEDIUM);
+  private final Alert camerasWithoutPlaces =
+      new Alert(
+          "Localization",
+          "camerasWithoutPlaces",
+          "More cameras than the estimator keeps apart",
+          Alert.Level.MEDIUM);
 
   /**
    * @param estimator the pose estimator, which this owns from now on
@@ -213,6 +219,15 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput("Localization/LandmarksAccepted", landmarksAccepted);
     estimate = estimator.estimate();
     notReadyToScore = LocalizationGate.SCORING.whyNot(estimate);
+    List<String> beyond = estimator.camerasWithoutPlaces();
+    if (!beyond.isEmpty()) {
+      camerasWithoutPlaces.setText(
+          "More cameras than the estimator keeps apart: "
+              + String.join(", ", beyond)
+              + " count each image's mount and tag errors as new, so their images together claim"
+              + " more than they know");
+    }
+    camerasWithoutPlaces.set(!beyond.isEmpty());
     log();
     return decisions;
   }
@@ -490,6 +505,10 @@ public final class Localization implements AutoCloseable {
     return usingBackup.get();
   }
 
+  boolean isCamerasWithoutPlacesAlertActive() {
+    return camerasWithoutPlaces.get();
+  }
+
   boolean isImuDisagreementAlertActive() {
     return imusDisagree.get();
   }
@@ -499,5 +518,6 @@ public final class Localization implements AutoCloseable {
     gyroDisconnected.close();
     usingBackup.close();
     imusDisagree.close();
+    camerasWithoutPlaces.close();
   }
 }

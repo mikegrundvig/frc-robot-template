@@ -3,10 +3,12 @@ package frc.robot.lib.localization;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
@@ -76,6 +78,9 @@ public final class PoseEstimator implements CameraLocalizer {
 
   /** Each camera's place among the errors the filter keeps apart, by name, as cameras appear. */
   private final Map<String, Integer> cameraSlots = new HashMap<>();
+
+  /** The cameras that came after every place was taken, in the order they came. */
+  private final Set<String> camerasWithoutPlaces = new LinkedHashSet<>();
 
   // The IMUs' readings, unwrapped into one continuous yaw.
   private boolean started;
@@ -266,6 +271,15 @@ public final class PoseEstimator implements CameraLocalizer {
    */
   public void addLandmark(LandmarkEvent landmark) {
     pendingLandmarks.add(landmark);
+  }
+
+  /**
+   * The cameras beyond the {@value PoseFilter#MAX_CAMERAS} whose repeated errors the estimator
+   * keeps apart: each image's turn and shift are taken as new, so their images, averaged, grow
+   * surer than they should. Empty unless a robot has more cameras than that.
+   */
+  public List<String> camerasWithoutPlaces() {
+    return List.copyOf(camerasWithoutPlaces);
   }
 
   /** What the last {@link #update} did with each landmark, for the log. */
@@ -690,6 +704,7 @@ public final class PoseEstimator implements CameraLocalizer {
       return slot;
     }
     if (cameraSlots.size() >= PoseFilter.MAX_CAMERAS) {
+      camerasWithoutPlaces.add(camera);
       return -1;
     }
     cameraSlots.put(camera, cameraSlots.size());

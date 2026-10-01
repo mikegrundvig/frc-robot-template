@@ -109,16 +109,19 @@ class PoseFilterTest {
 
   /**
    * A camera without a place among the considered errors (beyond {@link PoseFilter#MAX_CAMERAS})
-   * counts each image's error as new: it averages down as the textbook says.
+   * still has its turn and shift, in every image: they're taken as new each time, so its images
+   * average them down with their noise, as the textbook would.
    */
   @Test
-  void aCameraWithoutAPlaceCountsEachImageAsNew() {
+  void aCameraWithoutAPlaceCountsEachImagesErrorsAsNew() {
     PoseFilter filter = placed(CONSIDERED, 1.0, 0);
     for (int i = 0; i < 2500; i++) {
-      apply(filter, fix(Translation2d.ZERO, new Translation2d(3, 0), 0.05), -1);
+      apply(filter, fix(Translation2d.ZERO, new Translation2d(3, 0), 0.005), -1);
     }
 
-    assertThat(filter.covariance().xStdDev()).isCloseTo(0.001, within(0.0001));
+    // 5 mm of noise and 1 cm of shift in each image, averaged over 2,500 of them.
+    double each = Math.hypot(0.005, SHIFT) / Math.sqrt(2500);
+    assertThat(filter.covariance().xStdDev()).isCloseTo(each, within(0.02 * each));
   }
 
   /**

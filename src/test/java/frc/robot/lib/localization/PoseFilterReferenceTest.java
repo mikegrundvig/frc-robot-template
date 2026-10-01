@@ -156,6 +156,25 @@ class PoseFilterReferenceTest {
     if (rows == 3) {
       r[2][2] = noise.heading();
     }
+    if (camera < 0) {
+      // A camera without a place: its turn and shift, new in each image, are just more noise.
+      double[][] own = new double[rows][PER_CAMERA];
+      own[0][0] = -leverY;
+      own[0][1] = 1;
+      own[1][0] = leverX;
+      own[1][2] = 1;
+      if (rows == 3) {
+        own[2][0] = 1;
+        own[2][3] = 1;
+      }
+      for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < rows; j++) {
+          for (int which = 0; which < PER_CAMERA; which++) {
+            r[i][j] += own[i][which] * ownVariance(which) * own[j][which];
+          }
+        }
+      }
+    }
     double[] innovation = new double[rows];
     innovation[0] = measurement.pose().getX() - mean[0];
     innovation[1] = measurement.pose().getY() - mean[1];

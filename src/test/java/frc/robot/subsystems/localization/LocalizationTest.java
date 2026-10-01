@@ -7,12 +7,15 @@ import frc.robot.Robots;
 import frc.robot.lib.localization.DrivetrainReadings;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.OdometrySample;
+import frc.robot.lib.localization.PoseCovariance;
+import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.YawSource;
 import frc.robot.sim.DriveSimHarness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /** Localization fed by hand: what it makes of the drivetrain's readings, one loop at a time. */
@@ -43,11 +46,14 @@ class LocalizationTest {
           .build();
 
   private static DrivetrainReadings readings(ImuReadings gyro, ImuReadings backup) {
+    return readings(gyro, backup, 1_000_000L);
+  }
+
+  private static DrivetrainReadings readings(ImuReadings gyro, ImuReadings backup, long nanos) {
     return DrivetrainReadings.builder()
         .wheels(
             List.of(
-                new OdometrySample(
-                    1_000_000L, new double[] {0, 0, 0, 0}, new double[] {0, 0, 0, 0})))
+                new OdometrySample(nanos, new double[] {0, 0, 0, 0}, new double[] {0, 0, 0, 0})))
         .gyro(gyro)
         .backupImu(backup)
         .velocities(new ChassisVelocities())
@@ -74,6 +80,38 @@ class LocalizationTest {
       assertThat(localization.isGyroDisconnectedAlertActive()).isFalse();
       assertThat(localization.isUsingBackupAlertActive()).isTrue();
       assertThat(localization.pitchRadians()).as("the backup's attitude").isEqualTo(0.05);
+    }
+  }
+
+  /**
+   * A robot with more cameras than the estimator keeps apart: the ones after the eighth count each
+   * image's errors as new, and an alert names them.
+   */
+  @Test
+  void moreCamerasThanTheEstimatorKeepsApartRaiseAnAlert() {
+    try (Localization localization =
+        DriveSimHarness.localizationFor(Robots.SIM, DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+      localization.periodic(readings(LEVEL, ImuReadings.NONE), true);
+      localization.periodic(readings(LEVEL, ImuReadings.NONE, 21_000_000L), true);
+      localization.update();
+      assertThat(localization.isCamerasWithoutPlacesAlertActive()).isFalse();
+
+      for (int camera = 1; camera <= 9; camera++) {
+        localization
+            .forCameras()
+            .addVision(
+                new VisionMeasurement(
+                    11_000_000L,
+                    Pose2d.ZERO,
+                    PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY),
+                    Translation2d.ZERO,
+                    "camera " + camera,
+                    List.of(26),
+                    VisionMeasurement.Solver.HEADING_CONSTRAINED));
+      }
+      localization.update();
+
+      assertThat(localization.isCamerasWithoutPlacesAlertActive()).isTrue();
     }
   }
 }

@@ -11,7 +11,7 @@ import java.util.List;
  *
  * @param name the computer's name in the table, and its hostname
  * @param team the team number its address is built from
- * @param address its address, such as {@code 10.26.11.11}
+ * @param address its address, such as {@code 10.12.34.11}
  * @param board the board the image was built for, such as {@code orangepi-5}
  * @param cameras the PhotonVision camera names it runs (its role)
  * @param release the release the image came from, such as a Git tag

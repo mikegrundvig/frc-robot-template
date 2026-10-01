@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.coprocessor.json;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -33,6 +35,15 @@ public final class Json {
   /** Deeper nesting than this is refused: no settings come close, and it bounds the parser. */
   public static final int MAX_DEPTH = 256;
 
+  /**
+   * The longest a number may be, in characters. Longer ones are refused: no setting needs them, and
+   * exact arithmetic on a number takes time that grows with the square of its length.
+   */
+  public static final int MAX_NUMBER = 1000;
+
+  /** The most digits a number's exponent may have: 9 keeps every scale an {@code int}. */
+  public static final int MAX_EXPONENT_DIGITS = 9;
+
   /** The widest a container of plain values may be and still go on one line in {@link #pretty}. */
   static final int INLINE_WIDTH = 80;
 
@@ -53,29 +64,92 @@ public final class Json {
   /** The value with its members in their order and no spaces. */
   public static String compact(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Writer(out, false, false).write(value);
+    new Writer(out, false, false, Drain.NONE).write(value);
     return out.toString();
   }
 
   /** The value with its members sorted by name and no spaces. */
   public static String sorted(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Writer(out, true, false).write(value);
+    new Writer(out, true, false, Drain.NONE).write(value);
     return out.toString();
   }
 
   /** The value sorted, with every number in one form: what a hash is computed over. */
   public static String hashable(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Writer(out, true, true).write(value);
+    new Writer(out, true, true, Drain.NONE).write(value);
     return out.toString();
   }
 
   /** The value sorted and indented, ending in a newline: the form a file in Git takes. */
   public static String pretty(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Pretty(out).write(value, 0);
+    new Pretty(out, Drain.NONE).write(value, 0);
     return out.append('\n').toString();
+  }
+
+  /**
+   * Writes {@link #compact} to {@code out} as it goes, a few kilobytes at a time, rather than
+   * building it all first: for answers too large to hold twice.
+   */
+  public static void writeCompact(JsonValue value, Appendable out) throws IOException {
+    write(out, (buffer, drain) -> new Writer(buffer, false, false, drain).write(value));
+  }
+
+  /** Writes {@link #hashable} to {@code out} as it goes (see {@link #writeCompact}). */
+  public static void writeHashable(JsonValue value, Appendable out) throws IOException {
+    write(out, (buffer, drain) -> new Writer(buffer, true, true, drain).write(value));
+  }
+
+  /** Writes {@link #pretty} to {@code out} as it goes (see {@link #writeCompact}). */
+  public static void writePretty(JsonValue value, Appendable out) throws IOException {
+    write(
+        out,
+        (buffer, drain) -> {
+          new Pretty(buffer, drain).write(value, 0);
+          buffer.append('\n');
+        });
+  }
+
+  private interface Writing {
+    void write(StringBuilder buffer, Drain drain);
+  }
+
+  private static void write(Appendable out, Writing writing) throws IOException {
+    StringBuilder buffer = new StringBuilder();
+    Drain drain =
+        full -> {
+          try {
+            out.append(full);
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+          full.setLength(0);
+        };
+    try {
+      writing.write(buffer, drain);
+      drain.drain(buffer);
+    } catch (UncheckedIOException e) {
+      throw e.getCause();
+    }
+  }
+
+  /** Empties a writer's buffer into where it's going, once the buffer is full enough. */
+  private interface Drain {
+    /** Keeps everything in the buffer: for writing a String. */
+    Drain NONE = buffer -> {};
+
+    /** How full a buffer is before it's emptied, in characters. */
+    int SIZE = 8192;
+
+    void drain(StringBuilder buffer);
+
+    default void maybe(StringBuilder buffer) {
+      if (buffer.length() >= SIZE) {
+        drain(buffer);
+      }
+    }
   }
 
   /**
@@ -93,6 +167,23 @@ public final class Json {
     }
     BigInteger digits = value.unscaledValue();
     return digits + "e" + (-(long) value.scale());
+  }
+
+  /**
+   * The value of exactly these hex digits (no sign, no prefix), or -1 when they aren't all hex
+   * digits: what a {@code \\u} or {@code %} escape needs, where Integer.parseInt would also take a
+   * sign.
+   */
+  public static int hexValue(String digits) {
+    int value = 0;
+    for (int i = 0; i < digits.length(); i++) {
+      int digit = Character.digit(digits.charAt(i), 16);
+      if (digit < 0 || digits.charAt(i) > 'f') {
+        return -1;
+      }
+      value = value * 16 + digit;
+    }
+    return digits.isEmpty() ? -1 : value;
   }
 
   static void writeString(StringBuilder out, String value) {
@@ -133,7 +224,7 @@ public final class Json {
   }
 
   /** Writes on one line. */
-  private record Writer(StringBuilder out, boolean sort, boolean normalize) {
+  private record Writer(StringBuilder out, boolean sort, boolean normalize, Drain drain) {
     void write(JsonValue value) {
       switch (value) {
         case JsonValue.Obj object -> {
@@ -147,6 +238,7 @@ public final class Json {
             writeString(out, member.getKey());
             out.append(':');
             write(member.getValue());
+            drain.maybe(out);
           }
           out.append('}');
         }
@@ -159,6 +251,7 @@ public final class Json {
             }
             first = false;
             write(item);
+            drain.maybe(out);
           }
           out.append(']');
         }
@@ -172,7 +265,7 @@ public final class Json {
   }
 
   /** Writes sorted and indented. */
-  private record Pretty(StringBuilder out) {
+  private record Pretty(StringBuilder out, Drain drain) {
     void write(JsonValue value, int depth) {
       String inline = inline(value);
       if (inline != null) {
@@ -189,6 +282,7 @@ public final class Json {
             out.append(": ");
             write(members.get(i).getValue(), depth + 1);
             out.append(i + 1 < members.size() ? ",\n" : "\n");
+            drain.maybe(out);
           }
           indent(depth);
           out.append('}');
@@ -200,6 +294,7 @@ public final class Json {
             indent(depth + 1);
             write(items.get(i), depth + 1);
             out.append(i + 1 < items.size() ? ",\n" : "\n");
+            drain.maybe(out);
           }
           indent(depth);
           out.append(']');
@@ -223,7 +318,7 @@ public final class Json {
             first = false;
             writeString(line, member.getKey());
             line.append(": ");
-            new Writer(line, true, false).write(member.getValue());
+            new Writer(line, true, false, Drain.NONE).write(member.getValue());
           }
           line.append('}');
         }
@@ -236,12 +331,12 @@ public final class Json {
             }
             line.append(first ? "" : ", ");
             first = false;
-            new Writer(line, true, false).write(item);
+            new Writer(line, true, false, Drain.NONE).write(item);
           }
           line.append(']');
         }
         default -> {
-          new Writer(line, true, false).write(value);
+          new Writer(line, true, false, Drain.NONE).write(value);
           return line.toString();
         }
       }
@@ -390,14 +485,11 @@ public final class Json {
           case 'r' -> value.append('\r');
           case 't' -> value.append('\t');
           case 'u' -> {
-            if (pos + 4 > text.length()) {
+            int code = pos + 4 > text.length() ? -1 : hexValue(text.substring(pos, pos + 4));
+            if (code < 0) {
               throw error("a \\u escape needs four hex digits");
             }
-            try {
-              value.append((char) Integer.parseInt(text.substring(pos, pos + 4), 16));
-            } catch (NumberFormatException e) {
-              throw error("a \\u escape needs four hex digits");
-            }
+            value.append((char) code);
             pos += 4;
           }
           default -> {
@@ -415,13 +507,17 @@ public final class Json {
       }
       while (pos < text.length() && "0123456789.eE+-".indexOf(text.charAt(pos)) >= 0) {
         pos++;
+        if (pos - start > MAX_NUMBER) {
+          pos = start;
+          throw error("a number longer than " + MAX_NUMBER + " characters");
+        }
       }
       String lexeme = text.substring(start, pos);
       try {
         return new JsonValue.Num(lexeme);
       } catch (JsonException e) {
         pos = start;
-        throw error("not a number: " + lexeme);
+        throw error(String.valueOf(e.getMessage()));
       }
     }
 

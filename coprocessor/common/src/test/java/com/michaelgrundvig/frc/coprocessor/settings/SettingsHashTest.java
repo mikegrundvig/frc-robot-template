@@ -45,14 +45,32 @@ class SettingsHashTest {
                     + ":"
                     + String.join(".", rule.path())
                     + " "
-                    + rule.action())
+                    + rule.action()
+                    + " "
+                    + rule.when())
         .containsExactly(
-            "cameras/config_json:currentPipelineIndex EXCLUDE",
-            "cameras/config_json:streamIndex EXCLUDE",
-            "cameras/config_json:matchedCameraInfo.dev EXCLUDE",
-            "cameras/config_json:matchedCameraInfo.path EXCLUDE",
-            "cameras/config_json:matchedCameraInfo.otherPaths UNORDERED");
+            "cameras/config_json:currentPipelineIndex EXCLUDE ALWAYS",
+            "cameras/config_json:streamIndex EXCLUDE ALWAYS",
+            "cameras/config_json:matchedCameraInfo.dev EXCLUDE USB_BY_PATH",
+            "cameras/config_json:matchedCameraInfo.path EXCLUDE USB_BY_PATH",
+            "cameras/config_json:matchedCameraInfo.otherPaths UNORDERED ALWAYS");
     assertThat(SettingsHash.RULES).allSatisfy(rule -> assertThat(rule.why()).isNotBlank());
+  }
+
+  @Test
+  void aCameraNotMatchedByItsUsbPortKeepsItsPathInTheHash() {
+    String csi =
+        "{\"matchedCameraInfo\":{\"type\":\"PVCSICameraInfo\",\"path\":\"/base/soc/i2c0mux/i2c@1/ov9281@60\","
+            + "\"dev\":0}}";
+    assertThat(camera(csi.replace("i2c@1", "i2c@0")).hash()).isNotEqualTo(camera(csi).hash());
+    assertThat(camera(csi.replace("\"dev\":0", "\"dev\":1")).hash())
+        .isNotEqualTo(camera(csi).hash());
+
+    String usbWithoutPort =
+        "{\"matchedCameraInfo\":{\"type\":\"PVUsbCameraInfo\",\"path\":\"/dev/video0\","
+            + "\"otherPaths\":[\"/dev/v4l/by-id/u\"]}}";
+    assertThat(camera(usbWithoutPort.replace("video0", "video2")).hash())
+        .isNotEqualTo(camera(usbWithoutPort).hash());
   }
 
   @Test
@@ -153,9 +171,27 @@ class SettingsHashTest {
                 SettingsHash.hashed(
                     settings,
                     List.of(
-                        new Rule("t", "c", List.of("list", "*", "x"), Action.EXCLUDE, "why"),
-                        new Rule("t", "c", List.of("o", "*"), Action.UNORDERED, "why"),
-                        new Rule("other", "c", List.of("o"), Action.EXCLUDE, "why")))))
+                        new Rule(
+                            "t",
+                            "c",
+                            List.of("list", "*", "x"),
+                            Action.EXCLUDE,
+                            SettingsHash.When.ALWAYS,
+                            "why"),
+                        new Rule(
+                            "t",
+                            "c",
+                            List.of("o", "*"),
+                            Action.UNORDERED,
+                            SettingsHash.When.ALWAYS,
+                            "why"),
+                        new Rule(
+                            "other",
+                            "c",
+                            List.of("o"),
+                            Action.EXCLUDE,
+                            SettingsHash.When.ALWAYS,
+                            "why")))))
         .isEqualTo(
             "{\"tables\":{\"t\":{\"k\":{\"c\":{\"list\":[{\"y\":2}],\"o\":{\"a\":1,\"b\":[1,3]}}}}},"
                 + "\"userVersion\":1}");
@@ -163,9 +199,17 @@ class SettingsHashTest {
             Json.sorted(
                 SettingsHash.hashed(
                     settings,
-                    List.of(new Rule("t", "c", List.of("list", "*"), Action.EXCLUDE, "why")))))
+                    List.of(
+                        new Rule(
+                            "t",
+                            "c",
+                            List.of("list", "*"),
+                            Action.EXCLUDE,
+                            SettingsHash.When.ALWAYS,
+                            "why")))))
         .contains("\"list\":[]");
-    assertThatThrownBy(() -> new Rule("t", "c", List.of(), Action.EXCLUDE, "why"))
+    assertThatThrownBy(
+            () -> new Rule("t", "c", List.of(), Action.EXCLUDE, SettingsHash.When.ALWAYS, "why"))
         .isInstanceOf(IllegalArgumentException.class);
   }
 

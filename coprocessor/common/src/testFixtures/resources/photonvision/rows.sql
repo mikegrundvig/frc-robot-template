@@ -5,7 +5,7 @@
 -- CameraCalibrationCoefficients, NetworkConfig, HardwareConfig, HardwareSettings), not copied from
 -- a real board.
 INSERT INTO global (filename, contents) VALUES ('hardwareSettings', '{"ledBrightnessPercentage":100}');
-INSERT INTO global (filename, contents) VALUES ('networkConfig', '{"ntServerAddress":"2611","connectionType":"DHCP","staticIp":"","hostname":"vision-front","runNTServer":false,"shouldManage":false,"shouldPublishProto":false,"networkManagerIface":"","setStaticCommand":"","setDHCPcommand":""}');
+INSERT INTO global (filename, contents) VALUES ('networkConfig', '{"ntServerAddress":"1234","connectionType":"DHCP","staticIp":"","hostname":"vision-front","runNTServer":false,"shouldManage":false,"shouldPublishProto":false,"networkManagerIface":"","setStaticCommand":"","setDHCPcommand":""}');
 INSERT INTO global (filename, contents) VALUES ('hardwareConfig', '{"deviceName":"","ledPins":[],"ledsCanDim":false,"ledBrightnessRange":[0,100],"ledPWMFrequency":0,"getGPIOCommand":"","setGPIOCommand":"","setPWMCommand":"","setPWMFrequencyCommand":"","releaseGPIOCommand":"","restartHardwareCommand":"","vendorFOV":-1.0}');
 INSERT INTO global (filename, contents) VALUES ('neuralNetworkProperties', '{"models":[]}');
 INSERT INTO global (filename, contents) VALUES ('fieldLayout', '{"name":"2026-rebuilt-welded","tags":[{"ID":1,"pose":{"translation":{"x":11.8779,"y":7.4247,"z":0.889},"rotation":{"quaternion":{"W":6.123233995736766E-17,"X":0.0,"Y":0.0,"Z":1.0}}}}],"field":{"length":16.541,"width":8.069}}');

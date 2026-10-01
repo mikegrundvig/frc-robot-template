@@ -308,8 +308,19 @@ public sealed interface JsonValue
         Pattern.compile("-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?");
 
     public Num {
+      if (text.length() > Json.MAX_NUMBER) {
+        throw new JsonException("a number longer than " + Json.MAX_NUMBER + " characters");
+      }
       if (!GRAMMAR.matcher(text).matches()) {
-        throw new JsonException("not a JSON number: " + text);
+        throw new JsonException("not a number: " + text);
+      }
+      int exponent = Math.max(text.indexOf('e'), text.indexOf('E'));
+      if (exponent >= 0) {
+        String digits = text.substring(exponent + 1).replaceFirst("^[+-]", "");
+        if (digits.length() > Json.MAX_EXPONENT_DIGITS) {
+          throw new JsonException(
+              "a number's exponent of more than " + Json.MAX_EXPONENT_DIGITS + " digits: " + text);
+        }
       }
     }
 

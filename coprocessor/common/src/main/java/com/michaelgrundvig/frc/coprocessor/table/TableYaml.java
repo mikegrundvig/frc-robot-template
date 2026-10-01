@@ -22,7 +22,21 @@ final class TableYaml {
   private static final Set<String> TABLE_KEYS = Set.of("team", "agentPort", "computers");
   private static final Set<String> COMPUTER_KEYS =
       Set.of("name", "address", "board", "cameras", "agentPort");
-  private static final Pattern INTEGER = Pattern.compile("-?[0-9]{1,9}");
+
+  /** A whole number as the table writes one: no leading zeros, no sign but minus. */
+  private static final Pattern INTEGER = Pattern.compile("-?(0|[1-9][0-9]{0,8})");
+
+  /**
+   * What YAML (1.2, as yq reads it) takes for something other than text when it isn't quoted: null,
+   * true or false, or a number. A name written so is refused unless quoted, so this reader and yq
+   * never disagree about it.
+   */
+  private static final Pattern NOT_TEXT =
+      Pattern.compile(
+          "~|null|Null|NULL|true|True|TRUE|false|False|FALSE"
+              + "|[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+"
+              + "|[-+]?(\\.[0-9]+|[0-9]+(\\.[0-9]*)?)([eE][-+]?[0-9]+)?"
+              + "|[-+]?\\.(inf|Inf|INF)|\\.(nan|NaN|NAN)");
 
   private final String source;
   private final List<String> problems = new ArrayList<>();
@@ -111,7 +125,7 @@ final class TableYaml {
     }
     int before = problems.size();
     unknownKeys(mapping, COMPUTER_KEYS, "a computer");
-    String name = text(mapping, "name");
+    String name = name(mapping, "name");
     if (name != null) {
       check(mapping.entries().get("name"), Computer.nameProblem(name));
     }
@@ -120,7 +134,7 @@ final class TableYaml {
       check(mapping.entries().get("address"), Computer.addressProblem(address));
     }
     Board board = null;
-    String boardId = text(mapping, "board");
+    String boardId = name(mapping, "board");
     if (boardId != null) {
       board = Board.byId(boardId).orElse(null);
       if (board == null) {
@@ -160,7 +174,10 @@ final class TableYaml {
         problems.add(at(item.line(), "each camera is a name"));
         continue;
       }
-      String problem = Computer.cameraProblem(scalar.text());
+      String problem =
+          notText(scalar)
+              ? notTextProblem("camera", scalar.text())
+              : Computer.cameraProblem(scalar.text());
       if (problem != null) {
         problems.add(at(item.line(), problem));
       } else if (cameras.contains(scalar.text())) {
@@ -199,6 +216,29 @@ final class TableYaml {
       return null;
     }
     return scalar.text();
+  }
+
+  /** The key's text, refused when YAML would read it as something else unless it's quoted. */
+  private @Nullable String name(Mapping mapping, String key) {
+    String text = text(mapping, key);
+    Entry entry = mapping.entries().get(key);
+    if (text != null && entry != null && notText((Scalar) entry.value())) {
+      problems.add(at(entry.line(), notTextProblem(key, text)));
+      return null;
+    }
+    return text;
+  }
+
+  private static boolean notText(Scalar scalar) {
+    return !scalar.quoted() && NOT_TEXT.matcher(scalar.text()).matches();
+  }
+
+  private static String notTextProblem(String what, String text) {
+    return what
+        + " "
+        + text
+        + " isn't text to YAML (it's null, true or false, or a number): put it"
+        + " in quotes";
   }
 
   /** The key's whole number; {@code fallback} when it's absent (null fallback: required). */

@@ -26,13 +26,13 @@ computers:
 
 | Key | Required | What it may be |
 |---|---|---|
-| `team` | yes | 0 to 25599. A computer's address is 10.TE.AM.x: team 2611's `.11` is 10.26.11.11 |
-| `agentPort` | no, 5808 | 1024 to 65535, except 5800 (PhotonVision's page) and 5810 (NetworkTables). 5808 sits in FRC's team range, 5800-5810 |
+| `team` | yes | 0 to 25599. A computer's address is 10.TE.AM.x: team 1234's `.11` is 10.12.34.11 |
+| `agentPort` | no, 5808 | 1024 to 65535, except 5800 (PhotonVision's page), 5810 (NetworkTables), and 1181 to 1200 (PhotonVision's camera streams, which start at 1181, two ports per camera). 5808 sits in FRC's team range, 5800-5810 |
 | `computers` | yes (`[]` for none) | A list of computers |
 | `computers[].name` | yes | A hostname: lowercase letters, digits, and hyphens, starting with a letter and not ending with a hyphen, at most 63 characters. Unique |
 | `computers[].address` | yes | 6 to 19: FRC's static range for devices on the robot (WPILib's "IP Configurations"; .20-.199 is the field's DHCP pool, .200-.219 the radio's). 11 and up by convention. Unique |
 | `computers[].board` | yes | One of the five boards above |
-| `computers[].cameras` | no, none | PhotonVision camera names: the names robot code gives `PhotonCamera`. Not empty, no `/` or control characters, at most 64 characters. Unique across the whole table, since PhotonVision publishes each one at `/photonvision/<camera>` |
+| `computers[].cameras` | no, none | PhotonVision camera names: the names robot code gives `PhotonCamera`. Printable ASCII (letters, digits, spaces, punctuation), not empty, no `/`, no leading or trailing space, at most 64 characters. Unique across the whole table, since PhotonVision publishes each one at `/photonvision/<camera>` |
 | `computers[].agentPort` | no, the table's | As `agentPort` |
 
 The build reads the table and refuses one with a problem, listing every problem with its line. A
@@ -46,9 +46,12 @@ lists at least one computer.
 program or the agent. It reads the YAML above and anything shaped like it: one `key: value` per
 line, nested by indenting with spaces; lists as `- item` lines (at the key's indent or deeper) or
 on one line in `[...]`; plain, `'single'`, and `"double"` quoted values; and `#` comments.
-Everything else YAML allows (tabs, `{...}` mappings, anchors, tags, multi-line values, more than
-one document) is refused with its line number, rather than read in a way you didn't mean. Values
-are never guessed at: a camera named `no` is the text "no", not false.
+Everything else YAML allows (tabs, `{...}` mappings, anchors, tags, directives, multi-line values,
+more than one document, nesting more than 16 deep) is refused with its line number, rather than
+read in a way you didn't mean. Numbers are written plainly, without leading zeros. A name, board,
+or camera that YAML would read as something other than text (`~`, `null`, `true`, `false`, a
+number) must be in quotes: `cameras: ["1"]`. So this reader and other YAML tools (the image
+workflow reads the table with yq) always agree on what the table says.
 
 In Java: `Table.readYaml(path)` (or `Table.parseYaml(text, name)`) gives a checked `Table`, or a
 `TableException` whose `problems()` are the messages. A `Table` is checked however it's made, from
@@ -58,20 +61,32 @@ JSON too.
 
 Each coprocessor's agent answers on its `agentPort`: HTTP, JSON, no authentication. It runs on a
 closed robot network, runs nothing a request says, and bounds every answer. It's read-only but for
-one action, a soft power-off, which only the robot controller may ask for.
+one action, a soft power-off, which only the robot controller's address may ask for (a check of
+the address a request comes from, not authentication: see below).
 
 | Request | Answer |
 |---|---|
 | `GET /v1/stamp` | `Stamp`: which image this is, and as which computer |
-| `GET /v1/health` | `Health`: the computer's health, about 2 KB |
-| `GET /v1/journal?cursor=&priority=&unit=&limit=` | `JournalPage`: a page of the journal |
+| `GET /v1/health` | `Health`: the computer's health, 3 to 4 KB |
+| `GET /v1/journal?cursor=&before=&from=&priority=&unit=&limit=` | `JournalPage`: a page of the journal |
 | `GET /v1/settings` | PhotonVision's settings as canonical rows, with their hash |
-| `GET /v1/settings.zip` | The same as files, laid out like the repository's folder for the computer |
+| `GET /v1/settings.zip` | The same as files, laid out like the repository's folder for the computer, with `settings.sha256` beside the folder |
 | `POST /v1/shutdown` | `ShutdownAnswer` (202): stops PhotonVision, then powers the computer off. From the robot controller (10.TE.AM.2) only |
 
 A refusal or a failure answers `{"error": "..."}` with its status: 400 for a bad query, 403 for a
-shutdown from anyone but the robot controller, 404 for an unknown path (or no settings database
-yet), 405 for the wrong method (with `Allow`), and 500 when the agent failed.
+shutdown it won't take, 404 for an unknown path (or no settings database yet), 405 for the wrong
+method (with `Allow`), 421 for a request not addressed to it, 503 (with `Retry-After`) when a
+journal or settings request finds another under way, and 500 when the agent failed. A 500 says
+only that; what went wrong is in the agent's journal (it may name files).
+
+**Who it answers.** Each request has a thread of its own, so a client that's slow, or never
+finishes sending, holds up nobody else; a request must arrive within 4 seconds, an answer may take
+60, and 32 connections are open at most. The heavy requests (the journal and the settings) take
+turns, and one that finds another under way is refused as busy at once, so health, the stamp, and
+a shutdown never wait behind them. It answers only requests addressed to it (the `Host` a request
+names is a 10.x, 169.254.x, or loopback address, `localhost`, or its own name, alone or in
+`.local`), so a web page elsewhere can't reach it through a name that resolves to it. Every answer
+carries `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 
 The answers are Java records in `com.michaelgrundvig.frc.coprocessor.api`; the paths and limits are
 `AgentApi`'s constants. Each record has `toJson()` and `fromJson(...)`, and the top-level ones
@@ -86,7 +101,7 @@ belongs) is an error.
 ### `Stamp`
 
 ```json
-{"name": "vision-front", "team": 2611, "address": "10.26.11.11", "board": "orangepi-5",
+{"name": "vision-front", "team": 1234, "address": "10.12.34.11", "board": "orangepi-5",
  "cameras": ["front-left", "front-right"], "release": "coprocessors-2027.1",
  "recipeHash": "4f2c…", "photonvisionVersion": "v2027.1.0", "settingsHash": "9a8b…",
  "bootId": "3c1e6a2e-…", "mac": "c0:74:2b:fe:12:34"}
@@ -116,27 +131,58 @@ serves on. Other members are ignored.
 | `problems` | text | What the agent couldn't read, each saying what and why (at most 10); empty when it read everything. `shutting down: asked for by the robot` comes first once a shutdown is under way |
 
 A health answer is 3 to 4 KB for an RK3588 with two cameras: more than the design's guess of 2 KB,
-mostly the trip points and the journal's latest entries. Health asked for again within half a
-second is the same answer, so two pollers cost no more than one.
+mostly the trip points and the journal's latest entries. It's answered at once: asked again within
+half a second, it's the same answer; older than that, it's still the last one while a reading
+afresh starts in the background (a reading takes about 0.1 s, and a few seconds when the settings
+have just changed). Only the very first request waits for the first reading. So a poller's timeout
+never trips on a slow reading, and two pollers cost no more than one.
+
+`problems` starts with `shutting down: asked for by the robot` while a shutdown is under way, and
+with `shutdown failed: ...; ask again to retry` when powering off failed.
 
 ### `JournalPage`
 
-`entries` (oldest first), `cursor` (ask again with it for the entries after these), and `more`
-(whether more were waiting). Without a `cursor`, the page is the latest entries; `priority` (0-7,
-or `emerg` to `debug`) gives that priority and worse, `unit` one systemd unit, and `limit` the page
+`entries` (oldest first), `cursor`, and `more`. Where the page is, by one of:
+
+| Asked with | The page | Its `cursor` | `more` |
+|---|---|---|---|
+| nothing | the latest entries | the newest entry's: ask with `cursor=` for the next | false |
+| `cursor=C` | the entries just after C | the newest entry's, for the page after | whether more were waiting |
+| `before=C` | the entries just before C | the oldest entry's: ask with `before=` for the page before | whether older ones remain |
+| `from=boot` | the first entries of this boot | the newest entry's, to go on with `cursor=` | whether more were waiting |
+
+So a viewer's "Older" asks with `before=` the oldest entry it has, and a whole boot's log is
+`from=boot`, then `cursor=` until `more` is false. With no entries, the cursor is the one asked
+with. `priority` (0-7, or `emerg` to `debug`) gives that priority and worse, and `limit` the page
 size (100 unless asked, at most 500). A message longer than 2048 characters is cut. Entries of
 every boot the journal keeps are there; each says its boot.
+
+**What's served** is the kernel's messages and those of PhotonVision and the agent (with systemd's
+own about them), and nothing else: `unit` may be `kernel`, `photonvision.service`, or
+`coprocessor-agent.service` (`AgentApi.JOURNAL_UNITS`), and without one, the page has all three.
+The rest of the journal (logins, other services) isn't served.
 
 ### `POST /v1/shutdown`
 
 A soft power-off, for a coprocessor kept powered after the robot is switched off (by a battery
-pack, say), so it stops cleanly rather than losing power mid-write. Only the robot controller,
-10.TE.AM.2 by the stamp's team, may ask; anyone else gets 403. The agent logs the request to the
-journal, answers 202 at once with `{"shuttingDown": true, "alreadyRequested": false}`, then runs
-`systemctl stop photonvision.service` (so PhotonVision saves its settings; up to 2 minutes) and
-`systemctl poweroff`, which it runs even if the stop failed. Asking again while it's under way
+pack, say), so it stops cleanly rather than losing power mid-write. The agent logs the request to
+the journal, answers 202 at once with `{"shuttingDown": true, "alreadyRequested": false}`, then
+runs `systemctl stop photonvision.service` (so PhotonVision saves its settings; up to 2 minutes)
+and `systemctl poweroff`, which it runs even if the stop failed. Asking again while it's under way
 answers 202 with `alreadyRequested: true` and does nothing more. The agent answers until the
-computer goes down; health says `shutting down` meanwhile.
+computer goes down; health says `shutting down` meanwhile. If powering off fails, health says
+`shutdown failed`, and the next request tries again.
+
+**Who may ask: an address check, not authentication.** A shutdown is taken only from the robot
+controller's address, 10.TE.AM.2 by the stamp's team, and refused (403) from anyone else, and on a
+computer with no stamp (no name or team), which has no robot to take one from. Each refusal is
+logged, at most once in 10 seconds (with a count of the rest). This keeps an accidental click
+elsewhere from switching vision off. It doesn't stop anything on the robot's network that sends
+from 10.TE.AM.2: a laptop given that address while the robot controller is off could shut a
+coprocessor down. That's the same trust the robot's network gives the Driver Station and
+PhotonVision's own page (which can restart and wipe a coprocessor without asking). If it ever must
+be stronger, a per-team secret, provisioned onto the robot controller and into each image outside
+Git, would let the agent authenticate the request itself.
 
 ## Settings in Git
 
@@ -173,6 +219,15 @@ database at another schema version, or without a table or column the settings na
 `SettingsText` is the rows as the database's text, parsed a row at a time: a calibration is about a
 megabyte of JSON, many times that parsed, and the agent has 64 MB.
 
+Two things don't round-trip, and PhotonVision's schema has neither: an SQL NULL reads as JSON
+`null` and is written back as the text `null` (PhotonVision's columns are NOT NULL), and a column
+named like kept text (`x.text`) would be ambiguous, so its table is left out.
+
+**The backup** (`/v1/settings.zip`) holds `coprocessors/<computer>/settings/` and, written last
+beside it, `coprocessors/<computer>/settings.sha256`: each file's SHA-256 as `sha256sum` writes
+them. A zip that was cut short is missing it, or fails `sha256sum -c
+coprocessors/<computer>/settings.sha256` run from the repository's root. Git ignores it.
+
 **The tests' database** is made from PhotonVision's schema (its `DatabaseSchema` migrations,
 transcribed in `src/testFixtures/resources/photonvision/`) with example rows written from its
 configuration classes' fields; no PhotonVision jar is downloaded. A round trip against a database
@@ -195,9 +250,17 @@ a fixed order (`SettingsHash.RULES`, each with its reason; `SettingsHashTest` pi
 |---|---|---|---|
 | `cameras`, `config_json` | `currentPipelineIndex` | left out | The robot program switches pipelines and driver mode, and PhotonVision saves the choice |
 | `cameras`, `config_json` | `streamIndex` | left out | PhotonVision assigns each camera's stream ports as it starts |
-| `cameras`, `config_json` | `matchedCameraInfo.dev` | left out | The `/dev/videoN` number the kernel gave the camera this boot |
-| `cameras`, `config_json` | `matchedCameraInfo.path` | left out | The `/dev/videoN` device; PhotonVision matches cameras by the by-path entry in `otherPaths` |
+| `cameras`, `config_json` | `matchedCameraInfo.dev` | left out, for a USB camera matched by its port | The `/dev/videoN` number the kernel gave the camera this boot |
+| `cameras`, `config_json` | `matchedCameraInfo.path` | left out, for a USB camera matched by its port | The `/dev/videoN` device; PhotonVision matches such a camera by the by-path entry in `otherPaths` |
 | `cameras`, `config_json` | `matchedCameraInfo.otherPaths` | any order | The camera's other paths, in an order PhotonVision notes can change; which ones (the USB port) still counts |
+
+"A USB camera matched by its port" is one whose `type` is `PVUsbCameraInfo` with a by-path entry
+in its `otherPaths`. For any other (a CSI camera, a file, a USB camera without one), the path is
+what identifies the camera, so it counts.
+
+**Identical cameras swapped between ports are invisible**, to PhotonVision and to the hash alike:
+two cameras of the same model without serial numbers look the same, and PhotonVision follows the
+port, so each port's calibration now applies to the other camera. Label cameras and their ports.
 
 **Unverified:** the list comes from reading PhotonVision's source. A bench test on a real board
 confirms it: the hash holding steady across reboots, replugs, and pipeline switches. Changing the
@@ -239,9 +302,19 @@ what the robot checks each coprocessor against: PhotonLib's PhotonVision version
 and each computer's committed settings hash (empty for a computer with none). A table with a
 problem, or settings that can't be read, fail the build there.
 
-`CompiledTable.load()` reads it, and `mismatches(computer, stamp)` says, as sentences naming both
-values, how a coprocessor's stamp differs from this build in name, team, address, PhotonVision
-version, or recipe hash.
+`CompiledTable.load()` reads it. `compare(computer, stamp)` says how a coprocessor's stamp differs
+from this build, each difference a `Mismatch`: what differs, a sentence naming both values, and
+how much it matters (`Severity`):
+
+| Differs | Severity | Meaning |
+|---|---|---|
+| name, team, address, or PhotonVision version | `ERROR` | The wrong computer, or the wrong PhotonVision: a deploy fails, and the robot raises a high alert |
+| recipe hash | `WARNING` | The image was built from another recipe (the image's scripts, the agent, the lock): flash the current release when convenient |
+| this build has no recipe hash | `UNKNOWN` | The image's recipe can't be judged (built without Git, from a downloaded copy, or in a folder of a larger repository): not a mismatch, said as unknown |
+
+`mismatches(computer, stamp)` is the sentences of the errors and warnings alone. The robot's card
+and its deploy check go by these, with no rules of their own. The settings hash isn't compared:
+settings change while someone calibrates, which isn't a mismatch.
 
 **The recipe hash** says how the common image is built. `coprocessor/image/recipe.paths` lists what
 it covers (the image's scripts, the agent's and the shared code, the lock), and the hash is the
@@ -294,21 +367,36 @@ plain Java on the JDK's own web server, with xerial's sqlite-jdbc to read Photon
 | Cameras | `/dev/v4l/by-path/*-video-index0`, each through its video device to its USB device in `/sys` (port, speed, IDs, name); where each camera of the role is expected, from PhotonVision's settings, as PhotonVision matches it (its by-path entry) |
 | The journal | `journalctl -o json`: the kernel's messages and priority 3 or worse, counted a bounded piece at a time, picking up by cursor |
 | The drive | `/run/coprocessor/nvme-smart-log.json` and `nvme-id-ctrl.json`, nvme-cli's reports, which a root job on the image writes every minute (the agent can't read the drive itself). nvme-cli's JSON has changed between versions, so a temperature reads as kelvins or with its unit, and a few names have two spellings (unverified against the image's nvme-cli) |
-| Settings | PhotonVision's database, `/opt/photonvision/photonvision_config/photon.sqlite`, opened read-only, read again only when the file changes, in one transaction so PhotonVision's writes wait milliseconds at most |
+| Settings | PhotonVision's database, `/opt/photonvision/photonvision_config/photon.sqlite`, opened read-only, in one transaction so PhotonVision's writes wait milliseconds at most. Only the hash and where each camera is expected are kept, worked out again when the file (or its write-ahead log) changes; the settings themselves are read again to be sent, and dropped after. A file that couldn't be read isn't read again until it changes |
 
 Every path and command goes through one `Host`, so the tests run against a fixture tree of an
 RK3588 (`src/test/resources/rk3588`: eight cores in three clusters, seven thermal zones, two
 cameras, an NVMe drive) with canned command output, on any system. Colons in sysfs names are
 written `%3A` there, since Windows can't check out a file named with one.
 
-**Bounds.** A command has 2 seconds, and is stopped once it has printed what's needed (a journal
-page's entries, at most 4 MB); a file is read to 256 KB; an answer is at most 4 MB but the settings
-(48 MB of text); the web server allows 10 seconds to read a request and 60 to send an answer. Two
-threads serve requests, one times commands, and a shutdown has its own.
+**Bounds** (`Limits`, each tested): a command has 2 seconds, and is stopped once it has printed
+what's needed, at most 4 MB (a journal page); a file is read to 256 KB (a longer one is cut short,
+which a JSON file won't survive); a JSON answer is at most 4 MB. The settings are bounded as
+they're read, not after: a database file (with its log) of at most 32 MB, at most 16 MB of
+settings text in all, and at most 2 MB in any one value, which SQLite itself enforces too
+(`SQLITE_LIMIT_LENGTH`, at twice that, so a hostile database can't make the agent hold a huge value
+even once). Past a bound, the settings are refused, saying so in health's problems.
+
+Those numbers are measured. PhotonVision's settings parse to about nine times their text, so one
+value parses within the 64 MB heap beside the rest of the settings held while they're sent: under
+`-Xmx64m`, a database of 16 MB of text in values of 2 MB (a calibration is about 1 MB) hashes in
+about 3 s, sends as JSON in 3 s and as a zip in 1.5 s, with health polled throughout and answered
+at once, and 130 MB resident at the peak. Values of 4 MB ran out of heap. The unit caps the agent
+at 200 MB (`MemoryMax`), and out of memory, the agent exits and is restarted
+(`-XX:+ExitOnOutOfMemoryError`) rather than limping on.
 
 **Cost**, measured on a desktop: up and answering in about 160 ms; 75 MB resident after a minute
-of health and full journal pages twice a second; a health answer in about 2 ms when it's half a
-second old, 250 ms for the first (which counts the boot's journal).
+of health and full journal pages twice a second; a health answer in about 2 ms.
+
+**A hostile database** can't run anything: the schema's functions are distrusted
+(`trusted_schema` off), only plain tables are read (not views, virtual or shadow tables), and a
+table that isn't plainly keyed is left out rather than failing the rest. Whether PhotonVision's
+database is ever in write-ahead-log mode is a bench check: the agent notices a save either way.
 
 ### Built and installed
 
@@ -318,9 +406,14 @@ run with `java -jar`: the agent and everything it needs, with sqlite-jdbc's nati
 `/opt/coprocessor/coprocessor-agent.jar`, and **`coprocessor/agent/coprocessor-agent.service`** as
 `/etc/systemd/system/coprocessor-agent.service`, enabled. The unit is also the launcher: its
 `ExecStart` carries the JVM's settings (a 64 MB heap, the serial collector, the quick compiler
-only) and runs `/usr/bin/java`, where PhotonVision's image installs OpenJDK 25. It runs on the
-small cores (`AllowedCPUs=0-3`; PhotonVision has 4-7) at `Nice=10`, read-only everywhere but
-`/run/coprocessor-agent`, where sqlite-jdbc unpacks its library.
+only, exit when out of memory) and runs `/usr/bin/java`, where PhotonVision's image installs
+OpenJDK 25. It runs on the small cores (`AllowedCPUs=0-3`; PhotonVision has 4-7) at `Nice=10`, as
+an unprivileged user with no capabilities, read-only everywhere but `/run/coprocessor-agent`
+(where sqlite-jdbc unpacks its library), able to reach only the robot network, link-local
+addresses, and itself (`IPAddressAllow`), with systemd's other sandboxing on (namespaces, SUID,
+realtime, personality, clock, hostname, kernel logs, devices, `UMask=0077`, at most 64 tasks).
+Not `MemoryDenyWriteExecute`, since Java compiles code as it runs, nor `ProcSubset=pid`, since it
+reads `/proc/stat` and `/proc/uptime`.
 
 `java -jar coprocessor-agent.jar [serve] [--port=N] [--bind=ADDRESS] [--database=PATH]
 [--unit=NAME]` serves on the stamp file's `agentPort` (5808 when it has none) unless `--port`
@@ -336,23 +429,27 @@ stamping writes it.
   --output-format=json /dev/nvme0`), and `spi-uboot-version` (one line). A file that's missing
   reads as unknown.
 - **Read access** to PhotonVision's folder and database (its files are 644, its folders 755).
-- **A polkit rule** letting the agent's user stop PhotonVision's unit and power off, and nothing
-  else, in `/etc/polkit-1/rules.d/` (the actions are systemd's
-  `org.freedesktop.systemd1.manage-units`, with the unit and verb it passes, and logind's
-  `org.freedesktop.login1.power-off`, and `power-off-multiple-sessions` for when someone is logged
-  in over SSH):
+- **A polkit rule** letting the agent's user stop PhotonVision's unit and power off, and refusing
+  it everything else, in `/etc/polkit-1/rules.d/` (the image's `coprocessor-agent.rules`). The
+  actions are systemd's `org.freedesktop.systemd1.manage-units`, with the unit and verb it passes,
+  and logind's `org.freedesktop.login1.power-off`, and `power-off-multiple-sessions` for when
+  someone is logged in over SSH:
 
   ```js
   polkit.addRule(function (action, subject) {
     if (subject.user !== "coprocessor-agent") return polkit.Result.NOT_HANDLED;
+    if (action.id === "org.freedesktop.login1.power-off" ||
+        action.id === "org.freedesktop.login1.power-off-multiple-sessions") return polkit.Result.YES;
     if (action.id === "org.freedesktop.systemd1.manage-units" &&
         action.lookup("unit") === "photonvision.service" &&
         action.lookup("verb") === "stop") return polkit.Result.YES;
-    if (action.id === "org.freedesktop.login1.power-off" ||
-        action.id === "org.freedesktop.login1.power-off-multiple-sessions") return polkit.Result.YES;
-    return polkit.Result.NOT_HANDLED;
+    return polkit.Result.NO;
   });
   ```
+
+  `org.freedesktop.login1.power-off-ignore-inhibit` isn't granted: if something holds a shutdown
+  inhibitor, the power-off fails (and health says so). Whether anything on the image takes one is a
+  bench check.
 
 **For stamping:** `java -jar coprocessor-agent.jar settings-db ROWS_DIR EMPTY_DB OUT_DB` builds
 `OUT_DB` from a copy of `EMPTY_DB` (the empty database the pinned PhotonVision made in its smoke

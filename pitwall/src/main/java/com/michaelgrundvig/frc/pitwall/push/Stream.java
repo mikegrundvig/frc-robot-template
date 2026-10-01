@@ -13,7 +13,8 @@ import org.jspecify.annotations.Nullable;
  * <p>The loop never waits on a stream. A stream that falls so far behind that its mailbox fills (a
  * page on a Wi-Fi link that has stopped moving) is closed; the page reconnects and starts again
  * from a fresh snapshot. That keeps each stream's memory bounded without the loop ever deciding
- * which of a slow page's events matter.
+ * which of a slow page's events matter. Closing a stream interrupts its thread, which frees it even
+ * from a write stuck on a link that has stopped moving.
  */
 public final class Stream {
   /** Stands in the mailbox for "closed", so a thread waiting on it wakes. */
@@ -25,6 +26,10 @@ public final class Stream {
   private final Consumer<Stream> onClose;
   private volatile boolean open = true;
   private volatile String why = "";
+  private volatile @Nullable Thread writer;
+
+  /** When it last wrote, or opened if it hasn't: the stream to give up first is the stalest. */
+  private volatile long wroteNanos = System.nanoTime();
 
   /**
    * @param capacity how many events may wait before the stream counts as fallen behind
@@ -51,6 +56,24 @@ public final class Stream {
   /** Why it closed; empty while open. */
   public String why() {
     return why;
+  }
+
+  /** The stream's own thread takes it: closing the stream interrupts this thread. */
+  public void writtenBy(Thread thread) {
+    writer = thread;
+    if (!open) {
+      thread.interrupt();
+    }
+  }
+
+  /** An event, or a heartbeat, went out. */
+  public void wrote() {
+    wroteNanos = System.nanoTime();
+  }
+
+  /** When it last wrote, on {@link System#nanoTime()}'s clock; when it opened, if it hasn't. */
+  long wroteNanos() {
+    return wroteNanos;
   }
 
   /**
@@ -83,6 +106,12 @@ public final class Stream {
     }
     mailbox.clear();
     mailbox.offer(CLOSED);
+    // Its thread may be stuck writing to a page that has stopped answering: interrupting it
+    // closes the connection under the write, and frees it.
+    Thread thread = writer;
+    if (thread != null && thread != Thread.currentThread()) {
+      thread.interrupt();
+    }
     onClose.accept(this);
   }
 

@@ -12,6 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.jspecify.annotations.Nullable;
@@ -54,7 +56,7 @@ class BroadcasterTest {
   }
 
   private Stream open() {
-    return broadcaster.open().orElseThrow();
+    return broadcaster.open(null).orElseThrow();
   }
 
   @Test
@@ -144,18 +146,77 @@ class BroadcasterTest {
     assertThat(stream).hasToString("stream 1, closed: the page went away");
   }
 
+  /**
+   * At the limit, a page that's here takes the place of the one that wrote least lately: a page
+   * that has gone without its stream noticing (a laptop asleep) holds its place no longer.
+   */
   @Test
-  void onlySoManyStreamsOpenAndNoneOnceClosed() {
-    Stream one = open();
-    open();
+  void atTheLimitTheStalestStreamMakesWayForANewOne() throws Exception {
+    Stream stale = open();
+    Stream fresh = open();
+    Thread.sleep(2); // the clocks need to tell them apart
+    fresh.wrote();
 
-    assertThat(broadcaster.open()).as("at the limit").isEmpty();
+    Stream third = open();
+
+    assertThat(stale.isOpen()).isFalse();
+    assertThat(stale.why()).isEqualTo("another page needed its place");
+    assertThat(fresh.isOpen()).isTrue();
+    assertThat(third.isOpen()).isTrue();
+    assertThat(broadcaster.size()).isEqualTo(2);
+    assertThat(closed).containsExactly("1");
+  }
+
+  @Test
+  void aPageThatReconnectsReplacesTheStreamItHad() {
+    Stream before = open();
+    Stream other = open();
+
+    Stream after = broadcaster.open(before.id()).orElseThrow();
+
+    assertThat(before.why()).isEqualTo("its page reconnected");
+    assertThat(other.isOpen()).isTrue();
+    assertThat(after.id()).isEqualTo("3");
+  }
+
+  @Test
+  void noStreamOpensOnceItsClosed() {
+    Stream one = open();
 
     broadcaster.close();
 
     assertThat(one.isOpen()).isFalse();
     assertThat(one.why()).isEqualTo("Pitwall stopped");
-    assertThat(broadcaster.open()).isEmpty();
+    assertThat(broadcaster.open(null)).isEmpty();
+  }
+
+  /**
+   * A stream that falls behind is usually one whose thread is stuck writing to a page that has
+   * stopped answering. Closing it interrupts that thread, which frees it.
+   */
+  @Test
+  void closingAStreamFreesItsThreadEvenFromAStuckWrite() throws Exception {
+    Stream stream = open();
+    CountDownLatch freed = new CountDownLatch(1);
+    Thread stuck =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  stream.writtenBy(Thread.currentThread());
+                  try {
+                    Thread.sleep(Duration.ofMinutes(1)); // stands in for a write that never ends
+                  } catch (InterruptedException interrupted) {
+                    freed.countDown();
+                  }
+                });
+    for (int i = 0; i < 6; i++) {
+      Objects.requireNonNull(state.get("values")).put("kP", 16.0 + i);
+      loop(null);
+    }
+
+    assertThat(freed.await(5, TimeUnit.SECONDS)).as("the stuck thread was freed").isTrue();
+    assertThat(stream.why()).isEqualTo("it fell 4 events behind");
+    stuck.join();
   }
 
   @Test
@@ -197,7 +258,7 @@ class BroadcasterTest {
     ByHand byHand = new ByHand(wallClock::get);
     Actions.Gate ready = new Actions.Gate(true, true, false);
     Broadcaster wide = new Broadcaster(2, 1000, id -> {});
-    Stream first = wide.open().orElseThrow();
+    Stream first = wide.open(null).orElseThrow();
     byHand.experiments().requestStart(ByHand.STEP, null);
     int loops = 30;
     for (int i = 0; i < loops; i++) {
@@ -206,7 +267,7 @@ class BroadcasterTest {
       wide.periodic(this::state, byHand.experiments().run());
       byHand.step();
     }
-    Stream second = wide.open().orElseThrow();
+    Stream second = wide.open(null).orElseThrow();
     wide.periodic(this::state, byHand.experiments().run());
 
     List<String> samples =

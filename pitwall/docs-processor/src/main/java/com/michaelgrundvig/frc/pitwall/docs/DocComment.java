@@ -12,15 +12,25 @@ import org.jspecify.annotations.Nullable;
  * A doc comment, read for display on a page that shows plain text: its main text, the main text's
  * first sentence, and each {@code @param}.
  *
- * <p>The markup becomes plain text. {@code {@code x}} becomes {@code `x`}; {@code {@link A#b}}
- * becomes {@code b}, or the link's label when it has one. {@code <p>} starts a paragraph, after a
- * blank line, as do lists and the other HTML blocks ({@code <ul>}, {@code <pre>}...); {@code <li>}
- * starts a list item, on a line of its own beginning {@code "- "}. Other HTML is dropped, its text
- * kept, and entities such as {@code &lt;} become their characters. Within a paragraph or an item,
- * line breaks and runs of spaces become one space, as in a browser.
+ * <p>The markup becomes plain text. {@code {@code x}} becomes {@code `x`}; {@code {@link A#b}} and
+ * {@code {@value A#B}} become {@code b} and {@code B}, or a link's label when it has one. {@code
+ * <p>} starts a paragraph, after a blank line, as do lists and the other HTML blocks ({@code <ul>},
+ * {@code <pre>}...); {@code <li>} starts a list item, on a line of its own beginning {@code "- "}.
+ * Other HTML is dropped, its text kept. Within a paragraph or an item, line breaks and runs of
+ * spaces become one space, in {@code <pre>} too.
  *
- * @param summary the main text's first sentence: up to the first period followed by a space, as the
- *     javadoc tool finds it, within the first paragraph
+ * <p>Entities become their characters: HTML's own ({@code &lt; &gt; &amp; &quot; &apos; &nbsp;}),
+ * any by number ({@code &#176;}), and the units and symbols a configuration writes ({@code &deg;
+ * &times; &plusmn; &micro; &Omega; &mdash; &ndash; &rarr; &le; &ge;}). Others stay as written, and
+ * control characters are dropped.
+ *
+ * <p>A Markdown comment ({@code ///}) reads the same way, its own markup made plain too: a blank
+ * line starts a paragraph, a line starting {@code "- "} or {@code "* "} a list item, a code span
+ * stays in backticks, and a link ({@code [ref]}, {@code [label][ref]}, {@code [label](url)}) is its
+ * text.
+ *
+ * @param summary the main text's first sentence: up to the first period followed by a space,
+ *     outside code, as the javadoc tool finds it, within the first paragraph
  * @param text the main text, the summary included
  * @param params each {@code @param}'s text by the name it documents, in the order written
  */
@@ -34,18 +44,38 @@ record DocComment(String summary, String text, Map<String, String> params) {
       Set.of("p", "ul", "ol", "dl", "pre", "blockquote", "table", "div");
 
   private static final Map<String, String> ENTITIES =
-      Map.of("lt", "<", "gt", ">", "amp", "&", "quot", "\"", "apos", "'", "nbsp", " ");
+      Map.ofEntries(
+          Map.entry("lt", "<"),
+          Map.entry("gt", ">"),
+          Map.entry("amp", "&"),
+          Map.entry("quot", "\""),
+          Map.entry("apos", "'"),
+          Map.entry("nbsp", " "),
+          Map.entry("deg", "°"),
+          Map.entry("times", "×"),
+          Map.entry("plusmn", "±"),
+          Map.entry("micro", "µ"),
+          Map.entry("Omega", "Ω"),
+          Map.entry("mdash", "—"),
+          Map.entry("ndash", "–"),
+          Map.entry("rarr", "→"),
+          Map.entry("le", "≤"),
+          Map.entry("ge", "≥"));
 
-  /** Reads a doc comment, as the compiler gives it: without the comment's own stars. */
-  static DocComment parse(String comment) {
+  /**
+   * Reads a doc comment, as the compiler gives it: without the comment's own stars or slashes.
+   *
+   * @param markdown whether it's a Markdown comment, written with {@code ///}
+   */
+  static DocComment parse(String comment, boolean markdown) {
     List<String> sections = sections(comment);
-    String text = plain(sections.get(0));
+    String text = plain(sections.get(0), markdown);
     Map<String, String> params = new LinkedHashMap<>();
     for (String tag : sections.subList(1, sections.size())) {
       String[] words = tag.strip().split("\\s+", 3);
       // @param <T> documents a type parameter, not a value.
       if (words[0].equals("@param") && words.length > 1 && !words[1].startsWith("<")) {
-        params.putIfAbsent(words[1], words.length > 2 ? plain(words[2]) : "");
+        params.putIfAbsent(words[1], words.length > 2 ? plain(words[2], markdown) : "");
       }
     }
     return new DocComment(summary(text), text, params);
@@ -59,26 +89,29 @@ record DocComment(String summary, String text, Map<String, String> params) {
   private static List<String> sections(String comment) {
     List<String> sections = new ArrayList<>();
     int start = 0;
-    int depth = 0; // braces open inside an inline tag
     boolean lineStart = true;
-    for (int i = 0; i < comment.length(); i++) {
+    int i = 0;
+    while (i < comment.length()) {
       char c = comment.charAt(i);
-      if (depth > 0) {
-        depth += c == '{' ? 1 : c == '}' ? -1 : 0;
-      } else if (c == '{' && comment.startsWith("{@", i)) {
-        depth = 1;
-      } else if (c == '@' && lineStart) {
+      if (c == '{' && comment.startsWith("{@", i)) {
+        i = closingBrace(comment, i) + 1; // an @ inside an inline tag starts nothing
+        lineStart = false;
+        continue;
+      }
+      if (c == '@' && lineStart) {
         sections.add(comment.substring(start, i));
         start = i;
       }
       lineStart = c == '\n' || (lineStart && Character.isWhitespace(c));
+      i++;
     }
     sections.add(comment.substring(start));
     return sections;
   }
 
   /** Text with its markup made plain, and its whitespace laid out. */
-  static String plain(String marked) {
+  static String plain(String text, boolean markdown) {
+    String marked = markdown ? traditional(text) : text;
     StringBuilder out = new StringBuilder();
     int i = 0;
     while (i < marked.length()) {
@@ -93,7 +126,7 @@ record DocComment(String summary, String text, Map<String, String> params) {
         int end = marked.indexOf("-->", i);
         i = end < 0 ? marked.length() : end + 3;
       } else if (tag != null) {
-        out.append(left(tag));
+        out.append(whatTagLeaves(tag));
         i = marked.indexOf('>', i) + 1;
       } else if (entity != null) {
         out.append(entity);
@@ -104,6 +137,70 @@ record DocComment(String summary, String text, Map<String, String> params) {
       }
     }
     return laidOut(out.toString());
+  }
+
+  /**
+   * A Markdown comment's text in a traditional comment's markup, which {@link #plain} then reads: a
+   * blank line as {@code <p>}, a list item's line as {@code <li>}, a code span as {@code {@code
+   * ...}}, and a link as its text. Inline tags pass through as they are.
+   */
+  private static String traditional(String markdown) {
+    StringBuilder out = new StringBuilder();
+    boolean lineStart = true;
+    int i = 0;
+    while (i < markdown.length()) {
+      char c = markdown.charAt(i);
+      if (lineStart) {
+        lineStart = false;
+        int end = markdown.indexOf('\n', i);
+        String line = markdown.substring(i, end < 0 ? markdown.length() : end).strip();
+        if (line.isEmpty()) {
+          out.append("<p>");
+        } else if (line.startsWith("- ") || line.startsWith("* ")) {
+          out.append("<li>");
+          i = markdown.indexOf(line, i) + 2;
+          continue;
+        }
+      }
+      if (c == '{' && markdown.startsWith("{@", i)) {
+        int end = Math.min(closingBrace(markdown, i) + 1, markdown.length());
+        out.append(markdown, i, end);
+        i = end;
+      } else if (c == '`' && markdown.indexOf('`', i + 1) > 0) {
+        int end = markdown.indexOf('`', i + 1);
+        out.append("{@code ").append(markdown, i + 1, end).append('}');
+        i = end + 1;
+      } else if (c == '[' && markdown.indexOf(']', i) > i + 1) {
+        i = markdownLink(markdown, i, out);
+      } else {
+        out.append(c);
+        lineStart = c == '\n';
+        i++;
+      }
+    }
+    return out.toString();
+  }
+
+  /**
+   * Writes the Markdown link starting at {@code start} as its text: {@code [label][ref]} and {@code
+   * [label](url)} as the label, {@code [ref]} as a {@code {@link ref}} names it.
+   *
+   * @return where the link ends
+   */
+  private static int markdownLink(String markdown, int start, StringBuilder out) {
+    int close = markdown.indexOf(']', start);
+    String first = markdown.substring(start + 1, close);
+    int next = close + 1;
+    if (markdown.startsWith("[", next) && markdown.indexOf(']', next) > 0) {
+      out.append(first);
+      return markdown.indexOf(']', next) + 1;
+    }
+    if (markdown.startsWith("(", next) && markdown.indexOf(')', next) > 0) {
+      out.append(first);
+      return markdown.indexOf(')', next) + 1;
+    }
+    out.append(link(first));
+    return next;
   }
 
   /** Where the inline tag starting at {@code start} ends: its closing brace, or the text's end. */
@@ -126,9 +223,9 @@ record DocComment(String summary, String text, Map<String, String> params) {
     String content = parts.length > 1 ? parts[1].strip() : "";
     return switch (parts[0]) {
       case "code" -> content.isEmpty() ? "" : "`" + content + "`";
-      case "link", "linkplain" -> link(content);
+      case "link", "linkplain", "value" -> link(content);
       case "inheritDoc", "docRoot" -> "";
-      default -> content; // {@literal x}, {@value X}, {@index x}...: their text
+      default -> content; // {@literal x}, {@index x}...: their text
     };
   }
 
@@ -139,7 +236,11 @@ record DocComment(String summary, String text, Map<String, String> params) {
     int end = 0;
     while (end < content.length() && (depth > 0 || !Character.isWhitespace(content.charAt(end)))) {
       char c = content.charAt(end++);
-      depth += c == '(' ? 1 : c == ')' ? -1 : 0;
+      if (c == '(') {
+        depth++;
+      } else if (c == ')') {
+        depth--;
+      }
     }
     String label = content.substring(end).strip();
     if (!label.isEmpty()) {
@@ -162,7 +263,7 @@ record DocComment(String summary, String text, Map<String, String> params) {
   }
 
   /** What an HTML tag leaves in the text: a paragraph break, an item's start, or nothing. */
-  private static String left(String tag) {
+  private static String whatTagLeaves(String tag) {
     if (BLOCKS.contains(tag)) {
       return String.valueOf(PARAGRAPH);
     }
@@ -199,8 +300,8 @@ record DocComment(String summary, String text, Map<String, String> params) {
   }
 
   /**
-   * The character an HTML entity starting at {@code start} stands for ({@code <} for {@code &lt;}),
-   * or null if a {@code &} there doesn't start one.
+   * What the HTML entity starting at {@code start} stands for ({@code <} for {@code &lt;}, nothing
+   * for a control character), or null if a {@code &} there doesn't start one this decodes.
    */
   private static @Nullable String entity(String text, int start) {
     int end = text.indexOf(';', start);
@@ -208,17 +309,18 @@ record DocComment(String summary, String text, Map<String, String> params) {
       return null;
     }
     String name = text.substring(start + 1, end);
+    if (!name.startsWith("#")) {
+      return ENTITIES.get(name);
+    }
     try {
-      if (name.startsWith("#x") || name.startsWith("#X")) {
-        return Character.toString(Integer.parseInt(name.substring(2), 16));
-      }
-      if (name.startsWith("#")) {
-        return Character.toString(Integer.parseInt(name.substring(1)));
-      }
-    } catch (IllegalArgumentException notANumber) {
+      int codePoint =
+          name.startsWith("#x") || name.startsWith("#X")
+              ? Integer.parseInt(name.substring(2), 16)
+              : Integer.parseInt(name.substring(1));
+      return codePoint < 0x20 ? "" : Character.toString(codePoint);
+    } catch (IllegalArgumentException notACharacter) {
       return null;
     }
-    return ENTITIES.get(name);
   }
 
   /**
@@ -247,10 +349,21 @@ record DocComment(String summary, String text, Map<String, String> params) {
     return text.toString();
   }
 
-  /** The first sentence of the first paragraph, as the javadoc tool finds it. */
+  /**
+   * The first sentence of the first paragraph, as the javadoc tool finds it: up to the first period
+   * followed by a space, outside code.
+   */
   private static String summary(String text) {
     String first = text.lines().findFirst().orElse("");
-    int end = first.indexOf(". ");
-    return end < 0 ? first : first.substring(0, end + 1);
+    boolean inCode = false;
+    for (int i = 0; i + 1 < first.length(); i++) {
+      char c = first.charAt(i);
+      if (c == '`') {
+        inCode = !inCode;
+      } else if (c == '.' && !inCode && first.charAt(i + 1) == ' ') {
+        return first.substring(0, i + 1);
+      }
+    }
+    return first;
   }
 }

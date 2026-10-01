@@ -18,6 +18,7 @@ import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.RecordComponentElement;
 import javax.lang.model.element.TypeElement;
+import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.FileObject;
 import javax.tools.StandardLocation;
@@ -140,12 +141,14 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
   }
 
   private void write(TypeElement record) {
-    String name = processingEnv.getElementUtils().getBinaryName(record).toString();
-    String comment = processingEnv.getElementUtils().getDocComment(record);
+    Elements elements = processingEnv.getElementUtils();
+    String name = elements.getBinaryName(record).toString();
+    String comment = elements.getDocComment(record);
     if (comment == null || comment.isBlank() || !written.add(name)) {
       return;
     }
-    DocComment doc = DocComment.parse(comment);
+    boolean markdown = elements.getDocCommentKind(record) == Elements.DocCommentKind.END_OF_LINE;
+    DocComment doc = DocComment.parse(comment, markdown);
     // Each component's, in the record's order; a @param that names no component is left out.
     Map<String, String> params = new LinkedHashMap<>();
     for (RecordComponentElement component : record.getRecordComponents()) {

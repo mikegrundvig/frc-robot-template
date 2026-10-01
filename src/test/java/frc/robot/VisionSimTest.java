@@ -292,13 +292,14 @@ class VisionSimTest {
 
   /**
    * The promises each way of correcting the heading keeps for a camera turned 4°, as measured. The
-   * full update keeps all but the last: the camera is doubted by 9.2 cm, but the last lap is 4.2 cm
-   * off, no closer than with it trusted as before (4.2 cm). Leaving the heading to measurements
-   * with a heading of their own, a turned camera's headings pull the estimate's heading its way,
-   * its neighbour's tags land off too, and the check can't single it out: doubted 5.5 cm, the last
-   * lap 5.6 cm against 3.8 cm trusted as before. Adding the doubt to what each camera repeats makes
-   * the last lap worse (doubted 6.1 cm, and 8.7 cm against 3.8). This test shows which; it changes
-   * when one does, either way.
+   * full update keeps the first two: the camera is out of calibration and counts for less, and the
+   * back cameras are never doubted; but it's doubted by only 2.6 cm, and the last lap is 5.0 cm
+   * off, against 5.7 cm with it trusted as before: closer, not a fifth closer. Leaving the heading
+   * to measurements with a heading of their own, a turned camera's headings pull the estimate's
+   * heading its way, its neighbour's tags land off too, and the check doesn't doubt it at all: the
+   * last lap is 5.8 cm off, as with it trusted as before. Adding the doubt to what each camera
+   * repeats changes only the last lap (5.4 cm). This test shows which; it changes when one does,
+   * either way.
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)
@@ -306,9 +307,11 @@ class VisionSimTest {
     List<String> broken = turnedFourDegrees(heading).stream().map(VisionSimTest::promise).toList();
 
     if (heading == EstimatorConfig.HeadingCorrection.EVERY_FIX) {
-      assertThat(broken).as("the promises broken").containsExactly("last lap");
-    } else {
       assertThat(broken).as("the promises broken").containsExactly("doubted", "last lap");
+    } else {
+      assertThat(broken)
+          .as("the promises broken")
+          .containsExactly("no alert", "doubted", "last lap");
     }
   }
 
@@ -323,9 +326,10 @@ class VisionSimTest {
   }
 
   /**
-   * A camera turned 2° stands out in its tag residuals, 1.4 times its worst neighbour's, only when
-   * every fix corrects the heading (1.6). Otherwise its headings pull the estimate's heading
-   * partway its way, and its neighbour's tags land off as far (0.95).
+   * A camera turned 2° stands out in its tag residuals, more than 1.4 times its worst neighbour's,
+   * however the heading is corrected, and most when every fix corrects it (2.4). Otherwise its
+   * headings pull the estimate's heading partway its way, and its neighbour's tags land off too: it
+   * stands out less (1.6).
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)
@@ -333,9 +337,9 @@ class VisionSimTest {
     double standsOut = turnedTwoDegrees(heading);
 
     if (heading == EstimatorConfig.HeadingCorrection.EVERY_FIX) {
-      assertThat(standsOut).isGreaterThan(1.4);
+      assertThat(standsOut).isGreaterThan(2);
     } else {
-      assertThat(standsOut).as("doesn't stand out").isLessThan(1.4);
+      assertThat(standsOut).as("stands out, less").isBetween(1.4, 2.0);
     }
   }
 }

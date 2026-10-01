@@ -355,7 +355,9 @@ spinning wheels.
 voltage steps, and fits kS, kV, and kA from the log. Follow
 [WPILib's SysId guide](https://docs.wpilib.org/en/stable/docs/software/advanced-controls/system-identification/index.html);
 the template doesn't have a SysId routine yet. The same tests on one module, lifted off the floor,
-give its inertia, which the simulator assumes today (`ModuleIOSim`).
+give the inertia of its wheel, gears, and motor, which the simulator estimates today
+(`ModuleIOSim.WHEEL_INERTIA_KG_M2`) and adds to the share of the robot's mass each wheel carries
+(`Body.mass`).
 
 **Units:** SysId reports in the units the routine logged; the template's gains are in volts per
 meter per second.

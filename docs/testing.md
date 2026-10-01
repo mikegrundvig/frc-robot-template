@@ -318,14 +318,17 @@ What it shows:
   the configuration says can't happen.
 - **With a moved tag**, the three are alike, within the allowance, and no camera is doubted.
 
-`VisionSimTest`'s mount-check tests run under each. For a camera turned 4°, `every` keeps all but
-the last of the original promises (out of calibration and counting for less, the back cameras
-never doubted, doubted by more than 8 cm, the last lap a fifth closer than trusting it as before):
-doubted by 9.2 cm, its last lap is 4.2 cm off, no closer than trusting it as before (4.2 cm).
-`measurements` and `doubt` break two (doubted by 5.5 and 6.1 cm, and the last lap 5.6 and 8.7 cm
-against 3.8 cm trusted as before). A camera turned 2° stands out in its tag residuals only under
-`every` (1.6 times its worst neighbour's, against 0.95). Each test says which, and changes when
-one does.
+`VisionSimTest`'s mount-check tests run under each, on one route with one seed. For a camera
+turned 4°, `every` keeps two of the original promises (out of calibration and counting for less,
+the back cameras never doubted) and breaks two (doubted by more than 8 cm, the last lap a fifth
+closer than trusting it as before): doubted by 2.6 cm, its last lap is 5.0 cm off against 5.7 cm
+trusted as before. `measurements` and `doubt` break three: the camera is never doubted, so nothing
+says it counts for less, and the last lap is 5.8 and 5.4 cm off against 5.8 cm trusted as before.
+A camera turned 2° stands out in its tag residuals under all three, most under `every` (2.4 times
+its worst neighbour's, against 1.6). Each test says which, and changes when one does. One route
+is a narrow look: before the simulated drivetrain carried the robot's mass, the robot drove the
+same sticks 75% quicker off the line, and `every` doubted the 4° camera by 9.2 cm, `measurements`
+by 5.5, and the 2° camera stood out only under `every`.
 
 #### The simulator's late stamps
 

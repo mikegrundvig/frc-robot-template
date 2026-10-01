@@ -267,7 +267,7 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 
 ### `SwerveWiring`
 
-`frc.robot.lib.config.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
+`frc.robot.lib.wiring.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
 read. Per robot, in `Robots`. Phoenix Tuner X's swerve generator reports every value here; copy them
 across. The template's robot runs only in simulation and has no wiring, so nothing is set today.
 

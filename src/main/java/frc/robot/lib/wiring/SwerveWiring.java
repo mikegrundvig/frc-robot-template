@@ -1,10 +1,12 @@
-package frc.robot.lib.config;
+package frc.robot.lib.wiring;
 
 import static frc.robot.lib.config.Rules.between;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.size;
 import static org.wpilib.units.Units.Rotations;
 
+import frc.robot.lib.config.Checks;
+import frc.robot.lib.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

@@ -37,6 +37,25 @@ class ArchitectureTest {
     "com.ctre..", "org.photonvision..", "com.revrobotics..", "com.studica.."
   };
 
+  /** What any component may use: the JDK, WPILib's math and units, and annotations. */
+  private static final String[] PLAIN_JAVA_AND_MATH = {
+    "java..",
+    "org.wpilib.math..",
+    "org.wpilib.units..",
+    "org.jspecify..",
+    // The annotations on generated configuration builders; nothing at run time.
+    "io.soabase.recordbuilder.."
+  };
+
+  /** The validation kit: how a record checks its values. Every description builds on it. */
+  private static final String KIT = "frc.robot.lib.config..";
+
+  /** The field: its tags, places, zones, and terrain. */
+  private static final String FIELD = "frc.robot.lib.field..";
+
+  /** The robot's definition: what the robot is, from its frame to its sensors' mounts. */
+  private static final String DEFINITION = "frc.robot.lib.robot..";
+
   @Test
   void componentsNeverDependOnRobotCode() {
     classes()
@@ -44,15 +63,8 @@ class ArchitectureTest {
         .resideInAPackage("frc.robot.lib..")
         .should()
         .onlyDependOnClassesThat(
-            resideInAnyPackage(
-                    "frc.robot.lib..",
-                    "java..",
-                    "org.wpilib.math..",
-                    "org.wpilib.units..",
-                    "org.wpilib.fields..",
-                    "org.jspecify..",
-                    // The annotations on generated configuration builders; nothing at run time.
-                    "io.soabase.recordbuilder..")
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH)
+                .or(resideInAnyPackage("frc.robot.lib..", "org.wpilib.fields.."))
                 // Plain values from elsewhere in WPILib.
                 .or(
                     belongToAnyOf(
@@ -60,6 +72,100 @@ class ArchitectureTest {
         .because(
             "components must work in any robot and be testable without one: no hardware, robot"
                 + " state, NetworkTables, telemetry, tunables, commands, or simulation inside")
+        .check(PRODUCTION_CODE);
+  }
+
+  @Test
+  void componentsNeverSeeTheRobotsMechanismsOrTheSimulator() {
+    noClasses()
+        .that()
+        .resideInAPackage("frc.robot.lib..")
+        .should()
+        .dependOnClassesThat()
+        .resideInAnyPackage(
+            "com.michaelgrundvig.frc.pitwall..",
+            "frc.robot.sim..",
+            "frc.robot.subsystems..",
+            "frc.robot.commands..",
+            "org.littletonrobotics..")
+        .orShould()
+        .dependOnClassesThat()
+        .resideInAnyPackage(VENDOR_LIBRARIES)
+        .because(
+            "the robot program, the simulator, and Pitwall's views all use the components, so a"
+                + " component can't need any of them: Pitwall, the simulator, a mechanism's IO, or"
+                + " a vendor's library would tie it to one")
+        .check(PRODUCTION_CODE);
+  }
+
+  /**
+   * The kit, the field, and the robot's definition describe the world. Localization, the simulator,
+   * and the views read them, so they read nothing back, and hold no hardware.
+   */
+  @Test
+  void theKitSeesOnlyItself() {
+    classes()
+        .that()
+        .resideInAPackage(KIT)
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH).or(resideInAnyPackage(KIT)))
+        .because(
+            "every description builds on the validation kit, so it can't need one of them; and it"
+                + " names no hardware, which only the robot's wiring does")
+        .check(PRODUCTION_CODE);
+  }
+
+  @Test
+  void theFieldSeesOnlyTheKit() {
+    classes()
+        .that()
+        .resideInAPackage(FIELD)
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH)
+                .or(resideInAnyPackage(KIT, FIELD, "org.wpilib.fields.."))
+                // Which alliance a place is for: a plain value from WPILib's Driver Station.
+                .or(belongToAnyOf(Alliance.class)))
+        .because(
+            "the field is the same whatever robot plays on it, so it knows nothing of the robot's"
+                + " definition, as the definition knows nothing of the field")
+        .check(PRODUCTION_CODE);
+  }
+
+  @Test
+  void theRobotsDefinitionSeesOnlyTheKit() {
+    classes()
+        .that()
+        .resideInAPackage(DEFINITION)
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH).or(resideInAnyPackage(KIT, DEFINITION)))
+        .because(
+            "what the robot is doesn't depend on the field it plays on, nor on what reads it:"
+                + " localization, the simulator, and the views all read the definition")
+        .allowEmptyShould(true) // the definition's records move here from the kit
+        .check(PRODUCTION_CODE);
+  }
+
+  @Test
+  void localizationSeesOnlyTheWorldModel() {
+    classes()
+        .that()
+        .resideInAnyPackage("frc.robot.lib.localization..", "frc.robot.lib.calibration..")
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH)
+                .or(
+                    resideInAnyPackage(
+                        KIT,
+                        FIELD,
+                        DEFINITION,
+                        "frc.robot.lib.localization..",
+                        "frc.robot.lib.calibration..")))
+        .because(
+            "localization runs every loop on the robot from the field and the robot's definition"
+                + " alone: it needs nothing of the robot's loop, so its tests run in milliseconds")
         .check(PRODUCTION_CODE);
   }
 

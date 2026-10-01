@@ -2,9 +2,9 @@ package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
-import frc.robot.lib.config.CanBus;
 import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveWiring;
+import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.SwerveWiring;
 import java.util.concurrent.locks.Lock;
 import org.wpilib.math.geometry.Rotation3d;
 

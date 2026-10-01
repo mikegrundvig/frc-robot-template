@@ -17,7 +17,7 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveConfigLimitsBuilder;
-import frc.robot.lib.config.SwerveWiring;
+import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;

@@ -1,4 +1,4 @@
-package frc.robot.lib.config;
+package frc.robot.lib.wiring;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

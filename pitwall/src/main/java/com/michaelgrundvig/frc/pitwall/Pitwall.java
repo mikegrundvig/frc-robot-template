@@ -128,7 +128,7 @@ public final class Pitwall implements AutoCloseable {
             ? simulatorControls(advantageKit, said::add)
             : null;
     simulator = simulated;
-    page = new Page(status, actions, tuning, tee, experiments, simulated);
+    page = new Page(status, actions, tuning, tee, experiments, Pitwall::mode, simulated);
     // A page whose stream closes can't keep an experiment it started going, or drive a joystick.
     broadcaster =
         new Broadcaster(

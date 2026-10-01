@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.pitwall;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -151,7 +152,16 @@ class TunableTeeTest {
     tee.update();
 
     assertThat(outcome.getNow(null))
-        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Intake/enabled takes a boolean value"));
+        .isEqualTo(
+            Outcome.refused(
+                List.of(
+                    Outcome.Reason.of(
+                        Outcome.Layer.VALUE,
+                        "/Intake/enabled",
+                        "",
+                        "/Intake/enabled takes a boolean value",
+                        "/Intake/enabled takes a boolean value"))));
+    assertThat(outcome.getNow(null).detail()).isEqualTo("/Intake/enabled takes a boolean value");
     assertThat(kP.get()).as("all or none").isEqualTo(0.5);
   }
 
@@ -173,8 +183,14 @@ class TunableTeeTest {
     dashboard.setDouble("Shooter/kP", Double.NaN);
     tee.update();
 
-    assertThat(page.getNow(null))
-        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Shooter/kP takes a double value"));
+    assertThat(page.getNow(null).detail()).isEqualTo("/Shooter/kP takes a double value");
+    assertThat(page.getNow(null).reasons())
+        .singleElement()
+        .satisfies(
+            reason -> {
+              assertThat(reason.layer()).isEqualTo(Outcome.Layer.VALUE);
+              assertThat(reason.paths()).containsExactly("/Shooter/kP");
+            });
     assertThat(kP.get()).isEqualTo(0.5);
     assertThat(dashboard.getDouble("Shooter/kP")).as("snaps back").isEqualTo(0.5);
   }
@@ -217,7 +233,14 @@ class TunableTeeTest {
 
     assertThat(page.getNow(null))
         .isEqualTo(
-            new Outcome(Outcome.Result.REFUSED, "/Arm/limit refused the value: at most 40 A"));
+            Outcome.refused(
+                List.of(
+                    Outcome.Reason.of(
+                        Outcome.Layer.TUNABLE,
+                        "/Arm/limit",
+                        "",
+                        "at most 40 A",
+                        "/Arm/limit refused the value: at most 40 A"))));
     assertThat(intake.get()).as("all or none").isFalse();
     assertThat(limit[0]).isEqualTo(10);
   }
@@ -362,7 +385,16 @@ class TunableTeeTest {
     tee.update();
 
     assertThat(outcome.getNow(null))
-        .isEqualTo(new Outcome(Outcome.Result.REFUSED, "/Arm/count: 0 is below its limit of 1"));
+        .isEqualTo(
+            Outcome.refused(
+                List.of(
+                    Outcome.Reason.of(
+                        Outcome.Layer.LIMIT,
+                        "/Arm/count",
+                        "",
+                        "0 is below its limit of 1",
+                        "/Arm/count: 0 is below its limit of 1"))));
+    assertThat(outcome.getNow(null).detail()).isEqualTo("/Arm/count: 0 is below its limit of 1");
     assertThat(kP.get()).as("all or none").isEqualTo(0.5);
     assertThat(count.get()).isEqualTo(3);
   }
@@ -443,10 +475,20 @@ class TunableTeeTest {
     var outcome = tee.requestChanges(Map.of("Machine/travel/min", 12));
     tee.update();
 
+    // The range's check names no value, so it concerns the change's values in that record, and
+    // the record, where it is in the configuration.
     assertThat(outcome.getNow(null))
         .isEqualTo(
-            new Outcome(
-                Outcome.Result.REFUSED, "machine: min must be below max, got 12.0 and 10.0"));
+            Outcome.refused(
+                List.of(
+                    new Outcome.Reason(
+                        Outcome.Layer.RECORD,
+                        "Fixtures.Range",
+                        List.of("/Machine/travel/min"),
+                        "machine",
+                        "travel",
+                        "min must be below max, got 12.0 and 10.0",
+                        "machine: min must be below max, got 12.0 and 10.0"))));
     assertThat(live.get()).isEqualTo(Fixtures.machine());
   }
 
@@ -465,6 +507,11 @@ class TunableTeeTest {
         .containsExactly(
             "/Machine/drive/gains/kP: -1 is below its limit of 0",
             "There is no tunable the page can change at /Nowhere");
+    assertThat(outcome.getNow(null).reasons())
+        .extracting(Outcome.Reason::layer, Outcome.Reason::paths, Outcome.Reason::config)
+        .containsExactly(
+            tuple(Outcome.Layer.LIMIT, List.of("/Machine/drive/gains/kP"), "machine"),
+            tuple(Outcome.Layer.VALUE, List.of("/Nowhere"), ""));
     assertThat(live.get()).isEqualTo(Fixtures.machine());
   }
 

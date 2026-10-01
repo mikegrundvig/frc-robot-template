@@ -95,6 +95,10 @@ public final class Experiments {
   private volatile List<Rig> rigView = List.of();
   private volatile @Nullable Run run;
 
+  /** Why an experiment can't start now, as of the last loop; null while one can. */
+  private volatile @Nullable String lock =
+      new Actions.Gate(false, false, false).whyNot("experiments");
+
   /** What drives the run in progress; touched only by the robot loop. */
   private Actions.@Nullable Routine driving;
 
@@ -205,6 +209,14 @@ public final class Experiments {
   }
 
   /**
+   * Why an experiment can't start now, as of the last loop, such as "experiments run only with the
+   * robot enabled in utility mode"; null while one can. Safe to call from any thread.
+   */
+  public @Nullable String whyLocked() {
+    return lock;
+  }
+
+  /**
    * The run in progress, or the latest to end; null before the first. Safe to call from any thread.
    */
   public @Nullable Run run() {
@@ -276,7 +288,8 @@ public final class Experiments {
     if (current != null && isRunning(current) && routine != null && !isDriven(routine)) {
       current.cancel("Canceled: its command stopped before the run ended");
     }
-    String locked = whyLocked(gate);
+    String locked = gate.whyNot("experiments");
+    lock = locked;
     if (current != null && isRunning(current) && locked != null) {
       stop(current, "Canceled: " + locked);
     }
@@ -385,17 +398,6 @@ public final class Experiments {
     } catch (RuntimeException e) {
       return false;
     }
-  }
-
-  /** Why experiments can't run now, or null when they can. */
-  private static @Nullable String whyLocked(Actions.Gate gate) {
-    if (gate.fieldConnected()) {
-      return "the field system is connected";
-    }
-    if (!gate.enabled() || !gate.utility()) {
-      return "experiments run only with the robot enabled in utility mode";
-    }
-    return null;
   }
 
   /** Why the deadman cancels the run in progress, or null while its page keeps in touch. */

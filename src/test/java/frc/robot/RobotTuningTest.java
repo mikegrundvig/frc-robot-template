@@ -3,10 +3,14 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.pitwall.Outcome;
+import com.michaelgrundvig.frc.pitwall.TunableTee;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.wpilib.tunable.MockTunableBackend;
+import org.wpilib.tunable.TunableRegistry;
 
 /** Every robot's configuration works with live tuning, within the limits its mechanisms declare. */
 class RobotTuningTest {
@@ -82,6 +86,37 @@ class RobotTuningTest {
         .startsWith(
             "drivetrain: SwerveConfig.limits.maxLinearSpeed: 6 m/s is faster than the"
                 + " drivetrain's free speed");
+  }
+
+  /**
+   * The page shows a refusal beside the value it concerns. A record's message names the value the
+   * way {@code Checks} writes it, from the record that checked it ({@code
+   * SwerveConfig.limits.maxLinearSpeed}), and Pitwall reads that back to the value's tunable.
+   */
+  @Test
+  void aRecordsRefusalIsTiedToTheTunableItNames() {
+    var tee = new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false);
+    TunableRegistry.registerBackend("", tee);
+    try {
+      TunableRegistry.publish("Drive/config", Drive.tuning(Robots.SIM.drivetrain()));
+      tee.update();
+
+      var outcome = tee.requestChanges(Map.of("/Drive/config/limits/maxLinearSpeed", 6.0));
+      tee.update();
+
+      assertThat(outcome.getNow(null).reasons())
+          .singleElement()
+          .satisfies(
+              reason -> {
+                assertThat(reason.layer()).isEqualTo(Outcome.Layer.RECORD);
+                assertThat(reason.by()).isEqualTo("SwerveConfig");
+                assertThat(reason.paths()).containsExactly("/Drive/config/limits/maxLinearSpeed");
+                assertThat(reason.text())
+                    .startsWith("6 m/s is faster than the drivetrain's free speed");
+              });
+    } finally {
+      TunableRegistry.reset();
+    }
   }
 
   /** Vision's thresholds are tuned like the drivetrain's gains: its configuration, live. */

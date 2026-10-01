@@ -71,6 +71,23 @@ export function makeRow(path, context, options = {}) {
   return row;
 }
 
+/**
+ * Marks a row changed by someone else (a dashboard, another page, the field): outlined briefly
+ * (not with reduced motion), and said under it for half a minute. An edit being typed is kept.
+ */
+export function changedElsewhere(row, source) {
+  row.elsewhere = source;
+  row.el.classList.remove("flash");
+  void row.el.offsetWidth; // starts the outline again
+  row.el.classList.add("flash");
+  clearTimeout(row.elsewhereTimer);
+  row.elsewhereTimer = setTimeout(() => {
+    row.elsewhere = null;
+    updateRow(row);
+  }, 30000);
+  updateRow(row);
+}
+
 /** Shows a row's value as it is now: on the robot, staged here, and committed. */
 export function updateRow(row) {
   const doc = robot.doc;
@@ -130,6 +147,8 @@ export function updateRow(row) {
     notNumber && h("div", { class: "why" }, "✗ Only numbers can be applied."),
     outside && h("div", { class: "why" }, "✗ Outside its tuning limits: ",
       h("span", null, outside + ". Checked here, before sending.")),
+    row.elsewhere && h("div", { class: "else" }, "↻ Changed by " + row.elsewhere + (state.isEdit
+      ? ": the robot now has " + withUnit(now, value) + ", and your edit is kept." : ".")),
     reasons.map((reason) => h("div", { class: "why" }, "✗ Refused by " + refuser(reason) + ": ",
       h("span", null, reason.text))));
 }

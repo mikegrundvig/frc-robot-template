@@ -21,7 +21,7 @@ const expected = new Map();
 /** Each value as this page last saw it, and the program it saw it in: to tell what changed. */
 let known = load(KEY + ".known", { program: null, values: {}, tunables: {} });
 
-/** Calls {@code listener()} whenever an entry is added. */
+/** Calls {@code listener(entry)} whenever an entry is added. */
 export function onHistory(listener) {
   listeners.push(listener);
 }
@@ -50,10 +50,11 @@ export function record(source, kind, items) {
 
 function add(source, kind, items) {
   if (items.length === 0) return;
-  entries.push({ time: Date.now(), source, kind, items });
+  const entry = { time: Date.now(), source, kind, items };
+  entries.push(entry);
   while (entries.length > KEPT) entries.shift();
   save(KEY, entries);
-  for (const listener of listeners) listener();
+  for (const listener of listeners) listener(entry);
 }
 
 // Changes this page didn't make: from a dashboard, another page, the field connecting (which

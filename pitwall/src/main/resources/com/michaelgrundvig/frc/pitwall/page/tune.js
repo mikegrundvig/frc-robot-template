@@ -9,7 +9,8 @@
 import { robot, onChange, onConnection, h, replace } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
 import { onEdits, outcome } from "./edits.js";
-import { makeRow, updateRow, refuser } from "./rows.js";
+import { makeRow, updateRow, refuser, changedElsewhere } from "./rows.js";
+import { onHistory } from "./history.js";
 import { valueDocs, groupDocs, configDocs, groupOf } from "./docs.js";
 
 const rows = new Map(); // path -> its row
@@ -24,17 +25,22 @@ let inline = null; // the documentation open under a row or heading, on a phone
 let selected = null; // {path}, {config, group}, or {config}: what the documentation is about
 let builtFrom = null;
 let visible = false;
+let notice;
+let noticeTimer = null;
+let refusalsSeen = null; // the dashboard refusals already shown, to tell a new one
 
 function mount(view) {
   filter = h("input", { type: "search", autocomplete: "off", "aria-label": "Filter values",
     placeholder: "Filter by name or meaning  ( / )", oninput: build });
   list = h("div");
   panel = h("aside", { class: "docs", "aria-label": "What it means" });
+  notice = h("div", { class: "banner warn", role: "status", hidden: true });
   view.append(
     h("h1", { class: "view-title" }, "Tune"),
     h("p", { class: "lede" }, "Every value the mechanisms let you tune while the robot runs. "
         + "Edits wait here until you apply them; then they all change at once, or none do."),
     tuningOffBanner("Values"),
+    notice,
     h("div", { class: "tune" },
       h("div", null,
         h("div", { class: "toolbar" }, filter,
@@ -52,6 +58,14 @@ function mount(view) {
   });
   narrow.addEventListener("change", showDocs);
   onConnection(() => rows.forEach(updateRow));
+  // A value someone else changed says so on its row.
+  onHistory((entry) => {
+    if (entry.source === "this page" || entry.kind === "reset") return;
+    for (const item of entry.items) {
+      const row = rows.get(item.path);
+      if (row) changedElsewhere(row, entry.source);
+    }
+  });
   // "/" finds a value, as in many tools, unless someone is typing.
   document.addEventListener("keydown", (event) => {
     if (!visible || event.key !== "/" || typing(event.target)) return;
@@ -99,6 +113,7 @@ function typing(target) {
 
 function render(patch, snapshot) {
   const doc = robot.doc;
+  if (snapshot || "tuning" in patch) noteRefusal(snapshot);
   // A snapshot rebuilds every row: after a redeploy, the values and their limits may differ.
   if (snapshot || "tunables" in patch || builtFrom !== doc.tunables) {
     build();
@@ -114,6 +129,24 @@ function render(patch, snapshot) {
     }
   }
   if ("values" in patch || "changes" in patch || "configs" in patch || "rigs" in patch) showDocs();
+}
+
+/**
+ * A dashboard's change the robot refused, shown here for a while as it happens: the dashboard just
+ * snaps back, unable to say why. Changes keeps the list.
+ */
+function noteRefusal(snapshot) {
+  const refused = robot.doc.tuning.refused || [];
+  const latest = refused[refused.length - 1];
+  const known = refusalsSeen;
+  refusalsSeen = refused.join("\n");
+  if (snapshot || known === null || !latest || refusalsSeen === known) return;
+  notice.replaceChildren(h("span", { class: "grow" }, "✗ ", h("b", null, "A dashboard's change "
+      + "was refused: "), h("span", { class: "mono" }, latest)),
+    h("a", { href: "#changes" }, "See them all in Changes"));
+  notice.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => (notice.hidden = true), 15000);
 }
 
 /** The values, by configuration, then by the record they're in; only those the filter matches. */

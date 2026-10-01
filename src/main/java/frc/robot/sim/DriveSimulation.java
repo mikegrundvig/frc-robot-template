@@ -1,7 +1,9 @@
 package frc.robot.sim;
 
+import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
+import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
@@ -29,6 +31,12 @@ import org.wpilib.math.geometry.Twist2d;
  * it doesn't slip on its own, since traction isn't modeled yet (see docs/stand-ins.md), but faults
  * can be made: {@link #spin} slips a wheel, {@link #shove} moves the robot the way a push does,
  * {@link #hit} the way a collision does, and {@link #tilt} with {@link #grip} lifts it onto a bump.
+ *
+ * <p>Each wheel carries an equal share of the robot's configured mass ({@code Body.mass}), as
+ * inertia on its drive motor ({@link ModuleIOSim#driveInertiaKgM2}), so the robot speeds up and
+ * slows down as a robot of that mass does under its drive motors' torque. What that leaves out
+ * (weight transfer, the battery, the robot's own yaw inertia, the modules pushing on one another
+ * through the frame) is in docs/stand-ins.md.
  */
 public final class DriveSimulation {
   /** The backup IMU's noise is drawn this far from the gyro's seed: no seed's gyro shares it. */
@@ -85,15 +93,13 @@ public final class DriveSimulation {
   /**
    * On flat ground until given its terrain ({@link #setTerrain}).
    *
-   * @param config the modules as configured: the code's belief about them
-   * @param moduleLocations where the modules sit, from the robot's center
+   * @param body the robot's frame, which places the wheels, and its mass, which they carry
+   * @param drivetrain the drivetrain as configured: the code's belief about its modules
    * @param errors how the real wheels and sensors differ from the configuration
    */
-  public DriveSimulation(
-      SwerveConfig.Modules config, Translation2d[] moduleLocations, SensorErrors errors) {
-    if (moduleLocations.length != 4) {
-      throw new IllegalArgumentException("swerve needs exactly 4 modules");
-    }
+  public DriveSimulation(Body body, SwerveConfig drivetrain, SensorErrors errors) {
+    SwerveConfig.Modules config = drivetrain.modules();
+    Translation2d[] moduleLocations = drivetrain.moduleTranslations(body);
     kinematics = new SwerveKinematicsModel(moduleLocations);
     this.moduleLocations = moduleLocations.clone();
     planeFit(moduleLocations, planeFit);
@@ -102,7 +108,11 @@ public final class DriveSimulation {
       // Each module's CANcoder sends on its own clock: here a quarter period after the last, to the
       // steering loop's millisecond (0, 2, 5 and 7 ms into its cycle, at 100 Hz).
       modules[i] =
-          new ModuleIOSim(config, Math.toRadians(errors.steerOffsetDegrees().get(i)), i / 4.0);
+          new ModuleIOSim(
+              config,
+              body.mass().in(Kilograms) / modules.length,
+              Math.toRadians(errors.steerOffsetDegrees().get(i)),
+              i / 4.0);
       treadScale[i] = errors.wheelRadiusScale().get(i);
       builtTreadScale[i] = treadScale[i];
       trueRadiusMeters[i] = configuredRadiusMeters * treadScale[i];

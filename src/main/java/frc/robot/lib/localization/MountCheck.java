@@ -10,12 +10,14 @@ import org.wpilib.math.geometry.Translation3d;
  * average out. A camera bumped since it was calibrated puts them off the same way every time, in
  * the robot's frame, where its mount moved.
  *
- * <p>So the check averages each tag's miss in the robot's frame, over the latest tags: that average
- * is how far off the camera's mount is. Beyond a tolerance, the camera is out of calibration. Only
- * the level part of the miss moves the camera's measurements, since an image fixes where the robot
- * stands on the floor: that part, beyond the tolerance, is how much less the camera is trusted
- * ({@link #doubtMeters}). A camera knocked straight down still places the robot right on level
- * ground; it is out of calibration all the same, and every tag it sees lands high.
+ * <p>So the check averages each tag's miss in the robot's frame, over the camera's latest tags,
+ * each counted alike: that average is how far off the camera's mount is. A camera knocked partway
+ * through shows it in proportion to the share of its latest tags seen since, and fully once they
+ * all are. Beyond a tolerance, the camera is out of calibration. Only the level part of the miss
+ * moves the camera's measurements, since an image fixes where the robot stands on the floor: that
+ * part, beyond the tolerance, is how much less the camera is trusted ({@link #doubtMeters}). A
+ * camera knocked straight down still places the robot right on level ground; it is out of
+ * calibration all the same, and every tag it sees lands high.
  *
  * <p>The check measures against the estimate, so it needs other cameras to hold the estimate: with
  * one camera, the estimate follows that camera, and its tags land where they should whatever its
@@ -24,11 +26,15 @@ import org.wpilib.math.geometry.Translation3d;
  * the offsets fade with it.
  */
 public final class MountCheck {
-  private final int sightings;
-  private int seen;
-  private double x;
-  private double y;
-  private double z;
+  // The latest misses, in the robot's frame: a ring, the oldest overwritten by the newest.
+  private final double[] x;
+  private final double[] y;
+  private final double[] z;
+  private int newest = -1;
+  private int count;
+  private double sumX;
+  private double sumY;
+  private double sumZ;
 
   /**
    * @param sightings how many of the latest tags the camera is judged by: enough that noise and the
@@ -38,7 +44,9 @@ public final class MountCheck {
     if (sightings < 1) {
       throw new IllegalArgumentException("judge by at least one sighting: " + sightings);
     }
-    this.sightings = sightings;
+    x = new double[sightings];
+    y = new double[sightings];
+    z = new double[sightings];
   }
 
   /**
@@ -51,26 +59,48 @@ public final class MountCheck {
   public void add(Pose3d robot, Pose3d seen, Pose3d real) {
     Translation3d miss =
         seen.getTranslation().minus(real.getTranslation()).rotateBy(robot.getRotation().inverse());
-    // The average of every tag so far, until there are enough; from then on each new tag counts
-    // as one of the latest, and the oldest fade.
-    this.seen++;
-    double weight = 1.0 / Math.min(this.seen, sightings);
-    x += weight * (miss.getX() - x);
-    y += weight * (miss.getY() - y);
-    z += weight * (miss.getZ() - z);
+    newest = (newest + 1) % x.length;
+    if (count == x.length) {
+      sumX -= x[newest];
+      sumY -= y[newest];
+      sumZ -= z[newest];
+    } else {
+      count++;
+    }
+    x[newest] = miss.getX();
+    y[newest] = miss.getY();
+    z[newest] = miss.getZ();
+    sumX += x[newest];
+    sumY += y[newest];
+    sumZ += z[newest];
+    if (newest == x.length - 1) {
+      // Once around the ring, add the sums up afresh: what's taken off never quite cancels what
+      // was put on, and over a match the difference would add up.
+      sumX = sum(x);
+      sumY = sum(y);
+      sumZ = sum(z);
+    }
+  }
+
+  private static double sum(double[] values) {
+    double sum = 0;
+    for (double value : values) {
+      sum += value;
+    }
+    return sum;
   }
 
   /** Whether the camera has seen enough tags to judge its mount by. */
   public boolean judged() {
-    return seen >= sightings;
+    return count == x.length;
   }
 
   /**
-   * How far off, on average, the camera's tags land: a camera mounted 4 in lower than configured
-   * puts every tag 4 in high. NaN until it has seen enough tags to judge.
+   * How far off, on average, the camera's latest tags land: a camera mounted 4 in lower than
+   * configured puts every tag 4 in high. NaN until it has seen enough tags to judge.
    */
   public double offsetMeters() {
-    return judged() ? Math.sqrt(x * x + y * y + z * z) : Double.NaN;
+    return judged() ? Math.sqrt(sumX * sumX + sumY * sumY + sumZ * sumZ) / count : Double.NaN;
   }
 
   /** Whether the camera's tags land farther off than a calibrated camera's do. */
@@ -85,8 +115,11 @@ public final class MountCheck {
    * the way independent errors add: in squares.
    */
   public double doubtMeters(double toleranceMeters) {
-    double level = x * x + y * y;
-    if (!judged() || level <= toleranceMeters * toleranceMeters) {
+    if (!judged()) {
+      return 0;
+    }
+    double level = (sumX * sumX + sumY * sumY) / ((double) count * count);
+    if (level <= toleranceMeters * toleranceMeters) {
       return 0;
     }
     return Math.sqrt(level - toleranceMeters * toleranceMeters);

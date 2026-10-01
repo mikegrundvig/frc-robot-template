@@ -2,7 +2,8 @@
 // back to the same place and a link can be sent. Each view is its own module; this starts them
 // and follows the robot.
 
-import { robot, connect, onChange, onConnection, byId, h } from "./core.js";
+import { robot, connect, onChange, byId, h } from "./core.js";
+import { mountBar } from "./bar.js";
 import pit from "./pit.js";
 import tune from "./tune.js";
 import experiment from "./experiment.js";
@@ -10,6 +11,7 @@ import changes from "./changes.js";
 import sim from "./sim.js";
 
 const views = [pit, tune, experiment, changes, sim];
+mountBar();
 const sections = new Map(); // view id -> its section
 const tabs = new Map(); // view id -> its tab
 let current = null;
@@ -54,16 +56,9 @@ function show(view, rest) {
 
 onChange((patch, snapshot) => {
   if (snapshot || "robot" in patch) {
-    byId("name").textContent = "· " + robot.doc.robot.name;
     for (const view of views) tabs.get(view.id).hidden = !offered(view);
     route(); // the address may name a view offered only now, such as #sim
   }
-});
-
-onConnection((connected) => {
-  const label = byId("connection");
-  label.textContent = connected ? "Connected" : "Disconnected: reconnecting…";
-  label.classList.toggle("bad", !connected);
 });
 
 window.addEventListener("hashchange", route);

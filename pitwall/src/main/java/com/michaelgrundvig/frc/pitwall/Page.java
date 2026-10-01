@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -31,6 +32,7 @@ public final class Page {
   private final Tuning tuning;
   private final TunableTee tunables;
   private final Experiments experiments;
+  private final Supplier<String> mode;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
   private final String program = UUID.randomUUID().toString();
@@ -50,13 +52,29 @@ public final class Page {
   private Map<String, Object> rigSection = Map.of();
   private Map<String, Object> experimentSection = Map.of();
 
+  /** A page that doesn't know the robot's mode, such as a test's. */
   public Page(
       Status status, Actions actions, Tuning tuning, TunableTee tunables, Experiments experiments) {
+    this(status, actions, tuning, tunables, experiments, () -> "");
+  }
+
+  /**
+   * @param mode the robot's mode as the Driver Station sets it, such as "Utility, enabled": read in
+   *     the robot loop, only while a page is open
+   */
+  public Page(
+      Status status,
+      Actions actions,
+      Tuning tuning,
+      TunableTee tunables,
+      Experiments experiments,
+      Supplier<String> mode) {
     this.status = status;
     this.actions = actions;
     this.tuning = tuning;
     this.tunables = tunables;
     this.experiments = experiments;
+    this.mode = mode;
   }
 
   public Status status() {
@@ -83,7 +101,8 @@ public final class Page {
    * The page's state now, section by section. Call it from the robot loop.
    *
    * <ul>
-   *   <li>{@code robot}: its name, the code, simulator or real, and this program's id;
+   *   <li>{@code robot}: its name, the code, simulator or real, this program's id, and its mode
+   *       (empty when unknown);
    *   <li>{@code status}, {@code units}: each item's value, and the unit of each number;
    *   <li>{@code actions}: each action's phase and detail;
    *   <li>{@code tuning}: whether it's on, the field, and refused dashboard changes;
@@ -122,6 +141,7 @@ public final class Page {
     shown.put("simulated", robot.simulated());
     shown.put("code", robot.code());
     shown.put("program", program);
+    shown.put("mode", mode.get());
     return shown;
   }
 

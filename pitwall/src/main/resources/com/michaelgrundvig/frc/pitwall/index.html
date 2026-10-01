@@ -16,13 +16,14 @@
 <script type="module" src="/page/main.js"></script>
 </head>
 <body>
-<main>
-  <header>
-    <h1>Pitwall <span id="name" class="muted"></span></h1>
-    <span id="connection" class="muted">Connecting to the robot…</span>
-  </header>
+<div class="shell">
+  <header id="bar" class="bar"></header>
+  <div id="band" class="band" hidden></div>
   <nav id="tabs" class="tabs" aria-label="Views"></nav>
-  <div id="views"></div>
-</main>
+  <main id="views" class="views"></main>
+</div>
+<div id="toast" class="toast" hidden></div>
+<div id="live" class="sr" aria-live="polite"></div>
+<div id="live-urgent" class="sr" aria-live="assertive"></div>
 </body>
 </html>

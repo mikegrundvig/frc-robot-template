@@ -1,14 +1,22 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
+import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.subsystems.coprocessors.CoprocessorIO;
+import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
+import frc.robot.subsystems.coprocessors.Coprocessors;
+import frc.robot.subsystems.coprocessors.PhotonVisionIO;
+import frc.robot.subsystems.coprocessors.PhotonVisionIOSim;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
@@ -20,7 +28,7 @@ import org.wpilib.math.geometry.Transform3d;
  * The world the simulated robot drives in: the drivetrain's physics, which knows where the robot
  * really is, and PhotonVision's simulated cameras, rendering what they'd see from there. The
  * robot's code sees it only through its IO interfaces ({@link #drivetrainHardware}, {@link
- * #cameras}), as it would see real hardware.
+ * #cameras}, {@link #coprocessors}), as it would see real hardware.
  *
  * <p>The robot's wheels and sensors differ from its configuration as a real robot's do ({@link
  * SensorErrors}), so its estimate drifts from the truth, and localization is tested against that
@@ -35,6 +43,9 @@ public final class SimulatedWorld implements AutoCloseable {
   private final DriveSimulation drivetrain;
   private final VisionSim vision;
   private final CameraIOSim[] cameras;
+
+  /** The coprocessors' simulated health agents, once the robot asks for them. */
+  private final List<CoprocessorIOSim> coprocessors = new ArrayList<>();
 
   /**
    * @param field the field, with its tags and terrain
@@ -87,6 +98,32 @@ public final class SimulatedWorld implements AutoCloseable {
     return cameras.clone();
   }
 
+  /**
+   * The coprocessors' simulated health agents, one for each computer in the table, in its order:
+   * made the first time they're asked for, and the same ones after.
+   *
+   * @param table the table of coprocessors compiled into the program
+   * @param settings how often they're asked
+   */
+  public CoprocessorIO[] coprocessors(CompiledTable table, Coprocessors.Settings settings) {
+    if (coprocessors.isEmpty()) {
+      for (Computer computer : table.table().computers()) {
+        coprocessors.add(new CoprocessorIOSim(table, computer, settings));
+      }
+    }
+    return coprocessors.toArray(CoprocessorIO[]::new);
+  }
+
+  /** PhotonVision's version, as the simulated coprocessors publish it. */
+  public PhotonVisionIO photonVision() {
+    return new PhotonVisionIOSim(coprocessors);
+  }
+
+  /** The coprocessors' simulated agents, for their faults. */
+  List<CoprocessorIOSim> coprocessorSims() {
+    return List.copyOf(coprocessors);
+  }
+
   /** The cameras' names, in the robot's configured order. */
   public List<String> cameraNames() {
     return Arrays.stream(cameras).map(CameraIOSim::name).toList();
@@ -119,6 +156,9 @@ public final class SimulatedWorld implements AutoCloseable {
   public void step(long nowNanos) {
     drivetrain.step(RobotLoop.PERIOD_SECONDS, nowNanos);
     vision.update(drivetrain.truePose3d());
+    for (CoprocessorIOSim coprocessor : coprocessors) {
+      coprocessor.step(nowNanos);
+    }
   }
 
   /** Where the robot really is. */

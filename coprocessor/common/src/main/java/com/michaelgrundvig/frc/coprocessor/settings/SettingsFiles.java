@@ -55,26 +55,46 @@ public final class SettingsFiles {
   /** The files for these settings: each one's path (with {@code /}) and its text. */
   public static SortedMap<String, String> render(Settings settings) {
     SortedMap<String, String> files = new TreeMap<>();
-    files.put(
-        DATABASE_FILE,
-        Json.pretty(JsonValue.Obj.builder().put("userVersion", settings.userVersion()).build()));
-    Map<String, String> folded = new HashMap<>();
+    files.put(DATABASE_FILE, database(settings.userVersion()));
+    List<String> paths = new ArrayList<>();
     for (SettingsRow row : settings.rows()) {
-      String path = encode(row.table()) + "/" + encode(row.key()) + SUFFIX;
-      String clash = folded.put(path.toLowerCase(Locale.ROOT), row.table() + "/" + row.key());
+      String path = path(row.table(), row.key());
+      paths.add(path);
+      files.put(path, text(row));
+    }
+    checkCase(paths);
+    return files;
+  }
+
+  /** {@value #DATABASE_FILE}'s text: the schema version. */
+  public static String database(int userVersion) {
+    return Json.pretty(JsonValue.Obj.builder().put("userVersion", userVersion).build());
+  }
+
+  /** A row's file, from the settings folder: {@code <table>/<key>.json}, each name encoded. */
+  public static String path(String table, String key) {
+    return encode(table) + "/" + encode(key) + SUFFIX;
+  }
+
+  /** A row's file's text: its columns, sorted and indented. */
+  public static String text(SettingsRow row) {
+    return Json.pretty(row.columns());
+  }
+
+  /** Refuses rows' files that differ only in case, which would be one file on Windows and macOS. */
+  public static void checkCase(List<String> paths) {
+    Map<String, String> folded = new HashMap<>();
+    for (String path : paths) {
+      String clash = folded.put(path.toLowerCase(Locale.ROOT), path);
       if (clash != null) {
         throw new SettingsException(
             "\""
                 + clash
                 + "\" and \""
-                + row.table()
-                + "/"
-                + row.key()
+                + path
                 + "\" differ only in case, so they'd be one file on Windows and macOS");
       }
-      files.put(path, Json.pretty(row.columns()));
     }
-    return files;
   }
 
   /** Settings from their files (each path with {@code /}, and its text). */

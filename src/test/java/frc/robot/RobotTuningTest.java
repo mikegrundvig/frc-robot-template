@@ -3,6 +3,8 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.pitwall.ParameterDocs;
+import frc.robot.lib.config.SwerveConfig;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
 import java.util.List;
@@ -40,6 +42,19 @@ class RobotTuningTest {
     assertThat(drivetrain.get().gains().steerKp()).isEqualTo(18.5);
     assertThat(drivetrain.whyNot(Map.of("gains.steerKp", 500.0)))
         .isEqualTo("drivetrain: gains.steerKp: 500 is above its limit of 100");
+  }
+
+  /**
+   * The page says what a value means from its record's Javadoc, which the build writes into the
+   * program as it compiles: a value's {@code @param}, and its record's text.
+   */
+  @Test
+  void aTunedValueSaysWhatItMeans() {
+    assertThat(ParameterDocs.param(SwerveConfig.class, "gains.steerKp"))
+        .isEqualTo("volts per radian of error");
+    assertThat(ParameterDocs.of(SwerveConfig.Gains.class).summary())
+        .isEqualTo(
+            "Drive: velocity control on the motor controller, with feedforward from robot code.");
   }
 
   /** Within its limits isn't enough: the records' own checks have the last word, and say which. */

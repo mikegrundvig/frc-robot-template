@@ -97,6 +97,10 @@ tasks.named("test") {
     def work = layout.buildDirectory.dir("test-work")
     workingDir = work
     systemProperty "frc.projectDir", projectDir.absolutePath
+    // The values register is checked against the code (ValuesRegisterTest), so editing it alone
+    // reruns the tests.
+    inputs.file("docs/values.md").withPropertyName("valuesRegister")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
     doFirst { work.get().asFile.mkdirs() }
     // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
     // coverage report to count: the program's startup runs nowhere else.

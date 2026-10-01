@@ -3,7 +3,7 @@
 The robot's code runs on numbers: a frame size, a current limit, how far to trust a camera at 4 m.
 Some were measured, some were chosen, and some are still guesses. This register lists every value
 in the robot's configuration: which kind it is, where today's number came from, and how to measure
-it or why it is what it is.
+it or why it is what it is. A test keeps the list complete ([below](#keeping-it-complete)).
 
 ## Four kinds of value
 
@@ -79,6 +79,21 @@ mechanism its devices.
 
 In a configuration record, a value that is itself a configuration record (`RobotConfig.body`), or a
 list or optional of them (`RobotConfig.cameras`), has a section of its own rather than a row.
+
+## Keeping it complete
+
+`ValuesRegisterTest` reads this file and fails, naming exactly what to add or remove, when:
+
+- a configuration record has no section, or one of its values has no row;
+- a section or a row names a record or a value the code no longer has;
+- a row's kind isn't one of the four, or its source doesn't start with one of the words above;
+- a value a mechanism tunes live has no row under [tuning limits](#tuning-limits), or a row there
+  names one it no longer tunes.
+
+So a new value starts in its record, and the test asks for its row. A section is a `###` heading
+naming the record in backticks (`` ### `SwerveConfig.Limits` ``, a nested record with its outer
+one), followed by a table whose header starts with **Value** and has a **Kind** and a **Source**
+column. The test reads only a row's name, kind, and source; the rest is for people.
 
 ## Where to start
 

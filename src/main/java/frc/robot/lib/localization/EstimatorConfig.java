@@ -239,14 +239,16 @@ public record EstimatorConfig(
      * As {@link #HEADING_MEASUREMENTS}, and a camera the mount check doubts has that doubt added to
      * the errors it repeats in every image (its turn and shift), so its headings can pull the
      * heading only so far, however many there are. Only as good as the mount check's verdict: with
-     * a camera turned, the doubt lands mostly on its neighbours (docs/testing.md).
+     * a camera turned, the doubt lands as much or more on its neighbour (docs/testing.md).
      */
     HEADING_MEASUREMENTS_AND_MOUNT_DOUBT,
     /**
      * Every fix: a position fix corrects the heading too, through how far its tags are and how the
      * position's error has come to depend on the heading's. A full Kalman update: more accurate in
-     * heading after turns, and the mount check finds a turned camera, but the heading claims more
-     * than it knows (docs/testing.md).
+     * heading after turns, and the mount check finds a turned camera. It leans on the images'
+     * capture times while the robot turns: an image stamped a few milliseconds late shows the robot
+     * turned a little less, as a heading error would, the same way in every image, so check them
+     * before choosing it (docs/testing.md, docs/characterization.md).
      */
     EVERY_FIX
   }

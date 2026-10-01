@@ -163,9 +163,10 @@ each camera and tag, draws from its own stream of the seed, so no two seeds shar
 drawn from Gaussians at the spread the estimator's configuration claims (`EstimatorConfig`'s
 `cameraTurnStdDevDegrees`, `cameraShiftStdDevMeters`, `headingStdDevDegreesPerTurn`,
 `backupHeadingStdDevDegreesPerTurn`), with the
-vision noise model halved, which is how noisy the simulated cameras are: an estimator honest about
-its own claims reads a NEES near its number of dimensions. Wider or narrower errors than it claims
-show it over- or under-confident, which is what the options are for.
+vision noise model halved, a little wider than the simulated cameras' noise: an estimator honest
+about its own claims reads a NEES near its number of dimensions, or a little below. Wider or
+narrower errors than it claims show it over- or under-confident, which is what the options are
+for.
 
 | Option | Default | What |
 |---|---|---|
@@ -175,7 +176,7 @@ show it over- or under-confident, which is what the options are for.
 | `--mount-error-mm=M`, `--mount-error-degrees=D` | 3, `cameraTurnStdDevDegrees` | Each camera's mount off along and about each axis (standard deviations) |
 | `--tag-error-mm=M` | `cameraShiftStdDevMeters` | Each tag off the layout along each axis; 0 for an exact field |
 | `--gyro-scale-error=F`, `--backup-scale-error=F` | `headingStdDevDegreesPerTurn` / 360, `backupHeadingStdDevDegreesPerTurn` / 360 | Each IMU's scale off by this share |
-| `--noise-scale=F` | 0.5 | The vision noise model scaled; 1 is the model as shipped, twice the simulated cameras' noise |
+| `--noise-scale=F` | 0.5 | The vision noise model scaled; 1 is the model as shipped. The simulated cameras are quieter than half: at a quarter, the calibrated runs read a position NEES of 1.3 to 2.5, and still a heading NEES within its band |
 | `--heading=W` | `measurements` | What corrects the heading beside the gyro (`EstimatorConfig.headingCorrection`): `measurements`, `doubt`, or `every`; see [three ways to correct the heading](#three-ways-to-correct-the-heading) |
 | `--out=DIR` | `build/studies/consistency` | Where the report goes |
 
@@ -228,28 +229,30 @@ their own, the default):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.55 | 0.78 | 0 | 0 | 1.6 cm | 0.23° |
-| standing | 1.85 | 0.42 | 0 | 0 | 1.3 cm | 0.17° |
-| turning | 1.46 | 0.69 | 0 | 0 | 1.6 cm | 0.69° |
-| gyro-scale | 2.08 | 0.94 | 0.12% | 0.02% | 1.8 cm | 1.35° |
-| collision | 2.75 | 0.84 | 0.57% | 0.57% | 1.8 cm | 0.21° |
-| gyro-lost | 1.74 | 0.43 | 0 | 0 | 1.5 cm | 0.46° |
-| camera-low | 1.52 | 0.75 | under 0.01% | 0 | 1.7 cm | 0.22° |
-| camera-turned | 4.36 | 10.02 | 7.18% | 6.39% | 2.8 cm | 0.79° |
-| camera-turned-4 | 17.62 | 44.72 | 46.13% | 45.45% | 6.2 cm | 1.76° |
-| tag-moved | 2.53 | 0.94 | 2.90% | 1.94% | 2.0 cm | 0.24° |
+| driving | 1.04 | 0.60 | 0 | 0 | 1.3 cm | 0.20° |
+| standing | 1.68 | 0.37 | 0 | 0 | 1.2 cm | 0.16° |
+| turning | 1.43 | 0.68 | 0 | 0 | 1.5 cm | 0.68° |
+| gyro-scale | 1.99 | 0.92 | 0.07% | 0 | 1.7 cm | 1.34° |
+| collision | 1.14 | 0.80 | 0.28% | 0.28% | 1.4 cm | 0.21° |
+| gyro-lost | 1.71 | 0.44 | 0 | 0 | 1.5 cm | 0.46° |
+| camera-low | 1.02 | 0.62 | 0 | 0 | 1.3 cm | 0.20° |
+| camera-turned | 4.03 | 9.24 | 5.74% | 4.93% | 2.7 cm | 0.75° |
+| camera-turned-4 | 16.51 | 42.06 | 43.82% | 42.90% | 6.0 cm | 1.70° |
+| tag-moved | 1.88 | 0.89 | 1.78% | 1.18% | 1.6 cm | 0.24° |
 
-Every calibrated run is near its NEES, a little below: the floor for what a camera repeats is
-sized for the worst of what it allows. The collision's exceedances are the loops of the hit,
+Every calibrated run is near its NEES or below it, timid rather than overconfident: the floor for
+what a camera repeats is sized for the worst of what it allows, and the noise model is a little
+wider than the simulated cameras. The collision's exceedances are the loops of the hit,
 before the jolt is read. A tag 4 in off the layout, four times what `cameraShiftStdDevMeters`
 allows, stays just within the allowance: one tag among several in view. A camera turned 2° is
 eight times what `cameraTurnStdDevDegrees` allows, and 4° sixteen: the estimator can't tell either
 from a heading error, so its heading grows sure of a wrong value. Catching that is the mount
 check's job; how well it does depends on what may correct the heading, below.
 
-Numbers from before this table, in older commits, aren't comparable: those seeds shared draws
-(seed 2's first camera was seed 1's second, through `Seeds.mix` adding the seed to what it mixed),
-and their mounts and tags were drawn narrower than the configuration claims.
+Numbers from before this table, in older commits, aren't comparable: the simulated cameras
+stamped each image up to a loop late ([below](#the-simulators-late-stamps)), and before that the
+seeds shared draws (seed 2's first camera was seed 1's second, through `Seeds.mix` adding the seed
+to what it mixed) and the mounts and tags were drawn narrower than the configuration claims.
 
 ### Three ways to correct the heading
 
@@ -269,94 +272,154 @@ Twelve matched seeds of each (a, b, c in that order):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.55, 1.55, 1.71 | 0.78, 0.78, 2.19 | 0, 0, 0.14% | 0, 0, 0.13% | 1.6, 1.6, 1.7 cm | 0.23, 0.23, 0.25° |
-| standing | 1.85, 1.85, 1.89 | 0.42, 0.42, 1.69 | 0, 0, 0.03% | 0, 0, 0.02% | 1.3, 1.3, 1.4 cm | 0.17, 0.17, 0.22° |
-| turning | 1.46, 1.46, 1.74 | 0.69, 0.69, 3.31 | 0, 0, 0 | 0, 0, 0 | 1.6, 1.6, 1.7 cm | 0.69, 0.69, 0.40° |
-| gyro-scale | 2.08, 2.08, 2.89 | 0.94, 0.94, 6.33 | 0.12%, 0.12%, 0 | 0.02%, 0.02%, 0 | 1.8, 1.8, 2.2 cm | 1.35, 1.35, 0.63° |
-| collision | 2.75, 2.75, 3.27 | 0.84, 0.84, 2.53 | 0.57%, 0.57%, 0.64% | 0.57%, 0.57%, 0.64% | 1.8, 1.8, 1.8 cm | 0.21, 0.21, 0.28° |
-| gyro-lost | 1.74, 1.74, 2.01 | 0.43, 0.43, 2.85 | 0, 0, 0 | 0, 0, 0 | 1.5, 1.5, 1.7 cm | 0.46, 0.46, 0.41° |
-| camera-low | 1.52, 1.52, 1.61 | 0.75, 0.75, 2.29 | under 0.01% twice, 0.02% | 0, 0, 0.02% | 1.7, 1.7, 1.7 cm | 0.22, 0.22, 0.26° |
-| camera-turned | 4.36, 4.07, 4.75 | 10.02, 10.16, 7.75 | 7.18%, 6.17%, 9.16% | 6.39%, 4.72%, 8.34% | 2.8, 2.8, 2.8 cm | 0.79, 0.81, 0.48° |
-| camera-turned-4 | 17.62, 18.29, 10.72 | 44.72, 47.85, 21.31 | 46.13%, 46.62%, 24.42% | 45.45%, 45.75%, 23.93% | 6.2, 6.8, 4.2 cm | 1.76, 1.94, 0.78° |
-| tag-moved | 2.53, 2.53, 2.47 | 0.94, 0.94, 2.71 | 2.90%, 2.90%, 2.56% | 1.94%, 1.94%, 1.83% | 2.0, 2.0, 1.9 cm | 0.24, 0.24, 0.28° |
+| driving | 1.04, 1.04, 1.00 | 0.60, 0.60, 0.83 | 0, 0, 0 | 0, 0, 0 | 1.3, 1.3, 1.2 cm | 0.20, 0.20, 0.16° |
+| standing | 1.68, 1.68, 1.67 | 0.37, 0.37, 1.06 | 0, 0, 0 | 0, 0, 0 | 1.2, 1.2, 1.2 cm | 0.16, 0.16, 0.18° |
+| turning | 1.43, 1.43, 1.55 | 0.68, 0.68, 0.71 | 0, 0, 0 | 0, 0, 0 | 1.5, 1.5, 1.6 cm | 0.68, 0.68, 0.21° |
+| gyro-scale | 1.99, 1.99, 1.87 | 0.92, 0.92, 0.54 | 0.07%, 0.07%, 0 | 0, 0, 0 | 1.7, 1.7, 1.4 cm | 1.34, 1.34, 0.19° |
+| collision | 1.14, 1.14, 1.12 | 0.80, 0.80, 0.89 | 0.28% each | 0.28% each | 1.4, 1.4, 1.3 cm | 0.21, 0.21, 0.16° |
+| gyro-lost | 1.71, 1.71, 1.77 | 0.44, 0.44, 0.52 | 0, 0, 0 | 0, 0, 0 | 1.5, 1.5, 1.6 cm | 0.46, 0.46, 0.20° |
+| camera-low | 1.02, 1.02, 0.98 | 0.62, 0.62, 0.79 | 0, 0, 0 | 0, 0, 0 | 1.3, 1.3, 1.2 cm | 0.20, 0.20, 0.15° |
+| camera-turned | 4.03, 3.29, 4.18 | 9.24, 8.92, 8.67 | 5.74%, 2.70%, 8.10% | 4.93%, 1.99%, 6.34% | 2.7, 2.6, 2.5 cm | 0.75, 0.75, 0.52° |
+| camera-turned-4 | 16.51, 16.24, 10.63 | 42.06, 42.84, 24.03 | 43.82%, 41.37%, 23.29% | 42.90%, 40.36%, 23.03% | 6.0, 6.3, 4.2 cm | 1.70, 1.78, 0.88° |
+| tag-moved | 1.88, 1.88, 1.84 | 0.89, 0.89, 0.90 | 1.78%, 1.78%, 1.90% | 1.18%, 1.18%, 1.50% | 1.6, 1.6, 1.5 cm | 0.24, 0.24, 0.16° |
 
 And whether the mount check finds the turned camera (front-left) and leaves its healthy neighbour
 (front-right) alone: seeds that doubted each, the most each was doubted on average, and seeds that
-ended with each out of calibration. The back cameras were doubted in at most 3 seeds, by under a
-centimeter.
+ended with each out of calibration. The back cameras were doubted in at most 2 seeds, by under half
+a centimeter.
 
 | Run | Variant | front-left (turned) | front-right (healthy) |
 |---|---|---|---|
-| camera-turned | `measurements` | 7/12, 2.6 cm; out 2/12 | 9/12, 3.2 cm; out 5/12 |
-| camera-turned | `doubt` | 6/12, 2.5 cm; out 2/12 | 9/12, 3.4 cm; out 7/12 |
-| camera-turned | `every` | 12/12, 5.0 cm; out 4/12 | 0/12; out 2/12 |
-| camera-turned-4 | `measurements` | 12/12, 6.2 cm; out 12/12 | 12/12, 15.3 cm; out 10/12 |
-| camera-turned-4 | `doubt` | 11/12, 4.9 cm; out 12/12 | 12/12, 17.1 cm; out 12/12 |
-| camera-turned-4 | `every` | 12/12, 16.7 cm; out 12/12 | 11/12, 4.0 cm; out 9/12 |
+| camera-turned | `measurements` | 8/12, 2.6 cm; out 2/12 | 8/12, 2.9 cm; out 5/12 |
+| camera-turned | `doubt` | 8/12, 2.7 cm; out 4/12 | 8/12, 3.0 cm; out 7/12 |
+| camera-turned | `every` | 12/12, 4.3 cm; out 2/12 | 1/12, 0.1 cm; out 2/12 |
+| camera-turned-4 | `measurements` | 11/12, 6.6 cm; out 12/12 | 12/12, 15.2 cm; out 10/12 |
+| camera-turned-4 | `doubt` | 10/12, 6.0 cm; out 11/12 | 12/12, 16.2 cm; out 12/12 |
+| camera-turned-4 | `every` | 12/12, 16.5 cm; out 12/12 | 12/12, 4.2 cm; out 7/12 |
 
 What it shows:
 
-- **On a calibrated robot**, `measurements` and `doubt` are the same (no camera is doubted), and
-  honest. `every` is as accurate in position, more accurate in heading wherever the gyro's scale
-  matters (turning, the gyro-scale procedure, the backup IMU), and its position about as honest
-  (exceedances within the allowance). But its heading claims more than it knows: a heading NEES of
-  1.7 to 6.3 where 1 is honest, above the 95% band in every calibrated run but standing, and past
-  what twelve honest seeds reach 999 times in 1000 (2.9) after turning and after the gyro-scale
-  procedure.
+- **On a calibrated robot** all three are honest, `measurements` and `doubt` identically (no camera
+  is doubted). `every` is as accurate in position, and more accurate in heading wherever the gyro's
+  scale matters: 0.21° off after turning against 0.68°, 0.19° after the gyro-scale procedure
+  against 1.34°, 0.20° on the backup IMU against 0.46°. Its heading NEES is 0.52 to 1.06, inside
+  the 95% band in every calibrated run; `measurements` reads 0.37 to 0.92, timid standing still.
 - **With a turned camera**, `measurements` lets the turned camera's headings turn the robot's, and
   then the healthy cameras' positions disagree with it: the mount check doubts front-right as
-  often as front-left and, at 4°, by more than twice as much, calling it out of calibration in 10
-  seeds of 12. `doubt` adds the doubt where the mount check puts it, so mostly on the healthy
-  camera: a little better at 2°, a little worse at 4°. `every` lets all four cameras' positions
-  hold the heading, so the turned camera is the one that disagrees: the mount check doubts it in
-  every seed, never doubts its neighbour at 2° (though 2 seeds end with it past the tolerance),
-  and at 4° doubts the turned camera four times as much as its neighbour. Its estimate is closer
-  too: at 4°, 4.2 cm off on average against 6.2, at worst 12 cm against 43, and outside the
-  ellipse half as often. None is honest with a turned camera: one turned eight or sixteen times
-  its allowance is an error the configuration says can't happen.
+  often as front-left and, at 4°, more than twice as much, calling it out of calibration in 10
+  seeds of 12. `doubt` adds the doubt where the mount check puts it, as much on the healthy camera
+  as on the turned one: at 2° it halves the loops outside the ellipse (2.7% against 5.7%); at 4°
+  it's no better (41% against 44%, and 6.3 cm off on average against 6.0). `every` lets all four
+  cameras' positions hold the heading, so the turned camera is the one that disagrees: the mount
+  check doubts it in every seed, its neighbour once at 2° (by a millimeter), and at 4° doubts the
+  turned camera four times as much as its neighbour. Its estimate is closer too: at 4°, 4.2 cm off
+  on average against 6.0, at worst 12.7 cm against 32.3, and outside the ellipse half as often.
+  None is honest with a turned camera: one turned eight or sixteen times its allowance is an error
+  the configuration says can't happen.
 - **With a moved tag**, the three are alike, within the allowance, and no camera is doubted.
 
-`VisionSimTest`'s mount-check tests run under each. `every` keeps the original promises for a
-camera turned 4° (out of calibration and counting for less, the back cameras never doubted,
-doubted by more than 8 cm, the last lap a fifth closer than trusting it as before), and one turned
-2° stands out in its tag residuals. `measurements` and `doubt` break two of the first (doubted by
-less than 8 cm, and the last lap no closer), and the 2° camera doesn't stand out: each test says
-which, and changes when one does.
+`VisionSimTest`'s mount-check tests run under each. For a camera turned 4°, `every` keeps all but
+the last of the original promises (out of calibration and counting for less, the back cameras
+never doubted, doubted by more than 8 cm, the last lap a fifth closer than trusting it as before):
+doubted by 9.2 cm, its last lap is 4.2 cm off, no closer than trusting it as before (4.2 cm).
+`measurements` and `doubt` break two (doubted by 5.5 and 6.1 cm, and the last lap 5.6 and 8.7 cm
+against 3.8 cm trusted as before). A camera turned 2° stands out in its tag residuals only under
+`every` (1.6 times its worst neighbour's, against 0.95). Each test says which, and changes when
+one does.
+
+#### The simulator's late stamps
+
+An earlier run of this comparison found `every`'s heading claiming more than it knew: a heading
+NEES of 1.7 to 6.3 where 1 is honest, the most after the gyro-scale procedure. The simulator was
+the cause, not the estimator. PhotonVision's simulation takes each image from where the robot was
+when the image fell due (less the camera's latency), but stamped it as of the loop that rendered
+it, up to a loop (20 ms) later. A position solved with the gyro's heading at a stamp late by `t` is
+off just as if the heading were off by the turn rate times `t`, the same way in every image while
+the robot turns one way: 1.1° at 2 rad/s and 10 ms. A measurement with a heading of its own isn't
+taken while the robot turns faster than `VisionConfig.maxYawRateForHeading`, so `measurements`
+never let it near the heading; `every` took it for a heading error, image after image, and grew
+sure of a heading 0.7° off after the procedure's spins. `VisionSim` now stamps each image with
+when it was taken, as a real camera's time sync does (`CameraTimingSimTest`). `measurements` gained
+too: a stamp up to a loop late put every fix where the robot was up to 20 ms earlier, along the way
+it drove, so its position is closer now (1.3 cm off driving, against 1.6) and its NEES lower (the
+collision run's 1.14, against 2.75).
+
+How it was found, under `every`, four seeds of the turning run and the gyro-scale procedure, each
+kind of error taken away in turn:
+
+| What the seeds drew | Turning: heading NEES | Gyro-scale: heading NEES |
+|---|---|---|
+| Every error, as configured | 3.57 | 6.86 |
+| Tags exactly on the layout | 4.08 | 7.72 |
+| Cameras exactly on their mounts | 3.00 | 6.86 |
+| The IMUs' scales exact | 2.81 | 6.45 |
+| The noise model doubled (`--noise-scale=1`) | 2.43 | 3.75 |
+| No tag, mount, or scale error at all | 3.05 | 7.08 |
+| No error, images stamped when taken | 0.01 | 0.02 |
+| Every error, images stamped when taken | 1.55 | 0.92 |
+
+With no error drawn, the heading's error averaged the same in every seed, 0.35° over the turning
+run and 0.7° over the procedure's: it came from the turning itself. Each fix's error against the
+truth, regressed on what a late stamp does to it (the robot's velocity, plus its turn rate times
+the lever to its tags), put the stamps 8 to 11 ms late, and within 0.3 ms once stamped when taken.
+
+The innovations couldn't show it. Each kind of fix's normalized innovation (NIS) averaged under its
+degrees of freedom, before and after: under `every`, a single tag's position 0.12 to 0.25 of its 2
+before and 0.06 to 0.13 after, several tags' 0.36 to 0.83 and 0.10 to 0.59, a multi-tag heading
+(given its position) 0.39 to 0.92 of 1 and 0.17 to 0.62. An error of a centimeter or two in each
+fix hides inside the noise model's spread; only taken as new in each of hundreds of fixes does it
+make the heading sure. (The study's routes cross no bump, so no landmark is applied.)
+
+Nor was it what was first suspected. The tags' errors, the same for every camera that sees a tag:
+taking them away didn't lower the heading NEES (above), and with a noise model half as wide
+(`--noise-scale=0.25`, twelve seeds), `every`'s heading NEES on a calibrated robot is 0.61 to 1.19
+with them (`measurements`' 0.48 to 0.99) and 0.33 to 0.62 without: each camera's considered shift
+covers them. A lever wrong in sign or frame: with no
+error drawn and the images stamped right, `every`'s heading is 0.02° off. The gyro's scale coupling
+with the fixes during the procedure's turns: exact scales left it at 6.45.
+
+**What `every` leans on:** images stamped right while the robot turns. With every camera's stamps
+off by the same amount, drawn for each seed with a spread of 2 ms, its heading NEES after the
+gyro-scale procedure is 0.69 (0.54 stamped right); with a spread of 5 ms, 1.45; `measurements`
+reads 0.92 either way. So before choosing it, check the capture times on the robot to within about
+2 ms ([camera latency and time sync](characterization.md#camera-latency-and-time-sync)).
 
 ### The gates on the claimed uncertainty
 
 The robot's code acts on the claimed uncertainty in five places, and the report counts how often
 each would pass (`Gates`; see [reading the report](#reading-the-report)). Before is the estimator
 from before this study (sure of millimeters while centimeters off: a NEES of 17 to 476), on the same
-draws, with its configuration as it was; after is today's, the heading corrected by measurements
-(a) and by every fix (c). With `doubt` (b) they're as (a) but for the turned cameras: calibrating
-95.7% and 93.3%, judging a mount 92.2% and 88.2%. Each cell is before → a, c, in percent of loops:
+draws, with its configuration as it was, and the simulated images stamped up to a loop late; after
+is today's, the heading corrected by measurements (a) and by every fix (c). With `doubt` (b)
+they're as (a) but for the turned cameras: calibrating 95.1% and 93.2%, judging a mount 91.6% and
+88.5%. Each cell is before → a, c, in percent of loops:
 
 | Run | Calibrating (σ ≤ 5 cm) | Judging a mount (3 m) | Scoring (σ ≤ 15 cm) | Constraining (σθ ≤ 5°) | As placed (σθ ≤ 2°) |
 |---|---|---|---|---|---|
-| driving | 97.8 → 97.7, 97.8 | 97.1 → 93.0, 93.6 | 99.95 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
-| standing | 99.3 → 99.2, 99.3 | 99.1 → 96.2, 96.3 | 100 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
+| driving | 97.8 → 97.0, 97.2 | 97.1 → 92.0, 92.9 | 99.95 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
+| standing | 99.3 → 99.1, 99.1 | 99.1 → 95.9, 96.1 | 100 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
 | turning | 99.9 → 100, 100 | 99.9 → 32.5, 73.6 | 99.97 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
 | gyro-scale | 97.0 → 100, 100 | 74.4 → 57.6, 95.2 | 99.8 → 100, 100 | 100 → 99.99, 100 | 100 → 73.6, 100 |
-| collision | 97.5 → 97.4, 97.4 | 97.2 → 89.9, 90.2 | 99.6 → 99.5, 99.5 | 100 → 100, 100 | 100 → 100, 100 |
-| gyro-lost | 99.99 → 100, 100 | 99.99 → 38.4, 73.6 | 100 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
-| camera-low | 97.1 → 97.0, 97.2 | 96.2 → 93.2, 94.0 | 99.95 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
-| camera-turned | 96.9 → 96.8, 96.9 | 95.8 → 93.7, 94.3 | 99.95 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
-| camera-turned-4 | 95.6 → 95.4, 96.3 | 94.4 → 91.6, 93.9 | 99.8 → 99.9, 100 | 100 → 100, 100 | 100 → 100, 100 |
-| tag-moved | 96.9 → 97.0, 97.1 | 95.9 → 93.9, 94.7 | 99.9 → 100, 99.98 | 100 → 100, 100 | 100 → 100, 100 |
+| collision | 97.5 → 96.7, 96.9 | 97.2 → 89.2, 89.4 | 99.6 → 99.6, 99.6 | 100 → 100, 100 | 100 → 100, 100 |
+| gyro-lost | 99.99 → 100, 100 | 99.99 → 38.3, 73.6 | 100 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
+| camera-low | 97.1 → 96.1, 96.2 | 96.2 → 92.2, 93.0 | 99.95 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
+| camera-turned | 96.9 → 96.1, 96.2 | 95.8 → 92.8, 93.6 | 99.95 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
+| camera-turned-4 | 95.6 → 94.9, 95.8 | 94.4 → 91.4, 93.3 | 99.8 → 99.95, 100 | 100 → 100, 100 | 100 → 100, 100 |
+| tag-moved | 96.9 → 96.2, 96.4 | 95.9 → 92.9, 93.8 | 99.9 → 100, 100 | 100 → 100, 100 | 100 → 100, 100 |
 
 Calibrating, scoring, and solving with the gyro's heading barely change: an honest position is
-sure within 1.4 to 2.5 cm, well inside 5 and 15 cm, and the heading's doubt stays under 5°.
+sure within 1.5 to 2.5 cm, well inside 5 and 15 cm, and the heading's doubt stays under 5°.
 Judging a mount is where honesty costs. It needs the position and heading together within the
 mount tolerance (5 cm) at the tag's distance, so the heading within about 0.95° at 3 m, and the
 gyro's scale allowance (`headingStdDevDegreesPerTurn`, 1° a turn) puts it past that after a turn
 or two, until a multi-tag heading brings it back: with (a), the mount check can judge a third of
 the turning run's loops and fewer than three in five of the gyro-scale procedure's. Every fix
-brings the heading's doubt back sooner (74% and 95%), partly by claiming more than it knows. The
-estimator before passed nearly always because it was sure of a heading up to 2° off. And after the
-procedure's five turns, (a)'s heading claims more than a placed robot's 2° for a quarter of the
-run. None of these gates is retuned here: a lower allowance once the gyro is calibrated, a
-judging distance, or a tolerance are the team's to choose with these numbers.
+brings the heading's doubt back sooner (74% and 95%), and honestly: its heading is 0.2° off on
+average over either run, against (a)'s 0.7° and 1.3°. The estimator before passed nearly always
+because it was sure of a heading up to 2° off. And after the procedure's five turns, (a)'s heading
+claims more than a placed robot's 2° for a quarter of the run. None of these gates is retuned
+here: a lower allowance once the gyro is calibrated, a judging distance, or a tolerance are the
+team's to choose with these numbers.
 
 ### What it proves, and what it doesn't
 
@@ -368,7 +431,10 @@ inch. Those are measured ([characterization](characterization.md)), and on a rob
 the same idea without the truth: a camera's normalized innovations (NIS), and the error at
 surveyed spots. A configured repeated error smaller than the real one shows here too: with
 `cameraShiftStdDevDegrees` at 1°, half what tags 1 cm off put in a heading, the gyro-scale run read
-a heading NEES of 2.05 and had 4.9% of its loops outside the ellipse.
+a heading NEES of 2.05 and had 4.9% of its loops outside the ellipse (with the images stamped up to
+a loop late). Nor can it prove the cameras' capture times: the simulated ones are exact, and a real
+camera's are only as good as its time sync, which `every` leans on while the robot turns ([the
+simulator's late stamps](#the-simulators-late-stamps)).
 
 ### Keeping it honest
 

@@ -18,9 +18,10 @@ include "pitwall"
 // Pitwall's documentation processor, which reads the configuration records' Javadoc as the robot program
 // compiles, so the page can say what each value means. A compiler plugin, so it's a project of its own.
 include "pitwall:docs-processor"
-// The libraries (lib/), each its own project only where that blocks a dependency: the world model (the
-// validation kit, the field, and the robot's definition), which reads nothing but WPILib's math; and
-// localization, which reads the world model and nothing of the robot program, the simulator, or Pitwall.
+// The libraries (lib/), each a project of its own only where that blocks a dependency. The world
+// model (the validation kit, the field, and the robot's definition) reads only WPILib's math, units,
+// and field layouts; localization reads the world model, and nothing of the robot program, the
+// simulator, or Pitwall.
 include "world"
 project(":world").projectDir = file("lib/world")
 include "localization"

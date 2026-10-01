@@ -16,13 +16,6 @@ class RobotConfigTest {
     assertThat(Robots.all()).extracting(RobotConfig::name).doesNotHaveDuplicates();
   }
 
-  @Test
-  void aRobotNeedsAName() {
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> RobotConfigBuilder.builder(Robots.SIM).name(" ").build())
-        .withMessageContaining("name");
-  }
-
   /**
    * The driver's top speed is how it's driven, the free speed what the robot is: the configuration
    * holds one to the other. The template's robot reaches 4.73 m/s free.

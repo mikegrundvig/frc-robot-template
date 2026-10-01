@@ -216,9 +216,9 @@ public final class Robots {
    */
   public static final RobotConfig SIM =
       RobotConfig.builder()
-          .name("sim")
           .definition(
               RobotDefinition.builder()
+                  .name("sim")
                   .body(BODY)
                   .drivetrain(DRIVETRAIN)
                   .cameras(CAMERAS)

@@ -164,26 +164,27 @@ The values that move the robot most, and are least known today:
 
 ### `RobotConfig`
 
-`frc.robot.RobotConfig`: one robot, in `Robots`. Its other values are records with sections of
-their own: what the robot is (its definition), and how this program drives it, wires it, and judges
-what its sensors say.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `name` | chosen | `sim` | none | Which robot this is, as its logs name it. One per robot; keep it. |
+`frc.robot.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
+what the robot is (its definition, which names it), and how this program drives it, wires it, and
+judges what its sensors say.
 
 ### `RobotDefinition`
 
-`com.michaelgrundvig.frc.world.robot.RobotDefinition`: what the robot is, read by localization, the simulator, and
-the views (`RobotConfig.definition`). Its values are records with sections of their own: the body,
-the drivetrain as built, the cameras, and the IMUs. It checks them against each other: the wheels
-inside the frame, every camera and IMU inside the robot. Mechanisms' joints join it with the first
-mechanism that describes one.
+`com.michaelgrundvig.frc.world.robot.RobotDefinition`: what the robot is, read by localization, the
+simulator, and the views (`RobotConfig.definition`). Its values are records with sections of their
+own: the body, the drivetrain as built, the cameras, and the IMUs. It checks them against each
+other: the wheels inside the frame, every camera and IMU inside the robot. Mechanisms' joints join
+it with the first mechanism that describes one.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | chosen | `sim` | none | Which robot this is, as its logs and its checks' messages name it (`RobotDefinition[sim].cameras: ...`). One per robot; keep it. |
 
 ### `Body`
 
-`com.michaelgrundvig.frc.world.robot.Body`: the frame, bumpers, and mass. Per robot, in `Robots`. The template's
-robot is the largest and heaviest the 2026 rules allowed, with the best case center of gravity.
+`com.michaelgrundvig.frc.world.robot.Body`: the frame, bumpers, and mass. Per robot, in `Robots`.
+The template's robot is the largest and heaviest the 2026 rules allowed, with the best case center
+of gravity.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -197,18 +198,18 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 
 ### `Imus`
 
-`com.michaelgrundvig.frc.world.robot.Imus`: the robot's IMUs, each where it's mounted (`RobotDefinition.imus`): the
-gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are mounts, with a section of
-their own.
+`com.michaelgrundvig.frc.world.robot.Imus`: the robot's IMUs, each where it's mounted
+(`RobotDefinition.imus`): the gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are
+mounts, with a section of their own.
 
 ### `ImuMount`
 
-`com.michaelgrundvig.frc.world.robot.ImuMount`: where an IMU sits, how it's turned, and whether its accelerometer
-has been checked to read along the robot's axes. Per IMU, in `Robots`. Localization compares the
-wheels' velocity with what the IMU feels where it sits (an IMU off the center is swung around it as
-the robot turns), the drivetrain's IO turns the IMU's own axes into the robot's by its orientation,
-and the simulator mounts its IMUs here. A new robot starts from `Imus.UNCHECKED`: both at the
-center, level, and unchecked.
+`com.michaelgrundvig.frc.world.robot.ImuMount`: where an IMU sits, how it's turned, and whether its
+accelerometer has been checked to read along the robot's axes. Per IMU, in `Robots`. Localization
+compares the wheels' velocity with what the IMU feels where it sits (an IMU off the center is swung
+around it as the robot turns), the drivetrain's IO turns the IMU's own axes into the robot's by its
+orientation, and the simulator mounts its IMUs here. A new robot starts from `Imus.UNCHECKED`: both
+at the center, level, and unchecked.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -222,8 +223,9 @@ center, level, and unchecked.
 
 ### `DrivetrainGeometry`
 
-`com.michaelgrundvig.frc.world.robot.DrivetrainGeometry`: the swerve drivetrain as built (`RobotDefinition.drivetrain`).
-Per robot, in `Robots`. How it's driven, its limits and gains, is [`DrivetrainControl`](#drivetraincontrol).
+`com.michaelgrundvig.frc.world.robot.DrivetrainGeometry`: the swerve drivetrain as built
+(`RobotDefinition.drivetrain`). Per robot, in `Robots`. How it's driven, its limits and gains, is
+[`DrivetrainControl`](#drivetraincontrol).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -245,10 +247,10 @@ through its gearing (`driveGearing`, `steerGearing`), with sections of their own
 
 ### `Motor`
 
-`com.michaelgrundvig.frc.world.robot.Motor`: a DC motor, as its datasheet gives it. The motors FRC robots commonly
-use are named presets (`Motor.KRAKEN_X60`), with WPILib's numbers (its `DCMotor`); any other is
-described from its datasheet (`Motor.fromDatasheet()`). The template's robot drives and steers with
-Kraken X60s; the starting values are its.
+`com.michaelgrundvig.frc.world.robot.Motor`: a DC motor, as its datasheet gives it. The motors FRC
+robots commonly use are named presets (`Motor.KRAKEN_X60`), with WPILib's numbers (its `DCMotor`);
+any other is described from its datasheet (`Motor.fromDatasheet()`). The template's robot drives and
+steers with Kraken X60s; the starting values are its.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -261,8 +263,9 @@ Kraken X60s; the starting values are its.
 
 ### `Gearing`
 
-`com.michaelgrundvig.frc.world.robot.Gearing`: what stands between a motor and what it turns. The template's
-drivetrain has two: the drive's, whose numbers are the starting values, and the steering's.
+`com.michaelgrundvig.frc.world.robot.Gearing`: what stands between a motor and what it turns. The
+template's drivetrain has two: the drive's, whose numbers are the starting values, and the
+steering's.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -271,10 +274,10 @@ drivetrain has two: the drive's, whose numbers are the starting values, and the 
 
 ### `Actuator.Motors`
 
-`com.michaelgrundvig.frc.world.robot.Actuator.Motors`: one or more identical motors driving one thing through one
-gearing. Its motor and gearing have sections of their own. The template's drivetrain derives one
-for each module's drive and steering (`DrivetrainGeometry.Modules.drive()`, `steer()`), which the
-simulator turns its wheels with.
+`com.michaelgrundvig.frc.world.robot.Actuator.Motors`: one or more identical motors driving one
+thing through one gearing. Its motor and gearing have sections of their own. The template's
+drivetrain derives one for each module's drive and steering (`DrivetrainGeometry.Modules.drive()`,
+`steer()`), which the simulator turns its wheels with.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -351,8 +354,8 @@ One module's devices.
 
 ### `CameraConfig`
 
-`com.michaelgrundvig.frc.world.robot.CameraConfig`: one camera on the robot. Per camera, in `Robots`. The
-template's four are a 2026 competition robot's, as that team's 2026 code gives them.
+`com.michaelgrundvig.frc.world.robot.CameraConfig`: one camera on the robot. Per camera, in
+`Robots`. The template's four are a 2026 competition robot's, as that team's 2026 code gives them.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -382,10 +385,10 @@ that use it. The simulator builds its cameras from it.
 
 ### `VisionConfig`
 
-`com.michaelgrundvig.frc.localization.VisionConfig`: which camera results are thrown out, and how far the rest
-are trusted. Per robot (`RobotConfig.vision`); every robot starts from `VisionConfig.DEFAULTS`. Five
-are tunable live. Each image's outcome, with the number that decided it, is in
-`Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
+`com.michaelgrundvig.frc.localization.VisionConfig`: which camera results are thrown out, and how
+far the rest are trusted. Per robot (`RobotConfig.vision`); every robot starts from
+`VisionConfig.DEFAULTS`. Five are tunable live. Each image's outcome, with the number that decided
+it, is in `Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -408,8 +411,8 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 
 ### `EstimatorConfig`
 
-`com.michaelgrundvig.frc.localization.EstimatorConfig`: how the pose estimator weighs odometry, the gyro, and
-the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
+`com.michaelgrundvig.frc.localization.EstimatorConfig`: how the pose estimator weighs odometry, the
+gyro, and the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
 `EstimatorConfig.DEFAULTS`, which the code calls starting points, not measurements.
 
 The estimator's uncertainty should match its error. In the simulator, the
@@ -465,10 +468,10 @@ together, the χ² gate's number): it should average 2 for a position, 3 with a 
 
 ### `LocalizationGate`
 
-`com.michaelgrundvig.frc.localization.LocalizationGate`: whether an estimate is good enough to score from;
-the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and `NotReadyBecause`
-in a match log: ready whenever the robot is lined up with tags in view, and never while the estimate
-is off.
+`com.michaelgrundvig.frc.localization.LocalizationGate`: whether an estimate is good enough to score
+from; the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and
+`NotReadyBecause` in a match log: ready whenever the robot is lined up with tags in view, and never
+while the estimate is off.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -479,19 +482,20 @@ is off.
 
 ### `SlipCheck.Settings`
 
-`com.michaelgrundvig.frc.localization.SlipCheck.Settings`: how closely the wheels must agree with the IMU
-before the estimate doubts them for sliding over the floor together, which their disagreement with
-each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be sliding counts as
-suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current limit isn't asked:
-at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the tread's 11.8 m/s²
-(`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain read as at its grip's
-edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500 loops with the wheels
-gripping. Doubting a quarter of the travel there made the estimate claim up to 65 cm through the
-hard driving (31 cm on average over those loops), and let a tag misread by 1.5 m through its gate.
-Check in a log of hard driving: `Localization/TurnApartDegrees` and `SlideMetersPerSecond` stay
-under their tolerances through clean launches, turns, and stops, and `TurnSlipMetersPerSecond` and
-`SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels spin in a launch, or the robot
-is pushed, with the cameras then finding the estimate off by about as much as it doubted.
+`com.michaelgrundvig.frc.localization.SlipCheck.Settings`: how closely the wheels must agree with
+the IMU before the estimate doubts them for sliding over the floor together, which their
+disagreement with each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be
+sliding counts as suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current
+limit isn't asked: at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the
+tread's 11.8 m/s² (`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain
+read as at its grip's edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500
+loops with the wheels gripping. Doubting a quarter of the travel there made the estimate claim up to
+65 cm through the hard driving (31 cm on average over those loops), and let a tag misread by 1.5 m
+through its gate. Check in a log of hard driving: `Localization/TurnApartDegrees` and
+`SlideMetersPerSecond` stay under their tolerances through clean launches, turns, and stops, and
+`TurnSlipMetersPerSecond` and `SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels
+spin in a launch, or the robot is pushed, with the cameras then finding the estimate off by about as
+much as it doubted.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -509,8 +513,8 @@ is pushed, with the cameras then finding the estimate off by about as much as it
 
 ### `ImuCrossCheck.Settings`
 
-`com.michaelgrundvig.frc.localization.ImuCrossCheck.Settings`: how closely the gyro and the backup IMU must
-agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. Check
+`com.michaelgrundvig.frc.localization.ImuCrossCheck.Settings`: how closely the gyro and the backup
+IMU must agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. Check
 `Localization/ImuDisagreementDegrees`: well inside the tolerance in normal driving, and over it only
 for a real fault.
 
@@ -522,10 +526,10 @@ for a real fault.
 
 ### `TerrainCrossing.Settings`
 
-`com.michaelgrundvig.frc.localization.TerrainCrossing.Settings`: what counts as climbing, level, and one
-feature; the robot uses `Settings.DEFAULTS`. Check them with a
-[terrain crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from
-the new field's ramps.
+`com.michaelgrundvig.frc.localization.TerrainCrossing.Settings`: what counts as climbing, level, and
+one feature; the robot uses `Settings.DEFAULTS`. Check them with a [terrain
+crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from the
+new field's ramps.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|

@@ -32,8 +32,9 @@ program's at `build/reports/jacoco/test/html/index.html` and each library's unde
 
 Test classes mirror the package of what they test, in the same project: the tests for the world
 model's `com.michaelgrundvig.frc.world.field.Zone` are in
-`lib/world/src/test/java/com/michaelgrundvig/frc/world/field/ZoneTest.java`. Pick the lowest level that can show the bug; the
-lower the level, the faster the test and the more exactly a failure says what broke.
+`lib/world/src/test/java/com/michaelgrundvig/frc/world/field/ZoneTest.java`. Pick the lowest level
+that can show the bug; the lower the level, the faster the test and the more exactly a failure says
+what broke.
 
 | Level | What it runs | Example to copy |
 |---|---|---|

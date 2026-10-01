@@ -84,6 +84,7 @@ public final class ConfigFixtures {
   /** The body and drivetrain above, with these cameras, and IMUs not yet measured. */
   public static RobotDefinition definition(List<CameraConfig> cameras) {
     return RobotDefinition.builder()
+        .name("test")
         .body(body())
         .drivetrain(drivetrain())
         .cameras(cameras)

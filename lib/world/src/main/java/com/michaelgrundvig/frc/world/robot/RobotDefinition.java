@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
+
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
@@ -19,6 +21,7 @@ import org.wpilib.math.geometry.Translation2d;
  * camera mounted inside the body. Mechanisms' joints, with what drives each, join the definition
  * with the first mechanism that describes one.
  *
+ * @param name which robot this is, as its logs and its checks' messages name it
  * @param body the frame, bumpers, and mass
  * @param drivetrain the swerve drivetrain, as built
  * @param cameras the AprilTag cameras
@@ -27,9 +30,10 @@ import org.wpilib.math.geometry.Translation2d;
  */
 @ConfigRecord
 public record RobotDefinition(
-    Body body, DrivetrainGeometry drivetrain, List<CameraConfig> cameras, Imus imus) {
+    String name, Body body, DrivetrainGeometry drivetrain, List<CameraConfig> cameras, Imus imus) {
   public RobotDefinition {
-    Checks.on(RobotDefinition.class)
+    Checks.on(RobotDefinition.class, name)
+        .field("name", name, notBlank())
         .field("cameras", cameras, RobotDefinition::sharedNames)
         .check("drivetrain.wheelInset", () -> drivetrain.whyWheelsDontFit(body))
         .check("cameras", () -> outside(cameras, body))
@@ -38,7 +42,7 @@ public record RobotDefinition(
   }
 
   /** Starts describing a robot, one named value at a time. */
-  public static RobotDefinitionBuilder.BodyStage builder() {
+  public static RobotDefinitionBuilder.NameStage builder() {
     return RobotDefinitionBuilder.builder();
   }
 

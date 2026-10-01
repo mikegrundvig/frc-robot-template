@@ -136,14 +136,14 @@ Also built in:
   In the simulator it serves only the laptop it runs on (`-Dpitwall.network=true` serves the
   network too, to open it on a phone), and it answers only requests addressed to the robot, so a
   web page open on a connected laptop can't use it.
-- **A field model** (in `lib/world`, filled in for 2026 in `Rebuilt.java`): the field's AprilTags and
-  symmetry, and the start positions, targets, and zones robot code refers to by name. Everything is
-  written once, for the blue alliance, and one tested transform gives red's; targets near tags are
-  derived from each alliance's own tags, so a layout measured at an event corrects both. The robot
-  waits on the start its Driver Station location picks (1, 2, 3: left, center, right), drives
-  field-relative from its own alliance's end, checks its placement before the match, and has
-  zone triggers that look ahead along its path. In the simulator, change the alliance station
-  while disabled to start somewhere else. At kickoff, write the new game's the same way.
+- **A field model** (in `lib/world`, filled in for 2026 in `Rebuilt.java`): the field's AprilTags
+  and symmetry, and the start positions, targets, and zones robot code refers to by name. Everything
+  is written once, for the blue alliance, and one tested transform gives red's; targets near tags
+  are derived from each alliance's own tags, so a layout measured at an event corrects both. The
+  robot waits on the start its Driver Station location picks (1, 2, 3: left, center, right), drives
+  field-relative from its own alliance's end, checks its placement before the match, and has zone
+  triggers that look ahead along its path. In the simulator, change the alliance station while
+  disabled to start somewhere else. At kickoff, write the new game's the same way.
 - **A pose estimator built to be trusted** (`lib/localization`): 250 Hz odometry, with the gyro
   owning heading and the wheels' disagreement (slip) lowering their trust; camera measurements
   applied at the moment their image was taken, even when they arrive late (up to 1.5 s, and

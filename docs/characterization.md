@@ -297,9 +297,9 @@ headings wrap at ±180°: count the whole turns.
 ## Tread friction
 
 **What it measures:** the tread's grip on carpet, new and worn: the coefficient of friction,
-`DrivetrainGeometry.Modules.wheelCoefficientOfFriction`. The simulator's grip comes from it, and with the
-center of gravity's height it sets where the wheels slip under acceleration, which the drive's
-current limit is chosen to stay under.
+`DrivetrainGeometry.Modules.wheelCoefficientOfFriction`. The simulator's grip comes from it, and
+with the center of gravity's height it sets where the wheels slip under acceleration, which the
+drive's current limit is chosen to stay under.
 
 **Equipment:**
 
@@ -339,10 +339,10 @@ near the scale while the robot is enabled, and the reading taken from the side o
 
 ## Feedforward
 
-**What it measures:** the drive's feedforward: `DrivetrainControl.Gains.driveKs`, the volts to overcome
-friction, and `driveKv`, the volts per meter per second. These belong to a drivetrain design
-(modules, gearing, tread): robots built alike share them, measured on one. Measure again when any
-of those changes.
+**What it measures:** the drive's feedforward: `DrivetrainControl.Gains.driveKs`, the volts to
+overcome friction, and `driveKv`, the volts per meter per second. These belong to a drivetrain
+design (modules, gearing, tread): robots built alike share them, measured on one. Measure again when
+any of those changes.
 
 **Equipment:** the robot, running its program on its Systemcore, and a long clear floor.
 
@@ -364,15 +364,16 @@ meter per second.
 
 - Logged in wheel rotations: divide its kV by the wheel's circumference in meters
   (`2π × wheelRadius`).
-- Logged in motor rotations: multiply by `driveGearing`'s ratio first, then divide by the circumference.
+- Logged in motor rotations: multiply by `driveGearing`'s ratio first, then divide by the
+  circumference.
 
 A 2026 drivetrain's 0.7237 V per wheel rotation per second, with a 0.049 m wheel radius, is
 `0.7237 / (2π × 0.049)` = 2.35 V per m/s.
 
 **Without SysId,** the template's own tools get close:
 
-- `driveKv` starts at `DrivetrainGeometry.Modules.idealDriveKv()`, the motor and gearing's ideal (what
-  the template's robot uses).
+- `driveKv` starts at `DrivetrainGeometry.Modules.idealDriveKv()`, the motor and gearing's ideal
+  (what the template's robot uses).
 - Then tune both live on the Pitwall page: with `driveKp` at zero, drive at a steady speed and
   compare each module's speed with its setpoint in AdvantageScope (`Drive/ModuleVelocities`
   against `Drive/SetpointsOptimized`). Raise kV until they match at speed; raise kS until slow

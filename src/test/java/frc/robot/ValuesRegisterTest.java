@@ -125,12 +125,13 @@ class ValuesRegisterTest {
         .doesNotHaveDuplicates();
     assertThat(record("RobotConfig").components())
         .contains(
-            new Component("name", null),
             new Component("definition", "RobotDefinition"),
             new Component("drivetrainWiring", "SwerveWiring")); // in an Optional
     assertThat(record("RobotDefinition").components())
         .contains(
-            new Component("body", "Body"), new Component("cameras", "CameraConfig")); // in a List
+            new Component("name", null),
+            new Component("body", "Body"),
+            new Component("cameras", "CameraConfig")); // in a List
     assertThat(record("SensorErrors").components())
         .contains(
             new Component("cameraMountErrors", null), // a map of transforms, no record

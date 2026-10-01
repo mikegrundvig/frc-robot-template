@@ -1,7 +1,5 @@
 package frc.robot;
 
-import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
-
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.world.config.Checks;
@@ -20,7 +18,6 @@ import java.util.Optional;
  * localization, the simulator, the views. The rest is how this program drives it, wires it, and
  * judges what its sensors say.
  *
- * @param name which robot this is, as the logs name it
  * @param definition what the robot is: its body, drivetrain, cameras, and IMUs, and where each is
  *     mounted
  * @param drivetrain how the drivetrain is driven: its limits and gains, tunable live
@@ -33,15 +30,13 @@ import java.util.Optional;
  */
 @ConfigRecord
 public record RobotConfig(
-    String name,
     RobotDefinition definition,
     DrivetrainControl drivetrain,
     Optional<SwerveWiring> drivetrainWiring,
     VisionConfig vision,
     EstimatorConfig estimator) {
   public RobotConfig {
-    Checks.on(RobotConfig.class, name)
-        .field("name", name, notBlank())
+    Checks.on(RobotConfig.class, definition.name())
         .check(
             "drivetrain.limits.maxLinearSpeed",
             () -> drivetrain.whyTooFastFor(definition.drivetrain()))
@@ -49,7 +44,12 @@ public record RobotConfig(
   }
 
   /** Starts building a robot's configuration, one named value at a time. */
-  public static RobotConfigBuilder.NameStage builder() {
+  public static RobotConfigBuilder.DefinitionStage builder() {
     return RobotConfigBuilder.builder();
+  }
+
+  /** Which robot this is, as its logs name it: its definition's name. */
+  public String name() {
+    return definition.name();
   }
 }

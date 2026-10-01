@@ -27,35 +27,34 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
 - **Physics simulation** (traction, collisions, game pieces, the robot as one rigid body):
   maple-sim. Until then, simulation tests the code, not the robot's traction or power. Power
-  includes the drive motors' supply current
-  limit: the simulator models neither it nor Phoenix's step-down from it
-  (`DrivetrainControl.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`), and its battery holds
-  12 V, so the supply current a simulated module reports is what its motor would draw with no supply
-  limit. At the template's 30 A stator limit that changes nothing: a drive motor draws under 30 A
-  from the battery, below both limits. Raise the stator limit past them, and the simulator lets a
-  motor draw more from the battery than its motor controller would. The simulator keeps the robot's true pose apart from
-  its sensors (`DriveSimulation`, `SensorErrors`), the drive and steering motors obey their stator
-  current limits, the steering's loop runs as a TalonFX's does (every millisecond, on the angle its
-  CANcoder sends every 10 ms), the robot rides over the field's bumps (tilted and raised by the
-  ground under its wheels), and faults can be made while it runs, from the Pitwall page, by name
-  (`frc.robot.sim.Scenarios`, `./gradlew run -Pscenario=<name>`), or in a test
-  (`frc.robot.sim.Faults`, listed in [simulator.md](simulator.md)): a slipping wheel, a push, a hit
-  the IMU feels, a gyro unplugged, frozen, or reset, a camera knocked off its mount, frozen, or
-  late, a module's encoders gone stale. Wheels still never slip on their own, and no one wheel can
-  leave the floor: `wheel-lifted` tilts the robot by hand (which holds over any bump for the rest of
-  the run) and scales every wheel's grip alike, so its wheels never disagree as a lifted one's
-  would, and the robot isn't raised. The steering has no friction: a wheel's scrub on the carpet
-  and its gearbox's drag need measuring on a real module first (`CurrentLimitedMotorSim` says where
-  they go). And it hears its CANcoder at the rate the code asks for
-  (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
+  includes the drive motors' supply current limit: the simulator models neither it nor Phoenix's
+  step-down from it (`DrivetrainControl.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`),
+  and its battery holds 12 V, so the supply current a simulated module reports is what its motor
+  would draw with no supply limit. At the template's 30 A stator limit that changes nothing: a drive
+  motor draws under 30 A from the battery, below both limits. Raise the stator limit past them, and
+  the simulator lets a motor draw more from the battery than its motor controller would. The
+  simulator keeps the robot's true pose apart from its sensors (`DriveSimulation`, `SensorErrors`),
+  the drive and steering motors obey their stator current limits, the steering's loop runs as a
+  TalonFX's does (every millisecond, on the angle its CANcoder sends every 10 ms), the robot rides
+  over the field's bumps (tilted and raised by the ground under its wheels), and faults can be made
+  while it runs, from the Pitwall page, by name (`frc.robot.sim.Scenarios`,
+  `./gradlew run -Pscenario=<name>`), or in a test (`frc.robot.sim.Faults`, listed in
+  [simulator.md](simulator.md)): a slipping wheel, a push, a hit the IMU feels, a gyro unplugged,
+  frozen, or reset, a camera knocked off its mount, frozen, or late, a module's encoders gone stale.
+  Wheels still never slip on their own, and no one wheel can leave the floor: `wheel-lifted` tilts
+  the robot by hand (which holds over any bump for the rest of the run) and scales every wheel's
+  grip alike, so its wheels never disagree as a lifted one's would, and the robot isn't raised. The
+  steering has no friction: a wheel's scrub on the carpet and its gearbox's drag need measuring on a
+  real module first (`CurrentLimitedMotorSim` says where they go). And it hears its CANcoder at the
+  rate the code asks for (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet
+  confirmed.
 
   The drive carries the robot's configured mass. Each drive motor turns its wheel's share of
-  `Body.mass` as inertia at the configured `DrivetrainGeometry.Modules.wheelRadius`, (m / 4) r², plus
-  the wheel's own moving parts (`DrivetrainGeometry.Modules.driveInertia`, an estimate: about 2%
-  more), so the
-  robot speeds up as F = m a, and a heavier robot in `Robots.java` is a slower one in the
-  simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is within
-  10% of full speed in under a second. What that leaves out:
+  `Body.mass` as inertia at the configured `DrivetrainGeometry.Modules.wheelRadius`, (m / 4) r²,
+  plus the wheel's own moving parts (`DrivetrainGeometry.Modules.driveInertia`, an estimate: about
+  2% more), so the robot speeds up as F = m a, and a heavier robot in `Robots.java` is a slower one
+  in the simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is
+  within 10% of full speed in under a second. What that leaves out:
 
   - **Traction:** the robot follows its wheels only as fast as the tread's grip lets it change
     course (`wheelCoefficientOfFriction` times g, 11.8 m/s² at the template's 1.2): past that, the

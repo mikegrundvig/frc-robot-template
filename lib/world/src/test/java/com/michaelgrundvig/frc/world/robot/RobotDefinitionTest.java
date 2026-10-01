@@ -29,7 +29,15 @@ class RobotDefinitionTest {
     assertThatIllegalArgumentException()
         .isThrownBy(
             () -> RobotDefinitionBuilder.builder(definition(List.of())).drivetrain(tooDeep).build())
-        .withMessageStartingWith("RobotDefinition.drivetrain.wheelInset");
+        .withMessageStartingWith("RobotDefinition[test].drivetrain.wheelInset");
+  }
+
+  /** A robot has a name, which every message about its definition starts with. */
+  @Test
+  void aRobotNeedsAName() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> RobotDefinitionBuilder.builder(definition(List.of())).name(" ").build())
+        .withMessageStartingWith("RobotDefinition[ ].name");
   }
 
   @Test

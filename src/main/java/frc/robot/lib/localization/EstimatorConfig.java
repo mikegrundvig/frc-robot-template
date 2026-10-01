@@ -58,6 +58,9 @@ import frc.robot.lib.config.ConfigRecord;
  *     the field's layout says (the field's tolerance, and how it was built)
  * @param cameraShiftStdDevDegrees and how far its headings may, beyond its turn: tags off the
  *     layout turn a multi-tag solve's heading by how far off they are over how far apart they sit
+ * @param headingCorrection what may correct the heading the gyro owns, beside measurements with a
+ *     heading of their own; three ways under comparison (docs/testing.md), {@link
+ *     HeadingCorrection#HEADING_MEASUREMENTS} until the team chooses
  * @param cameraShiftCorrelationMeters how far the robot moves before a camera's shift is mostly a
  *     new one: it sees other tags, or the same ones from elsewhere
  * @param cameraShiftCorrelationDegrees and how far it turns
@@ -108,6 +111,7 @@ public record EstimatorConfig(
     double cameraTurnStdDevDegrees,
     double cameraShiftStdDevMeters,
     double cameraShiftStdDevDegrees,
+    HeadingCorrection headingCorrection,
     double cameraShiftCorrelationMeters,
     double cameraShiftCorrelationDegrees,
     double historySeconds,
@@ -146,6 +150,7 @@ public record EstimatorConfig(
           .cameraTurnStdDevDegrees(0.25)
           .cameraShiftStdDevMeters(0.01)
           .cameraShiftStdDevDegrees(2.0)
+          .headingCorrection(HeadingCorrection.HEADING_MEASUREMENTS)
           .cameraShiftCorrelationMeters(1.0)
           .cameraShiftCorrelationDegrees(45)
           .historySeconds(1.5)
@@ -213,6 +218,31 @@ public record EstimatorConfig(
                         + shown(tiltStartDegrees)
                         + "): wheels stop counting above where they start to count less")
         .orThrow();
+  }
+
+  /**
+   * What corrects the heading beside the gyro. A camera's position solved with the gyro's heading
+   * leans on it, and so says something about the heading too; whether that's let correct the
+   * heading is the choice. Each is honest about its uncertainty; they differ in what they trust the
+   * cameras with.
+   */
+  public enum HeadingCorrection {
+    /**
+     * Only measurements with a heading of their own (multi-tag solves, under strict conditions): a
+     * position fix carries the heading's doubt but never turns it, so the gyro owns heading.
+     */
+    HEADING_MEASUREMENTS,
+    /**
+     * As {@link #HEADING_MEASUREMENTS}, and a camera the mount check doubts has that doubt added to
+     * the errors it repeats in every image (its turn and shift), so its headings can pull the
+     * heading only so far, however many there are.
+     */
+    HEADING_MEASUREMENTS_AND_MOUNT_DOUBT,
+    /**
+     * Every fix: a position fix corrects the heading too, through how far its tags are and how the
+     * position's error has come to depend on the heading's. A full Kalman update.
+     */
+    EVERY_FIX
   }
 
   /** Starts building estimator settings, one named value at a time. */

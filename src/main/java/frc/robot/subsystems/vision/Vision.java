@@ -408,6 +408,7 @@ public final class Vision implements AutoCloseable {
     for (Camera camera : cameras) {
       camera.read();
       camera.checkMount(current.mountToleranceMeters());
+      localizer.mountDoubt(camera.name(), camera.mountDoubtMeters(), camera.mountDistanceMeters());
       int next = 0;
       for (CameraIO.Frame frame : camera.inputs.frames) {
         int first = next;

@@ -62,6 +62,8 @@ public final class PoseEstimator implements CameraLocalizer {
   private final double headingVariancePerSecond;
   private final double headingNoiseVariancePerRadian;
   private final double wheelHeadingVariancePerRadian;
+  private final double turnVariance;
+  private final double shiftVariance;
   private final long historyNanos;
   private final long futureToleranceNanos;
   private final long visionTimeoutNanos;
@@ -78,6 +80,11 @@ public final class PoseEstimator implements CameraLocalizer {
 
   /** Each camera's place among the errors the filter keeps apart, by name, as cameras appear. */
   private final Map<String, Integer> cameraSlots = new HashMap<>();
+
+  /**
+   * Each camera's doubt about its mount, and the distance it was judged at, to apply next update.
+   */
+  private final Map<String, double[]> mountDoubts = new HashMap<>();
 
   /** The cameras that came after every place was taken, in the order they came. */
   private final Set<String> camerasWithoutPlaces = new LinkedHashSet<>();
@@ -145,6 +152,8 @@ public final class PoseEstimator implements CameraLocalizer {
     headingVariancePerSecond = square(Math.toRadians(config.headingDriftDegreesPerMinute())) / 60;
     headingNoiseVariancePerRadian =
         square(Math.toRadians(config.headingNoiseDegreesPerTurn())) / (2 * Math.PI);
+    turnVariance = square(Math.toRadians(config.cameraTurnStdDevDegrees()));
+    shiftVariance = square(config.cameraShiftStdDevMeters());
     wheelHeadingVariancePerRadian =
         square(Math.toRadians(config.wheelHeadingStdDevDegreesPerTurn())) / (2 * Math.PI);
     historyNanos = Timestamps.fromSeconds(config.historySeconds());
@@ -169,7 +178,8 @@ public final class PoseEstimator implements CameraLocalizer {
                 config.cameraShiftStdDevMeters(),
                 Math.toRadians(config.cameraShiftStdDevDegrees()),
                 config.cameraShiftCorrelationMeters(),
-                Math.toRadians(config.cameraShiftCorrelationDegrees())));
+                Math.toRadians(config.cameraShiftCorrelationDegrees())),
+            config.headingCorrection() == EstimatorConfig.HeadingCorrection.EVERY_FIX);
     filter.set(initial, yaw);
   }
 
@@ -266,6 +276,26 @@ public final class PoseEstimator implements CameraLocalizer {
   }
 
   /**
+   * A camera's doubt about its mount ({@link MountCheck}), as of now. With {@link
+   * EstimatorConfig.HeadingCorrection#HEADING_MEASUREMENTS_AND_MOUNT_DOUBT}, the next {@link
+   * #update} adds it to what the camera repeats in every image: the doubt to its shift, and the
+   * doubt over its tags' distance to its turn. Otherwise it's ignored here (the vision pipeline
+   * widens each image by it either way).
+   *
+   * <p>A doubt that comes after the camera's fixes counted is taken as new from then on: what the
+   * estimate already took from them stays as sure as it was, and what's left of the doubt holds the
+   * camera's later fixes off. Since the mount check judges over its latest few hundred tags, the
+   * doubt always comes a little after the knock.
+   */
+  @Override
+  public void mountDoubt(String camera, double doubtMeters, double distanceMeters) {
+    if (config.headingCorrection()
+        == EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT) {
+      mountDoubts.put(camera, new double[] {doubtMeters, distanceMeters});
+    }
+  }
+
+  /**
    * A landmark, to apply at the next {@link #update} at its time: an update along one axis, gated
    * like a camera's measurement, and kept apart from the cameras' counts, agreement, and recovery.
    */
@@ -322,6 +352,7 @@ public final class PoseEstimator implements CameraLocalizer {
       replay(usable, landmarks, decisions);
     }
     recoverIfTheCamerasAgree();
+    applyMountDoubts();
     if (started) {
       long cutoff = history.newestTime() - disagreementWindowNanos;
       agreements.removeIf(agreement -> agreement.time() < cutoff);
@@ -691,6 +722,29 @@ public final class PoseEstimator implements CameraLocalizer {
     recoveries++;
     consecutiveRejections = 0;
     recovery.clear();
+  }
+
+  /**
+   * Sets each doubted camera's turn and shift variances from its doubt, at the newest step, and
+   * keeps them there for a replay to start from. A replay from before restores the variances as
+   * they were then; each update sets them again.
+   */
+  private void applyMountDoubts() {
+    if (!started || mountDoubts.isEmpty()) {
+      return;
+    }
+    for (Map.Entry<String, double[]> doubt : mountDoubts.entrySet()) {
+      int slot = cameraSlot(doubt.getKey());
+      if (slot < 0) {
+        continue;
+      }
+      double meters = doubt.getValue()[0];
+      double distance = doubt.getValue()[1];
+      double turn = distance > 0 ? meters / distance : 0;
+      filter.setCameraVariances(slot, turnVariance + turn * turn, shiftVariance + meters * meters);
+    }
+    mountDoubts.clear();
+    history.store(history.size() - 1, filter);
   }
 
   /**

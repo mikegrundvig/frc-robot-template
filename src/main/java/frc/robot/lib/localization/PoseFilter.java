@@ -62,9 +62,10 @@ final class PoseFilter {
   static final int CONSIDERED = 2 + PER_CAMERA * MAX_CAMERAS;
 
   /**
-   * How many numbers the filter's uncertainty takes to store: the covariance, and its relations.
+   * How many numbers the filter's uncertainty takes to store: the covariance, its relations, and
+   * each camera's turn's and shift's variances.
    */
-  static final int UNCERTAINTY = 9 + 3 * CONSIDERED;
+  static final int UNCERTAINTY = 9 + 3 * CONSIDERED + 2 * MAX_CAMERAS;
 
   private static final int SCALE = 0;
   private static final int BACKUP_SCALE = 1;
@@ -97,6 +98,7 @@ final class PoseFilter {
   private final double backupScaleVariance;
   private final double turnVariance;
   private final double shiftVariance;
+  private final boolean fixesTurnHeading;
   private final double headingShiftVariance;
   private final double shiftMeters;
   private final double shiftRadians;
@@ -108,6 +110,14 @@ final class PoseFilter {
 
   /** How each of x, y, and the offset relates to each considered error: 3 by CONSIDERED. */
   private final double[] related = new double[3 * CONSIDERED];
+
+  /**
+   * Each camera's turn's variance, and its shift's along each axis: as considered, unless a doubt
+   * about its mount has raised them ({@link #setCameraVariances}).
+   */
+  private final double[] cameraTurnVariance = new double[MAX_CAMERAS];
+
+  private final double[] cameraShiftVariance = new double[MAX_CAMERAS];
 
   // Scratch space for a camera measurement, from its innovation to its correction: two rows for
   // its position, a third for its heading if it has one. Row-major, three columns each.
@@ -128,6 +138,16 @@ final class PoseFilter {
   private long innovations;
 
   PoseFilter(Considered considered) {
+    this(considered, false);
+  }
+
+  /**
+   * @param fixesTurnHeading whether a position fix also corrects the heading, through its lever and
+   *     how the position's error has come to relate to the heading's: a full Kalman update. False
+   *     leaves the heading to measurements with a heading of their own: the gyro owns it.
+   */
+  PoseFilter(Considered considered, boolean fixesTurnHeading) {
+    this.fixesTurnHeading = fixesTurnHeading;
     scaleVariance = square(considered.gyroScaleStdDev());
     backupScaleVariance = square(considered.backupScaleStdDev());
     turnVariance = square(considered.cameraTurnStdDevRadians());
@@ -135,6 +155,31 @@ final class PoseFilter {
     headingShiftVariance = square(considered.cameraShiftStdDevRadians());
     shiftMeters = considered.shiftCorrelationMeters();
     shiftRadians = considered.shiftCorrelationRadians();
+    Arrays.fill(cameraTurnVariance, turnVariance);
+    Arrays.fill(cameraShiftVariance, shiftVariance);
+  }
+
+  /**
+   * Sets one camera's turn's and shift's variances, from now on: raised by a doubt about its mount,
+   * or back down. A variance that falls takes the estimate's relation to the error down with it, in
+   * proportion, so the joint covariance stays positive semidefinite (its Schur complement is
+   * unchanged).
+   */
+  void setCameraVariances(int camera, double turn, double shift) {
+    scaleRelations(turnColumn(camera), turn, cameraTurnVariance[camera]);
+    scaleRelations(turnColumn(camera) + 1, shift, cameraShiftVariance[camera]);
+    scaleRelations(turnColumn(camera) + 2, shift, cameraShiftVariance[camera]);
+    cameraTurnVariance[camera] = turn;
+    cameraShiftVariance[camera] = shift;
+  }
+
+  private void scaleRelations(int column, double to, double from) {
+    if (to < from) {
+      double factor = from > 0 ? Math.sqrt(to / from) : 0;
+      for (int row = 0; row < 3; row++) {
+        related[row * CONSIDERED + column] *= factor;
+      }
+    }
   }
 
   /**
@@ -397,7 +442,7 @@ final class PoseFilter {
         for (int c = 0; c < PER_CAMERA; c++) {
           double hc = hCamera[i * PER_CAMERA + c];
           if (hc != 0) {
-            double own = ownVariance(c) * hCamera[j * PER_CAMERA + c];
+            double own = ownVariance(camera, c) * hCamera[j * PER_CAMERA + c];
             if (camera >= 0) {
               int k = turnColumn(camera) + c;
               own +=
@@ -452,7 +497,7 @@ final class PoseFilter {
         for (int k = 0; k < rows; k++) {
           sum += ph3[i * 3 + k] * sInverse3[k * 3 + j];
         }
-        gain[i * 3 + j] = i == 2 && rows == 2 ? 0 : sum;
+        gain[i * 3 + j] = i == 2 && rows == 2 && !fixesTurnHeading ? 0 : sum;
       }
     }
     return new Innovation(
@@ -525,7 +570,7 @@ final class PoseFilter {
                 + related[CONSIDERED + k] * h3[r * 3 + 1]
                 + related[2 * CONSIDERED + k] * h3[r * 3 + 2];
         if (ofThisCamera) {
-          sum += ownVariance(own) * hCamera[r * PER_CAMERA + own];
+          sum += ownVariance(measuredBy, own) * hCamera[r * PER_CAMERA + own];
         }
         column[r] = sum;
       }
@@ -604,6 +649,9 @@ final class PoseFilter {
   void copyUncertaintyTo(double[] into, int at) {
     System.arraycopy(covariance, 0, into, at, 9);
     System.arraycopy(related, 0, into, at + 9, related.length);
+    int cameras = at + 9 + related.length;
+    System.arraycopy(cameraTurnVariance, 0, into, cameras, MAX_CAMERAS);
+    System.arraycopy(cameraShiftVariance, 0, into, cameras + MAX_CAMERAS, MAX_CAMERAS);
   }
 
   void restore(double x, double y, double offset, double[] uncertainties, int at) {
@@ -612,6 +660,9 @@ final class PoseFilter {
     this.offset = offset;
     System.arraycopy(uncertainties, at, covariance, 0, 9);
     System.arraycopy(uncertainties, at + 9, related, 0, related.length);
+    int cameras = at + 9 + related.length;
+    System.arraycopy(uncertainties, cameras, cameraTurnVariance, 0, MAX_CAMERAS);
+    System.arraycopy(uncertainties, cameras + MAX_CAMERAS, cameraShiftVariance, 0, MAX_CAMERAS);
   }
 
   /** A camera's turn's column; its shift's x, y, and heading follow it. */
@@ -621,13 +672,13 @@ final class PoseFilter {
 
   /**
    * A camera's own considered variance: its turn's (0), its shift's along x (1) or y (2), or its
-   * headings' shift (3).
+   * headings' shift (3); a camera without a place has the considered ones.
    */
-  private double ownVariance(int which) {
+  private double ownVariance(int camera, int which) {
     return switch (which) {
-      case 0 -> turnVariance;
+      case 0 -> camera >= 0 ? cameraTurnVariance[camera] : turnVariance;
       case 3 -> headingShiftVariance;
-      default -> shiftVariance;
+      default -> camera >= 0 ? cameraShiftVariance[camera] : shiftVariance;
     };
   }
 

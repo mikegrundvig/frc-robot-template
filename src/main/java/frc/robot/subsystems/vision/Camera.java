@@ -45,6 +45,13 @@ final class Camera implements AutoCloseable {
   final TunableBoolean enabled = TunableBoolean.create(true);
 
   private long lastFrame = Long.MIN_VALUE;
+
+  /**
+   * When the latest image was taken that the estimator accepted from this camera, agreeing with the
+   * estimate closely: this camera holds the pose others are judged against.
+   */
+  private long lastAgreed = Long.MIN_VALUE;
+
   private int accepted;
   private int rejected;
   private double residualSum;
@@ -217,14 +224,14 @@ final class Camera implements AutoCloseable {
    * configured mount, and where the tag really is, if the field has it.
    *
    * @param robot where the robot was, raised and tilted as it was
-   * @param poseKnown whether that pose is known well enough to judge the camera's mount by
+   * @param judge whether that pose is known well enough to judge the camera's mount by
    */
-  void saw(Pose3d robot, Pose3d seen, @Nullable Pose3d real, boolean poseKnown) {
+  void saw(Pose3d robot, Pose3d seen, @Nullable Pose3d real, boolean judge) {
     seenTags.add(seen);
     if (real != null) {
       loopResidualSum += seen.getTranslation().getDistance(real.getTranslation());
       loopResidualCount++;
-      if (poseKnown) {
+      if (judge) {
         mount.add(robot, seen, real);
       }
     }
@@ -249,14 +256,21 @@ final class Camera implements AutoCloseable {
     }
   }
 
-  /** Counts and logs what the estimator decided about this camera's measurements. */
-  void record(List<VisionDecision> decisions) {
+  /**
+   * Counts and logs what the estimator decided about this camera's measurements.
+   *
+   * @param agreeMeters an accepted measurement this close to the estimate agrees with it
+   */
+  void record(List<VisionDecision> decisions, double agreeMeters) {
     List<String> reasons = new ArrayList<>();
     for (VisionDecision decision : decisions) {
       if (decision.measurement().camera().equals(name())) {
         reasons.add(decision.reason());
         if (decision.accepted()) {
           accepted++;
+          if (decision.innovationMeters() <= agreeMeters) {
+            lastAgreed = Math.max(lastAgreed, decision.measurement().timestampNanos());
+          }
         } else {
           rejected++;
         }
@@ -280,6 +294,14 @@ final class Camera implements AutoCloseable {
   /** How far off, on average, the camera's latest tags land: NaN until it has seen enough. */
   double mountOffsetMeters() {
     return mount.offsetMeters();
+  }
+
+  /**
+   * When the latest image was taken that the estimator accepted from this camera within the
+   * agreement it was given; none, the minimum.
+   */
+  long lastAgreedNanos() {
+    return lastAgreed;
   }
 
   boolean isConnected() {

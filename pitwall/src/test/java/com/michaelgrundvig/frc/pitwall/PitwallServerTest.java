@@ -189,7 +189,8 @@ class PitwallServerTest {
             "changes.js",
             "sim.js",
             "sim-drive.js",
-            "sim-faults.js");
+            "sim-faults.js",
+            "sim-outcome.js");
   }
 
   @Test

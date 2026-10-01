@@ -77,7 +77,7 @@ class RobotTest {
   }
 
   @Test
-  void anUnknownOrMissingStartIsARealRobots() {
+  void aStartIsReadByNameAndAnyOtherStartsAsARealRobot() {
     assertEquals(Robot.SimStart.DISABLED, Robot.SimStart.named(null));
     assertEquals(Robot.SimStart.DISABLED, Robot.SimStart.named("sideways"));
     assertEquals(Robot.SimStart.READY, Robot.SimStart.named("ready"));

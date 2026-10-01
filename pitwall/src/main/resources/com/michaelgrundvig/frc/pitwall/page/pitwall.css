@@ -62,7 +62,7 @@
 @media (pointer: coarse) { :root { --row: 44px; } }
 /* On a touch screen, everything pressed is at least 44 px tall: a finger, standing, one hand. */
 @media (pointer: coarse) {
-  button, input, select, summary, .chip, .tab, .mode, .uncommitted { min-height: 44px; }
+  button, input, select, summary, .chip, .tab, .mode, .uncommitted, .pill.driving { min-height: 44px; }
   button.link { min-height: 44px; }
   .switch { min-height: 44px; }
 }
@@ -534,8 +534,8 @@ table { border-collapse: collapse; }
 .faults { margin-top: var(--s4); }
 .onbar .acts { justify-content: space-between; }
 .onnow { flex: 1 1 260px; }
-.onword { color: var(--warn); }
-.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px;
+.onword { color: var(--tuned); }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 0 14px;
          align-items: start; }
 @media (max-width: 719px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }
 .fcard > summary { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; align-items: center;
@@ -548,28 +548,28 @@ table { border-collapse: collapse; }
 .fault { position: relative; padding: 10px 0 10px 14px; border-top: 1px solid var(--line); }
 .fault::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px;
                  border-radius: 2px; background: transparent; }
-.fault.on::before { background: var(--warn); }
+.fault.on::before { background: var(--tuned); }
 .fhead { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); align-items: center; }
 .fault .does { font-size: 14px; color: var(--text-2); margin: 2px 0 6px; }
-.fvalues { font-size: 14px; color: var(--warn); font-weight: 600; margin: 0 0 6px; }
+.fvalues { font-size: 14px; color: var(--tuned); font-weight: 600; margin: 0 0 6px; }
 .params { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin: 0 0 var(--s2); }
 .param { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
 .pval { width: 5.5em; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
 .param .unit { min-width: 0; }
 .param .lim { font-size: 12px; color: var(--muted); }
 .fault .acts .meta { flex: 1 1 200px; }
-.tag.on { color: var(--warn); background: var(--warn-tint); }
+.tag.on { color: var(--tuned); background: var(--tuned-tint); }
 /* The scenarios, side by side on a laptop: each its name and Apply, what it does, and its faults,
    those on marked as a fault on is. */
-.scens { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 var(--s5); }
+.scens { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 0 var(--s5); }
 .scen { position: relative; padding: 10px 0 10px 14px; border-top: 1px solid var(--line); }
 .scen::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px;
                 border-radius: 2px; background: transparent; }
-.scen.on::before { background: var(--warn); }
+.scen.on::before { background: var(--tuned); }
 .scen .grow { flex: 1 1 auto; overflow-wrap: anywhere; }
 .scen .does { font-size: 14px; color: var(--text-2); margin: 2px 0; }
 .sfaults { margin: 0; font-size: var(--meta); color: var(--muted); }
-.sfaults .son { color: var(--warn); font-weight: 600; }
+.sfaults .son { color: var(--tuned); font-weight: 600; }
 
 dialog { border: 1px solid var(--line-strong); border-radius: 12px; padding: 0; background: var(--surface); color: var(--text);
          box-shadow: var(--shadow); max-width: min(560px, calc(100vw - 32px)); }

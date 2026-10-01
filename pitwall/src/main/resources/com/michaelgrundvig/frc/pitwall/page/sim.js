@@ -12,19 +12,19 @@
 // view shows it as the simulator answers. A paused simulator runs no loops, so it sends nothing
 // new: a page opened while it's paused gets no snapshot, and asks the simulator directly instead.
 //
-// Esc disables the robot here, and from any view while the keys drive it (outside a field, where
-// Esc drops what was typed). Elsewhere Esc keeps its meaning: it stops a run or an action, and
-// with nothing running drops a value's edit. Disabling there would turn "stop this run" into "stop
-// it and enable again", since a run needs the robot enabled.
+// Esc disables the robot in Sim, always, even in a field; and from any other view while this page
+// drives it (the keyboard or a gamepad), outside a field, where Esc drops what was typed.
+// Elsewhere Esc keeps its meaning: it stops a run or an action, and with nothing running drops a
+// value's edit. Disabling there would turn "stop this run" into "stop it and enable again", since
+// a run needs the robot enabled.
 
 import {
-  robot, onChange, onConnection, send, h, replace, announce, confirm, typing, stopping, shown,
+  robot, onChange, onConnection, send, h, replace, announce, say, confirm, typing, stopping, shown,
 } from "./core.js";
 import { showDriving } from "./bar.js";
 import * as drive from "./sim-drive.js";
-import {
-  makeFaults, renderFaults, renderScenarios, lockFaults, loopRan,
-} from "./sim-faults.js";
+import { makeFaults, renderFaults, renderScenarios, lockFaults } from "./sim-faults.js";
+import { note, outcome, loopRan } from "./sim-outcome.js";
 
 /** The sections of the robot's state this view reads. */
 const READS = ["simulator", "components", "scenarios"];
@@ -33,7 +33,10 @@ const MODES = [["AUTONOMOUS", "Autonomous"], ["TELEOPERATED", "Teleoperated"],
   ["UTILITY", "Utility"]];
 const STATIONS = ["RED_1", "RED_2", "RED_3", "BLUE_1", "BLUE_2", "BLUE_3"];
 
-/** The longest match time the simulator takes, in seconds: room for any match period. */
+/**
+ * The longest match time the simulator takes, in seconds: room for any match period. The server's
+ * is PitwallServer's MAX_MATCH_SECONDS, which decides; this only checks before sending.
+ */
 const MAX_MATCH_SECONDS = 600;
 
 let visible = false;
@@ -44,8 +47,8 @@ let visible = false;
 let fallback = null;
 let lastEnabled = null;
 let hiddenAt = 0; // when the tab was last hidden while this page drove, for the note on return
-let asked = false; // a request here waits for the robot's next loop, and says so
 let driveStatus = drive.status();
+let drawnDrive = ""; // what renderDrive last drew, beside the joysticks' axes
 const ui = {};
 
 function mount(view) {
@@ -72,11 +75,10 @@ function mount(view) {
     h("div", { class: "sim" },
       h("div", null, stationCard(), timeCard()),
       h("div", null, driveCard())),
-    makeFaults());
+    makeFaults({ state, paused: isPaused }));
   onChange((patch, snapshot) => {
     if (snapshot) fallback = null;
     // Anything from the robot means a loop ran: what waited for one is done.
-    if (asked) loopRanHere();
     loopRan();
     // Only what it reads: the status and the values change often, and say nothing here.
     if (!snapshot && !READS.some((section) => section in patch)) return;
@@ -110,9 +112,13 @@ function hide() {
   visible = false;
 }
 
-/** Offered in the simulator, and before any snapshot once the simulator has answered. */
+/**
+ * Offered where the robot is simulated and has the simulator's controls, and before any snapshot
+ * once a paused simulator has answered.
+ */
 function offered() {
-  return Boolean(robot.doc ? robot.doc.robot.simulated : fallback);
+  const doc = robot.doc;
+  return Boolean(doc ? doc.robot.simulated && doc.simulator : fallback);
 }
 
 // ---- The state ----
@@ -127,6 +133,10 @@ function sim() {
   return now ? now.simulator : null;
 }
 
+function isPaused() {
+  return Boolean(sim() && sim().paused);
+}
+
 /** Whether anything here can be asked of the simulator now. */
 function canAct() {
   return !robot.stopped && state() !== null
@@ -135,13 +145,15 @@ function canAct() {
 
 /**
  * A page opened while the simulator is paused gets no snapshot: after a second and a half without
- * one, it asks the simulator, which answers at once while paused.
+ * one, it asks the simulator, which answers at once while paused. Only a paused simulator's answer
+ * stands in for a snapshot: anything else (a slow loop, a robot) waits for the stream.
  */
 function askSoon() {
   setTimeout(async () => {
     if (robot.doc) return;
     const result = await send("GET", "/api/simulator");
-    if (robot.doc || !result.ok || !result.body || !result.body.simulator) return;
+    const answer = result.ok && result.body ? result.body.simulator : null;
+    if (robot.doc || !answer || answer.paused !== true || !("enabled" in answer)) return;
     fallback = result.body;
     document.dispatchEvent(new Event("pitwall-offered"));
     if (visible) renderAll();
@@ -178,8 +190,8 @@ function capital(text) {
 // ---- Requests ----
 
 /**
- * Changes the Driver Station or the clock, saying what became of it where it was asked: a refusal
- * in the simulator's words, or that a paused simulator waits for a step.
+ * Changes the Driver Station or the clock, saying what became of it where it was asked (see
+ * sim-outcome.js).
  */
 async function patch(body, message) {
   const result = await send("PATCH", "/api/simulator", body);
@@ -188,34 +200,11 @@ async function patch(body, message) {
 }
 
 function answered(result, message) {
-  if (result.ok && result.status === 202) {
-    note(message, "Asked: it applies with the next loop. The simulator is paused: Step or Resume.");
-    message.dataset.asked = "true";
-    asked = true;
-  } else if (result.ok) {
-    note(message, "");
-    if (fallback && !robot.doc && result.body && "enabled" in result.body) {
-      fallback.simulator = result.body; // no stream to say so until a loop runs
-      renderAll();
-    }
-  } else {
-    const why = result.problem.detail || result.problem.title;
-    note(message, "✗ " + why, true);
-    announce("Refused: " + why);
-  }
-}
-
-function note(message, text, bad = false) {
-  delete message.dataset.asked;
-  message.hidden = !text;
-  message.textContent = text;
-  message.className = "message" + (bad ? " bad" : "");
-}
-
-function loopRanHere() {
-  asked = false;
-  for (const message of [ui.dsMessage, ui.timeMessage]) {
-    if (message.dataset.asked) note(message, "");
+  outcome(message, result, { paused: isPaused() });
+  if (result.ok && result.status === 200 && fallback && !robot.doc && result.body
+      && "enabled" in result.body) {
+    fallback.simulator = result.body; // no stream to say so until a loop runs
+    renderAll();
   }
 }
 
@@ -225,18 +214,23 @@ async function enable() {
   await patch({ enabled: true }, ui.dsMessage);
 }
 
+/** Disables the robot. Failing to is said loudly, wherever it was asked from. */
 async function disable() {
-  await patch({ enabled: false }, ui.dsMessage);
+  const result = await patch({ enabled: false }, ui.dsMessage);
+  if (!result.ok) {
+    say("The simulator didn't disable: " + (result.problem.detail || result.problem.title), true,
+      true);
+  }
 }
 
-/** Esc disables, here, or anywhere while the keys drive (outside a field). */
+/** Esc disables: in Sim always, and anywhere while this page drives, outside a field. */
 function escape(event) {
   if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) {
     return;
   }
   const now = sim();
   if (!now || !now.enabled) return; // nothing to disable: Esc keeps its other meanings
-  const driving = driveStatus.keyboard.on && !typing(event.target);
+  const driving = driveStatus.inputs.some(Boolean) && !typing(event.target);
   if (!visible && !driving) return;
   event.preventDefault();
   disable();
@@ -314,17 +308,22 @@ async function setField(on) {
       h("p", null, "As at an event, tuning, actions, and experiments lock, and "
           + (tuned.length === 1 ? "this tuned value goes" : "these " + tuned.length
             + " tuned values go") + " back to committed:"),
-      h("ul", null, tuned.map((path) => {
-        const value = doc.tunables[path];
-        return h("li", null, value ? value.config + " " + value.field + ": "
-            + shown(doc.values[path]) + " → " + shown(value.committed) : path);
-      })),
+      tunedList(doc, tuned),
       h("p", { class: "meta" }, "What was tuned is printed to the log, and this session's history "
           + "keeps it: Restore, in Changes, stages it again."),
     ], "Attach the field");
     if (!yes) return;
   }
   await patch({ fmsAttached: on }, ui.dsMessage);
+}
+
+/** Tuned values as a list: each by its configuration and path, now and committed. */
+function tunedList(doc, paths) {
+  return h("ul", null, paths.map((path) => {
+    const value = doc.tunables[path];
+    return h("li", null, value ? value.config + " " + value.field + ": " + shown(doc.values[path])
+        + " → " + shown(value.committed) : path);
+  }));
 }
 
 async function setMatchTime() {
@@ -451,14 +450,20 @@ async function step() {
 
 /** Stops the simulator, after asking: it ends the robot program, and what wasn't committed. */
 async function stop() {
-  const tuned = robot.doc ? Object.keys(robot.doc.changes || {}).length : 0;
+  const doc = robot.doc;
+  const tuned = doc ? Object.keys(doc.changes || {}) : [];
   const yes = await confirm("Stop the simulator?", [
     h("p", null, "The robot program ends, as closing WPILib's simulator window did. AdvantageKit's "
         + "log keeps its last loops. Start it again with ./gradlew run; this page reconnects by "
         + "itself."),
-    tuned > 0 && h("p", { class: "message bad" }, "● " + tuned + (tuned === 1
-      ? " tuned value isn't" : " tuned values aren't") + " committed, and ends with the program: "
-        + "Changes has the lines to commit."),
+    tuned.length > 0 && [
+      h("p", { class: "message bad" }, "● " + (tuned.length === 1 ? "This tuned value isn't"
+        : "These " + tuned.length + " tuned values aren't") + " committed, and "
+          + (tuned.length === 1 ? "ends" : "end") + " with the program:"),
+      tunedList(doc, tuned),
+      h("p", { class: "meta" }, "Changes has the lines that commit "
+          + (tuned.length === 1 ? "it." : "them.")),
+    ],
   ], "Stop the simulator");
   if (!yes) return;
   stopping(); // its stream ending is the program ending, not a lost link
@@ -525,22 +530,32 @@ function makeJoystick(port) {
   return parts;
 }
 
+/**
+ * The driving card. A gamepad changes it every frame, but only its joysticks' axes and buttons:
+ * the rest is drawn only when it changed.
+ */
 function renderDrive() {
   const status = driveStatus;
-  ui.keys.el.setAttribute("aria-checked", String(status.keyboard.on));
-  ui.keys.state.textContent = status.keyboard.on ? " · on" : " · off";
-  ui.keyState.className = "state" + (status.keyboard.on && status.keyboard.paused ? " paused" : "");
-  ui.keyState.textContent = keyText(status);
-  ui.pad.el.setAttribute("aria-checked", String(status.gamepad.on));
-  ui.pad.state.textContent = status.gamepad.on ? " · on" : " · off";
-  replace(ui.padState, padText(status));
-  for (const [slot, button] of ui.slot.buttons) {
-    button.setAttribute("aria-pressed", String(status.gamepad.slot === slot));
+  const key = JSON.stringify([status.keyboard, status.gamepad, status.hidden, status.problem,
+    hiddenAt]);
+  if (key !== drawnDrive) {
+    drawnDrive = key;
+    ui.keys.el.setAttribute("aria-checked", String(status.keyboard.on));
+    ui.keys.state.textContent = status.keyboard.on ? " · on" : " · off";
+    ui.keyState.className = "state"
+        + (status.keyboard.on && status.keyboard.paused ? " paused" : "");
+    ui.keyState.textContent = keyText(status);
+    ui.pad.el.setAttribute("aria-checked", String(status.gamepad.on));
+    ui.pad.state.textContent = status.gamepad.on ? " · on" : " · off";
+    replace(ui.padState, padText(status));
+    for (const [slot, button] of ui.slot.buttons) {
+      button.setAttribute("aria-pressed", String(status.gamepad.slot === slot));
+    }
+    ui.hiddenNote.hidden = status.hidden || hiddenAt === 0
+        || !(status.keyboard.on || status.gamepad.on);
+    ui.driveMessage.hidden = !status.problem;
+    ui.driveMessage.textContent = status.problem ? "✗ " + status.problem : "";
   }
-  ui.hiddenNote.hidden = status.hidden || hiddenAt === 0
-      || !(status.keyboard.on || status.gamepad.on);
-  ui.driveMessage.hidden = !status.problem;
-  ui.driveMessage.textContent = status.problem ? "✗ " + status.problem : "";
   renderJoysticks();
 }
 
@@ -551,7 +566,8 @@ function keyText(status) {
     case "window": return "Paused: this window doesn't have the keyboard. Click the page to drive.";
     case "field": return "Paused: the focus is in a field, so keys type there. Click outside it "
         + "to drive.";
-    default: return "Driving joystick 0: hold the keys below. Esc disables the robot.";
+    default: return "Driving joystick 0: hold the keys below. Esc disables the robot, from any "
+        + "view.";
   }
 }
 
@@ -581,24 +597,38 @@ function renderJoysticks() {
   for (const [port, parts] of ui.joysticks.entries()) {
     const input = driveStatus.inputs[port];
     const fromServer = now && now.joysticks ? now.joysticks[String(port)] : null;
+    // Another page's input was the latest the robot took: two pages drive this joystick.
+    const another = Boolean(canAct() && fromServer && fromServer.fromPage && fromServer.stream
+        && fromServer.stream !== robot.stream);
     const sources = [port === 0 && driveStatus.keyboard.on && "the keyboard",
       driveStatus.gamepad.on && driveStatus.gamepad.pads.some((pad) => pad.drives === port)
         && "a gamepad"].filter(Boolean);
-    parts.source.textContent = input ? "· from " + sources.join(" and ") : "";
+    const source = input ? "· from " + sources.join(" and ") : "";
+    if (parts.source.textContent !== source) parts.source.textContent = source;
     parts.axesEl.hidden = !input;
     parts.pressed.hidden = !input;
     parts.el.classList.toggle("idle", !input);
-    parts.flag.className = "meta";
-    if (input && fromServer && fromServer.centeredByDeadman) {
-      parts.flag.className = "message bad";
-      parts.flag.textContent = "✗ Centered by the robot: it heard nothing from this page for half "
-          + "a second (the deadman). It drives again with the next input.";
+    let flag;
+    let bad = false;
+    if (input && another) {
+      bad = true;
+      flag = "✗ Another Pitwall page drives this joystick too: the robot takes whichever input "
+          + "came last. Switch driving off in one of them.";
+    } else if (input && fromServer && fromServer.centeredByDeadman) {
+      bad = true;
+      flag = "✗ Centered by the robot: it heard nothing from this page for half a second (the "
+          + "deadman). It drives again with the next input.";
     } else if (input) {
-      parts.flag.textContent = "";
+      flag = "";
+    } else if (another) {
+      flag = "Driven from another Pitwall page.";
     } else {
-      parts.flag.textContent = canAct() && fromServer && fromServer.fromPage
-        ? "Driven from another Pitwall page."
-        : "Not driven from this page: a Driver Station or WPILib's simulator window may drive it.";
+      flag = "Not driven from this page: a Driver Station or WPILib's simulator window may drive "
+          + "it.";
+    }
+    if (parts.flag.textContent !== flag) {
+      parts.flag.className = bad ? "message bad" : "meta";
+      parts.flag.textContent = flag;
     }
     if (!input) continue;
     input.axes.forEach((value, axis) => {

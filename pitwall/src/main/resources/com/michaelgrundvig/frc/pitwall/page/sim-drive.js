@@ -12,7 +12,9 @@
 // Keys reach only a focused page, so keyboard driving pauses, centered, whenever the focus is in a
 // field (typing "w" into a value never drives), the window loses the keyboard, or the tab is
 // hidden. A hidden tab can't be trusted to read a gamepad either (browsers throttle it), so the
-// page polls gamepads only while it's visible, and centers its joysticks when it's hidden.
+// page polls gamepads only while it's visible, and centers its joysticks when it's hidden. Nothing
+// here listens to anything until driving is first switched on, which only Sim, in the simulator,
+// can do: on a robot it never runs.
 
 import { robot, api, onConnection, typing } from "./core.js";
 
@@ -28,8 +30,17 @@ export const BUTTON_NAMES = ["Face down", "Face right", "Face left", "Face up", 
 const AXES = 6;
 const BUTTONS = 26;
 
-/** How often input that isn't centered is sent again: well inside the robot's 500 ms. */
+/** How often each joystick's input that isn't centered is sent again: well inside 500 ms. */
 const REPEAT_MS = 200;
+
+/** How soon input the robot didn't answer is sent again. */
+const RETRY_MS = 100;
+
+/**
+ * Keys that can swallow another key's release: on macOS a key let go while Cmd is down never says
+ * so, and Alt can take the keyboard to a menu. Pressed or let go, every key counts as released.
+ */
+const MODIFIERS = new Set(["Meta", "Alt", "OS"]);
 
 /**
  * The keyboard's one layout, for this template's driving, by physical key (KeyboardEvent.code, so
@@ -68,21 +79,26 @@ const keyboard = { on: false, held: new Set() };
 const gamepad = { on: false, pads: [] };
 const listeners = [];
 let slot = storedSlot();
-let hidden = document.visibilityState === "hidden";
-let focused = document.hasFocus();
-let inField = typing(document.activeElement);
+let armed = false;
+let hidden = false;
+let focused = true;
+let inField = false;
 
-// What was sent, per joystick: its input as JSON, or null; and whether this page drives it.
+// Each joystick: what was sent (its input as JSON, or null), when (its own repeat clock), and
+// whether this page drives it now, as the robot last heard.
 const sent = [null, null];
+const sentAt = [0, 0];
 const claimed = [false, false];
 let sentStream = "";
-let lastSentAt = 0;
 let inFlight = false;
 let again = false;
+let retrying = 0;
+let repeating = 0;
 let framePending = false;
 let polling = 0;
 let problem = null;
 let inputs = [null, null];
+let told = "";
 
 /** Calls {@code listener(status)} whenever what this page drives, or how, changes. */
 export function onDrive(listener) {
@@ -93,7 +109,8 @@ export function onDrive(listener) {
  * What this page drives now: {keyboard: {on, paused}, gamepad: {on, slot, pads: [{id, standard,
  * drives}]}, hidden, inputs: [input or null, for joystick 0 and 1], problem}. {@code paused} says
  * why the keys don't drive now ("field", "window", "hidden"), or is null; a gamepad {@code drives}
- * joystick 0 or 1, or null when it can't drive.
+ * joystick 0 or 1, or null when it can't drive. A joystick's input isn't null while this page
+ * drives it.
  */
 export function status() {
   return {
@@ -108,6 +125,7 @@ export function status() {
 
 /** Switches keyboard driving on or off. Off lets the joystick go, for anything else to drive. */
 export function setKeyboard(on) {
+  arm();
   keyboard.on = on;
   keyboard.held.clear();
   update();
@@ -115,7 +133,9 @@ export function setKeyboard(on) {
 
 /** Switches gamepad driving on or off. */
 export function setGamepad(on) {
+  arm();
   gamepad.on = on;
+  if (on && !hidden) readPads();
   if (!on) gamepad.pads = [];
   poll();
   update();
@@ -158,34 +178,64 @@ function paused() {
   return null;
 }
 
+/** Starts listening, the first time driving is switched on: the page as it is now, then changes. */
+function arm() {
+  if (armed) return;
+  armed = true;
+  hidden = document.visibilityState === "hidden";
+  focused = document.hasFocus();
+  inField = typing(document.activeElement);
+  document.addEventListener("keydown", keyDown);
+  document.addEventListener("keyup", keyUp);
+  document.addEventListener("contextmenu", letGo);
+  // Focus in a field pauses the keys, and so does the window losing the keyboard: a key released
+  // meanwhile is never heard, so they all count as released, and the joystick is centered.
+  document.addEventListener("focusin", (event) => pause(() => (inField = typing(event.target))));
+  document.addEventListener("focusout", () => pause(() => (inField = false)));
+  window.addEventListener("blur", () => pause(() => (focused = false)));
+  window.addEventListener("focus", () => pause(() => (focused = true)));
+  document.addEventListener("visibilitychange", () => {
+    const nowHidden = document.visibilityState === "hidden";
+    // Back in view, the gamepads are read afresh first: what was read before is stale.
+    if (!nowHidden && gamepad.on) readPads();
+    pause(() => (hidden = nowHidden));
+    poll();
+  });
+  // A link back sends everything again, to the new stream; a link lost sends nothing until then.
+  onConnection((connected) => {
+    if (connected) transmit();
+  });
+}
+
 // ---- Keys ----
 
-document.addEventListener("keydown", (event) => {
+function keyDown(event) {
+  if (MODIFIERS.has(event.key) || event.metaKey) {
+    letGo();
+    return;
+  }
   const key = KEYS[event.code];
-  if (!keyboard.on || !key || event.ctrlKey || event.metaKey || event.altKey
-      || typing(event.target) || document.querySelector("dialog[open]")) {
+  if (!keyboard.on || !key || event.ctrlKey || event.altKey || typing(event.target)
+      || document.querySelector("dialog[open]")) {
     return;
   }
   event.preventDefault(); // the arrows don't scroll the page while they drive
   if (paused() || keyboard.held.has(event.code)) return;
   keyboard.held.add(event.code);
   soon();
-});
+}
 
-document.addEventListener("keyup", (event) => {
-  if (keyboard.held.delete(event.code)) soon();
-});
+function keyUp(event) {
+  if (MODIFIERS.has(event.key)) letGo();
+  else if (keyboard.held.delete(event.code)) soon();
+}
 
-// Focus in a field pauses the keys, and so does the window losing the keyboard: a key released
-// meanwhile is never heard, so they all count as released, and the joystick is centered.
-document.addEventListener("focusin", (event) => pause(() => (inField = typing(event.target))));
-document.addEventListener("focusout", () => pause(() => (inField = false)));
-window.addEventListener("blur", () => pause(() => (focused = false)));
-window.addEventListener("focus", () => pause(() => (focused = true)));
-document.addEventListener("visibilitychange", () => {
-  pause(() => (hidden = document.visibilityState === "hidden"));
-  poll();
-});
+/** Every key counts as released: one may have been let go unheard. Pressed again, it drives. */
+function letGo() {
+  if (keyboard.held.size === 0) return;
+  keyboard.held.clear();
+  soon();
+}
 
 function pause(change) {
   const before = paused();
@@ -242,7 +292,7 @@ function centered() {
   return { axes: new Array(AXES).fill(0), buttons: new Array(BUTTONS).fill(false), povs: [-1] };
 }
 
-/** An axis as a Driver Station sends it, in steps of 1/127: a stick at rest stops twitching. */
+/** An axis as a Driver Station sends it: in steps of 1/127. */
 function level(value) {
   return Math.round(Math.max(-1, Math.min(1, value)) * 127) / 127;
 }
@@ -258,11 +308,11 @@ function keyInput() {
 }
 
 /** Two inputs on one joystick: an axis the keys move, else the gamepad's; a button either's. */
-function merge(into, input) {
+function combine(into, input) {
   if (!into) return input;
   return {
     axes: into.axes.map((value, axis) => (value !== 0 ? value : input.axes[axis])),
-    buttons: into.buttons.map((pressed, button) => pressed || input.buttons[button]),
+    buttons: into.buttons.map((down, button) => down || input.buttons[button]),
     povs: into.povs,
   };
 }
@@ -279,18 +329,24 @@ function update() {
   if (gamepad.on) {
     for (const each of gamepad.pads) {
       if (each.drives === null) continue;
-      next[each.drives] = merge(next[each.drives], hidden ? centered() : padInput(each.pad));
+      next[each.drives] = combine(next[each.drives], hidden ? centered() : padInput(each.pad));
     }
   }
   inputs = next;
-  send(false);
-  tell();
+  transmit();
+  // Each joystick held is sent again every 200 ms, so the robot's deadman never centers a stick
+  // held still; with nothing held, nothing ticks.
+  const held = inputs.some(pressed);
+  if (held && !repeating) repeating = setInterval(transmit, REPEAT_MS / 4);
+  if (!held && repeating) {
+    clearInterval(repeating);
+    repeating = 0;
+  }
+  notify();
 }
 
-let told = "";
-
 /** Tells the listeners, when anything they show changed: a gamepad is read every frame. */
-function tell() {
+function notify() {
   const now = status();
   const key = JSON.stringify(now);
   if (key === told) return;
@@ -309,11 +365,11 @@ function soon() {
 }
 
 /**
- * Sends each joystick's input, when it differs from what was sent (or {@code repeat}, while
- * anything is pressed): one request at a time, the latest input winning. A joystick this page no
- * longer drives is let go, once.
+ * Sends each joystick's input that differs from what was sent, or that's held and due again by its
+ * own 200 ms clock, in one request at a time, the latest input winning. A joystick this page no
+ * longer drives is let go, once. What the robot didn't answer is sent again shortly.
  */
-function send(repeat) {
+function transmit() {
   if (!robot.stream || !robot.connected || robot.stopped) return;
   if (robot.stream !== sentStream) {
     // A new stream: the robot let go of the old one's joysticks, so everything is new to it.
@@ -321,12 +377,15 @@ function send(repeat) {
     sent.fill(null);
     claimed.fill(false);
   }
+  const now = Date.now();
   const body = {};
   for (let port = 0; port < 2; port++) {
     const input = inputs[port];
     if (input) {
       const text = JSON.stringify(input);
-      if (text !== sent[port] || (repeat && pressed(input))) body[port] = input;
+      if (text !== sent[port] || (pressed(input) && now - sentAt[port] >= REPEAT_MS)) {
+        body[port] = input;
+      }
     } else if (claimed[port]) {
       body[port] = null;
     }
@@ -337,40 +396,43 @@ function send(repeat) {
     return;
   }
   inFlight = true;
+  clearTimeout(retrying);
   for (const [port, input] of Object.entries(body)) {
     sent[port] = input ? JSON.stringify(input) : null;
     claimed[port] = Boolean(input);
+    sentAt[port] = now;
   }
-  lastSentAt = Date.now();
-  // One that hangs is dropped: the next goes, and the robot's deadman covers the gap.
+  // One that hangs is dropped, and sent again: the robot's deadman covers the gap.
   const options = { keepalive: hidden, signal: AbortSignal.timeout(400) };
   api("PUT", "/api/simulator/joysticks", body, options)
     .then(async (response) => {
-      const before = problem;
+      if (response.status >= 500) {
+        unanswered(body);
+        return;
+      }
       problem = response.ok ? null
         : ((await response.json().catch(() => null)) || {}).detail || response.statusText;
       if (response.status === 404) release(); // not a simulator after all
-      if (problem !== before) tell();
+      notify();
     })
-    .catch(() => {
-      sent.fill(null); // sent again, once the robot answers
-    })
+    .catch(() => unanswered(body))
     .finally(() => {
       inFlight = false;
       if (again) {
         again = false;
-        send(false);
+        transmit();
       }
     });
 }
 
-// While anything is pressed, it's sent again every 200 ms, so the robot's deadman never centers a
-// stick held still.
-setInterval(() => {
-  if (Date.now() - lastSentAt >= REPEAT_MS && inputs.some(pressed)) send(true);
-}, 50);
-
-// A link back sends everything again, to the new stream; a link lost sends nothing until then.
-onConnection((connected) => {
-  if (connected) send(false);
-});
+/** What a request carried wasn't heard: it's sent again, a joystick let go included. */
+function unanswered(body) {
+  for (const [port, input] of Object.entries(body)) {
+    sent[port] = null;
+    if (input === null) claimed[port] = true;
+  }
+  problem = "The robot didn't answer: sending again.";
+  notify();
+  clearTimeout(retrying);
+  retrying = setTimeout(transmit, RETRY_MS);
+}

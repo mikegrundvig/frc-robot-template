@@ -108,7 +108,8 @@ document.addEventListener("pitwall-offered", reoffer);
 
 // Esc stops whatever is running on the robot, anywhere on the page: an experiment's run, and any
 // action. (With nothing running, Esc in a value drops its edit: see rows.js. In the simulator, Esc
-// in Sim, or while driving from the keyboard, disables the robot instead: see sim.js.)
+// in Sim, or anywhere outside a field while this page drives the robot, disables it instead: see
+// sim.js.)
 document.addEventListener("keydown", async (event) => {
   if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) {
     return;

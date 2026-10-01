@@ -159,8 +159,8 @@
   let lastRequest = 0;
   // Every run this tab has seen, oldest first: they outlive reconnects and restarts of the robot.
   const runs = [];
-  // The run this page started, while it runs: the page keeps it going with heartbeats.
-  let myRun = null;
+  // Whether this page is starting a run: from the click on Run until the robot answers.
+  let starting = false;
 
   function shown(number) {
     if (typeof number !== "number") return String(number);
@@ -229,11 +229,11 @@
     }
   }, 1000);
 
-  /** A request to the API, naming this page's stream. */
-  function api(method, path, body) {
+  /** A request to the API, naming this page's stream. Sent counts for the deadman, not answered. */
+  function api(method, path, body, more = {}) {
     lastRequest = Date.now();
     const headers = { "Pitwall-Stream": stream };
-    const options = { method, headers };
+    const options = { method, headers, ...more };
     if (body !== undefined) {
       headers["Content-Type"] = "application/merge-patch+json";
       options.body = JSON.stringify(body);
@@ -241,13 +241,29 @@
     return fetch(path, options);
   }
 
-  // The deadman: while this page's run goes on, the robot must hear from it every 500 ms, so it
-  // sends a heartbeat whenever it has been quiet for 200 ms.
+  /** Whether this page keeps a run going: it's starting one, or one it started is running. */
+  function inCharge() {
+    return starting || Boolean(doc && doc.run && doc.run.phase === "RUNNING"
+        && stream !== "" && doc.run.controller === stream);
+  }
+
+  // The deadman: while this page keeps a run going, the robot must hear from it every 500 ms, so
+  // it sends a heartbeat whenever it has been quiet for 100 ms. One that hangs is dropped.
   setInterval(() => {
-    if (myRun !== null && Date.now() - lastRequest >= 200) {
-      api("POST", "/api/heartbeat").catch(() => {});
+    if (inCharge() && Date.now() - lastRequest >= 100) {
+      api("POST", "/api/heartbeat", undefined, { signal: AbortSignal.timeout(400) }).catch(() => {});
     }
-  }, 50);
+  }, 25);
+
+  // A hidden tab's timers slow to once a second, too slow to keep a run going. So a run this page
+  // keeps going stops as the tab is hidden, saying so, rather than when the deadman runs out.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && inCharge() && doc.run) {
+      api("POST", "/api/experiments",
+          { cancel: doc.run.experiment, run: doc.run.id, reason: "this tab was hidden" },
+          { keepalive: true }).catch(() => {});
+    }
+  });
 
   /** Sends a request, and says what became of it where the page shows messages. */
   async function send(method, path, body, say) {
@@ -303,7 +319,6 @@
       gains: now.gains, signals: now.signals, phase: now.phase, detail: now.detail,
       scores: now.scores,
     }));
-    if (myRun === key && now.phase !== "RUNNING") myRun = null;
   }
 
   /** Adds a run's samples to its trace; a snapshot's start it over. */
@@ -593,7 +608,8 @@
     for (const built of rigViews.values()) if (built.plot) built.plot.destroy();
     rigViews.clear();
     for (const [name, rig] of Object.entries(doc.rigs)) {
-      const view = { rig, gains: new Map(), plot: null, plotKey: "" };
+      const view = { rig, gains: new Map(), plot: null, plotKey: "", scoresKey: "", runsPlotted: "",
+                     expanded: new Set() };
       const gainInputs = () => [...view.gains].map(([path, gain]) => [path, gain.input]);
       const section = make("section", "rig");
       const title = make("h3", "", name);
@@ -647,8 +663,12 @@
       const runButton = make("button", "primary", "Run");
       const cancelButton = make("button", "", "Cancel");
       runButton.addEventListener("click", () => startRun(choice.value, view));
-      cancelButton.addEventListener("click", () =>
-        send("POST", "/api/experiments", { cancel: choice.value }, view.say));
+      // Cancels the run in progress, whichever experiment is chosen now.
+      cancelButton.addEventListener("click", () => {
+        if (doc.run && doc.run.phase === "RUNNING") {
+          send("POST", "/api/experiments", { cancel: doc.run.experiment, run: doc.run.id }, view.say);
+        }
+      });
       runRow.append(choice, runButton, cancelButton);
       const settings = make("div", "muted");
       choice.addEventListener("change", () => updateRig(name, view));
@@ -699,12 +719,13 @@
     }
   }
 
+  /** Starts a run, keeping it going from the click: the robot answers once it has started. */
   async function startRun(experiment, view) {
-    const response = await send("POST", "/api/experiments", { start: experiment }, view.say);
-    if (response && response.status === 200) {
-      const run = await response.json();
-      myRun = runKey(doc.robot.program, run.id);
-      lastRequest = Date.now();
+    starting = true;
+    try {
+      await send("POST", "/api/experiments", { start: experiment }, view.say);
+    } finally {
+      starting = false;
     }
   }
 
@@ -730,30 +751,47 @@
     view.calls.textContent = lines.join("\n");
     view.calls.hidden = lines.length === 0;
     view.commitTitle.hidden = lines.length === 0;
-    renderScores(name, view);
-    drawRig(name, view, false);
+    // The scores only when a run or the lock changed; the plot only when a run came or went
+    // (samples arriving redraw it too: see drawSoon).
+    const mine = runs.filter((run) => run.rig === name);
+    const scoresKey = JSON.stringify([
+      mine.map((run) => [run.key, run.phase, run.detail, Boolean(run.scores)]),
+      session.enabled, doc.robot.program, doc.robot.code, [...view.expanded]]);
+    if (scoresKey !== view.scoresKey) {
+      view.scoresKey = scoresKey;
+      renderScores(name, view);
+    }
+    const plotKey = mine.map((run) => run.key).join(",");
+    if (plotKey !== view.runsPlotted) {
+      view.runsPlotted = plotKey;
+      drawRig(name, view, false);
+    }
   }
 
   /**
-   * A run's scores in one row, over every measurement and every jump: rise and error averaged,
-   * overshoot, settling, and peaks the worst. A jump that never settled leaves settling empty.
+   * A run's scores, the worst of every jump: rise, overshoot, settling, and steady-state error (by
+   * its size), and each peak. A jump that never got there, or never settled, is worse than any that
+   * did. With {@code only}, a measurement's own jumps and signals (those named after it, such as
+   * "Front left voltage" for "Front left"); without it, the worst measurement in each column.
    */
-  function summary(run) {
+  function summary(run, only) {
     if (!run.scores) return null;
-    const jumps = Object.values(run.scores.steps).flat();
-    const numbers = (key) => jumps.map((jump) => jump[key]).filter((x) => typeof x === "number");
-    const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
-    const worst = (xs) => (xs.length && xs.length === jumps.length ? Math.max(...xs) : NaN);
+    const jumps = Object.entries(run.scores.steps)
+      .filter(([measurement]) => only === undefined || measurement === only)
+      .flatMap(([, steps]) => steps);
+    const worst = (key, size = (x) => x) => jumps.length === 0 ? NaN
+        : Math.max(...jumps.map((jump) => typeof jump[key] === "number" ? size(jump[key]) : Infinity));
     const peaks = {};
     for (const signal of run.signals || []) {
+      if (only !== undefined && !signal.name.startsWith(only + " ")) continue;
       const peak = run.scores.peaks[signal.name];
       if (typeof peak === "number") peaks[signal.unit] = Math.max(peaks[signal.unit] ?? 0, peak);
     }
     return {
-      rise: mean(numbers("rise")),
-      overshoot: worst(numbers("overshoot")),
-      settling: worst(numbers("settling")),
-      error: mean(numbers("error").map(Math.abs)),
+      rise: worst("rise"),
+      overshoot: worst("overshoot"),
+      settling: worst("settling"),
+      error: worst("error", Math.abs),
       peaks,
     };
   }
@@ -768,20 +806,26 @@
     const table = view.scores;
     table.replaceChildren();
     if (mine.length === 0) return;
-    const summaries = mine.map(summary);
+    const summaries = mine.map((run) => summary(run));
     const units = [...new Set(summaries.flatMap((s) => (s ? Object.keys(s.peaks) : [])))];
     const unit = view.rig.unit;
     const columns = [
       { label: "Rise", get: (s) => s.rise, show: (x) => (x * 1000).toFixed(0) + " ms" },
       { label: "Overshoot", get: (s) => s.overshoot, show: (x) => (x * 100).toFixed(1) + "%" },
       { label: "Settling", get: (s) => s.settling, show: (x) => (x * 1000).toFixed(0) + " ms" },
+
       { label: "Error", get: (s) => s.error, show: (x) => small(x) + " " + unit },
       ...units.map((u) => ({ label: "Peak " + u, get: (s) => s.peaks[u],
                              show: (x) => small(x) + " " + u })),
     ];
     const head = table.createTHead().insertRow();
     head.append(make("th", "", "Run"), make("th", "", "Gains"));
-    for (const column of columns) head.append(make("th", "number", column.label));
+    for (const column of columns) {
+      const th = make("th", "number", column.label);
+      th.title = "The worst of every jump of every " + (view.rig.measurements.length > 1
+          ? "measurement (" + view.rig.measurements.join(", ") + "): ▸ shows each" : "jump");
+      head.append(th);
+    }
     head.append(make("th"));
     // The best in each column, when there's more than one run to compare.
     const best = columns.map((column) => {
@@ -793,7 +837,17 @@
       const row = body.insertRow();
       if (index === 0) row.className = "latest";
       const label = row.insertCell();
-      label.textContent = `${run.id} ${run.experiment}`;
+      if (summaries[index] && view.rig.measurements.length > 1) {
+        const open = view.expanded.has(run.key);
+        const more = make("button", "small", open ? "▾" : "▸");
+        more.setAttribute("aria-label", (open ? "Hide" : "Show") + " each measurement of run " + run.id);
+        more.addEventListener("click", () => {
+          if (open) view.expanded.delete(run.key); else view.expanded.add(run.key);
+          updateRig(name, view);
+        });
+        label.append(more, " ");
+      }
+      label.append(`${run.id} ${run.experiment}`);
       if (run.program !== doc.robot.program) {
         const tag = make("span", "tag", run.code !== doc.robot.code ? "other code" : "before a restart");
         tag.title = "Ran on " + run.robot + (run.simulated ? " (simulator)" : "") + ", code " + run.code;
@@ -803,24 +857,37 @@
         .map(([path, value]) => path.slice(path.lastIndexOf("/") + 1) + " " + shown(value))
         .join(", ");
       const s = summaries[index];
+      const show = (values, cells) => columns.forEach((column, c) => {
+        const value = column.get(values);
+        const cell = cells.insertCell();
+        cell.className = "number" + (cells === row && Number.isFinite(value) && value === best[c]
+            ? " best" : "");
+        cell.textContent = Number.isFinite(value) ? column.show(value)
+            : value === Infinity ? "never" : "—";
+      });
       if (!s) {
         const cell = row.insertCell();
         cell.colSpan = columns.length;
         cell.className = "muted";
         cell.textContent = run.phase === "RUNNING" ? "Running…" : run.detail;
       } else {
-        columns.forEach((column, c) => {
-          const value = column.get(s);
-          const cell = row.insertCell();
-          cell.className = "number" + (Number.isFinite(value) && value === best[c] ? " best" : "");
-          cell.textContent = Number.isFinite(value) ? column.show(value) : "—";
-        });
+        show(s, row);
       }
       const restore = make("button", "small", "Restore");
       restore.title = "Put this run's gains back";
       restore.disabled = !doc.tuning.enabled;
       restore.addEventListener("click", () => send("PATCH", "/api/values", run.gains, view.say));
       row.insertCell().append(restore);
+      if (s && view.expanded.has(run.key)) {
+        for (const measurement of view.rig.measurements) {
+          const wheel = body.insertRow();
+          wheel.className = "muted";
+          wheel.insertCell();
+          wheel.insertCell().textContent = measurement;
+          show(summary(run, measurement), wheel);
+          wheel.insertCell();
+        }
+      }
     });
   }
 

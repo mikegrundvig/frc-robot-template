@@ -198,6 +198,7 @@ public final class Page {
     run.gains().forEach((field, value) -> gains.put(pathOf(experiment.rig(), field), value));
     shown.put("gains", gains);
     shown.put("startNanos", run.startNanos());
+    shown.put("controller", run.controller());
     Run.State state = run.state();
     shown.put("phase", state.phase().name());
     shown.put("detail", state.detail());

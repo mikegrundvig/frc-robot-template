@@ -45,7 +45,8 @@ public final class ByHand {
                       public void cancel() {
                         run.cancel("Canceled: another command needed Arm");
                       }
-                    })
+                    },
+                ended -> {})
             .add(new Experiment(STEP, lag.rig(), Lag.STEP_AND_BACK));
   }
 

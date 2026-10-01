@@ -22,7 +22,7 @@ class RunTest {
   private final Lag lag = new Lag();
 
   private Run run(Rig rig, Profile profile) {
-    return new Run(1, new Experiment("Step and back", rig, profile), 4000);
+    return new Run(1, new Experiment("Step and back", rig, profile), 4000, "7");
   }
 
   private static Run.Scores scores(Run run) {
@@ -177,16 +177,18 @@ class RunTest {
     run.step(lag.nextLoop());
 
     run.cancel("Canceled from the page");
-    run.explain("Canceled: the page closed");
+    run.cancel("Canceled: another command needed Arm");
 
     assertThat(run.step(lag.nextLoop())).as("over").isTrue();
     assertThat(run.state())
-        .isEqualTo(new Run.State(Run.Phase.CANCELED, "Canceled: the page closed", null));
+        .as("the first reason stands")
+        .isEqualTo(new Run.State(Run.Phase.CANCELED, "Canceled from the page", null));
+    assertThat(run.controller()).isEqualTo("7");
     assertThat(run.trace().series(Rig.SETPOINT).count()).isEqualTo(1);
   }
 
   @Test
-  void anEndedRunIsNotCanceledOrExplainedAway() {
+  void anEndedRunIsNotCanceledAfterward() {
     Run run =
         run(
             lag.rig(),
@@ -194,7 +196,6 @@ class RunTest {
     runToTheEnd(run);
 
     run.cancel("Canceled from the page");
-    run.explain("Canceled: the page closed");
 
     assertThat(run.state().phase()).isEqualTo(Run.Phase.ENDED);
     assertThat(run).hasToString("run 1 of Step and back: Ended");

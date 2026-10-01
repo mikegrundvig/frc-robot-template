@@ -364,8 +364,8 @@ runs (`./gradlew consistencyStudy`), and one run's log compares `Localization/Po
 with `Sim/PoseErrorMeters`; on a robot, compare it with how far the cameras move the estimate when
 they see tags again after a stretch without. Honest is a position NEES (the error squared, over the
 covariance the estimate claimed) averaging 2 and a heading NEES averaging 1, with the error outside
-the claimed covariance's 99.9% ellipse in about a thousandth of loops; the defaults read 1.04 to
-2.1 and 0.36 to 1.05 in the study's calibrated runs, the collision's 1.66 among them. Well
+the claimed covariance's 99.9% ellipse in about a thousandth of loops; the defaults read 0.99 to
+2.1 and 0.37 to 1.05 in the study's calibrated runs, the collision's 1.40 among them. Well
 above, the estimate is too sure of itself, and its gate rejects good measurements; well below, it's
 too unsure, and the cameras pull it around. On a robot, without the truth, the same test is a
 camera's correction squared over the covariance claimed for it (the estimate's and the camera's

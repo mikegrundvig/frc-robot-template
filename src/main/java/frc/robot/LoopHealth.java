@@ -54,6 +54,11 @@ final class LoopHealth implements AutoCloseable {
     return monitor;
   }
 
+  /** The last loop's timing, section by section. */
+  LoopMonitor.Report last() {
+    return last;
+  }
+
   /** A loop begins. */
   void start(long nowNanos) {
     monitor.start(nowNanos);

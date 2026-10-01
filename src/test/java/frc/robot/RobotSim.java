@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenario;
@@ -195,6 +196,11 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     DriverStationBackend.refreshData();
     Robot.loop(pitwall(), robot, scheduler(), Objects.requireNonNull(loopHealth));
     TunableRegistry.update();
+  }
+
+  /** The loop's timing, as the robot program's loop monitor has it. */
+  public LoopMonitor.Report lastLoop() {
+    return Objects.requireNonNull(loopHealth).last();
   }
 
   /** {@code count} robot loops. */

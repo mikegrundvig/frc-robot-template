@@ -126,7 +126,7 @@ class ArchitectureTest {
   void theSimulatorStaysOutOfTheRobotsCode() {
     noClasses()
         .that()
-        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..")
+        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..", "frc.robot.views..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot.sim..")
@@ -146,7 +146,8 @@ class ArchitectureTest {
             "frc.robot.commands..",
             "frc.robot.dashboard..",
             "frc.robot.game..",
-            "frc.robot.sim..")
+            "frc.robot.sim..",
+            "frc.robot.views..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot")

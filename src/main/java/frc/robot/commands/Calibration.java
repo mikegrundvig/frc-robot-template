@@ -140,11 +140,15 @@ public final class Calibration {
             Actions.command(() -> scheduler, this::level));
     for (CameraConfig camera : cameras) {
       actions.add(
-          format(
-              "Calibrate the %s camera's mount (%.0f s, drive slowly past tags)",
-              camera.name(), MOUNT_SECONDS),
+          cameraMountAction(camera.name()),
           Actions.command(() -> scheduler, () -> cameraMount(camera.name())));
     }
+  }
+
+  /** The Pitwall action that calibrates a camera's mount, by the camera's name. */
+  public static String cameraMountAction(String camera) {
+    return format(
+        "Calibrate the %s camera's mount (%.0f s, drive slowly past tags)", camera, MOUNT_SECONDS);
   }
 
   private static String format(String pattern, Object... values) {

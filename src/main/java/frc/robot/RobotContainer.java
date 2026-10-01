@@ -29,6 +29,7 @@ import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.lib.localization.VisionConfig;
+import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
@@ -49,6 +50,8 @@ import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
+import frc.robot.subsystems.vision.VisionSim;
+import frc.robot.views.world.WorldView;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.Arrays;
@@ -70,6 +73,7 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
+import org.wpilib.math.kinematics.SwerveModuleVelocity;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
@@ -138,6 +142,14 @@ public final class RobotContainer implements AutoCloseable {
   private final @Nullable SimulatedWorld world;
 
   private final Localization localization;
+
+  /** What the estimator did with the last loop's camera measurements, for the World view. */
+  private List<VisionDecision> decisions = List.of();
+
+  /** The robot's frame and cameras, as configured, for the World view. */
+  private final Body robotBody;
+
+  private final List<CameraConfig> robotCameras;
   private final Drive drive;
   private final Vision vision;
   private final Coprocessors coprocessors;
@@ -217,6 +229,8 @@ public final class RobotContainer implements AutoCloseable {
     loop = loopHealth.monitor();
     Body body = robot.body();
     List<CameraConfig> cameras = robot.cameras();
+    robotBody = body;
+    robotCameras = cameras;
     this.field = field;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
@@ -419,7 +433,8 @@ public final class RobotContainer implements AutoCloseable {
         localization.pitchRadians(),
         localization.rollRadians());
     loop.mark("Vision", System.nanoTime());
-    vision.record(localization.update());
+    decisions = localization.update();
+    vision.record(decisions);
     loop.mark("Localization", System.nanoTime());
     coprocessors.periodic(RobotController.getTime(), enabled);
     loop.mark("Coprocessors", System.nanoTime());
@@ -618,6 +633,20 @@ public final class RobotContainer implements AutoCloseable {
     pitwall
         .experiments()
         .add(new Experiment(STEER_STEP, drive.steeringRig(drivetrainTuning), STEER_STEP_PROFILE));
+    // The World view: the field, the robot where localization believes it is, its cameras' sight
+    // lines with their verdicts, and in the simulator, the truth.
+    pitwall
+        .scenes()
+        .add(
+            WorldView.scene(
+                field,
+                robotBody,
+                drivetrainTuning.get(),
+                robotCameras,
+                VisionSim.MAX_SIGHT_METERS,
+                worldReadings(),
+                sim != null ? () -> sim.drivetrain().truePose3d() : null,
+                camera -> Optional.of(Calibration.cameraMountAction(camera))));
     // Each change goes to every open page: the lines that follow sensors change at most once a
     // second, and are written to change only when something worth reading does.
     pitwall
@@ -633,6 +662,36 @@ public final class RobotContainer implements AutoCloseable {
 
   Drive drive() {
     return drive;
+  }
+
+  /** What the World view reads each loop while a page shows it: localization's and the wheels'. */
+  private WorldView.Readings worldReadings() {
+    return new WorldView.Readings() {
+      @Override
+      public LocalizationEstimate estimate() {
+        return localization.estimate();
+      }
+
+      @Override
+      public double pitchRadians() {
+        return localization.pitchRadians();
+      }
+
+      @Override
+      public double rollRadians() {
+        return localization.rollRadians();
+      }
+
+      @Override
+      public SwerveModuleVelocity[] modules() {
+        return drive.moduleVelocities();
+      }
+
+      @Override
+      public List<VisionDecision> decisions() {
+        return decisions;
+      }
+    };
   }
 
   /** The drivetrain's configuration as the pit tunes it. */

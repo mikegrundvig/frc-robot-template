@@ -368,7 +368,8 @@ public class Drive implements Mechanism, AutoCloseable {
     return positions;
   }
 
-  private SwerveModuleVelocity[] moduleVelocities() {
+  /** Each module's measured wheel speed and angle, in the order of {@code moduleTranslations}. */
+  public SwerveModuleVelocity[] moduleVelocities() {
     SwerveModuleVelocity[] velocities = new SwerveModuleVelocity[4];
     for (int i = 0; i < 4; i++) {
       velocities[i] = modules[i].getVelocity();

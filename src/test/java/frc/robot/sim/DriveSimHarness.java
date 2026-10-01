@@ -4,6 +4,7 @@ import frc.robot.RobotConfig;
 import frc.robot.RobotSim;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
@@ -72,7 +73,12 @@ public final class DriveSimHarness implements AutoCloseable {
       reach = Math.max(reach, wheel.getNorm());
     }
     return new Localization(
-        estimator, new SwerveKinematicsModel(wheels), terrain, reach, robot.imus());
+        estimator,
+        new SwerveKinematicsModel(wheels),
+        terrain,
+        reach,
+        robot.drivetrain().modules().wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY,
+        robot.imus());
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */

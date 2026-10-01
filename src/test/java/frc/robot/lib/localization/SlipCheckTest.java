@@ -21,6 +21,9 @@ class SlipCheckTest {
   private static final SlipCheck.Settings SETTINGS = SlipCheck.Settings.DEFAULTS;
   private static final double TOLERANCE = SETTINGS.speedToleranceMetersPerSecond();
 
+  /** The tread's grip, its friction of 1.2 times g: what the floor can explain. */
+  private static final double GRIP = 1.2 * ImuReadings.STANDARD_GRAVITY;
+
   /**
    * A robot moving on the field, and what its wheels and IMU read of it, loop by loop. The truth is
    * its velocity on the field and its heading; its wheels can roll faster than it moves, and turn
@@ -28,7 +31,7 @@ class SlipCheckTest {
    * robot turns.
    */
   private static final class Robot {
-    final SlipCheck check = new SlipCheck(SETTINGS, REACH);
+    final SlipCheck check = new SlipCheck(SETTINGS, REACH, GRIP);
     final Translation2d imu;
     final boolean checked;
     double heading = 0.3;
@@ -324,23 +327,32 @@ class SlipCheckTest {
   }
 
   /**
-   * Hit from the side as it stops hard: the IMU feels 17 m/s², past the limit. The wheels explain
-   * the 12 m/s² it slows along its way, not the 12 sideways, which is under the limit on its own:
-   * still a share of a collision, as large as it is against the limit. Only a share, the speed
-   * comparison goes on with it, so a slide it starts is still seen.
+   * Hit from the side at 13.5 m/s²: past what the tread's grip could explain (11.8), short of a
+   * whole collision (15), so a share of one, the same standing still and braking hard, when the IMU
+   * feels 18 m/s² in all, the wheels explaining the 12 of the braking. Only a share, the speed
+   * comparison goes on with it, so a slide it starts is still seen. And the robot catching up with
+   * wheels that got ahead of it, at the grip, the wheels holding their speed, is no collision.
    */
   @Test
-  void aHitTheWheelsPartlyExplainIsAShareOfACollision() {
-    Robot robot = new Robot();
-    robot.fieldVx = 2;
-    robot.loops(10, 0, 0, 0, 0);
+  void whatTheWheelsDontExplainPastTheGripIsAShareOfACollision() {
+    Robot standing = new Robot().loops(10, 0, 0, 0, 0);
+    Robot braking = new Robot();
+    braking.fieldVx = 2;
+    braking.loops(10, 0, 0, 0, 0);
+    Robot catchingUp = new Robot();
+    catchingUp.slide(0.5, 0).loops(10, 0, 0, 0, 0);
 
-    robot.slide(0, -0.24).loop(-0.24, 0.24, 0, 0);
+    standing.slide(0, -0.27).loop(0, 0.27, 0, 0);
+    braking.slide(0, -0.27).loop(-0.24, 0.27, 0, 0);
+    catchingUp.slide(0.5 - 0.23, 0).loop(0.23, 0, 0, 0); // 11.5 m/s², its wheels holding
 
-    assertThat(robot.check.collisionShare()).isCloseTo(12 / 15.0, within(1e-9));
-    assertThat(robot.check.slideMetersPerSecond())
-        .as("the speed comparison keeps the sideways 0.24 m/s the wheels didn't see")
-        .isCloseTo(0.24, within(0.01));
+    double share = (13.5 - GRIP) / (SETTINGS.joltMetersPerSecSq() - GRIP);
+    assertThat(standing.check.collisionShare()).isCloseTo(share, within(1e-9));
+    assertThat(braking.check.collisionShare()).isCloseTo(share, within(1e-9));
+    assertThat(catchingUp.check.collisionShare()).isZero();
+    assertThat(braking.check.slideMetersPerSecond())
+        .as("the speed comparison keeps the sideways 0.27 m/s the wheels didn't see")
+        .isCloseTo(0.27, within(0.01));
   }
 
   /** Without a checked accelerometer, a jolt's size alone decides. */
@@ -386,7 +398,8 @@ class SlipCheckTest {
                     .speedToleranceMetersPerSecond(-1)
                     .build())
         .hasMessage("Settings.speedToleranceMetersPerSecond: -1 must be zero or more");
-    assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0)).hasMessageContaining("reach");
+    assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0, GRIP)).hasMessageContaining("reach");
+    assertThatThrownBy(() -> new SlipCheck(SETTINGS, REACH, 20)).hasMessageContaining("grip");
     assertThatThrownBy(
             () ->
                 new SlipCheck.Sample(

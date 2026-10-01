@@ -26,8 +26,8 @@ import frc.robot.subsystems.vision.VisionSim;
  * @param mountErrorDegrees how far each camera is really turned, at most, about each axis
  * @param trials how many robustness trials, each drawing all of these errors from plausible ranges;
  *     0 scores the field once, with the errors as set here
- * @param mostCameras the most cameras a layout has: the family's, or those made from CAD's places,
- *     with more are left out
+ * @param mostCameras the most cameras a layout may have: larger layouts from the family, or from
+ *     CAD's places, are left out
  * @param seed where every random draw starts: the same seed gives the same report
  * @param threads how many threads share the work
  */
@@ -50,7 +50,7 @@ public record CameraStudyConfig(
   static final int ROBUST_TRIALS = 12;
 
   /**
-   * A run of under a minute: every half meter, every 45 degrees, two images per camera, with the
+   * A run of about a minute: every half meter, every 45 degrees, two images per camera, with the
    * simulator's own camera errors and the gyro a quarter degree off. Two threads, since the
    * computer may be shared.
    */

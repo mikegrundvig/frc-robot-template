@@ -41,7 +41,7 @@ public record Score(
   static final double TWO_CENTIMETERS = 0.02;
 
   /**
-   * The ranking: the smallest error that 95% of the field is within, to the millimeter, which is
+   * The ranking: the smallest error that 95% of the field is within, rounded to the millimeter,
    * about the sampling's own noise. A tie goes to fewer cameras, which cost less and weigh less,
    * then to the smaller error, then by name, so ties always fall the same way. A layout that
    * measures less than 95% of the field has no such error; those rank after the rest, by how much

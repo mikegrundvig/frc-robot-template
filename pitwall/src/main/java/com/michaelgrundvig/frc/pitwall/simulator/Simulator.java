@@ -90,6 +90,7 @@ public final class Simulator {
   // The loop's own state.
   private final long[] takenVersion = new long[JOYSTICKS];
   private final @Nullable JoystickInput[] written = new JoystickInput[JOYSTICKS];
+  private final @Nullable String[] writtenFor = new String[JOYSTICKS];
   private final boolean[] zeroed = new boolean[JOYSTICKS];
   private boolean countingMatchTime;
   private long lastLoopNanos;
@@ -271,13 +272,29 @@ public final class Simulator {
    * The page's input for a joystick: the robot loop takes the latest each loop. Safe from any
    * thread.
    *
+   * <p>A joystick is driven by the page that last sent it input. Only that page can let it go: from
+   * any other, null is ignored, so a page that stops driving never lets go of a joystick another
+   * page drives now.
+   *
    * @param port 0 to {@link #JOYSTICKS} - 1
    * @param input null to let the joystick go: centered, and no longer the page's
    * @param stream the page's event stream; its closing lets the joystick go
    */
   public void joystick(int port, @Nullable JoystickInput input, @Nullable String stream) {
     Objects.checkIndex(port, JOYSTICKS);
-    heard.set(port, new Heard(input, stream, clock.getAsLong(), versions.incrementAndGet()));
+    while (true) {
+      Heard last = heard.get(port);
+      if (input == null
+          && last != null
+          && last.input() != null
+          && !Objects.equals(last.stream(), stream)) {
+        return; // another page's: not this one's to let go
+      }
+      if (heard.compareAndSet(
+          port, last, new Heard(input, stream, clock.getAsLong(), versions.incrementAndGet()))) {
+        return;
+      }
+    }
   }
 
   /**
@@ -397,6 +414,8 @@ public final class Simulator {
       Map<String, Object> joystick = new LinkedHashMap<>();
       joystick.put("fromPage", written[port] != null);
       joystick.put("centeredByDeadman", zeroed[port] && written[port] != null);
+      // Which page drives it, by its event stream, so a page can tell it isn't the only one.
+      joystick.put("stream", Objects.requireNonNullElse(writtenFor[port], ""));
       joysticks.put(Integer.toString(port), joystick);
     }
     state.put("joysticks", joysticks);
@@ -462,6 +481,7 @@ public final class Simulator {
           changed = true;
         }
         written[port] = input;
+        writtenFor[port] = input != null ? last.stream() : null;
         zeroed[port] = false;
       }
       JoystickInput driving = written[port];

@@ -57,9 +57,24 @@ function route() {
   if (view.route) view.route(rest);
 }
 
-/** Whether a view is offered: the simulator's only in the simulator. */
+/**
+ * Whether a view is offered: the simulator's only in the simulator. A view may say for itself
+ * ({@code offered()}): Sim knows it's the simulator before any snapshot, when the page opened while
+ * the simulator was paused.
+ */
 function offered(view) {
+  if (view.offered) return view.offered();
   return !view.simulatorOnly || Boolean(robot.doc && robot.doc.robot.simulated);
+}
+
+/**
+ * Offers the views offered now, and shows the one the address names if it's offered only now (or
+ * no longer): after each snapshot, and when a view says what it offers changed. Nothing is focused.
+ */
+function reoffer() {
+  for (const view of views) tabs.get(view.id).hidden = !offered(view);
+  const { view } = address();
+  if (view !== current) show(view);
 }
 
 function show(view) {
@@ -86,17 +101,15 @@ onChange((patch, snapshot) => {
     count.textContent = String(tuned);
     count.setAttribute("aria-label", tuned + " to commit");
   }
-  if (snapshot || "robot" in patch) {
-    for (const view of views) tabs.get(view.id).hidden = !offered(view);
-    // The address may name a view offered only now, such as #sim, or one no longer offered: only
-    // then does the view change, and nothing is focused.
-    const { view } = address();
-    if (view !== current) show(view);
-  }
+  // The address may name a view offered only now, such as #sim, or one no longer offered.
+  if (snapshot || "robot" in patch) reoffer();
 });
+document.addEventListener("pitwall-offered", reoffer);
 
 // Esc stops whatever is running on the robot, anywhere on the page: an experiment's run, and any
-// action. (With nothing running, Esc in a value drops its edit: see rows.js.)
+// action. (With nothing running, Esc in a value drops its edit: see rows.js. In the simulator, Esc
+// in Sim, or anywhere outside a field while this page drives the robot, disables it instead: see
+// sim.js.)
 document.addEventListener("keydown", async (event) => {
   if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("dialog[open]")) {
     return;

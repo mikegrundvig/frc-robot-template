@@ -38,8 +38,38 @@ import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
 public class Robot extends LoggedRobot {
-  /** Set by {@code ./gradlew run} with the GUI: start the simulator enabled in teleop. */
-  static final String AUTO_ENABLE_PROPERTY = "frc.sim.autoEnable";
+  /** Set by {@code ./gradlew run}: how the simulated robot starts, as a {@link SimStart}'s name. */
+  static final String START_PROPERTY = "frc.sim.start";
+
+  /** How {@code ./gradlew run} starts the simulated robot. */
+  enum SimStart {
+    /**
+     * Without WPILib's simulator GUI, the default: disabled, in teleop on the blue alliance's
+     * station 2 with a Driver Station attached. Pitwall's Sim view enables it with one press, there
+     * beside the keyboard driving it switches on.
+     */
+    READY,
+    /**
+     * With the GUI ({@code -Pgui}): as {@link #READY}, and enabled, since the GUI's keyboard drives
+     * it at once and the GUI is on screen to disable it.
+     */
+    ENABLED,
+    /**
+     * As a real robot starts, before its Driver Station connects: disabled, with no station or mode
+     * ({@code -PstartDisabled}). Tests and replays, which never set the property, too.
+     */
+    DISABLED;
+
+    /** The start a property names, case aside; {@link #DISABLED} for none, or one unknown. */
+    static SimStart named(@Nullable String name) {
+      for (SimStart start : values()) {
+        if (start.name().equalsIgnoreCase(name)) {
+          return start;
+        }
+      }
+      return DISABLED;
+    }
+  }
 
   /** Set by {@code ./gradlew run -Pscenario=<name>}: the simulator scenario to start in. */
   static final String SCENARIO_PROPERTY = "frc.sim.scenario";
@@ -253,30 +283,33 @@ public class Robot extends LoggedRobot {
   }
 
   /**
-   * {@code ./gradlew run} with the simulator GUI starts the simulated robot enabled in teleop, on
-   * the blue alliance's station 2 unless the GUI already chose one, so a driver can drive right
-   * away instead of hunting through the GUI first. The GUI can still disable it or change the
-   * station, and {@code ./gradlew run -PstartDisabled} starts disabled with no station, like a real
-   * robot before its Driver Station connects. Without the GUI it starts disabled: nothing on screen
-   * could disable it yet. Tests and replay never set the property.
+   * {@code ./gradlew run} starts the simulated robot ready to drive: in teleop, on the blue
+   * alliance's station 2 unless something already chose one, with a Driver Station attached, so it
+   * stands on the center start. Without WPILib's simulator GUI, the default, it starts disabled:
+   * Pitwall's Sim view enables it with one press, beside the keyboard driving it switches on there,
+   * and a robot never enables itself before anyone is watching it. With the GUI ({@code -Pgui}) it
+   * starts enabled, since the GUI's keyboard drives it at once and the GUI is on screen. {@code
+   * -PstartDisabled} starts it as a real robot starts, disabled with no station or mode. Tests and
+   * replay never set the property.
    */
   @Override
   public void simulationInit() {
-    startEnabledIfRequested(Constants.currentMode, Boolean.getBoolean(AUTO_ENABLE_PROPERTY));
+    startAsAsked(Constants.currentMode, SimStart.named(System.getProperty(START_PROPERTY)));
   }
 
-  /** Enable the simulated robot in teleop, only in a physics simulation and only when asked. */
-  static void startEnabledIfRequested(Constants.Mode mode, boolean requested) {
-    if (mode == Constants.Mode.SIM && requested) {
-      if (MatchState.getAlliance().isEmpty()) {
-        // The center start, and blue's forward is the field view's right: the easiest first drive.
-        DriverStationSim.setAllianceStationId(AllianceStationID.BLUE_2);
-      }
-      DriverStationSim.setDsAttached(true);
-      DriverStationSim.setRobotMode(RobotMode.TELEOPERATED);
-      DriverStationSim.setEnabled(true);
-      DriverStationSim.notifyNewData();
+  /** Readies or enables the simulated robot, only in a physics simulation and only when asked. */
+  static void startAsAsked(Constants.Mode mode, SimStart start) {
+    if (mode != Constants.Mode.SIM || start == SimStart.DISABLED) {
+      return;
     }
+    if (MatchState.getAlliance().isEmpty()) {
+      // The center start, and blue's forward is the field view's right: the easiest first drive.
+      DriverStationSim.setAllianceStationId(AllianceStationID.BLUE_2);
+    }
+    DriverStationSim.setDsAttached(true);
+    DriverStationSim.setRobotMode(RobotMode.TELEOPERATED);
+    DriverStationSim.setEnabled(start == SimStart.ENABLED);
+    DriverStationSim.notifyNewData();
   }
 
   @Override

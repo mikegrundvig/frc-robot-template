@@ -1,9 +1,14 @@
-// Simulation: ./gradlew run starts the robot program in the simulator, with its GUI.
+// Simulation: ./gradlew run starts the robot program in the simulator, with WPILib's simulator GUI
+// unless -Pgui=false. Pitwall's page (http://localhost:5820) drives the simulator either way: the
+// Driver Station, the keyboard or a gamepad, pausing and stepping, and faults (docs/simulator.md).
+// The GUI is on by default for now; once Pitwall's Sim view replaces it, the default turns off and
+// -Pgui turns it back on. A real Driver Station can connect to the simulator either way.
 //
 // First-run defaults, so the simulator is drivable immediately: the robot starts enabled in teleop
 // on the blue alliance's station 2, the center start (-PstartDisabled to start disabled with no
-// station, like a real robot), the keyboard is the driver's gamepad, and the field view is open. sim/ holds the default GUI settings; they are copied only when missing, so
-// a user's own layout and gamepad choices are kept.
+// station, like a real robot), and with the GUI, the keyboard is the driver's gamepad and the field
+// view is open. sim/ holds the default GUI settings; they are copied only when missing, so a
+// user's own layout and gamepad choices are kept.
 //
 // Start in a scenario, a fault in the robot's sensors or something that happens to it:
 // ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (frc.robot.sim.Scenarios).
@@ -11,7 +16,15 @@
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
 
-wpi.sim.addGui().defaultEnabled = !project.hasProperty("replay")
+// The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither.
+def guiByDefault = true
+def guiAsked = project.findProperty("gui")?.toString()
+if (guiAsked != null && !(guiAsked in ["", "true", "false"])) {
+    throw new GradleException("-Pgui runs the simulator with WPILib's GUI and -Pgui=false without it, not -Pgui=${guiAsked}")
+}
+def gui = guiAsked == null ? guiByDefault : guiAsked != "false"
+
+wpi.sim.addGui().defaultEnabled = gui && !project.hasProperty("replay")
 wpi.sim.addDriverstation()
 
 def scenario = project.findProperty("scenario")?.toString()
@@ -44,6 +57,9 @@ tasks.named("run") {
     def defaults = fileTree("sim") { include "simgui*.json" }
     def target = projectDir
     doFirst {
+        if (!gui) {
+            return // the GUI's settings are the GUI's alone
+        }
         defaults.each { File f ->
             def dest = new File(target, f.name)
             if (!dest.exists()) {

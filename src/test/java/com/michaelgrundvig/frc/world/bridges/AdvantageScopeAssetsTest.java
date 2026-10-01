@@ -133,8 +133,12 @@ class AdvantageScopeAssetsTest {
     assertThat(front.get("name")).isEqualTo("front");
     assertThat(numbers(front.get("position"))).containsExactly(0.25, 0.2, 0.5);
     assertThat(numbers(front.get("resolution"))).containsExactly(1280.0, 800.0);
-    // An 80° diagonal across 1280 x 800 pixels sees 70.86° across.
-    assertThat(number(front.get("fov"))).isCloseTo(70.86, within(0.01));
+    // An 80° diagonal across 1280 x 800 pixels sees 47.95° from top to bottom, which
+    // AdvantageScope's view takes as fov over the aspect ratio (1.6).
+    double vertical =
+        2 * Math.toDegrees(Math.atan(Math.tan(Math.toRadians(40)) * 800 / Math.hypot(1280, 800)));
+    assertThat(vertical).isCloseTo(47.95, within(0.01));
+    assertThat(number(front.get("fov")) / 1.6).isCloseTo(vertical, within(1e-5));
     List<Object> components = list(config.get("components"));
     assertThat(components).as("four wheels, then the fields of view").hasSize(5);
     for (Object component : components) {

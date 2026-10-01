@@ -322,7 +322,14 @@ public final class AdvantageScopeAssets {
 
   /**
    * A camera as AdvantageScope's fixed view: its lens, turned as WPILib's {@code Rotation3d(roll,
-   * pitch, yaw)} turns it, and its horizontal field of view.
+   * pitch, yaw)} turns it, and its field of view.
+   *
+   * <p>AdvantageScope's docs call {@code fov} the horizontal field of view, but its renderer takes
+   * the view's vertical angle as {@code fov} over the image's aspect ratio (Field3dRendererImpl.ts,
+   * at the release this writes for): a linear scaling that's only right for narrow lenses. So this
+   * writes the vertical angle times the aspect ratio (76.7° for an 80° diagonal across 1280 x 800,
+   * whose true horizontal angle is 70.9°), and the view sees exactly what the camera does. The
+   * cones are drawn from the true angles.
    */
   private static Map<String, Object> camera(CameraConfig camera) {
     CameraConfig.Sensor sensor = camera.sensor();
@@ -337,7 +344,8 @@ public final class AdvantageScopeAssets {
     Translation3d lens = camera.position();
     view.put("position", List.of(lens.getX(), lens.getY(), lens.getZ()));
     view.put("resolution", List.of(sensor.widthPixels(), sensor.heightPixels()));
-    view.put("fov", StrictMath.toDegrees(2 * halfAngle(sensor, sensor.widthPixels())));
+    double aspect = (double) sensor.widthPixels() / sensor.heightPixels();
+    view.put("fov", StrictMath.toDegrees(2 * halfAngle(sensor, sensor.heightPixels())) * aspect);
     return view;
   }
 

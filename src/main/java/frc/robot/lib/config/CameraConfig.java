@@ -85,7 +85,8 @@ public record CameraConfig(
    * @param frameRate images processed per second
    * @param latency the average time from taking an image to its result reaching the robot. Images
    *     that take much longer are thrown out, so measure it: the Vision log's {@code
-   *     LatencySeconds} for the camera, less the wait for the robot's loop.
+   *     LatencySeconds} for the camera, less the wait for the robot's loop. The simulator's cameras
+   *     take this long too.
    */
   @ConfigRecord
   public record Sensor(

@@ -4,6 +4,7 @@ import static org.wpilib.units.Units.Seconds;
 
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.MountCheck;
+import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionDecision;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,12 @@ final class Camera implements AutoCloseable {
   private final Alert unreadable;
   private final Alert outOfCalibration;
   private final Alert outOfStep;
+
+  /** The out-of-step alert stays up this long after the last image out of step. */
+  private static final long OUT_OF_STEP_HOLD_NANOS = 2_000_000_000L;
+
+  private long outOfStepUntil = Long.MIN_VALUE;
+  private int leftOutOfStep;
 
   /** Whether the camera still sits where its configuration says, from where its tags land. */
   private final MountCheck mount;
@@ -147,38 +154,53 @@ final class Camera implements AutoCloseable {
   /**
    * Whether an image arrived within the camera's band: no earlier than it was taken, and no later
    * than the camera's usual latency plus a margin. Outside it, the image is left out, and an alert
-   * stays up until one arrives within it again.
+   * stays up for two seconds after the last one.
    *
-   * @param latencySeconds from when the image was taken to this loop
+   * <p>An image read this loop arrived after the previous loop read the camera, so it's late only
+   * if it was late already then: a loop that ran long doesn't make the camera's images late.
+   *
+   * @param takenNanos when the image was taken, by its stamp
+   * @param nowNanos this loop's time
+   * @param previousLoopNanos the previous loop's time; the minimum on the first loop
    * @param marginSeconds how much later than the camera's usual latency is still in time
    */
-  boolean arrivedInTime(double latencySeconds, double marginSeconds) {
-    latencies.add(latencySeconds);
+  boolean arrivedInTime(
+      long takenNanos, long nowNanos, long previousLoopNanos, double marginSeconds) {
+    latencies.add(Timestamps.toSeconds(nowNanos - takenNanos));
     double latest = config.sensor().latency().in(Seconds) + marginSeconds;
-    boolean inTime = latencySeconds >= 0 && latencySeconds <= latest;
-    if (!inTime) {
-      String arrived =
-          latencySeconds < 0
-              ? String.format(Locale.ROOT, "%.0f ms before they're taken", -latencySeconds * 1000)
-              : String.format(Locale.ROOT, "%.0f ms after they're taken", latencySeconds * 1000);
-      outOfStep.setText(
+    String why = null;
+    if (takenNanos > nowNanos) {
+      why =
           String.format(
               Locale.ROOT,
-              "Camera %s's images arrive %s, outside 0 to %.0f ms, and are left out: are its"
-                  + " clock and the robot's in step (time sync)? If it's just slower, measure its"
-                  + " latency",
-              name(),
-              arrived,
-              latest * 1000));
-      outcome(
+              "arrived %.0f ms before it was taken",
+              Timestamps.toSeconds(takenNanos - nowNanos) * 1000);
+    } else if (previousLoopNanos != Long.MIN_VALUE
+        && Timestamps.toSeconds(previousLoopNanos - takenNanos) > latest) {
+      why =
           String.format(
               Locale.ROOT,
-              "arrived %.0f ms after it was taken, outside 0 to %.0f ms",
-              latencySeconds * 1000,
-              latest * 1000));
+              "arrived at least %.0f ms after it was taken, more than %.0f ms",
+              Timestamps.toSeconds(previousLoopNanos - takenNanos) * 1000,
+              latest * 1000);
     }
-    outOfStep.set(!inTime);
-    return inTime;
+    if (why == null) {
+      return true;
+    }
+    outcome(why);
+    leftOutOfStep++;
+    if (!(nowNanos < outOfStepUntil)) {
+      // Said once as the alert goes up, not changed with every image while it's up.
+      outOfStep.setText(
+          "Camera "
+              + name()
+              + "'s images are out of step, and left out: one "
+              + why
+              + ". Are its clock and the robot's in step (time sync)? If it's just slower,"
+              + " measure its latency");
+    }
+    outOfStepUntil = nowNanos + OUT_OF_STEP_HOLD_NANOS;
+    return false;
   }
 
   /** What became of one of this loop's images. */
@@ -239,10 +261,16 @@ final class Camera implements AutoCloseable {
 
   /**
    * Logs this loop's images and tags, the tag residual, this loop's and since startup, and how far
-   * off the camera's mount looks.
+   * off the camera's mount looks; and keeps the out-of-step alert up while it's held, unless the
+   * camera is turned off or gone, which says more.
    */
-  void logLoop() {
+  void logLoop(long nowNanos) {
+    if (!enabled.get() || !inputs.connected) {
+      outOfStepUntil = Long.MIN_VALUE;
+    }
+    outOfStep.set(nowNanos < outOfStepUntil);
     Logger.recordOutput(key + "/Outcomes", outcomes.toArray(String[]::new));
+    Logger.recordOutput(key + "/LeftOutOfStep", leftOutOfStep);
     Logger.recordOutput(
         key + "/LatencySeconds", latencies.stream().mapToDouble(Double::doubleValue).toArray());
     Logger.recordOutput(key + "/SeenTags", seenTags.toArray(Pose3d[]::new));
@@ -314,6 +342,11 @@ final class Camera implements AutoCloseable {
 
   int rejected() {
     return rejected;
+  }
+
+  /** How many of the camera's images were left out for arriving out of step. */
+  int leftOutOfStep() {
+    return leftOutOfStep;
   }
 
   boolean isDisconnectedAlertActive() {

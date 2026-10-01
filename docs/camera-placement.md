@@ -87,7 +87,8 @@ And the accuracy where there's a measurement: the position error's root mean squ
 heading error's.
 
 **Deterministic.** Every random draw comes from the seed, so the same run gives the same report, to
-the digit, on any computer with any number of threads. A camera's noise depends only on the seed,
+the digit, with any number of threads, on the same kind of computer (the same operating system and
+processor: the native solves may round differently on another). A camera's noise depends only on the seed,
 the pose, and where the camera is, so a layout scores the same whatever else is tried beside it.
 
 ## Running it
@@ -198,20 +199,20 @@ Scoring, 1.0, 2.0, 3.0, 6.0, 3
 2026's field stands in until 2027's is published, so this says nothing about next season's robot;
 it shows what a run says and how to read it. The default run, seed 1:
 
-| Cameras | The best layout of that many | Rank | Localized | Two tags | Two cameras |
+| Cameras | The best layout of that many | Rank | 95% within | Within 2 cm | Two cameras |
 |---:|---|---:|---:|---:|---:|
-| 1 | ahead, 16 in up, tilted 20° | 138 | 63.3% | 45.8% | 0.0% |
-| 2 | ahead and back, 24 in up, tilted 10° | 72 | 89.1% | 75.9% | 48.0% |
-| 3 | front corners splayed 45°, and back, 16 in up, tilted 20° | 35 | 97.6% | 91.5% | 82.7% |
-| 4 | corners splayed 30°, 24 in up, tilted 20° | 1 | 99.7% | 95.5% | 93.5% |
-| 4 | the template robot's own | 26 | 98.6% | 93.2% | 96.2% |
+| 1 | ahead, 16 in up, tilted 20° | 139 | none (65% measured) | 44.9% | 0.0% |
+| 2 | ahead and back, 24 in up, tilted 10° | 70 | none (93% measured) | 72.1% | 47.2% |
+| 3 | front corners splayed 30°, and back, 16 in up, tilted 20° | 29 | 3.3 cm | 84.4% | 81.8% |
+| 4 | ahead, back, left, right, 16 in up, tilted 20° | 1 | 2.5 cm | 91.3% | 96.3% |
+| 4 | the template robot's own | 19 | 2.9 cm | 87.6% | 94.7% |
 
-Every camera up to four buys coverage; the fourth still buys two points localized and eleven of two
-cameras seeing tags. The top 25 layouts are four cameras within about a point of each other:
-corners splayed 30° or 45° and the four sides do alike, at any of the three heights, tilted up 10°
-to 20° (level does a little worse). The template robot's own layout is among them. With seed 2,
-95% of layouts move less than 0.3 points, and the top two stay the top two. REBUILT has 32 tags,
-many in mid-field on the hubs; a field with fewer tags spreads the layouts further apart.
+One or two cameras leave more than 5% of the field without a measurement. The third brings the 95%
+error to 3.3 cm, and the fourth to 2.5 cm, with nearly every spot seen by two cameras. The top ten
+are all four cameras, 2.5 to 2.6 cm: cameras on the four sides, or at the corners splayed 30° or
+45°, at any of the three heights, tilted up 10° to 20°. The template robot's own layout is 4 mm
+behind them. REBUILT has 32 tags, many in mid-field on the hubs; a field with fewer tags spreads
+the layouts further apart.
 
 ## At kickoff
 
@@ -243,3 +244,9 @@ with those cameras, and run with `--robot=<its name>`: its cameras are "the robo
   (PhotonVision's simulation would report it at the camera itself); none failed in the example run.
 - **The lens:** a perfect lens, with PhotonVision's model of corner noise. Measure a real camera's
   noise before trusting the absolute numbers.
+
+## Later: a tool for any team
+
+The study runs the template's own vision pipeline on the template's own robot configuration. Once
+the vision pipeline is a library teams pull in, the study could become a standalone tool any team
+runs on its own robot and field, whatever its code. It isn't one yet.

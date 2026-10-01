@@ -32,11 +32,11 @@ public final class CameraStudy {
   static final String USAGE =
       """
       Usage: ./gradlew cameraStudy --args="[options]"   (see docs/camera-placement.md)
-        --robot=NAME              which of Robots.all() to place cameras on (default: Robots.current())
-        --field=NAME              one of WPILib's fields (default: the season's, Fields.DEFAULT_FIELD)
+        --robot=NAME              which of Robots.all() (default: Robots.current())
+        --field=NAME              one of WPILib's Fields (default: Fields.DEFAULT_FIELD)
         --layout=FILE             a tag layout file (JSON), for a field WPILib doesn't have yet
         --weights=FILE            regions of the field that count more, or not at all (CSV)
-        --mounts=FILE             where CAD could put cameras (CSV); without it, a family around the frame
+        --mounts=FILE             where CAD could put cameras (CSV; default: a family)
         --cameras=N               the most cameras in a layout (default 4)
         --grid-meters=M           how far apart the positions are (default 0.5)
         --headings=N              headings at each position (default 8)
@@ -150,7 +150,7 @@ public final class CameraStudy {
                 "Layouts: the robot's own, and the family around its frame, of up to %d cameras.",
                 config.mostCameras())
             : format(
-                "Layouts: the robot's own, and every one of up to %d cameras at the places in `%s`.",
+                "Layouts: the robot's own, and all of up to %d cameras at the places in `%s`.",
                 config.mostCameras(), mountsFile));
     setup.add(
         format(

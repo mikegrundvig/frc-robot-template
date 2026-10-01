@@ -109,7 +109,7 @@ class CameraStudyTest {
     // Ways of facing: 2, 2, 1. One camera: 5; two: 2 x 2 + 2 x 1 + 2 x 1 = 8; the robot's own.
     assertThat(Files.readAllLines(folder.resolve("report/candidates.csv"))).hasSize(1 + 14);
     assertThat(Files.readString(folder.resolve("report/summary.md")))
-        .contains("every one of up to 2 cameras at the places in `" + mounts + "`")
+        .contains("all of up to 2 cameras at the places in `" + mounts + "`")
         .contains("2 cameras: front 0°, up 10°; back 180°, up 20°");
   }
 

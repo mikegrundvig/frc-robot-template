@@ -742,7 +742,10 @@ class VisionTest {
         .isLessThan(1e-6);
   }
 
-  /** The tolerance is the pit's to tune, and applies from the next loop. */
+  /**
+   * The tolerance is the pit's to tune, and applies from the next loop; the alert holds still
+   * around it.
+   */
   @Test
   void theMountToleranceIsReadEveryLoop() {
     CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
@@ -750,9 +753,15 @@ class VisionTest {
     imagesFrom(reallyLower, 260);
     assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isTrue();
 
-    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.15).build();
+    // 10 cm off. Up past the tolerance, the alert comes down only under 0.8 of it.
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.11).build();
     loop();
-
-    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isFalse();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).as("8.8 cm: still up").isTrue();
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.13).build();
+    loop();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).as("10.4 cm: down").isFalse();
+    tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.11).build();
+    loop();
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).as("11 cm: stays down").isFalse();
   }
 }

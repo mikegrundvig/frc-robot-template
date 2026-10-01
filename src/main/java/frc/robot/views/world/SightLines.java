@@ -42,11 +42,17 @@ final class SightLines implements Layer {
 
   /** One camera's latest measurement of one tag, and when it was decided. */
   private record Seen(
-      String id, String camera, int tag, VisionDecision decision, long decidedNanos) {
-    Seen(String camera, int tag, VisionDecision decision, long decidedNanos) {
+      String id,
+      String camera,
+      String cameraId,
+      int tag,
+      VisionDecision decision,
+      long decidedNanos) {
+    Seen(String camera, String cameraId, int tag, VisionDecision decision, long decidedNanos) {
       this(
-          "ray." + WorldView.name(camera) + "." + tag + (decision.accepted() ? ".ok" : ".bad"),
+          "ray." + cameraId + "." + tag + (decision.accepted() ? ".ok" : ".bad"),
           camera,
+          cameraId,
           tag,
           decision,
           decidedNanos);
@@ -54,7 +60,10 @@ final class SightLines implements Layer {
   }
 
   private final FieldModel field;
-  private final Set<String> cameras;
+
+  /** Each camera's id, by its name: what its measurements say. */
+  private final Map<String, String> cameraIds;
+
   private final WorldView.Readings readings;
   private final Function<String, Optional<String>> cameraAction;
 
@@ -78,7 +87,9 @@ final class SightLines implements Layer {
       WorldView.Readings readings,
       Function<String, Optional<String>> cameraAction) {
     this.field = field;
-    this.cameras = cameras.stream().map(CameraConfig::name).collect(Collectors.toSet());
+    this.cameraIds =
+        cameras.stream()
+            .collect(Collectors.toUnmodifiableMap(CameraConfig::name, CameraConfig::id));
     this.readings = readings;
     this.cameraAction = cameraAction;
   }
@@ -106,14 +117,15 @@ final class SightLines implements Layer {
       lastDecisions = decisions;
       for (VisionDecision decision : decisions) {
         VisionMeasurement measurement = decision.measurement();
-        if (!cameras.contains(measurement.camera())) {
+        String cameraId = cameraIds.get(measurement.camera());
+        if (cameraId == null) {
           continue;
         }
         for (int tag : measurement.tagIds()) {
           if (field.tag(tag).isEmpty()) {
             continue;
           }
-          Seen line = new Seen(measurement.camera(), tag, decision, now);
+          Seen line = new Seen(measurement.camera(), cameraId, tag, decision, now);
           Seen before = drawn.put(measurement.camera() + "/" + tag, line);
           changed |= before == null || !before.id().equals(line.id());
           latest.put(line.id(), line);
@@ -134,7 +146,7 @@ final class SightLines implements Layer {
       String id = line.id();
       shapes
           .line(id, SceneBuilder.ROOT)
-          .between(WorldView.cameraFrame(line.camera()), WorldView.tagFrame(line.tag()))
+          .between(WorldView.cameraFrame(line.cameraId()), WorldView.tagFrame(line.tag()))
           .style(line.decision().accepted() ? Style.OK : Style.BAD.dashed())
           .inspect(() -> inspection(latest.getOrDefault(id, line)));
     }

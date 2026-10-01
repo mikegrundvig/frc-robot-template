@@ -96,22 +96,14 @@ public final class WorldView {
     return scene.focus(RobotLayer.FRAME);
   }
 
-  /** A camera's frame on the page. */
-  static String cameraFrame(String camera) {
-    return "camera." + name(camera);
+  /** A camera's frame on the page, by its id ({@link CameraConfig#id()}). */
+  static String cameraFrame(String cameraId) {
+    return "camera." + cameraId;
   }
 
   /** A tag's frame on the page. */
   static String tagFrame(int id) {
     return "tag." + id;
-  }
-
-  /** A name as the page's ids allow: letters, digits, dots, hyphens, and underscores. */
-  static String name(String name) {
-    String cleaned = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]+", "-");
-    return cleaned.isEmpty() || !Character.isLetterOrDigit(cleaned.charAt(0))
-        ? "x" + cleaned
-        : cleaned;
   }
 
   /** A number to two places, for details. */

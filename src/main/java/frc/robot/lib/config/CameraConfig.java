@@ -7,6 +7,8 @@ import static frc.robot.lib.config.Rules.notBlank;
 import static frc.robot.lib.config.Rules.positive;
 import static org.wpilib.units.Units.Degrees;
 
+import java.util.Locale;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
@@ -23,7 +25,8 @@ import org.wpilib.units.measure.Time;
  * <p>Positions are from the robot's origin: the frame's center, on the floor. Angles apply in the
  * order yaw, tilt, roll, each about the camera's own axes.
  *
- * @param name unique on the robot; use the name the vision software knows the camera by
+ * @param name unique on the robot, even as an id ({@link #id()}); use the name the vision software
+ *     knows the camera by
  * @param forward how far ahead of the center the lens sits (negative: behind it)
  * @param left how far left of the center (negative: to the right)
  * @param up how far above the floor
@@ -45,9 +48,17 @@ public record CameraConfig(
     Angle yaw,
     Sensor sensor,
     double noiseScale) {
+  /**
+   * The most characters a camera's {@link #id()} may have: Pitwall's World view names what it draws
+   * for a camera by it, in ids of at most 64 characters, the longest twelve more ({@code
+   * "camera.<id>.view"}, {@code "ray.<id>.<tag>.bad"}).
+   */
+  public static final int MAX_ID_LENGTH = 52;
+
   public CameraConfig {
     Checks.on(CameraConfig.class, name)
         .field("name", name, notBlank())
+        .field("name", name, CameraConfig::idTooLong)
         .field("forward", forward, finite())
         .field("left", left, finite())
         .field("up", up, finite())
@@ -61,6 +72,34 @@ public record CameraConfig(
   /** Starts building a camera, one named value at a time. */
   public static CameraConfigBuilder.NameStage builder() {
     return CameraConfigBuilder.builder();
+  }
+
+  /**
+   * Its name as an id, as tools that can't take any text name it (Pitwall's World view): lowercase
+   * letters, digits, dots, hyphens and underscores, everything else a hyphen ("Front Left" is
+   * "front-left"), starting with a letter or digit. Unique on the robot, as its name is.
+   */
+  public String id() {
+    return id(name);
+  }
+
+  private static String id(String name) {
+    String cleaned = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9._-]+", "-");
+    return cleaned.isEmpty() || !Character.isLetterOrDigit(cleaned.charAt(0))
+        ? "x" + cleaned
+        : cleaned;
+  }
+
+  private static @Nullable String idTooLong(String name) {
+    String id = id(name);
+    return id.length() <= MAX_ID_LENGTH
+        ? null
+        : "must be at most "
+            + MAX_ID_LENGTH
+            + " characters as an id, which the World view names what it draws for it by: "
+            + id
+            + " is "
+            + id.length();
   }
 
   /** Where the lens sits, from the robot's origin. */

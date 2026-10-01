@@ -73,6 +73,17 @@ class CameraConfigTest {
   }
 
   @Test
+  void aCamerasIdIsItsNameAsToolsThatTakeOnlyIdsNameIt() {
+    assertThat(change().name("Front Left!").build().id()).isEqualTo("front-left-");
+    assertThat(change().name("-x").build().id()).isEqualTo("x-x");
+    assertThat(change().name("a".repeat(CameraConfig.MAX_ID_LENGTH)).build().id())
+        .hasSize(CameraConfig.MAX_ID_LENGTH);
+    assertRejected(
+        "CameraConfig[" + "A".repeat(53) + "].name: must be at most 52 characters as an id",
+        () -> change().name("A".repeat(53)).build());
+  }
+
+  @Test
   void aSensorWithNoLatencyIsAllowed() {
     assertThatNoException().isThrownBy(() -> changeSensor().latency(Milliseconds.of(0)).build());
   }

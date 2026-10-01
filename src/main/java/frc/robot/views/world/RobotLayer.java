@@ -154,7 +154,7 @@ final class RobotLayer implements Layer {
           .style(Style.ACCENT);
     }
     for (CameraConfig camera : cameras) {
-      String frame = WorldView.cameraFrame(camera.name());
+      String frame = WorldView.cameraFrame(camera.id());
       scene.frame(frame, FRAME, camera.robotToCamera());
       scene
           .arrow(frame + ".axis", frame)

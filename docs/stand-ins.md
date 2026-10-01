@@ -27,9 +27,9 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
 - **Physics simulation** (traction, collisions, game pieces): maple-sim. Until then, simulation tests
   the code, not the robot's traction or power. The simulator keeps the robot's true pose apart from
-  its sensors (`DriveSimulation`, `SensorErrors`), the drive motors obey their stator current limit,
-  the robot rides over the field's bumps (tilted and raised by the ground under its wheels), and
-  faults can be made by hand or by name (`frc.robot.sim.Scenarios`, `./gradlew run
+  its sensors (`DriveSimulation`, `SensorErrors`), the drive and steering motors obey their stator
+  current limits, the robot rides over the field's bumps (tilted and raised by the ground under its
+  wheels), and faults can be made by hand or by name (`frc.robot.sim.Scenarios`, `./gradlew run
   -Pscenario=<name>`): a slipping wheel, a push, a hit the IMU feels, a gyro unplugged or frozen, a
   camera knocked off its mount. Wheels still never slip on their own, and no one wheel can leave the
   floor: `wheel-lifted` tilts the robot by hand (which holds over any bump for the rest of the run)

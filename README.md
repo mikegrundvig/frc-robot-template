@@ -123,11 +123,14 @@ Also built in:
   while disabled to start somewhere else. At kickoff, write the new game's the same way.
 - **A pose estimator built to be trusted** (`lib/localization`): 250 Hz odometry, with the gyro
   owning heading and the wheels' disagreement (slip) lowering their trust; camera measurements
-  applied at the moment their image was taken, however late they arrive; every measurement gated
+  applied at the moment their image was taken, even when they arrive late (up to 1.5 s, and
+  within their camera's usual latency plus a margin, or the clocks are out of step and the image
+  is left out); every measurement gated
   against the estimate, so a misread tag can't move it; and recovery when the cameras agree with
-  each other that odometry is wrong (a collision). It reports what it rests on (tracking,
-  dead reckoning, lost, gyro lost) and how sure it is, on Pitwall and in the log. Swerve and tank
-  kinematics plug in; so will any other drivetrain.
+  each other that odometry is wrong (a collision). A camera knocked off its mount counts for less
+  until it's recalibrated, and says so; a task lining up on a target can trust only that target's
+  tags. It reports what it rests on (tracking, dead reckoning, lost, gyro lost) and how sure it
+  is, on Pitwall and in the log. Swerve and tank kinematics plug in; so will any other drivetrain.
 - **A simulator that knows where the robot really is:** its wheels and gyro report the truth with
   the errors a season-worn robot has (worn tread, encoder zeros a little off, gyro scale, drift, and
   noise; `SensorErrors`), so odometry drifts as a real robot's does, and a wheel can be made to slip
@@ -169,6 +172,7 @@ Also built in:
 | `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, and the named scenarios (`Scenarios`). Only the simulator builds it. |
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
+| `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |

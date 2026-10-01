@@ -24,6 +24,7 @@ class PoseFilterReferenceTest {
   private static final int PER_CAMERA = 4;
 
   private static final double SCALE = Math.toRadians(1) / (2 * Math.PI);
+  private static final double BACKUP_SCALE = Math.toRadians(2) / (2 * Math.PI);
   private static final double TURN = Math.toRadians(0.25);
   private static final double SHIFT = 0.01;
   private static final double HEADING_SHIFT = Math.toRadians(2);
@@ -39,18 +40,22 @@ class PoseFilterReferenceTest {
     return which == 0 ? TURN * TURN : which == 3 ? HEADING_SHIFT * HEADING_SHIFT : SHIFT * SHIFT;
   }
 
-  /** A camera's considered error's index in the augmented state. */
+  /** A camera's considered error's index in the augmented state, after the two IMUs' scales. */
   private static int column(int camera, int which) {
-    return 3 + 1 + PER_CAMERA * camera + which;
+    return 3 + 2 + PER_CAMERA * camera + which;
+  }
+
+  /** A considered error's own variance, by its index among them. */
+  private static double consideredVariance(int k) {
+    return k == 0
+        ? SCALE * SCALE
+        : k == 1 ? BACKUP_SCALE * BACKUP_SCALE : ownVariance((k - 2) % PER_CAMERA);
   }
 
   private void startConsidered() {
     p = new double[N][N];
-    p[3][3] = SCALE * SCALE;
-    for (int camera = 0; camera < PoseFilter.MAX_CAMERAS; camera++) {
-      for (int which = 0; which < PER_CAMERA; which++) {
-        p[column(camera, which)][column(camera, which)] = ownVariance(which);
-      }
+    for (int k = 0; k < C; k++) {
+      p[3 + k][3 + k] = consideredVariance(k);
     }
   }
 
@@ -79,7 +84,7 @@ class PoseFilterReferenceTest {
       double dy,
       double positionNoise,
       double headingNoise,
-      boolean gyro) {
+      YawSource turnedBy) {
     double heading = startYaw + mean[2];
     double along = dx;
     double across = dy;
@@ -97,8 +102,10 @@ class PoseFilterReferenceTest {
     f[0][2] = -moveY;
     f[1][2] = moveX;
     double[][] g = identity(N);
-    if (gyro) {
+    if (turnedBy == YawSource.GYRO) {
       g[2][3] = turn; // the gyro's scale error, times the turn, goes into the heading's
+    } else if (turnedBy == YawSource.BACKUP) {
+      g[2][4] = turn; // and the backup IMU's, its own
     }
     // Each camera's shift fades as the robot moves and turns, to a fresh one of the same variance.
     double remains =
@@ -236,7 +243,7 @@ class PoseFilterReferenceTest {
       for (int j = 0; j < 3; j++) {
         double value = kept[i * 3 + j];
         for (int k = 0; k < C; k++) {
-          double variance = k == 0 ? SCALE * SCALE : ownVariance((k - 1) % PER_CAMERA);
+          double variance = consideredVariance(k);
           if (variance > 0) {
             value -= kept[9 + i * C + k] * kept[9 + j * C + k] / variance;
           }
@@ -250,7 +257,8 @@ class PoseFilterReferenceTest {
   @Test
   void everyOperationMatchesTheAugmentedSchmidtKalmanFilter() {
     PoseFilter.Considered considered =
-        new PoseFilter.Considered(SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS);
+        new PoseFilter.Considered(
+            SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS);
     double worstDifference = 0;
     double worstEigenvalue = Double.POSITIVE_INFINITY;
     int operations = 0;
@@ -284,9 +292,11 @@ class PoseFilterReferenceTest {
           double dy = 0.04 * (random.nextDouble() - 0.5);
           double positionNoise = logUniform(random, 1e-9, 1e-4);
           double headingNoise = logUniform(random, 1e-12, 1e-5);
-          boolean gyro = random.nextDouble() < 0.85;
-          filter.predict(yaw, turn, dx, dy, positionNoise, headingNoise, gyro);
-          predict(yaw, turn, dx, dy, positionNoise, headingNoise, gyro);
+          double which = random.nextDouble();
+          YawSource turnedBy =
+              which < 0.6 ? YawSource.GYRO : which < 0.85 ? YawSource.BACKUP : YawSource.WHEELS;
+          filter.predict(yaw, turn, dx, dy, positionNoise, headingNoise, turnedBy);
+          predict(yaw, turn, dx, dy, positionNoise, headingNoise, turnedBy);
           yaw += turn;
         } else if (u < 0.90) {
           VisionMeasurement measurement = measurement(random, filter);
@@ -386,7 +396,7 @@ class PoseFilterReferenceTest {
     PoseFilter filter =
         new PoseFilter(
             new PoseFilter.Considered(
-                SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS));
+                SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS));
     filter.set(new PoseReset(0, Pose2d.ZERO, PoseCovariance.fromStdDevs(1, 1, 0.1), "x"), 0);
     double yaw = 0;
     double worstEigenvalue = Double.POSITIVE_INFINITY;
@@ -409,7 +419,7 @@ class PoseFilterReferenceTest {
       filter.correct(innovation);
       worstMiss = Math.max(worstMiss, Math.abs(filter.x() - x));
       if (i % 5 == 0) {
-        filter.predict(yaw, 0.001, 0.001, 0, 1e-12, 1e-14, true);
+        filter.predict(yaw, 0.001, 0.001, 0, 1e-12, 1e-14, YawSource.GYRO);
         yaw += 0.001;
       }
       worstEigenvalue = Math.min(worstEigenvalue, leastEigenvalue(filter));

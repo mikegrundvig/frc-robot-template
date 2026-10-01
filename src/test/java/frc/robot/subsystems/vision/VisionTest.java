@@ -23,6 +23,7 @@ import frc.robot.lib.localization.TagAllowlist;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
+import frc.robot.lib.localization.YawSource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -132,9 +133,9 @@ class VisionTest {
         new Vision(
             List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned, () -> ourAlliance);
     for (int k = 0; k <= 10; k++) {
-      estimator.addOdometry(T0 + k * 20_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
+      estimator.addOdometry(T0 + k * 20_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
     }
-    estimator.addOdometry(T0 + 220_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    estimator.addOdometry(T0 + 220_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
   }
 
   @AfterEach
@@ -237,7 +238,7 @@ class VisionTest {
     double pitch = Math.toRadians(-8);
     double roll = Math.toRadians(3);
     loop(pitch, roll); // tilted as of T0 + 220 ms, when the image is taken
-    estimator.addOdometry(T0 + 240_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    estimator.addOdometry(T0 + 240_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
     io.see(
         T0 + 220_000_000L,
         camera,
@@ -453,7 +454,7 @@ class VisionTest {
     loop();
     long before = estimator.estimate().timestampNanos();
     long now = before + 400_000_000L;
-    estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
     io.see(before + 20_000_000L, camera); // arrived 30 ms later, then waited 350 ms for the loop
 
     vision.periodic(now, estimator.estimate(), 0, 0);
@@ -678,7 +679,7 @@ class VisionTest {
   private void imagesFrom(CameraConfig reallyMounted, int images) {
     for (int k = 0; k < images; k++) {
       long now = estimator.estimate().timestampNanos() + 20_000_000L;
-      estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
+      estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
       io.see(now, reallyMounted);
       if (second != null) {
         secondIo.see(now, second);

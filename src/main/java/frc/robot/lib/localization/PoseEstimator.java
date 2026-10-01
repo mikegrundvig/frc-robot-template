@@ -58,6 +58,7 @@ public final class PoseEstimator implements CameraLocalizer {
   private final double translationVariancePerMeter;
   private final double translationVariancePerRadian;
   private final double headingVariancePerSecond;
+  private final double headingNoiseVariancePerRadian;
   private final double wheelHeadingVariancePerRadian;
   private final long historyNanos;
   private final long futureToleranceNanos;
@@ -76,11 +77,11 @@ public final class PoseEstimator implements CameraLocalizer {
   /** Each camera's place among the errors the filter keeps apart, by name, as cameras appear. */
   private final Map<String, Integer> cameraSlots = new HashMap<>();
 
-  // The gyro's reading, unwrapped into one continuous yaw.
+  // The IMUs' readings, unwrapped into one continuous yaw.
   private boolean started;
   private double yaw;
-  private double lastGyroYaw;
-  private boolean lastGyroConnected;
+  private double lastImuYaw;
+  private YawSource lastSource = YawSource.WHEELS;
 
   // What the wheels are going through, and the doubt it adds up to.
   private DriveConditions conditions = DriveConditions.NORMAL;
@@ -137,6 +138,8 @@ public final class PoseEstimator implements CameraLocalizer {
     translationVariancePerMeter = square(config.translationStdDevPerMeter());
     translationVariancePerRadian = square(config.translationStdDevPerRadian());
     headingVariancePerSecond = square(Math.toRadians(config.headingDriftDegreesPerMinute())) / 60;
+    headingNoiseVariancePerRadian =
+        square(Math.toRadians(config.headingNoiseDegreesPerTurn())) / (2 * Math.PI);
     wheelHeadingVariancePerRadian =
         square(Math.toRadians(config.wheelHeadingStdDevDegreesPerTurn())) / (2 * Math.PI);
     historyNanos = Timestamps.fromSeconds(config.historySeconds());
@@ -156,6 +159,7 @@ public final class PoseEstimator implements CameraLocalizer {
         new PoseFilter(
             new PoseFilter.Considered(
                 Math.toRadians(config.headingStdDevDegreesPerTurn()) / (2 * Math.PI),
+                Math.toRadians(config.backupHeadingStdDevDegreesPerTurn()) / (2 * Math.PI),
                 Math.toRadians(config.cameraTurnStdDevDegrees()),
                 config.cameraShiftStdDevMeters(),
                 Math.toRadians(config.cameraShiftStdDevDegrees()),
@@ -166,23 +170,29 @@ public final class PoseEstimator implements CameraLocalizer {
 
   /**
    * One odometry step: how the robot moved since the previous step, ending at this time, and what
-   * the gyro read then. Steps come in time order, at whatever rate odometry runs (250 Hz on a
-   * robot); a step no newer than the last is ignored. The first step only starts the clock and the
-   * gyro's reference.
+   * an IMU read then. Steps come in time order, at whatever rate odometry runs (250 Hz on a robot);
+   * a step no newer than the last is ignored. The first step only starts the clock and the IMU's
+   * reference.
    *
-   * @param gyroYawRadians the gyro's yaw, counterclockwise; any zero, wrapped or not
-   * @param gyroReporting false while the gyro is lost: the wheels' rotation stands in for it. A yaw
-   *     that isn't a number counts as lost, so one bad reading can't poison the heading.
+   * <p>An IMU turns a step only when it also read the step before: a step after it was lost, came
+   * back (its reading may have jumped), or took over from the other IMU (on its own zero) is turned
+   * by the wheels, and the IMU's next steps carry on from its new reading.
+   *
+   * @param yawRadians the IMU's yaw, counterclockwise; any zero, wrapped or not. One that isn't a
+   *     number counts as no reading, so one bad reading can't poison the heading.
+   * @param source which IMU read it: the gyro, or the backup IMU while the gyro is lost; the wheels
+   *     when neither does, and the yaw is ignored
    */
   public void addOdometry(
-      long timestampNanos, BodyMotion motion, double gyroYawRadians, boolean gyroReporting) {
-    boolean gyroConnected = gyroReporting && Double.isFinite(gyroYawRadians);
+      long timestampNanos, BodyMotion motion, double yawRadians, YawSource source) {
+    YawSource reading =
+        source != YawSource.WHEELS && Double.isFinite(yawRadians) ? source : YawSource.WHEELS;
     if (!started) {
       started = true;
-      yaw = gyroConnected ? gyroYawRadians : 0;
-      lastGyroYaw = gyroConnected ? gyroYawRadians : 0;
-      lastGyroConnected = gyroConnected;
-      history.start(timestampNanos, gyroConnected, yaw);
+      yaw = reading != YawSource.WHEELS ? yawRadians : 0;
+      lastImuYaw = yaw;
+      lastSource = reading;
+      history.start(timestampNanos, reading, yaw);
       filter.set(initial, yaw);
       history.store(0, filter);
       lastResetNanos = timestampNanos;
@@ -192,16 +202,18 @@ public final class PoseEstimator implements CameraLocalizer {
     if (timestampNanos <= previousTime) {
       return;
     }
-    // The gyro owns rotation. When it's lost, or has just come back and its reading may have
-    // jumped, the wheels' rotation stands in for the step.
+    // An IMU owns rotation, from its second reading on. Lost, just back, or just switched to, the
+    // wheels' rotation stands in for the step.
+    YawSource turnedBy =
+        reading != YawSource.WHEELS && reading == lastSource ? reading : YawSource.WHEELS;
     yaw +=
-        gyroConnected && lastGyroConnected
-            ? MathUtil.angleModulus(gyroYawRadians - lastGyroYaw)
+        turnedBy != YawSource.WHEELS
+            ? MathUtil.angleModulus(yawRadians - lastImuYaw)
             : motion.dthetaRadians();
-    if (gyroConnected) {
-      lastGyroYaw = gyroYawRadians;
+    if (reading != YawSource.WHEELS) {
+      lastImuYaw = yawRadians;
     }
-    lastGyroConnected = gyroConnected;
+    lastSource = reading;
 
     // A tilt the ground explains still rolls on the ground: the travel counts at the slope's
     // cosine. Tilt beyond it may have lifted the wheels: their travel counts for less.
@@ -221,7 +233,7 @@ public final class PoseEstimator implements CameraLocalizer {
             trust * across * motion.dyMeters(),
             motion.residualMeters(),
             extra,
-            gyroConnected,
+            turnedBy,
             yaw);
     advance(step, 0, 1);
     history.store(step, filter);
@@ -381,7 +393,7 @@ public final class PoseEstimator implements CameraLocalizer {
         started
             ? history.motionOver(VELOCITY_WINDOW_NANOS, filter.offset())
             : new OdometryHistory.Motion(Translation2d.ZERO, 0);
-    boolean gyroConnected = !started || history.gyro(history.size() - 1);
+    boolean gyroConnected = !started || lastSource != YawSource.WHEELS;
     double visionAge =
         lastAcceptedNanos == Long.MIN_VALUE
             ? Double.POSITIVE_INFINITY
@@ -706,8 +718,11 @@ public final class PoseEstimator implements CameraLocalizer {
                 + history.extra(j)),
         fraction
             * (headingVariancePerSecond * seconds
-                + (history.gyro(j) ? 0 : wheelHeadingVariancePerRadian * Math.abs(stepTurn))),
-        history.gyro(j));
+                + (history.turnedBy(j) == YawSource.WHEELS
+                        ? wheelHeadingVariancePerRadian
+                        : headingNoiseVariancePerRadian)
+                    * Math.abs(stepTurn)),
+        history.turnedBy(j));
   }
 
   /**

@@ -3,8 +3,8 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
+import frc.robot.lib.localization.YawSource;
 import frc.robot.sim.Faults;
-import frc.robot.subsystems.localization.Localization;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -119,7 +119,7 @@ class SimulatorControlsSimTest {
             "/api/simulator/faults",
             "{\"component\": \"" + Faults.GYRO + "\", \"fault\": \"" + Faults.UNPLUGGED + "\"}");
     sim.run(0.5);
-    Localization.YawSource without = sim.robot().localization().yawSource();
+    YawSource without = sim.robot().localization().yawSource();
     var pluggedIn =
         send(
             "POST",
@@ -128,9 +128,9 @@ class SimulatorControlsSimTest {
     sim.run(1.0);
 
     assertThat(unplugged.statusCode()).isEqualTo(200);
-    assertThat(without).isEqualTo(Localization.YawSource.BACKUP);
+    assertThat(without).isEqualTo(YawSource.BACKUP);
     assertThat(pluggedIn.statusCode()).isEqualTo(200);
-    assertThat(sim.robot().localization().yawSource()).isEqualTo(Localization.YawSource.GYRO);
+    assertThat(sim.robot().localization().yawSource()).isEqualTo(YawSource.GYRO);
   }
 
   /** A scenario from the page happens now, to the running robot. */

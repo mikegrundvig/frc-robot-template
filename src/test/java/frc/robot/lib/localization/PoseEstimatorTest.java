@@ -41,7 +41,7 @@ class PoseEstimatorTest {
 
     Robot(EstimatorConfig config, PoseReset start) {
       estimator = new PoseEstimator(config, point -> field(point), start);
-      estimator.addOdometry(time, new BodyMotion(0, 0, 0, 0), gyroYaw, true);
+      estimator.addOdometry(time, new BodyMotion(0, 0, 0, 0), gyroYaw, YawSource.GYRO);
     }
 
     Robot() {
@@ -66,7 +66,10 @@ class PoseEstimatorTest {
         time += STEP;
         gyroYaw += omega * dt;
         estimator.addOdometry(
-            time, new BodyMotion(vx * dt, vy * dt, omega * dt, residual), gyroYaw, gyro);
+            time,
+            new BodyMotion(vx * dt, vy * dt, omega * dt, residual),
+            gyroYaw,
+            gyro ? YawSource.GYRO : YawSource.WHEELS);
       }
       return this;
     }
@@ -415,13 +418,13 @@ class PoseEstimatorTest {
             EstimatorConfig.DEFAULTS,
             point -> true,
             new PoseReset(0, START, PoseCovariance.fromStdDevs(10, 10, 3), "unknown"));
-    estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0, true);
+    estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0, YawSource.GYRO);
     assertThat(estimator.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.INITIALIZING);
 
     estimator.reset(new PoseReset(T0, START, PLACED, "placed"));
     assertThat(estimator.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
 
-    estimator.addOdometry(T0 + STEP, new BodyMotion(0, 0, 0, 0), 0, true);
+    estimator.addOdometry(T0 + STEP, new BodyMotion(0, 0, 0, 0), 0, YawSource.GYRO);
     estimator.addVision(
         new VisionMeasurement(
             T0 + STEP,
@@ -435,12 +438,12 @@ class PoseEstimatorTest {
     assertThat(estimator.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.TRACKING);
     assertThat(estimator.estimate().health().visionAgeSeconds()).isZero();
 
-    estimator.addOdometry(T0 + 300 * STEP, new BodyMotion(0, 0, 0, 0), 0, true);
+    estimator.addOdometry(T0 + 300 * STEP, new BodyMotion(0, 0, 0, 0), 0, YawSource.GYRO);
     assertThat(estimator.estimate().mode())
         .as("1.2 s without vision")
         .isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
 
-    estimator.addOdometry(T0 + 301 * STEP, new BodyMotion(0, 0, 0, 0), 0, false);
+    estimator.addOdometry(T0 + 301 * STEP, new BodyMotion(0, 0, 0, 0), 0, YawSource.WHEELS);
     assertThat(estimator.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
   }
 
@@ -466,6 +469,49 @@ class PoseEstimatorTest {
     robot.drive(10, 0, 0, 0);
 
     assertThat(robot.pose().getRotation().getRadians()).isCloseTo(heading, within(1e-9));
+  }
+
+  /**
+   * The step where the gyro comes back is turned by the wheels, so its turn counts as the wheels'
+   * doubt, not the gyro's: the heading grows as unsure over it as over any wheel-turned step.
+   */
+  @Test
+  void theStepWhereTheGyroComesBackIsTheWheels() {
+    Robot back = new Robot().drive(10, 0, 0, 0, 0, false);
+    Robot lost = new Robot().drive(10, 0, 0, 0, 0, false);
+
+    back.drive(1, 0, 0, 1.0); // the gyro back, turning
+    lost.drive(1, 0, 0, 1.0, 0, false); // still lost, turning by the wheels
+
+    assertThat(back.estimate().covariance().heading())
+        .isCloseTo(lost.estimate().covariance().heading(), within(1e-15));
+    assertThat(back.estimate().health().gyroConnected()).as("the gyro reads again").isTrue();
+  }
+
+  /** While the backup IMU turns odometry in the gyro's place, its own scale's doubt grows. */
+  @Test
+  void theBackupImuTurnsWithItsOwnScalesDoubt() {
+    Robot gyro = new Robot().drive(1, 0, 0, 0);
+    PoseEstimator backup =
+        new PoseEstimator(TEXTBOOK, point -> true, new PoseReset(0, START, PLACED, "start"));
+    backup.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0.7, YawSource.BACKUP);
+    backup.reset(new PoseReset(T0, START, PLACED, "placed"));
+    double yaw = 0.7;
+    for (int i = 1; i <= 250; i++) {
+      yaw += 2 * Math.PI / 250;
+      backup.addOdometry(
+          T0 + i * STEP, new BodyMotion(0, 0, 2 * Math.PI / 250, 0), yaw, YawSource.BACKUP);
+    }
+    gyro.drive(249, 0, 0, 2 * Math.PI);
+
+    // A full turn on each: the backup's 2° a turn against the gyro's 1°.
+    double backupTurn =
+        Math.toRadians(EstimatorConfig.DEFAULTS.backupHeadingStdDevDegreesPerTurn());
+    double gyroTurn = Math.toRadians(EstimatorConfig.DEFAULTS.headingStdDevDegreesPerTurn());
+    assertThat(backup.estimate().covariance().headingStdDev()).isGreaterThan(backupTurn);
+    assertThat(gyro.estimate().covariance().headingStdDev())
+        .isGreaterThan(gyroTurn)
+        .isLessThan(backupTurn);
   }
 
   @Test
@@ -633,7 +679,7 @@ class PoseEstimatorTest {
             EstimatorConfig.DEFAULTS, point -> true, new PoseReset(0, START, PLACED, "start"));
 
     estimator.resetHeading(Rotation2d.PI, 0.1);
-    estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0.4, true);
+    estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0.4, YawSource.GYRO);
 
     assertThat(estimator.pose().getRotation().getDegrees()).isCloseTo(180, within(1e-9));
     assertThat(estimator.pose().getTranslation()).isEqualTo(START.getTranslation());
@@ -799,7 +845,7 @@ class PoseEstimatorTest {
     Robot robot = new Robot().drive(25, 1, 0, 0);
     robot.time += STEP;
     robot.estimator.addOdometry(
-        robot.time, new BodyMotion(0.004, 0, 0, 0), Double.NaN, /* reporting */ true);
+        robot.time, new BodyMotion(0.004, 0, 0, 0), Double.NaN, YawSource.GYRO);
 
     assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
     robot.drive(25, 1, 0, 0);

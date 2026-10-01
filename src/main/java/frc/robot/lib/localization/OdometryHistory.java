@@ -19,7 +19,7 @@ final class OdometryHistory {
   /** Each step's own added position variance for slip, tilt, and collisions: fixed on arrival. */
   private final double[] extra;
 
-  private final boolean[] gyro;
+  private final YawSource[] turnedBy;
   private final double[] yawAfter;
   private final double[] xAfter;
   private final double[] yAfter;
@@ -41,7 +41,7 @@ final class OdometryHistory {
     dy = new double[capacity];
     residual = new double[capacity];
     extra = new double[capacity];
-    gyro = new boolean[capacity];
+    turnedBy = new YawSource[capacity];
     yawAfter = new double[capacity];
     xAfter = new double[capacity];
     yAfter = new double[capacity];
@@ -50,11 +50,11 @@ final class OdometryHistory {
   }
 
   /** Starts over with a single step: where odometry starts. */
-  void start(long timestampNanos, boolean gyroConnected, double yaw) {
+  void start(long timestampNanos, YawSource source, double yaw) {
     oldest = 0;
     size = 1;
     time[0] = timestampNanos;
-    gyro[0] = gyroConnected;
+    turnedBy[0] = source;
     yawAfter[0] = yaw;
   }
 
@@ -65,7 +65,7 @@ final class OdometryHistory {
    * @param dyMeters and to the left
    * @param residualMeters the wheels' disagreement
    * @param extraVariance the step's added position variance
-   * @param gyroConnected whether the gyro turned this step, or the wheels stood in
+   * @param source what turned this step: an IMU, or the wheels standing in
    * @param yaw the unwrapped yaw after the step
    * @return the new step's number
    */
@@ -75,7 +75,7 @@ final class OdometryHistory {
       double dyMeters,
       double residualMeters,
       double extraVariance,
-      boolean gyroConnected,
+      YawSource source,
       double yaw) {
     if (size == capacity) {
       oldest = slot(1);
@@ -88,7 +88,7 @@ final class OdometryHistory {
     dy[slot] = dyMeters;
     residual[slot] = residualMeters;
     extra[slot] = extraVariance;
-    gyro[slot] = gyroConnected;
+    turnedBy[slot] = source;
     yawAfter[slot] = yaw;
     return size - 1;
   }
@@ -121,8 +121,8 @@ final class OdometryHistory {
     return extra[slot(step)];
   }
 
-  boolean gyro(int step) {
-    return gyro[slot(step)];
+  YawSource turnedBy(int step) {
+    return turnedBy[slot(step)];
   }
 
   double yawAfter(int step) {

@@ -25,11 +25,11 @@ class PoseFilterTest {
    * and their headings 1°.
    */
   private static final PoseFilter.Considered CONSIDERED =
-      new PoseFilter.Considered(0.003, TURN, SHIFT, HEADING_SHIFT, 1.0, Math.toRadians(45));
+      new PoseFilter.Considered(0.003, 0.005, TURN, SHIFT, HEADING_SHIFT, 1.0, Math.toRadians(45));
 
   /** Nothing considered: every error is new each time, the textbook filter. */
   private static final PoseFilter.Considered TEXTBOOK =
-      new PoseFilter.Considered(0, 0, 0, 0, 1.0, Math.toRadians(45));
+      new PoseFilter.Considered(0, 0, 0, 0, 0, 1.0, Math.toRadians(45));
 
   private static PoseFilter placed(
       PoseFilter.Considered considered, double meters, double radians) {
@@ -134,7 +134,7 @@ class PoseFilterTest {
     double standing = filter.covariance().xStdDev();
 
     // Two meters straight ahead, sure of every millimeter: the shift is mostly forgotten.
-    filter.predict(0, 0, 2, 0, 0, 0, true);
+    filter.predict(0, 0, 2, 0, 0, 0, YawSource.GYRO);
     for (int i = 0; i < 2000; i++) {
       apply(filter, fix(new Translation2d(2, 0), new Translation2d(3, 0), 0.05), 0);
     }
@@ -153,15 +153,33 @@ class PoseFilterTest {
   void theGyrosScaleErrorIsTheSameEveryTurn() {
     PoseFilter filter = placed(CONSIDERED, 0.01, 0);
 
-    filter.predict(0, 2 * Math.PI, 0, 0, 0, 0, true);
+    filter.predict(0, 2 * Math.PI, 0, 0, 0, 0, YawSource.GYRO);
     double afterATurn = filter.covariance().headingStdDev();
-    filter.predict(2 * Math.PI, 2 * Math.PI, 0, 0, 0, 0, true);
+    filter.predict(2 * Math.PI, 2 * Math.PI, 0, 0, 0, 0, YawSource.GYRO);
     double afterTwo = filter.covariance().headingStdDev();
-    filter.predict(4 * Math.PI, -4 * Math.PI, 0, 0, 0, 0, true);
+    filter.predict(4 * Math.PI, -4 * Math.PI, 0, 0, 0, 0, YawSource.GYRO);
 
     assertThat(afterATurn).isCloseTo(0.003 * 2 * Math.PI, within(1e-12));
     assertThat(afterTwo).as("twice as far off").isCloseTo(2 * afterATurn, within(1e-12));
     assertThat(filter.covariance().headingStdDev()).as("back where it started").isLessThan(1e-9);
+  }
+
+  /**
+   * Each IMU's scale is its own: three turns one way on the gyro, then three back on the backup IMU
+   * while the gyro is lost, leave the heading as unsure as both scales over three turns each, not
+   * back where it started as one scale's turns there and back would.
+   */
+  @Test
+  void eachImusScaleIsItsOwn() {
+    PoseFilter filter = placed(CONSIDERED, 0.01, 0);
+
+    filter.predict(0, 6 * Math.PI, 0, 0, 0, 0, YawSource.GYRO);
+    filter.predict(6 * Math.PI, -6 * Math.PI, 0, 0, 0, 0, YawSource.BACKUP);
+
+    double gyro = 0.003 * 6 * Math.PI;
+    double backup = 0.005 * 6 * Math.PI;
+    assertThat(filter.covariance().headingStdDev())
+        .isCloseTo(Math.hypot(gyro, backup), within(1e-12));
   }
 
   /** Turned by the wheels while the gyro is lost, the gyro's scale has nothing to do with it. */
@@ -169,7 +187,7 @@ class PoseFilterTest {
   void theWheelsTurningLeaveTheGyrosScaleOut() {
     PoseFilter filter = placed(CONSIDERED, 0.01, 0);
 
-    filter.predict(0, 2 * Math.PI, 0, 0, 0, 0, false);
+    filter.predict(0, 2 * Math.PI, 0, 0, 0, 0, YawSource.WHEELS);
 
     assertThat(filter.covariance().headingStdDev()).isZero();
   }
@@ -203,7 +221,7 @@ class PoseFilterTest {
   @Test
   void theUncertaintyComesBackAsKept() {
     PoseFilter filter = placed(CONSIDERED, 0.1, 0.02);
-    filter.predict(0, 1, 1, 0.5, 0.001, 0.0001, true);
+    filter.predict(0, 1, 1, 0.5, 0.001, 0.0001, YawSource.GYRO);
     apply(filter, fix(new Translation2d(1, 0.6), new Translation2d(2, 1), 0.05), 3);
     double[] kept = new double[PoseFilter.UNCERTAINTY];
     filter.copyUncertaintyTo(kept, 0);

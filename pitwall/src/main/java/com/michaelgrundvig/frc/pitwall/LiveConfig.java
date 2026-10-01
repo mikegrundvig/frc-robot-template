@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import io.avaje.jsonb.JsonType;
+import io.avaje.jsonb.Jsonb;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
@@ -79,6 +81,9 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   /** Where a tunable value is: the components leading to it from the root, then its own. */
   private record Slot(
       Knob knob, List<RecordComponent> route, RecordComponent component, @Nullable Unit unit) {}
+
+  /** Writes text as a JSON string, quotes and backslashes escaped, as properties carry it. */
+  private static final JsonType<String> TEXT = Jsonb.builder().build().type(String.class);
 
   private final String name;
   private final T committed;
@@ -206,6 +211,46 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   /** Every value that can be tuned, in the order they were chosen. */
   public List<Knob> knobs() {
     return slots.values().stream().map(Slot::knob).toList();
+  }
+
+  /**
+   * The record that declares a tunable value, as the configuration holds it: {@code
+   * SwerveConfig.Gains} for {@code gains.steerKp}.
+   *
+   * @throws IllegalArgumentException if no tunable value has this path
+   */
+  public Class<? extends Record> recordOf(String path) {
+    return slot(path).component().getDeclaringRecord().asSubclass(Record.class);
+  }
+
+  /**
+   * What a tunable value means: its {@code @param} in the Javadoc of the record that declares it
+   * ({@link ParameterDocs}), such as {@code "volts per radian of error"}; empty when it has none.
+   *
+   * @throws IllegalArgumentException if no tunable value has this path
+   */
+  public String meaning(String path) {
+    String name = slot(path).component().getName();
+    return ParameterDocs.of(recordOf(path)).params().getOrDefault(name, "");
+  }
+
+  /**
+   * The records the tunable values are in, below the root, each by its path, in the order the knobs
+   * reach them: {@code {"gains": SwerveConfig.Gains.class}}.
+   */
+  public Map<String, Class<? extends Record>> groups() {
+    Map<String, Class<? extends Record>> groups = new LinkedHashMap<>();
+    for (Slot slot : slots.values()) {
+      List<RecordComponent> route = slot.route();
+      StringBuilder path = new StringBuilder();
+      for (int i = 0; i < route.size(); i++) {
+        path.append(i == 0 ? "" : ".").append(route.get(i).getName());
+        // The record at this path declares the next step: its components came from its class.
+        RecordComponent next = i + 1 < route.size() ? route.get(i + 1) : slot.component();
+        groups.putIfAbsent(path.toString(), next.getDeclaringRecord().asSubclass(Record.class));
+      }
+    }
+    return groups;
   }
 
   /**
@@ -338,7 +383,8 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
 
   /**
    * Publishes each tunable value as a WPILib tunable number under the table, its path's dots as
-   * slashes ({@code gains/steerKp}), with its limits and unit as properties. WPILib calls this.
+   * slashes ({@code gains/steerKp}), with its limits, unit, and meaning ({@code "description"}) as
+   * properties, for any NetworkTables tool to read. WPILib calls this.
    */
   @Override
   public void publishTunable(TunableTable table) {
@@ -347,6 +393,10 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
       TunableConfig config = new TunableConfig();
       if (!slot.knob().unit().isEmpty()) {
         config = config.withProperty("unit", '"' + slot.knob().unit().replace("\"", "") + '"');
+      }
+      String meaning = meaning(path);
+      if (!meaning.isEmpty()) {
+        config = config.withProperty("description", TEXT.toJson(meaning));
       }
       // Known as this configuration's before it's published, so Pitwall's tee, which sees it
       // published, can tell.

@@ -109,9 +109,11 @@ Also built in:
 
   **What a value means is its `@param`:** the page will show a configuration record's Javadoc
   beside its values, each value's `@param` as what it means (`@param steerKp volts per radian of
-  error`). So write what the value does and in what unit, not its name again. The build copies the
-  Javadoc into the program as it compiles (Pitwall's documentation processor, in
-  `pitwall/docs-processor`), so the robot needs no source to show it.
+  error`), and dashboards see it as the value's `description` property. So write what the value
+  does and in what unit, not its name again. Every tunable value needs one: `RobotTuningTest`
+  fails without it, naming the record whose Javadoc to write. The build copies the Javadoc into
+  the program as it compiles (Pitwall's documentation processor, in `pitwall/docs-processor`), so
+  the robot needs no source to show it.
 
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver

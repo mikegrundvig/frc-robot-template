@@ -39,6 +39,7 @@ public final class Page {
   private List<Object> builtFrom = List.of();
 
   private @Nullable String builtLock = "never built";
+  private Map<String, Object> configSection = Map.of();
   private Map<String, Object> tunableSection = Map.of();
   private Map<String, Object> valueSection = Map.of();
   private Map<String, Object> changeSection = Map.of();
@@ -87,6 +88,7 @@ public final class Page {
    *   <li>{@code status}, {@code units}: each item's value, and the unit of each number;
    *   <li>{@code actions}: each action's phase and detail;
    *   <li>{@code tuning}: whether it's on, the field, and refused dashboard changes;
+   *   <li>{@code configs}: each configuration's documentation, as {@code /api/configs} gives it;
    *   <li>{@code tunables}, {@code values}, {@code changes}: the configurations' tunable values, by
    *       the WPILib tunable each is published as, as {@code /api/tunables}, {@code /api/values},
    *       and {@code /api/changes} give them;
@@ -103,6 +105,7 @@ public final class Page {
     sections.put("units", status.units());
     sections.put("actions", actionStates());
     sections.put("tuning", session());
+    sections.put("configs", configSection);
     sections.put("tunables", tunableSection);
     sections.put("values", valueSection);
     sections.put("changes", changeSection);
@@ -135,7 +138,36 @@ public final class Page {
     return session;
   }
 
-  /** Each configuration value, by its tunable: {@code {"config", "field", "unit", ...}}. */
+  /**
+   * Each configuration's documentation, by name: its root record's, and each record's its values
+   * are in, {@code {"record", "doc": {"summary", "text"}, "groups": [{"path", "record", "doc"}]}}.
+   * It never changes while the program runs, so the stream sends it once.
+   */
+  static Map<String, Object> configs(Tuning.View view) {
+    Map<String, Object> described = new LinkedHashMap<>();
+    for (Tuning.ConfigView config : view.configs()) {
+      List<Object> groups = new ArrayList<>();
+      for (Tuning.Group group : config.groups()) {
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("path", group.path());
+        shown.put("record", group.record());
+        shown.put("doc", doc(group.doc()));
+        groups.add(shown);
+      }
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("record", config.record());
+      shown.put("doc", doc(config.doc()));
+      shown.put("groups", groups);
+      described.put(config.name(), shown);
+    }
+    return described;
+  }
+
+  /**
+   * Each configuration value, by its tunable: {@code {"config", "field", "unit", "limits",
+   * "committed", "record", "doc"}}, the last two the record that declares it and what its Javadoc
+   * says the value means.
+   */
   static Map<String, Object> tunables(Tuning.View view) {
     Map<String, Object> described = new LinkedHashMap<>();
     for (Tuning.ConfigView config : view.configs()) {
@@ -147,6 +179,8 @@ public final class Page {
         description.put(
             "limits", value.limits().equals(Limits.NONE) ? "" : value.limits().toString());
         description.put("committed", value.committed());
+        description.put("record", value.record());
+        description.put("doc", value.doc());
         described.put(value.path(), description);
       }
     }
@@ -230,6 +264,7 @@ public final class Page {
       return;
     }
     Tuning.View view = tuning.view();
+    configSection = configs(view);
     tunableSection = tunables(view);
     valueSection = values(view);
     changeSection = changes(view);
@@ -352,6 +387,11 @@ public final class Page {
     shown.put("error", jump.map(StepResponse::steadyStateError).orElse(Double.NaN));
     shown.put("samples", jump.map(StepResponse::samples).orElse(0));
     return shown;
+  }
+
+  /** A record's documentation as the page reads it: its summary and its text. */
+  private static Map<String, Object> doc(ParameterDocs doc) {
+    return pair("summary", doc.summary(), "text", doc.text());
   }
 
   /** Two values by name, in this order, as JSON writes them. */

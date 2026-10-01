@@ -5,7 +5,6 @@ import io.avaje.jsonb.JsonType;
 import io.avaje.jsonb.Jsonb;
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.RecordComponent;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,8 +18,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <pre>{@code
  * ParameterDocs.of(SwerveConfig.Gains.class).summary() // "Drive: velocity control on the ..."
- * ParameterDocs.param(SwerveConfig.class, "gains.steerKp") // "volts per radian of error"
+ * ParameterDocs.of(SwerveConfig.Gains.class).params().get("steerKp") // "volts per radian of error"
  * }</pre>
+ *
+ * <p>A tunable value's meaning comes through {@link LiveConfig#meaning}, which knows the record
+ * that declares the value.
  *
  * <p>The text is plain, laid out for a page that shows text as it is: paragraphs separated by a
  * blank line, each list item on a line of its own starting {@code "- "}, and code in backticks.
@@ -64,35 +66,12 @@ public record ParameterDocs(String summary, String text, Map<String, String> par
   }
 
   /**
-   * What a value means, found by its path from a root record, as {@link LiveConfig} names values:
-   * {@code param(SwerveConfig.class, "gains.steerKp")} is the {@code @param steerKp} of {@code
-   * SwerveConfig.Gains}, the record that declares it.
-   *
-   * @return empty when the value has no {@code @param}, or the path leads to no value
+   * A record's name as code in its package writes it, nested records with their outer ones: {@code
+   * SwerveConfig.Gains}. The page names records so, to say whose Javadoc to write.
    */
-  public static String param(Class<?> root, String path) {
-    Class<?> record = root;
-    String[] steps = path.split("\\.", -1);
-    for (int i = 0; i < steps.length - 1; i++) {
-      Class<?> next = componentType(record, steps[i]);
-      if (next == null) {
-        return "";
-      }
-      record = next;
-    }
-    return of(record).params().getOrDefault(steps[steps.length - 1], "");
-  }
-
-  private static @Nullable Class<?> componentType(Class<?> record, String name) {
-    RecordComponent[] components = record.getRecordComponents(); // null for a class
-    if (components != null) {
-      for (RecordComponent component : components) {
-        if (component.getName().equals(name)) {
-          return component.getType();
-        }
-      }
-    }
-    return null;
+  public static String nameOf(Class<?> record) {
+    String name = record.getName().substring(record.getPackageName().length());
+    return (name.startsWith(".") ? name.substring(1) : name).replace('$', '.');
   }
 
   /** Reads a record's documentation through its class loader, from wherever the record came. */

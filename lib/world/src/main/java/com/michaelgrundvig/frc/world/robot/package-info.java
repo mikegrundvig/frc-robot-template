@@ -20,4 +20,7 @@
  * any {@link com.michaelgrundvig.frc.world.robot.Motor}, from WPILib's named motors or a datasheet,
  * through any {@link com.michaelgrundvig.frc.world.robot.Gearing}.
  */
+@NullMarked
 package com.michaelgrundvig.frc.world.robot;
+
+import org.jspecify.annotations.NullMarked;

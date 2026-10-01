@@ -20,4 +20,7 @@
  * two of its tags, a spot facing a tag), so a layout measured at an event corrects both alliances'
  * places at once.
  */
+@NullMarked
 package com.michaelgrundvig.frc.world.field;
+
+import org.jspecify.annotations.NullMarked;

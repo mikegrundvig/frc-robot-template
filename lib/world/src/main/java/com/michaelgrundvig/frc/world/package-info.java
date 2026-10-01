@@ -14,4 +14,7 @@
  * it reads a clock or holds state, so the robot, the simulator's parallel runs, and a replay all
  * read the same model ({@code ArchitectureTest}).
  */
+@NullMarked
 package com.michaelgrundvig.frc.world;
+
+import org.jspecify.annotations.NullMarked;

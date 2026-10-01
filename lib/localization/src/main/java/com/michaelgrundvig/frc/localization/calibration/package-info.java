@@ -16,4 +16,7 @@
  *       camera really is, from the tags it sees while the other cameras say where the robot is.
  * </ul>
  */
+@NullMarked
 package com.michaelgrundvig.frc.localization.calibration;
+
+import org.jspecify.annotations.NullMarked;

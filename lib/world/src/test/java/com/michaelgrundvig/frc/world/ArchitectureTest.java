@@ -22,6 +22,7 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import org.jspecify.annotations.NullMarked;
 import org.junit.jupiter.api.Test;
 import org.wpilib.driverstation.Alliance;
 
@@ -132,6 +133,17 @@ class ArchitectureTest {
         .check(WORLD);
   }
 
+  /**
+   * NullAway trusts a library's {@code @Nullable} only where it treats the code as annotated.
+   * Marking each package {@code @NullMarked} (in its package-info) carries that with the jar, to
+   * the robot program and every project that reads this one; a package without it would let a null
+   * through unannounced.
+   */
+  @Test
+  void everyPackageIsNullMarked() {
+    classes().should(resideInANullMarkedPackage()).check(WORLD);
+  }
+
   @Test
   void noStaticMutableState() {
     fields()
@@ -190,6 +202,22 @@ class ArchitectureTest {
           if (!caller.equals(builder) && !caller.startsWith(builder + "$")) {
             events.add(SimpleConditionEvent.violated(call, call.getDescription()));
           }
+        }
+      }
+    };
+  }
+
+  private static ArchCondition<JavaClass> resideInANullMarkedPackage() {
+    return new ArchCondition<>("reside in a package marked @NullMarked") {
+      @Override
+      public void check(JavaClass type, ConditionEvents events) {
+        if (!type.getPackage().isAnnotatedWith(NullMarked.class)) {
+          events.add(
+              SimpleConditionEvent.violated(
+                  type,
+                  type.getName()
+                      + ": its package isn't @NullMarked; mark it in its package-info.java, as the"
+                      + " others are"));
         }
       }
     };

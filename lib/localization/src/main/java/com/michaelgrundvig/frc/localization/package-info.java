@@ -81,4 +81,7 @@
  * Their sizes are in {@link com.michaelgrundvig.frc.localization.EstimatorConfig}, and
  * docs/values.md says how to measure each.
  */
+@NullMarked
 package com.michaelgrundvig.frc.localization;
+
+import org.jspecify.annotations.NullMarked;

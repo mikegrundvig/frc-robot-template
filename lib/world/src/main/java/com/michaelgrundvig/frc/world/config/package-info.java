@@ -50,4 +50,7 @@
  *       written down twice.
  * </ul>
  */
+@NullMarked
 package com.michaelgrundvig.frc.world.config;
+
+import org.jspecify.annotations.NullMarked;

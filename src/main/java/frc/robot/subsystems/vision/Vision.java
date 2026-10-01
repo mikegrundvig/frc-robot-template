@@ -82,10 +82,7 @@ public final class Vision implements AutoCloseable {
   /** Half a second of the robot's attitude, for each image's capture time. */
   private final AttitudeHistory attitudes = new AttitudeHistory(RobotLoop.loops(0.5));
 
-  /**
-   * The robot's pose is good enough to calibrate a camera against, or to judge its mount by: within
-   * 5 cm.
-   */
+  /** The robot's pose is good enough to calibrate a camera against: within 5 cm. */
   private static final double CALIBRATION_POSE_STD_DEV_METERS = 0.05;
 
   /**
@@ -94,6 +91,14 @@ public final class Vision implements AutoCloseable {
    * (over 200, a calibrated camera's tags in simulation landed up to 5 cm off; over 500, 3.5 cm).
    */
   private static final int MOUNT_SIGHTINGS = 500;
+
+  /**
+   * A camera's mount is judged only while another camera's measurement agreed with the estimate
+   * this lately: the others hold the pose it's judged against, and odometry carries it between. Two
+   * seconds, since cameras facing other ways see tags at other moments, and a camera's partner
+   * facing the same way can be pulled off with it.
+   */
+  private static final long OTHERS_HOLD_NANOS = 2_000_000_000L;
 
   /**
    * A camera is calibrated only from images taken standing still, this long: no blur, and no
@@ -384,7 +389,9 @@ public final class Vision implements AutoCloseable {
         new Motion(
             estimate.fieldVelocity().getNorm(),
             recentYawRate,
+            estimate.covariance().largestPositionStdDev(),
             estimate.covariance().headingStdDev(),
+            estimate.mode() == LocalizationEstimate.Mode.TRACKING,
             poseKnown(estimate));
 
     for (Camera camera : cameras) {
@@ -411,11 +418,18 @@ public final class Vision implements AutoCloseable {
    *
    * @param speed meters per second, over the field
    * @param recentYawRate the fastest the robot turned lately, radians per second
+   * @param positionStdDev how sure the estimate's position is, meters, the least sure way
    * @param headingStdDev how sure the estimate's heading is, radians
+   * @param tracking whether recent camera measurements agree with odometry
    * @param poseKnown whether the pose is held well enough to calibrate a camera against
    */
   private record Motion(
-      double speed, double recentYawRate, double headingStdDev, boolean poseKnown) {}
+      double speed,
+      double recentYawRate,
+      double positionStdDev,
+      double headingStdDev,
+      boolean tracking,
+      boolean poseKnown) {}
 
   /**
    * One image: solved into a measurement for the estimator (unless it's held back), and its tags
@@ -485,8 +499,34 @@ public final class Vision implements AutoCloseable {
                   && frame.timestampNanos() - movingUntil >= STILL_NANOS
               ? mountCalibration
               : null;
-      recordSightings(camera, robotThen, detections, motion.poseKnown(), sightings);
+      // A camera's mount is judged only against a pose the other cameras hold: the robot turning
+      // slowly, the estimate tracking, no calibration under way, and another camera's
+      // measurement accepted lately. Each tag also needs the heading sure enough at its distance
+      // (recordSightings): a heading off by an angle puts every tag that angle times its distance
+      // off, the same way each time, which is just what a camera turned on its mount looks like.
+      boolean judging =
+          motion.tracking()
+              && motion.recentYawRate() <= current.maxYawRateForHeading()
+              && !isCalibrating()
+              && othersHold(camera, frame.timestampNanos());
+      recordSightings(camera, robotThen, detections, judging ? motion : null, sightings);
     }
+  }
+
+  /**
+   * Whether another camera holds the pose: the estimator accepted one of its measurements within
+   * two seconds of a moment, and it agreed with the estimate within the mount tolerance. After the
+   * heading has been disturbed (the gyro-scale procedure's spins, say), the estimate can stand
+   * still centimeters off while it's sure to millimeters; the cameras, agreeing with each other but
+   * not with it, are what show it.
+   */
+  private boolean othersHold(Camera camera, long timestampNanos) {
+    for (Camera other : cameras) {
+      if (other != camera && other.lastAgreedNanos() >= timestampNanos - OTHERS_HOLD_NANOS) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -494,19 +534,25 @@ public final class Vision implements AutoCloseable {
    * configured mount, for the camera's residual and the check of its mount; and gives it to the
    * mount calibration collecting this camera's sightings, if one is.
    *
-   * @param poseKnown whether the robot's pose is known well enough to judge the mount by
+   * @param judging how the robot moved, if its pose is held well enough to judge the mount by; null
+   *     if not
    */
   private void recordSightings(
       Camera camera,
       Pose3d robotThen,
       TagDetections detections,
-      boolean poseKnown,
+      @Nullable Motion judging,
       @Nullable CameraMountCalibration sightings) {
     for (TagDetections.Tag tag : detections.tags()) {
       Pose3d seen =
           robotThen.transformBy(camera.config.robotToCamera()).transformBy(tag.bestCameraToTag());
       Pose3d real = field.tag(tag.id()).orElse(null);
-      camera.saw(robotThen, seen, real, poseKnown);
+      double distance = tag.bestCameraToTag().getTranslation().getNorm();
+      boolean judge =
+          judging != null
+              && Math.hypot(judging.positionStdDev(), distance * judging.headingStdDev())
+                  <= current.mountToleranceMeters();
+      camera.saw(robotThen, seen, real, judge);
       if (real != null && sightings != null) {
         sightings.add(robotThen, tag.bestCameraToTag(), tag.altCameraToTag(), real);
       }
@@ -522,7 +568,7 @@ public final class Vision implements AutoCloseable {
   /** Counts and logs what the estimator decided about each camera's measurements. */
   public void record(List<VisionDecision> decisions) {
     for (Camera camera : cameras) {
-      camera.record(decisions);
+      camera.record(decisions, current.mountToleranceMeters());
     }
   }
 

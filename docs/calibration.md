@@ -86,6 +86,12 @@ camera bumped since it was calibrated puts them off the same way every time. Ove
 tags (seconds of seeing tags), the average of how far they land off is the Vision log's
 `MountOffsetMeters` for that camera.
 
+A tag counts only when the pose it's placed through can be trusted: the robot turning slowly, the
+pose and heading sure enough that together they'd put a tag at that distance less than the
+tolerance off, no calibration running, and another camera's measurement agreeing with the pose
+within the tolerance in the last two seconds. A heading off by a degree puts a tag 3 m away 5 cm
+off, the same way every time, which is just what a camera turned on its mount looks like.
+
 Past 5 cm (the vision configuration's `mountToleranceMeters`, which the pit can tune), the alert
 *Camera front-left is out of calibration: its tags land 10 cm off* says to recalibrate it. Until
 then, the part of the offset across the floor (beyond the tolerance, taken off in squares) is how

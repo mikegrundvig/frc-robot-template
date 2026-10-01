@@ -628,8 +628,40 @@ class VisionTest {
       long now = estimator.estimate().timestampNanos() + 20_000_000L;
       estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
       io.see(now, reallyMounted);
+      if (second != null) {
+        secondIo.see(now, second);
+      }
       loop();
     }
+  }
+
+  /** A second camera, mounted as configured beside the front one, to hold the pose. */
+  private @Nullable CameraConfig second;
+
+  private final ScriptedCamera secondIo = new ScriptedCamera();
+
+  /** Vision with the front camera and a second one, as configured, that sees the same tags. */
+  private void withASecondCamera() {
+    second = CameraConfigBuilder.builder(camera).name("second").build();
+    vision.close();
+    vision =
+        new Vision(
+            List.of(camera, second),
+            new CameraIO[] {io, secondIo},
+            estimator,
+            FIELD,
+            () -> tuned,
+            () -> ourAlliance);
+  }
+
+  /** A camera on its own has nothing to hold the pose it'd be judged against: it never is. */
+  @Test
+  void aCameraAloneIsNeverJudged() {
+    CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+
+    imagesFrom(reallyLower, 300);
+
+    assertThat(vision.mountOffsetMeters("front")).isNaN();
   }
 
   /**
@@ -640,6 +672,7 @@ class VisionTest {
   @Test
   void aCameraWhoseTagsLandOffIsOutOfCalibrationOnceJudged() {
     CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+    withASecondCamera();
 
     imagesFrom(reallyLower, 200); // two tags an image: 400 seen, not enough to judge
 
@@ -661,7 +694,9 @@ class VisionTest {
   @Test
   void theMountToleranceIsReadEveryLoop() {
     CameraConfig reallyLower = CameraConfigBuilder.builder(camera).up(Inches.of(8)).build();
+    withASecondCamera();
     imagesFrom(reallyLower, 260);
+    assertThat(vision.camera(0).isOutOfCalibrationAlertActive()).isTrue();
 
     tuned = VisionConfigBuilder.builder(VisionConfig.DEFAULTS).mountToleranceMeters(0.15).build();
     loop();

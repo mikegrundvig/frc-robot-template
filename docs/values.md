@@ -186,6 +186,29 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 | `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). Nothing reads it yet: the simulator spins the robot as if its mass sat at its wheels, about 11 kg m² for the template's ([stand-ins](stand-ins.md)); a simulator that models the robot as one body will. |
 | `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
 
+### `Imus`
+
+`frc.robot.lib.config.Imus`: the robot's IMUs, each where it's mounted (`RobotConfig.imus`): the
+gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are mounts, with a section of
+their own.
+
+### `ImuMount`
+
+`frc.robot.lib.config.ImuMount`: where an IMU sits, how it's turned, and whether its accelerometer
+has been checked to read along the robot's axes. Per IMU, in `Robots`. Localization compares the
+wheels' velocity with what the IMU feels where it sits (an IMU off the center is swung around it as
+the robot turns), the drivetrain's IO turns the IMU's own axes into the robot's by its orientation,
+and the simulator mounts its IMUs here. A new robot starts from `Imus.UNCHECKED`: both at the
+center, level, and unchecked.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `forward` | as built | 0 m | none (the simulator's IMUs sit at the center) | From CAD, or a tape: how far ahead of the robot's center the IMU sits (negative behind). For Systemcore, where its board sits. |
+| `left` | as built | 0 m | none (as `forward`) | As `forward`, to the left (negative right). |
+| `up` | as built | 3 in | guess (a belly pan) | As `forward`, above the floor. Inside the robot, as a camera is. The slip check reads only the yaw rate, which swings an IMU level whatever its height, so nothing uses it yet: a robot pitching or rolling would swing a high IMU too. |
+| `orientation` | as built | level, x forward (`Rotation3d.ZERO`) | none (the simulator's IMUs are mounted so) | How it's turned on the robot: the rotation that takes the axes printed on it into the robot's. From how it's mounted; [the accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes) confirms it. For the Pigeon, it must agree with the mount pose saved on it in Phoenix Tuner X, which its own yaw, pitch, and roll follow: the code doesn't write it there yet. |
+| `accelerometerChecked` | calibrated | true for the simulator's robot; false for a new one (`Imus.UNCHECKED`) | none (the simulator's IMUs read along their axes by construction) | [The accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes): three short drives in a log, for each IMU. Until it passes, the slip check doesn't compare the wheels' speed with that IMU's accelerometer, and a jolt counts by its size alone. Off by default because a mis-mounted accelerometer is far worse than none: on the simulator's clean driving, one turned a quarter turn on its mount read slip in most loops. |
+
 ## The drivetrain
 
 ### `SwerveConfig`
@@ -254,8 +277,7 @@ across. The template's robot runs only in simulation and has no wiring, so nothi
 | `gyroId` | as built | none | none | Tuner X: the Pigeon 2's CAN ID. |
 | `gyroYawScale` | calibrated | none (1 until measured) | none | [The gyro's scale](calibration.md#the-gyros-scale), once per gyro, and after replacing or remounting it. |
 | `couplingRatio` | as built | none | none | Tuner X's swerve generator, or the module's datasheet: drive motor turns per turn of the module, wheel held still. |
-| `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
-| `systemcoreYaw` | as built | none | none | Mounted flat, how far Systemcore's board is turned on the robot: zero with its x axis forward, counterclockwise from above. Its accelerometer reads the board's axes; this turns them into the robot's. Check it with [the accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes), on the backup IMU's readings (`Drive/BackupGyro/AccelerationXMetersPerSecSq`). |
+| `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. WPILib takes its yaw about the axis this says is up. How the board is turned on the robot is its `ImuMount` (`Imus.backup`). Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
 
 ### `SwerveWiring.ModuleWiring`
 
@@ -401,22 +423,6 @@ is off.
 | `maxPositionStdDevMeters` | chosen | 0.15 m | guess | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
 | `maxTiltDegrees` | chosen | 5° | guess (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
 
-### `ImuPlacement`
-
-`frc.robot.lib.localization.ImuPlacement`: where the robot's IMUs sit, and whether the gyro's
-accelerometer has been checked to read along the robot's axes (`RobotConfig.imus`). Localization
-compares the wheels' velocity with what the IMU feels where it sits: an IMU off the center is swung
-around it as the robot turns. In the robot's configuration rather than its wiring, since the
-simulator needs it too.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `gyroForward` | as built | 0 m | none (the simulator's IMU sits at the center) | From CAD, or a tape: how far ahead of the robot's center the Pigeon 2 sits (negative behind). |
-| `gyroLeft` | as built | 0 m | none (as `gyroForward`) | As `gyroForward`, to the left (negative right). |
-| `backupForward` | as built | 0 m | none (as `gyroForward`) | As `gyroForward`, for Systemcore's IMU (where its board sits). |
-| `backupLeft` | as built | 0 m | none (as `gyroForward`) | As `gyroLeft`, for Systemcore's IMU. |
-| `accelerometerChecked` | calibrated | true for the simulator's robot; false for a new one (`ImuPlacement.UNCHECKED`) | none (the simulator's IMUs read along the robot's axes by construction) | [The accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes): three short drives in a log. Until it passes, the slip check doesn't compare the wheels' speed with the accelerometer, and a jolt counts by its size alone. Off by default because a mis-mounted accelerometer is far worse than none: on the simulator's clean driving, one turned a quarter turn on its mount read slip in most loops. |
-
 ### `SlipCheck.Settings`
 
 `frc.robot.lib.localization.SlipCheck.Settings`: how closely the wheels must agree with the IMU
@@ -509,9 +515,9 @@ feels the robot's true motion where it sits, gravity's share as it tilts, and a 
 | `biasForward` | characterized | 0.08 m/s² | guess (CTRE publishes no bias for the Pigeon 2's accelerometer, factory-calibrated, and the boot plot in its User's Guide shows a few mg; a mount half a degree off level puts 0.09 m/s² of gravity in it) | Standing level and still, the average of `Drive/Gyro/AccelerationXMetersPerSecSq` over ten seconds. |
 | `biasLeft` | characterized | -0.05 m/s² | guess (as `biasForward`) | As `biasForward`, along y. |
 | `noise` | characterized | 0.3 m/s² | guess (no noise is published; this is a driving robot's vibration, which the part's own noise of a few mg is far under) | The spread of `AccelerationXMetersPerSecSq` while driving steadily straight. |
-| `turnedDegrees` | characterized | 0.5° | guess (a mount pose set within half a degree) | What the [accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes) leaves: a robot speeding up straight ahead reads this share of it sideways. |
-| `flipped` | characterized | false | none (a checked mount) | The accelerometer check: strafing left reads negative. |
-| `forwardMeters` | characterized | 0.01 m | guess (a place measured to a centimeter) | How far from where `ImuPlacement` places it the IMU really sits. |
+| `turnedDegrees` | characterized | 0.5° | guess (an orientation set within half a degree) | How far the part really lies turned about the robot's up axis from the orientation its `ImuMount` gives it. What the [accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes) leaves: a robot speeding up straight ahead reads this share of it sideways. |
+| `flipped` | characterized | false | none (a checked mount) | Whether the part is really mounted the other way up from its `ImuMount`'s orientation. The accelerometer check: strafing left reads negative. |
+| `forwardMeters` | characterized | 0.01 m | guess (a place measured to a centimeter) | How far from where its `ImuMount` places it the IMU really sits. |
 | `leftMeters` | characterized | 0 m | guess (as `forwardMeters`) | As `forwardMeters`, to the left. |
 | `rangeMetersPerSecSq` | as built | 19.6 m/s² (2 g) | datasheet (Phoenix 6's `AccelerationX` signal reads from -2 to 2 g) | A fact of the part: a hit past it reads at it. |
 | `sampleHz` | chosen | 100 Hz | datasheet (`GyroIOPigeon2` asks for the accelerometer at 100 Hz, the CAN FD default in Phoenix 6's documentation) | How often the code asks for it. |

@@ -2,7 +2,6 @@ package frc.robot.lib.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Rotations;
 
 import java.util.ArrayList;
@@ -37,7 +36,6 @@ class SwerveWiringTest {
         .couplingRatio(3.5)
         .modules(modules)
         .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
-        .systemcoreYaw(Degrees.of(0))
         .build();
   }
 
@@ -93,7 +91,6 @@ class SwerveWiringTest {
                     .couplingRatio(-1)
                     .modules(modules())
                     .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
-                    .systemcoreYaw(Degrees.of(0))
                     .build())
         .hasMessage("SwerveWiring.couplingRatio: -1 must be zero or more");
   }

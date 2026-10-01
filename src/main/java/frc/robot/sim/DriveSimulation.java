@@ -4,10 +4,10 @@ import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.Body;
+import frc.robot.lib.config.Imus;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
-import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.SwerveKinematicsModel;
@@ -113,7 +113,7 @@ public final class DriveSimulation {
    * @param errors how the real wheels and sensors differ from the configuration
    */
   public DriveSimulation(Body body, SwerveConfig drivetrain, SensorErrors errors) {
-    this(body, drivetrain, errors, ImuPlacement.UNCHECKED);
+    this(body, drivetrain, errors, Imus.UNCHECKED);
   }
 
   /**
@@ -122,11 +122,10 @@ public final class DriveSimulation {
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param drivetrain the drivetrain as configured: the code's belief about its modules
    * @param errors how the real wheels and sensors differ from the configuration
-   * @param imus where the robot's configuration places its IMUs: they really sit off that by their
-   *     accelerometers' errors
+   * @param imus where the robot's definition mounts its IMUs: they really sit off that, and are
+   *     turned off it, by their accelerometers' errors
    */
-  public DriveSimulation(
-      Body body, SwerveConfig drivetrain, SensorErrors errors, ImuPlacement imus) {
+  public DriveSimulation(Body body, SwerveConfig drivetrain, SensorErrors errors, Imus imus) {
     SwerveConfig.Modules config = drivetrain.modules();
     Translation2d[] moduleLocations = drivetrain.moduleTranslations(body);
     kinematics = new SwerveKinematicsModel(moduleLocations);

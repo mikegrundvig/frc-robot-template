@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.within;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /**
@@ -27,8 +28,9 @@ class SlipCheckTest {
    * robot turns.
    */
   private static final class Robot {
-    final SlipCheck check;
+    final SlipCheck check = new SlipCheck(SETTINGS, REACH);
     final Translation2d imu;
+    final boolean checked;
     double heading = 0.3;
     double rate;
     double fieldVx;
@@ -48,7 +50,7 @@ class SlipCheckTest {
 
     Robot(Translation2d imu, boolean checked) {
       this.imu = imu;
-      check = new SlipCheck(SETTINGS, REACH, checked);
+      this.checked = checked;
     }
 
     /** The IMU's velocity on the field: the robot's, and its swing around the center. */
@@ -80,7 +82,9 @@ class SlipCheckTest {
               turn,
               heading,
               rate,
-              imu,
+              // Its height swings it no differently: the robot only turns level.
+              new Translation3d(imu.getX(), imu.getY(), 0.1),
+              checked,
               new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
               felt.getX(),
               felt.getY()));
@@ -382,11 +386,11 @@ class SlipCheckTest {
                     .speedToleranceMetersPerSecond(-1)
                     .build())
         .hasMessage("Settings.speedToleranceMetersPerSecond: -1 must be zero or more");
-    assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0, true)).hasMessageContaining("reach");
+    assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0)).hasMessageContaining("reach");
     assertThatThrownBy(
             () ->
                 new SlipCheck.Sample(
-                    0, 0, 0, 0, 0, Translation2d.ZERO, new ChassisVelocities(), 0, 0))
+                    0, 0, 0, 0, 0, Translation3d.ZERO, true, new ChassisVelocities(), 0, 0))
         .hasMessageContaining("takes time");
   }
 }

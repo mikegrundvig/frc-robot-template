@@ -7,13 +7,15 @@ import frc.robot.RobotConfigBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.localization.ImuPlacement;
-import frc.robot.lib.localization.ImuPlacementBuilder;
+import frc.robot.lib.config.ImuMount;
+import frc.robot.lib.config.ImuMountBuilder;
+import frc.robot.lib.config.ImusBuilder;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SensorErrorsAccelErrorsBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.units.Units;
 
@@ -21,12 +23,12 @@ import org.wpilib.units.Units;
  * Where the IMU sits and how its accelerometer lies, against what localization believes: driving
  * that never slips must never look like slipping. The gyro's accelerometer reads as a Pigeon 2's
  * does on the simulator's season-worn robot ({@link SensorErrors.AccelErrors#PIGEON_2}), turned or
- * moved where a test says; the robot's configuration says where it sits and whether it has been
- * checked ({@link ImuPlacement}).
+ * moved where a test says; the robot's definition says where it's mounted, how it's turned, and
+ * whether it has been checked ({@link ImuMount}).
  */
 @SimulationTest
 @ExtendWith(RobotSim.class)
-class ImuPlacementSimTest {
+class ImuMountSimTest {
   /**
    * Driving the wheels grip through: launches from rest at full stick, stops, a spin in place at a
    * turn a second, and driving while spinning, each from standing.
@@ -41,8 +43,11 @@ class ImuPlacementSimTest {
   /** What the slip check said over a drive. */
   private record Verdict(int slipping, int collisions) {}
 
-  private static Verdict drive(ImuPlacement believed, SensorErrors.AccelErrors accelerometer) {
-    RobotConfig robot = RobotConfigBuilder.builder(Robots.SIM).imus(believed).build();
+  private static Verdict drive(ImuMount believed, SensorErrors.AccelErrors accelerometer) {
+    RobotConfig robot =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .imus(ImusBuilder.builder(Robots.SIM.imus()).gyro(believed).build())
+            .build();
     try (DriveSimHarness harness =
         new DriveSimHarness(robot, SensorErrors.TYPICAL.withAccelerometer(accelerometer))) {
       int[] counts = new int[2];
@@ -58,10 +63,10 @@ class ImuPlacementSimTest {
     }
   }
 
-  private static ImuPlacement at(Translation2d place, boolean checked) {
-    return ImuPlacementBuilder.builder(ImuPlacement.UNCHECKED)
-        .gyroForward(Units.Meters.of(place.getX()))
-        .gyroLeft(Units.Meters.of(place.getY()))
+  private static ImuMount at(Translation2d place, boolean checked) {
+    return ImuMountBuilder.builder(Robots.SIM.imus().gyro())
+        .forward(Units.Meters.of(place.getX()))
+        .left(Units.Meters.of(place.getY()))
         .accelerometerChecked(checked)
         .build();
   }
@@ -83,7 +88,7 @@ class ImuPlacementSimTest {
    */
   @Test
   void anUncheckedAccelerometerTurnedOrFlippedSeesNoSlip() {
-    ImuPlacement unchecked = at(Translation2d.ZERO, false);
+    ImuMount unchecked = at(Translation2d.ZERO, false);
     SensorErrors.AccelErrors turned =
         SensorErrorsAccelErrorsBuilder.builder(pigeon()).turnedDegrees(90).build();
     SensorErrors.AccelErrors flipped =
@@ -98,10 +103,10 @@ class ImuPlacementSimTest {
 
   /**
    * An IMU 20 cm ahead of the center and 5 cm left feels the robot's turns swing it around. Where
-   * the configuration places it, that's no slip; believed at the center, it would be.
+   * the definition places it, that's no slip; believed at the center, it would be.
    */
   @Test
-  void anImuOffTheCenterWhereTheConfigurationPlacesItSeesNoSlip() {
+  void anImuOffTheCenterWhereTheDefinitionPlacesItSeesNoSlip() {
     Translation2d place = new Translation2d(0.2, 0.05);
     SensorErrors.AccelErrors offCenter =
         SensorErrorsAccelErrorsBuilder.builder(pigeon())
@@ -114,5 +119,24 @@ class ImuPlacementSimTest {
 
     assertThat(placed).isEqualTo(new Verdict(0, 0));
     assertThat(centered.slipping()).as("believed at the center").isPositive();
+  }
+
+  /**
+   * Mounted however the robot's definition says (here on its side, its x axis pointing left and its
+   * z axis forward), the accelerometer reads gravity and the robot's motion along its own axes, and
+   * the IO turns them into the robot's: no slip, no hit. Turned a quarter turn further on its mount
+   * than the definition says, it reads slip.
+   */
+  @Test
+  void anImuTurnedOnItsMountAsTheDefinitionSaysSeesNoSlip() {
+    ImuMount onItsSide =
+        ImuMountBuilder.builder(at(Translation2d.ZERO, true))
+            .orientation(new Rotation3d(Math.PI / 2, 0, Math.PI / 2))
+            .build();
+    SensorErrors.AccelErrors turnedFurther =
+        SensorErrorsAccelErrorsBuilder.builder(pigeon()).turnedDegrees(90).build();
+
+    assertThat(drive(onItsSide, pigeon())).isEqualTo(new Verdict(0, 0));
+    assertThat(drive(onItsSide, turnedFurther).slipping()).as("turned further").isPositive();
   }
 }

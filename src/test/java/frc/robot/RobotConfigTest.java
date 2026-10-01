@@ -8,14 +8,18 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.wpilib.units.Units.Inches;
 
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.ImuMount;
+import frc.robot.lib.config.ImuMountBuilder;
+import frc.robot.lib.config.Imus;
+import frc.robot.lib.config.ImusBuilder;
 import frc.robot.lib.config.SwerveConfigBuilder;
 import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.localization.VisionConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation3d;
 
 class RobotConfigTest {
@@ -68,6 +72,43 @@ class RobotConfigTest {
         .withMessageContaining("camera front is outside the robot");
   }
 
+  /**
+   * An IMU is mounted inside the robot, as a camera is: the backup 2 m up, or the gyro 1 m behind,
+   * is a mistake in units or sign.
+   */
+  @Test
+  void imusMustBeOnTheRobot() {
+    ImuMount high = ImuMountBuilder.builder(ImuMount.UNCHECKED).up(Inches.of(80)).build();
+    ImuMount behind = ImuMountBuilder.builder(ImuMount.UNCHECKED).forward(Inches.of(-40)).build();
+    RobotConfig robot = robot(List.of());
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                RobotConfigBuilder.builder(robot)
+                    .imus(ImusBuilder.builder(Imus.UNCHECKED).backup(high).build())
+                    .build())
+        .withMessageContaining("the backup IMU is outside the robot");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                RobotConfigBuilder.builder(robot)
+                    .imus(ImusBuilder.builder(Imus.UNCHECKED).gyro(behind).build())
+                    .build())
+        .withMessageContaining("the gyro is outside the robot");
+  }
+
+  @Test
+  void anImusOrientationIsARotation() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                ImuMountBuilder.builder(ImuMount.UNCHECKED)
+                    .orientation(new Rotation3d(Double.NaN, 0, 0))
+                    .build())
+        .withMessageContaining("ImuMount.orientation");
+  }
+
   @Test
   void theCameraListCannotChangeAfterwards() {
     List<CameraConfig> cameras = new ArrayList<>(List.of(camera("front", inches(10, 0, 8))));
@@ -87,7 +128,7 @@ class RobotConfigTest {
         .cameras(cameras)
         .vision(VisionConfig.DEFAULTS)
         .estimator(EstimatorConfig.DEFAULTS)
-        .imus(ImuPlacement.UNCHECKED)
+        .imus(Imus.UNCHECKED)
         .build();
   }
 

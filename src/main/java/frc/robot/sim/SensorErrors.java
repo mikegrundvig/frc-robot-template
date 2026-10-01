@@ -137,12 +137,13 @@ public record SensorErrors(
    * @param biasLeft the same along the robot's left axis
    * @param noise random noise on each sample, as a standard deviation, in m/s²: the part's, and the
    *     robot's vibration
-   * @param turnedDegrees how far its axes really lie turned from where the robot's code takes them,
-   *     counterclockwise from above: a mount pose set a little off, or the part turned on its mount
-   *     since
-   * @param flipped whether it's really mounted the other way up from what the robot's code takes:
-   *     its left axis reads the robot's right
-   * @param forwardMeters how far ahead of where the robot's configuration places it it really sits
+   * @param turnedDegrees how far its axes really lie turned, about the robot's up axis, from the
+   *     orientation the robot's definition gives it ({@code ImuMount.orientation}),
+   *     counterclockwise from above: an orientation set a little off, or the part turned on its
+   *     mount since
+   * @param flipped whether it's really mounted the other way up from its orientation in the robot's
+   *     definition: its left axis reads the robot's right
+   * @param forwardMeters how far ahead of where the robot's definition places it it really sits
    * @param leftMeters and how far left
    * @param rangeMetersPerSecSq the most it reports on each axis, either way: past it, it reads the
    *     range. Infinite for none.

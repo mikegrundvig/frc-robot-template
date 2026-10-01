@@ -3,9 +3,9 @@ package frc.robot.sim;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.Imus;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.vision.CameraIO;
@@ -50,7 +50,7 @@ public final class SimulatedWorld implements AutoCloseable {
       Body body,
       List<CameraConfig> cameras,
       SensorErrors errors) {
-    this(field, drivetrain, body, cameras, ImuPlacement.UNCHECKED, errors);
+    this(field, drivetrain, body, cameras, Imus.UNCHECKED, errors);
   }
 
   /**
@@ -58,7 +58,7 @@ public final class SimulatedWorld implements AutoCloseable {
    * @param drivetrain the drivetrain's configuration
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param cameras the robot's cameras, as configured
-   * @param imus where the robot's IMUs are configured to sit
+   * @param imus where the robot's definition mounts its IMUs
    * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
    */
   public SimulatedWorld(
@@ -66,7 +66,7 @@ public final class SimulatedWorld implements AutoCloseable {
       SwerveConfig drivetrain,
       Body body,
       List<CameraConfig> cameras,
-      ImuPlacement imus,
+      Imus imus,
       SensorErrors errors) {
     this.field = field;
     this.drivetrain = new DriveSimulation(body, drivetrain, errors, imus);

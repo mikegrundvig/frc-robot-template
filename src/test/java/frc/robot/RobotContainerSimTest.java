@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
@@ -382,7 +381,6 @@ class RobotContainerSimTest {
                         .couplingRatio(3.5)
                         .modules(List.of(modules))
                         .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
-                        .systemcoreYaw(Degrees.of(0))
                         .build()))
             .build();
     sim.build(Constants.Mode.REAL, wired, SensorErrors.NONE);

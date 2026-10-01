@@ -1,7 +1,6 @@
 package frc.robot.lib.config;
 
 import static frc.robot.lib.config.Rules.between;
-import static frc.robot.lib.config.Rules.finite;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.size;
 import static org.wpilib.units.Units.Rotations;
@@ -33,10 +32,10 @@ import org.wpilib.units.measure.Angle;
  *     coupling.
  * @param modules front left, front right, back left, back right
  * @param systemcoreMount how Systemcore itself is mounted, for its onboard IMU, the backup to the
- *     gyro: flat, or on edge along its long side (landscape) or short side (portrait)
- * @param systemcoreYaw mounted flat, how far Systemcore is turned on the robot: zero with its
- *     board's x axis pointing forward, counterclockwise seen from above. Its accelerometer reads
- *     the board's axes, which this turns into the robot's.
+ *     gyro: flat, or on edge along its long side (landscape) or short side (portrait). WPILib takes
+ *     its yaw about the axis this says is up. How the board is turned on the robot, which turns its
+ *     accelerometer's axes into the robot's, is its mount in the robot's definition ({@code
+ *     Imus.backup}).
  */
 @ConfigRecord
 public record SwerveWiring(
@@ -45,8 +44,7 @@ public record SwerveWiring(
     double gyroYawScale,
     double couplingRatio,
     List<ModuleWiring> modules,
-    OnboardIMU.MountOrientation systemcoreMount,
-    Angle systemcoreYaw) {
+    OnboardIMU.MountOrientation systemcoreMount) {
   public SwerveWiring {
     Checks.on(SwerveWiring.class)
         .field("gyroId", gyroId, between(0, 62)) // a CAN ID
@@ -54,7 +52,6 @@ public record SwerveWiring(
         .field("couplingRatio", couplingRatio, nonNegative())
         .field("modules", modules, size(4))
         .field("modules", modules, SwerveWiring::sharedIds)
-        .field("systemcoreYaw", systemcoreYaw, finite())
         .orThrow();
   }
 

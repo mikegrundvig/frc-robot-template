@@ -222,7 +222,10 @@ public final class RobotContainer implements AutoCloseable {
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
       world = null;
       PhoenixDrivetrain phoenix =
-          new PhoenixDrivetrain(robot.drivetrainWiring().get(), drivetrain.get().modules());
+          new PhoenixDrivetrain(
+              robot.drivetrainWiring().get(),
+              drivetrain.get().modules(),
+              robot.imus().gyro().orientation());
       hardware = phoenix;
       driveHardware =
           DriveHardware.builder()
@@ -231,7 +234,7 @@ public final class RobotContainer implements AutoCloseable {
               .backupImu(
                   new GyroIOSystemcore(
                       robot.drivetrainWiring().get().systemcoreMount(),
-                      robot.drivetrainWiring().get().systemcoreYaw()))
+                      robot.imus().backup().orientation()))
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {

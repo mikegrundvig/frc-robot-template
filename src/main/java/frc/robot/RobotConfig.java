@@ -6,10 +6,11 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
+import frc.robot.lib.config.ImuMount;
+import frc.robot.lib.config.Imus;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
 import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.localization.VisionConfig;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -34,7 +35,7 @@ import org.wpilib.math.geometry.Translation2d;
  * @param vision how far the cameras' images are trusted, and which are left out: the thresholds and
  *     uncertainties, some tunable live
  * @param estimator how the pose estimator weighs odometry, the gyro, and the cameras
- * @param imus where the IMUs sit, and whether the gyro's accelerometer has been checked to read
+ * @param imus where each IMU is mounted, and whether its accelerometer has been checked to read
  *     along the robot's axes: localization compares the wheels with what they feel. Here rather
  *     than in the wiring, since a robot running in the simulator needs it too.
  */
@@ -47,13 +48,14 @@ public record RobotConfig(
     List<CameraConfig> cameras,
     VisionConfig vision,
     EstimatorConfig estimator,
-    ImuPlacement imus) {
+    Imus imus) {
   public RobotConfig {
     Checks.on(RobotConfig.class, name)
         .field("name", name, notBlank())
         .field("cameras", cameras, RobotConfig::sharedNames)
         .check("drivetrain.wheelInset", () -> drivetrain.whyWheelsDontFit(body))
         .check("cameras", () -> outside(cameras, body))
+        .check("imus", () -> outside(imus, body))
         .orThrow();
   }
 
@@ -88,5 +90,19 @@ public record RobotConfig(
       }
     }
     return outside.isEmpty() ? null : String.join("; ", outside);
+  }
+
+  /** The IMUs mounted outside the robot, or null if none are. */
+  private static @Nullable String outside(Imus imus, Body body) {
+    List<String> outside = new ArrayList<>();
+    outside(outside, "the gyro", imus.gyro(), body);
+    outside(outside, "the backup IMU", imus.backup(), body);
+    return outside.isEmpty() ? null : String.join("; ", outside);
+  }
+
+  private static void outside(List<String> outside, String name, ImuMount imu, Body body) {
+    if (!body.contains(imu.position())) {
+      outside.add(name + " is outside the robot, at " + imu.position());
+    }
   }
 }

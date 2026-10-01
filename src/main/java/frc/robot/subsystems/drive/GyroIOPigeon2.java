@@ -7,7 +7,6 @@ import static org.wpilib.units.Units.RadiansPerSecond;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
-import com.ctre.phoenix6.configs.MountPoseConfigs;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.Queue;
@@ -24,13 +23,17 @@ import org.wpilib.units.measure.LinearAcceleration;
  * acceleration once a loop (acceleration twice, since a collision's jolt is brief).
  *
  * <p>The Pigeon 2's axes are WPILib's (+x forward, +y left, +z up; yaw counterclockwise, pitch nose
- * down), so its angles pass through as they are. Its yaw, pitch, and roll follow the mount pose set
- * in Phoenix Tuner X; its accelerometer doesn't (CTRE's Pigeon 2.0 User's Guide, "Enclosure
- * Orientated Signals": it reads along the case's own axes). So this reads the mount pose saved on
- * the Pigeon at startup and turns the accelerometer's axes into the robot's with it. Set the mount
- * pose in Phoenix Tuner X whichever way the Pigeon is mounted, then check the accelerometer as
- * docs/calibration.md says before localization trusts it. Its accelerometer reports up to ±2 g on
- * each axis.
+ * down), so its angles pass through as they are. Its yaw, pitch, and roll follow the mount pose
+ * saved on the Pigeon, set in Phoenix Tuner X (its mount calibration); its accelerometer doesn't
+ * (CTRE's Pigeon 2.0 User's Guide, "Enclosure Orientated Signals": it reads along the case's own
+ * axes). So this turns the accelerometer's axes into the robot's by the Pigeon's orientation as the
+ * robot's definition gives it ({@code ImuMount.orientation}), which the accelerometer check in
+ * docs/calibration.md confirms before localization trusts it. Its accelerometer reports up to ±2 g
+ * on each axis.
+ *
+ * <p>The definition's orientation isn't written to the Pigeon: how Phoenix 6 takes a mount pose's
+ * angles (the case's turn on the robot, or the turn that undoes it) isn't settled from its
+ * documentation, so the two are set apart for now, and must agree.
  */
 final class GyroIOPigeon2 implements GyroIO {
   private static final double ACCELERATION_HZ = 100;
@@ -43,8 +46,8 @@ final class GyroIOPigeon2 implements GyroIO {
   private final StatusSignal<LinearAcceleration> accelerationY;
   private final StatusSignal<LinearAcceleration> accelerationZ;
 
-  /** How the Pigeon sits on the robot: turns its case's axes into the robot's. */
-  private final Rotation3d mount;
+  /** How the Pigeon is turned on the robot: turns its case's axes into the robot's. */
+  private final Rotation3d orientation;
 
   private final double radiansPerYawUnit;
   private final double yawScale;
@@ -56,9 +59,13 @@ final class GyroIOPigeon2 implements GyroIO {
 
   /**
    * @param yawScale the gyro's measured scale: its readings times this are the true rotation
+   * @param orientation how the Pigeon is turned on the robot, from the robot's definition: the
+   *     rotation that takes its case's axes into the robot's
    */
-  GyroIOPigeon2(int id, CANBus bus, double yawScale, PhoenixOdometryThread odometry) {
+  GyroIOPigeon2(
+      int id, CANBus bus, double yawScale, Rotation3d orientation, PhoenixOdometryThread odometry) {
     this.yawScale = yawScale;
+    this.orientation = orientation;
     Pigeon2 pigeon = new Pigeon2(id, bus);
     yaw = pigeon.getYaw();
     yawVelocity = pigeon.getAngularVelocityZWorld();
@@ -67,10 +74,6 @@ final class GyroIOPigeon2 implements GyroIO {
     accelerationX = pigeon.getAccelerationX();
     accelerationY = pigeon.getAccelerationY();
     accelerationZ = pigeon.getAccelerationZ();
-    MountPoseConfigs pose = new MountPoseConfigs();
-    // Unread (the Pigeon not answering at startup), the case's axes are taken for the robot's:
-    // the accelerometer check shows whether they are.
-    mount = pigeon.getConfigurator().refresh(pose).isOK() ? mount(pose) : Rotation3d.ZERO;
     // The odometry thread records raw values; this turns the yaw's unit (degrees) into radians.
     radiansPerYawUnit = yaw.getValue().unit().toBaseUnits(1);
 
@@ -98,7 +101,7 @@ final class GyroIOPigeon2 implements GyroIO {
     inputs.rollRad = roll.getValue().in(Radians);
     Translation3d acceleration =
         robotAxes(
-            mount,
+            orientation,
             accelerationX.getValue().in(MetersPerSecondPerSecond),
             accelerationY.getValue().in(MetersPerSecondPerSecond),
             accelerationZ.getValue().in(MetersPerSecondPerSecond));
@@ -123,24 +126,8 @@ final class GyroIOPigeon2 implements GyroIO {
     inputs.odometryYawsRad = yaws;
   }
 
-  /** How the Pigeon sits on the robot, as read from its mount pose at startup. */
-  Rotation3d mount() {
-    return mount;
-  }
-
-  /**
-   * The Pigeon's mount pose as a rotation: how its case is turned on the robot, its yaw, pitch, and
-   * roll applied in that order about its own axes, so it turns the case's axes into the robot's.
-   */
-  static Rotation3d mount(MountPoseConfigs pose) {
-    return new Rotation3d(
-        Math.toRadians(pose.MountPoseRoll),
-        Math.toRadians(pose.MountPosePitch),
-        Math.toRadians(pose.MountPoseYaw));
-  }
-
   /** A vector the case reads, along the robot's axes. */
-  static Translation3d robotAxes(Rotation3d mount, double x, double y, double z) {
-    return new Translation3d(x, y, z).rotateBy(mount);
+  static Translation3d robotAxes(Rotation3d orientation, double x, double y, double z) {
+    return new Translation3d(x, y, z).rotateBy(orientation);
   }
 }

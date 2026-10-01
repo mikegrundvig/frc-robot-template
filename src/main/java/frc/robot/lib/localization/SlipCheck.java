@@ -5,8 +5,9 @@ import static frc.robot.lib.config.Rules.positive;
 
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
+import frc.robot.lib.config.ImuMount;
 import java.util.ArrayDeque;
-import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /**
@@ -29,7 +30,7 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       its wheels, or the push lets go), the accelerometer feels that too, and it's gone. Once
  *       past the accelerometer's noise, all of it is how fast the wheels slide: the tolerance tells
  *       a slide from the noise, it isn't a share of every slide. Only on a robot whose
- *       accelerometer is known to read along its axes ({@link ImuPlacement#accelerometerChecked}).
+ *       accelerometer is known to read along its axes ({@link ImuMount#accelerometerChecked}).
  *   <li><b>A jolt.</b> The accelerometer feeling more than {@link Settings#joltMetersPerSecSq} is a
  *       collision, as far as the wheels' own change of velocity doesn't explain it (a robot
  *       stopping hard is felt by both, a hit only by the IMU): what they don't explain, against the
@@ -132,7 +133,10 @@ public final class SlipCheck {
    *     frame the speed is compared in. Not a number without an IMU.
    * @param yawRateRadiansPerSecond how fast the IMU turns at the loop's end, counterclockwise; not
    *     a number if it can't say, and the wheels' turn rate stands in
-   * @param imuPlace where the IMU sits, from the robot's center
+   * @param imuPosition where the IMU sits, from the robot's origin (its center, on the floor)
+   * @param accelerometerChecked whether this IMU's accelerometer is known to read along the robot's
+   *     axes ({@link ImuMount#accelerometerChecked}): without it, the speed isn't compared, and a
+   *     jolt is judged by its size alone
    * @param wheels the robot's velocity as its wheels measure it, robot-relative, at the loop's end
    * @param forwardAccelerationMetersPerSecSq the acceleration the IMU felt over the loop along the
    *     robot's forward axis, without gravity's share; not a number when it can't say
@@ -144,7 +148,8 @@ public final class SlipCheck {
       double imuTurnRadians,
       double yawRadians,
       double yawRateRadiansPerSecond,
-      Translation2d imuPlace,
+      Translation3d imuPosition,
+      boolean accelerometerChecked,
       ChassisVelocities wheels,
       double forwardAccelerationMetersPerSecSq,
       double leftAccelerationMetersPerSecSq) {
@@ -166,7 +171,6 @@ public final class SlipCheck {
   private final double joltLimit;
   private final double saturation;
   private final double reachMeters;
-  private final boolean accelerometerChecked;
 
   private final ArrayDeque<Turn> turns = new ArrayDeque<>();
   private double turnsSeconds;
@@ -193,11 +197,8 @@ public final class SlipCheck {
    * @param settings how closely the wheels must agree with the IMU
    * @param wheelReachMeters how far the wheels sit from the robot's center: a turn they see and the
    *     gyro doesn't, times this, is how far they slid
-   * @param accelerometerChecked whether the accelerometer is known to read along the robot's axes
-   *     ({@link ImuPlacement#accelerometerChecked}): without it, the speed isn't compared, and a
-   *     jolt is judged by its size alone
    */
-  public SlipCheck(Settings settings, double wheelReachMeters, boolean accelerometerChecked) {
+  public SlipCheck(Settings settings, double wheelReachMeters) {
     if (!(wheelReachMeters > 0) || Double.isInfinite(wheelReachMeters)) {
       throw new IllegalArgumentException("the wheels' reach must be positive: " + wheelReachMeters);
     }
@@ -210,7 +211,6 @@ public final class SlipCheck {
     // A reading within a hair of the range is at it.
     saturation = 0.99 * settings.accelerometerRangeMetersPerSecSq();
     reachMeters = wheelReachMeters;
-    this.accelerometerChecked = accelerometerChecked;
   }
 
   /** One loop's readings. */
@@ -334,14 +334,16 @@ public final class SlipCheck {
       startOver(forward, left);
       return;
     }
-    // The wheels' velocity where the IMU sits: the robot's, plus its turn swinging the IMU around.
+    // The wheels' velocity where the IMU sits: the robot's, plus its turn swinging the IMU around,
+    // the turn's rate crossed with the IMU's position. Only the yaw rate is read, which swings it
+    // level whatever its height: a robot pitching or rolling would swing a high IMU too.
     double rate =
         Double.isFinite(sample.yawRateRadiansPerSecond())
             ? sample.yawRateRadiansPerSecond()
             : wheels.omega;
-    Translation2d place = sample.imuPlace();
-    double atImuX = wheels.vx - rate * place.getY();
-    double atImuY = wheels.vy + rate * place.getX();
+    Translation3d position = sample.imuPosition();
+    double atImuX = wheels.vx - rate * position.getY();
+    double atImuY = wheels.vy + rate * position.getX();
     double cos = Math.cos(yaw);
     double sin = Math.sin(yaw);
     double velocityX = cos * atImuX - sin * atImuY;
@@ -351,7 +353,8 @@ public final class SlipCheck {
     double seconds = sample.seconds();
     boolean before = Double.isFinite(lastVelocityX);
     collision = joltBySize(forward, left) ? 1 : 0;
-    if (collision > 0 && accelerometerChecked && before && !saturated(forward, left)) {
+    boolean checked = sample.accelerometerChecked();
+    if (collision > 0 && checked && before && !saturated(forward, left)) {
       // What the wheels felt too is driving; what they don't explain, the hit's share.
       double unexplained =
           Math.hypot(
@@ -359,10 +362,7 @@ public final class SlipCheck {
               feltY - (velocityY - lastVelocityY) / seconds);
       collision = Math.min(1, unexplained / joltLimit);
     }
-    if (!accelerometerChecked
-        || collision >= 1
-        || !Double.isFinite(feltX)
-        || !Double.isFinite(feltY)) {
+    if (!checked || collision >= 1 || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
       forgetSpeeds();
     } else if (before) {
       // How the wheels' velocity changed over the loop, less what the accelerometer felt...

@@ -1,5 +1,7 @@
 package frc.robot.subsystems.localization;
 
+import frc.robot.lib.config.ImuMount;
+import frc.robot.lib.config.Imus;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.CameraLocalizer;
@@ -8,7 +10,6 @@ import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.DriveKinematicsModel;
 import frc.robot.lib.localization.DrivetrainReadings;
 import frc.robot.lib.localization.ImuCrossCheck;
-import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.LandmarkDecision;
 import frc.robot.lib.localization.LocalizationEstimate;
@@ -105,8 +106,10 @@ public final class Localization implements AutoCloseable {
   private YawSource lastStepSource = YawSource.WHEELS;
   private double lastStepYaw = Double.NaN;
 
-  /** Where the IMUs sit, and whether the gyro's accelerometer reads along the robot's axes. */
-  private final ImuPlacement imus;
+  /**
+   * Where the IMUs are mounted, and whether each one's accelerometer reads along the robot's axes.
+   */
+  private final Imus imus;
 
   private YawSource yawSource = YawSource.GYRO;
 
@@ -162,23 +165,22 @@ public final class Localization implements AutoCloseable {
    * @param terrain the field's raised terrain: a tilt it explains keeps the wheels trusted, and its
    *     crests are landmarks
    * @param wheelReachMeters how far the wheels reach from the robot's center
-   * @param imus where the IMUs sit, and whether the gyro's accelerometer reads along the robot's
-   *     axes
+   * @param imus where the IMUs are mounted, and whether each one's accelerometer has been checked
+   *     to read along the robot's axes
    */
   public Localization(
       PoseEstimator estimator,
       DriveKinematicsModel kinematics,
       Terrain terrain,
       double wheelReachMeters,
-      ImuPlacement imus) {
+      Imus imus) {
     this.estimator = estimator;
     this.kinematics = kinematics;
     this.ground = terrain;
     this.wheelReach = wheelReachMeters;
     crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
     this.imus = imus;
-    slipCheck =
-        new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters, imus.accelerometerChecked());
+    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters);
     estimate = estimator.estimate();
   }
 
@@ -422,6 +424,7 @@ public final class Localization implements AutoCloseable {
       for (Step step : loop) {
         wheelTurn += step.motion().dthetaRadians();
       }
+      ImuMount mount = source == YawSource.GYRO ? imus.gyro() : imus.backup();
       slipCheck.update(
           new SlipCheck.Sample(
               Timestamps.toSeconds(last.timestampNanos() - lastStepNanos),
@@ -429,7 +432,8 @@ public final class Localization implements AutoCloseable {
               MathUtil.angleModulus(last.yaw() - lastStepYaw),
               last.yaw(),
               imu.yawRateRadiansPerSecond(),
-              source == YawSource.GYRO ? imus.gyro() : imus.backup(),
+              mount.position(),
+              mount.accelerometerChecked(),
               wheels,
               felt.forward(),
               felt.left()));

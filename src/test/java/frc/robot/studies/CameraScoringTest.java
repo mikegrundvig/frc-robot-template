@@ -121,7 +121,7 @@ class CameraScoringTest {
 
   @Test
   void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads() {
-    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE).samples();
+    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig threes =
         CameraStudyConfigBuilder.builder(ONE_THREAD).threads(3).frames(2).build();
     CameraStudyConfig otherSeed = CameraStudyConfigBuilder.builder(threes).seed(2).build();

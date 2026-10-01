@@ -93,7 +93,8 @@ public final class CameraStudy {
     String weightsFile = options.get("weights");
     Weights weights = weightsFile == null ? Weights.NONE : Weights.read(Path.of(weightsFile));
     FieldGrid grid =
-        new FieldGrid(field, robot.body(), config.gridMeters(), config.headings(), weights);
+        new FieldGrid(
+            field, robot.body(), config.gridMeters(), config.headings(), weights, config.seed());
     List<Sample> samples = grid.samples();
     List<Candidate> candidates = Candidates.of(robot);
     CameraScoring scoring = new CameraScoring(robot, field, candidates, config);

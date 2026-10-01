@@ -20,7 +20,9 @@ mechanism through its whole travel, and a rigid mount; that's for CAD to check.
 ## How it works
 
 **Where the robot might be.** Positions on a grid over the whole field, every 0.5 m, kept half a
-robot's length off the walls, each at 8 headings. Every spot counts the same, because the study
+robot's length off the walls, each at 8 headings. Each position's headings start at their own
+random fraction of the 45° step, so they don't all line up with the walls and with cameras splayed
+45°, which would favor the layouts that happen to match them. Every spot counts the same, because the study
 can't know what the next game rewards; a team that does can say so with weights (below). A spot the
 robot can't reach, inside a field element, counts too until a weights file leaves it out.
 

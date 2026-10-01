@@ -24,7 +24,10 @@ class ValuesRegisterTest {
   private static final Path REGISTER =
       Path.of(System.getProperty("frc.projectDir", "."), "docs", "values.md");
 
-  private static final List<CodeRecord> RECORDS = ValuesRegister.scan();
+  /** The code's records, scanned the first time a test asks, and only then. */
+  private static final class Scanned {
+    static final List<CodeRecord> RECORDS = ValuesRegister.scan(ProductionCode.CLASSES);
+  }
 
   /** Each mechanism's live tuning: the paths of the values it tunes, by the tuning's name. */
   private static Map<String, List<String>> tuning() {
@@ -37,16 +40,23 @@ class ValuesRegisterTest {
     return tuning;
   }
 
+  private static ValuesRegister register() throws IOException {
+    return ValuesRegister.parse(Files.readString(REGISTER));
+  }
+
   @Test
   void theRegisterHasARowForEveryConfigurationValueAndNoOther() throws IOException {
-    ValuesRegister register = ValuesRegister.parse(Files.readString(REGISTER));
+    assertThat(register().problems(Scanned.RECORDS, tuning())).isEmpty();
+  }
 
-    assertThat(register.problems(RECORDS, tuning())).isEmpty();
+  @Test
+  void theLegendsListTheKindsAndSourcesTheCheckAccepts() throws IOException {
+    assertThat(register().legendProblems()).isEmpty();
   }
 
   @Test
   void theScanFindsEveryConfigurationRecordAndWhatEachValueHolds() {
-    assertThat(RECORDS)
+    assertThat(Scanned.RECORDS)
         .extracting(CodeRecord::name)
         .contains("RobotConfig", "Body", "SwerveConfig.Limits", "ImuCrossCheck.Settings")
         .contains("ImuReadings") // listed in the register as not configuration
@@ -72,7 +82,7 @@ class ValuesRegisterTest {
   }
 
   private static CodeRecord record(String name) {
-    return RECORDS.stream().filter(r -> r.name().equals(name)).findFirst().orElseThrow();
+    return Scanned.RECORDS.stream().filter(r -> r.name().equals(name)).findFirst().orElseThrow();
   }
 
   // An arm, for the checks' own tests: a length, gains in a record of their own, and readings
@@ -99,19 +109,19 @@ class ValuesRegisterTest {
 
       | Kind | Meaning |
       |---|---|
-      | chosen | Not a table the check reads. |
+      | chosen | A legend, which the check reads apart. |
 
       ## The arm
 
       ### `Arm`
 
-      | Value | Kind | Today | Source | How to measure it, or why |
+      | Value | Kind | Template's starting value | Source | How to measure it, or why |
       |---|---|---|---|---|
       | `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |
 
       ### `Arm.Gains`
 
-      | Value | Kind | Today | Source | How to measure it, or why |
+      | Value | Kind | Template's starting value | Source | How to measure it, or why |
       |---|---|---|---|---|
       | `kP` | chosen | 2 | simulation | Why: it holds. |
       | `kD` | chosen | 0.1 | top team (254) | Why: it damps. |
@@ -122,8 +132,8 @@ class ValuesRegisterTest {
 
       | Knob | Limits | Source | Why |
       |---|---|---|---|
-      | `gains.kP` | 0 to 10 | unknown | Room to tune. |
-      | `gains.kD` | 0 to 1 | unknown | Room to tune. |
+      | `gains.kP` | 0 to 10 | guess | Room to tune. |
+      | `gains.kD` | 0 to 1 | guess | Room to tune. |
 
       ## Records that aren't configuration
 
@@ -145,12 +155,18 @@ class ValuesRegisterTest {
   void aMissingValueOrRecordSaysWhatToAdd() {
     String register =
         ARM_REGISTER
-            .replace("| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n", "")
+            .replace(
+                "### `Arm`\n\n"
+                    + "| Value | Kind | Template's starting value | Source | How to measure it, or"
+                    + " why |\n"
+                    + "|---|---|---|---|---|\n"
+                    + "| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n\n",
+                "")
             .replace("### `Arm.Gains`", "### `Arm.Gainz`");
 
     assertThat(problems(register))
         .containsExactly(
-            "docs/values.md line 18: remove the section for Arm.Gainz: no configuration record is"
+            "docs/values.md line 13: remove the section for Arm.Gainz: no configuration record is"
                 + " named Arm.Gainz",
             "Add a section for Arm (frc.robot.Arm) to docs/values.md: a heading ### `Arm` and a"
                 + " table of its values with a row for each: length. Or, if it carries readings"
@@ -162,14 +178,45 @@ class ValuesRegisterTest {
   }
 
   @Test
+  void aSectionWithoutItsTableSaysSoAtItsHeading() {
+    String register =
+        ARM_REGISTER.replace(
+            "| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n", "");
+
+    assertThat(problems(register))
+        .containsExactly(
+            "docs/values.md line 9: the section for Arm has no table of its values: add one whose"
+                + " header starts with Value, with a row for each: length");
+  }
+
+  @Test
+  void aTableUnderARecordsHeadingMustBeItsValues() {
+    String register =
+        ARM_REGISTER.replace(
+            "| Value | Kind | Template's starting value | Source | How to measure it, or why |\n"
+                + "|---|---|---|---|---|\n"
+                + "| `length` |",
+            "| Name | Kind | Template's starting value | Source | How to measure it, or why |\n"
+                + "|---|---|---|---|---|\n"
+                + "| `length` |");
+
+    assertThat(problems(register))
+        .containsExactly(
+            "docs/values.md line 11: the table under ### `Arm` must start its header with Value (a"
+                + " record's values) or Knob (a tuning's knobs), not \"Name\"",
+            "docs/values.md line 9: the section for Arm has no table of its values: add one whose"
+                + " header starts with Value, with a row for each: length");
+  }
+
+  @Test
   void aValueMissingFromItsRecordsTableSaysWhichAndWhere() {
     String register =
         ARM_REGISTER.replace("| `kD` | chosen | 0.1 | top team (254) | Why: it damps. |\n", "");
 
     assertThat(problems(register))
         .containsExactly(
-            "Add Arm.Gains.kD to docs/values.md: a row | `kD` | kind | today | source | how | in"
-                + " Arm.Gains's table");
+            "Add Arm.Gains.kD to docs/values.md: a row | `kD` | kind | starting value | source |"
+                + " how | in Arm.Gains's table");
   }
 
   @Test
@@ -200,7 +247,7 @@ class ValuesRegisterTest {
         ARM_REGISTER
             .replace("| `kP` | chosen | 2 | simulation |", "| `kP` | tuned | 2 | simulation |")
             .replace("| `kD` | chosen | 0.1 | top team (254) |", "| `kD` | chosen | 0.1 | 254 |")
-            .replace("| `gains.kP` | 0 to 10 | unknown |", "| `gains.kP` | 0 to 10 | |");
+            .replace("| `gains.kP` | 0 to 10 | guess |", "| `gains.kP` | 0 to 10 | |");
 
     assertThat(problems(register))
         .containsExactly(
@@ -212,6 +259,19 @@ class ValuesRegisterTest {
             "docs/values.md line 28: the arm tuning's gains.kP's source is \"\": it must start"
                 + " with one of measured, 2026 code, top team, datasheet, rules, math, simulation,"
                 + " guess, unknown, none, with any detail after it in parentheses");
+  }
+
+  @Test
+  void theLegendsMustListWhatTheCheckAccepts() {
+    ValuesRegister register = ValuesRegister.parse(ARM_REGISTER);
+
+    assertThat(register.legendProblems())
+        .containsExactly(
+            "docs/values.md's legend lists the kinds [chosen], but the test accepts [calibrated,"
+                + " characterized, chosen, as built]: make them the same (ValuesRegister.KINDS)",
+            "docs/values.md's legend lists the sources [], but the test accepts [measured, 2026"
+                + " code, top team, datasheet, rules, math, simulation, guess, unknown, none]: make"
+                + " them the same (ValuesRegister.SOURCES)");
   }
 
   @Test
@@ -231,6 +291,26 @@ class ValuesRegisterTest {
   }
 
   @Test
+  void aRecordARobotsConfigurationHoldsCantBeListedAsNotConfiguration() {
+    List<CodeRecord> robot =
+        List.of(
+            new CodeRecord(
+                "RobotConfig", "frc.robot.RobotConfig", List.of(new Component("arm", "Arm"))),
+            ARM.get(0),
+            ARM.get(1),
+            ARM.get(2));
+    String register =
+        ARM_REGISTER.replace(
+            "| `ArmReadings` | What the arm read in one loop. |",
+            "| `ArmReadings` | What the arm read in one loop. |\n| `Arm.Gains` | Not really. |");
+
+    assertThat(ValuesRegister.parse(register).recordProblems(robot))
+        .contains(
+            "docs/values.md line 36: Arm.Gains can't be listed as not configuration: a robot's"
+                + " configuration holds it (RobotConfig.arm → Arm.gains)");
+  }
+
+  @Test
   void aRecordOfReadingsNotListedAsSuchIsAskedFor() {
     String register =
         ARM_REGISTER.replace("| `ArmReadings` | What the arm read in one loop. |\n", "");
@@ -245,8 +325,8 @@ class ValuesRegisterTest {
   void everyKnobOfEveryTuningHasARow() {
     String register =
         ARM_REGISTER
-            .replace("| `gains.kD` | 0 to 1 | unknown | Room to tune. |\n", "")
-            .replace("| `gains.kP` |", "| `gains.kI` | 0 to 1 | unknown | Gone. |\n| `gains.kP` |");
+            .replace("| `gains.kD` | 0 to 1 | guess | Room to tune. |\n", "")
+            .replace("| `gains.kP` |", "| `gains.kI` | 0 to 1 | guess | Gone. |\n| `gains.kP` |");
     Map<String, List<String>> tuning =
         Map.of("arm", List.of("gains.kP", "gains.kD"), "wrist", List.of("gains.kP"));
 
@@ -282,7 +362,7 @@ class ValuesRegisterTest {
             ## An example
 
             ```markdown
-            | Value | Kind | Today | Source | How |
+            | Value | Kind | Template's starting value | Source | How |
             |---|---|---|---|---|
             | `example` | chosen | 1 | guess | Not a real row. |
             ```
@@ -296,12 +376,44 @@ class ValuesRegisterTest {
   }
 
   @Test
+  void tildeFencesAndCommentsAreLeftAloneToo() {
+    String register =
+        ARM_REGISTER.replace(
+            "| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n",
+            """
+            | `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |
+
+            ~~~
+            | `fenced` | chosen | 1 | guess | Not a row. |
+            ~~~
+
+            <!-- an old row, kept for now:
+            | `commented` | chosen | 1 | guess | Not a row either. |
+            -->
+            """);
+
+    assertThat(problems(register)).isEmpty();
+  }
+
+  @Test
+  void anEscapedPipeIsPartOfItsCell() {
+    assertThat(ValuesRegister.cells("| `kP` | chosen | 2 \\| 3 | guess | Why: a \\| b. |"))
+        .containsExactly("`kP`", "chosen", "2 | 3", "guess", "Why: a | b.");
+
+    String register =
+        ARM_REGISTER.replace(
+            "| `kP` | chosen | 2 | simulation | Why: it holds. |",
+            "| `kP` | chosen | 2 \\| 3 | simulation | Why: either \\| both. |");
+    assertThat(problems(register)).isEmpty();
+  }
+
+  @Test
   void aTableOfValuesNeedsItsRecordsHeadingAndItsColumns() {
     String register =
         """
         ## No record named
 
-        | Value | Kind | Today | How |
+        | Value | Kind | Template's starting value | How |
         |---|---|---|---|
         | `length` | as built | 0.8 m | From CAD. |
         Length, not a row.

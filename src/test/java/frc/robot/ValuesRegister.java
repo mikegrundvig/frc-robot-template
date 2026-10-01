@@ -1,14 +1,15 @@
 package frc.robot;
 
 import com.tngtech.archunit.core.domain.JavaClass;
-import com.tngtech.archunit.core.importer.ClassFileImporter;
-import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.core.domain.JavaClasses;
 import frc.robot.lib.config.ConfigRecord;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,18 +23,22 @@ import org.jspecify.annotations.Nullable;
  * The values register (docs/values.md) as its test reads it, and what it lacks or has too many of
  * against the code.
  *
- * <p>The register is Markdown, written for people. The test reads three kinds of table, told apart
- * by the first cell of their header row; every other table is left alone:
+ * <p>The register is Markdown, written for people. The test reads these tables, told apart by the
+ * first cell of their header row, and leaves every other table alone:
  *
  * <ul>
  *   <li><b>Value</b>: the values of the record the {@code ###} heading above names in backticks,
- *       one per row, each with a <b>Kind</b> and a <b>Source</b> column.
+ *       one per row, with a <b>Kind</b> and a <b>Source</b> column.
  *   <li><b>Knob</b>: the knobs of the mechanism tuning the heading above names, with a
  *       <b>Source</b> column.
  *   <li><b>Record</b>: the records that aren't configuration.
+ *   <li><b>Kind</b> and <b>Source</b>: the legends, which must list the kinds and sources the test
+ *       accepts.
  * </ul>
  *
- * <p>A row's first cell is a name in backticks.
+ * <p>A row's first cell is a name in backticks. Cells split at pipes, except an escaped one ({@code
+ * \|}). Fenced code blocks ({@code ```} or {@code ~~~}) and HTML comments ({@code <!-- -->}) are
+ * skipped, so an example table in either isn't read.
  */
 final class ValuesRegister {
   /** The register, for messages. */
@@ -56,10 +61,17 @@ final class ValuesRegister {
           "unknown",
           "none");
 
+  /** A robot's whole configuration: every record it holds, however deep, is configuration. */
+  static final String ROOT = "RobotConfig";
+
+  /** The header of a table of values' column for the template's starting value. */
+  static final String STARTING_VALUE = "Template's starting value";
+
   private static final Pattern HEADING = Pattern.compile("^(#{1,6})\\s+(.*)$");
   private static final Pattern CODE = Pattern.compile("`([^`]+)`");
   private static final Pattern NAME_CELL = Pattern.compile("^`([^`]+)`$");
   private static final Pattern SEPARATOR_CELL = Pattern.compile("^:?-+:?$");
+  private static final Pattern UNESCAPED_PIPE = Pattern.compile("(?<!\\\\)\\|");
 
   /**
    * A record marked {@link ConfigRecord}, as the register names it.
@@ -87,20 +99,29 @@ final class ValuesRegister {
    * @param name its first cell's name
    * @param kind its Kind cell; empty in a table without one
    * @param source its Source cell; empty in a table without one
+   * @param value its starting value, in a table of values, or its limits, in a table of knobs
    * @param line where it is, counting from 1
    */
-  record Row(String subject, String name, String kind, String source, int line) {}
+  record Row(String subject, String name, String kind, String source, String value, int line) {}
 
   private enum Table {
     VALUES,
     KNOBS,
     RECORDS,
+    KINDS_LEGEND,
+    SOURCES_LEGEND,
     OTHER
   }
 
   private final List<Row> values = new ArrayList<>();
   private final List<Row> knobs = new ArrayList<>();
   private final List<Row> notConfiguration = new ArrayList<>();
+  private final List<String> legendKinds = new ArrayList<>();
+  private final List<String> legendSources = new ArrayList<>();
+
+  /** Each {@code ###} heading that names something in backticks, by that name, with its line. */
+  private final Map<String, Integer> headings = new LinkedHashMap<>();
+
   private final List<String> formatProblems = new ArrayList<>();
 
   private ValuesRegister() {}
@@ -112,18 +133,32 @@ final class ValuesRegister {
     Table table = Table.OTHER;
     int kindColumn = -1;
     int sourceColumn = -1;
+    int valueColumn = -1;
     boolean inTable = false;
-    boolean inFence = false;
+    String fence = "";
+    boolean inComment = false;
     String[] lines = markdown.split("\n", -1);
     for (int i = 0; i < lines.length; i++) {
       String line = lines[i].strip();
       int number = i + 1;
-      if (line.startsWith("```")) {
-        inFence = !inFence;
+      if (inComment) {
+        inComment = !line.contains("-->");
+        continue;
+      }
+      if (!fence.isEmpty()) {
+        if (line.startsWith(fence)) {
+          fence = "";
+        }
+        continue;
+      }
+      if (line.startsWith("<!--")) {
+        inComment = !line.contains("-->");
         inTable = false;
         continue;
       }
-      if (inFence) {
+      if (line.startsWith("```") || line.startsWith("~~~")) {
+        fence = line.substring(0, 3);
+        inTable = false;
         continue;
       }
       Matcher heading = HEADING.matcher(line);
@@ -133,6 +168,9 @@ final class ValuesRegister {
         if (level <= 3) {
           Matcher code = CODE.matcher(heading.group(2));
           subject = level == 3 && code.find() ? code.group(1) : "";
+          if (!subject.isEmpty()) {
+            register.headings.putIfAbsent(subject, number);
+          }
         }
         continue;
       }
@@ -146,13 +184,28 @@ final class ValuesRegister {
         table = kindOf(cells.get(0));
         kindColumn = cells.indexOf("Kind");
         sourceColumn = cells.indexOf("Source");
-        if (!register.checkHeader(table, subject, kindColumn, sourceColumn, number)) {
+        valueColumn =
+            switch (table) {
+              case VALUES -> cells.indexOf(STARTING_VALUE);
+              case KNOBS -> cells.indexOf("Limits");
+              default -> -1;
+            };
+        if (!register.readable(table, subject, cells.get(0), kindColumn, sourceColumn, number)) {
           table = Table.OTHER; // its rows can't be read; the problem says why
         }
         continue;
       }
       if (table == Table.OTHER
           || cells.stream().allMatch(c -> SEPARATOR_CELL.matcher(c).matches())) {
+        continue;
+      }
+      String first = cells.get(0).replace("**", "").strip();
+      if (table == Table.KINDS_LEGEND) {
+        register.legendKinds.add(first);
+        continue;
+      }
+      if (table == Table.SOURCES_LEGEND) {
+        register.legendSources.add(first);
         continue;
       }
       Matcher name = NAME_CELL.matcher(cells.get(0));
@@ -166,29 +219,39 @@ final class ValuesRegister {
                 + "\"");
         continue;
       }
-      String kind = kindColumn >= 0 && kindColumn < cells.size() ? cells.get(kindColumn) : "";
-      String source =
-          sourceColumn >= 0 && sourceColumn < cells.size() ? cells.get(sourceColumn) : "";
+      Row row =
+          new Row(
+              table == Table.RECORDS ? "" : subject,
+              name.group(1),
+              cell(cells, kindColumn),
+              cell(cells, sourceColumn),
+              cell(cells, valueColumn),
+              number);
       switch (table) {
-        case VALUES -> register.values.add(new Row(subject, name.group(1), kind, source, number));
-        case KNOBS -> register.knobs.add(new Row(subject, name.group(1), "", source, number));
-        case RECORDS -> register.notConfiguration.add(new Row("", name.group(1), "", "", number));
-        case OTHER -> {}
+        case VALUES -> register.values.add(row);
+        case KNOBS -> register.knobs.add(row);
+        case RECORDS -> register.notConfiguration.add(row);
+        default -> {}
       }
     }
     return register;
   }
 
-  private static List<String> cells(String line) {
+  /** A row's cells, split at its unescaped pipes, each unescaped and trimmed. */
+  static List<String> cells(String line) {
     String inner = line.substring(1);
-    if (inner.endsWith("|")) {
+    if (inner.endsWith("|") && !inner.endsWith("\\|")) {
       inner = inner.substring(0, inner.length() - 1);
     }
     List<String> cells = new ArrayList<>();
-    for (String cell : inner.split("\\|", -1)) {
-      cells.add(cell.strip());
+    for (String cell : UNESCAPED_PIPE.split(inner, -1)) {
+      cells.add(cell.replace("\\|", "|").strip());
     }
     return cells;
+  }
+
+  private static String cell(List<String> cells, int column) {
+    return column >= 0 && column < cells.size() ? cells.get(column) : "";
   }
 
   private static Table kindOf(String firstHeaderCell) {
@@ -196,17 +259,33 @@ final class ValuesRegister {
       case "Value" -> Table.VALUES;
       case "Knob" -> Table.KNOBS;
       case "Record" -> Table.RECORDS;
+      case "Kind" -> Table.KINDS_LEGEND;
+      case "Source" -> Table.SOURCES_LEGEND;
       default -> Table.OTHER;
     };
   }
 
   /** Whether a table's rows can be read, adding a problem for each reason they can't. */
-  private boolean checkHeader(Table table, String subject, int kind, int source, int line) {
+  private boolean readable(
+      Table table, String subject, String firstHeaderCell, int kind, int source, int line) {
+    String where = FILE + " line " + line + ": ";
+    if (table == Table.OTHER) {
+      if (!subject.isEmpty()) {
+        formatProblems.add(
+            where
+                + "the table under ### `"
+                + subject
+                + "` must start its header with Value (a record's values) or Knob (a tuning's"
+                + " knobs), not \""
+                + firstHeaderCell
+                + "\"");
+      }
+      return false;
+    }
     if (table != Table.VALUES && table != Table.KNOBS) {
       return true;
     }
     int before = formatProblems.size();
-    String where = FILE + " line " + line + ": ";
     String rows = table == Table.VALUES ? "values" : "knobs";
     if (subject.isEmpty()) {
       formatProblems.add(
@@ -228,16 +307,84 @@ final class ValuesRegister {
 
   /**
    * Everything the register lacks or has too many of, each saying what to add or remove: empty when
-   * it matches the code.
+   * it matches the code. The tables' form, the records, and the tunings; the legends are checked
+   * apart ({@link #legendProblems}).
    *
    * @param records every record marked {@link ConfigRecord}
    * @param tuning each mechanism tuning's name, with the paths of the values it tunes
    */
   List<String> problems(List<CodeRecord> records, Map<String, List<String>> tuning) {
     List<String> problems = new ArrayList<>(formatProblems);
+    problems.addAll(recordProblems(records));
+    problems.addAll(tuningProblems(tuning));
+    return problems;
+  }
+
+  /** Whether the legends list exactly the kinds and sources the test accepts, in order. */
+  List<String> legendProblems() {
+    List<String> problems = new ArrayList<>();
+    if (!legendKinds.equals(KINDS)) {
+      problems.add(
+          FILE
+              + "'s legend lists the kinds "
+              + legendKinds
+              + ", but the test accepts "
+              + KINDS
+              + ": make them the same (ValuesRegister.KINDS)");
+    }
+    if (!legendSources.equals(SOURCES)) {
+      problems.add(
+          FILE
+              + "'s legend lists the sources "
+              + legendSources
+              + ", but the test accepts "
+              + SOURCES
+              + ": make them the same (ValuesRegister.SOURCES)");
+    }
+    return problems;
+  }
+
+  /**
+   * Every configuration record has its section, and every value its row, with a kind and a source
+   * from the lists; nothing is listed that the code doesn't have.
+   */
+  List<String> recordProblems(List<CodeRecord> records) {
+    List<String> problems = new ArrayList<>();
     Map<String, List<CodeRecord>> byName =
         records.stream()
             .collect(Collectors.groupingBy(CodeRecord::name, TreeMap::new, Collectors.toList()));
+    sameNames(byName, problems);
+    Map<String, Row> notConfigured = notConfigured(byName, problems);
+    heldByARobot(byName, notConfigured, problems);
+    Map<String, CodeRecord> configuration = new TreeMap<>();
+    byName.forEach(
+        (name, same) -> {
+          if (!notConfigured.containsKey(name)) {
+            configuration.put(name, same.get(0));
+          }
+        });
+    Map<String, Map<String, Row>> rows = grouped(values, problems);
+    staleSections(rows, configuration, notConfigured, problems);
+    configuration.forEach(
+        (name, record) ->
+            recordRows(name, record, rows.getOrDefault(name, Map.of()), configuration, problems));
+    for (Row row : values) {
+      String value = row.subject() + "." + row.name();
+      if (!KINDS.contains(row.kind())) {
+        problems.add(
+            at(row)
+                + value
+                + "'s kind is \""
+                + row.kind()
+                + "\": it must be one of "
+                + String.join(", ", KINDS));
+      }
+      checkSource(row, value, problems);
+    }
+    return problems;
+  }
+
+  private static void sameNames(Map<String, List<CodeRecord>> byName, List<String> problems) {
     byName.forEach(
         (name, same) -> {
           if (same.size() > 1) {
@@ -251,7 +398,11 @@ final class ValuesRegister {
                     + " can tell them apart");
           }
         });
+  }
 
+  /** The records listed as not configuration, by name; a listing of no record is a problem. */
+  private Map<String, Row> notConfigured(
+      Map<String, List<CodeRecord>> byName, List<String> problems) {
     Map<String, Row> notConfigured = new LinkedHashMap<>();
     for (Row row : notConfiguration) {
       Row earlier = notConfigured.putIfAbsent(row.name(), row);
@@ -267,15 +418,60 @@ final class ValuesRegister {
                 + row.name());
       }
     }
-    Map<String, CodeRecord> configuration = new TreeMap<>();
-    byName.forEach(
-        (name, same) -> {
-          if (!notConfigured.containsKey(name)) {
-            configuration.put(name, same.get(0));
-          }
-        });
+    return notConfigured;
+  }
 
-    Map<String, Map<String, Row>> rows = grouped(values, problems);
+  /** How a record is reached from a robot's configuration: the record and value that hold it. */
+  private record Via(String record, String component) {}
+
+  /** A record a robot's configuration holds is configuration, whatever the register says. */
+  private static void heldByARobot(
+      Map<String, List<CodeRecord>> byName, Map<String, Row> notConfigured, List<String> problems) {
+    if (!byName.containsKey(ROOT)) {
+      return;
+    }
+    Map<String, Via> reached = new LinkedHashMap<>();
+    Deque<String> queue = new ArrayDeque<>(List.of(ROOT));
+    while (!queue.isEmpty()) {
+      String name = queue.removeFirst();
+      for (CodeRecord record : byName.getOrDefault(name, List.of())) {
+        for (Component component : record.components()) {
+          String held = component.holds();
+          if (held != null && !held.equals(ROOT) && !reached.containsKey(held)) {
+            reached.put(held, new Via(name, component.name()));
+            queue.addLast(held);
+          }
+        }
+      }
+    }
+    for (Row row : notConfigured.values()) {
+      if (row.name().equals(ROOT)) {
+        problems.add(
+            at(row) + ROOT + " can't be listed as not configuration: it's a robot's configuration");
+        continue;
+      }
+      if (!reached.containsKey(row.name())) {
+        continue;
+      }
+      List<String> path = new ArrayList<>();
+      for (Via via = reached.get(row.name()); via != null; via = reached.get(via.record())) {
+        path.add(0, via.record() + "." + via.component());
+      }
+      problems.add(
+          at(row)
+              + row.name()
+              + " can't be listed as not configuration: a robot's configuration holds it ("
+              + String.join(" → ", path)
+              + ")");
+    }
+  }
+
+  /** Sections for records the code doesn't have, or that are listed as not configuration. */
+  private static void staleSections(
+      Map<String, Map<String, Row>> rows,
+      Map<String, CodeRecord> configuration,
+      Map<String, Row> notConfigured,
+      List<String> problems) {
     rows.forEach(
         (subject, named) -> {
           if (configuration.containsKey(subject)) {
@@ -299,92 +495,103 @@ final class ValuesRegister {
                     + subject);
           }
         });
+  }
 
-    configuration.forEach(
-        (name, record) -> {
-          Map<String, Row> named = rows.getOrDefault(name, Map.of());
-          List<String> missing = new ArrayList<>();
-          Map<String, Component> components = new LinkedHashMap<>();
-          for (Component component : record.components()) {
-            components.put(component.name(), component);
-            boolean ownSection =
-                component.holds() != null && configuration.containsKey(component.holds());
-            if (!ownSection && !named.containsKey(component.name())) {
-              missing.add(component.name());
-            }
-          }
-          if (named.isEmpty() && !missing.isEmpty()) {
-            problems.add(
-                "Add a section for "
-                    + name
-                    + " ("
-                    + record.className()
-                    + ") to "
-                    + FILE
-                    + ": a heading ### `"
-                    + name
-                    + "` and a table of its values with a row for each: "
-                    + String.join(", ", missing)
-                    + ". Or, if it carries readings rather than configuration, list it with the"
-                    + " records that aren't configuration");
-          } else {
-            for (String value : missing) {
-              problems.add(
-                  "Add "
-                      + name
-                      + "."
-                      + value
-                      + " to "
-                      + FILE
-                      + ": a row | `"
-                      + value
-                      + "` | kind | today | source | how | in "
-                      + name
-                      + "'s table");
-            }
-          }
-          for (Row row : named.values()) {
-            Component component = components.get(row.name());
-            String holds = component == null ? null : component.holds();
-            if (component == null) {
-              problems.add(
-                  at(row)
-                      + "remove "
-                      + name
-                      + "."
-                      + row.name()
-                      + ": "
-                      + name
-                      + " has no value named "
-                      + row.name());
-            } else if (holds != null && configuration.containsKey(holds)) {
-              problems.add(
-                  at(row)
-                      + "remove "
-                      + name
-                      + "."
-                      + row.name()
-                      + ": it holds "
-                      + holds
-                      + ", which has its own section");
-            }
-          }
-        });
-
-    for (Row row : values) {
-      String value = row.subject() + "." + row.name();
-      if (!KINDS.contains(row.kind())) {
+  /** One configuration record's rows: one for each value, and none for anything else. */
+  private void recordRows(
+      String name,
+      CodeRecord record,
+      Map<String, Row> named,
+      Map<String, CodeRecord> configuration,
+      List<String> problems) {
+    List<String> missing = new ArrayList<>();
+    Map<String, Component> components = new LinkedHashMap<>();
+    for (Component component : record.components()) {
+      components.put(component.name(), component);
+      String holds = component.holds();
+      boolean ownSection = holds != null && configuration.containsKey(holds);
+      if (!ownSection && !named.containsKey(component.name())) {
+        missing.add(component.name());
+      }
+    }
+    if (named.isEmpty() && !missing.isEmpty()) {
+      Integer heading = headings.get(name);
+      problems.add(
+          heading != null
+              ? FILE
+                  + " line "
+                  + heading
+                  + ": the section for "
+                  + name
+                  + " has no table of its values: add one whose header starts with Value, with a"
+                  + " row for each: "
+                  + String.join(", ", missing)
+              : "Add a section for "
+                  + name
+                  + " ("
+                  + record.className()
+                  + ") to "
+                  + FILE
+                  + ": a heading ### `"
+                  + name
+                  + "` and a table of its values with a row for each: "
+                  + String.join(", ", missing)
+                  + ". Or, if it carries readings rather than configuration, list it with the"
+                  + " records that aren't configuration");
+    } else {
+      for (String value : missing) {
+        problems.add(
+            "Add "
+                + name
+                + "."
+                + value
+                + " to "
+                + FILE
+                + ": a row | `"
+                + value
+                + "` | kind | starting value | source | how | in "
+                + name
+                + "'s table");
+      }
+    }
+    for (Row row : named.values()) {
+      Component component = components.get(row.name());
+      if (component == null) {
         problems.add(
             at(row)
-                + value
-                + "'s kind is \""
-                + row.kind()
-                + "\": it must be one of "
-                + String.join(", ", KINDS));
+                + "remove "
+                + name
+                + "."
+                + row.name()
+                + ": "
+                + name
+                + " has no value named "
+                + row.name());
+        continue;
       }
-      checkSource(row, value, problems);
+      String holds = component.holds();
+      if (holds != null && configuration.containsKey(holds)) {
+        problems.add(
+            at(row)
+                + "remove "
+                + name
+                + "."
+                + row.name()
+                + ": it holds "
+                + holds
+                + ", which has its own section");
+      }
     }
+  }
 
+  /**
+   * Every value a mechanism tunes has a row under its tuning, with a source from the list, and no
+   * row names one it doesn't tune.
+   *
+   * @param tuning each tuning's name, with the paths of the values it tunes
+   */
+  List<String> tuningProblems(Map<String, List<String>> tuning) {
+    List<String> problems = new ArrayList<>();
     Map<String, Map<String, Row>> knobRows = grouped(knobs, problems);
     knobRows.forEach(
         (subject, named) -> {
@@ -399,49 +606,63 @@ final class ValuesRegister {
         });
     new TreeMap<>(tuning)
         .forEach(
-            (name, paths) -> {
-              Map<String, Row> named = knobRows.getOrDefault(name, Map.of());
-              List<String> missing = paths.stream().filter(p -> !named.containsKey(p)).toList();
-              if (named.isEmpty() && !missing.isEmpty()) {
-                problems.add(
-                    "Add a section for the "
-                        + name
-                        + " tuning to "
-                        + FILE
-                        + ": a heading ### `"
-                        + name
-                        + "` tuning and a table of its knobs with a row for each: "
-                        + String.join(", ", missing));
-              } else {
-                for (String path : missing) {
-                  problems.add(
-                      "Add the "
-                          + name
-                          + " tuning's "
-                          + path
-                          + " to "
-                          + FILE
-                          + ": a row | `"
-                          + path
-                          + "` | limits | source | why | in its table");
-                }
-              }
-              for (Row row : named.values()) {
-                if (!paths.contains(row.name())) {
-                  problems.add(
-                      at(row)
-                          + "remove the "
-                          + name
-                          + " tuning's "
-                          + row.name()
-                          + ": it tunes no value by that path");
-                }
-              }
-            });
+            (name, paths) ->
+                tuningRows(name, paths, knobRows.getOrDefault(name, Map.of()), problems));
     for (Row row : knobs) {
       checkSource(row, "the " + row.subject() + " tuning's " + row.name(), problems);
     }
     return problems;
+  }
+
+  /** One tuning's rows: one for each knob, and none for anything else. */
+  private void tuningRows(
+      String name, List<String> paths, Map<String, Row> named, List<String> problems) {
+    List<String> missing = paths.stream().filter(p -> !named.containsKey(p)).toList();
+    if (named.isEmpty() && !missing.isEmpty()) {
+      Integer heading = headings.get(name);
+      problems.add(
+          heading != null
+              ? FILE
+                  + " line "
+                  + heading
+                  + ": the section for the "
+                  + name
+                  + " tuning has no table of its knobs: add one whose header starts with Knob,"
+                  + " with a row for each: "
+                  + String.join(", ", missing)
+              : "Add a section for the "
+                  + name
+                  + " tuning to "
+                  + FILE
+                  + ": a heading ### `"
+                  + name
+                  + "` tuning and a table of its knobs with a row for each: "
+                  + String.join(", ", missing));
+    } else {
+      for (String path : missing) {
+        problems.add(
+            "Add the "
+                + name
+                + " tuning's "
+                + path
+                + " to "
+                + FILE
+                + ": a row | `"
+                + path
+                + "` | limits | source | why | in its table");
+      }
+    }
+    for (Row row : named.values()) {
+      if (!paths.contains(row.name())) {
+        problems.add(
+            at(row)
+                + "remove the "
+                + name
+                + " tuning's "
+                + row.name()
+                + ": it tunes no value by that path");
+      }
+    }
   }
 
   /** Rows by subject, then name, in order; a name twice in one subject is a problem. */
@@ -491,17 +712,14 @@ final class ValuesRegister {
     return FILE + " line " + row.line() + ": ";
   }
 
-  /** Every record marked {@link ConfigRecord} in the robot program, with its values. */
-  static List<CodeRecord> scan() {
+  /** Every record marked {@link ConfigRecord} among these classes, with its values. */
+  static List<CodeRecord> scan(JavaClasses classes) {
     List<String> classNames =
-        new ClassFileImporter()
-                .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-                .importPackages("frc.robot")
-                .stream()
-                .filter(c -> c.isAnnotatedWith(ConfigRecord.class))
-                .map(JavaClass::getName)
-                .sorted()
-                .toList();
+        classes.stream()
+            .filter(c -> c.isAnnotatedWith(ConfigRecord.class))
+            .map(JavaClass::getName)
+            .sorted()
+            .toList();
     Map<String, String> names = new LinkedHashMap<>();
     for (String className : classNames) {
       names.put(className, registerName(className));

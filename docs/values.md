@@ -75,7 +75,8 @@ Every record marked `@ConfigRecord` is either configuration, with a section here
 when its values describe the robot or how its code judges what it reads: numbers someone measured
 or chose, fixed while the robot runs except as the pit tunes them. A record built from what the
 robot reads or does (an IMU's readings, built every loop) isn't, and neither is one that hands a
-mechanism its devices.
+mechanism its devices, nor a tool's options for one run (the camera study's). Where such a record
+holds assumed numbers, they're listed in a table of their own.
 
 In a configuration record, a value that is itself a configuration record (`RobotConfig.body`), or a
 list or optional of them (`RobotConfig.cameras`), has a section of its own rather than a row.
@@ -309,6 +310,8 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 | `minTagsForHeading` | chosen | 2 | guess (the fewest a multi-tag solve has) | Why: one tag's heading is too noisy and too ambiguous to correct the gyro. Raise it if two-tag solves pull the heading around (`Localization/Pose`'s heading stepping against `Drive/Gyro/Yaw`). |
 | `maxYawRateForHeading` | chosen | 0.5 rad/s | unknown | Why: correct the gyro's heading only when the robot is turning slowly, where a capture time a little off barely moves the heading. Check the heading offset (`Localization/Pose`'s heading less `Drive/Gyro/Yaw`): lower it if the offset steps while the robot turns; raise it if the offset is rarely corrected in a match. |
 | `maxReprojectionErrorForHeadingPixels` | chosen | 1 px | unknown | Why: only a solve that fits its tags well corrects the gyro. Check against [camera noise](characterization.md#camera-noise): a still camera's multi-tag solves should fit well under it. |
+| `mountToleranceMeters` | chosen | 0.05 m | simulation (calibrated cameras on a season-worn robot showed 0.7 to 1 cm while driving) | Why: a calibrated camera's tags land a little off from noise and the estimate's own error; past this, the camera has moved on its mount, the alert says to recalibrate it, and the excess makes it count for less ([how the robot notices](calibration.md#how-the-robot-notices-a-camera-that-moved)). Check `Vision/<camera>/MountOffsetMeters` on the real robot: freshly calibrated cameras should sit well under it. Raise it if they don't; lower it if a camera known to be knocked, and placing the robot visibly off, stays under it. |
+| `latencyMarginSeconds` | chosen | 0.1 s | guess | Why: an image arriving more than this after its camera's usual `latency`, or before it was taken, has a wrong capture time or a coprocessor falling behind, so it's left out. It can't catch a clock off by less than it: 0.1 s is 30 cm at 3 m/s. Set it a little above the spread of `Vision/<camera>/LatencySeconds` once [the capture times are checked](characterization.md#camera-latency-and-time-sync). Raise it if images in time are left out (`Vision/<camera>/LeftOutOfStep`); lower it toward that spread if the check finds capture times off by more than a few milliseconds. |
 
 ### `EstimatorConfig`
 
@@ -456,6 +459,42 @@ a robot keeps wanting to go past it, after asking why.
 | `linearStdDevBaseline` | 0.001 to 1 m | unknown | Never zero, which would trust a camera completely. |
 | `angularStdDevBaseline` | 0.001 to 1 rad | unknown | As `linearStdDevBaseline`. |
 | `distanceExponent` | 0 to 4 | top team (teams used 2 to 4) | The range teams used, and flat. |
+| `mountToleranceMeters` | 0.01 to 0.5 m | unknown | From tighter than a calibrated camera can hold to a camera far off its mount. |
+| `latencyMarginSeconds` | 0.01 to 1 s | unknown | From tighter than a camera's own jitter to a second, still inside the estimator's 1.5 s of history. |
+
+### Experiment rigs
+
+A rig is a mechanism as Pitwall's experiments run it. Its gains are values its mechanism already
+tunes (the steering's are the drivetrain's `gains.steerKp` and `gains.steerKd`, above), so their
+limits are checked there. A rig's own limits are another kind of number: not how far a value may
+be tuned, but where an experiment may send the mechanism, so the setpoints of every test motion stay
+inside them. Rigs are built from a running mechanism and registered in `RobotContainer`, so the
+test doesn't read them: add a row here when you add a rig or an experiment.
+
+| Rig or experiment | Numbers | Kind | Source | Why |
+|---|---|---|---|---|
+| The steering rig (`Drive.steeringRig`): where an experiment may point the wheels | -180° to 180° | chosen | guess | A module turns all the way around, so any angle is safe; the limits keep a test motion within one turn, as the wheel's angle is scored. |
+| The steering's experiment (`RobotContainer`): "Steer to 90° and back" | 0° to 90° and back, 0.8 s at each, after a 0.5 s lead-in | chosen | guess | A quarter turn shows rise, overshoot, and settling; 0.8 s is several times the steering's settling (118 ms in the simulator), so each step settles before the next. |
+
+## The camera study's assumptions
+
+The camera placement study ([docs/camera-placement.md](camera-placement.md)) scores where cameras
+could go by simulating what they'd see, so it assumes how the cameras and the robot err. Its
+options (`CameraStudyConfig`) are listed under the records that aren't configuration, since they're
+a run's choices; these are the assumptions inside them, and the ranges a robustness run draws
+from. The test doesn't check this list. Measuring the cameras ([camera noise](characterization.md#camera-noise))
+replaces the nominal values, and narrows the ranges.
+
+| Assumption | Today | Kind | Source | How to measure it, or why |
+|---|---|---|---|---|
+| Tag corner noise, nominal | 0.25 px average, 0.08 px spread | characterized | datasheet (`VisionSim`'s, PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise). |
+| How far tags are seen, nominal | 7 m | characterized | unknown (`VisionSim`'s) | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
+| The gyro's heading error, nominal | 0.25°, one standard deviation | characterized | guess | The estimator's heading uncertainty while cameras correct it (`Localization/HeadingStdDevDegrees`), checked in the simulator against `Sim/HeadingErrorDegrees`. |
+| Each camera off its mount, nominal | none | characterized | guess (calibrated mounts) | [A camera's mount](calibration.md#a-cameras-mount): its result's "how sure" after calibrating. |
+| Corner noise, robustness range | 0.1 to 0.6 px | chosen | guess | A sharp, still global-shutter image locates corners to about a tenth of a pixel; defocus, a softer lens, or blur, half a pixel or more ([the study's reasons](camera-placement.md#robustness)). |
+| Sight, robustness range | 5 to 7 m | chosen | guess | Where detection gives out for a field-size tag at the camera's resolution, with exposure and blur ([the study's reasons](camera-placement.md#robustness)). |
+| Gyro heading error, robustness range | 0.1° to 0.5° | chosen | guess | A few tenths of a degree while cameras correct it; half a degree after a hit or a stretch without two tags ([the study's reasons](camera-placement.md#robustness)). |
+| Mount error, robustness range | 0 to 5 mm and 0° to 1° per axis | chosen | guess | A mount checked by calibration lands within a few millimeters and a fraction of a degree; a bumped or uncalibrated one, a degree or more ([the study's reasons](camera-placement.md#robustness)). |
 
 ## Numbers still written in code
 
@@ -475,6 +514,8 @@ code's choices, explained beside them.
 | `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [Terrain crossings](characterization.md#terrain-crossings) (M7). |
 | `Drive`: a wheel this far short of its speed is at its grip's edge | 0.5 m/s | chosen | unknown (the idea: 581 and 1678) | Why: a wheel that can't keep up is slipping or stalled. Check: `Localization/TractionLimited` turns on in pushing matches, and not in clean driving. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
+| `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |
+| `Vision`: how recently another camera must have agreed for a camera's tags to count toward its mount | 2 s | chosen | simulation (half a second left out cameras facing other ways, which see tags at other moments) | Why: the other cameras hold the pose a camera is judged against. |
 
 ## Records that aren't configuration
 
@@ -485,3 +526,4 @@ code's choices, explained beside them.
 | `RobotStatus` | What the drive team's dashboard shows, built each loop. |
 | `DriveHardware` | The drivetrain's devices, handed to it: hardware, not numbers. |
 | `Scenario` | A named situation for the simulator. Its numbers are what a test needs, written in `Scenarios`. |
+| `CameraStudyConfig` | The camera placement study's options for one run (how finely it samples the field, how many trials and threads, its seed), set on the command line. Nothing on a robot reads it. Its assumptions about how cameras and the robot err are listed under [the camera study's assumptions](#the-camera-studys-assumptions). |

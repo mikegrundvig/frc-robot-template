@@ -541,16 +541,17 @@ and then seeing again), and the estimate recovers in each. What's known not to h
   bias from a reading that holds steady for 2 s with the wheels and the gyro still, whatever its
   size, so gravity leaking into an IMU tilted on its mount is learned, not added up as a slide:
   unchecked, tilted 10°, standing 3 s and then driving 5 s, the estimate claimed 4.0 m and then
-  10.2 m (7.4 and 13.4 m on a vertical plate); now 1 cm and then 13 cm, as with a level IMU. A push
-  the wheels don't see that holds the robot speeding up steadily for 2 s reads the same, and is
-  learned too, after which the slide the comparison holds stops growing with it: pushed at a steady
-  0.8 m/s² (which the simulator's accelerometer reads at about 0.45, the push stepped once a loop),
-  0.45 m/s² was taken in two seconds on. One that builds isn't: pushed from standing at 0.5, 1 and
-  2 m/s³ up to 2 m/s², the bias took in 0.05 m/s² at most, the noise, where learning any reading
-  within 1 m/s² of the bias took in 1.38, 0.65 and 0.29. At worst the estimate was 10, 7 and 4 times
-  as far off as it claimed disabled (34, 22 and 13 enabled), against 105, 20 and 7 (352, 67 and 20):
-  still far off, since the comparison sees a slide only past its tolerance (above), and the
-  simulator's accelerometer reads these stepped pushes at about half their size.
+  10.2 m (7.4 and 13.4 m on a vertical plate); now 1 cm and then 13 cm, as with a level IMU, and an
+  alert says to check the orientation. A push the wheels don't see that holds the robot speeding up
+  steadily for 2 s reads the same, and is learned too, after which the slide the comparison holds
+  stops growing with it: pushed at a steady 0.8 m/s² (which the simulator's accelerometer reads at
+  about 0.45, the push stepped once a loop), 0.45 m/s² was taken in two seconds on. One that builds
+  isn't: pushed from standing at 0.5, 1 and 2 m/s³ up to 2 m/s², the bias took in 0.05 m/s² at most,
+  the noise, where learning any reading within 1 m/s² of the bias took in 1.38, 0.65 and 0.29. At
+  worst the estimate was 10, 7 and 4 times as far off as it claimed disabled (34, 22 and 13
+  enabled), against 105, 20 and 7 (352, 67 and 20): still far off, since the comparison sees a slide
+  only past its tolerance (above), and the simulator's accelerometer reads these stepped pushes at
+  about half their size.
 - **Before the bias is learned.** For the first 2 s standing after the robot starts, or after its
   IMU comes back, the accelerometer's bias isn't learned. A checked one's is taken as none: a bias
   up to `speedBiasMetersPerSecSq` can't build up, and the check passes only one within 0.2 m/s², but

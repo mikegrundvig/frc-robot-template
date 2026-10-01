@@ -276,7 +276,7 @@ class SlipCheckTest {
    * An accelerometer reading 0.3 m/s² too high, twice what the speed comparison lets go of:
    * standing still for half a minute, it learns its bias once the reading has held for {@link
    * SlipCheck.Settings#steadySeconds}, before the slide it builds meanwhile reaches the tolerance;
-   * then a hard launch is no slide either.
+   * then a hard launch is no slide either. A bias that size is a part's, not gravity's.
    */
   @Test
   void standingStillTheAccelerometersBiasIsLearned() {
@@ -292,6 +292,7 @@ class SlipCheckTest {
 
     assertThat(most).as("standing").isLessThan(TOLERANCE);
     assertThat(learned).isCloseTo(0.3, within(1e-9));
+    assertThat(robot.check.leaksGravity()).isFalse();
     assertThat(robot.check.slipMetersPerSecond()).as("launching").isZero();
   }
 
@@ -315,7 +316,8 @@ class SlipCheckTest {
    * gravity leaks into the accelerometer's level axes, 1.7 m/s² forward at 10°, and a full g to the
    * left on one mounted on a vertical plate, its y axis up. Standing, the reading holds, so it's
    * the bias, however large, and the size comparison, waiting for it, adds nothing up meanwhile.
-   * Driving after, with it taken off, the wheels and the accelerometer agree: no slide.
+   * Driving after, with it taken off, the wheels and the accelerometer agree: no slide. And a bias
+   * that large is gravity, not a part's.
    */
   @Test
   void aSteadyReadingStandingIsTheBiasWhateverItsSize() {
@@ -329,6 +331,7 @@ class SlipCheckTest {
         most = Math.max(most, robot.check.slipMetersPerSecond());
       }
       double learned = robot.check.biasMetersPerSecSq();
+      boolean leaks = robot.check.leaksGravity();
       // Then a launch at 4.4 m/s², turning a turn a second, and a stop.
       for (int i = 0; i < 25; i++) {
         robot.loop(4.4 * LOOP, 0, 2 * Math.PI, 0);
@@ -340,6 +343,7 @@ class SlipCheckTest {
       }
 
       assertThat(learned).as("learned").isCloseTo(Math.hypot(leak[0], leak[1]), within(1e-9));
+      assertThat(leaks).as("gravity").isTrue();
       assertThat(most).as("no slide, standing or driving").isZero();
     }
   }

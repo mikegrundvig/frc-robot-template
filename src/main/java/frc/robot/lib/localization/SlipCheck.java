@@ -38,6 +38,7 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       velocity and what it felt, each added up on its own, add up alike whichever way it's
  *       turned, and what one holds past the other is a slide. It's compared only once its bias is
  *       learned: until then, gravity leaking into one tilted on its mount would add up as a slide.
+ *       A bias past what a part has is that gravity, and {@link #leaksGravity} says so.
  *   <li><b>A jolt.</b> What the accelerometer feels that the wheels' own change of velocity doesn't
  *       explain (a robot stopping hard is felt by both, a hit only by the IMU) is a collision as
  *       far as it's past the tread's grip, which is the most the floor can explain (the robot
@@ -84,6 +85,8 @@ public final class SlipCheck {
    * @param steadyMetersPerSecond the reading holds steady when the speed it adds up to over that
    *     stretch strays no further than this from what its average adds up to: further, it rose or
    *     fell (a push building, or come and gone), and nothing is learned
+   * @param largestBiasMetersPerSecSq the largest bias an accelerometer has: one learned past this
+   *     is gravity's share, the IMU turned on the robot otherwise than its definition says
    * @param maxSlideMetersPerSecond the fastest the wheels and the robot can be sliding apart: past
    *     it, what the speed comparison holds is no slide (a bias it hasn't learned, adding up), and
    *     it counts no faster
@@ -102,6 +105,7 @@ public final class SlipCheck {
       double stillMetersPerSecond,
       double steadySeconds,
       double steadyMetersPerSecond,
+      double largestBiasMetersPerSecSq,
       double maxSlideMetersPerSecond,
       double joltMetersPerSecSq,
       double accelerometerRangeMetersPerSecSq) {
@@ -120,7 +124,8 @@ public final class SlipCheck {
      * a second in, still all in the newer half. One building slower than 0.2 m/s³ passes for
      * steady, and the bias follows it, 1.5 s behind. And 2 s learns a checked accelerometer's bias
      * of up to twice what the comparison lets go of (0.3 m/s²) before it holds the tolerance's
-     * worth of it.
+     * worth of it. Past 1 m/s², a bias is gravity: a Pigeon 2's is a tenth of that, and a case
+     * tilted 6° on its mount leaks 1 m/s².
      */
     public static final Settings DEFAULTS =
         builder()
@@ -132,6 +137,7 @@ public final class SlipCheck {
             .stillMetersPerSecond(0.05)
             .steadySeconds(2)
             .steadyMetersPerSecond(0.1)
+            .largestBiasMetersPerSecSq(1)
             .maxSlideMetersPerSecond(5)
             .joltMetersPerSecSq(15)
             .accelerometerRangeMetersPerSecSq(2 * ImuReadings.STANDARD_GRAVITY)
@@ -147,6 +153,7 @@ public final class SlipCheck {
           .field("stillMetersPerSecond", stillMetersPerSecond, positive())
           .field("steadySeconds", steadySeconds, positive())
           .field("steadyMetersPerSecond", steadyMetersPerSecond, positive())
+          .field("largestBiasMetersPerSecSq", largestBiasMetersPerSecSq, positive())
           .field("maxSlideMetersPerSecond", maxSlideMetersPerSecond, positive())
           .field("joltMetersPerSecSq", joltMetersPerSecSq, positive())
           .field("accelerometerRangeMetersPerSecSq", accelerometerRangeMetersPerSecSq, positive())
@@ -224,6 +231,7 @@ public final class SlipCheck {
   private final double stillSpeed;
   private final double steadySeconds;
   private final double steadySpeed;
+  private final double largestBias;
   private final double maxSlide;
   private final double joltLimit;
   private final double grip;
@@ -299,6 +307,7 @@ public final class SlipCheck {
     stillSpeed = settings.stillMetersPerSecond();
     steadySeconds = settings.steadySeconds();
     steadySpeed = settings.steadyMetersPerSecond();
+    largestBias = settings.largestBiasMetersPerSecSq();
     maxSlide = settings.maxSlideMetersPerSecond();
     joltLimit = settings.joltMetersPerSecSq();
     if (!(gripMetersPerSecSq > 0) || !(gripMetersPerSecSq < joltLimit)) {
@@ -434,6 +443,15 @@ public final class SlipCheck {
    */
   public double biasMetersPerSecSq() {
     return Math.hypot(biasForward, biasLeft);
+  }
+
+  /**
+   * Whether the accelerometer's bias, learned standing still, is past the largest a part has
+   * ({@link Settings#largestBiasMetersPerSecSq}): gravity's share, leaking in because the IMU is
+   * turned on the robot otherwise than its definition says, a case tilted on its mount.
+   */
+  public boolean leaksGravity() {
+    return biasMetersPerSecSq() > largestBias;
   }
 
   /** Whether an acceleration is a jolt by its size alone: past the limit, or at the range. */

@@ -70,7 +70,11 @@ the gyro and the backup:
 
 The Pigeon's own yaw, pitch, and roll follow the mount pose saved on it, which [its mount
 calibration](#the-imu-reads-level) sets in Tuner X: the code doesn't write the definition's
-orientation to it yet, so the two are set apart and must agree.
+orientation to it yet, so the two are set apart and must agree. They can disagree unseen: the
+Pigeon's pitch and roll follow its mount pose, while its accelerometer reads a case the definition
+doesn't know is tilted as gravity leaking into its level axes. When the slip check learns a bias
+past 1 m/s² standing still (`SlipCheck.Settings.largestBiasMetersPerSecSq`; a case tilted 6° leaks
+that much), an alert says to check that IMU's orientation in the robot's definition.
 
 Then, recording a log, in utility mode on a flat floor:
 

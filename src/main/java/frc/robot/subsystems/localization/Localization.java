@@ -158,6 +158,13 @@ public final class Localization implements AutoCloseable {
           "camerasWithoutPlaces",
           "More cameras than the estimator keeps apart",
           Alert.Level.MEDIUM);
+  private final Alert imuOrientation =
+      new Alert(
+          "Localization",
+          "imuOrientation",
+          "The accelerometer reads gravity standing still: check the IMU's orientation in the"
+              + " robot's definition",
+          Alert.Level.MEDIUM);
 
   /**
    * @param estimator the pose estimator, which this owns from now on
@@ -205,6 +212,7 @@ public final class Localization implements AutoCloseable {
           case WHEELS -> null;
         };
     compareWithTheImu(steps, attitude, readings.velocities());
+    checkOrientation(steps.source());
     conditions = conditions(enabled);
     estimator.setConditions(conditions);
     for (Step step : steps.steps()) {
@@ -455,6 +463,27 @@ public final class Localization implements AutoCloseable {
   }
 
   /**
+   * Says when the accelerometer of the IMU that turns odometry reads, standing still, past any bias
+   * a part has ({@link SlipCheck#leaksGravity}): gravity's share, leaking in because the robot's
+   * definition gives the IMU another orientation than it's mounted with. Its pitch and roll can be
+   * right all the while (a Pigeon's follow the mount pose saved on it), so only the accelerometer
+   * shows it.
+   */
+  private void checkOrientation(YawSource source) {
+    boolean leaks = slipCheck.leaksGravity();
+    if (leaks) {
+      imuOrientation.setText(
+          String.format(
+              Locale.ROOT,
+              "The %s's accelerometer reads %.1f m/s² standing still, gravity's share: check its"
+                  + " orientation in the robot's definition (docs/calibration.md)",
+              source == YawSource.BACKUP ? "backup IMU" : "gyro",
+              slipCheck.biasMetersPerSecSq()));
+    }
+    imuOrientation.set(leaks);
+  }
+
+  /**
    * What an IMU felt of the robot's own motion, along the robot's axes, in m/s²: its reading less
    * gravity's share. Not a number where the IMU can't say.
    */
@@ -632,11 +661,16 @@ public final class Localization implements AutoCloseable {
     return imusDisagree.get();
   }
 
+  boolean isImuOrientationAlertActive() {
+    return imuOrientation.get();
+  }
+
   @Override
   public void close() {
     gyroDisconnected.close();
     usingBackup.close();
     imusDisagree.close();
     camerasWithoutPlaces.close();
+    imuOrientation.close();
   }
 }

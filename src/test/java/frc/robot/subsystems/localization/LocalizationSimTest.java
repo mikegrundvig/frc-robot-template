@@ -598,10 +598,16 @@ class LocalizationSimTest {
 
   /**
    * Stood 3 s and then drove 5 s, turning, unchecked: how sure the estimate was at the end of each,
-   * the most slip each saw, and the slip at the end.
+   * the most slip each saw, the slip at the end, and whether the alert to check the IMU's
+   * orientation was on, standing.
    */
   private record StoodThenDrove(
-      double standingStdDev, double standingSlip, double stdDev, double mostSlip, double slip) {}
+      double standingStdDev,
+      double standingSlip,
+      boolean alert,
+      double stdDev,
+      double mostSlip,
+      double slip) {}
 
   /** An unchecked robot whose gyro's accelerometer reads this much more, along its own axes. */
   private StoodThenDrove standThenDrive(double leakForward, double leakLeft) {
@@ -623,11 +629,13 @@ class LocalizationSimTest {
     robot.drive(3.0, 0, 0, 0);
     double standingStdDev = robot.estimator.estimate().covariance().largestPositionStdDev();
     double standingSlip = most[0];
+    boolean alert = robot.localization.isImuOrientationAlertActive();
     most[0] = 0;
     robot.drive(5.0, 0.6, 0.3, 0.5);
     return new StoodThenDrove(
         standingStdDev,
         standingSlip,
+        alert,
         robot.estimator.estimate().covariance().largestPositionStdDev(),
         most[0],
         robot.localization.conditions().slipMetersPerSecond());
@@ -638,8 +646,8 @@ class LocalizationSimTest {
    * (the Pigeon's mount pose set in Tuner X, but not the orientation in the definition): gravity
    * leaks into the accelerometer's level axes, 1.7 m/s² at 10°, and a full g on a Pigeon mounted on
    * a vertical plate. Standing 3 s, the slip check learns it as the bias, claims no slide
-   * meanwhile; driving after, it claims no more than with a level IMU. Taken for a slide, the 10°
-   * case claimed 4 m standing and 10 m after driving.
+   * meanwhile, and an alert says to check the orientation; driving after, it claims no more than
+   * with a level IMU. Taken for a slide, the 10° case claimed 4 m standing and 10 m after driving.
    */
   @Test
   void anUncheckedImuTiltedOnItsMountIsLearnedAsItsBias() {
@@ -647,6 +655,7 @@ class LocalizationSimTest {
     StoodThenDrove tilted = standThenDrive(1.7, 0);
     StoodThenDrove vertical = standThenDrive(0, ImuReadings.STANDARD_GRAVITY);
 
+    assertThat(level.alert()).as("level").isFalse();
     for (StoodThenDrove leaking : List.of(tilted, vertical)) {
       assertThat(leaking.standingSlip()).as("no slide standing").isZero();
       assertThat(leaking.standingStdDev()).as("standing").isLessThan(0.05);
@@ -655,6 +664,7 @@ class LocalizationSimTest {
       assertThat(leaking.stdDev())
           .as("after driving, against the level IMU's %.3f m", level.stdDev())
           .isLessThan(1.1 * level.stdDev());
+      assertThat(leaking.alert()).as("the alert").isTrue();
     }
   }
 

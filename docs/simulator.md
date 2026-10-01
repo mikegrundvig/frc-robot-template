@@ -11,20 +11,29 @@ API (http://localhost:5820/api/simulator), below, which anything else that speak
 
 | Job | Command |
 |---|---|
-| The simulator, enabled on a start and drivable from the GUI's keyboard | `./gradlew run` |
-| Without WPILib's simulator GUI, disabled: drive it through the API | `./gradlew run -Pgui=false` |
-| With the GUI, whatever the default | `./gradlew run -Pgui` |
+| The simulator, driven from *Sim*: in teleop on a start, disabled until you press Enable | `./gradlew run` |
+| With WPILib's simulator GUI too, enabled and drivable from its keyboard | `./gradlew run -Pgui` |
 | Disabled, with no alliance station, like a real robot | `./gradlew run -PstartDisabled` |
 | In a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the scenarios | `./gradlew scenarios` |
 
-**The GUI is on by default for now**, and turns off by default once the *Sim* view replaces it;
-`-Pgui` then brings it back. A real Driver Station can connect to the simulator either way
-(`halsim_ds_socket` stays loaded). Without the GUI the robot starts disabled, since nothing on
-screen could disable it yet; enable it through the API or a real Driver Station. Without the GUI
-you also lose its HAL device views, its NetworkTables browser and plots, its `Field2d` window
-(AdvantageScope and Elastic show the same), its notifier table, keyboard remapping, and its
-joystick reading, which works whatever window has focus.
+**WPILib's simulator GUI is off unless you ask for it** with `-Pgui` (and `-Pgui=false` is the
+default spelled out). *Sim* does its job. A real Driver Station can connect to the simulator
+either way (`halsim_ds_socket` stays loaded). The GUI's default settings in `sim/` are copied
+into the project folder only when it runs, and only when missing. Without it you lose its HAL
+device views, its NetworkTables browser and plots, its `Field2d` window (AdvantageScope and
+Elastic show the same), its notifier table, keyboard remapping, and its joystick reading, which
+works whatever window has focus.
+
+**The robot starts ready to drive, but disabled:** in teleop, on the blue alliance's station 2 (the
+center start) unless one was chosen, with a Driver Station attached, so it stands on its start and
+*Sim*'s Enable is one press from driving. It doesn't enable itself. To drive you come to *Sim*
+anyway, to switch the keyboard or a gamepad on, and Enable is there beside them; a robot that
+enabled itself would be enabled before anyone was watching, and a scenario's events, which happen
+once it's enabled, would be over before the page or AdvantageScope was open. With the GUI it starts
+enabled, as it always has: the GUI's keyboard drives it at once, and the GUI is on screen to
+disable it. `-PstartDisabled` starts it as a real robot starts, before its Driver Station connects:
+disabled, with no station or mode.
 
 **The GUI and the API's joysticks don't mix.** Read in alpha-7's `DriverStationGui.cpp`
 (`DriverStationExecute`): while the Driver Station is attached and not in autonomous, the GUI
@@ -32,8 +41,8 @@ writes all six joysticks every frame, zeros for a slot it has no device for, and
 data every 20 ms. Its *Zero disconnected joysticks* setting doesn't stop that: the check tests the
 setting's pointer, not its value, so it always zeros. The GUI's own match time counts down while
 enabled too. So with the GUI on, the API's joystick input is overwritten within a frame, and its
-match time fights the GUI's. Drive through the API with `-Pgui=false`, or turn the GUI's Driver
-Station off (its *Disable DS* setting), which makes it only read.
+match time fights the GUI's. So drive from *Sim* without the GUI, the default, or with `-Pgui` turn
+the GUI's Driver Station off (its *Disable DS* setting), which makes it only read.
 
 ## Pitwall's simulator controls
 

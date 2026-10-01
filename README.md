@@ -23,8 +23,8 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ```bash
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
-./gradlew run                                # the simulator, enabled on a start and drivable from the keyboard
-./gradlew run -Pgui=false                    # the simulator without WPILib's GUI, disabled (docs/simulator.md)
+./gradlew run                                # the simulator, driven from Pitwall's Sim view (http://localhost:5820/#sim)
+./gradlew run -Pgui                          # with WPILib's simulator GUI too, enabled and drivable from its keyboard
 ./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
@@ -206,7 +206,7 @@ Also built in:
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
-| `sim/` | Default simulator GUI settings, used on the first `./gradlew run` with the GUI. |
+| `sim/` | WPILib's simulator GUI's default settings, used on the first `./gradlew run -Pgui`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |

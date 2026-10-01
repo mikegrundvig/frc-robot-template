@@ -158,9 +158,14 @@ final class ModuleIOTalonFX implements ModuleIO {
     encoderAbsolute = encoder.getAbsolutePosition();
 
     // Odometry's signals as fast as the thread reads them, the rest once a loop, and nothing else
-    // from the motor controllers. The CANcoder keeps its own rates: the steering reads it remotely.
+    // from the motor controllers. The CANcoder's position and velocity, which the steering's loop
+    // runs on, go at their own rate, set explicitly: signals that share a frame go at the fastest
+    // rate any of them asks for, and left at the default, they could go no faster than the
+    // absolute position's once a loop.
     BaseStatusSignal.setUpdateFrequencyForAll(
         PhoenixOdometryThread.FREQUENCY_HZ, drivePosition, steerPosition);
+    BaseStatusSignal.setUpdateFrequencyForAll(
+        PhoenixDrivetrain.ENCODER_FREQUENCY_HZ, encoder.getPosition(), encoder.getVelocity());
     BaseStatusSignal.setUpdateFrequencyForAll(
         RobotLoop.FREQUENCY_HZ,
         driveVelocity,

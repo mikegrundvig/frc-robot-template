@@ -11,7 +11,9 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.ModuleIO;
+import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import java.util.Arrays;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.system.DCMotor;
@@ -42,20 +44,32 @@ final class ModuleIOSim implements ModuleIO {
   private static final double STEER_LOOP_SECONDS = 0.001;
 
   /**
-   * How often the module's CANcoder sends its angle to the steering motor, in seconds. Without a
-   * Phoenix Pro license the steering closes its loop on the CANcoder as a remote sensor, and takes
-   * a new angle and speed only when the CANcoder sends them over CAN: every 10 ms at Phoenix 6's
-   * default rate for a CANcoder's position (100 Hz). In between, its loop runs on what it last
-   * heard, up to 10 ms old, and that wait, more than the loop's rate or the current limit, is what
-   * makes the steering overshoot at high gains. The fraction of a millisecond a frame takes on the
-   * bus is left out. On a robot that has the CANcoder send faster, make this match; with Pro's
-   * FusedCANcoder, the loop reads the motor's own sensor every loop, and this is {@link
-   * #STEER_LOOP_SECONDS}.
+   * How often the module's CANcoder sends its angle to the steering motor, in seconds: at the rate
+   * the robot's code sets ({@link PhoenixDrivetrain#ENCODER_FREQUENCY_HZ}), every 10 ms at 100 Hz.
+   * Without a Phoenix Pro license the steering closes its loop on the CANcoder as a remote sensor,
+   * and takes a new angle and speed only when the CANcoder sends them over CAN. In between, its
+   * loop runs on what it last heard, up to a period old, and that wait, more than the loop's rate
+   * or the current limit, is what makes the steering overshoot at high gains. The fraction of a
+   * millisecond a frame takes on the bus is left out. With Pro's FusedCANcoder, the loop would read
+   * the motor's own sensor every loop, and this would be {@link #STEER_LOOP_SECONDS}.
    */
-  private static final double ENCODER_PERIOD_SECONDS = 0.01;
+  private static final double ENCODER_PERIOD_SECONDS = 1 / PhoenixDrivetrain.ENCODER_FREQUENCY_HZ;
 
   private static final int ENCODER_PERIOD_LOOPS =
       (int) Math.round(ENCODER_PERIOD_SECONDS / STEER_LOOP_SECONDS);
+
+  // The CANcoder sends on the steering loop's millisecond, and the same number of times every robot
+  // loop, so each robot loop finds every CANcoder at the same point in its cycle.
+  static {
+    double loopsPerRobotLoop = RobotLoop.PERIOD_SECONDS / ENCODER_PERIOD_SECONDS;
+    if (Math.abs(ENCODER_PERIOD_LOOPS * STEER_LOOP_SECONDS - ENCODER_PERIOD_SECONDS) > 1e-9
+        || Math.abs(loopsPerRobotLoop - Math.round(loopsPerRobotLoop)) > 1e-9) {
+      throw new IllegalStateException(
+          "the CANcoder's period, "
+              + ENCODER_PERIOD_SECONDS
+              + " s, must be a whole number of milliseconds and divide the robot's loop");
+    }
+  }
 
   private final DCMotorSim driveSim;
   private final CurrentLimitedMotorSim steerMotor;

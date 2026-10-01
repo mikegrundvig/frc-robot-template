@@ -60,8 +60,8 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
 
   private final Set<String> written = new HashSet<>();
 
-  /** Whether the option's annotation was found missing, and said so, already. */
-  private boolean saidMissing;
+  /** Whether the option was found to name no annotation, and said so, already. */
+  private boolean saidWrongName;
 
   @Override
   public Set<String> getSupportedOptions() {
@@ -95,7 +95,13 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
     } else {
       TypeElement marker = processingEnv.getElementUtils().getTypeElement(option.strip());
       if (marker == null || marker.getKind() != ElementKind.ANNOTATION_TYPE) {
-        sayMissing(option.strip());
+        sayWrongName(
+            option.strip(),
+            marker == null
+                ? "names nothing the compiler can find"
+                : "names a "
+                    + marker.getKind().toString().toLowerCase(Locale.ROOT)
+                    + ", not an annotation");
         return false;
       }
       for (Element marked : round.getElementsAnnotatedWith(marker)) {
@@ -110,10 +116,10 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
     return false; // every annotation is still the other processors' (RecordBuilder's, for one)
   }
 
-  /** Fails the compile once, saying how to fix the option. */
-  private void sayMissing(String marker) {
-    if (!saidMissing) {
-      saidMissing = true;
+  /** Fails the compile once, saying what's wrong with the option and how to fix it. */
+  private void sayWrongName(String marker, String wrong) {
+    if (!saidWrongName) {
+      saidWrongName = true;
       processingEnv
           .getMessager()
           .printMessage(
@@ -122,9 +128,11 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
                   + RECORDS_OPTION
                   + "="
                   + marker
-                  + " names no annotation the compiler can find. Fix the name in build.gradle:"
-                  + " it's the annotation that marks configuration records, with its package"
-                  + " (frc.robot.lib.config.ConfigRecord in the template).");
+                  + " "
+                  + wrong
+                  + ". Fix the name in build.gradle: it's the annotation that marks configuration"
+                  + " records, with its package (frc.robot.lib.config.ConfigRecord in the"
+                  + " template).");
     }
   }
 
@@ -195,7 +203,7 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
   }
 
   /** A JSON string: quotes, backslashes, and control characters escaped. */
-  private static String quoted(String text) {
+  static String quoted(String text) {
     StringBuilder quoted = new StringBuilder("\"");
     for (char c : text.toCharArray()) {
       switch (c) {

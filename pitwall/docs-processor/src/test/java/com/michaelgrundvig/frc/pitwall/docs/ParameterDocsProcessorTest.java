@@ -196,7 +196,10 @@ class ParameterDocsProcessorTest {
             """);
   }
 
-  /** What JSON gives a meaning is escaped; everything else goes as it is, in UTF-8. */
+  /**
+   * What JSON gives a meaning is escaped; everything else goes as it is, in UTF-8, but control
+   * characters, which are dropped.
+   */
   @Test
   void theTextIsEscapedAsJsonRequires() throws IOException {
     var written =
@@ -215,7 +218,10 @@ class ParameterDocsProcessorTest {
 
     assertThat(written.get("robot.Symbols.json"))
         .contains("\"heading\": \"the \\\"zero\\\" heading, in ° from C:\\\\field\"")
-        .contains("\"bell\": \"rings \\u0007 once\"");
+        .contains("\"bell\": \"rings once\"");
+    assertThat(ParameterDocsProcessor.quoted("a \"b\" \\c\nd\u0007"))
+        .as("JSON's own escapes, and any control character")
+        .isEqualTo("\"a \\\"b\\\" \\\\c\\nd\\u0007\"");
   }
 
   @Test
@@ -296,7 +302,12 @@ class ParameterDocsProcessorTest {
         public record Plain(double d) {}
         """;
 
-    for (String name : List.of("robot.Missing", "robot.Plain")) {
+    Map<String, String> wrongs =
+        Map.of(
+            "robot.Missing", "names nothing the compiler can find",
+            "robot.Plain", "names a record, not an annotation");
+    for (Map.Entry<String, String> wrong : wrongs.entrySet()) {
+      String name = wrong.getKey();
       Compiled compiled = compile(source, "-Apitwall.docs.records=" + name);
 
       assertThat(compiled.ok()).as(name).isFalse();
@@ -305,7 +316,9 @@ class ParameterDocsProcessorTest {
           .startsWith(
               "ERROR: -Apitwall.docs.records="
                   + name
-                  + " names no annotation the compiler can find. Fix the name in build.gradle");
+                  + " "
+                  + wrong.getValue()
+                  + ". Fix the name in build.gradle");
       assertThat(compiled.written()).as(name).isEmpty();
     }
   }

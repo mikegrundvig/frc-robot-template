@@ -30,14 +30,21 @@ import org.gradle.process.ExecOperations;
 import org.gradle.work.DisableCachingByDefault;
 
 /**
- * One tool's files, generated from the robot's model and checked against what's committed, in one
- * step: what every tool-config plugin registers (the AdvantageScope plugin's {@code
+ * One tool's files, generated from the robot's model and brought in line with what's committed, in
+ * one step: what every tool-config plugin registers (the AdvantageScope plugin's {@code
  * advantageScopeAssets}).
  *
  * <p>It runs a writer's {@code main} on the compiled program, in a Java process of its own with a
  * small, fixed heap, which builds the robots' configuration records and writes the tool's files
  * into a folder under {@code build/}; then {@link ToolConfigSync} brings the committed files in
- * line, or fails naming an edit made outside the build.
+ * line. A plain plugin's files are simply written over. A strict one's ({@link #getStrict}), for a
+ * tool whose GUI rewrites its file, fail the build when edited outside it, naming the difference
+ * and the two ways out: change {@code Robots.java}, or {@code -PdiscardToolEdits}.
+ *
+ * <p><b>A merge conflict in a strict plugin's files:</b> take either side, and build. If the file
+ * then matches the merged {@code Robots.java}, the build passes. If not, it fails naming the line:
+ * fix {@code Robots.java}, or take the model's version with {@code -PdiscardToolEdits}. A plain
+ * plugin's conflicts need no care: take either side, build, and commit what it writes.
  *
  * <p>It's up to date while the program's classes and the committed files are unchanged, so an
  * unchanged model costs nothing. The classes count without the build's stamp ({@code
@@ -71,7 +78,17 @@ public abstract class ToolConfigTask extends DefaultTask {
   @Input
   public abstract Property<String> getMaxHeapSize();
 
-  /** Write the model's files over any edit made outside the build: {@code -PdiscardToolEdits}. */
+  /**
+   * Whether an edit made outside the build fails it, rather than being written over: for a tool
+   * whose GUI rewrites its file. The plugin decides.
+   */
+  @Input
+  public abstract Property<Boolean> getStrict();
+
+  /**
+   * Strict, write the model's files over any edit made outside the build: {@code
+   * -PdiscardToolEdits}.
+   */
   @Input
   public abstract Property<Boolean> getDiscardEdits();
 
@@ -94,7 +111,10 @@ public abstract class ToolConfigTask extends DefaultTask {
   @Internal
   public abstract DirectoryProperty getGenerated();
 
-  /** What the build last wrote into the committed folder, by each file's hash. */
+  /**
+   * What the build last wrote into the committed folder, by each file's hash: in the project's
+   * {@code .gradle/} folder, which a clean leaves, so a clean doesn't make the build forget.
+   */
   @OutputFile
   public abstract RegularFileProperty getSidecar();
 
@@ -130,7 +150,8 @@ public abstract class ToolConfigTask extends DefaultTask {
                 getSidecar().get().getAsFile().toPath(),
                 getSource().get(),
                 committed.getName(),
-                getWriterFiles().get())
+                getWriterFiles().get(),
+                getStrict().get())
             .run(getDiscardEdits().get());
     if (!outcome.refused().isEmpty()) {
       throw new GradleException(String.join("\n\n", outcome.refused()));

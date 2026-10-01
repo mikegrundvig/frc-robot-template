@@ -149,8 +149,44 @@ class AdvantageScopeAssetsPluginTest {
     assertThat(result.getOutput()).doesNotContain("Robot_comp");
   }
 
+  /** Nobody edits AdvantageScope's assets with a tool: the build writes over an edit. */
   @Test
-  void anEditOutsideTheBuildFailsItNamingBothValuesAndTheTwoFixes() throws IOException {
+  void anEditOutsideTheBuildIsWrittenOver() throws IOException {
+    gradle("advantageScopeAssets").build();
+    write(
+        "ascope_assets/Robot_comp/config.json", "{\n  \"name\": \"comp\",\n  \"mass\": 59.5\n}\n");
+
+    assertThat(outcome(gradle("build").build())).isEqualTo(TaskOutcome.SUCCESS);
+    assertThat(config()).contains("\"mass\": 61.0");
+  }
+
+  /** A merge conflict resolved with the other side's files, older than the merged model. */
+  @Test
+  void aMergeResolvedWithEitherSideIsWrittenFromTheModel() throws IOException {
+    gradle("advantageScopeAssets").build();
+    mass("67.8");
+    write(
+        "ascope_assets/Robot_comp/config.json", "{\n  \"name\": \"comp\",\n  \"mass\": 64.0\n}\n");
+
+    assertThat(outcome(gradle("advantageScopeAssets").build())).isEqualTo(TaskOutcome.SUCCESS);
+    assertThat(config()).contains("\"mass\": 67.8");
+  }
+
+  /** A clean doesn't make the build forget what it wrote: the record is in .gradle/, not build/. */
+  @Test
+  void aCleanBuildAfterChangingTheModelPasses() throws IOException {
+    strict();
+    gradle("advantageScopeAssets").build();
+
+    mass("67.8");
+    assertThat(outcome(gradle("clean", "build").build())).isEqualTo(TaskOutcome.SUCCESS);
+    assertThat(config()).contains("\"mass\": 67.8");
+  }
+
+  /** The strict check, for a plugin whose tool's GUI rewrites its file. */
+  @Test
+  void strictAnEditOutsideTheBuildFailsItNamingBothValuesAndTheTwoFixes() throws IOException {
+    strict();
     gradle("advantageScopeAssets").build();
     write(
         "ascope_assets/Robot_comp/config.json", "{\n  \"name\": \"comp\",\n  \"mass\": 59.5\n}\n");
@@ -170,21 +206,36 @@ class AdvantageScopeAssetsPluginTest {
     assertThat(config()).contains("\"mass\": 61.0");
   }
 
-  /** After a clean (or a fresh clone), nothing says who changed what: a mismatch fails. */
+  /** Strict, on a fresh clone nothing says who changed what: a mismatch fails, a match passes. */
   @Test
-  void withoutWhatTheBuildLastWroteAMismatchFailsAndAMatchPasses() throws IOException {
+  void strictWithoutARecordAMismatchFailsAndAMatchPasses() throws IOException {
+    strict();
     gradle("advantageScopeAssets").build();
+    forget();
 
-    assertThat(outcome(gradle("clean", "advantageScopeAssets").build()))
-        .isEqualTo(TaskOutcome.SUCCESS);
+    assertThat(outcome(gradle("advantageScopeAssets").build())).isEqualTo(TaskOutcome.SUCCESS);
 
+    forget();
     write(
         "ascope_assets/Robot_comp/config.json", "{\n  \"name\": \"comp\",\n  \"mass\": 59.5\n}\n");
-    BuildResult failed = gradle("clean", "advantageScopeAssets").buildAndFail();
+    BuildResult failed = gradle("advantageScopeAssets").buildAndFail();
     assertThat(failed.getOutput())
         .contains(
             "ascope_assets/Robot_comp/config.json differs from what Robots.java gives, and nothing"
                 + " records what the build last wrote there (a fresh clone, or after a clean)");
+  }
+
+  /** As a fresh clone has it: no record of what the build wrote. */
+  private void forget() throws IOException {
+    Files.deleteIfExists(project.resolve(".gradle/tool-configs/advantagescope-assets.sha256"));
+  }
+
+  /** Makes the fixture's task strict, as a path tool's plugin would be. */
+  private void strict() throws IOException {
+    Files.writeString(
+        project.resolve("build.gradle"),
+        Files.readString(project.resolve("build.gradle"))
+            + "tasks.named(\"advantageScopeAssets\") { strict = true }\n");
   }
 
   /** Someone else changed the model and built and committed its files: both arrive together. */

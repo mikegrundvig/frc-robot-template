@@ -24,7 +24,6 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Start it waiting for a debugger on port 5005 | `./gradlew run --debug-jvm` |
 | Fix formatting (every local build does this too) | `./gradlew spotlessApply` |
 | Redraw AdvantageScope's robot models from `Robots.java` (every build does this too; [more](simulator.md#see-it-in-advantagescope)) | `./gradlew advantageScopeAssets` |
-| Build, writing the models over an edit made to them outside the build | `./gradlew build -PdiscardToolEdits` |
 | Store your team number, once, before deploying | `./gradlew setTeamNumber -PteamNumber=NNNN` |
 | Deploy to the robot, after every check passes | `./gradlew deploy` |
 | Deploy, with the robot waiting for a debugger on port 8349 | `./gradlew deploy -PdebugMode` |

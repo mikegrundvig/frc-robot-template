@@ -102,11 +102,12 @@ ghost. Commit the folder with the change to `Robots.java` that made it.
   starts the robot program to draw it: it builds only the robots' configuration records, in a Java
   process of its own with a 32 MB heap. It took 0.3 s on the template's robot, and with
   `Robots.java` unchanged it's skipped as up to date (0.025 s).
-- **An edit made outside the build fails it,** rather than being overwritten. The failure names
-  the line in the file and what `Robots.java` gives, and the two ways out: change `Robots.java` if
-  the file is right, or discard the edit with `./gradlew build -PdiscardToolEdits`. After a clean
-  or on a fresh clone the build can't tell an edit from a stale file, so any mismatch fails the
-  same way. A pull that changed `Robots.java` and the folder together passes.
+- **Don't edit the folder:** the next build writes over an edit, from `Robots.java`. Nobody edits
+  these files with a tool, so the build simply keeps them in step: after a pull, a `clean`, or a
+  merge alike. **A merge conflict in `ascope_assets/`:** take either side
+  (`git checkout --theirs ascope_assets`), build, and commit what the build writes. (A plugin for
+  a tool whose GUI rewrites its own file, such as a path tool's, would instead fail the build on an
+  edit made outside it, naming the difference: the plugins' shared base in `build-logic/` can.)
 - **What the model leaves out:** everything it doesn't draw, such as the mass, the motors, the
   gains, and each camera's noise and latency (the writer's Javadoc lists them, and a test keeps
   the list whole).

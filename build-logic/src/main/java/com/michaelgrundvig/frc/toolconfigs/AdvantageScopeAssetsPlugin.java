@@ -24,6 +24,10 @@ import org.gradle.api.tasks.TaskProvider;
  * }
  * }</pre>
  *
+ * <p>The assets are plain generated files, which nobody edits with a tool: the build writes over an
+ * edit (and a clean, a merge, or a pull never trips it up). A strict plugin, for a tool whose GUI
+ * rewrites its file, would refuse one ({@link ToolConfigTask#getStrict}).
+ *
  * <p>Its task, {@code advantageScopeAssets}, runs the writer ({@code
  * com.michaelgrundvig.frc.world.bridges.AdvantageScopeAssets}) on the compiled program, which only
  * builds the robots' configuration records and writes files: no robot program, HAL, NetworkTables
@@ -78,8 +82,7 @@ public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
                 task -> {
                   task.setGroup("build");
                   task.setDescription(
-                      "Generate AdvantageScope's robot assets from Robots.java, and fail on an"
-                          + " edit made outside the build (-PdiscardToolEdits discards it).");
+                      "Generate AdvantageScope's robot assets (ascope_assets/) from Robots.java.");
                   task.getRuntimeClasspath().from(main.getRuntimeClasspath());
                   task.getProgram()
                       .from(
@@ -105,6 +108,7 @@ public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
                                     return arguments;
                                   }));
                   task.getMaxHeapSize().set(HEAP);
+                  task.getStrict().set(false);
                   task.getDiscardEdits()
                       .set(
                           project
@@ -126,8 +130,8 @@ public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
                       .set(
                           project
                               .getLayout()
-                              .getBuildDirectory()
-                              .file("tool-configs/advantagescope-assets.sha256"));
+                              .getProjectDirectory()
+                              .file(".gradle/tool-configs/advantagescope-assets.sha256"));
                 });
     project.getTasks().named("build").configure(build -> build.dependsOn(assets));
   }

@@ -11,7 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The check itself, without Gradle: what's written, and what's refused and how it's said. */
+/**
+ * The check itself, without Gradle: what's written, and, strict, what's refused and how it's said.
+ */
 class ToolConfigSyncTest {
   @TempDir Path dir;
   private Path generated;
@@ -29,7 +31,19 @@ class ToolConfigSyncTest {
             dir.resolve("sidecar"),
             "Robots.java",
             "ascope_assets",
-            List.of("config.json", "model*.glb", "notes.txt"));
+            List.of("config.json", "model*.glb", "notes.txt"),
+            true);
+  }
+
+  private ToolConfigSync plain() {
+    return new ToolConfigSync(
+        generated,
+        committed,
+        dir.resolve("sidecar"),
+        "Robots.java",
+        "ascope_assets",
+        List.of("config.json", "model*.glb"),
+        false);
   }
 
   private void generate(String path, String text) throws IOException {
@@ -153,5 +167,26 @@ class ToolConfigSyncTest {
     assertThat(outcome.refused()).isEmpty();
     assertThat(outcome.written()).isEmpty();
     assertThat(committed.resolve("Robot_a/.DS_Store")).exists();
+  }
+
+  /** Plain, the model's files are written over whatever is there, after an edit or a merge. */
+  @Test
+  void plainWritesOverAnEditAndRemovesWhatTheModelNoLongerGives() throws IOException {
+    generate("Robot_a/config.json", "{\n  \"mass\": 61\n}\n");
+    generate("Robot_a/model_4.glb", "cones");
+    write(committed.resolve("Robot_a/config.json"), "{\n  \"mass\": 59.5\n}\n");
+    write(committed.resolve("Robot_a/model_4.glb"), "someone else's cones");
+    write(committed.resolve("Robot_a/model_5.glb"), "a stale component");
+
+    ToolConfigSync.Outcome outcome = plain().run(false);
+
+    assertThat(outcome.refused()).isEmpty();
+    assertThat(outcome.written())
+        .containsExactly(
+            "Robot_a/config.json: written from Robots.java",
+            "Robot_a/model_4.glb: written from Robots.java",
+            "Robot_a/model_5.glb: removed, Robots.java no longer gives it");
+    assertThat(committed("Robot_a/config.json")).contains("61");
+    assertThat(committed.resolve("Robot_a/model_5.glb")).doesNotExist();
   }
 }

@@ -22,26 +22,31 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 
 /**
- * Brings a tool's committed files in line with what the model generates, and refuses when that
- * would overwrite an edit made outside the build. What it last wrote is remembered in a sidecar
- * (each file's SHA-256, under {@code build/}), which tells a file the build wrote from one someone
- * changed:
+ * Brings a tool's committed files in line with what the model generates. Only the files that differ
+ * are written, so a pull that changed the model and its files together changes nothing. What it
+ * last wrote is remembered in a sidecar (each file's SHA-256), kept in the project's {@code
+ * .gradle/} folder, which a clean leaves.
+ *
+ * <p><b>Plain</b> (AdvantageScope's assets, which nobody edits with a tool): the model's files are
+ * written over whatever is there, and a file the writer can write that the model no longer gives is
+ * removed.
+ *
+ * <p><b>Strict</b> (for a tool whose GUI rewrites its file, as a path tool's does), the sidecar
+ * tells a file the build wrote from one someone changed:
  *
  * <ul>
  *   <li>a file that already matches the model is left as it is;
  *   <li>a file that's what the build last wrote, while the model changed, is rewritten;
- *   <li>a file that matches neither was edited outside the build (or, with no sidecar after a fresh
- *       clone or a clean, may have been): nothing is written, and the failure names both versions
- *       and the two ways out, unless the edit is to be discarded;
+ *   <li>a file that matches neither was edited outside the build (or, with no sidecar on a fresh
+ *       clone, may have been): nothing is written, and the failure names both versions and the two
+ *       ways out, unless the edit is to be discarded;
  *   <li>a new file is written;
  *   <li>a file in one of the generated folders that the model no longer gives is removed if it's
- *       what the build last wrote, and refused like an edit if not. Only names the writer can write
- *       count: what a computer leaves in a folder ({@code .DS_Store}, {@code Thumbs.db}, {@code
- *       desktop.ini}) is no one's edit.
+ *       what the build last wrote, and refused like an edit if not.
  * </ul>
  *
- * <p>So a pull that changed the model and its files together passes, and only the files change on
- * disk that have to.
+ * <p>Either way, only names the writer can write count: what a computer leaves in a folder ({@code
+ * .DS_Store}, {@code Thumbs.db}, {@code desktop.ini}) is no one's, and stays.
  */
 final class ToolConfigSync {
   /**
@@ -59,6 +64,7 @@ final class ToolConfigSync {
   private final String source;
   private final String committedName;
   private final List<PathMatcher> writerFiles;
+  private final boolean strict;
 
   /**
    * @param generated where the generator wrote the files, freshly
@@ -67,6 +73,7 @@ final class ToolConfigSync {
    * @param source where the model comes from, as a person would change it ({@code Robots.java})
    * @param committedName how to name the committed folder in messages ({@code ascope_assets})
    * @param writerFiles the names of the files the writer can write, as globs ({@code model*.glb})
+   * @param strict whether an edit made outside the build is refused rather than written over
    */
   ToolConfigSync(
       Path generated,
@@ -74,7 +81,9 @@ final class ToolConfigSync {
       Path sidecar,
       String source,
       String committedName,
-      List<String> writerFiles) {
+      List<String> writerFiles,
+      boolean strict) {
+    this.strict = strict;
     this.generated = generated;
     this.committed = committed;
     this.sidecar = sidecar;
@@ -95,9 +104,11 @@ final class ToolConfigSync {
   /**
    * Compares, then writes what it may.
    *
-   * @param discardEdits write the model's files over any edit, as {@code -PdiscardToolEdits} asks
+   * @param discardEdits strict, write the model's files over any edit, as {@code
+   *     -PdiscardToolEdits} asks
    */
   Outcome run(boolean discardEdits) throws IOException {
+    boolean overwrite = !strict || discardEdits;
     Map<String, String> remembered = readSidecar();
     Map<String, byte[]> wanted = files(generated);
     Map<String, byte[]> writes = new TreeMap<>();
@@ -119,16 +130,16 @@ final class ToolConfigSync {
       if (hash(now).equals(remembered.get(path))) {
         writes.put(path, file.getValue());
         written.add(path + ": " + source + " changed");
-      } else if (discardEdits) {
+      } else if (overwrite) {
         writes.put(path, file.getValue());
-        written.add(path + ": an edit discarded");
+        written.add(path + (strict ? ": an edit discarded" : ": written from " + source));
       } else {
         refused.add(different(path, now, file.getValue(), remembered.containsKey(path)));
       }
     }
     for (String path : stale(wanted)) {
       byte[] now = Files.readAllBytes(committed.resolve(path));
-      if (hash(now).equals(remembered.get(path)) || discardEdits) {
+      if (hash(now).equals(remembered.get(path)) || overwrite) {
         removals.add(path);
         written.add(path + ": removed, " + source + " no longer gives it");
       } else {
@@ -141,7 +152,7 @@ final class ToolConfigSync {
                 + " doesn't give it, and the build didn't write it.");
       }
     }
-    if (!refused.isEmpty() && !discardEdits) {
+    if (!refused.isEmpty()) {
       return new Outcome(List.of(), refused);
     }
     for (Map.Entry<String, byte[]> write : writes.entrySet()) {

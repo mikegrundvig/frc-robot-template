@@ -187,7 +187,7 @@ Also built in:
   see the robot drawn from its configuration (bumpers, wheels turning as measured, each camera's
   field of view), where it believes it is against where the simulator says it is, each camera's
   accepted and refused tags, and the estimate's ellipse, with nothing to drag in. The build redraws
-  the robot whenever `Robots.java` changes, and refuses an edit made outside it
+  the robot whenever `Robots.java` changes
   ([docs/simulator.md](docs/simulator.md#see-it-in-advantagescope)).
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
   where the time went), when logging falls behind, and when the log drive is missing or filling.

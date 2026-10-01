@@ -47,6 +47,20 @@ class MountCheckTest {
   }
 
   /** Each tag 10 cm off in some direction: noise, which averages out. */
+  /** How far its tags were, on average: what turns a doubt in meters into a turn on its mount. */
+  @Test
+  void itKnowsHowFarItsTagsWere() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    assertThat(check.distanceMeters()).as("not judged yet").isNaN();
+    double sum = 0;
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, Translation3d.ZERO);
+      sum += TAG.getTranslation().getDistance(robot(k).getTranslation());
+    }
+
+    assertThat(check.distanceMeters()).isCloseTo(sum / SIGHTINGS, within(1e-9));
+  }
+
   @Test
   void noiseAveragesOut() {
     MountCheck check = new MountCheck(SIGHTINGS);

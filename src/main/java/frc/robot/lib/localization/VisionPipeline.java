@@ -23,7 +23,9 @@ import org.wpilib.math.geometry.Translation2d;
  *       only the position, using the robot's heading from the gyro. Of the two poses a single tag
  *       allows, the one whose heading agrees with the gyro is used, which removes single-tag
  *       ambiguity, and each tag's known height checks the view. The idea behind Limelight's
- *       MegaTag2 and PhotonVision's constrained solve.
+ *       MegaTag2 and PhotonVision's constrained solve. Such a position leans on the gyro's heading,
+ *       so the measurement says how far its tags were ({@link VisionMeasurement#lever}): the
+ *       estimator carries the heading's doubt in it.
  *   <li><b>Multi-tag</b>, the vision software's solution from every tag at once, when the heading
  *       isn't known yet (a robot not yet placed).
  *   <li><b>Single tag</b>, the least ambiguous one, only if its ambiguity is low.
@@ -200,6 +202,8 @@ public final class VisionPipeline {
         new Rotation3d(robot.rollRadians(), robot.pitchRadians(), heading.getRadians());
     double sumX = 0;
     double sumY = 0;
+    double sumToTagX = 0;
+    double sumToTagY = 0;
     double sumWeights = 0;
     double worstHeight = 0;
     for (TagDetections.Tag tag : known) {
@@ -211,6 +215,9 @@ public final class VisionPipeline {
       double weight = 1 / Math.max(tagDistance * tagDistance, 1e-6);
       sumX += weight * fix.position().getX();
       sumY += weight * fix.position().getY();
+      // What the heading turned to place the robot: from where it puts the robot, to the tag.
+      sumToTagX += weight * (fieldToTag.getX() - fix.position().getX());
+      sumToTagY += weight * (fieldToTag.getY() - fix.position().getY());
       sumWeights += weight;
       if (Math.abs(fix.heightErrorMeters()) > Math.abs(worstHeight)) {
         worstHeight = fix.heightErrorMeters();
@@ -259,6 +266,8 @@ public final class VisionPipeline {
             seen.timestampNanos(),
             new Pose2d(position, measuredHeading),
             PoseCovariance.fromStdDevs(spread, spread, headingStdDev),
+            new VisionMeasurement.Lever(
+                heading, new Translation2d(sumToTagX / sumWeights, sumToTagY / sumWeights)),
             camera.name(),
             ids(known),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -329,6 +338,7 @@ public final class VisionPipeline {
                 linear,
                 widened(
                     config.angularStdDevBaseline() * scale, image.mountDoubtMeters() / distance)),
+            VisionMeasurement.Lever.NONE,
             image.camera().name(),
             ids(used),
             solver);

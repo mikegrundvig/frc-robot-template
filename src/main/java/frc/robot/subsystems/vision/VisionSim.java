@@ -10,13 +10,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
+import org.photonvision.simulation.VisionTargetSim;
 import org.wpilib.fields.Field;
+import org.wpilib.fields.FieldTag;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The simulator's cameras: PhotonVision's own simulation, rendering each camera's view of the tags
@@ -25,8 +29,9 @@ import org.wpilib.math.geometry.Transform3d;
  * through the same {@link CameraIOPhotonVision} a real camera uses.
  *
  * <p>A camera can be knocked on its mount ({@link #mount}) or made later than its configuration
- * says ({@link #addLatency}) while the simulation runs; the robot code still believes its
- * configuration.
+ * says ({@link #addLatency}), and a tag moved off where the field was built ({@link #moveTag}),
+ * while the simulation runs; the robot code still believes its configuration and the field's
+ * layout.
  */
 public final class VisionSim implements AutoCloseable {
   /** Tags farther than this are not detected: small in the image, and noisy. */
@@ -40,8 +45,12 @@ public final class VisionSim implements AutoCloseable {
 
   public static final double CORNER_NOISE_STD_DEV_PIXELS = 0.08;
 
+  /** Each seed's cameras draw their noise from seeds this far apart. */
+  private static final long SEEDS_PER_WORLD = 1000;
+
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
+  private final long seed;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
   /** A camera as added: PhotonVision's simulation of it, its configured mount and latency. */
@@ -49,9 +58,94 @@ public final class VisionSim implements AutoCloseable {
 
   private final Map<String, Added> byName = new LinkedHashMap<>();
 
-  public VisionSim(FieldModel field) {
+  /** The field's tags as the cameras see them, by ID, and where each was as the world was built. */
+  private final Map<Integer, VisionTargetSim> tags = new LinkedHashMap<>();
+
+  private final Map<Integer, Pose3d> builtTags = new LinkedHashMap<>();
+
+  /** The tag moved from where it was built, if one is: its ID. */
+  private int movedTag = NONE;
+
+  private static final int NONE = Integer.MIN_VALUE;
+
+  /**
+   * @param tagErrors by tag ID, how far each tag really sits from where the field's layout says, in
+   *     the field's frame, as the world is built: the cameras see it there, while their multi-tag
+   *     solves, as the coprocessor's do, believe the layout ({@link #moveTag} moves one further)
+   * @param seed where the cameras' noise starts: each camera draws its own from it, so a run
+   *     repeats exactly, and a run with another seed sees other noise. Seed 1's cameras draw from
+   *     1, 2, 3, and on; seed 2's from 1001, 1002, and on.
+   */
+  public VisionSim(FieldModel field, Map<Integer, Translation3d> tagErrors, long seed) {
     layout = field.toField();
-    world.addAprilTags(layout);
+    List<FieldTag> real = new ArrayList<>();
+    for (FieldTag tag : layout.getTags()) {
+      Translation3d off = tagErrors.getOrDefault(tag.getID(), Translation3d.ZERO);
+      Pose3d pose = tag.getPose();
+      Pose3d built = new Pose3d(pose.getTranslation().plus(off), pose.getRotation());
+      real.add(new FieldTag(tag.getID(), built));
+      builtTags.put(tag.getID(), built);
+    }
+    world.addAprilTags(
+        new Field(
+            layout.name,
+            layout.season,
+            layout.game,
+            null,
+            layout.length,
+            layout.width,
+            layout.program,
+            real));
+    for (VisionTargetSim target : world.getVisionTargets("apriltag")) {
+      tags.put(target.fiducialID, target);
+    }
+    this.seed = seed;
+  }
+
+  /** The field's tags' IDs, as its layout lists them. */
+  public List<Integer> tagIds() {
+    return List.copyOf(builtTags.keySet());
+  }
+
+  /**
+   * Moves one tag this far from where it was as the world was built, in the field's frame, from now
+   * on, putting any other moved tag back: a tag knocked at an event. The robot code, and the
+   * cameras' multi-tag solves, still believe the layout.
+   *
+   * @param by zero puts it back
+   * @throws IllegalArgumentException if the field has no tag with this ID
+   */
+  public void moveTag(int id, Translation3d by) {
+    VisionTargetSim target = tags.get(id);
+    Pose3d built = builtTags.get(id);
+    if (target == null || built == null) {
+      throw new IllegalArgumentException("the field has no tag " + id);
+    }
+    putTagsBack();
+    target.setPose(new Pose3d(built.getTranslation().plus(by), built.getRotation()));
+    movedTag = by.equals(Translation3d.ZERO) ? NONE : id;
+  }
+
+  /** Puts every tag back where it was as the world was built. */
+  public void putTagsBack() {
+    for (Map.Entry<Integer, Pose3d> built : builtTags.entrySet()) {
+      VisionTargetSim target = tags.get(built.getKey());
+      if (target != null) {
+        target.setPose(built.getValue());
+      }
+    }
+    movedTag = NONE;
+  }
+
+  /** Whether a tag is moved from where it was as the world was built. */
+  public boolean isTagMoved() {
+    return movedTag != NONE;
+  }
+
+  /** Where a tag really is now, as the cameras see it; empty if the field has no such tag. */
+  public Optional<Pose3d> tagPose(int id) {
+    VisionTargetSim target = tags.get(id);
+    return target == null ? Optional.empty() : Optional.of(target.getPose());
   }
 
   /** Adds a camera, mounted exactly as configured, and returns the IO the robot code reads. */
@@ -69,8 +163,9 @@ public final class VisionSim implements AutoCloseable {
   public CameraIO camera(CameraConfig config, Transform3d mountError) {
     CameraIOPhotonVision io = new CameraIOPhotonVision(config.name());
     // Seeded, one seed per camera, so a simulated run repeats exactly.
+    long cameraSeed = (seed - 1) * SEEDS_PER_WORLD + cameras.size() + 1;
     PhotonCameraSim simulated =
-        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameras.size() + 1), layout);
+        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameraSeed), layout);
     simulated.setMaxSightRange(MAX_SIGHT_METERS);
     Transform3d configured = config.robotToCamera();
     world.addCamera(simulated, mounted(configured, mountError));

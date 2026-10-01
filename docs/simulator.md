@@ -166,8 +166,11 @@ it finds out from its sensors, as on a robot.
 | | Slipping: only a share of its wheels' rolling moves it | lasts | grip |
 | | Placed, as the drive team carries it | happens | x, y (m), heading (°) |
 | | Carried to the nearest bump, facing across it | happens | |
+| Field | Tag moved: one tag, from where the field was built; moving another puts it back. The robot's code and the cameras' multi-tag solves still believe the layout | lasts | tag (its ID), x, y, up (in), in the field's frame |
 
-Carrying the robot to a bump is declared only on a field with bumps.
+Carrying the robot to a bump is declared only on a field with bumps. A world can also be built
+with its tags a little off the layout (`SensorErrors.tagErrors`), as the consistency study builds
+it; undoing a moved tag puts it back there.
 
 ### What the simulator can't make fail yet
 

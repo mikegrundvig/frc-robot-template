@@ -13,6 +13,7 @@ import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
+import frc.robot.lib.localization.YawSource;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;
@@ -247,7 +248,7 @@ class LocalizationSimTest {
 
     assertThat(backup).as("heading error on the backup IMU, degrees").isLessThan(1.5);
     assertThat(wheels).as("on the wheels alone").isGreaterThan(3 * backup);
-    assertThat(robot.localization.yawSource()).isEqualTo(Localization.YawSource.BACKUP);
+    assertThat(robot.localization.yawSource()).isEqualTo(YawSource.BACKUP);
     assertThat(robot.localization.isUsingBackupAlertActive()).isTrue();
     assertThat(robot.localization.isGyroDisconnectedAlertActive()).isFalse();
     assertThat(robot.estimator.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
@@ -268,7 +269,7 @@ class LocalizationSimTest {
 
     assertThat(onBackup).isCloseTo(before, within(0.2));
     assertThat(robot.headingErrorDegrees()).isCloseTo(before, within(0.2));
-    assertThat(robot.localization.yawSource()).isEqualTo(Localization.YawSource.GYRO);
+    assertThat(robot.localization.yawSource()).isEqualTo(YawSource.GYRO);
     assertThat(robot.localization.isUsingBackupAlertActive()).isFalse();
   }
 

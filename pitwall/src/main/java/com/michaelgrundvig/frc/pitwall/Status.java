@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.DoubleSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -60,8 +59,10 @@ public final class Status {
   private final LongSupplier clock;
   private final Map<String, Source> items = new LinkedHashMap<>();
   private final Map<String, Shown> shown = new LinkedHashMap<>();
-  private final ConcurrentLinkedQueue<CompletableFuture<List<Item>>> asked =
-      new ConcurrentLinkedQueue<>();
+
+  /** The read a request asked for, shared by every request until the loop reads; null for none. */
+  private @Nullable CompletableFuture<List<Item>> asked;
+
   private volatile List<Item> view = List.of();
   private volatile Map<String, Object> read = Map.of();
 
@@ -135,7 +136,8 @@ public final class Status {
    *     the items has them read too
    */
   public void periodic(boolean watched) {
-    if (!watched && asked.isEmpty()) {
+    CompletableFuture<List<Item>> request = take();
+    if (!watched && request == null) {
       return;
     }
     long nowNanos = clock.getAsLong();
@@ -156,9 +158,15 @@ public final class Status {
     List<Item> now = List.copyOf(lines);
     view = now;
     read = values;
-    for (var request = asked.poll(); request != null; request = asked.poll()) {
+    if (request != null) {
       request.complete(now);
     }
+  }
+
+  private synchronized @Nullable CompletableFuture<List<Item>> take() {
+    CompletableFuture<List<Item>> request = asked;
+    asked = null;
+    return request;
   }
 
   /** Every item as of the last loop it was read, in the order added. Safe from any thread. */
@@ -167,13 +175,17 @@ public final class Status {
   }
 
   /**
-   * Asks the robot loop to read every item. Safe from any thread.
+   * Asks the robot loop to read every item. Safe from any thread. However many ask before the next
+   * loop, it reads once, and they share the answer.
    *
    * @return completes, in the robot loop, with every item as read
    */
-  public CompletableFuture<List<Item>> requestRead() {
-    CompletableFuture<List<Item>> items = new CompletableFuture<>();
-    asked.add(items);
+  public synchronized CompletableFuture<List<Item>> requestRead() {
+    CompletableFuture<List<Item>> items = asked;
+    if (items == null) {
+      items = new CompletableFuture<>();
+      asked = items;
+    }
     return items;
   }
 

@@ -63,23 +63,25 @@ public final class Run {
   /** The configuration its gains were last read from; a new one may hold new gains. */
   private Record checked;
 
-  /** Its gains as they changed while it ran, by path: empty unless they did. */
+  /** Its gains as they changed while it ran, by field: empty unless they did. */
   private volatile Map<String, Double> changedGains = Map.of();
 
   /**
-   * A run, before its first loop. Its gains are read now.
+   * A run, before its first loop. Its gains are read now, and its trace made with room for the
+   * whole run.
    *
-   * @param capacity how many samples each signal can hold
    * @param controller the event stream of the page that started it, which keeps it going; null for
    *     none
    */
-  Run(int id, Experiment experiment, int capacity, @Nullable String controller) {
+  Run(int id, Experiment experiment, @Nullable String controller) {
     this.id = id;
     this.experiment = experiment;
     this.controller = controller == null ? "" : controller;
     gains = experiment.rig().gainValues();
     checked = experiment.rig().config().get();
-    trace = new Trace(experiment.rig().traced(), capacity);
+    double seconds = experiment.profile().durationSeconds();
+    trace =
+        new Trace(experiment.rig().traced(), signal -> experiment.rig().capacity(signal, seconds));
   }
 
   /** Counts the runs since the robot program started: 1, 2, 3. */
@@ -99,7 +101,7 @@ public final class Run {
     return controller;
   }
 
-  /** The rig's gains as the run started, by path, each in its knob's unit. */
+  /** The rig's gains as the run started, by field, each in its knob's unit. */
   public Map<String, Double> gains() {
     return gains;
   }
@@ -213,9 +215,9 @@ public final class Run {
     Map<String, Double> changed = new LinkedHashMap<>(changedGains);
     rig.gainValues()
         .forEach(
-            (path, value) -> {
-              if (!value.equals(gains.get(path))) {
-                changed.put(path, value);
+            (field, value) -> {
+              if (!value.equals(gains.get(field))) {
+                changed.put(field, value);
               }
             });
     changedGains = Map.copyOf(changed);
@@ -225,7 +227,7 @@ public final class Run {
   private String changes() {
     List<String> changes = new ArrayList<>();
     changedGains.forEach(
-        (path, value) -> changes.add(path + " " + gains.get(path) + " to " + value));
+        (field, value) -> changes.add(field + " " + gains.get(field) + " to " + value));
     return String.join(", ", changes);
   }
 

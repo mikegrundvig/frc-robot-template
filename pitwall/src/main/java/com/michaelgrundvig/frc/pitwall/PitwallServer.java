@@ -51,7 +51,7 @@ import org.jspecify.annotations.Nullable;
  *       reconnecting names the stream it had ({@code ?replaces=id}), which closes; with eight open,
  *       the one that wrote least lately makes way. See {@link Broadcaster}.
  *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
- *       "value"}]}.
+ *       "value"}]}; 503 when the loop doesn't get to it within a second.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
  *       "detail"}]}. {@code POST} it {@code {"start": name}} or {@code {"cancel": name}}.
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected",
@@ -63,7 +63,7 @@ import org.jspecify.annotations.Nullable;
  *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
  *       its configuration first; {@code null} returns a value to its committed one.
  *   <li>{@code GET /api/changes}: what differs from the committed configurations, with the builder
- *       calls that commit it, {@code [{"config", "path", "committed", "tuned", "builderCall"}]}
+ *       calls that commit it, {@code [{"config", "field", "committed", "tuned", "builderCall"}]}
  *       ({@code Accept: text/plain} for the report). {@code DELETE} it to return every value to its
  *       committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
@@ -537,15 +537,23 @@ public final class PitwallServer implements AutoCloseable {
       }
     }
 
-    /** The status items, read by the next loop; as last read if the loop doesn't get to it. */
+    /**
+     * The status items, read by the next loop. A loop that doesn't get to it in time (stopped, or
+     * paused in a debugger) is 503: an old reading passed off as now would mislead.
+     */
     private List<Status.Item> readStatus() {
       try {
         return status.requestRead().get(wait.toMillis(), TimeUnit.MILLISECONDS);
       } catch (TimeoutException | ExecutionException e) {
-        return status.view();
+        throw new Problem(
+            503,
+            "No reading",
+            "The robot loop didn't read the status within "
+                + wait.toMillis()
+                + " ms: it may be stopped or paused");
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
-        return status.view();
+        throw new Problem(503, "Interrupted", "The server stopped waiting for the robot loop");
       }
     }
 
@@ -785,7 +793,7 @@ public final class PitwallServer implements AutoCloseable {
         for (LiveConfig.Change change : config.changes()) {
           Map<String, Object> shown = new LinkedHashMap<>();
           shown.put("config", config.name());
-          shown.put("path", change.path());
+          shown.put("field", change.path());
           shown.put("committed", change.committed());
           shown.put("tuned", change.tuned());
           shown.put("builderCall", change.builderCall());

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.ToIntFunction;
 import org.wpilib.units.Unit;
 
 /**
@@ -36,12 +37,23 @@ public final class Trace {
    *     isn't positive
    */
   public Trace(List<Signal> signals, int capacity) {
+    this(signals, signal -> capacity);
+  }
+
+  /**
+   * @param signals what the run records, in the order the page shows them
+   * @param capacity how many samples a signal can hold: a signal read once a loop needs less room
+   *     than a device's own readings
+   * @throws IllegalArgumentException if there are no signals, two share a name, or a capacity isn't
+   *     positive
+   */
+  public Trace(List<Signal> signals, ToIntFunction<Signal> capacity) {
     if (signals.isEmpty()) {
       throw new IllegalArgumentException("a trace records at least one signal");
     }
     this.signals = List.copyOf(signals);
     for (Signal signal : this.signals) {
-      if (series.put(signal.name(), new Series(capacity)) != null) {
+      if (series.put(signal.name(), new Series(capacity.applyAsInt(signal))) != null) {
         throw new IllegalArgumentException("two signals are named " + signal.name());
       }
     }

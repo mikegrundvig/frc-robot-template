@@ -86,6 +86,6 @@ class ProfilesTest {
                 .to(Radians.of(1.5708))
                 .hold(Seconds.of(1))
                 .toString())
-        .isEqualTo("step, 0.25 rad to 1.571 rad, held 1 s");
+        .isEqualTo("step, 0.25 rad to 1.5708 rad, held 1 s");
   }
 }

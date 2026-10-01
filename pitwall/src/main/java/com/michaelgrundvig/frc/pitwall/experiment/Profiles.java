@@ -2,8 +2,8 @@ package com.michaelgrundvig.frc.pitwall.experiment;
 
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.pitwall.Numbers;
 import java.util.List;
-import java.util.Locale;
 import org.wpilib.units.Measure;
 import org.wpilib.units.Unit;
 import org.wpilib.units.measure.Time;
@@ -138,11 +138,6 @@ public final class Profiles {
 
   /** A measure as people write it: {@code 90 °}, {@code 0.8 s}. */
   private static String shown(Measure<?> measure) {
-    double value = measure.magnitude();
-    String number =
-        value == Math.rint(value) && Math.abs(value) < 1e15
-            ? Long.toString((long) value)
-            : String.format(Locale.ROOT, "%.4g", value).replaceAll("\\.?0+(e|$)", "$1");
-    return number + " " + measure.unit().symbol();
+    return Numbers.shown(measure.magnitude()) + " " + measure.unit().symbol();
   }
 }

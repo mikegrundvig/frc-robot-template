@@ -314,6 +314,9 @@
       run = { key, program: doc.robot.program, code: doc.robot.code, robot: doc.robot.name,
               simulated: doc.robot.simulated, trace: {} };
       runs.push(run);
+      // Scores for every run, but traces only for a rig's latest few: the plot overlays fewer.
+      runs.filter((r) => r.rig === now.rig && r !== run).slice(0, -(TRACES_KEPT - 1))
+        .forEach((r) => (r.trace = {}));
     }
     // A copy: the next run's patches change the document's run in place.
     Object.assign(run, structuredClone({
@@ -593,6 +596,8 @@
   let shownRigs = "";
   // How many of a rig's runs its plot lays over each other, the latest in bold.
   const OVERLAID = 4;
+  // How many of a rig's runs keep their traces, so another signal can be plotted; scores stay.
+  const TRACES_KEPT = 8;
 
   function renderRigs() {
     const key = JSON.stringify([doc.rigs, doc.experiments]);
@@ -803,9 +808,9 @@
     };
   }
 
-  /** A score to three figures; anything under a thousandth as that. */
+  /** A score to three figures, as {@link shown} writes numbers; anything under a thousandth so. */
   function small(x) {
-    return Math.abs(x) < 0.001 ? "< 0.001" : String(Number(x.toPrecision(3)));
+    return Math.abs(x) < 0.001 ? "< 0.001" : shown(Number(x.toPrecision(3)));
   }
 
   function renderScores(name, view) {

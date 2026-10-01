@@ -42,9 +42,6 @@ public final class Experiments {
   /** The longest an experiment may run: its trace is kept whole in memory. */
   public static final double LONGEST_SECONDS = 10;
 
-  /** How fast a signal may be sampled for its trace to hold a whole run: 1 kHz. */
-  static final int SAMPLES_PER_SECOND = 1000;
-
   /**
    * The robot a run ran on, for its record, so runs from another robot or other code are told
    * apart.
@@ -335,7 +332,7 @@ public final class Experiments {
           Outcome.Result.REFUSED,
           current.experiment().name() + " is running; one experiment runs at a time");
     }
-    Run next = new Run(runsStarted + 1, experiment, capacity(experiment), stream);
+    Run next = new Run(runsStarted + 1, experiment, stream);
     Actions.Routine launched = launcher.launch(next);
     String refused;
     try {
@@ -434,10 +431,5 @@ public final class Experiments {
     inputs.names = requests.stream().map(Request::name).toArray(String[]::new);
     inputs.runs = requests.stream().mapToLong(Request::run).toArray();
     return requests;
-  }
-
-  /** Room in each signal's series for the whole run at 1 kHz, and half a second to spare. */
-  private static int capacity(Experiment experiment) {
-    return (int) Math.ceil((experiment.profile().durationSeconds() + 0.5) * SAMPLES_PER_SECOND);
   }
 }

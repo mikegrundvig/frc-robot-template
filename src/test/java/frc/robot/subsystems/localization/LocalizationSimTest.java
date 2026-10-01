@@ -93,8 +93,7 @@ class LocalizationSimTest {
    * 15 s of driving: odometry alone drifts past 15 cm; with the camera, within the design's 8 cm
    * while moving. At the ends of the legs that turn while driving, the heavy robot is still
    * changing course, its wheels disagreeing with each other as they speed up and slow down to their
-   * new speeds, so the estimate doubts them and leans on the camera's noisy fixes: 5.9 cm off at
-   * worst, about the 6.2 cm it claims.
+   * new speeds: 3.9 cm off at worst, claiming 2.5 cm.
    */
   @Test
   void odometryAloneDriftsAndTheCameraHoldsTheEstimateToTheTruth() {
@@ -110,6 +109,26 @@ class LocalizationSimTest {
     LocalizationEstimate estimate = seeing.estimator.estimate();
     assertThat(estimate.mode()).isEqualTo(LocalizationEstimate.Mode.TRACKING);
     assertThat(estimate.health().accepted()).isGreaterThan(300);
+  }
+
+  /**
+   * The route without a camera. Through its hard changes of direction the simulated wheels disagree
+   * for half a second, each reaching its new speed at its own pace, and the chassis skids where its
+   * grip runs out. The disagreement is spread over all the wheels, and counts as noise that
+   * averages out; the skid, the slip check sees. What the estimate claims at the end is about how
+   * far off it is.
+   */
+  @Test
+  void blindTheEstimateClaimsAboutHowFarOffItIs() {
+    DriveSimHarness robot = robot(SensorErrors.TYPICAL);
+    driveTheRoute(robot);
+
+    // 83 cm off, claiming 83 cm. Counting all of the disagreement as slip that kept its
+    // direction, it claimed 3.05 m.
+    double off = robot.positionError();
+    assertThat(robot.estimator.estimate().covariance().largestPositionStdDev())
+        .as("claimed, %.2f m off", off)
+        .isBetween(0.7 * off, 1.5 * off);
   }
 
   /** Knocked 60 cm sideways: the camera disagrees, then keeps disagreeing, and wins. */

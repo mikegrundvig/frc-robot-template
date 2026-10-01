@@ -61,13 +61,25 @@ class PoseEstimatorTest {
     }
 
     Robot drive(int steps, double vx, double vy, double omega, double residual, boolean gyro) {
+      return drive(steps, vx, vy, omega, residual, residual, gyro);
+    }
+
+    /** Drives with the wheels disagreeing, this much of it one wheel's. */
+    Robot drive(
+        int steps,
+        double vx,
+        double vy,
+        double omega,
+        double residual,
+        double oneWheel,
+        boolean gyro) {
       double dt = STEP / 1e9;
       for (int i = 0; i < steps; i++) {
         time += STEP;
         gyroYaw += omega * dt;
         estimator.addOdometry(
             time,
-            new BodyMotion(vx * dt, vy * dt, omega * dt, residual),
+            new BodyMotion(vx * dt, vy * dt, omega * dt, residual, oneWheel),
             gyroYaw,
             gyro ? YawSource.GYRO : YawSource.WHEELS);
       }
@@ -557,6 +569,23 @@ class PoseEstimatorTest {
     assertThat(slipping.estimate().covariance().xStdDev())
         .isGreaterThan(gripping.estimate().covariance().xStdDev() * 1.2);
     assertThat(slipping.estimate().health().residualMeters()).isEqualTo(0.004);
+  }
+
+  /**
+   * The wheels disagreeing by 4 mm a step for a second. One wheel slipping on its own keeps its
+   * direction: the doubt adds up from step to step. Spread over all the wheels, each step's own, it
+   * averages out: 4 mm times the root of the 250 steps.
+   */
+  @Test
+  void oneWheelsDisagreementAddsUpWhereSpreadDisagreementAveragesOut() {
+    double base = new Robot().drive(250, 2.0, 0, 0).estimate().covariance().xx();
+    Robot oneWheel = new Robot().drive(250, 2.0, 0, 0, 0.004, 0.004, true);
+    Robot spread = new Robot().drive(250, 2.0, 0, 0, 0.004, 0, true);
+
+    double spreadDoubt = Math.sqrt(spread.estimate().covariance().xx() - base);
+    double oneWheelDoubt = Math.sqrt(oneWheel.estimate().covariance().xx() - base);
+    assertThat(spreadDoubt).isCloseTo(0.004 * Math.sqrt(250), within(1e-6));
+    assertThat(oneWheelDoubt).isGreaterThan(3 * spreadDoubt);
   }
 
   @Test

@@ -19,7 +19,9 @@ import frc.robot.lib.config.ConfigRecord;
  * @param translationStdDevPerRadian how far odometry's position may be off after turning one
  *     radian, in meters: wheels scrub as they turn
  * @param residualScale how much of the wheels' disagreement (the kinematic residual, which says how
- *     far it may have put their travel off) counts as suspect travel: 1 counts all of it
+ *     far it may have put their travel off) counts: 1 counts all of it. What one wheel alone
+ *     explains counts as suspect travel, which keeps its direction; the rest, spread over the
+ *     wheels, as each step's own error
  * @param tiltStartDegrees below this tilt the wheels are trusted fully
  * @param tiltZeroDegrees at and above this tilt the wheels' travel counts for nothing: a robot
  *     climbing a bump or a ramp has wheels in the air (6328 scaled to zero at 25 degrees). Between

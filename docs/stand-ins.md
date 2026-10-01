@@ -80,10 +80,11 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   - **Coupling between the modules:** each wheel moves its own share of the robot, and the robot
     follows the wheels' best fit, so a module pushing harder or weaker than the others, or pointed
     off, doesn't drag on them through the frame as on a robot: its wheel just disagrees with
-    theirs. The robot still moves exactly as their best fit says, so the doubt the estimate takes
-    from their disagreement through a hard change of direction (tens of centimeters, while the
-    wheels speed up and slow down to their new speeds) is more than the simulated robot needs. On a
-    robot, wheels set that far apart are scrubbing over the carpet.
+    theirs. The robot still moves as their best fit says (as far as its grip lets it), so the doubt
+    the estimate takes from their disagreement through a hard change of direction, while the wheels
+    speed up and slow down to their new speeds, is more than the simulated robot needs. It's spread
+    over all four, so it counts as each step's own error, which averages out, a few centimeters
+    over a leg. On a robot, wheels set that far apart are scrubbing over the carpet.
 
   The steering turns a fixed load, 0.004 kg m² (Phoenix Tuner X's generated simulation value, as
   AdvantageKit's swerve templates use it; not measured). It assumes the module's turning parts and

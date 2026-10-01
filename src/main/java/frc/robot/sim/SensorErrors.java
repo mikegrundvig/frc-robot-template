@@ -33,7 +33,7 @@ import org.wpilib.math.geometry.Transform3d;
  * @param backupGyro the backup IMU's errors (Systemcore's own), read once a loop
  * @param cameraMountErrors by camera name, how each camera is really mounted off its configured
  *     mount, in the robot's frame: a camera knocked 4 in low, or turned 2 degrees
- * @param seed for the noise, so a run repeats exactly
+ * @param seed for the noise, the gyros' and the cameras', so a run repeats exactly
  */
 @ConfigRecord
 public record SensorErrors(

@@ -34,13 +34,23 @@ public final class VisionSim implements AutoCloseable {
 
   public static final double CORNER_NOISE_STD_DEV_PIXELS = 0.08;
 
+  /** Each seed's cameras draw their noise from seeds this far apart. */
+  private static final long SEEDS_PER_WORLD = 1000;
+
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
+  private final long seed;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
-  public VisionSim(FieldModel field) {
+  /**
+   * @param seed where the cameras' noise starts: each camera draws its own from it, so a run
+   *     repeats exactly, and a run with another seed sees other noise. Seed 1's cameras draw from
+   *     1, 2, 3, and on; seed 2's from 1001, 1002, and on.
+   */
+  public VisionSim(FieldModel field, long seed) {
     layout = field.toField();
     world.addAprilTags(layout);
+    this.seed = seed;
   }
 
   /** Adds a camera, mounted exactly as configured, and returns the IO the robot code reads. */
@@ -58,8 +68,9 @@ public final class VisionSim implements AutoCloseable {
   public CameraIO camera(CameraConfig config, Transform3d mountError) {
     CameraIOPhotonVision io = new CameraIOPhotonVision(config.name());
     // Seeded, one seed per camera, so a simulated run repeats exactly.
+    long cameraSeed = (seed - 1) * SEEDS_PER_WORLD + cameras.size() + 1;
     PhotonCameraSim simulated =
-        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameras.size() + 1), layout);
+        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameraSeed), layout);
     simulated.setMaxSightRange(MAX_SIGHT_METERS);
     Transform3d configured = config.robotToCamera();
     world.addCamera(

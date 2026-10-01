@@ -118,6 +118,16 @@ What it offers:
 - **Coverage has a floor.** The build fails below the floors in `coverage-floor.properties`. They
   catch code with no tests at all; they are not a target to chase.
 
+## Is the estimator honest? The consistency study
+
+The pose estimator reports how uncertain it is, and gates, χ² tests, and any later bound on its
+error all trust that number. The simulator knows where the robot really is, so it can check the
+claim: `./gradlew consistencyStudy` drives the whole simulated robot through a set of runs
+(driving, standing, turning in place, the gyro-scale procedure, a collision, a camera knocked low,
+a camera turned), several seeds of each, and compares every loop's estimate with the truth
+(`frc.robot.studies.ConsistencyStudy`). Its report is in `build/studies/consistency/`.
+`EstimatorConsistencySimTest` runs a few of its runs on every build.
+
 ## Configuration is tested too
 
 A bad configuration fails the build, never a robot. Every robot in `Robots.all()` is built and

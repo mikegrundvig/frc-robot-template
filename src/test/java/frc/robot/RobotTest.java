@@ -7,7 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import frc.robot.sim.Scenario;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SimulatedWorld;
@@ -91,7 +92,6 @@ class RobotTest {
   /** As ./gradlew run starts it: on the first loop the robot is enabled, then never again. */
   @Test
   void aScenarioStartsOnceTheRobotIsEnabled() {
-    Scenario collision = Scenarios.named("collision");
     try (SimulatedWorld world =
         new SimulatedWorld(
             RobotSim.FIELD,
@@ -99,15 +99,34 @@ class RobotTest {
             Robots.SIM.body(),
             List.of(),
             SensorErrors.NONE)) {
+      Components components = new Components(said -> {});
+      world.addTo(components);
+      List<Setting> collision = Scenarios.named("collision").eventsIn(world);
       Pose2d start = world.truePose();
 
-      assertSame(collision, Robot.startWhenEnabled(collision, world, false), "disabled: waits");
+      assertSame(
+          collision, Robot.startWhenEnabled(collision, components, false), "disabled: waits");
       assertEquals(start, world.truePose());
-      assertSame(collision, Robot.startWhenEnabled(collision, null, true), "no world: waits");
-      assertNull(Robot.startWhenEnabled(collision, world, true), "enabled: started");
+      assertSame(collision, Robot.startWhenEnabled(collision, null, true), "no simulator: waits");
+      assertNull(Robot.startWhenEnabled(collision, components, true), "enabled: started");
       assertEquals(0.6, world.truePose().getY() - start.getY(), 1e-9);
-      assertNull(Robot.startWhenEnabled(null, world, true), "nothing more to start");
+      assertNull(Robot.startWhenEnabled(null, components, true), "nothing more to start");
     }
+  }
+
+  /** A scenario asked for by name that can't happen stops the program, saying why. */
+  @Test
+  void aScenarioThatCantHappenStopsTheProgram() {
+    Components components = new Components(said -> {});
+
+    IllegalStateException refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> Robot.apply(List.of(Setting.of("Gyro", "Unplugged")), components));
+
+    assertTrue(
+        String.valueOf(refused.getMessage()).contains("no component named Gyro"),
+        refused.getMessage());
   }
 
   @Test

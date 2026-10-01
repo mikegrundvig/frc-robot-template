@@ -146,12 +146,14 @@ Also built in:
 - **Named scenarios for the simulator:** a fault in the robot's sensors or something that happens
   to it, by name: `./gradlew run -Pscenario=camera-low` starts the simulator with a camera knocked
   4 in low, and `collision`, `gyro-unplugged`, or `bump-crossing` happen once the robot is enabled.
-  Placing the robot again (a new alliance station while disabled) undoes a move.
-  `./gradlew scenarios` lists them all, and a misspelled name stops before the simulator starts,
-  with the list. The mechanisms and localization are never told: they find out from the sensors,
-  as on a robot, and the log names the scenario (`SimScenario`). Tests use the same catalog
-  (`frc.robot.sim.Scenarios`, and `RobotSim`'s `build` and `start`); what the simulator can't
-  make yet is in [docs/stand-ins.md](docs/stand-ins.md).
+  Each is a named set of the simulated world's live faults (`frc.robot.sim.Faults`), so the Pitwall
+  page applies one to a running simulation too, and undoes what lasts. Placing the robot again (a
+  new alliance station while disabled) undoes a move. `./gradlew scenarios` lists them all, and a
+  misspelled name stops before the simulator starts, with the list. The mechanisms and
+  localization are never told: they find out from the sensors, as on a robot, and the log names
+  the scenario (`SimScenario`) and the faults on (`Pitwall/Simulator/Faults`). Tests use the same
+  catalog (`frc.robot.sim.Scenarios`, and `RobotSim`'s `build` and `start`); what the simulator
+  can't make yet is in [docs/simulator.md](docs/simulator.md).
 - **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
   level, and each camera's mount, each measured on the robot and reported as the number to commit
   and where it goes ([docs/calibration.md](docs/calibration.md)).

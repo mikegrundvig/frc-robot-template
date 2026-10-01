@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The registry of what can fail in a simulated robot: declared by the robot's simulation, applied
- * and undone by name, each fault's values checked against its ranges. The robot here is a lamp and
- * a fan.
+ * and undone by name, each fault's values checked against its ranges, and scenarios as sets of
+ * faults. The robot here is a lamp and a fan.
  */
 class ComponentsTest {
   /** A simulated lamp: on or off, and how bright. */
@@ -145,9 +145,36 @@ class ComponentsTest {
     assertThat(brightness).isEqualTo(1);
   }
 
-  /** Two components can't share a name. */
   @Test
-  void aComponentsNameIsItsOwn() {
+  void aScenarioAppliesItsFaultsInOrderAndSaysWhichFailed() {
+    components
+        .scenario(
+            "blackout",
+            "The lamp goes out.",
+            List.of(Setting.of("Lamp", "Flickers"), Setting.of("Lamp", "Unplugged")))
+        .scenario("broken", "The fan jams.", List.of(Setting.of("Fan", "Jams")));
+
+    assertThat(components.hasScenario("blackout")).isTrue();
+    assertThat(components.applyScenario("blackout")).isNull();
+    assertThat(flickers).isEqualTo(3);
+    assertThat(unplugged).isTrue();
+    assertThat(components.applyScenario("broken"))
+        .isEqualTo("broken: Fan: Jams failed: the fan has no motor");
+    assertThat(components.applyScenario("dark"))
+        .isEqualTo("There is no scenario named dark; there are blackout, broken");
+    assertThat(said).first().isEqualTo("scenario blackout: The lamp goes out.");
+  }
+
+  /** A scenario made of faults that aren't there is refused as the robot starts. */
+  @Test
+  void aScenarioMustBeMadeOfDeclaredFaults() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                components.scenario("typo", "Misspelled.", List.of(Setting.of("Lamp", "Unpluged"))))
+        .withMessage(
+            "the scenario typo: Lamp has no fault named Unpluged; it has Unplugged, Dimmed,"
+                + " Flickers");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> components.add(Component.of("Lamp", "light")))
         .withMessage("two components are named Lamp");

@@ -115,7 +115,10 @@ public final class Simulator {
     return new Simulator(new WpilibHal(), clock, components, stop, logFaults);
   }
 
-  /** The simulated robot's components that can fail: the robot's simulation declares them here. */
+  /**
+   * The simulated robot's components that can fail, and its scenarios: the robot's simulation
+   * declares them here.
+   */
   public Components components() {
     return components;
   }
@@ -221,6 +224,11 @@ public final class Simulator {
     return enqueue(() -> outcome(components.undoAll()));
   }
 
+  /** Asks the robot loop to apply a scenario's faults. Safe from any thread. */
+  public CompletableFuture<Outcome> requestScenario(String name) {
+    return enqueue(() -> outcome(components.applyScenario(name)));
+  }
+
   /**
    * The page's input for a joystick: the robot loop takes the latest each loop. Safe from any
    * thread.
@@ -306,8 +314,8 @@ public final class Simulator {
 
   /**
    * The simulator as the page shows it, section by section: {@code simulator} (the Driver Station,
-   * the clock, and which joysticks the page drives), and {@code components}. Call it from the robot
-   * loop.
+   * the clock, and which joysticks the page drives), {@code components}, and {@code scenarios}.
+   * Call it from the robot loop.
    */
   public Map<String, Map<String, Object>> view() {
     DriverStationState station = hal.driverStation();
@@ -331,6 +339,7 @@ public final class Simulator {
     Map<String, Map<String, Object>> view = new LinkedHashMap<>();
     view.put("simulator", state);
     view.put("components", components.view());
+    view.put("scenarios", components.scenarioView());
     lastView = view;
     return view;
   }

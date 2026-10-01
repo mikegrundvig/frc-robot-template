@@ -617,7 +617,8 @@ class PitwallServerTest {
             "/api/simulator/step",
             "/api/simulator/stop",
             "/api/simulator/joysticks",
-            "/api/simulator/faults")) {
+            "/api/simulator/faults",
+            "/api/simulator/scenarios")) {
       for (String method : List.of("GET", "PATCH", "POST", "PUT", "DELETE")) {
         var answer = send(method, path, "application/json", method.equals("GET") ? null : "{}");
         assertThat(answer.statusCode()).as(method + " " + path).isEqualTo(404);

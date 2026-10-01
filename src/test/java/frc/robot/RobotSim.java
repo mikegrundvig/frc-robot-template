@@ -3,6 +3,7 @@ package frc.robot;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.timing.RobotLoop;
@@ -96,12 +97,14 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
 
   /**
    * Builds the simulator's robot in a scenario ({@link frc.robot.sim.Scenarios}), as {@code
-   * ./gradlew run -Pscenario=<name>} does: the scenario's faults in sensors that err as a
-   * season-worn robot's do. What happens to the robot in it waits until the test starts it ({@link
-   * #start}).
+   * ./gradlew run -Pscenario=<name>} does: the scenario's sensor faults on sensors that err as a
+   * season-worn robot's do, applied through the simulator's controls before the first loop. What
+   * happens to the robot in it waits until the test starts it ({@link #start}).
    */
   public RobotContainer build(Scenario scenario) {
-    return build(Robots.SIM, scenario.errorsOn(Robots.SIM.cameras()));
+    RobotContainer built = build(Robots.SIM, SensorErrors.TYPICAL);
+    Robot.apply(scenario.sensorFaultsIn(world()), components());
+    return built;
   }
 
   /** Builds a robot in the simulator. */
@@ -153,7 +156,15 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
    * simulated world. {@code ./gradlew run} starts it on the first loop the robot is enabled.
    */
   public void start(Scenario scenario) {
-    scenario.startIn(world());
+    Robot.apply(scenario.eventsIn(world()), components());
+  }
+
+  /**
+   * The simulated world's parts that can fail, and the scenarios, as the simulator's controls on
+   * the Pitwall page have them: apply a fault here as the page does.
+   */
+  public Components components() {
+    return pitwall().simulator().orElseThrow().components();
   }
 
   /** The robot's command scheduler. */

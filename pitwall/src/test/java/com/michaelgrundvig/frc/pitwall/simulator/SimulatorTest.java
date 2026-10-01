@@ -284,7 +284,7 @@ class SimulatorTest {
         .containsEntry("dsAttached", false)
         .containsEntry("matchTime", 15.0)
         .containsEntry("paused", false);
-    assertThat(simulator.view()).containsOnlyKeys("simulator", "components");
+    assertThat(simulator.view()).containsOnlyKeys("simulator", "components", "scenarios");
   }
 
   @Test

@@ -78,7 +78,10 @@ public final class Localization implements AutoCloseable {
   /** How far off a bump's footprint the estimate may put the robot and still be on it. */
   private static final double MAX_GROUND_REACH_METERS = 1.0;
 
-  /** A crest places the robot's center within about this far across it (to measure: M7). */
+  /**
+   * A crest places the robot's center within about this far across it: a guess, to measure on a
+   * real robot (docs/calibration.md, a terrain crossing).
+   */
   private static final double CREST_SPREAD_METERS = 0.05;
 
   /** A crest is taken for a bump only when the estimate is within this far of it. */

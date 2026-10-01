@@ -172,14 +172,17 @@ Also built in:
 AdvantageKit's templates (BSD 3-Clause, Littleton Robotics); WPILib is BSD 3-Clause (FIRST and other
 WPILib contributors). Their licenses are in [`licenses/`](licenses/).
 
-The libraries the robot program uses come under their own licenses. None is in this repository
-(Gradle downloads them), so sharing the source shares none of them. A built robot program (the jar
-`deploy` sends) contains them all, so share source, never built jars:
+The libraries the robot program uses come under their own licenses. Only one is in this
+repository: uPlot, the plotting library Pitwall's page loads from the robot (no internet at an
+event), whose license is in [`licenses/`](licenses/). Gradle downloads the rest, so sharing the
+source shares none of them. A built robot program (the jar `deploy` sends) contains them all, so
+share source, never built jars:
 
 | Library | License |
 |---|---|
 | WPILib, including Commands v3 | BSD 3-Clause |
 | AdvantageKit | BSD 3-Clause |
 | PhotonLib | MIT |
+| uPlot 1.6.32, in `pitwall/` | MIT |
 | PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
 | CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |

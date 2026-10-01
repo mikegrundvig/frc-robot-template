@@ -1,0 +1,12 @@
+[Unit]
+Description=Write the drive's health and the SPI bootloader's version for the health agent
+Before=coprocessor-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/coprocessor/coprocessor-facts.sh
+Nice=10
+AllowedCPUs=0-3
+
+[Install]
+WantedBy=multi-user.target

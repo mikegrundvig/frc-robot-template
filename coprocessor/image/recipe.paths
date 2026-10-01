@@ -1,0 +1,22 @@
+# What the recipe hash covers: every committed file under these paths, at HEAD. A change to any of
+# them makes a different image, so the hash changes, and a robot built from that commit refuses to
+# deploy against coprocessors flashed from an older one until they're reflashed.
+#
+# The definition, for any other implementation (the robot build computes the same value):
+#   recipe hash = sha256 of the output of
+#     git ls-tree -r --full-tree HEAD -- <each path below, in this order>
+#   as lowercase hex. Lines here that are blank or start with # are ignored.
+#
+# Documentation and tests are left out on purpose: changing them changes no image.
+coprocessor/image/provision.sh
+coprocessor/image/layout.sh
+coprocessor/image/stamp.sh
+coprocessor/image/stamp-image.sh
+coprocessor/image/lib
+coprocessor/image/boards
+coprocessor/image/files
+coprocessor/photonvision.lock
+coprocessor/agent/src/main
+coprocessor/agent/build.gradle
+coprocessor/common/src/main
+coprocessor/common/build.gradle

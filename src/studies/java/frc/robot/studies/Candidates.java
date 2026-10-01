@@ -13,9 +13,10 @@ import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Distance;
 
 /**
- * The camera layouts the study tries: the robot's own, and a family built around its frame. The
- * family covers the choices CAD makes: how many cameras, where on the frame, which way each faces,
- * how high, and how far up it tilts. Change the lists here to try others.
+ * The camera layouts the study tries when CAD hasn't said where cameras could go ({@link
+ * MountOptions}): the robot's own, and a family built around its frame. The family covers the
+ * choices CAD makes: how many cameras, where on the frame, which way each faces, how high, and how
+ * far up it tilts. Change the lists here to try others.
  */
 public final class Candidates {
   /** Off the floor: just above the bumpers, the middle, and high. */
@@ -56,27 +57,35 @@ public final class Candidates {
   private record Layout(String name, List<Spot> spots) {}
 
   /**
-   * The robot's own cameras first, then the family, which uses the sensor of the robot's first
-   * camera.
-   *
-   * @throws IllegalArgumentException if the robot has no camera, whose sensor the family needs
+   * The robot's own cameras first, then the family of up to four, which uses the sensor of the
+   * robot's first camera.
    */
   public static List<Candidate> of(RobotConfig robot) {
+    List<Candidate> all = new ArrayList<>(List.of(own(robot)));
+    all.addAll(family(robot.body(), robot.cameras().get(0).sensor(), 4));
+    return all;
+  }
+
+  /**
+   * The robot's own cameras, as {@code Robots} configures them.
+   *
+   * @throws IllegalArgumentException if the robot has no camera, whose sensor every layout uses
+   */
+  public static Candidate own(RobotConfig robot) {
     if (robot.cameras().isEmpty()) {
       throw new IllegalArgumentException(
           "robot " + robot.name() + " has no cameras: give it one, the sensor for every layout");
     }
-    List<Candidate> all = new ArrayList<>();
-    all.add(new Candidate("The robot's own: " + robot.name(), robot.cameras()));
-    all.addAll(family(robot.body(), robot.cameras().get(0).sensor()));
-    return all;
+    return new Candidate("The robot's own: " + robot.name(), robot.cameras());
   }
 
   /**
    * One to four cameras at the frame's corners and the middles of its sides, facing out, at every
    * height the robot reaches and every tilt.
+   *
+   * @param mostCameras layouts of more cameras than this are left out
    */
-  public static List<Candidate> family(Body body, CameraConfig.Sensor sensor) {
+  public static List<Candidate> family(Body body, CameraConfig.Sensor sensor, int mostCameras) {
     List<Layout> layouts = new ArrayList<>();
     layouts.add(new Layout("1 camera: ahead", List.of(FRONT)));
     for (Angle splay : SPLAYS) {
@@ -109,6 +118,9 @@ public final class Candidates {
     Distance left = body.frameWidth().div(2).minus(INSET);
     List<Candidate> family = new ArrayList<>();
     for (Layout layout : layouts) {
+      if (layout.spots().size() > mostCameras) {
+        continue;
+      }
       for (Distance height : HEIGHTS) {
         if (height.gt(body.height())) {
           continue;

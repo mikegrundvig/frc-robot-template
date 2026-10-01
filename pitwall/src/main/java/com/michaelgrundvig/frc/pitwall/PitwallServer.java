@@ -27,6 +27,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -89,6 +91,10 @@ import org.jspecify.annotations.Nullable;
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
  * robot loop to apply. The event stream is written by its own thread from what the loop hands it.
  *
+ * <p>The page itself is {@code index.html} and the files in {@code page/} beside it ({@code
+ * /page/tune.js}, ...): a script module for its core and one for each view, plain JavaScript served
+ * as written, with nothing to build.
+ *
  * <p>Nothing here is bundled: the web server is the one built into Java ({@code
  * com.sun.net.httpserver}), and JSON is avaje-jsonb, which WPILib gives every robot program.
  */
@@ -122,6 +128,13 @@ public final class PitwallServer implements AutoCloseable {
    */
   private static final Map<String, String> BUNDLED =
       Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
+
+  /**
+   * The page's own files besides index.html: a script module for its core and one for each view,
+   * and its styles, in {@code page/} beside it. A plain name and nothing else, so no request can
+   * reach any other resource.
+   */
+  private static final Pattern PAGE_FILE = Pattern.compile("/page/[a-z][a-z0-9-]*\\.(js|css)");
 
   /** The header a page names its event stream in, so the deadman knows who's asking. */
   static final String STREAM = "Pitwall-Stream";
@@ -259,6 +272,15 @@ public final class PitwallServer implements AutoCloseable {
     return found;
   }
 
+  /** One of the page's files by name, such as {@code tune.js}; empty if there's none. */
+  private static Optional<byte[]> pageFile(String name) {
+    try (InputStream in = PitwallServer.class.getResourceAsStream("page/" + name)) {
+      return in == null ? Optional.empty() : Optional.of(in.readAllBytes());
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
   private static String page() {
     try (InputStream in = PitwallServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
@@ -312,6 +334,10 @@ public final class PitwallServer implements AutoCloseable {
     private final Broadcaster broadcaster;
     private final String page;
     private final Map<String, byte[]> bundled;
+
+    /** The page's files, read once each as first asked for: they never change while it runs. */
+    private final Map<String, Optional<byte[]>> pageFiles = new ConcurrentHashMap<>();
+
     private final Duration wait;
     private final Duration idle;
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
@@ -343,6 +369,9 @@ public final class PitwallServer implements AutoCloseable {
         try {
           checkAddressed(exchange, method);
           List<String> allowed = METHODS.get(path);
+          if (allowed == null && PAGE_FILE.matcher(path).matches()) {
+            allowed = List.of("GET");
+          }
           if (allowed == null) {
             throw new Problem(404, "Not found", "There is nothing at " + path);
           }
@@ -373,7 +402,12 @@ public final class PitwallServer implements AutoCloseable {
             case "GET /api/run" -> sendJson(exchange, 200, run(true));
             case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
-            default -> throw new IllegalStateException("unrouted: " + method + " " + path);
+            default -> {
+              if (!PAGE_FILE.matcher(path).matches()) {
+                throw new IllegalStateException("unrouted: " + method + " " + path);
+              }
+              sendPageFile(exchange, path);
+            }
           }
         } catch (Problem problem) {
           sendProblem(exchange, problem);
@@ -811,6 +845,23 @@ public final class PitwallServer implements AutoCloseable {
       headers(exchange, Objects.requireNonNull(BUNDLED.get(path)));
       // The same for as long as the program runs: the browser may keep it.
       exchange.getResponseHeaders().set("Cache-Control", "max-age=3600");
+      exchange.sendResponseHeaders(200, file.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(file);
+      }
+    }
+
+    /**
+     * One of the page's files, from {@code page/} beside index.html. Not kept by the browser, so a
+     * page reloaded after a redeploy runs the new program's page.
+     */
+    private void sendPageFile(HttpExchange exchange, String path) throws IOException {
+      String name = path.substring("/page/".length());
+      byte[] file =
+          pageFiles
+              .computeIfAbsent(name, PitwallServer::pageFile)
+              .orElseThrow(() -> new Problem(404, "Not found", "There is nothing at " + path));
+      headers(exchange, name.endsWith(".css") ? "text/css" : "text/javascript");
       exchange.sendResponseHeaders(200, file.length);
       try (OutputStream out = exchange.getResponseBody()) {
         out.write(file);

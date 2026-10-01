@@ -23,6 +23,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -135,6 +137,44 @@ class PitwallServerTest {
     assertThat(page.statusCode()).isEqualTo(200);
     assertThat(page.headers().firstValue("Content-Type")).hasValue("text/html; charset=utf-8");
     assertThat(page.body()).contains("<title>Pitwall</title>");
+  }
+
+  /** The page is its shell and its modules, each served from the jar as written. */
+  @Test
+  void servesThePagesModulesAndStyles() throws Exception {
+    var main = get("/page/main.js", "*/*");
+    var styles = get("/page/pitwall.css", "*/*");
+
+    assertThat(get("/", "text/html").body()).contains("src=\"/page/main.js\"");
+    assertThat(main.statusCode()).isEqualTo(200);
+    assertThat(main.headers().firstValue("Content-Type"))
+        .hasValue("text/javascript; charset=utf-8");
+    assertThat(styles.headers().firstValue("Content-Type")).hasValue("text/css; charset=utf-8");
+    assertThat(get("/page/nothing.js").statusCode()).isEqualTo(404);
+    assertThat(get("/page/%2E%2E/index.html").statusCode())
+        .as("only a plain name, never a way out of page/")
+        .isEqualTo(404);
+    assertThat(send("POST", "/page/main.js", null, null).statusCode()).isEqualTo(405);
+  }
+
+  /** A module a view imports but the jar lacks would leave the page blank: each one is here. */
+  @Test
+  void everyModuleThePageImportsIsServed() throws Exception {
+    Pattern imports = Pattern.compile("from \"\\./([a-z-]+\\.js)\"");
+    List<String> seen = new ArrayList<>(List.of("main.js"));
+    for (int i = 0; i < seen.size(); i++) {
+      var module = get("/page/" + seen.get(i), "*/*");
+      assertThat(module.statusCode()).as(seen.get(i)).isEqualTo(200);
+      Matcher found = imports.matcher(module.body());
+      while (found.find()) {
+        if (!seen.contains(found.group(1))) {
+          seen.add(found.group(1));
+        }
+      }
+    }
+
+    assertThat(seen)
+        .contains("core.js", "pit.js", "tune.js", "experiment.js", "changes.js", "sim.js");
   }
 
   @Test

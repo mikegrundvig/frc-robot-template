@@ -316,7 +316,8 @@ final class PoseFilter {
    *
    * @param yawThen the gyro's yaw when the image was taken
    * @param camera which camera, from 0 to {@link #MAX_CAMERAS} - 1, whose turn and shift it shares
-   *     with the camera's other images; -1 for none
+   *     with the camera's other images; -1 for one without a place, whose turn and shift are taken
+   *     as new in each image
    * @return null if its uncertainty and the estimate's together are degenerate
    */
   @Nullable Innovation innovation(VisionMeasurement measurement, double yawThen, int camera) {
@@ -369,22 +370,23 @@ final class PoseFilter {
       }
     }
     // S = H P H^T + R: the estimate's part, then the camera's errors': how they relate to the
-    // estimate, and their own variances.
+    // estimate, and their own variances. A camera without a place among the considered errors
+    // still has them, in every image: they're taken as new in each, unrelated to anything.
     for (int i = 0; i < rows; i++) {
       for (int j = 0; j < rows; j++) {
         double sum = h3[i * 3] * ph3[j] + h3[i * 3 + 1] * ph3[3 + j] + h3[i * 3 + 2] * ph3[6 + j];
-        if (camera >= 0) {
-          for (int c = 0; c < PER_CAMERA; c++) {
-            double hc = hCamera[i * PER_CAMERA + c];
-            if (hc != 0) {
+        for (int c = 0; c < PER_CAMERA; c++) {
+          double hc = hCamera[i * PER_CAMERA + c];
+          if (hc != 0) {
+            double own = ownVariance(c) * hCamera[j * PER_CAMERA + c];
+            if (camera >= 0) {
               int k = turnColumn(camera) + c;
-              sum +=
-                  hc
-                      * (related[k] * h3[j * 3]
-                          + related[CONSIDERED + k] * h3[j * 3 + 1]
-                          + related[2 * CONSIDERED + k] * h3[j * 3 + 2]
-                          + ownVariance(c) * hCamera[j * PER_CAMERA + c]);
+              own +=
+                  related[k] * h3[j * 3]
+                      + related[CONSIDERED + k] * h3[j * 3 + 1]
+                      + related[2 * CONSIDERED + k] * h3[j * 3 + 2];
             }
+            sum += hc * own;
           }
         }
         s3[i * 3 + j] = sum;

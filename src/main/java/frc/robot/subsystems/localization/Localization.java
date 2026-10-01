@@ -165,6 +165,8 @@ public final class Localization implements AutoCloseable {
    * @param terrain the field's raised terrain: a tilt it explains keeps the wheels trusted, and its
    *     crests are landmarks
    * @param wheelReachMeters how far the wheels reach from the robot's center
+   * @param gripMetersPerSecSq the most the tread's grip can change the robot's velocity: its
+   *     friction times g
    * @param imus where the IMUs are mounted, and whether each one's accelerometer has been checked
    *     to read along the robot's axes
    */
@@ -173,6 +175,7 @@ public final class Localization implements AutoCloseable {
       DriveKinematicsModel kinematics,
       Terrain terrain,
       double wheelReachMeters,
+      double gripMetersPerSecSq,
       Imus imus) {
     this.estimator = estimator;
     this.kinematics = kinematics;
@@ -180,7 +183,7 @@ public final class Localization implements AutoCloseable {
     this.wheelReach = wheelReachMeters;
     crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
     this.imus = imus;
-    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters);
+    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters, gripMetersPerSecSq);
     estimate = estimator.estimate();
   }
 
@@ -215,6 +218,8 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput(
         "Localization/GroundSlopeDegrees", Math.toDegrees(conditions.groundSlopeRadians()));
     Logger.recordOutput("Localization/CollisionShare", conditions.collisionShare());
+    Logger.recordOutput(
+        "Localization/UnexplainedJoltMetersPerSecSq", slipCheck.unexplainedMetersPerSecSq());
     Logger.recordOutput("Localization/SlipMetersPerSecond", conditions.slipMetersPerSecond());
     Logger.recordOutput(
         "Localization/TurnSlipMetersPerSecond", slipCheck.turnSlipMetersPerSecond());

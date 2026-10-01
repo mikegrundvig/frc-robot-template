@@ -31,13 +31,15 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       past the accelerometer's noise, all of it is how fast the wheels slide: the tolerance tells
  *       a slide from the noise, it isn't a share of every slide. Only on a robot whose
  *       accelerometer is known to read along its axes ({@link ImuMount#accelerometerChecked}).
- *   <li><b>A jolt.</b> The accelerometer feeling more than {@link Settings#joltMetersPerSecSq} is a
- *       collision, as far as the wheels' own change of velocity doesn't explain it (a robot
- *       stopping hard is felt by both, a hit only by the IMU): what they don't explain, against the
- *       limit, is its share of one. A reading at the accelerometer's range is a whole one, whatever
- *       the wheels did, and without a checked accelerometer its size alone decides. The speed
- *       comparison starts over after a whole one: the collision's doubt covers it. A share of one
- *       stays in it as well, so a slide it started is still seen.
+ *   <li><b>A jolt.</b> What the accelerometer feels that the wheels' own change of velocity doesn't
+ *       explain (a robot stopping hard is felt by both, a hit only by the IMU) is a collision as
+ *       far as it's past the tread's grip, which is the most the floor can explain (the robot
+ *       catching up with wheels that got ahead of it): a whole one at {@link
+ *       Settings#joltMetersPerSecSq}, a share of one between. A reading at the accelerometer's
+ *       range is a whole one, whatever the wheels did, and without a checked accelerometer the
+ *       jolt's size alone decides. The speed comparison starts over after a whole one: the
+ *       collision's doubt covers it. A share of one stays in it as well, so a slide it started is
+ *       still seen.
  * </ul>
  *
  * <p>The turn and the speed each say how fast the wheels may be sliding over the floor; together,
@@ -66,8 +68,8 @@ public final class SlipCheck {
    * @param speedToleranceMetersPerSecond how far the wheels' speed and the accelerometer's
    *     reckoning of the robot's may drift apart without a slide: its noise, and its lag as the
    *     robot's acceleration changes. Past it, the whole of it is the slide's speed.
-   * @param joltMetersPerSecSq an acceleration past this is a collision, as far as the wheels don't
-   *     explain it: what they don't, against this, is its share of one
+   * @param joltMetersPerSecSq what the IMU feels and the wheels don't explain, past this, is a
+   *     whole collision; past the tread's grip and short of this, a share of one
    * @param accelerometerRangeMetersPerSecSq the most the accelerometer reports on each axis: a
    *     reading at it is a jolt past what it can say, whatever the wheels did
    */
@@ -169,6 +171,7 @@ public final class SlipCheck {
   private final double speedBias;
   private final double speedTolerance;
   private final double joltLimit;
+  private final double grip;
   private final double saturation;
   private final double reachMeters;
 
@@ -192,13 +195,17 @@ public final class SlipCheck {
   private double turnSlip;
   private double speedSlip;
   private double collision;
+  private double unexplained;
 
   /**
    * @param settings how closely the wheels must agree with the IMU
    * @param wheelReachMeters how far the wheels sit from the robot's center: a turn they see and the
    *     gyro doesn't, times this, is how far they slid
+   * @param gripMetersPerSecSq the most the tread's grip can change the robot's velocity: its
+   *     friction times g. Felt by the IMU and unexplained by the wheels, an acceleration up to it
+   *     may be the floor bringing the robot to its wheels' speed, and is no collision.
    */
-  public SlipCheck(Settings settings, double wheelReachMeters) {
+  public SlipCheck(Settings settings, double wheelReachMeters, double gripMetersPerSecSq) {
     if (!(wheelReachMeters > 0) || Double.isInfinite(wheelReachMeters)) {
       throw new IllegalArgumentException("the wheels' reach must be positive: " + wheelReachMeters);
     }
@@ -208,6 +215,14 @@ public final class SlipCheck {
     speedBias = settings.speedBiasMetersPerSecSq();
     speedTolerance = settings.speedToleranceMetersPerSecond();
     joltLimit = settings.joltMetersPerSecSq();
+    if (!(gripMetersPerSecSq > 0) || !(gripMetersPerSecSq < joltLimit)) {
+      throw new IllegalArgumentException(
+          "the tread's grip must be under the collision's jolt ("
+              + joltLimit
+              + " m/s²): "
+              + gripMetersPerSecSq);
+    }
+    grip = gripMetersPerSecSq;
     // A reading within a hair of the range is at it.
     saturation = 0.99 * settings.accelerometerRangeMetersPerSecSq();
     reachMeters = wheelReachMeters;
@@ -285,6 +300,15 @@ public final class SlipCheck {
   }
 
   /**
+   * What the last loop's IMU felt that the wheels' own change of velocity doesn't explain, in m/s²:
+   * zero when they explain it, or it felt less than they changed, or its accelerometer isn't
+   * checked. For tuning the collision's limits.
+   */
+  public double unexplainedMetersPerSecSq() {
+    return unexplained;
+  }
+
+  /**
    * How much of a collision the last loop's IMU felt, from none to a whole one: a jolt the wheels
    * don't explain past the limit, or one at the accelerometer's range, is a whole one; a jolt past
    * the limit the wheels partly explain, what they don't against the limit.
@@ -354,13 +378,19 @@ public final class SlipCheck {
     boolean before = Double.isFinite(lastVelocityX);
     collision = joltBySize(forward, left) ? 1 : 0;
     boolean checked = sample.accelerometerChecked();
-    if (collision > 0 && checked && before && !saturated(forward, left)) {
-      // What the wheels felt too is driving; what they don't explain, the hit's share.
-      double unexplained =
-          Math.hypot(
-              feltX - (velocityX - lastVelocityX) / seconds,
-              feltY - (velocityY - lastVelocityY) / seconds);
-      collision = Math.min(1, unexplained / joltLimit);
+    unexplained = 0;
+    if (checked && before && Double.isFinite(feltX) && Double.isFinite(feltY)) {
+      double wheelsX = (velocityX - lastVelocityX) / seconds;
+      double wheelsY = (velocityY - lastVelocityY) / seconds;
+      // What the IMU felt that the wheels don't explain. Felt by the IMU less than the wheels'
+      // own change, it's the wheels changing faster than the robot can follow: a slide, not a hit.
+      if (Math.hypot(feltX, feltY) >= Math.hypot(wheelsX, wheelsY)) {
+        unexplained = Math.hypot(feltX - wheelsX, feltY - wheelsY);
+      }
+    }
+    if (checked && before && !saturated(forward, left)) {
+      // Past the grip, the floor can't explain it: a share of a collision, up to a whole one.
+      collision = Math.clamp((unexplained - grip) / (joltLimit - grip), 0.0, 1.0);
     }
     if (!checked || collision >= 1 || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
       forgetSpeeds();

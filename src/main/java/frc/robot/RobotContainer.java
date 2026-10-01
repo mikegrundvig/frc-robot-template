@@ -21,6 +21,7 @@ import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
@@ -265,6 +266,7 @@ public final class RobotContainer implements AutoCloseable {
             new SwerveKinematicsModel(wheels),
             field.terrain(),
             wheelReach,
+            drivetrain.get().modules().wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY,
             robot.imus());
     drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;

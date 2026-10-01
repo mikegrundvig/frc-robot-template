@@ -2,8 +2,10 @@ package com.michaelgrundvig.frc.pitwall;
 
 import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.backend.NetworkTablesTunableBackend;
@@ -39,6 +41,10 @@ import org.wpilib.util.Alert;
  * same changes at the same moments; while replaying, the page doesn't start. Without AdvantageKit
  * there is no replay, so nothing needs logging.
  *
+ * <p>In the simulator, the page also drives the simulation in place of WPILib's simulator GUI: the
+ * Driver Station, joysticks, pausing and stepping, and stopping ({@link #simulator()}). On a robot
+ * there is no such thing.
+ *
  * @param <T> the robot's configuration record
  */
 public final class Pitwall implements AutoCloseable {
@@ -49,6 +55,7 @@ public final class Pitwall implements AutoCloseable {
   private final TunableTee tee;
   private final Page page;
   private final Broadcaster broadcaster;
+  private final @Nullable Simulator simulator;
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
   private final Alert changedSwitches = new Alert("Pitwall", "", Alert.Level.HIGH);
   private final boolean advantageKit;
@@ -105,9 +112,21 @@ public final class Pitwall implements AutoCloseable {
               tuned.set(view.hasChanges());
             });
     TunableRegistry.registerBackend("", tee);
-    page = new Page(status, actions, tuning, tee, experiments);
-    // A page whose stream closes can't keep an experiment it started going.
-    broadcaster = new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, experiments::lost);
+    // In the simulator, the page drives the simulation; on a robot, nothing can.
+    Simulator simulated = RobotBase.isSimulation() ? simulatorControls(advantageKit) : null;
+    simulator = simulated;
+    page = new Page(status, actions, tuning, tee, experiments, simulated);
+    // A page whose stream closes can't keep an experiment it started going, or drive a joystick.
+    broadcaster =
+        new Broadcaster(
+            Broadcaster.MAX_STREAMS,
+            Broadcaster.MAILBOX,
+            stream -> {
+              experiments.lost(stream);
+              if (simulated != null) {
+                simulated.lost(stream);
+              }
+            });
     server = replaying ? null : startPage(page, broadcaster, port);
   }
 
@@ -126,6 +145,22 @@ public final class Pitwall implements AutoCloseable {
               + e);
       return null;
     }
+  }
+
+  /**
+   * The simulator's controls, on WPILib's simulation: the page's Stop ends AdvantageKit's log, then
+   * the program.
+   */
+  private static Simulator simulatorControls(boolean advantageKit) {
+    return Simulator.wpilib(
+        RobotController::getTime,
+        () -> {
+          System.out.println("Simulator: stopped from Pitwall's page");
+          if (advantageKit) {
+            AdvantageKitLog.end();
+          }
+          System.exit(0);
+        });
   }
 
   /**
@@ -176,6 +211,14 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
+   * The simulator's controls, in the simulator. Empty on a robot, where nothing may write the
+   * Driver Station's state.
+   */
+  public Optional<Simulator> simulator() {
+    return Optional.ofNullable(simulator);
+  }
+
+  /**
    * The port the page is served on, or -1 when it isn't (while replaying, or it couldn't start).
    */
   public int port() {
@@ -185,11 +228,16 @@ public final class Pitwall implements AutoCloseable {
 
   /**
    * Applies the page's requests, then reads the status and tells any open page what changed. Call
-   * it first thing in {@code robotPeriodic()}, before anything reads a configuration and before the
-   * command scheduler runs. When the robot disables, it prints (and logs) what tuning changed, so
-   * it can be committed.
+   * it first thing in {@code robotPeriodic()}, before anything reads a configuration or the Driver
+   * Station and before the command scheduler runs. When the robot disables, it prints (and logs)
+   * what tuning changed, so it can be committed.
    */
   public void periodic() {
+    // First, so everything after sees the Driver Station the page set, as AdvantageKit logs it.
+    Simulator simulated = simulator;
+    if (simulated != null) {
+      simulated.periodic();
+    }
     boolean enabled = RobotState.isEnabled();
     boolean fieldConnected = RobotState.isFMSAttached();
     if (fieldConnected && !wasFieldConnected) {

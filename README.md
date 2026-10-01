@@ -73,6 +73,10 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to put a run's gains back and the builder calls that
     commit them. A gain changes only the way any value does, through the checks below.
+  - **The simulator's controls** (in the simulator only; a robot has none): the Driver Station
+    (enable, the mode, the alliance station, the field system, the match time), driving from the
+    keyboard or a gamepad, pausing and stepping, and Stop. See
+    [docs/simulator.md](docs/simulator.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
@@ -177,7 +181,7 @@ Also built in:
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

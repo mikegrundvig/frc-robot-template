@@ -605,6 +605,35 @@ class PitwallServerTest {
   }
 
   /** The status line of a GET naming this host, sent by hand: Java's client won't set Host. */
+  /**
+   * On a robot there's no simulator: nothing at any of its routes, so nothing can ever write the
+   * Driver Station's state there, and no section of it in the event stream.
+   */
+  @Test
+  void aRobotHasNoSimulatorControls() throws Exception {
+    for (String path :
+        List.of(
+            "/api/simulator",
+            "/api/simulator/step",
+            "/api/simulator/stop",
+            "/api/simulator/joysticks")) {
+      for (String method : List.of("GET", "PATCH", "POST", "PUT", "DELETE")) {
+        var answer = send(method, path, "application/json", method.equals("GET") ? null : "{}");
+        assertThat(answer.statusCode()).as(method + " " + path).isEqualTo(404);
+        assertThat(answer.body()).contains("a robot has no simulator controls");
+      }
+    }
+    Page robots =
+        new Page(
+            new Status(),
+            new Actions(inputs -> {}),
+            tuning,
+            tunables,
+            new ByHand(System::nanoTime).experiments());
+    assertThat(robots.simulator()).isNull();
+    assertThat(robots.sections()).doesNotContainKey("simulator");
+  }
+
   private String statusLine(String host) throws Exception {
     try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.port());
         var reader =

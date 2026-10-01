@@ -23,7 +23,9 @@ import org.wpilib.math.geometry.Translation2d;
  *       only the position, using the robot's heading from the gyro. Of the two poses a single tag
  *       allows, the one whose heading agrees with the gyro is used, which removes single-tag
  *       ambiguity, and each tag's known height checks the view. The idea behind Limelight's
- *       MegaTag2 and PhotonVision's constrained solve.
+ *       MegaTag2 and PhotonVision's constrained solve. Such a position leans on the gyro's heading,
+ *       so the measurement says how far its tags were ({@link VisionMeasurement#robotToTags}): the
+ *       estimator carries the heading's doubt in it.
  *   <li><b>Multi-tag</b>, the vision software's solution from every tag at once, when the heading
  *       isn't known yet (a robot not yet placed).
  *   <li><b>Single tag</b>, the least ambiguous one, only if its ambiguity is low.

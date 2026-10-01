@@ -279,7 +279,8 @@ onboard IMU drifts is unknown until measured.
 ### Repeatability of the gyro's scale
 
 `EstimatorConfig.headingStdDevDegreesPerTurn` is how far the gyro's heading may still be off after a
-full turn, once its scale is calibrated.
+full turn, once its scale is calibrated: the same error every turn, so five turns are five times as
+far off. Until it's calibrated, keep the template's 1°.
 
 1. Run [the gyro's scale](calibration.md#the-gyros-scale) calibration five times in a row, from the
    same spot. Each reports a scale.

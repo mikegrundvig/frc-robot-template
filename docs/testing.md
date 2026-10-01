@@ -124,13 +124,93 @@ What it offers:
 
 ## Is the estimator honest? The consistency study
 
-The pose estimator reports how uncertain it is, and gates, χ² tests, and any later bound on its
-error all trust that number. The simulator knows where the robot really is, so it can check the
-claim: `./gradlew consistencyStudy` drives the whole simulated robot through a set of runs
-(driving, standing, turning in place, the gyro-scale procedure, a collision, a camera knocked low,
-a camera turned), several seeds of each, and compares every loop's estimate with the truth
-(`frc.robot.studies.ConsistencyStudy`). Its report is in `build/studies/consistency/`.
-`EstimatorConsistencySimTest` runs a few of its runs on every build.
+The pose estimator reports how uncertain it is, and the χ² gate, the scoring gate's uncertainty
+limit, and any later bound on its error all trust that number. A claim of 3 mm while the robot is
+10 cm off is worse than no claim at all. The simulator knows where the robot really is, so it can
+check: `./gradlew consistencyStudy` drives the whole simulated robot through seven runs, twelve
+seeds of each, and compares every loop's estimate with the truth (`frc.robot.studies`:
+`ConsistencyStudy`, `ConsistencyRuns`, `Consistency`). It takes about five minutes, one robot at a
+time (WPILib's simulation is one per program). The report is in `build/studies/consistency/`.
+
+The runs, on the simulator's season-worn robot (`SensorErrors.TYPICAL`) with four cameras:
+
+| Run | What happens |
+|---|---|
+| `driving` | The route in view of the tags, there and back, then 3 s standing |
+| `standing` | The route once, then 20 s standing still |
+| `turning` | 5 s standing, two turns in place, 5 s standing |
+| `gyro-scale` | The gyro-scale procedure (five turns), then standing: 40 s |
+| `collision` | The `collision` scenario partway through the route |
+| `camera-low` | The `camera-low` scenario, driving the route |
+| `camera-turned` | The `camera-turned` scenario, driving the route |
+
+Each seed draws its own noise, its own small error for each camera's mount (up to 5 mm and 0.25°
+along and about each axis, what calibrating a mount leaves), and its own for each tag (up to half
+an inch along each axis, the field's build tolerance: the cameras see a tag where it is, the
+robot believes the layout).
+
+| Option | Default | What |
+|---|---|---|
+| `--runs=A,B` | all | Which runs |
+| `--seeds=N` | 12 | Runs of each, each with its own draws |
+| `--seed=N` | 1 | The first seed |
+| `--mount-error-mm=M`, `--mount-error-degrees=D` | 5, 0.25 | How far each camera may sit off its mount |
+| `--tag-error-mm=M` | 12.7 | How far each tag may sit off the layout; 0 for an exact field |
+| `--noise-scale=F` | 1 | The vision noise model scaled: what if it were fit tighter or looser |
+| `--out=DIR` | `build/studies/consistency` | Where the report goes |
+
+### Reading the report
+
+`summary.md` has a row a run. Each column answers a question:
+
+- **NEES** (normalized estimation error squared): the error weighted by the inverse of the
+  covariance the estimate claimed. An honest estimator averages its number of dimensions: 2 for
+  position, 1 for heading. Far above, it's overconfident: sure of an estimate that's off. Below,
+  it's timid: it trusts its measurements less than it could, which costs accuracy but misleads
+  nobody.
+- **Above, below:** at each loop, the NEES averaged over the seeds falls inside a 95% band (1.03
+  to 3.28 for position with 12 seeds) if honest, so about 2.5% of loops land above it and 2.5%
+  below. Many above is overconfidence at those moments, even when the average looks fine.
+- **Past 3.72 σ:** how often the position error goes past 3.72 times the claimed spread along its
+  least sure direction. For an honest estimate that's at most once in a thousand loops (0.1%):
+  the bound a two-dimensional Gaussian's tail holds a thousandth of. This is the claim a scoring
+  gate or a protection level relies on.
+- **Worst:** the most claimed spreads the error ever was.
+- **Mean error, worst error, heading error, claimed σ:** accuracy beside honesty. An estimator
+  that got honest by getting worse is no improvement.
+
+`loops.csv` has each run's NEES, error, and claimed spread loop by loop, averaged over the seeds,
+for a spreadsheet: it shows when a run goes wrong (during the turns, or standing after them).
+
+What to expect, today: every calibrated run below its NEES band, and nothing past 3.72 σ but the
+loop of the collision's hit (the robot has moved before the jolt is read). The estimator is timid
+in the simulator for two reasons, both on purpose: the vision noise model is 2026's, about twice
+the simulated cameras' noise (`--noise-scale=0.5` brings the NEES to about 1), and it allows for a
+real field's tags and real mounts. The `camera-turned` run's heading NEES is far above: a camera
+turned 2° is a fault eight times what the configuration allows, and the estimator can't tell it
+from a heading error. Catching that is the mount check's job, and comparing cameras with each
+other would do it better.
+
+### What it proves, and what it doesn't
+
+It proves the estimator's arithmetic keeps its claims honest against the errors the simulator
+makes: wheel wear, a gyro's scale and drift, the cameras' noise, mounts and tags within their
+tolerances, a collision. It can't prove the real robot's numbers: that the noise model fits the
+real cameras, that the gyro's scale is as configured, that the field's tags are within half an
+inch. Those are measured ([characterization](characterization.md)), and on a robot the check is
+the same idea without the truth: a camera's normalized innovations (NIS), and the error at
+surveyed spots. A configured repeated error smaller than the real one shows here too: with mounts
+off by up to 1° (`--mount-error-degrees=1`), four times what the configuration allows, standing
+still goes past 3.72 σ in about 7% of loops.
+
+### Keeping it honest
+
+`EstimatorConsistencySimTest` runs four of the runs (driving, standing, turning, the gyro-scale
+procedure), two seeds each, on every build, about 30 s: each must keep its position NEES under 3,
+its heading NEES under 2, no loop past 3.72 σ, and a mean error of 2 to 3 cm at most. A change to
+the estimator, its configuration, or the vision pipeline that breaks one has made the estimate
+claim more than it knows, or got there by being worse. Run the whole study before and after such
+a change, and put both tables in the commit.
 
 ## Configuration is tested too
 

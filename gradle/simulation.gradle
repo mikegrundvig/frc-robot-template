@@ -1,16 +1,17 @@
-// Simulation: ./gradlew run starts the robot program in the simulator, with WPILib's simulator GUI
-// unless -Pgui=false. Pitwall serves the simulator's controls as an API either way (the Driver
-// Station, joysticks, pausing and stepping, and faults: docs/simulator.md); the Pitwall page's Sim
-// view, which will drive them, is coming. The GUI is on by default until that view replaces it,
-// when the default turns off and -Pgui turns it back on. A real Driver Station can connect to the
-// simulator either way.
+// Simulation: ./gradlew run starts the robot program in the simulator, driven from the Pitwall
+// page's Sim view (http://localhost:5820/#sim): the Driver Station, the keyboard and gamepads,
+// pausing and stepping, Stop, and failing the robot's parts (docs/simulator.md). WPILib's
+// simulator GUI is off unless asked for with -Pgui; while it's open it overwrites the page's
+// joysticks every frame. A real Driver Station can connect to the simulator either way.
 //
-// First-run defaults, so the simulator is drivable immediately: with the GUI, the robot starts
-// enabled in teleop on the blue alliance's station 2, the center start (-PstartDisabled to start
-// disabled with no station, like a real robot), the keyboard is the driver's gamepad, and the field
-// view is open. Without the GUI it starts disabled, since nothing on screen could disable it yet.
-// sim/ holds the default GUI settings; they are copied only when missing, so a user's own layout
-// and gamepad choices are kept.
+// The robot starts in teleop on the blue alliance's station 2, the center start, with a Driver
+// Station attached, so it's one press from driving: disabled, for the Sim view's Enable, beside the
+// keyboard driving it switches on (a robot never enables itself before anyone is watching it).
+// With the GUI it starts enabled, since the GUI's keyboard drives it at once and the GUI is on
+// screen to disable it. -PstartDisabled starts it as a real robot starts, disabled with no station.
+// sim/ holds the GUI's default settings, its keyboard as the driver's gamepad and the field view
+// open; they are copied only when the GUI runs and only when missing, so a user's own layout and
+// gamepad choices are kept.
 //
 // Start in a scenario, a fault in the robot's sensors or something that happens to it:
 // ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (frc.robot.sim.Scenarios).
@@ -19,7 +20,7 @@
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
 
 // The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither.
-def guiByDefault = true
+def guiByDefault = false
 def guiAsked = project.findProperty("gui")?.toString()
 if (guiAsked != null && !(guiAsked in ["", "true", "false"])) {
     throw new GradleException("-Pgui runs the simulator with WPILib's GUI and -Pgui=false without it, not -Pgui=${guiAsked}")
@@ -50,9 +51,10 @@ tasks.named("run") {
         }
         systemProperty "frc.simMode", "REPLAY"
     }
-    // Enabled at the start only with the GUI on screen to disable it again.
-    systemProperty "frc.sim.autoEnable",
-            gui && !project.hasProperty("startDisabled") && !project.hasProperty("replay")
+    // How the robot starts (Robot.SimStart): enabled only with the GUI on screen to disable it.
+    systemProperty "frc.sim.start",
+            project.hasProperty("startDisabled") || project.hasProperty("replay") ? "disabled"
+            : gui ? "enabled" : "ready"
     if (scenario != null) {
         dependsOn scenarios
         systemProperty "frc.sim.scenario", scenario

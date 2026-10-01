@@ -40,7 +40,8 @@ merged when `./gradlew ci` passes and the robot drives.
    - PhotonLib: the coprocessors must run the same PhotonVision version as the library.
 6. **Build:** `./gradlew ci`, and fix what moved. Prereleases rename and move APIs; the release
    notes say where.
-7. **Drive it:** `./gradlew run`, drive around, and open the Pitwall page.
+7. **Drive it:** `./gradlew run`, open the Pitwall page's Sim view (http://localhost:5820/#sim),
+   switch on driving with the keyboard, press Enable (it starts disabled), and drive around.
 8. **Update the docs:** `docs/stand-ins.md` (a stand-in may now have its real library, and a
    pinned build its release) and the README's status note.
 9. **On the robot:** image it with the Systemcore image released alongside the new WPILib, and

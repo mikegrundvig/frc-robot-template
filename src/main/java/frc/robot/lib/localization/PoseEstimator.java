@@ -244,7 +244,7 @@ public final class PoseEstimator implements CameraLocalizer {
             timestampNanos,
             Math.hypot(motion.dxMeters(), motion.dyMeters()),
             trust,
-            motion);
+            motion.residualMeters());
     int step =
         history.add(
             timestampNanos,
@@ -820,24 +820,20 @@ public final class PoseEstimator implements CameraLocalizer {
 
   /**
    * A step's position variance beyond the base terms. Its suspect travel (the share of the wheels'
-   * travel the tilt left out, how far one wheel slipping on its own may have put it off, and how
-   * far the IMU says they slid) adds to the recent suspect travel before squaring, since slip keeps
-   * its direction for a while. The rest of the wheels' disagreement, spread over all of them, is
-   * the step's own error, which says nothing of the next step's: it adds as a variance. A new
-   * collision adds its variance; and a disabled robot may be carried.
+   * travel the tilt left out, how far their disagreement with each other may have put it off, and
+   * how far the IMU says they slid) adds to the recent suspect travel before squaring, since slip
+   * keeps its direction for a while; a new collision adds its variance; and a disabled robot may be
+   * carried.
    */
-  private double extraVariance(
-      long from, long to, double distance, double trust, BodyMotion motion) {
+  private double extraVariance(long from, long to, double distance, double trust, double residual) {
     double seconds = Timestamps.toSeconds(to - from);
     double carried = suspectTravel * Math.exp(-seconds / config.slipCorrelationSeconds());
-    double scale = config.residualScale();
     suspectTravel =
         carried
             + (1 - trust) * distance
-            + scale * motion.oneWheelMeters()
+            + config.residualScale() * residual
             + conditions.slipMetersPerSecond() * seconds;
-    double spread = square(motion.residualMeters()) - square(motion.oneWheelMeters());
-    double variance = square(suspectTravel) - square(carried) + square(scale) * spread;
+    double variance = square(suspectTravel) - square(carried);
     if (conditions.disabled()) {
       variance += handlingVariancePerSecond * seconds;
     }

@@ -361,20 +361,20 @@ drives the same sticks along another path, and the comparison turned over: which
 mount check blames depends on how the robot drives as much as on what corrects the heading.
 
 `VisionSimTest`'s mount-check tests run under each, on one route with one seed. For a camera
-turned 4°, `doubt` keeps two of the original promises (out of calibration and counting for less,
+turned 4°, `every` keeps two of the original promises (out of calibration and counting for less,
 the back cameras never doubted) and breaks two (doubted by more than 8 cm, the last lap a fifth
-closer than trusting it as before): doubted by 1.9 cm, its last lap is 4.5 cm off against 5.5 cm
-trusted as before. `measurements` and `every` break three: the camera is never doubted, so nothing
-says it counts for less, and the last lap is 5.4 and 5.1 cm off against 5.5 and 5.4 cm trusted as
-before. A camera turned 2° stands out in its tag residuals under all three, most under `every`
-(2.5 times its worst neighbour's, against 1.8). Each test says which, and changes when one does.
-One route is a narrow look: before the simulated drivetrain carried the robot's mass, the robot
-drove the same sticks 75% quicker off the line, and `every` doubted the 4° camera by 9.2 cm,
-`measurements` by 5.5, and the 2° camera stood out only under `every`; on the same route, while
-the estimate still doubted a quarter of the wheels' travel whenever the drive motors were at their
-current limit, `every` doubted it by 2.6 cm, and `doubt` brought the last lap to 5.4 cm; while it
-counted all of the wheels' disagreement as slip that kept its direction, `every` doubted it by 1.3
-cm and kept the first two promises, and `doubt` none.
+closer than trusting it as before): doubted by 5.7 cm, its last lap is 4.7 cm off against 5.4 cm
+trusted as before. `measurements` and `doubt` break three: the camera is never doubted, so nothing
+says it counts for less, and the last lap is 5.6 and 5.5 cm off against 5.5 cm trusted as before.
+A camera turned 2° stands out in its tag residuals under all three, most under `every` (2.5 times
+its worst neighbour's, against 1.7). Each test says which, and changes when one does. One route
+is a narrow look: before the simulated drivetrain carried the robot's mass, the robot drove the
+same sticks 75% quicker off the line, and `every` doubted the 4° camera by 9.2 cm, `measurements`
+by 5.5, and the 2° camera stood out only under `every`; on the same route, while the estimate
+still doubted a quarter of the wheels' travel whenever the drive motors were at their current
+limit, `every` doubted it by 2.6 cm, and `doubt` brought the last lap to 5.4 cm; and while the
+wheels' disagreement counted as slip only where one wheel alone explained it (since reverted),
+`doubt` kept the first two promises and `every` none.
 
 #### The simulator's late stamps
 
@@ -498,6 +498,19 @@ simulator's late stamps](#the-simulators-late-stamps)).
 None of its runs slides the robot over the floor, and slides are where the estimate is least
 honest. `LocalizationSimTest` drives them (pushed sideways, a launch at half grip, the camera blind
 and then seeing again), and the estimate recovers in each. What's known not to hold:
+
+- **Wheels spinning past the floor.** The wheels' disagreement with each other (the kinematic
+  residual) says how far one wheel slipping put their fitted travel off; two slipping together put
+  it off by about twice what it says (2.2 times on a square drivetrain), and neither the gyro nor
+  the accelerometer sees a pair either side of the robot spinning slower than the speed
+  comparison's tolerance. So a pair spinning is doubted about half as far as it put the estimate
+  off: the front pair at 0.5 m/s for a second, 25 cm off, claims 12.6 cm; at 1 m/s, 50 cm off,
+  56 cm, the accelerometer seeing the rest. One wheel spinning claims about what it put the
+  estimate off. Nor can the simulator say more: its chassis moves as the wheels' best fit says
+  (`DriveSimulation`), so in it, wheels that disagree can't put the robot anywhere their fit
+  doesn't, and a rule for telling which disagreement is slip, tuned against it, would fit the
+  simulator's own guesses. Wheel slip needs a simulator whose physics makes it (one modelling the
+  robot as a rigid body on its tread), and logs from a real robot, before it can be judged better.
 
 - **A slide's first tenth of a second.** The slip check sees a slide only once the wheels and the
   accelerometer are 0.3 m/s apart, so the doubt starts behind it. With the camera's last fix still

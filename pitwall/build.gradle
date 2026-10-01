@@ -54,6 +54,10 @@ dependencies {
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
+    // The tests' records are documented as the robot program's are, so ParameterDocs reads what the
+    // processor really writes.
+    testAnnotationProcessor project(":pitwall:docs-processor")
+
     testImplementation platform(libs.junit.bom)
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"

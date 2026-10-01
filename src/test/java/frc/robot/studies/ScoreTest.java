@@ -86,6 +86,18 @@ class ScoreTest {
     assertThat(Score.of(ONE, samples, twoBlind).positionP95Meters()).isInfinite();
   }
 
+  /** 12.4 and 12.6 mm round to 12 and 13: not a tie, so fewer cameras don't decide it. */
+  @Test
+  void errorsThatRoundApartArentATie() {
+    Score nearer = scored(TWO, 0.0124, 1);
+    Score cheaper = scored(ONE, 0.0126, 1);
+    List<Score> scores = new ArrayList<>(List.of(cheaper, nearer));
+
+    scores.sort(Score.RANKING);
+
+    assertThat(scores).containsExactly(nearer, cheaper);
+  }
+
   @Test
   void aFieldWeighingNothingCantBeScored() {
     Outcome[][] outcomes = {{placed(0.01)}};
@@ -99,8 +111,8 @@ class ScoreTest {
   }
 
   /**
-   * The smaller 95th percentile first, to the millimeter; within a millimeter, fewer cameras; and
-   * those without one last, the most within 5 cm first.
+   * The smaller 95th percentile first, rounded to the millimeter; when two round alike, fewer
+   * cameras; and those without one last, the most within 5 cm first.
    */
   @Test
   void theRankingGoesByTheNinetyFifthPercentileThenFewerCameras() {

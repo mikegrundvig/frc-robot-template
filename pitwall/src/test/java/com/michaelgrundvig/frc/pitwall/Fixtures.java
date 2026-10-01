@@ -18,6 +18,11 @@ final class Fixtures {
   /** A fact about the hardware: not tunable. */
   record Motor(double freeSpeedMetersPerSecond) {}
 
+  /**
+   * The drive's limits.
+   *
+   * @param current the most current through the motor
+   */
   record DriveLimits(Current current, LinearVelocity maxSpeed) {
     DriveLimits {
       if (!(current.baseUnitMagnitude() > 0)) {
@@ -26,6 +31,14 @@ final class Fixtures {
     }
   }
 
+  /**
+   * How the drive is controlled. Tuned on a running machine, then committed.
+   *
+   * <p>Start {@code kP} low.
+   *
+   * @param kP volts per meter per second of error
+   * @param lookahead how far ahead the drive aims
+   */
   record Gains(double kP, Time lookahead) {
     Gains {
       if (!(kP >= 0)) {
@@ -34,6 +47,11 @@ final class Fixtures {
     }
   }
 
+  /**
+   * A drive.
+   *
+   * @param gains how it's controlled
+   */
   record Drive(Motor motor, DriveLimits limits, Gains gains) {
     Drive {
       if (limits.maxSpeed().in(MetersPerSecond) > motor.freeSpeedMetersPerSecond()) {
@@ -51,6 +69,31 @@ final class Fixtures {
   }
 
   record Machine(String name, Drive drive, Range travel) {}
+
+  /**
+   * What a configuration writes that JSON must escape, or that isn't ASCII.
+   *
+   * @param heading the "zero" heading, in ° from C:\field's corner
+   * @param resistance in Ω, or &Omega;
+   */
+  record Symbols(double heading, double resistance) {}
+
+  /** A stage of a mechanism, of whichever kind: a component declared by its interface. */
+  interface Stage {}
+
+  /**
+   * A stage that lifts.
+   *
+   * @param kP volts per meter of error
+   */
+  record Lift(double kP) implements Stage {}
+
+  /**
+   * A carriage, on whichever stage.
+   *
+   * @param stage the stage it rides
+   */
+  record Carriage(Stage stage) {}
 
   /**
    * A 40 A, 4 m/s drive (its motor is good for 4.5 m/s) with kP 16 and a 30 ms lookahead, and

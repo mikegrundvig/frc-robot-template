@@ -8,14 +8,13 @@
 
 import { robot, onChange, onConnection, h, replace } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
-import { onEdits, outcome } from "./edits.js";
-import { makeRow, updateRow, refuser, changedElsewhere } from "./rows.js";
+import { onEdits } from "./edits.js";
+import { makeRow, updateRow, changedElsewhere } from "./rows.js";
 import { onHistory } from "./history.js";
 import { valueDocs, groupDocs, configDocs, groupOf } from "./docs.js";
 
 const rows = new Map(); // path -> its row
 const counts = new Map(); // configuration -> its heading's count
-const notes = new Map(); // "configuration/record path" -> the note under that record's heading
 const headings = new Map(); // "configuration/record path" -> that heading
 const narrow = matchMedia("(max-width: 719px)");
 let list;
@@ -23,6 +22,7 @@ let filter;
 let panel;
 let inline = null; // the documentation open under a row or heading, on a phone
 let selected = null; // {path}, {config, group}, or {config}: what the documentation is about
+let asked = null; // the value an address named before the robot's values came, to show then
 let builtFrom = null;
 let visible = false;
 let notice;
@@ -53,7 +53,6 @@ function mount(view) {
   onChange(render);
   onEdits(() => {
     rows.forEach(updateRow);
-    updateNotes();
     showDocs();
   });
   narrow.addEventListener("change", showDocs);
@@ -87,7 +86,11 @@ function hide() {
  * (#tune/drivetrain/gains.steerKp): it's shown, focused, and its meaning opened.
  */
 function route(rest) {
-  if (!rest || !robot.doc) return;
+  if (!robot.doc) {
+    asked = rest || null; // a reload: shown with the first snapshot
+    return;
+  }
+  if (!rest) return;
   const cut = rest.indexOf("/");
   const config = rest.slice(0, cut);
   const field = rest.slice(cut + 1);
@@ -158,7 +161,6 @@ function build() {
   const refocus = focused && focused.dataset ? focused.dataset.path : null;
   rows.clear();
   counts.clear();
-  notes.clear();
   headings.clear();
   inline = null;
   const query = filter.value.trim().toLowerCase();
@@ -175,8 +177,6 @@ function build() {
   for (const [config, groups] of configs) {
     const count = h("span", { class: "meta" });
     counts.set(config, count);
-    const configNote = h("div", { class: "group-note" });
-    notes.set(config + "/", configNote);
     const docs = doc.configs && doc.configs[config];
     const configHeading = h("h2", { class: "mech-h" },
       h("button", { type: "button", class: "link", "aria-label": config + ": what it is",
@@ -192,10 +192,8 @@ function build() {
         updateRow(row);
         rowList.append(row.el);
       }
-      const note = h("div", { class: "group-note" });
       let heading = null;
       if (group) {
-        notes.set(config + "/" + group, note);
         const about = docs && (docs.groups || []).find((candidate) => candidate.path === group);
         heading = h("h3", { class: "group-h" },
           h("button", { type: "button", class: "link mono", "aria-label": group + ": what it is",
@@ -205,10 +203,10 @@ function build() {
         headings.set(config + "/" + group, heading);
       }
       parts.push(h("section", { class: "group", "aria-label": config + (group ? " " + group : "") },
-        heading, group && note, rowList));
+        heading, rowList));
     }
     sections.push(h("section", { class: "mech", "aria-label": config },
-      configHeading, configNote, parts));
+      configHeading, parts));
   }
   if (sections.length === 0) {
     sections.push(h("p", { class: "muted" }, query
@@ -218,9 +216,13 @@ function build() {
   }
   list.replaceChildren(...sections);
   updateCounts();
-  updateNotes();
   showDocs();
   if (refocus && rows.has(refocus)) rows.get(refocus).input.focus();
+  if (asked) {
+    const wanted = asked;
+    asked = null;
+    route(wanted);
+  }
 }
 
 function matches(value, query) {
@@ -294,25 +296,6 @@ function showDocs() {
   } else if (inline.previousElementSibling !== anchor) {
     anchor.after(inline);
   }
-}
-
-/**
- * A refusal's reasons that name no value (a record's check of itself) go under that record's
- * heading, or its configuration's when the record has no values of its own here.
- */
-function updateNotes() {
-  const placed = new Map();
-  const errors = (outcome.refusal && outcome.refusal.errors) || [];
-  for (const error of errors) {
-    if ((error.paths || []).length > 0 || !error.config) continue;
-    const key = notes.has(error.config + "/" + error.group) ? error.config + "/" + error.group
-        : error.config + "/";
-    if (!placed.has(key)) placed.set(key, []);
-    placed.get(key).push(h("div", null, "✗ Refused by " + refuser(error)
-        + (error.group && key.endsWith("/") ? " (" + error.group + ")" : "") + ": ",
-      h("span", null, error.text)));
-  }
-  for (const [key, note] of notes) replace(note, placed.get(key) || []);
 }
 
 /** Each configuration's heading says how many values it has, and how many are tuned. */

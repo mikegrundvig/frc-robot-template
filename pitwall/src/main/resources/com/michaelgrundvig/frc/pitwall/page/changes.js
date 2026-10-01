@@ -3,8 +3,10 @@
 // or the field connecting, returns every value to committed. Committing is writing the builder
 // calls into the robot's configuration.
 
-import { robot, onChange, send, h, say, replace, confirm, go, shown } from "./core.js";
-import { stageAll } from "./edits.js";
+import {
+  robot, onChange, onConnection, send, h, say, replace, confirm, go, shown,
+} from "./core.js";
+import { stageAll, whyLocked } from "./edits.js";
 import { entries, onHistory, expect, record, undid, itemsText, clock } from "./history.js";
 
 let reports;
@@ -13,6 +15,8 @@ let copyAll;
 let resetAll;
 let refusalList;
 let historyList;
+let copyBox;
+let copyArea;
 const seen = new Map(); // a dashboard refusal's text -> when this page first saw it
 
 function mount(view) {
@@ -24,6 +28,16 @@ function mount(view) {
     "Return all to committed…");
   refusalList = h("ul", { class: "hist" });
   historyList = h("ul", { class: "hist" });
+  // Where text goes when the browser won't copy it (an older one, or one that won't on http):
+  // selected, for Ctrl+C.
+  copyArea = h("textarea", { class: "copyarea", readonly: true, rows: 6,
+                             "aria-label": "The text to copy" });
+  copyBox = h("div", { class: "copybox", hidden: true },
+    h("p", { class: "meta" }, "This browser won't copy it for the page: the text below is "
+        + "selected, so press Ctrl+C (⌘C on a Mac)."),
+    copyArea,
+    h("button", { type: "button", class: "small", onclick: () => (copyBox.hidden = true) },
+      "Close"));
   view.append(
     h("h1", { class: "view-title" }, "Changes"),
     h("p", { class: "lede" }, "What to commit, and where it goes."),
@@ -34,6 +48,7 @@ function mount(view) {
           + "into the robot's configuration and commit it."),
       none, reports,
       h("div", { class: "acts" }, copyAll, resetAll),
+      copyBox,
       h("p", { class: "meta phone-only" }, "Committing is a laptop's job: copying works here, "
           + "but the code is there.")),
     h("section", { class: "card" },
@@ -47,6 +62,11 @@ function mount(view) {
           + "can't say why; the reason is here.")));
   onChange(render);
   onHistory(renderHistory);
+  onConnection(() => {
+    if (!robot.doc) return;
+    renderReports();
+    renderHistory();
+  });
   renderHistory();
 }
 
@@ -74,14 +94,14 @@ function renderReports() {
   const count = Object.keys(doc.changes).length;
   none.hidden = count > 0;
   copyAll.disabled = count === 0;
-  resetAll.disabled = count === 0 || !doc.tuning.enabled;
+  resetAll.disabled = count === 0 || Boolean(whyLocked());
   replace(reports, [...groups.values()].map((group) => report(group)));
   // Rebuilt above only if the text changed: give the buttons their handlers again.
   for (const button of reports.querySelectorAll("button[data-copy]")) {
     button.onclick = () => copy(button.dataset.copy, button);
   }
   for (const button of reports.querySelectorAll("button[data-revert]")) {
-    button.disabled = !doc.tuning.enabled;
+    button.disabled = Boolean(whyLocked());
     button.onclick = () => revert(button.dataset.revert.split("\n"));
   }
 }
@@ -119,29 +139,58 @@ function report({ config, group, record, paths }) {
                     title: "Stage their committed values, to apply in Tune" }, "Revert these")));
 }
 
-/** Copies text, saying so on the button that did it. */
+/**
+ * Copies text, saying so on the button that did it. Where the browser won't, the text is shown,
+ * selected, for Ctrl+C: never a "Copied" that didn't happen.
+ */
 async function copy(text, button) {
-  try {
-    await navigator.clipboard.writeText(text); // needs a secure page, such as localhost
-  } catch (error) {
-    const area = h("textarea"); // the fallback for http://robot.local
-    area.value = text;
-    document.body.append(area);
-    area.select();
-    document.execCommand("copy");
-    area.remove();
+  if (!(await copied(text))) {
+    copyArea.value = text;
+    copyBox.hidden = false;
+    copyArea.focus();
+    copyArea.select();
+    say("Couldn't copy it here: the text is selected, so press Ctrl+C.", true);
+    return;
   }
+  copyBox.hidden = true;
   const was = button.textContent;
   button.textContent = "Copied ✓";
   setTimeout(() => (button.textContent = was), 1500);
   say("Copied.");
 }
 
+/** Whether the browser copied it: by the clipboard API, or else the older way, which says. */
+async function copied(text) {
+  try {
+    await navigator.clipboard.writeText(text); // needs a secure page, such as localhost
+    return true;
+  } catch (error) {
+    // http://robot.local isn't secure: try the older way.
+  }
+  const area = h("textarea", { class: "offscreen" });
+  area.value = text;
+  document.body.append(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (error) {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
 /** Copies the robot's own report: every change with the builder call that commits it. */
 async function copyReport(button) {
-  const text = await fetch("/api/changes", { headers: { Accept: "text/plain" } })
-      .then((response) => response.text());
-  copy(text, button);
+  const response = await fetch("/api/changes", { headers: { Accept: "text/plain" } })
+      .catch(() => null);
+  if (!response || !response.ok) {
+    say("The robot didn't send its report" + (response ? " (" + response.status + ")" : "")
+        + ": nothing was copied.", true);
+    return;
+  }
+  copy(await response.text(), button);
 }
 
 /**
@@ -149,6 +198,11 @@ async function copyReport(button) {
  * undid, so Restore brings it back.
  */
 async function returnAll() {
+  const lock = whyLocked();
+  if (lock) {
+    say(lock, true, true);
+    return;
+  }
   const doc = robot.doc;
   const tuned = Object.keys(doc.tunables).filter((path) => path in doc.changes);
   const ok = await confirm("Return all to committed?", [
@@ -176,20 +230,25 @@ async function returnAll() {
 
 /**
  * Everything this session changed, newest first, each restorable: what a change set (staged again
- * as it was), or what a return to committed undid (the field connecting, a restart, Return all).
+ * as it was), what a return to committed undid (the field connecting, a restart, Return all), or
+ * edits set aside unapplied. A restart also says what the new code changed, apart, as there's
+ * nothing to restore of that.
  */
 function renderHistory() {
   if (!historyList) return;
-  const locked = !robot.doc || !robot.doc.tuning.enabled;
+  const locked = Boolean(whyLocked());
   replace(historyList, entries.length === 0
     ? h("li", null, h("span", { class: "muted" }, "Nothing changed yet."))
     : entries.slice().reverse().map((entry, index) => h("li", null,
       h("span", { class: "t" }, clock(entry.time)),
       h("div", null, h("div", { class: "src" }, entry.source),
-        h("div", { class: "items" }, itemsText(entry))),
-      h("button", { type: "button", "data-entry": String(entries.length - 1 - index),
-                    disabled: locked },
-        undid(entry) ? "Restore what it undid" : "Restore these"))));
+        entry.items.length > 0 && h("div", { class: "items" }, itemsText(entry.items)),
+        entry.code && entry.code.length > 0 && h("div", { class: "items" },
+          "The code changed (committed): " + itemsText(entry.code))),
+      entry.items.length > 0 ? h("button", { type: "button",
+        "data-entry": String(entries.length - 1 - index), disabled: locked },
+        entry.kind === "staged" ? "Stage them again"
+          : undid(entry) ? "Restore what it undid" : "Restore these") : h("span"))));
   for (const button of historyList.querySelectorAll("button[data-entry]")) {
     button.disabled = locked;
     button.onclick = () => restore(entries[Number(button.dataset.entry)]);
@@ -209,6 +268,8 @@ function renderRefusals() {
   const refused = robot.doc.tuning.refused || [];
   const now = Date.now();
   for (const text of refused) if (!seen.has(text)) seen.set(text, now);
+  // The robot keeps its latest few: forget what it no longer lists.
+  for (const text of seen.keys()) if (!refused.includes(text)) seen.delete(text);
   replace(refusalList, refused.length === 0 ? h("li", null, h("span", { class: "muted" }, "None."))
     : refused.slice().reverse().map((text) => h("li", null,
       h("span", { class: "t" }, clock(seen.get(text))), h("span", { class: "items" }, text))));

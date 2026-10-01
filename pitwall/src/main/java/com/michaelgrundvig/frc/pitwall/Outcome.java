@@ -49,8 +49,10 @@ public record Outcome(Result result, String detail, List<Reason> reasons) {
    * @param layer which check refused it
    * @param by who refused it: the record whose check it was ({@code SwerveConfig.Gains}), or the
    *     rule's name; empty for a value's own limits and type
-   * @param paths the tunables it concerns: one for a limit, or a record's check that names a value;
-   *     every value it reads, for a rule; none when it names no value (a record's check of itself)
+   * @param paths the tunables it concerns, each to show it beside: the one a value's own check (its
+   *     type, its limits) or a record's check names; for a record's check that names none (a check
+   *     of the record as a whole), every value of the change in that record; for a rule, every
+   *     value it reads; for a tunable's own setter, the tunables it was setting
    * @param config the configuration it concerns; empty for a rule, which reads several, and for a
    *     tunable of no configuration
    * @param group for a record's check that names no value, where that record is in its

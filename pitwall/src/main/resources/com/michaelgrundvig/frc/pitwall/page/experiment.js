@@ -3,23 +3,30 @@
 // the tab's sessionStorage.
 
 import {
-  robot, onChange, onConnection, onSamples, api, send, lastRequestAt, shown, h, say, replace,
+  robot, onChange, onConnection, onSamples, api, send, lastRequestAt, shown, h, say, announce,
+  replace,
 } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
-import { onEdits, stageAll, pending, apply } from "./edits.js";
-import { load, save } from "./history.js";
+import { onEdits, stageAll, pending, apply, edited, whyLocked } from "./edits.js";
+import { load, trySave, cannotKeep } from "./history.js";
 import { makeRow, updateRow } from "./rows.js";
 import { valueDocs } from "./docs.js";
 
 const KEY = "pitwall.runs";
 // Every run this tab has seen, oldest first: kept through a reload, until the tab closes.
-const runs = load(KEY, []);
+const runs = load(KEY, [], (kept) => Array.isArray(kept) && kept.every((run) => run
+    && typeof run.key === "string" && typeof run.trace === "object" && run.gains));
+// Element ids, each its own.
+let ids = 0;
 // Whether this page is starting a run: from the click on Run until the robot answers.
 let starting = false;
 // How many of a rig's runs its plot lays over each other, the latest in bold.
 const OVERLAID = 4;
 // How many of a rig's runs keep their traces, so another signal can be plotted; scores stay.
 const TRACES_KEPT = 8;
+
+/** The sections of the robot's state this view reads. */
+const READS = ["run", "rigs", "experiments", "tunables", "values", "changes", "tuning", "robot"];
 
 const rigViews = new Map(); // rig name -> its panel's parts
 let builtFrom = "";
@@ -41,11 +48,18 @@ function mount(view) {
     tuningOffBanner("Gains"),
     chips, empty, panels);
   onChange((patch, snapshot) => {
-    noteRun();
+    // Only what it reads: other sections (the status, the simulator's) change often, and say
+    // nothing to a rig.
+    if (!snapshot && !READS.some((section) => section in patch)) return;
+    if (snapshot || "run" in patch || "robot" in patch) noteRun();
     render(patch, snapshot);
   });
   onSamples((trace, fromStart) => {
     takeSamples(trace, fromStart);
+    // The time on Stop as the samples come, not with the plot's frames, which a hidden tab skips.
+    for (const [name, view] of rigViews) {
+      if (view.busy) view.runButton.textContent = "■ Stop  (Esc)" + countdown(name);
+    }
     drawSoon();
   });
   onEdits(() => {
@@ -136,6 +150,12 @@ function noteRun() {
     gains: now.gains, signals: now.signals, phase: now.phase, detail: now.detail,
     scores: now.scores, gainsChanged: now.gainsChanged,
   }));
+  if (ended) {
+    // A run that stopped short (the deadman, the robot disabling) is said at once; one that ran
+    // its course, when the reader is free.
+    if (now.phase === "ENDED") announce("Run " + now.id + " ended: " + now.detail + ".");
+    else say("Run " + now.id + " stopped. " + now.detail + ".", true, true);
+  }
   if (ended || (created && now.phase !== "RUNNING")) keepSoon();
 }
 
@@ -152,9 +172,14 @@ function keepSoon() {
  * most of a run, so the oldest runs' traces go first, their scores kept.
  */
 function keepRuns() {
-  while (!save(KEY, runs)) {
-    const oldest = runs.find((run) => Object.keys(run.trace).length > 0);
-    if (!oldest) return;
+  // A copy is trimmed to fit, never the runs on the page: they keep their traces here.
+  const copy = runs.map((run) => ({ ...run }));
+  while (!trySave(KEY, copy)) {
+    const oldest = copy.find((run) => Object.keys(run.trace).length > 0);
+    if (!oldest) {
+      cannotKeep();
+      return;
+    }
     oldest.trace = {};
   }
 }
@@ -226,7 +251,8 @@ function buildRigs() {
     view.runButton = h("button", { type: "button", class: "big primary",
                                    onclick: () => runOrStop(name, view) });
     view.state = h("p", { class: "state" });
-    view.gate = h("p", { class: "gatemsg", id: "gate-" + name.replace(/[^a-zA-Z0-9]/g, "-") });
+    view.gate = h("p", { class: "gatemsg", id: "exp-gate-" + ++ids });
+    view.staged = h("div", { class: "staged-note", id: "exp-staged-" + ++ids });
     view.calls = h("pre");
     view.commit = h("div", { class: "commit" },
       h("p", { class: "meta" }, "To keep the tuned gains, write these into the configuration:"),
@@ -249,7 +275,7 @@ function buildRigs() {
         gains,
         unpublished.length > 0 && h("p", { class: "meta" }, "Not tunable, so not shown: "
             + unpublished.join(", ")),
-        h("div", { class: "runbox" }, view.runButton, view.gate, view.state,
+        h("div", { class: "runbox" }, view.runButton, view.gate, view.staged, view.state,
           h("p", { class: "dead" }, "Stops if this page goes quiet for half a second, or the "
               + "robot disables. The gains at the start are recorded with the run.")),
         view.commit),
@@ -264,9 +290,10 @@ function buildRigs() {
 }
 
 /**
- * Starts a run, keeping it going from the click; or stops the one running. With edits staged, it
- * applies them first, through the same checks, all or none, and runs only if they applied: one
- * press, so a run is never of the gains before the edit.
+ * Starts a run, keeping it going from the click; or stops the one running. With the rig's gains
+ * staged, it applies them first, through the same checks, all or none, and runs only if they
+ * applied: one press, so a run is never of the gains before the edit. Only its gains: other
+ * values staged in Tune, which can't be seen from here, stay staged.
  */
 async function runOrStop(name, view) {
   const run = robot.doc.run;
@@ -275,7 +302,8 @@ async function runOrStop(name, view) {
     if (!result.ok) say(result.problem.detail, true);
     return;
   }
-  if (pending().count > 0 && !(await apply())) return; // the apply bar says why
+  const gains = view.rig.gains;
+  if (pending(gains).count > 0 && !(await apply({ only: gains }))) return; // the bar says why
   starting = true;
   try {
     const result = await send("POST", "/api/experiments", { start: view.choice.value });
@@ -287,6 +315,36 @@ async function runOrStop(name, view) {
 
 function capital(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A value's name in code, steerKp; its configuration and path, for one not of this rig. */
+function nameOf(path) {
+  const value = robot.doc.tunables[path];
+  return value ? value.field.slice(value.field.lastIndexOf(".") + 1) : path;
+}
+
+function fullName(path) {
+  const value = robot.doc.tunables[path];
+  return value ? value.config + " " + value.field : path;
+}
+
+/**
+ * How far the run on a rig has got, by its samples' own times, and how long it has left: " · 0.8 s
+ * of 2.1 s, 1.3 s left". Empty before its first sample.
+ */
+function countdown(name) {
+  const run = robot.doc.run;
+  if (!run || run.rig !== name) return "";
+  const kept = runs.find((r) => r.key === runKey(robot.doc.robot.program, run.id));
+  const seconds = (robot.doc.experiments[run.experiment] || {}).seconds;
+  let elapsed = 0;
+  for (const series of Object.values((kept && kept.trace) || {})) {
+    if (series.t.length > 0) elapsed = Math.max(elapsed, series.t[series.t.length - 1]);
+  }
+  if (typeof seconds !== "number") return elapsed > 0 ? " · " + elapsed.toFixed(1) + " s" : "";
+  const left = Math.max(0, seconds - elapsed);
+  return " · " + elapsed.toFixed(1) + " s of " + seconds.toFixed(1) + " s, " + left.toFixed(1)
+      + " s left";
 }
 
 /** A rig's gain: as in Tune, except that it stays put while its run runs. */
@@ -316,19 +374,38 @@ function updateRig(name, view) {
   view.rows.forEach((row) => updateGain(view, row));
   const current = doc.run && doc.run.rig === name ? doc.run : null;
   const running = view.busy;
-  const staged = pending();
-  const blocked = staged.invalid.length + staged.outside.length > 0 || !doc.tuning.enabled;
-  view.runButton.className = running ? "big danger" : "big primary";
-  view.runButton.textContent = running ? "■ Stop  (Esc)"
-    : staged.count > 0 ? "Apply " + staged.count + " and run" : "▶ Run";
+  // Run applies the rig's staged gains first; anything else staged stays, and says so here.
+  const gains = view.rig.gains;
+  const own = pending(gains);
+  const others = edited().filter((path) => !gains.includes(path));
+  const lock = own.count > 0 ? whyLocked() : null;
+  const bad = [...own.invalid, ...own.outside];
+  view.runButton.className = "big " + (running ? "danger pinned" : "primary");
+  view.runButton.textContent = running ? "■ Stop  (Esc)" + countdown(name)
+    : own.count > 0 ? "Apply " + own.count + (own.big.length > 0 ? ", including "
+      + own.big.length + (own.big.length === 1 ? " big step," : " big steps,") : "") + " and run"
+    : "▶ Run";
   // Run is off beside the gate's own reason, and the mode now. Stop is never locked.
   const why = !robot.connected ? "Not connected to the robot." : doc.robot.experimentsLocked
     ? capital(doc.robot.experimentsLocked) + (doc.robot.mode ? ". Now: " + doc.robot.mode : "") + "."
     : null;
   view.gate.hidden = running || !why;
   view.gate.textContent = why ? "🔒 " + why : "";
-  view.runButton.disabled = !running && (Boolean(why) || (staged.count > 0 && blocked));
-  view.runButton.setAttribute("aria-describedby", view.gate.id);
+  view.runButton.disabled = !running && (Boolean(why) || bad.length > 0 || Boolean(lock));
+  replace(view.staged, running ? [] : [
+    bad.length > 0 && h("p", { class: "why" }, "✗ " + bad.map(nameOf).join(", ")
+        + (bad.length === 1 ? " is" : " are") + " outside " + (bad.length === 1 ? "its" : "their")
+        + " limits or not a number: fix " + (bad.length === 1 ? "it" : "them") + " to run."),
+    !why && lock && h("p", { class: "gatemsg" }, "🔒 " + lock),
+    own.big.length > 0 && h("p", { class: "big" }, "▲ " + own.big.map((step) =>
+      nameOf(step.path) + " " + shown(step.from) + " → " + shown(step.to) + ": "
+        + Math.round(step.share * 100) + "% of its range").join("; ")),
+    others.length > 0 && h("p", { class: "meta" }, others.length
+        + (others.length === 1 ? " other edit is" : " other edits are") + " staged in Tune ("
+        + others.map(fullName).join(", ") + "): Run leaves "
+        + (others.length === 1 ? "it" : "them") + " staged."),
+  ]);
+  view.runButton.setAttribute("aria-describedby", view.gate.id + " " + view.staged.id);
   const described = doc.experiments[view.choice.value];
   view.state.textContent = current
     ? `Run ${current.id}, ${current.experiment}: ${current.detail}`

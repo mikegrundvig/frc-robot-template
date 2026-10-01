@@ -76,7 +76,7 @@ function render(patch, snapshot) {
   if (snapshot || "changes" in patch) {
     const count = Object.keys(doc.changes).length;
     uncommitted.hidden = count === 0;
-    uncommitted.replaceChildren(h("b", null, "● " + count), " to commit");
+    uncommitted.replaceChildren(h("b", null, "● " + count), "to commit");
     uncommitted.title = count + (count === 1 ? " tuned value differs" : " tuned values differ")
         + " from the committed configuration: see Changes";
   }
@@ -132,16 +132,11 @@ export function tuningOffBanner(what) {
     banner.hidden = !doc || doc.tuning.enabled || doc.tuning.fieldConnected;
     button.disabled = !robot.connected;
   };
-  onChange(update);
+  onChange((patch, snapshot) => {
+    if (snapshot || "tuning" in patch) update();
+  });
   onConnection(update);
   return banner;
-}
-
-/** Why something that changes the robot can't be pressed now, or null while it can. */
-export function whyNotNow() {
-  if (!robot.connected) return "Not connected to the robot.";
-  if (robot.doc && robot.doc.tuning.fieldConnected) return "The field system is connected.";
-  return null;
 }
 
 function renderConnection(connected) {
@@ -230,7 +225,10 @@ function nextTheme() {
 function showTheme(chosen = theme()) {
   if (chosen === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = chosen;
-  themeButton.textContent = THEMES[chosen];
+  const [mark, word] = THEMES[chosen].split(" ");
+  themeButton.replaceChildren(h("span", { "aria-hidden": "true" }, mark),
+    h("span", { class: "word" }, " " + word));
+  themeButton.title = "Theme: " + word;
   themeButton.setAttribute("aria-label", "Theme: " + chosen + ". Change it.");
   document.dispatchEvent(new Event("pitwall-theme"));
 }

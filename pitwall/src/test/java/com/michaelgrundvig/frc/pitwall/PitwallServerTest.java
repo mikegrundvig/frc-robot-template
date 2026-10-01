@@ -145,12 +145,19 @@ class PitwallServerTest {
     var main = get("/page/main.js", "*/*");
     var styles = get("/page/pitwall.css", "*/*");
 
-    assertThat(get("/", "text/html").body()).contains("src=\"/page/main.js\"");
+    assertThat(get("/", "text/html").body())
+        .contains("src=\"/page/main.js\"", "src=\"/page/theme.js\"")
+        .as("the page runs no inline script")
+        .doesNotContain("<script>");
+    assertThat(get("/page/theme.js", "*/*").statusCode()).isEqualTo(200);
     assertThat(main.statusCode()).isEqualTo(200);
     assertThat(main.headers().firstValue("Content-Type"))
         .hasValue("text/javascript; charset=utf-8");
     assertThat(styles.headers().firstValue("Content-Type")).hasValue("text/css; charset=utf-8");
     assertThat(get("/page/nothing.js").statusCode()).isEqualTo(404);
+    assertThat(get("/page/" + "a".repeat(64) + ".js").statusCode())
+        .as("a name too long to be one of the page's")
+        .isEqualTo(404);
     assertThat(get("/page/%2E%2E/index.html").statusCode())
         .as("only a plain name, never a way out of page/")
         .isEqualTo(404);
@@ -160,7 +167,7 @@ class PitwallServerTest {
   /** A module a view imports but the jar lacks would leave the page blank: each one is here. */
   @Test
   void everyModuleThePageImportsIsServed() throws Exception {
-    Pattern imports = Pattern.compile("from \"\\./([a-z-]+\\.js)\"");
+    Pattern imports = Pattern.compile("from \"\\./([a-z][a-z0-9-]*\\.js)\"");
     List<String> seen = new ArrayList<>(List.of("main.js"));
     for (int i = 0; i < seen.size(); i++) {
       var module = get("/page/" + seen.get(i), "*/*");
@@ -578,7 +585,12 @@ class PitwallServerTest {
 
     assertThat(page.headers().firstValue("X-Frame-Options")).hasValue("DENY");
     assertThat(page.headers().firstValue("Content-Security-Policy"))
-        .hasValueSatisfying(policy -> assertThat(policy).contains("frame-ancestors 'none'"));
+        .hasValueSatisfying(
+            policy ->
+                assertThat(policy)
+                    .contains("frame-ancestors 'none'")
+                    .as("no inline script or style runs")
+                    .doesNotContain("unsafe-inline"));
     assertThat(page.headers().firstValue("X-Content-Type-Options")).hasValue("nosniff");
   }
 
@@ -611,7 +623,8 @@ class PitwallServerTest {
                 + "\"signals\":[{\"name\":\"Voltage\",\"unit\":\"V\"}]}},"
                 + "\"experiments\":{\""
                 + STEP
-                + "\":{\"rig\":\"Arm\",\"settings\":\"step and back, 0 ° to 90 °, held 0.8 s\"}}}");
+                + "\":{\"rig\":\"Arm\",\"settings\":\"step and back, 0 ° to 90 °, held 0.8 s\","
+                + "\"seconds\":2.1}}}");
   }
 
   @Test

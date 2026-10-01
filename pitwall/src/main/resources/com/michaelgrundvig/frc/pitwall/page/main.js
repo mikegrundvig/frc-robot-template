@@ -30,11 +30,31 @@ for (const view of views) {
   view.mount(section);
 }
 
-/** The view the address names, and the rest of the address after it: #tune/drivetrain/... */
-function route() {
-  const [id, ...rest] = decodeURIComponent(location.hash.slice(1)).split("/");
+/**
+ * The view the address names, and the rest of the address after it (#tune/drivetrain/...): Pit for
+ * an address that names no view offered here, or can't be read.
+ */
+function address() {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(location.hash.slice(1));
+  } catch (malformed) {
+    decoded = ""; // a stray "%" in a typed or pasted address
+  }
+  const [id, ...rest] = decoded.split("/");
   const known = views.find((view) => view.id === id && offered(view));
-  show(known || pit, known ? rest.join("/") : "");
+  return { view: known || pit, rest: known ? rest.join("/") : "" };
+}
+
+/**
+ * Goes where the address says, as someone asked (a link, a tab, Back, a reload): the view shows,
+ * and may focus what the rest of the address names. A snapshot never does this, so reconnecting
+ * never moves anyone's focus.
+ */
+function route() {
+  const { view, rest } = address();
+  show(view);
+  if (view.route) view.route(rest);
 }
 
 /** Whether a view is offered: the simulator's only in the simulator. */
@@ -42,7 +62,7 @@ function offered(view) {
   return !view.simulatorOnly || Boolean(robot.doc && robot.doc.robot.simulated);
 }
 
-function show(view, rest) {
+function show(view) {
   if (current !== view) {
     if (current && current.hide) current.hide();
     for (const [id, section] of sections) section.hidden = id !== view.id;
@@ -54,7 +74,6 @@ function show(view, rest) {
     if (view.show) view.show();
     showIn(view.id);
   }
-  if (view.route) view.route(rest);
 }
 
 const count = h("span", { class: "count", hidden: true });
@@ -69,9 +88,10 @@ onChange((patch, snapshot) => {
   }
   if (snapshot || "robot" in patch) {
     for (const view of views) tabs.get(view.id).hidden = !offered(view);
-    // The address may name a view offered only now, such as #sim, or one no longer offered.
-    const named = views.find((view) => view.id === location.hash.slice(1).split("/")[0]);
-    if ((named || pit) !== current || snapshot) route();
+    // The address may name a view offered only now, such as #sim, or one no longer offered: only
+    // then does the view change, and nothing is focused.
+    const { view } = address();
+    if (view !== current) show(view);
   }
 });
 
@@ -94,5 +114,5 @@ document.addEventListener("keydown", async (event) => {
 });
 
 window.addEventListener("hashchange", route);
-route();
 connect();
+route();

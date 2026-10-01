@@ -50,6 +50,14 @@ import org.wpilib.units.Units;
  * #candidate} before applying anything, and gives every reason on the page; without Pitwall, a
  * refused value is quietly declined, and the dashboard shows the value in effect again.
  *
+ * <p>A record refuses a value by throwing from its constructor, with a message the page can tie to
+ * the value: one line for each value it rejects, {@code "where: what"}, where names the value from
+ * the record that checked it, by its simple name and its path there ({@code Gains.steerKd}, or
+ * {@code SwerveConfig.limits.maxLinearSpeed} for a check across records). A record with a name of
+ * its own puts it in brackets ({@code CameraConfig[front].tiltUp}). The page shows each line beside
+ * its value; a line that names no tunable value (a check of the record as a whole) shows beside the
+ * change's values in that record. Any message refuses the change; this form only places it.
+ *
  * <p>Nothing is saved on the robot. {@link #changes()} lists what differs from the committed
  * configuration, each with the builder call that commits it.
  *

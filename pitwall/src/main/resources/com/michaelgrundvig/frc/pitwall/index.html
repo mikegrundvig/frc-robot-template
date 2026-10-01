@@ -12,15 +12,7 @@
 <title>Pitwall</title>
 <link rel="stylesheet" href="/uPlot.min.css">
 <link rel="stylesheet" href="/page/pitwall.css">
-<script>
-  // The theme chosen here, before anything is drawn, so a dark page never flashes light.
-  try {
-    const theme = localStorage.getItem("pitwall.theme");
-    if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
-  } catch (error) {
-    // Storage is off in this browser: the system's theme.
-  }
-</script>
+<script src="/page/theme.js"></script>
 <script src="/uPlot.iife.min.js"></script>
 <script type="module" src="/page/main.js"></script>
 </head>

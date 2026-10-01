@@ -9,7 +9,7 @@ import { robot, shown, h, go, withUnit } from "./core.js";
 import { described, edit } from "./edits.js";
 
 /** Text as the documentation lays it out: paragraphs, "- " list items, and `code` spans. */
-export function prose(text) {
+function prose(text) {
   const blocks = [];
   for (const paragraph of String(text).split(/\n\s*\n/)) {
     const lines = paragraph.split("\n");

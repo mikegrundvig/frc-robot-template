@@ -9,18 +9,21 @@ import {
 } from "./edits.js";
 import { firstSentence, nameOf } from "./docs.js";
 
+/** Element ids, each its own: a path made into an id could match another's. */
+let ids = 0;
+
 /**
  * Makes a value's row.
  *
  * @param path the value's tunable path, such as /Drive/config/gains/steerKp
- * @param context which view it's in ("tune", "exp"), so its elements' ids stay apart
+ * @param context which view it's in ("tune", "exp")
  * @param options {select(row, how)}: called when the row is asked what it means, by its name
  *     ("name"), by focusing it ("focus"), or with "?" in its value ("key")
  */
 export function makeRow(path, context, options = {}) {
   const value = described(path);
   const name = nameOf(value);
-  const id = context + "-" + path.replace(/[^a-zA-Z0-9]/g, "-");
+  const id = context + "-" + ++ids;
   const row = { path, name };
   const select = (how) => options.select && options.select(row, how);
   row.nameButton = h("button", { type: "button", class: "link name",
@@ -158,7 +161,7 @@ export function updateRow(row) {
  * diamond, the value now a dot, an edit a ring (square, outside the limits). The limits' text is
  * what a screen reader says, so the bar is left out of it.
  */
-export function makeRange() {
+function makeRange() {
   const range = {
     committed: h("div", { class: "mk c", title: "committed" }),
     now: h("div", { class: "mk cur", title: "now" }),
@@ -173,7 +176,7 @@ export function makeRange() {
 }
 
 /** Places the marks on a range bar; hides it for a value not limited at both ends. */
-export function placeRange(range, value, now, edited) {
+function placeRange(range, value, now, edited) {
   const limited = typeof value.min === "number" && typeof value.max === "number"
       && value.max > value.min;
   range.el.hidden = !limited;
@@ -192,7 +195,7 @@ export function placeRange(range, value, now, edited) {
 }
 
 /** Who refused a change, as the row says it: "its tuning limits", "SwerveConfig.Gains's check". */
-export function refuser(reason) {
+function refuser(reason) {
   switch (reason.layer) {
     case "limit": return "its tuning limits";
     case "record": return (reason.by || "its record") + "'s own check";

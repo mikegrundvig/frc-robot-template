@@ -141,10 +141,10 @@ public final class PitwallServer implements AutoCloseable {
 
   /**
    * The page's own files besides index.html: a script module for its core and one for each view,
-   * and its styles, in {@code page/} beside it. A plain name and nothing else, so no request can
-   * reach any other resource.
+   * and its styles, in {@code page/} beside it. A short plain name and nothing else, so no request
+   * can reach any other resource.
    */
-  private static final Pattern PAGE_FILE = Pattern.compile("/page/[a-z][a-z0-9-]*\\.(js|css)");
+  private static final Pattern PAGE_FILE = Pattern.compile("/page/[a-z][a-z0-9-]{0,31}\\.(js|css)");
 
   /** The header a page names its event stream in, so the deadman knows who's asking. */
   static final String STREAM = "Pitwall-Stream";
@@ -354,8 +354,11 @@ public final class PitwallServer implements AutoCloseable {
     private final String page;
     private final Map<String, byte[]> bundled;
 
-    /** The page's files, read once each as first asked for: they never change while it runs. */
-    private final Map<String, Optional<byte[]>> pageFiles = new ConcurrentHashMap<>();
+    /**
+     * The page's files, each read once, as first asked for: they never change while it runs. Only
+     * files found are kept, so a stranger asking for names that don't exist fills nothing.
+     */
+    private final Map<String, byte[]> pageFiles = new ConcurrentHashMap<>();
 
     private final Duration wait;
     private final Duration idle;
@@ -882,10 +885,13 @@ public final class PitwallServer implements AutoCloseable {
      */
     private void sendPageFile(HttpExchange exchange, String path) throws IOException {
       String name = path.substring("/page/".length());
-      byte[] file =
-          pageFiles
-              .computeIfAbsent(name, PitwallServer::pageFile)
-              .orElseThrow(() -> new Problem(404, "Not found", "There is nothing at " + path));
+      byte[] file = pageFiles.get(name);
+      if (file == null) {
+        file =
+            pageFile(name)
+                .orElseThrow(() -> new Problem(404, "Not found", "There is nothing at " + path));
+        pageFiles.putIfAbsent(name, file);
+      }
       headers(exchange, name.endsWith(".css") ? "text/css" : "text/javascript");
       exchange.sendResponseHeaders(200, file.length);
       try (OutputStream out = exchange.getResponseBody()) {
@@ -948,14 +954,12 @@ public final class PitwallServer implements AutoCloseable {
       exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
       // The page may not be framed by another site's page (to trick a click on its buttons), and
-      // loads nothing from anywhere else.
+      // loads nothing from anywhere else. It runs no inline script or style: what a robot's text
+      // could slip into the page (it's always set as text) couldn't run.
       exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
       exchange
           .getResponseHeaders()
-          .set(
-              "Content-Security-Policy",
-              "default-src 'self'; script-src 'self' 'unsafe-inline';"
-                  + " style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
+          .set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'");
       exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
       exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
     }

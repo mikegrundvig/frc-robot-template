@@ -4,13 +4,14 @@
 // listed here, grouped by the check that gave it, each a way to its value; the same reasons show
 // beside the values.
 //
-// A big step changes the bar, and nothing pops up (decided): while any staged edit moves its value
-// by more than a quarter of its tuning range, the bar turns to a warning, names each, and its
-// button says so. One press still applies everything: the warning is there from the moment the
-// edit is staged, not sprung at the press.
+// A big step changes the bar, and nothing pops up: while any staged edit moves its value by more
+// than a quarter of its tuning range, the bar turns to a warning, names each, and its button says
+// so. One press still applies everything, as for any change: the warning is there from the moment
+// the edit is staged, not sprung at the press, and a second press would only teach people to press
+// twice.
 
 import { robot, onChange, onConnection, h, byId, go, replace, shown } from "./core.js";
-import { onEdits, pending, apply, discard, closeRefusal, outcome } from "./edits.js";
+import { onEdits, pending, apply, discard, closeRefusal, outcome, whyLocked } from "./edits.js";
 import { setTuning } from "./bar.js";
 
 /** The views it shows in: those with values to stage. */
@@ -71,9 +72,7 @@ function render() {
   const ready = Object.keys(changes).length;
   const session = robot.doc.tuning;
   // Why nothing can be applied now, said where the edits wait, with the way out when there's one.
-  const lock = !robot.connected ? "Not connected to the robot: the edits wait here."
-    : session.fieldConnected ? "The field system is connected: nothing can change."
-    : !session.enabled ? "Tuning is off: switch it on to apply them." : null;
+  const lock = whyLocked();
   const blocked = invalid.length + outside.length;
   replace(what, h("b", null, count + (count === 1 ? " edit" : " edits")),
     " staged, applied together or not at all.",
@@ -90,9 +89,9 @@ function render() {
     h("b", null, "▲ " + (big.length === 1 ? "A big step" : big.length + " big steps") + ": "),
     big.map((step, index) => {
       const value = robot.doc.tunables[step.path];
-      const name = value.field.slice(value.field.lastIndexOf(".") + 1);
-      return [index > 0 ? "; " : "", h("span", { class: "mono" }, name), " " + shown(step.from)
-          + " → " + shown(step.to) + ": " + Math.round(step.share * 100) + "% of its range"];
+      return [index > 0 ? "; " : "", h("span", { class: "mono" }, value.config + " " + value.field),
+        " " + shown(step.from) + " → " + shown(step.to) + ": " + Math.round(step.share * 100)
+          + "% of its range"];
     }),
     ". More than a quarter of a value's tuning range: check it before applying."]);
   switchOn.hidden = !(robot.connected && !session.enabled && !session.fieldConnected);
@@ -130,13 +129,9 @@ function refused(refusal) {
   ];
 }
 
-/** The values a reason concerns, each a way to it in Tune; its record, when it names none. */
+/** The values a reason concerns, each a way to it in Tune. */
 function where(error) {
-  const paths = error.paths || [];
-  if (paths.length === 0) {
-    return h("span", { class: "mono" }, error.config + (error.group ? " " + error.group : ""));
-  }
-  return paths.flatMap((path, index) => {
+  return (error.paths || []).flatMap((path, index) => {
     const value = robot.doc.tunables[path];
     if (!value) return [index > 0 ? ", " : "", h("span", { class: "mono" }, path)];
     const hash = "#tune/" + value.config + "/" + value.field;

@@ -1,4 +1,4 @@
-/* Pitwall's page: its look (docs/design/pitwall-ui.md, Visual system).
+/* Pitwall's page: its look.
 
    Colors are tokens, light by default and dark when the system is (or when the theme choice in the
    state bar says so). Every text color is at least 4.5:1 on its background in both themes. Edited,
@@ -60,6 +60,12 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .5);
 }
 @media (pointer: coarse) { :root { --row: 44px; } }
+/* On a touch screen, everything pressed is at least 44 px tall: a finger, standing, one hand. */
+@media (pointer: coarse) {
+  button, input, select, .chip, .tab, .mode, .uncommitted { min-height: 44px; }
+  button.link { min-height: 44px; }
+  .switch { min-height: 44px; }
+}
 
 /* ---- Basics ---- */
 
@@ -139,10 +145,17 @@ input[readonly] { background: var(--surface-2); }
 .pill.on { border-color: var(--ok); color: var(--ok); }
 .pill.locked { border-color: var(--lock); color: var(--lock); background: var(--lock-tint); }
 .pill button { min-height: 26px; padding: 2px 10px; border-radius: 999px; font-size: 14px; }
-@media (pointer: coarse) { .pill button { min-height: 36px; } }
+@media (pointer: coarse) { .pill button { min-height: 44px; } }
 .uncommitted { font-weight: 600; color: inherit; text-decoration: none; }
 .uncommitted b { color: var(--tuned); }
 .theme { font-size: 14px; }
+.mode, .uncommitted { display: inline-flex; align-items: center; gap: .3em; }
+/* Below a wide laptop, the bar keeps to one line: the code (in Pit's status too) goes, and the
+   theme button is its mark alone. */
+@media (max-width: 1099px) {
+  .bar .code { display: none; }
+  .theme .word { display: none; }
+}
 @media (max-width: 719px) {
   .bar { padding: var(--s2) var(--s3); gap: 6px 10px; }
   .bar .code, .bar .theme { display: none; }
@@ -263,8 +276,6 @@ table { border-collapse: collapse; }
            padding: 10px 2px 6px; }
 .group-h .meta { font-weight: 400; }
 .group-h .gsum { flex: 1 1 100%; font-weight: 400; font-size: var(--meta); color: var(--muted); }
-.group-note { font-size: 14px; color: var(--bad); font-weight: 600; padding: 0 2px 6px; }
-.group-note span { font-weight: 400; color: var(--text); }
 
 /* A value's row: its name and meaning; the value, unit, and nudges; its limits; its committed
    value. The bar at its left edge, a mark, and a word say its state. */
@@ -309,7 +320,8 @@ table { border-collapse: collapse; }
 .note .else { color: var(--text-2); }
 .note .big { color: var(--warn); font-weight: 600; }
 .row > .docs-inline { grid-area: docs; }
-@container rows (max-width: 640px) {
+/* A row stacks once its four parts no longer fit side by side, the value's nudges included. */
+@container rows (max-width: 760px) {
   .row { grid-template-columns: minmax(0, 1fr) auto;
          grid-template-areas: "name name" "value value" "range committed" "note note" "docs docs"; gap: 6px var(--s3); }
   .meaning { white-space: normal; }
@@ -395,6 +407,14 @@ table { border-collapse: collapse; }
 .runbox .gatemsg { margin: var(--s2) 0 0; font-size: 14px; color: var(--lock); font-weight: 600; }
 .runbox .dead { margin: var(--s2) 0 0; font-size: var(--meta); color: var(--muted); }
 .runbox .state { margin: var(--s2) 0 0; font-size: 14px; }
+.staged-note p { margin: var(--s2) 0 0; font-size: 14px; }
+.staged-note .why { color: var(--bad); font-weight: 600; }
+.staged-note .big { color: var(--warn); font-weight: 600; }
+/* On a phone, Stop is pinned full width above the tabs while a run runs: it's always in reach. */
+@media (max-width: 719px) {
+  .runbox button.pinned { position: fixed; z-index: 5; left: var(--s3); right: var(--s3); width: auto;
+                          bottom: calc(64px + env(safe-area-inset-bottom)); box-shadow: var(--shadow); }
+}
 .plot { min-height: 280px; }
 .plot .notice { padding: 40px var(--s3); text-align: center; }
 .plotbar { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; justify-content: space-between; }
@@ -416,6 +436,9 @@ table { border-collapse: collapse; }
 .report h3 { font-size: var(--body); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
 .report .where { font-size: var(--meta); color: var(--text-2); margin: 2px 0 4px; }
 .hist { list-style: none; margin: 0; padding: 0; }
+.copybox { margin-top: var(--s3); display: grid; gap: var(--s2); }
+.copyarea { width: 100%; font-family: var(--mono); font-size: var(--meta); }
+.offscreen { position: fixed; left: -9999px; top: 0; }
 .hist li { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) auto; gap: 4px var(--s3); padding: var(--s2) 0;
            border-bottom: 1px solid var(--line); align-items: baseline; }
 .hist li:last-child { border-bottom: none; }

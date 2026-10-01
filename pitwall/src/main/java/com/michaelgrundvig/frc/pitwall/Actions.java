@@ -73,11 +73,21 @@ public final class Actions {
   public record Gate(boolean enabled, boolean utility, boolean fieldConnected) {
     /** Why actions can't run now, or null when they can. */
     @Nullable String whyNot() {
+      return whyNot("actions");
+    }
+
+    /**
+     * Why what the gate holds can't run now, or null when it can: one rule for actions and
+     * experiments alike, said for each.
+     *
+     * @param what what's held, as the reason names it: "actions", "experiments"
+     */
+    public @Nullable String whyNot(String what) {
       if (fieldConnected) {
         return "the field system is connected";
       }
       if (!enabled || !utility) {
-        return "actions run only with the robot enabled in utility mode";
+        return what + " run only with the robot enabled in utility mode";
       }
       return null;
     }

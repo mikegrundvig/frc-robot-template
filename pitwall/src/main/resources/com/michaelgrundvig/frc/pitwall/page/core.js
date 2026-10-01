@@ -41,10 +41,11 @@ export function onConnection(listener) {
 }
 
 /** A JSON merge patch (RFC 7396): what changed, with null for what's gone. */
-export function merge(target, patch) {
+function merge(target, patch) {
   if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;
   if (target === null || typeof target !== "object" || Array.isArray(target)) target = {};
   for (const [key, value] of Object.entries(patch)) {
+    if (key === "__proto__") continue; // a key JSON may carry, and an object mustn't take
     if (value === null) delete target[key];
     else target[key] = merge(target[key], value);
   }
@@ -220,9 +221,14 @@ export function go(hash) {
 }
 
 /**
- * Replaces an element's children, but only when they differ: a part updated with nothing new keeps
- * its elements, so a button isn't rebuilt between a press and its release. (Comparing markup reads
- * it; nothing is ever written as HTML.)
+ * Replaces an element's children, but only when their markup differs: a part updated with nothing
+ * new keeps its elements, so a button isn't rebuilt between a press and its release. (Comparing
+ * markup reads it; nothing is ever written as HTML.)
+ *
+ * <p>The rule that follows: what the markup doesn't show isn't compared, so new elements whose
+ * markup matches the old are thrown away, their handlers with them. A handler given here must
+ * therefore read what it needs when it runs (from {@link robot}, or a data- attribute), not from
+ * what was current when it was made.
  */
 export function replace(element, ...children) {
   const next = children.flat(Infinity).filter((child) => child !== null && child !== undefined
@@ -274,11 +280,15 @@ export function confirm(title, body, yes) {
 let toastTimer = null;
 
 /**
- * Says what became of something done here: always to a screen reader, and on screen for a while
- * when it went wrong (a refusal of the request, say), since the page then looks as it did before.
+ * Says what became of something done here: to a screen reader, and on screen for a while when it
+ * went wrong (a refusal of the request, say), since the page then looks as it did before.
+ *
+ * @param bad whether it went wrong: shown as well as read out
+ * @param urgent read out at once, interrupting: for a lock, a lost link, or a run stopped; a result
+ *     (applied, refused) is read out when the reader is free
  */
-export function say(text, bad = false) {
-  announce(text, bad);
+export function say(text, bad = false, urgent = false) {
+  announce(text, urgent);
   if (!bad) return;
   const toast = byId("toast");
   toast.replaceChildren(h("span", null, "✗ " + text),

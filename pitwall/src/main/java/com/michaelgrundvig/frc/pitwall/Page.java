@@ -379,12 +379,14 @@ public final class Page {
     return shown;
   }
 
+  /** Each experiment's rig, its settings, and how long it runs, for the page to count down. */
   private Map<String, Object> experimentList() {
     Map<String, Object> shown = new LinkedHashMap<>();
     for (Experiment experiment : experiments.experiments()) {
-      shown.put(
-          experiment.name(),
-          pair("rig", experiment.rig().name(), "settings", experiment.settings()));
+      Map<String, Object> described =
+          pair("rig", experiment.rig().name(), "settings", experiment.settings());
+      described.put("seconds", experiment.profile().durationSeconds());
+      shown.put(experiment.name(), described);
     }
     return shown;
   }

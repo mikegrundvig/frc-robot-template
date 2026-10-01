@@ -1,11 +1,19 @@
 // Edits to configuration values: typed (or staged by a button) here, then applied together, checked
 // whole on the robot, all or none. Tune and Experiment share them, so a value staged in one shows
 // staged in the other, and the apply bar counts them all.
+//
+// An edit is staged against the robot program it was typed for. When that program is gone (a
+// redeploy) or the field connects (a match runs the committed configuration), the edits no longer
+// mean what they did: they move into the session's history, where Restore stages them again.
 
 import { robot, onChange, send, shown, say, announce, near } from "./core.js";
-import { expect, record } from "./history.js";
+import { expect, record, recordWhenSeen } from "./history.js";
 
-/** What's staged, by the value's tunable path: the text as typed, so a typo stays to be fixed. */
+/**
+ * What's staged, by the value's tunable path: {text} as typed, so a typo stays to be fixed; the
+ * {program} it was staged against; and, for the history, the value's {config}, {field}, and what
+ * it was ({from}).
+ */
 const staged = new Map();
 const listeners = [];
 
@@ -38,19 +46,41 @@ export function described(path) {
 }
 
 /**
- * Stages what was typed for a value. Typing the value it has already ("16" for 16.0) stages
- * nothing: numbers are compared, not text.
+ * Whether text is the value a configuration value has now: the same number ("16" for 16.0), or
+ * what the page shows for it ("2.53771" for 2.537712345), which retyped is no edit.
  */
+function same(text, now) {
+  const trimmed = String(text).trim();
+  if (typeof now !== "number" || trimmed === "") return false;
+  const number = Number(trimmed);
+  return trimmed === shown(now) || (Number.isFinite(number) && near(number, now));
+}
+
+/** Stages what was typed for a value; what it has already stages nothing. */
 export function stage(path, text) {
-  const number = Number(String(text).trim());
-  const now = robot.doc.values[path];
-  if (String(text).trim() !== "" && Number.isFinite(number) && near(number, now)) {
+  put(path, String(text));
+  changed();
+}
+
+/**
+ * Stages a number for a value, exactly: a value's committed number, a run's gain, or one from the
+ * history, staged as itself (String round-trips a double), so applying it gives that very number.
+ */
+export function stageNumber(path, number) {
+  stage(path, String(number));
+}
+
+function put(path, text) {
+  const doc = robot.doc;
+  const value = described(path);
+  if (!value || same(text, doc.values[path])) {
     staged.delete(path);
   } else {
-    staged.set(path, String(text));
+    const kept = staged.get(path);
+    staged.set(path, { text, program: doc.robot.program, config: value.config, field: value.field,
+                       from: kept ? kept.from : doc.values[path] });
   }
   forget(path);
-  changed();
 }
 
 /**
@@ -77,25 +107,17 @@ export function closeRefusal() {
   changed();
 }
 
-/** Stages a number for a value, as people write it. */
-export function stageNumber(path, number) {
-  stage(path, shown(Number(number.toPrecision(6))));
-}
-
 /**
- * Stages several values at once, {path: number}, such as a run's gains or what a history entry
- * changed: those still tunable, each as people write it.
+ * Stages several values at once, {path: number}, exactly, such as a run's gains or what a history
+ * entry changed: those still tunable.
  *
  * @return how many were staged
  */
 export function stageAll(values) {
   let count = 0;
   for (const [path, number] of Object.entries(values)) {
-    if (!(path in robot.doc.values) || typeof number !== "number") continue;
-    const now = robot.doc.values[path];
-    if (near(number, now)) staged.delete(path);
-    else staged.set(path, shown(Number(number.toPrecision(6))));
-    forget(path);
+    if (!described(path) || typeof number !== "number") continue;
+    put(path, String(number));
     count++;
   }
   changed();
@@ -120,17 +142,18 @@ export function discard() {
  * reads as a number; {isEdit} when that differs from the value now; {outside}, why it's outside
  * the value's tuning limits, checked here before sending (the robot checks again); and {share}
  * and {big}, how far it moves the value as a share of its limits' span, and whether that's a big
- * step, more than a quarter of it.
+ * step.
  */
 export function edit(path) {
-  const text = staged.has(path) ? staged.get(path) : null;
-  if (text === null) return { text: null, valid: true, isEdit: false };
+  const entry = staged.get(path);
+  if (!entry) return { text: null, valid: true, isEdit: false };
+  const text = entry.text;
   const trimmed = text.trim();
   const number = Number(trimmed);
   const valid = trimmed !== "" && Number.isFinite(number);
   if (!valid) return { text, valid: false, isEdit: true };
   const now = robot.doc.values[path];
-  const isEdit = now === undefined || !near(number, now);
+  const isEdit = !same(text, now);
   const value = described(path);
   const outside = value ? whyOutside(number, value) : null;
   const span = value && typeof value.min === "number" && typeof value.max === "number"
@@ -140,9 +163,9 @@ export function edit(path) {
 }
 
 /**
- * A big step: a quarter of a value's tuning range (decided). Measured against the range, not the
- * value now, so zeroing a gain, or editing one committed as zero, never misfires; a value with no
- * range has no big steps.
+ * A big step moves a value by more than a quarter of its tuning range (its limits' span). Measured
+ * against the range, not the value now, so zeroing a gain, or editing one committed as zero, never
+ * misfires; a value without limits at both ends has no range, so no big steps.
  */
 const BIG = 0.25;
 
@@ -158,61 +181,93 @@ function whyOutside(number, value) {
 }
 
 /**
- * Everything staged: {changes} to send, {path: number}; {invalid}, the paths whose text isn't a
- * number; {outside}, those outside their limits; {big}, the big steps; and {count}, how many
- * edits there are.
+ * What's staged, or just the values named: {changes} to send, {path: number}; {invalid}, the paths
+ * whose text isn't a number; {outside}, those outside their limits; {big}, the big steps; and
+ * {count}, how many edits there are.
+ *
+ * @param only the paths to count, or null for every staged edit
  */
-export function pending() {
+export function pending(only = null) {
   const changes = {};
   const invalid = [];
   const outside = [];
   const big = [];
   for (const path of staged.keys()) {
-    if (!(path in robot.doc.values)) continue; // no longer tunable: a redeploy took it away
+    if (only && !only.includes(path)) continue;
+    if (!(path in robot.doc.values)) continue;
     const state = edit(path);
     if (!state.isEdit) continue;
     if (!state.valid) invalid.push(path);
     else if (state.outside) outside.push(path);
     else changes[path] = state.number;
-    if (state.big) big.push({ path, from: robot.doc.values[path], to: state.number, share: state.share });
+    if (state.big) {
+      big.push({ path, from: robot.doc.values[path], to: state.number, share: state.share });
+    }
   }
   return { changes, invalid, outside, big,
            count: Object.keys(changes).length + invalid.length + outside.length };
 }
 
+/** The values with an edit staged, in the order they were staged. */
+export function edited() {
+  return [...staged.keys()].filter((path) => path in robot.doc.values && edit(path).isEdit);
+}
+
 /**
- * Nudges a value a step: a tenth of itself (or of its edit), up or down, which is how gains get
- * tuned, and quicker than typing on a phone. At zero, a hundredth of its limits' span. Kept within
- * its limits.
+ * Nudges a value a step: a tenth of its size (or of its edit's), up or down, which is how gains get
+ * tuned, and quicker than typing on a phone. At zero, a hundredth of its limits' span. Rounded to
+ * four figures, then kept within its limits.
  *
  * @param direction 1 for up, -1 for down
  */
 export function nudge(path, direction) {
   const value = described(path);
+  if (!value) return;
   const state = edit(path);
   const base = state.valid && state.text !== null ? state.number : robot.doc.values[path];
   const span = typeof value.min === "number" && typeof value.max === "number"
     ? value.max - value.min : 0;
-  let next = base === 0 ? direction * (span > 0 ? span / 100 : 0.1) : base * (1 + direction * 0.1);
+  let next = base === 0 ? direction * (span > 0 ? span / 100 : 0.1)
+    : base + direction * Math.abs(base) * 0.1;
+  next = Number(next.toPrecision(4));
   if (typeof value.min === "number") next = Math.max(value.min, next);
   if (typeof value.max === "number") next = Math.min(value.max, next);
-  stage(path, shown(Number(next.toPrecision(4))));
+  stage(path, shown(next));
 }
 
 /**
- * Applies every staged edit, all or none. The robot checks them whole (each value's limits, its
- * configuration's records, the robot's rules) and either applies all of them or none, saying why.
- * The session's history records what it applied.
+ * Why nothing can be applied now, in words for beside the edits; null while it can. The robot
+ * would refuse it anyway: saying so here keeps a press from looking like it did something.
+ */
+export function whyLocked() {
+  if (!robot.connected) return "Not connected to the robot: the edits wait here.";
+  if (!robot.doc) return "The robot hasn't sent its values yet.";
+  if (robot.doc.tuning.fieldConnected) return "The field system is connected: nothing can change.";
+  if (!robot.doc.tuning.enabled) return "Tuning is off: switch it on to apply.";
+  return null;
+}
+
+/**
+ * Applies the staged edits, all or none: every one, or with {@code only}, just those values (a
+ * rig's gains, for its run). The robot checks them whole (each value's limits, its configuration's
+ * records, the robot's rules) and either applies all of them or none, saying why. The session's
+ * history records what it applied.
  *
- * @param source where the history says it came from
+ * @param options {only}: the paths to apply, or every staged edit; {source}: where the history
+ *     says it came from
  * @return whether they were applied
  */
-export async function apply(source = "this page") {
-  const { changes, invalid, outside } = pending();
-  if (invalid.length > 0 || outside.length > 0 || Object.keys(changes).length === 0
-      || outcome.applying) {
+export async function apply({ only = null, source = "this page" } = {}) {
+  if (outcome.applying) return false;
+  const lock = whyLocked();
+  if (lock) {
+    say(lock, true, true);
     return false;
   }
+  const { changes, invalid, outside } = pending(only);
+  if (invalid.length > 0 || outside.length > 0 || Object.keys(changes).length === 0) return false;
+  // What was sent, as typed: an edit retyped while the robot answers stays staged.
+  const sent = new Map(Object.keys(changes).map((path) => [path, staged.get(path).text]));
   outcome.applying = true;
   outcome.refusal = null;
   changed();
@@ -221,41 +276,80 @@ export async function apply(source = "this page") {
   outcome.applying = false;
   const count = Object.keys(changes).length;
   if (result.status === 202) {
-    // The robot loop didn't answer in time: the edits stay staged, and each stops counting as one
-    // once the robot has its value.
+    // The robot loop didn't answer in time: the edits stay staged, each dropped as the robot is
+    // seen to have its value, and recorded then.
+    recordWhenSeen(source, items);
     say("Queued: the robot will apply it on its next loop, or refuse it.");
     changed();
     return false;
   }
   if (result.ok) {
-    for (const path of Object.keys(changes)) staged.delete(path);
+    for (const [path, text] of sent) {
+      if (staged.has(path) && staged.get(path).text === text) staged.delete(path);
+    }
     record(source, "apply", items);
     say("Applied " + count + (count === 1 ? " change." : " changes."));
     changed();
     return true;
   }
   if (result.status === 0) {
-    say(result.problem.detail, true); // not answering: nothing to show beside the values
+    say(result.problem.detail, true, true); // not answering: nothing to show beside the values
     changed();
     return false;
   }
   // Shown above the apply bar, and each reason beside its value: the edits stay staged, so fixing
-  // one and applying again is the whole loop.
+  // one and applying again is the whole loop. A refusal is a result, read out politely; a lock is
+  // read out at once.
   outcome.refusal = { status: result.status, ...result.problem };
   const reasons = (result.problem.errors || []).length;
   announce(result.status === 422
     ? "Refused: nothing changed. " + reasons + (reasons === 1 ? " reason." : " reasons.")
-    : "Nothing changed. " + (result.problem.detail || result.problem.title), true);
+    : "Nothing changed. " + (result.problem.detail || result.problem.title), result.status === 409);
   changed();
   return false;
 }
 
-// A staged value that changes on the robot may now match its edit (another page applied the same),
-// and is then no edit at all: the rows and the apply bar recount. Other changes don't concern them.
-onChange((patch, snapshot) => {
-  if (staged.size === 0) return;
-  if (snapshot || "tunables" in patch
-      || ("values" in patch && Object.keys(patch.values).some((path) => staged.has(path)))) {
-    changed();
+/**
+ * Moves staged edits that no longer mean what they did into the history, where Restore stages them
+ * again, and drops them.
+ */
+function lose(paths, why) {
+  const items = [];
+  for (const path of paths) {
+    const entry = staged.get(path);
+    const number = Number(entry.text.trim());
+    if (entry.text.trim() !== "" && Number.isFinite(number)) {
+      items.push({ path, config: entry.config, field: entry.field, from: entry.from, to: number });
+    }
+    staged.delete(path);
   }
+  record("staged, not applied, " + why, "staged", items);
+  say(paths.length === 1 ? "A staged edit was set aside " + why + ": stage it again from Changes."
+    : paths.length + " staged edits were set aside " + why + ": stage them again from Changes.",
+  true, true);
+}
+
+onChange((patch, snapshot) => {
+  const doc = robot.doc;
+  // Edits staged against a program that's gone, or before the field connected, don't carry over.
+  if (snapshot) {
+    const stale = [...staged].filter(([, entry]) => entry.program !== doc.robot.program)
+      .map(([path]) => path);
+    if (stale.length > 0) {
+      outcome.refusal = null; // about the old program's values
+      lose(stale, "before the robot restarted");
+    }
+  }
+  if (doc.tuning.fieldConnected && staged.size > 0) {
+    lose([...staged.keys()], "as the field connected");
+  }
+  // A staged value the robot now has (this page's queued apply, or another page's) is no edit.
+  let touched = snapshot || "tunables" in patch || "tuning" in patch;
+  for (const [path, value] of Object.entries(patch.values || {})) {
+    const entry = staged.get(path);
+    if (!entry) continue;
+    touched = true;
+    if (same(entry.text, value)) staged.delete(path);
+  }
+  if (touched) changed();
 });

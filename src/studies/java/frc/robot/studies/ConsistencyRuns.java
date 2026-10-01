@@ -145,21 +145,22 @@ final class ConsistencyRuns {
               }),
           named(
               "camera-low",
-              "The route four times.",
+              "The route four times, then 3 s standing.",
               robot -> {
                 robot.route(4);
                 robot.stand(3);
               }),
           named(
               "camera-turned",
-              "The route four times.",
+              "The route four times, then 3 s standing.",
               robot -> {
                 robot.route(4);
                 robot.stand(3);
               }),
           new Run(
               "camera-turned-4",
-              "The robot's first camera turned 4° on its mount. Driving the route four times.",
+              "The robot's first camera turned 4° on its mount. The route four times, then 3 s"
+                  + " standing.",
               Scenario.builder()
                   .name("camera-turned-4")
                   .description("The robot's first camera turned 4° on its mount.")
@@ -178,8 +179,8 @@ final class ConsistencyRuns {
               }),
           new Run(
               "tag-moved",
-              "Tag 26, on the blue hub's face toward the route, moved 4 in along the field. Driving"
-                  + " the route four times.",
+              "Tag 26, on the blue hub's face toward the route, moved 4 in along the field. The"
+                  + " route four times, then 3 s standing.",
               Scenario.builder()
                   .name("tag-moved")
                   .description("Tag 26 moved 4 in along the field.")

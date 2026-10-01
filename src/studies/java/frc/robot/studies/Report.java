@@ -66,8 +66,9 @@ final class Report {
     }
     md.append(
         "\n*Ranked by* the position error 95% of the field is within, from one set of images with"
-            + " the robot standing still: smaller is better, and a tie to the millimeter goes to"
-            + " fewer cameras. *None* means more than 5% of the field gets no measurement at all."
+            + " the robot standing still: smaller is better, errors that round to the same"
+            + " millimeter tie, and a tie goes to fewer cameras. *None* means more than 5% of the"
+            + " field gets no measurement at all."
             + " Every score is explained in docs/camera-placement.md.\n");
 
     md.append("\n## The best\n\n").append(HEADER);
@@ -111,9 +112,10 @@ final class Report {
     md.append(
         format(
             "%n*Ranked by* the worst of %d trials' 95%% error, each trial's conditions drawn from"
-                + " the plausible ranges in docs/camera-placement.md: smaller is better, a tie to"
-                + " the millimeter goes to fewer cameras. *None* means more than 5%% of the field"
-                + " went unmeasured in some trial.%n%n",
+                + " the plausible ranges in docs/camera-placement.md: smaller is better, errors"
+                + " that round to the same millimeter tie, and a tie goes to fewer cameras. *None*"
+                + " means more than 5%% of the field went unmeasured in some trial; those rank"
+                + " after the rest, by the least of the field they placed within 5 cm.%n%n",
             robustness.trials().size()));
     for (int t = 0; t < robustness.trials().size(); t++) {
       md.append(format("- Trial %d: %s.%n", t + 1, robustness.trials().get(t).described()));
@@ -157,7 +159,7 @@ final class Report {
 
   private static final String ROBUST_HEADER =
       "| Rank | Layout | Worst trial 95% | Median 95% | Nominal 95% | Nominal rank"
-          + " | Worst within 5 cm | Two cameras |\n"
+          + " | Worst within 5 cm | Nominal two cameras |\n"
           + "|---:|---|---:|---:|---:|---:|---:|---:|\n";
 
   private static String robustRow(int rank, Robustness.Layout layout) {
@@ -184,12 +186,14 @@ final class Report {
 
   private static final String HEADER =
       "| Rank | Layout | 95% within | Within 2 cm | Within 5 cm | One tag | Two tags | Two cameras"
-          + " | Measured | Heading | Position RMS | Heading RMS |\n"
-          + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+          + " | Measured | Heading | Position RMS | Heading RMS | One lost: 95% within"
+          + " | One lost: measured |\n"
+          + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
 
   private static String row(int rank, Score score) {
+    Score.OneLost oneLost = score.oneLost();
     return format(
-        "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
+        "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
         rank,
         score.candidate().name(),
         centimeters(score.positionP95Meters()),
@@ -203,7 +207,9 @@ final class Report {
         centimeters(score.positionRmsMeters()),
         Double.isNaN(score.headingRmsDegrees())
             ? "none"
-            : format("%.2f°", score.headingRmsDegrees()));
+            : format("%.2f°", score.headingRmsDegrees()),
+        oneLost == null ? "not scored" : centimeters(oneLost.p95Meters()),
+        oneLost == null ? "not scored" : percent(oneLost.measured()));
   }
 
   /**
@@ -243,7 +249,7 @@ final class Report {
 
   private static final String SCORE_COLUMNS =
       "position_p95_m,within_2cm,within_5cm,one_tag,two_tags,two_cameras,measured,heading,"
-          + "position_rms_m,heading_rms_deg";
+          + "position_rms_m,heading_rms_deg,one_lost_p95_m,one_lost_measured";
 
   static List<String> candidates(List<Score> ranking) {
     List<String> lines = new ArrayList<>();
@@ -291,8 +297,9 @@ final class Report {
   }
 
   private static String scoreColumns(Score score) {
+    Score.OneLost oneLost = score.oneLost();
     return format(
-        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s",
+        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s,%s,%s",
         number(score.positionP95Meters(), 4),
         score.withinTwoCentimeters(),
         score.withinFiveCentimeters(),
@@ -302,7 +309,9 @@ final class Report {
         score.measured(),
         score.heading(),
         number(score.positionRmsMeters(), 4),
-        number(score.headingRmsDegrees(), 3));
+        number(score.headingRmsDegrees(), 3),
+        oneLost == null ? "" : number(oneLost.p95Meters(), 4),
+        oneLost == null ? "" : format("%.4f", oneLost.measured()));
   }
 
   static List<String> poses(Run run) {

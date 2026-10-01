@@ -75,7 +75,17 @@ class TuningTest {
         .isEqualTo("machine");
     assertThat(view.configs().get(0).values())
         .first()
-        .isEqualTo(new Tuning.Value(KP, "drive.gains.kP", "", Limits.between(0, 100), 16, 16));
+        .isEqualTo(
+            new Tuning.Value(
+                KP,
+                "drive.gains.kP",
+                "",
+                Limits.between(0, 100),
+                16,
+                16,
+                "Fixtures.Gains",
+                "drive.gains",
+                "volts per meter per second of error"));
     assertThat(tuning.report()).isEmpty();
   }
 

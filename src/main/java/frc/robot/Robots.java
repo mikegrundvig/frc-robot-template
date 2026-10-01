@@ -30,7 +30,9 @@ import java.util.Optional;
  *
  * <p>The template's robot is a typical competition build, at the 2026 rule maximums where the rules
  * set one (the next season's rules replace them at kickoff). Replace each value with your robot's
- * as you design and measure it.
+ * as you design and measure it: docs/values.md says how to measure each, and where today's number
+ * came from. Note a measured value where it's set, as the calibration procedures do: {@code
+ * .mass(Pounds.of(131.2)) // measured 2027-02-14: two scales, bumpers and battery on}.
  */
 public final class Robots {
   private Robots() {}

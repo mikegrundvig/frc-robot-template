@@ -78,21 +78,22 @@ public final class LoopMonitor {
       return slowest;
     }
 
-    /** One line for the pit: how long loops take, and whether they keep up. */
+    /**
+     * One line for the pit: the slowest loop lately, to the millisecond, and how many overran. It
+     * changes only when the loops do, not with every loop's own time, so a page showing it isn't
+     * sent a new line every loop.
+     */
     public String describe() {
+      long worst = Math.round(worstLatelySeconds * 1000);
       String took =
           overrunsLately == 0
-              ? String.format(
-                  Locale.ROOT,
-                  "%.1f ms, worst %.1f ms lately",
-                  seconds * 1000,
-                  worstLatelySeconds * 1000)
+              ? String.format(Locale.ROOT, "Worst %d ms lately, none overran", worst)
               : String.format(
                   Locale.ROOT,
-                  "Overran %d %s lately, worst %.1f ms",
+                  "Overran %d %s lately, worst %d ms",
                   overrunsLately,
                   overrunsLately == 1 ? "time" : "times",
-                  worstLatelySeconds * 1000);
+                  worst);
       return lateLately == 0
           ? took
           : String.format(

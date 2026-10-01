@@ -5,6 +5,7 @@ import frc.robot.lib.field.FieldModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -29,9 +30,14 @@ import org.wpilib.math.geometry.Translation2d;
  * </ol>
  *
  * <p>Uncertainty grows with the tags' distance (squared, by default), shrinks with their count, and
- * grows with the robot's speed and turning (blur). A result may correct heading only from a
- * multi-tag solution of several tags, with the robot barely turning and the solution fitting well;
- * otherwise the gyro keeps heading to itself. Everything thrown out says why, for the log.
+ * grows with the robot's speed and turning (blur). A camera whose mount is in doubt (its tags land
+ * off the same way every time: {@link MountCheck}) adds that doubt, as independent errors add. A
+ * result may correct heading only from a multi-tag solution of several tags, with the robot barely
+ * turning and the solution fitting well; otherwise the gyro keeps heading to itself. Everything
+ * thrown out says why, for the log.
+ *
+ * <p>A task may trust only some tags ({@link TagAllowlist}): the image is solved from those alone,
+ * and the vision software's multi-tag solution only if it used no others.
  *
  * <p>Pure logic: the field's layout, the camera's mount, and the robot at the capture time all come
  * in as arguments.
@@ -43,9 +49,81 @@ public final class VisionPipeline {
     this.field = field;
   }
 
+  /**
+   * How far to trust one camera's image beyond its configuration, for the moment.
+   *
+   * @param mountDoubtMeters how far the camera's measurements may be off from where its mount moved
+   *     since it was calibrated ({@link MountCheck#doubtMeters}): zero for a camera that sits where
+   *     its configuration says
+   * @param onlyTags the tags the current task trusts; null for every tag
+   */
+  public record Trust(double mountDoubtMeters, @Nullable TagAllowlist onlyTags) {
+    /** A camera where its configuration says, and every tag. */
+    public static final Trust FULL = new Trust(0, null);
+
+    public Trust {
+      if (!(mountDoubtMeters >= 0) || Double.isInfinite(mountDoubtMeters)) {
+        throw new IllegalArgumentException("a mount's doubt is zero or more: " + mountDoubtMeters);
+      }
+    }
+  }
+
+  /** One image, and what it's solved with. */
+  private record Image(
+      TagDetections seen,
+      CameraConfig camera,
+      CaptureContext robot,
+      VisionConfig config,
+      double mountDoubtMeters) {
+    /**
+     * How much a result's uncertainty grows from the one-tag-at-one-meter baseline: with distance,
+     * fewer tags, the camera's own noise, and the robot's motion.
+     */
+    double scale(int tags, double distance) {
+      double motion =
+          1
+              + config.speedStdDevFactor() * robot.speedMetersPerSecond()
+              + config.yawRateStdDevFactor() * robot.recentYawRateRadiansPerSecond();
+      return Math.pow(distance, config.distanceExponent()) / tags * camera.noiseScale() * motion;
+    }
+  }
+
   /** What to make of one image. */
   public VisionResult process(
-      TagDetections seen, CameraConfig camera, CaptureContext robot, VisionConfig config) {
+      TagDetections seen,
+      CameraConfig camera,
+      CaptureContext robot,
+      VisionConfig config,
+      Trust trust) {
+    TagAllowlist onlyTags = trust.onlyTags();
+    if (onlyTags == null) {
+      return solve(new Image(seen, camera, robot, config, trust.mountDoubtMeters()));
+    }
+    TagDetections trusted = trusted(seen, onlyTags);
+    if (trusted.tags().isEmpty() && !seen.tags().isEmpty()) {
+      return rejected(
+          seen, "no tags this task trusts (" + onlyTags.describe() + ")", Double.NaN, Double.NaN);
+    }
+    return solve(new Image(trusted, camera, robot, config, trust.mountDoubtMeters()));
+  }
+
+  /**
+   * An image as a task sees it: only the tags it trusts, and the vision software's multi-tag
+   * solution only if that used no others.
+   */
+  private static TagDetections trusted(TagDetections seen, TagAllowlist onlyTags) {
+    List<TagDetections.Tag> tags =
+        seen.tags().stream().filter(tag -> onlyTags.allows(tag.id())).toList();
+    TagDetections.MultiTag multiTag = seen.multiTag();
+    boolean allTrusted = multiTag != null && multiTag.tagIds().stream().allMatch(onlyTags::allows);
+    return new TagDetections(
+        seen.timestampNanos(), seen.camera(), tags, allTrusted ? multiTag : null);
+  }
+
+  private VisionResult solve(Image image) {
+    TagDetections seen = image.seen();
+    CaptureContext robot = image.robot();
+    VisionConfig config = image.config();
     List<TagDetections.Tag> known = new ArrayList<>();
     double distance = 0;
     for (TagDetections.Tag tag : seen.tags()) {
@@ -73,7 +151,7 @@ public final class VisionPipeline {
     }
     Rotation2d heading = robot.heading();
     if (heading != null && robot.headingStdDevRadians() <= config.maxHeadingStdDevToConstrain()) {
-      return headingConstrained(seen, known, camera, robot, heading, distance, config);
+      return headingConstrained(image, known, heading, distance);
     }
     TagDetections.MultiTag multiTag = seen.multiTag();
     if (multiTag != null) {
@@ -82,9 +160,8 @@ public final class VisionPipeline {
               new Pose3d(
                   multiTag.fieldToCamera().getTranslation(),
                   multiTag.fieldToCamera().getRotation()),
-              camera.robotToCamera());
-      return fullPose(
-          seen, pose, known, camera, robot, distance, VisionMeasurement.Solver.MULTI_TAG, config);
+              image.camera().robotToCamera());
+      return fullPose(image, pose, known, distance, VisionMeasurement.Solver.MULTI_TAG);
     }
     TagDetections.Tag clearest = known.get(0);
     for (TagDetections.Tag tag : known) {
@@ -103,26 +180,21 @@ public final class VisionPipeline {
         TagSolver.robotFromTag(
             field.tag(clearest.id()).orElseThrow(),
             clearest.bestCameraToTag(),
-            camera.robotToCamera());
+            image.camera().robotToCamera());
     return fullPose(
-        seen,
+        image,
         pose,
         List.of(clearest),
-        camera,
-        robot,
         clearest.bestCameraToTag().getTranslation().getNorm(),
-        VisionMeasurement.Solver.SINGLE_TAG,
-        config);
+        VisionMeasurement.Solver.SINGLE_TAG);
   }
 
   private VisionResult headingConstrained(
-      TagDetections seen,
-      List<TagDetections.Tag> known,
-      CameraConfig camera,
-      CaptureContext robot,
-      Rotation2d heading,
-      double distance,
-      VisionConfig config) {
+      Image image, List<TagDetections.Tag> known, Rotation2d heading, double distance) {
+    TagDetections seen = image.seen();
+    CameraConfig camera = image.camera();
+    CaptureContext robot = image.robot();
+    VisionConfig config = image.config();
     Transform3d robotToCamera = camera.robotToCamera();
     Rotation3d attitude =
         new Rotation3d(robot.rollRadians(), robot.pitchRadians(), heading.getRadians());
@@ -153,9 +225,11 @@ public final class VisionPipeline {
       return rejected(seen, "the solve isn't a number", distance, worstHeight);
     }
     double spread =
-        config.linearStdDevBaseline()
-            * config.headingConstrainedFactor()
-            * scale(known.size(), distance, camera, robot, config);
+        widened(
+            config.linearStdDevBaseline()
+                * config.headingConstrainedFactor()
+                * image.scale(known.size(), distance),
+            image.mountDoubtMeters());
 
     // Heading, too, only under strict conditions; otherwise the gyro keeps it to itself.
     Rotation2d measuredHeading = heading;
@@ -175,7 +249,9 @@ public final class VisionPipeline {
       if (Double.isFinite(solved.getRadians())) {
         measuredHeading = solved;
         headingStdDev =
-            config.angularStdDevBaseline() * scale(known.size(), distance, camera, robot, config);
+            widened(
+                config.angularStdDevBaseline() * image.scale(known.size(), distance),
+                image.mountDoubtMeters() / distance);
       }
     }
     VisionMeasurement measurement =
@@ -225,14 +301,13 @@ public final class VisionPipeline {
   }
 
   private VisionResult fullPose(
-      TagDetections seen,
+      Image image,
       Pose3d pose,
       List<TagDetections.Tag> used,
-      CameraConfig camera,
-      CaptureContext robot,
       double distance,
-      VisionMeasurement.Solver solver,
-      VisionConfig config) {
+      VisionMeasurement.Solver solver) {
+    TagDetections seen = image.seen();
+    VisionConfig config = image.config();
     double height = pose.getZ();
     if (!Double.isFinite(pose.getX())
         || !Double.isFinite(pose.getY())
@@ -243,16 +318,18 @@ public final class VisionPipeline {
       return rejected(
           seen, format("the solve puts the robot %.2f m off the floor", height), distance, height);
     }
-    double scale = scale(used.size(), distance, camera, robot, config);
+    double scale = image.scale(used.size(), distance);
+    double linear = widened(config.linearStdDevBaseline() * scale, image.mountDoubtMeters());
     VisionMeasurement measurement =
         new VisionMeasurement(
             seen.timestampNanos(),
             pose.toPose2d(),
             PoseCovariance.fromStdDevs(
-                config.linearStdDevBaseline() * scale,
-                config.linearStdDevBaseline() * scale,
-                config.angularStdDevBaseline() * scale),
-            camera.name(),
+                linear,
+                linear,
+                widened(
+                    config.angularStdDevBaseline() * scale, image.mountDoubtMeters() / distance)),
+            image.camera().name(),
             ids(used),
             solver);
     return new VisionResult(
@@ -269,16 +346,20 @@ public final class VisionPipeline {
   }
 
   /**
-   * How much a result's uncertainty grows from the one-tag-at-one-meter baseline: with distance,
-   * fewer tags, the camera's own noise, and the robot's motion.
+   * A spread with the camera's mount doubt added, as independent errors add: in squares. For
+   * heading, a doubt in meters is a turn of the doubt over the tags' distance: a camera turned by
+   * an angle puts tags that far off at that distance.
+   *
+   * <p>Only widened, never shut off: a heading error in the estimate puts every camera's tags off
+   * as if each were turned on its mount, and from one camera the two look the same. A camera in
+   * doubt that couldn't correct heading at all would keep the estimate from ever turning back.
+   *
+   * <p>A wider spread also loosens the estimator's gate for the measurement, which weighs how far
+   * it lands from the estimate against both their spreads: a doubted camera's measurements are
+   * rejected less often, and count for less when they're accepted.
    */
-  private static double scale(
-      int tags, double distance, CameraConfig camera, CaptureContext robot, VisionConfig config) {
-    double motion =
-        1
-            + config.speedStdDevFactor() * robot.speedMetersPerSecond()
-            + config.yawRateStdDevFactor() * robot.recentYawRateRadiansPerSecond();
-    return Math.pow(distance, config.distanceExponent()) / tags * camera.noiseScale() * motion;
+  private static double widened(double spread, double doubt) {
+    return doubt > 0 ? Math.hypot(spread, doubt) : spread;
   }
 
   private static List<Integer> ids(List<TagDetections.Tag> tags) {

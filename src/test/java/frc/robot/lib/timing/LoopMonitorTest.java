@@ -34,7 +34,7 @@ class LoopMonitorTest {
     assertThat(report.seconds()).isCloseTo(0.011, within(1e-12));
     assertThat(report.slowest()).isEqualTo(new LoopMonitor.Section("S1", 0.005));
     assertThat(report.overran()).isFalse();
-    assertThat(report.describe()).isEqualTo("11.0 ms, worst 11.0 ms lately");
+    assertThat(report.describe()).isEqualTo("Worst 11 ms lately, none overran");
   }
 
   @Test
@@ -50,7 +50,7 @@ class LoopMonitorTest {
     assertThat(second.overrunsLately()).isEqualTo(1);
     assertThat(second.worstLatelySeconds()).isCloseTo(0.026, within(1e-12));
     assertThat(fourth.overrunsLately()).isEqualTo(1);
-    assertThat(fourth.describe()).isEqualTo("Overran 1 time lately, worst 31.0 ms");
+    assertThat(fourth.describe()).isEqualTo("Overran 1 time lately, worst 31 ms");
     assertThat(fourth.lateLately()).as("an overrun isn't also a late start").isZero();
     assertThat(sixth.overrunsLately()).isZero();
   }
@@ -72,7 +72,7 @@ class LoopMonitorTest {
         .isCloseTo(0.025, within(1e-12));
     assertThat(late.describe())
         .isEqualTo(
-            "5.0 ms, worst 5.0 ms lately; 1 started late (time lost between loops: logging,"
+            "Worst 5 ms lately, none overran; 1 started late (time lost between loops: logging,"
                 + " garbage collection)");
     assertThat(onTime.outsideSeconds()).isZero();
     assertThat(onTime.lateLately()).as("still recent").isEqualTo(1);

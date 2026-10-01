@@ -38,14 +38,14 @@ class LoopHealthTest {
 
     loop(20, 35, false);
 
-    assertThat(quick).isEqualTo("5.0 ms, worst 5.0 ms lately");
+    assertThat(quick).isEqualTo("Worst 5 ms lately, none overran");
     assertThat(alertAfterQuick).isFalse();
     assertThat(health.isOverrunAlertActive()).isTrue();
     assertThat(health.overrunAlertText())
         .isEqualTo(
             "The loop overran 20 ms 1 time in the last 10 s; the last took 35 ms, 35 of them in"
                 + " Commands");
-    assertThat(health.describe()).isEqualTo("Overran 1 time lately, worst 35.0 ms");
+    assertThat(health.describe()).isEqualTo("Overran 1 time lately, worst 35 ms");
   }
 
   /** Time lost between loops (writing the log, garbage collection) shows as a late start. */

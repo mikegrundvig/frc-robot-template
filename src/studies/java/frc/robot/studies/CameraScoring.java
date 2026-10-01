@@ -11,6 +11,7 @@ import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
+import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -153,12 +154,8 @@ public final class CameraScoring {
     // Where each camera really is, off its configured mount as these conditions have it.
     Transform3d[] mounts = new Transform3d[cameras.size()];
     for (int m = 0; m < cameras.size(); m++) {
-      Transform3d configured = cameras.get(m).robotToCamera();
-      Transform3d error = conditions.mountError(cameraSeeds[m]);
       mounts[m] =
-          new Transform3d(
-              configured.getTranslation().plus(error.getTranslation()),
-              configured.getRotation().rotateBy(error.getRotation()));
+          VisionSim.mounted(cameras.get(m).robotToCamera(), conditions.mountError(cameraSeeds[m]));
     }
     AtomicInteger done = new AtomicInteger();
     int threads = Math.min(config.threads(), Math.max(1, samples.size()));

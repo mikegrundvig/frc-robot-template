@@ -9,7 +9,6 @@ import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigException;
 import frc.robot.lib.field.FieldModel;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,44 +68,35 @@ public final class Weights {
     return regions;
   }
 
+  /** The columns of a weights file, in order. */
+  static final List<String> COLUMNS = List.of("name", "x min", "y min", "x max", "y max", "weight");
+
   /**
-   * Reads regions from a CSV file, one per line: {@code name, x min, y min, x max, y max, weight}.
-   * Blank lines and lines starting with {@code #} are skipped.
+   * Reads regions from a CSV file, one per line: {@code name, x min, y min, x max, y max, weight},
+   * in meters. Blank lines and lines starting with {@code #} are skipped.
    *
-   * @throws IllegalArgumentException naming the line of any region that isn't one
+   * @throws IllegalArgumentException naming the line, and the column, of any region that isn't one
    */
   public static Weights read(Path file) throws IOException {
     List<Region> regions = new ArrayList<>();
-    List<String> lines = Files.readAllLines(file);
-    for (int i = 0; i < lines.size(); i++) {
-      String line = lines.get(i).strip();
-      if (line.isEmpty() || line.startsWith("#")) {
-        continue;
-      }
-      String where = file.getFileName() + " line " + (i + 1) + ": ";
-      String[] values = line.split(",", -1);
-      if (values.length != 6) {
-        throw new IllegalArgumentException(
-            where + "a region is 6 values, name, x min, y min, x max, y max, weight: " + line);
+    for (CsvFile.Line line : CsvFile.read(file, COLUMNS)) {
+      if (regions.isEmpty() && line.namesColumns(1, 2, 3, 4, 5)) {
+        throw line.wrong("looks like the columns' names: start it with # to make it a comment");
       }
       try {
         regions.add(
             new Region(
-                values[0].strip(),
-                number(values[1]),
-                number(values[2]),
-                number(values[3]),
-                number(values[4]),
-                number(values[5])));
-      } catch (NumberFormatException | ConfigException e) {
-        throw new IllegalArgumentException(where + e.getMessage(), e);
+                line.values().get(0),
+                line.number(1, COLUMNS.get(1)),
+                line.number(2, COLUMNS.get(2)),
+                line.number(3, COLUMNS.get(3)),
+                line.number(4, COLUMNS.get(4)),
+                line.number(5, COLUMNS.get(5))));
+      } catch (ConfigException e) {
+        throw line.wrong(String.valueOf(e.getMessage()));
       }
     }
     return new Weights(regions);
-  }
-
-  private static double number(String text) {
-    return Double.parseDouble(text.strip());
   }
 
   /** How much a spot counts: the product of the weights of the regions it's in, on either half. */

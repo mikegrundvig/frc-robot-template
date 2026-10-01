@@ -1,10 +1,12 @@
 package frc.robot.lib.config;
 
+import static frc.robot.lib.config.Rules.atMost;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.positive;
 import static frc.robot.lib.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.Seconds;
 
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Translation2d;
@@ -100,11 +102,27 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
    * and brownouts (more current than the battery can give). Speed limits cap what the driver can
    * ask for.
    *
+   * <p>The drive's supply limit steps down. Phoenix 6 lets a drive motor draw up to {@code
+   * driveSupplyCurrent}, but once it has been held at that limit for {@code driveSupplyLowerTime},
+   * it lowers the limit to {@code driveSupplyLowerCurrent} until the motor draws less than that
+   * again. The step-down keeps the motor's breaker from tripping in a long push: a 40 A breaker
+   * carries 40 A for as long as you like, but 60 A for as little as 3.9 seconds. Phoenix steps down
+   * even when the code never mentions it (to 40 A after 1 s), so the template sets both values
+   * here, where they can be seen. A robot that loses its push after a second of hard driving is
+   * seeing the step-down.
+   *
    * <p>All are tunable on a running robot (the drivetrain says within what): dial them in on the
    * robot, then commit what works.
    *
    * @param driveStatorCurrent the most current through each drive motor, which caps its torque
-   * @param driveSupplyCurrent the most current each drive motor draws from the battery
+   * @param driveSupplyCurrent the most current each drive motor draws from the battery, for at most
+   *     driveSupplyLowerTime at a time: then the limit steps down to driveSupplyLowerCurrent
+   * @param driveSupplyLowerCurrent each drive motor's supply limit after the step-down, until it
+   *     draws less than this again: no more than its breaker's rating. With driveSupplyCurrent at
+   *     or below it, there's nothing to step down from, and it does nothing.
+   * @param driveSupplyLowerTime how long a drive motor may draw driveSupplyCurrent before its limit
+   *     steps down to driveSupplyLowerCurrent: longer than a sprint, and well short of the time its
+   *     breaker takes to trip
    * @param steerStatorCurrent the most current through each steer motor
    * @param maxLinearSpeed the fastest the driver can ask the robot to move
    * @param maxAngularSpeed the fastest the driver can ask the robot to spin
@@ -113,6 +131,8 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
   public record Limits(
       Current driveStatorCurrent,
       Current driveSupplyCurrent,
+      Current driveSupplyLowerCurrent,
+      Time driveSupplyLowerTime,
       Current steerStatorCurrent,
       LinearVelocity maxLinearSpeed,
       AngularVelocity maxAngularSpeed) {
@@ -120,6 +140,11 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
       Checks.on(Limits.class)
           .field("driveStatorCurrent", driveStatorCurrent, positive())
           .field("driveSupplyCurrent", driveSupplyCurrent, positive())
+          .field("driveSupplyLowerCurrent", driveSupplyLowerCurrent, positive())
+          // Phoenix reads a zero time as "never step down": to mean that, set the lower current to
+          // the supply limit instead, where it shows. 5 s is the longest Phoenix takes.
+          .field("driveSupplyLowerTime", driveSupplyLowerTime, positive())
+          .field("driveSupplyLowerTime", driveSupplyLowerTime, atMost(Seconds.of(5)))
           .field("steerStatorCurrent", steerStatorCurrent, positive())
           .field("maxLinearSpeed", maxLinearSpeed, positive())
           .field("maxAngularSpeed", maxAngularSpeed, positive())

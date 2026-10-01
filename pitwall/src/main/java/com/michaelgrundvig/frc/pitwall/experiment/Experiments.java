@@ -84,7 +84,7 @@ public final class Experiments {
 
   private final Robot robot;
   private final Consumer<ExperimentInputs> logInputs;
-  private final LongSupplier wallClock;
+  private final LongSupplier clock;
   private final boolean replaying;
   private final Launcher launcher;
   private final Consumer<String> report;
@@ -113,8 +113,9 @@ public final class Experiments {
    * @param robot the robot runs are recorded on
    * @param logInputs logs the starts and cancels one loop applies, or in a replay replaces them
    *     with the logged ones
-   * @param robotClock the robot's clock, in nanoseconds ({@code RobotController::getTime}), which a
-   *     replay reproduces
+   * @param robotClock the robot's clock, in nanoseconds ({@code RobotController::getTime}): it
+   *     times the runs, which a replay reproduces, and the deadman, which in the simulator's tests
+   *     then steps with the loops
    * @param replaying whether this is a replay, where the log's cancels stand in for the deadman
    * @param report told each run's end, in a sentence, such as why the deadman canceled it
    */
@@ -127,26 +128,26 @@ public final class Experiments {
     this(
         robot,
         logInputs,
-        System::nanoTime,
+        robotClock,
         replaying,
         run -> Actions.command(run.experiment().rig()::scheduler, () -> run.command(robotClock)),
         report);
   }
 
   /**
-   * @param wallClock the time requests arrive, in nanoseconds, for the deadman
+   * @param clock the time requests arrive, in nanoseconds, for the deadman
    * @param launcher how a run is driven
    */
   Experiments(
       Robot robot,
       Consumer<ExperimentInputs> logInputs,
-      LongSupplier wallClock,
+      LongSupplier clock,
       boolean replaying,
       Launcher launcher,
       Consumer<String> report) {
     this.robot = robot;
     this.logInputs = logInputs;
-    this.wallClock = wallClock;
+    this.clock = clock;
     this.replaying = replaying;
     this.launcher = launcher;
     this.report = report;
@@ -242,7 +243,7 @@ public final class Experiments {
    * @param stream the event stream of the page it came from; null for none
    */
   public void heard(@Nullable String stream) {
-    long now = wallClock.getAsLong();
+    long now = clock.getAsLong();
     controller.updateAndGet(
         c -> Objects.equals(stream, c.stream()) ? new Controller(c.stream(), now, c.lost()) : c);
   }
@@ -347,7 +348,7 @@ public final class Experiments {
     }
     runsStarted++;
     driving = launched;
-    controller.set(new Controller(stream, wallClock.getAsLong(), false));
+    controller.set(new Controller(stream, clock.getAsLong(), false));
     deadmanAsked = false;
     run = next;
     return Outcome.applied();
@@ -406,7 +407,7 @@ public final class Experiments {
     if (now.lost()) {
       return "the page that started it closed";
     }
-    if (wallClock.getAsLong() - now.heardNanos() > DEADMAN.toNanos()) {
+    if (clock.getAsLong() - now.heardNanos() > DEADMAN.toNanos()) {
       return "the page that started it went quiet for over " + DEADMAN.toMillis() + " ms";
     }
     return null;

@@ -23,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
@@ -42,6 +43,9 @@ class EventsTest {
   private static final Actions.Gate READY = new Actions.Gate(true, true, false);
   private static final String KP = "/Machine/drive/gains/kP";
   private static final JsonType<Object> JSON = Jsonb.builder().build().type(Object.class);
+
+  /** The longest the test waits, in real time, for the network. */
+  private static final Duration WAIT = Duration.ofSeconds(10);
 
   /** One server-sent event as it arrived: its name and data. */
   record Sse(String event, String data) {
@@ -65,8 +69,8 @@ class EventsTest {
           Broadcaster.MAX_STREAMS,
           Broadcaster.MAILBOX,
           stream -> {
-            closed.add(stream);
             byHand.experiments().lost(stream);
+            closed.add(stream); // last: a test that sees it closed sees the experiments told
           });
   private final HttpClient client = HttpClient.newHttpClient();
   private final List<AutoCloseable> open = new ArrayList<>();
@@ -125,15 +129,34 @@ class EventsTest {
   }
 
   /**
-   * Runs the loop until something is true, a millisecond of real time between loops. The deadman's
-   * clock stands still meanwhile: how many loops it takes depends on how busy the computer is.
+   * Runs the loop a step at a time until an answer comes, waiting up to 50 ms of real time for it
+   * after each: the time it takes is the network's, not the robot's.
    */
-  private void loopUntil(BooleanSupplier done) throws InterruptedException {
-    for (int i = 0; i < 5000 && !done.getAsBoolean(); i++) {
+  private <T> T answered(CompletableFuture<T> answer) throws Exception {
+    long deadline = System.nanoTime() + WAIT.toNanos();
+    while (System.nanoTime() < deadline) {
       step();
-      Thread.sleep(1);
+      try {
+        return answer.get(50, TimeUnit.MILLISECONDS);
+      } catch (TimeoutException notYet) {
+        // Another loop, then.
+      }
     }
-    assertThat(done.getAsBoolean()).as("it happened within 5000 loops").isTrue();
+    throw new AssertionError("no answer within " + WAIT);
+  }
+
+  /**
+   * Runs the loop until something the network brings is true, for at most ten seconds of real time.
+   * The deadman's clock stands still meanwhile: how many loops it takes depends on how busy the
+   * computer is.
+   */
+  private void loopUntil(BooleanSupplier done) {
+    long deadline = System.nanoTime() + WAIT.toNanos();
+    while (!done.getAsBoolean() && System.nanoTime() < deadline) {
+      step();
+      Thread.onSpinWait();
+    }
+    assertThat(done.getAsBoolean()).as("it happened within " + WAIT).isTrue();
   }
 
   /** A page's stream, as its events arrive. */
@@ -146,8 +169,7 @@ class EventsTest {
           client.sendAsync(
               HttpRequest.newBuilder(uri(server, "/api/events")).GET().build(),
               HttpResponse.BodyHandlers.ofLines());
-      loopUntil(connecting::isDone);
-      response = connecting.get();
+      response = answered(connecting);
       Stream<String> lines = response.body();
       open.add(lines::close);
       Thread.ofVirtual().start(() -> read(lines));
@@ -175,10 +197,15 @@ class EventsTest {
       }
     }
 
-    /** The next event, running the loop until it comes. */
-    Sse next() throws InterruptedException {
-      loopUntil(() -> !events.isEmpty());
-      return Objects.requireNonNull(events.poll());
+    /** The next event but a heartbeat, running the loop until it comes. */
+    Sse next() {
+      while (true) {
+        loopUntil(() -> !events.isEmpty());
+        Sse event = Objects.requireNonNull(events.poll());
+        if (!event.event().equals("heartbeat")) {
+          return event;
+        }
+      }
     }
 
     /** Waits for the snapshot, and returns it. */
@@ -216,24 +243,24 @@ class EventsTest {
     for (int i = 0; i < 500; i++) {
       loop();
     }
-    Thread.sleep(200); // anything sent would have arrived
-
-    assertThat(page.events).as("500 loops, nothing changed").isEmpty();
-
+    // A stream carries its events in order: if the next is this change's patch, nothing came
+    // before it.
     tunables.requestChanges(Map.of(KP, 18.5));
     Sse patch = page.next();
     for (int i = 0; i < 100; i++) {
       loop();
     }
-    Thread.sleep(100);
+    tunables.requestChanges(Map.of(KP, 19.0));
+    Sse marker = page.next();
 
-    assertThat(patch.event()).isEqualTo("patch");
+    assertThat(marker.json()).as("one change, one patch").containsOnlyKeys("values", "changes");
+    assertThat(number(asMap(marker.json().get("values")).get(KP))).isEqualTo(19.0);
+    assertThat(patch.event()).as("500 loops, nothing changed, then the patch").isEqualTo("patch");
     assertThat(patch.json()).containsOnlyKeys("values", "changes");
     assertThat(asMap(patch.json().get("values"))).containsOnlyKeys(KP);
     assertThat(number(asMap(patch.json().get("values")).get(KP))).isEqualTo(18.5);
     assertThat(asMap(asMap(patch.json().get("changes")).get(KP)))
         .containsEntry("builderCall", ".kP(18.5)");
-    assertThat(page.events).as("one change, one patch").isEmpty();
   }
 
   /** An event, not a comment line: a browser's EventSource never shows the page a comment. */
@@ -285,10 +312,7 @@ class EventsTest {
     Listener page = new Listener(running);
     String stream = (String) Objects.requireNonNull(page.snapshot().json().get("stream"));
 
-    CompletableFuture<HttpResponse<String>> started = post(running, "/api/experiments", stream);
-    loopUntil(started::isDone);
-    assertThat(started.get().statusCode()).isEqualTo(200);
-    int samples = 0;
+    assertThat(answered(post(running, "/api/experiments", stream)).statusCode()).isEqualTo(200);
     Run run = Objects.requireNonNull(byHand.experiments().run());
     for (int i = 0; i < 120; i++) {
       if (i % 10 == 0) {
@@ -296,18 +320,23 @@ class EventsTest {
       }
       loop();
     }
-    Thread.sleep(200);
-    for (Sse event = page.events.poll(); event != null; event = page.events.poll()) {
-      if (event.event().equals("samples")) {
-        samples++;
-      }
+    // One samples event a loop while it ran, 106 of them; wait for each, then see none follows.
+    int samples = 0;
+    while (samples < 106) {
+      Sse event = page.events.poll(WAIT.toMillis(), TimeUnit.MILLISECONDS);
+      assertThat(event).as("106 samples events, within " + WAIT).isNotNull();
+      samples += Objects.requireNonNull(event).event().equals("samples") ? 1 : 0;
     }
+    tunables.requestChanges(Map.of(KP, 18.5));
+    Sse marker = page.next();
 
     assertThat(run.state().phase()).isEqualTo(Run.Phase.ENDED);
-    assertThat(samples).as("one event a loop while it ran").isEqualTo(106);
+    assertThat(marker.event())
+        .as("nothing after the last samples but the next change")
+        .isEqualTo("patch");
+    assertThat(asMap(marker.json().get("values"))).containsKey(KP);
 
-    CompletableFuture<HttpResponse<String>> again = post(running, "/api/experiments", stream);
-    loopUntil(again::isDone);
+    answered(post(running, "/api/experiments", stream));
     Run next = Objects.requireNonNull(byHand.experiments().run());
     for (int i = 0; i < 30; i++) {
       loop(); // 600 ms without a word from the page
@@ -322,13 +351,18 @@ class EventsTest {
     PitwallServer running = start(Duration.ofMillis(20));
     Listener page = new Listener(running);
     String stream = (String) Objects.requireNonNull(page.snapshot().json().get("stream"));
-    CompletableFuture<HttpResponse<String>> started = post(running, "/api/experiments", stream);
-    loopUntil(started::isDone);
+    answered(post(running, "/api/experiments", stream));
     Run run = Objects.requireNonNull(byHand.experiments().run());
 
     page.close();
-    loopUntil(() -> run.state().phase() != Run.Phase.RUNNING);
+    // The server notices at its next write, a heartbeat within 20 ms; the robot waits meanwhile.
+    long deadline = System.nanoTime() + WAIT.toNanos();
+    while (!closed.contains(stream) && System.nanoTime() < deadline) {
+      Thread.onSpinWait();
+    }
+    loop();
 
+    assertThat(closed).contains(stream);
     assertThat(run.state().detail()).isEqualTo("Canceled: the page that started it closed");
   }
 

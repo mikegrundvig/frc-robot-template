@@ -13,10 +13,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +31,7 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 @SimulationTest
 class PitwallStreamSimTest {
   private static final JsonType<Object> JSON = Jsonb.builder().build().type(Object.class);
+  private static final String STEER_KP = "/Drive/config/gains/steerKp";
 
   @RegisterExtension final RobotSim sim = new RobotSim();
 
@@ -55,10 +56,13 @@ class PitwallStreamSimTest {
     waitFor(() -> events.size() >= 1, "the snapshot");
 
     sim.loops(250); // five seconds, nothing happening
-    sim.loops(1);
-    settle();
+    // A stream carries its events in order: everything before this change's patch was sent in
+    // those 250 loops.
+    sim.pitwall().tunables().requestChanges(Map.of(STEER_KP, 17.0));
+    waitFor(() -> events.stream().anyMatch(PitwallStreamSimTest::isMarker), "the marking change");
 
-    List<String[]> patches = events.stream().filter(e -> e[0].equals("patch")).toList();
+    List<String[]> patches =
+        events.stream().takeWhile(e -> !isMarker(e)).filter(e -> e[0].equals("patch")).toList();
     Map<String, Integer> changed = new TreeMap<>();
     for (String[] patch : patches) {
       @SuppressWarnings("unchecked") // a merge patch is an object of sections
@@ -78,6 +82,11 @@ class PitwallStreamSimTest {
         .isLessThanOrEqualTo(5);
   }
 
+  /** The patch that carries the marking change. */
+  private static boolean isMarker(String[] event) {
+    return event[0].equals("patch") && event[1].contains("\"" + STEER_KP + "\":17.0");
+  }
+
   private void openStream() throws Exception {
     CompletableFuture<HttpResponse<Stream<String>>> connecting =
         client.sendAsync(
@@ -86,10 +95,7 @@ class PitwallStreamSimTest {
                 .GET()
                 .build(),
             HttpResponse.BodyHandlers.ofLines());
-    while (!connecting.isDone()) {
-      sim.loop();
-      Thread.onSpinWait();
-    }
+    waitFor(connecting::isDone, "the stream");
     Stream<String> lines = connecting.get().body();
     open.add(lines::close);
     Thread.ofVirtual()
@@ -119,21 +125,11 @@ class PitwallStreamSimTest {
   }
 
   /** Runs loops until something has arrived, for at most ten seconds of real time. */
-  private void waitFor(java.util.function.BooleanSupplier arrived, String what) {
+  private void waitFor(BooleanSupplier arrived, String what) {
     long end = System.nanoTime() + Duration.ofSeconds(10).toNanos();
     while (!arrived.getAsBoolean() && System.nanoTime() < end) {
       sim.loop();
     }
     assertThat(arrived.getAsBoolean()).as(what).isTrue();
-  }
-
-  /** Waits, without running the robot, until the events stop arriving. */
-  private void settle() throws InterruptedException {
-    int seen = -1;
-    for (int i = 0; i < 50 && seen != events.size(); i++) {
-      seen = events.size();
-      Objects.requireNonNull(events);
-      Thread.sleep(50);
-    }
   }
 }

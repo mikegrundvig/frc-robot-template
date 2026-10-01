@@ -2,9 +2,9 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import frc.robot.lib.localization.YawSource;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
-import frc.robot.subsystems.localization.Localization;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -68,7 +68,7 @@ class ScenarioSimTest {
     sim.start(enabledIn("gyro-unplugged"));
     sim.run(0.5);
 
-    assertThat(sim.robot().localization().yawSource()).isEqualTo(Localization.YawSource.BACKUP);
+    assertThat(sim.robot().localization().yawSource()).isEqualTo(YawSource.BACKUP);
   }
 
   /** Both IMUs unplugged: the heading rests on the wheels. */
@@ -77,7 +77,7 @@ class ScenarioSimTest {
     sim.start(enabledIn("imus-unplugged"));
     sim.run(0.5);
 
-    assertThat(sim.robot().localization().yawSource()).isEqualTo(Localization.YawSource.WHEELS);
+    assertThat(sim.robot().localization().yawSource()).isEqualTo(YawSource.WHEELS);
   }
 
   /** Carried to a bump: the cameras find it there, and forward drives it over. */

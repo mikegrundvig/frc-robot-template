@@ -40,8 +40,14 @@ import frc.robot.lib.config.ConfigRecord;
  * @param headingStdDevDegreesPerTurn how far the gyro's heading may be off after a full turn: its
  *     scale error, the same in every turn, so five turns are five times as far off (the estimator
  *     considers it, but never corrects it: the gyro-scale procedure measures it)
- * @param wheelHeadingStdDevDegreesPerTurn the same for heading from the wheels, used only while the
- *     gyro is lost; its errors are taken as new with every turn
+ * @param backupHeadingStdDevDegreesPerTurn the same for the backup IMU, while it turns odometry in
+ *     the gyro's place: its own scale error, the same in every turn it makes, and unrelated to the
+ *     gyro's (the gyro-scale procedure calibrates the gyro alone)
+ * @param headingNoiseDegreesPerTurn how far an IMU's heading may be off at random after a full
+ *     turn, beyond its scale: errors that don't repeat from turn to turn, whose variance grows with
+ *     the turning
+ * @param wheelHeadingStdDevDegreesPerTurn the same for heading from the wheels, used only while
+ *     both IMUs are lost; its errors are taken as new with every turn
  * @param cameraTurnStdDevDegrees how far each camera may be turned from its configured mount, the
  *     same in every image: what calibrating its mount leaves, and its lens. A camera turned by an
  *     angle puts its tags, and so the robot, that angle times their distance off, as a heading
@@ -96,6 +102,8 @@ public record EstimatorConfig(
     double handlingStdDevPerSqrtSecond,
     double headingDriftDegreesPerMinute,
     double headingStdDevDegreesPerTurn,
+    double backupHeadingStdDevDegreesPerTurn,
+    double headingNoiseDegreesPerTurn,
     double wheelHeadingStdDevDegreesPerTurn,
     double cameraTurnStdDevDegrees,
     double cameraShiftStdDevMeters,
@@ -132,6 +140,8 @@ public record EstimatorConfig(
           .handlingStdDevPerSqrtSecond(0.02)
           .headingDriftDegreesPerMinute(0.5)
           .headingStdDevDegreesPerTurn(1.0)
+          .backupHeadingStdDevDegreesPerTurn(2.0)
+          .headingNoiseDegreesPerTurn(0.1)
           .wheelHeadingStdDevDegreesPerTurn(10)
           .cameraTurnStdDevDegrees(0.25)
           .cameraShiftStdDevMeters(0.01)
@@ -169,6 +179,9 @@ public record EstimatorConfig(
         .field("handlingStdDevPerSqrtSecond", handlingStdDevPerSqrtSecond, nonNegative())
         .field("headingDriftDegreesPerMinute", headingDriftDegreesPerMinute, nonNegative())
         .field("headingStdDevDegreesPerTurn", headingStdDevDegreesPerTurn, nonNegative())
+        .field(
+            "backupHeadingStdDevDegreesPerTurn", backupHeadingStdDevDegreesPerTurn, nonNegative())
+        .field("headingNoiseDegreesPerTurn", headingNoiseDegreesPerTurn, nonNegative())
         .field("wheelHeadingStdDevDegreesPerTurn", wheelHeadingStdDevDegreesPerTurn, nonNegative())
         .field("cameraTurnStdDevDegrees", cameraTurnStdDevDegrees, nonNegative())
         .field("cameraShiftStdDevMeters", cameraShiftStdDevMeters, nonNegative())

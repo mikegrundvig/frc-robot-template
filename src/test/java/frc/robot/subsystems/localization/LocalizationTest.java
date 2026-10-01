@@ -7,6 +7,7 @@ import frc.robot.Robots;
 import frc.robot.lib.localization.DrivetrainReadings;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.OdometrySample;
+import frc.robot.lib.localization.YawSource;
 import frc.robot.sim.DriveSimHarness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -63,7 +64,7 @@ class LocalizationTest {
       localization.update();
 
       assertThat(localization.isGyroDisconnectedAlertActive()).isTrue();
-      assertThat(localization.yawSource()).isEqualTo(Localization.YawSource.WHEELS);
+      assertThat(localization.yawSource()).isEqualTo(YawSource.WHEELS);
       assertThat(localization.pitchRadians()).as("no IMU, no tilt").isZero();
       assertThat(localization.pose().getX()).isFinite();
 

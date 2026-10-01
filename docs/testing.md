@@ -132,7 +132,7 @@ What it offers:
 The pose estimator reports how uncertain it is, and the χ² gate, the scoring gate's uncertainty
 limit, and any later bound on its error all trust that number. A claim of 3 mm while the robot is
 10 cm off is worse than no claim at all. The simulator knows where the robot really is, so it can
-check: `./gradlew consistencyStudy` drives the whole simulated robot through seven runs, twelve
+check: `./gradlew consistencyStudy` drives the whole simulated robot through eight runs, twelve
 seeds of each, and compares every loop's estimate with the truth (`frc.robot.studies`:
 `ConsistencyStudy`, `ConsistencyRuns`, `Consistency`). It takes about five minutes, one robot at a
 time (WPILib's simulation is one per program). The report is in `build/studies/consistency/`.
@@ -146,6 +146,7 @@ The runs, on the simulator's season-worn robot (`SensorErrors.TYPICAL`) with fou
 | `turning` | 5 s standing, two turns in place, 5 s standing |
 | `gyro-scale` | The gyro-scale procedure (five turns), then standing: 40 s |
 | `collision` | The `collision` scenario partway through the route |
+| `gyro-lost` | 5 s standing, a turn in place on the gyro, the gyro unplugged (`gyro-unplugged`), a turn back on the backup IMU, 5 s standing |
 | `camera-low` | The `camera-low` scenario, driving the route |
 | `camera-turned` | The `camera-turned` scenario, driving the route |
 
@@ -208,13 +209,14 @@ What to expect, today (12 matched seeds):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.54 | 0.76 | 0 | 0 | 1.6 cm | 0.22° |
-| standing | 1.85 | 0.43 | 0 | 0 | 1.3 cm | 0.17° |
-| turning | 1.46 | 0.70 | 0 | 0 | 1.6 cm | 0.69° |
-| gyro-scale | 2.07 | 0.95 | 0.10% | 0.01% | 1.8 cm | 1.35° |
-| collision | 2.76 | 0.85 | 0.57% | 0.57% | 1.8 cm | 0.21° |
-| camera-low | 1.60 | 0.83 | 0 | 0 | 1.7 cm | 0.24° |
-| camera-turned | 3.40 | 14.17 | 2.45% | 2.20% | 2.5 cm | 0.98° |
+| driving | 1.54 | 0.76 | 0 | 0 | 1.6 cm | 0.23° |
+| standing | 1.85 | 0.42 | 0 | 0 | 1.3 cm | 0.17° |
+| turning | 1.46 | 0.69 | 0 | 0 | 1.6 cm | 0.69° |
+| gyro-scale | 2.08 | 0.95 | 0.12% | 0.02% | 1.8 cm | 1.35° |
+| collision | 2.75 | 0.84 | 0.57% | 0.57% | 1.8 cm | 0.21° |
+| gyro-lost | 1.74 | 0.44 | 0 | 0 | 1.5 cm | 0.46° |
+| camera-low | 1.59 | 0.82 | 0 | 0 | 1.7 cm | 0.24° |
+| camera-turned | 3.38 | 14.00 | 2.39% | 2.10% | 2.5 cm | 0.99° |
 
 Every calibrated run is near its NEES, a little below: the floor for what a camera repeats is
 sized for the worst of what it allows. The collision's exceedances are the loops of the hit,

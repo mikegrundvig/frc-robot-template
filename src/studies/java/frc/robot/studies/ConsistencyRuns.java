@@ -126,6 +126,18 @@ final class ConsistencyRuns {
                 robot.route(3, ROUTE.length);
                 robot.stand(3);
               }),
+          new Run(
+              "gyro-lost",
+              "5 s standing; a turn in place on the gyro; the gyro unplugged; a turn back on the"
+                  + " backup IMU; 5 s standing.",
+              Scenarios.named("gyro-unplugged"),
+              robot -> {
+                robot.stand(5);
+                robot.hold(5, 0, 0, 0.5);
+                robot.start(); // the gyro unplugged
+                robot.hold(5, 0, 0, -0.5);
+                robot.stand(5);
+              }),
           named(
               "camera-low",
               robot -> {
@@ -194,9 +206,6 @@ final class ConsistencyRuns {
     /** How far a calibrated camera's mount is still off along each axis: a few millimeters. */
     static final double MOUNT_MILLIMETERS = 3;
 
-    /** How far an uncalibrated backup IMU's scale is off: the simulator's season-worn one's. */
-    static final double BACKUP_SCALE = 0.005;
-
     // Each kind of error's stream of a seed.
     private static final long MOUNTS = 1;
     private static final long TAGS = 2;
@@ -226,8 +235,9 @@ final class ConsistencyRuns {
      * The errors the estimator's configuration allows for, drawn at the spread it claims: each
      * camera turned by {@code cameraTurnStdDevDegrees} about each axis, each tag off by {@code
      * cameraShiftStdDevMeters} along each, the gyro's scale off by {@code
-     * headingStdDevDegreesPerTurn}, and a few millimeters of mount. An estimator honest about these
-     * reads a NEES near its number of dimensions.
+     * headingStdDevDegreesPerTurn} and the backup IMU's by {@code
+     * backupHeadingStdDevDegreesPerTurn}, and a few millimeters of mount. An estimator honest about
+     * these reads a NEES near its number of dimensions.
      */
     static Spread matched(EstimatorConfig config) {
       return new Spread(
@@ -235,7 +245,7 @@ final class ConsistencyRuns {
           config.cameraTurnStdDevDegrees(),
           1000 * config.cameraShiftStdDevMeters(),
           config.headingStdDevDegreesPerTurn() / 360,
-          BACKUP_SCALE);
+          config.backupHeadingStdDevDegreesPerTurn() / 360);
     }
 
     /** One camera's error, for a seed: the same every time for the same seed and camera. */

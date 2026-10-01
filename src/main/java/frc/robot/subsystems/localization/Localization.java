@@ -19,6 +19,7 @@ import frc.robot.lib.localization.PoseReset;
 import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionDecision;
+import frc.robot.lib.localization.YawSource;
 import frc.robot.lib.localization.YawTrack;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,13 +54,6 @@ import org.wpilib.util.Alert;
  * DrivetrainReadings}.
  */
 public final class Localization implements AutoCloseable {
-  /** What turns odometry: the gyro, the backup IMU while the gyro is lost, or the wheels. */
-  public enum YawSource {
-    GYRO,
-    BACKUP,
-    WHEELS
-  }
-
   /**
    * A jolt beyond this, in m/s², is a collision (6800's threshold): hard driving stays near the
    * wheels' grip, about 1 g.
@@ -379,8 +373,8 @@ public final class Localization implements AutoCloseable {
    * Feeds every wheel reading since the last loop to the estimator, as the robot's motion between
    * readings, with the yaw at each: the gyro's, or while it's lost the backup IMU's (interpolated
    * between its readings), or with neither, the wheels' turning, which the estimator says drifts.
-   * The step where the source changes turns by the wheels too, so the estimator starts over from
-   * the new source's reading instead of taking the two IMUs' different zeros as a turn.
+   * The estimator is told which, so it keeps each IMU's scale error apart, and turns the step where
+   * the source changes by the wheels, rather than take the two IMUs' different zeros as a turn.
    */
   private void addOdometry(List<OdometrySample> wheels, ImuReadings gyro, ImuReadings backup) {
     track(gyroYaws, gyro);
@@ -390,18 +384,15 @@ public final class Localization implements AutoCloseable {
             ? YawSource.GYRO
             : backupYaws.hasReadings() ? YawSource.BACKUP : YawSource.WHEELS;
     YawTrack yaws = source == YawSource.GYRO ? gyroYaws : backupYaws;
-    boolean switching = !wheels.isEmpty() && source != yawSource;
     if (!wheels.isEmpty()) {
       yawSource = source;
     }
-    for (int k = 0; k < wheels.size(); k++) {
-      OdometrySample reading = wheels.get(k);
+    for (OdometrySample reading : wheels) {
       OdometrySample previous = lastReading;
       BodyMotion motion =
           previous == null ? new BodyMotion(0, 0, 0, 0) : kinematics.motion(previous, reading);
-      boolean turnedByImu = source != YawSource.WHEELS && !(switching && k == 0);
-      double yaw = source == YawSource.WHEELS ? 0 : yaws.at(reading.timestampNanos());
-      estimator.addOdometry(reading.timestampNanos(), motion, yaw, turnedByImu);
+      double yaw = source == YawSource.WHEELS ? Double.NaN : yaws.at(reading.timestampNanos());
+      estimator.addOdometry(reading.timestampNanos(), motion, yaw, source);
       lastReading = reading;
     }
   }

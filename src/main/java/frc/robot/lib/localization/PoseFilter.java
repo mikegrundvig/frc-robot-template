@@ -27,8 +27,9 @@ import org.wpilib.math.util.MathUtil;
  *       and the heading's error together (its H is [I | J d], d the robot-to-tags vector and J a
  *       quarter turn), but a fix never corrects the heading: the gyro owns it, and only a
  *       measurement with a heading of its own corrects its drift.
- *   <li><b>The gyro's scale:</b> a gyro that reads 0.3% too much turn is 1.1° off after a turn and
- *       5.4° after five, the same way each time, not a little more at random.
+ *   <li><b>Each IMU's scale:</b> a gyro that reads 0.3% too much turn is 1.1° off after a turn and
+ *       5.4° after five, the same way each time, not a little more at random. The backup IMU's is
+ *       its own: three turns one way on the gyro and three back on the backup don't cancel.
  *   <li><b>Each camera's turn on its mount</b>, what's left after calibrating it: it moves the
  *       camera's positions just as a heading error does, and its headings by the angle itself.
  *   <li><b>Each camera's shift:</b> the rest of what its positions and headings share from image to
@@ -55,10 +56,10 @@ final class PoseFilter {
   private static final int PER_CAMERA = 4;
 
   /**
-   * How many errors the filter considers: the gyro's scale, then each camera's turn and its shift
-   * (along x, along y, and of its headings).
+   * How many errors the filter considers: the gyro's scale and the backup IMU's, then each camera's
+   * turn and its shift (along x, along y, and of its headings).
    */
-  static final int CONSIDERED = 1 + PER_CAMERA * MAX_CAMERAS;
+  static final int CONSIDERED = 2 + PER_CAMERA * MAX_CAMERAS;
 
   /**
    * How many numbers the filter's uncertainty takes to store: the covariance, and its relations.
@@ -66,6 +67,7 @@ final class PoseFilter {
   static final int UNCERTAINTY = 9 + 3 * CONSIDERED;
 
   private static final int SCALE = 0;
+  private static final int BACKUP_SCALE = 1;
 
   /** An uncertainty as big as the field: the estimate knows nothing. */
   private static final PoseCovariance NO_IDEA = PoseCovariance.fromStdDevs(100, 100, Math.PI);
@@ -74,6 +76,7 @@ final class PoseFilter {
    * How unsure the filter is of the errors it considers.
    *
    * @param gyroScaleStdDev the gyro's scale error: radians of heading per radian it turns
+   * @param backupScaleStdDev the backup IMU's
    * @param cameraTurnStdDevRadians each camera's turn on its mount
    * @param cameraShiftStdDevMeters each camera's shift, along each axis
    * @param cameraShiftStdDevRadians and of its headings
@@ -83,6 +86,7 @@ final class PoseFilter {
    */
   record Considered(
       double gyroScaleStdDev,
+      double backupScaleStdDev,
       double cameraTurnStdDevRadians,
       double cameraShiftStdDevMeters,
       double cameraShiftStdDevRadians,
@@ -90,6 +94,7 @@ final class PoseFilter {
       double shiftCorrelationRadians) {}
 
   private final double scaleVariance;
+  private final double backupScaleVariance;
   private final double turnVariance;
   private final double shiftVariance;
   private final double headingShiftVariance;
@@ -125,6 +130,7 @@ final class PoseFilter {
 
   PoseFilter(Considered considered) {
     scaleVariance = square(considered.gyroScaleStdDev());
+    backupScaleVariance = square(considered.backupScaleStdDev());
     turnVariance = square(considered.cameraTurnStdDevRadians());
     shiftVariance = square(considered.cameraShiftStdDevMeters());
     headingShiftVariance = square(considered.cameraShiftStdDevRadians());
@@ -226,8 +232,8 @@ final class PoseFilter {
    * @param dy and to the left
    * @param positionNoise variance to add to each position axis
    * @param headingNoise variance to add to the heading
-   * @param gyroTurned whether an IMU turned it, so its scale error grows the heading's; the wheels'
-   *     own turning errors are in the heading noise
+   * @param turnedBy what turned it: an IMU's scale error grows the heading's error by the turn; the
+   *     wheels' own turning errors are in the heading noise
    */
   void predict(
       double startYaw,
@@ -236,7 +242,7 @@ final class PoseFilter {
       double dy,
       double positionNoise,
       double headingNoise,
-      boolean gyroTurned) {
+      YawSource turnedBy) {
     double heading = startYaw + offset;
     double along = dx;
     double across = dy;
@@ -274,24 +280,26 @@ final class PoseFilter {
       related[CONSIDERED + k] += b * withHeading;
     }
 
-    // A gyro reading its turns a little large or small adds its scale error times the turn to the
+    // An IMU reading its turns a little large or small adds its scale error times the turn to the
     // heading's error: the same error every turn, so it is related to all the others.
-    if (gyroTurned && scaleVariance > 0) {
-      covariance[8] += 2 * turn * related[2 * CONSIDERED + SCALE] + turn * turn * scaleVariance;
-      covariance[2] += turn * related[SCALE];
+    int scale = turnedBy == YawSource.GYRO ? SCALE : BACKUP_SCALE;
+    double variance = turnedBy == YawSource.GYRO ? scaleVariance : backupScaleVariance;
+    if (turnedBy != YawSource.WHEELS && variance > 0) {
+      covariance[8] += 2 * turn * related[2 * CONSIDERED + scale] + turn * turn * variance;
+      covariance[2] += turn * related[scale];
       covariance[6] = covariance[2];
-      covariance[5] += turn * related[CONSIDERED + SCALE];
+      covariance[5] += turn * related[CONSIDERED + scale];
       covariance[7] = covariance[5];
-      related[2 * CONSIDERED + SCALE] += turn * scaleVariance;
+      related[2 * CONSIDERED + scale] += turn * variance;
     }
 
     // As the robot moves and turns, each camera's shift becomes a different one.
     double kept = Math.exp(-Math.hypot(moveX, moveY) / shiftMeters - Math.abs(turn) / shiftRadians);
     if (kept < 1) {
-      for (int camera = 0; camera < MAX_CAMERAS; camera++) {
+      for (int slot = 0; slot < MAX_CAMERAS; slot++) {
         for (int row = 0; row < 3; row++) {
           for (int c = 1; c < PER_CAMERA; c++) {
-            related[row * CONSIDERED + turnColumn(camera) + c] *= kept;
+            related[row * CONSIDERED + turnColumn(slot) + c] *= kept;
           }
         }
       }
@@ -576,7 +584,7 @@ final class PoseFilter {
 
   /** A camera's turn's column; its shift's x, y, and heading follow it. */
   private static int turnColumn(int camera) {
-    return 1 + PER_CAMERA * camera;
+    return 2 + PER_CAMERA * camera;
   }
 
   /**

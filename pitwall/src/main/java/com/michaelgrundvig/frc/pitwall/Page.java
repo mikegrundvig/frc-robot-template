@@ -39,10 +39,14 @@ public final class Page {
   private List<Object> builtFrom = List.of();
 
   private @Nullable String builtLock = "never built";
-  private Map<String, Object> configSection = Map.of();
   private Map<String, Object> tunableSection = Map.of();
   private Map<String, Object> valueSection = Map.of();
   private Map<String, Object> changeSection = Map.of();
+
+  /** The configurations the documentation section was built for, and the section. */
+  private List<LiveConfig<?>> documented = List.of();
+
+  private Map<String, Object> configSection = Map.of();
 
   /** The experiments the rig sections were built from, and whether every gain's tunable was. */
   private @Nullable List<Experiment> rigsBuiltFor;
@@ -98,7 +102,13 @@ public final class Page {
    * </ul>
    */
   public Map<String, Map<String, Object>> sections() {
-    rebuildTuningIfChanged();
+    List<LiveConfig<?>> configs = tunables.configs();
+    if (!sameObjects(configs, documented)) {
+      // Only when a configuration is published: their documentation never changes.
+      configSection = configs(configs);
+      documented = configs;
+    }
+    rebuildTuningIfChanged(configs);
     Map<String, Map<String, Object>> sections = new LinkedHashMap<>();
     sections.put("robot", robot());
     sections.put("status", status.values());
@@ -139,24 +149,27 @@ public final class Page {
   }
 
   /**
-   * Each configuration's documentation, by name: its root record's, and each record's its values
-   * are in, {@code {"record", "doc": {"summary", "text"}, "groups": [{"path", "record", "doc"}]}}.
-   * It never changes while the program runs, so the stream sends it once.
+   * Each configuration's documentation, by name: what its root record's Javadoc says, then each
+   * record its values are in, with what the record holding it says it is: {@code {"record", "doc":
+   * {"summary", "text"}, "groups": [{"path", "record", "doc", "meaning"}]}}. Each {@code record} is
+   * a display name ({@code SwerveConfig.Gains}). It was read when the configuration was published.
    */
-  static Map<String, Object> configs(Tuning.View view) {
+  static Map<String, Object> configs(List<LiveConfig<?>> configs) {
     Map<String, Object> described = new LinkedHashMap<>();
-    for (Tuning.ConfigView config : view.configs()) {
+    for (LiveConfig<?> config : configs) {
+      LiveConfig.Documentation docs = config.documentation();
       List<Object> groups = new ArrayList<>();
-      for (Tuning.Group group : config.groups()) {
+      for (LiveConfig.Documentation.Group group : docs.groups()) {
         Map<String, Object> shown = new LinkedHashMap<>();
         shown.put("path", group.path());
         shown.put("record", group.record());
         shown.put("doc", doc(group.doc()));
+        shown.put("meaning", group.meaning());
         groups.add(shown);
       }
       Map<String, Object> shown = new LinkedHashMap<>();
-      shown.put("record", config.record());
-      shown.put("doc", doc(config.doc()));
+      shown.put("record", docs.record());
+      shown.put("doc", doc(docs.doc()));
       shown.put("groups", groups);
       described.put(config.name(), shown);
     }
@@ -165,8 +178,9 @@ public final class Page {
 
   /**
    * Each configuration value, by its tunable: {@code {"config", "field", "unit", "limits",
-   * "committed", "record", "doc"}}, the last two the record that declares it and what its Javadoc
-   * says the value means.
+   * "committed", "record", "group", "meaning"}}, the last three the display name of the record that
+   * declares it, that record's path ({@code /api/configs}' group), and what its {@code @param} says
+   * the value means.
    */
   static Map<String, Object> tunables(Tuning.View view) {
     Map<String, Object> described = new LinkedHashMap<>();
@@ -180,7 +194,8 @@ public final class Page {
             "limits", value.limits().equals(Limits.NONE) ? "" : value.limits().toString());
         description.put("committed", value.committed());
         description.put("record", value.record());
-        description.put("doc", value.doc());
+        description.put("group", value.group());
+        description.put("meaning", value.meaning());
         described.put(value.path(), description);
       }
     }
@@ -254,9 +269,9 @@ public final class Page {
     return shown;
   }
 
-  private void rebuildTuningIfChanged() {
+  private void rebuildTuningIfChanged(List<LiveConfig<?>> configs) {
     List<Object> from = new ArrayList<>();
-    for (LiveConfig<?> config : tunables.configs()) {
+    for (LiveConfig<?> config : configs) {
       from.add(config.get());
     }
     String lock = tuning.whyLocked();
@@ -264,7 +279,6 @@ public final class Page {
       return;
     }
     Tuning.View view = tuning.view();
-    configSection = configs(view);
     tunableSection = tunables(view);
     valueSection = values(view);
     changeSection = changes(view);
@@ -406,7 +420,7 @@ public final class Page {
     return value.isPresent() ? value.getAsDouble() : Double.NaN;
   }
 
-  private static boolean sameObjects(List<Object> a, List<Object> b) {
+  private static boolean sameObjects(List<?> a, List<?> b) {
     if (a.size() != b.size()) {
       return false;
     }

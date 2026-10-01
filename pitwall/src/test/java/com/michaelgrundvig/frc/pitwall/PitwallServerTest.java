@@ -232,9 +232,9 @@ class PitwallServerTest {
         .contains(
             "\"/Machine/drive/gains/kP\":{\"config\":\"machine\",\"field\":\"drive.gains.kP\",\"unit\":\"\","
                 + "\"limits\":\"0 to 100\",\"committed\":16.0,\"record\":\"Fixtures.Gains\","
-                + "\"doc\":\"volts per meter per second of error\"}")
+                + "\"group\":\"drive.gains\",\"meaning\":\"volts per meter per second of error\"}")
         .as("undocumented")
-        .contains("\"record\":\"Fixtures.Range\",\"doc\":\"\"");
+        .contains("\"record\":\"Fixtures.Range\",\"group\":\"travel\",\"meaning\":\"\"");
     assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
   }
 
@@ -246,15 +246,16 @@ class PitwallServerTest {
             "{\"machine\":{\"record\":\"Fixtures.Machine\",\"doc\":{\"summary\":\"\",\"text\":\"\"},"
                 + "\"groups\":["
                 + "{\"path\":\"drive\",\"record\":\"Fixtures.Drive\","
-                + "\"doc\":{\"summary\":\"\",\"text\":\"\"}},"
+                + "\"doc\":{\"summary\":\"A drive.\",\"text\":\"A drive.\"},\"meaning\":\"\"},"
                 + "{\"path\":\"drive.gains\",\"record\":\"Fixtures.Gains\","
                 + "\"doc\":{\"summary\":\"How the drive is controlled.\",\"text\":\"How the drive"
                 + " is controlled. Tuned on a running machine, then committed.\\n\\nStart `kP`"
-                + " low.\"}},"
+                + " low.\"},\"meaning\":\"how it's controlled\"},"
                 + "{\"path\":\"drive.limits\",\"record\":\"Fixtures.DriveLimits\","
-                + "\"doc\":{\"summary\":\"The drive's limits.\",\"text\":\"The drive's limits.\"}},"
+                + "\"doc\":{\"summary\":\"The drive's limits.\",\"text\":\"The drive's limits.\"},"
+                + "\"meaning\":\"\"},"
                 + "{\"path\":\"travel\",\"record\":\"Fixtures.Range\","
-                + "\"doc\":{\"summary\":\"\",\"text\":\"\"}}]}}");
+                + "\"doc\":{\"summary\":\"\",\"text\":\"\"},\"meaning\":\"\"}]}}");
   }
 
   @Test

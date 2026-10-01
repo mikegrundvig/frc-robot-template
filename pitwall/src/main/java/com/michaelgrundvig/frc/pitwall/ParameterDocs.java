@@ -66,12 +66,17 @@ public record ParameterDocs(String summary, String text, Map<String, String> par
   }
 
   /**
-   * A record's name as code in its package writes it, nested records with their outer ones: {@code
-   * SwerveConfig.Gains}. The page names records so, to say whose Javadoc to write.
+   * A record's display name: as code in its package writes it, nested records with their outer ones
+   * ({@code SwerveConfig.Gains}), and a record declared in a method with its class ({@code
+   * Robot.Setup}). The page names records so, to say whose Javadoc to write.
    */
   public static String nameOf(Class<?> record) {
-    String name = record.getName().substring(record.getPackageName().length());
-    return (name.startsWith(".") ? name.substring(1) : name).replace('$', '.');
+    Class<?> outer = record.getEnclosingClass();
+    if (outer == null) {
+      return record.getSimpleName();
+    }
+    String simple = record.getSimpleName(); // empty for an anonymous class, which has no name
+    return simple.isEmpty() ? nameOf(outer) : nameOf(outer) + "." + simple;
   }
 
   /** Reads a record's documentation through its class loader, from wherever the record came. */

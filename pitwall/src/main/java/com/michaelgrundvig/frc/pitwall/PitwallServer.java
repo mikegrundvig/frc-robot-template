@@ -58,12 +58,14 @@ import org.jspecify.annotations.Nullable;
  *       "refused"}}, the last being the latest dashboard changes refused and why (a dashboard can't
  *       say). {@code PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
  *   <li>{@code GET /api/configs}: each configuration's documentation, from its records' Javadoc
- *       ({@link ParameterDocs}), {@code {name: {"record", "doc": {"summary", "text"}, "groups":
- *       [{"path", "record", "doc"}]}}}: its root record, then each record its values are in.
+ *       ({@link LiveConfig.Documentation}), {@code {name: {"record", "doc": {"summary", "text"},
+ *       "groups": [{"path", "record", "doc", "meaning"}]}}}: its root record, then each record its
+ *       values are in, with what the record holding it says it is. A {@code record} is a display
+ *       name, such as {@code SwerveConfig.Gains}.
  *   <li>{@code GET /api/tunables}: the configurations' tunable values, by the WPILib tunable each
  *       is published as, {@code {path: {"config", "field", "unit", "limits", "committed", "record",
- *       "doc"}}}, the last two the record that declares the value and what its {@code @param} says
- *       the value means (empty when it says nothing).
+ *       "group", "meaning"}}}, the last three the record that declares the value, its path, and
+ *       what its {@code @param} says the value means (empty when there's none).
  *   <li>{@code GET /api/values}: their current values, {@code {path: number}}. {@code PATCH} it
  *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
  *       its configuration first; {@code null} returns a value to its committed one.
@@ -367,7 +369,7 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/actions" -> postAction(exchange);
             case "GET /api/tuning" -> sendJson(exchange, 200, session());
             case "PATCH /api/tuning" -> patchTuning(exchange);
-            case "GET /api/configs" -> sendJson(exchange, 200, Page.configs(tuning.view()));
+            case "GET /api/configs" -> sendJson(exchange, 200, configs());
             case "GET /api/tunables" -> sendJson(exchange, 200, tunables());
             case "GET /api/values" -> sendJson(exchange, 200, values());
             case "PATCH /api/values" -> patchValues(exchange);
@@ -765,6 +767,10 @@ public final class PitwallServer implements AutoCloseable {
 
     private Map<String, Object> session() {
       return state.session();
+    }
+
+    private Map<String, Object> configs() {
+      return Page.configs(tunables.configs());
     }
 
     private Map<String, Object> tunables() {

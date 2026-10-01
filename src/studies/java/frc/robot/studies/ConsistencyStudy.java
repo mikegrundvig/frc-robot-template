@@ -48,7 +48,7 @@ public final class ConsistencyStudy {
         --out=DIR                 where the report goes (default build/studies/consistency)
       """;
 
-  /** Runs of each, by default: the study takes about five minutes. */
+  /** Runs of each, by default: the study takes about seven minutes. */
   static final int SEEDS = 12;
 
   private static final Set<String> OPTIONS =

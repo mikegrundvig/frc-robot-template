@@ -69,7 +69,9 @@ onChange((patch, snapshot) => {
   }
   if (snapshot || "robot" in patch) {
     for (const view of views) tabs.get(view.id).hidden = !offered(view);
-    route(); // the address may name a view offered only now, such as #sim
+    // The address may name a view offered only now, such as #sim, or one no longer offered.
+    const named = views.find((view) => view.id === location.hash.slice(1).split("/")[0]);
+    if ((named || pit) !== current || snapshot) route();
   }
 });
 

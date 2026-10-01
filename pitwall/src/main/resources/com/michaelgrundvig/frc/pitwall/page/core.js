@@ -188,6 +188,15 @@ export function h(tag, props, ...children) {
   return made;
 }
 
+/**
+ * Goes to a place on the page by its address (#tune/drivetrain/gains.steerKp), even when it's the
+ * address already: the view then shows the place again, focused.
+ */
+export function go(hash) {
+  if (location.hash === hash) window.dispatchEvent(new HashChangeEvent("hashchange"));
+  else location.hash = hash;
+}
+
 /** The element with this id. */
 export function byId(id) {
   return document.getElementById(id);

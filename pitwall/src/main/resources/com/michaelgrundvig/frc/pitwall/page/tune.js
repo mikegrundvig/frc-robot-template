@@ -2,11 +2,12 @@
 // until applied, then all change at once, or none do.
 
 import { robot, onChange, h } from "./core.js";
-import { onEdits } from "./edits.js";
-import { makeRow, updateRow, replace } from "./rows.js";
+import { onEdits, outcome } from "./edits.js";
+import { makeRow, updateRow, replace, refuser } from "./rows.js";
 
 const rows = new Map(); // path -> its row
 const counts = new Map(); // configuration -> its heading's count
+const notes = new Map(); // "configuration/record path" -> the note under that record's heading
 let list;
 let filter;
 let builtFrom = null;
@@ -26,7 +27,10 @@ function mount(view) {
         h("span", { class: "tag edit" }, "✎ edit"), "staged here, not applied")),
     list);
   onChange(render);
-  onEdits(() => rows.forEach(updateRow));
+  onEdits(() => {
+    rows.forEach(updateRow);
+    updateNotes();
+  });
   // "/" finds a value, as in many tools, unless someone is typing.
   document.addEventListener("keydown", (event) => {
     if (!visible || event.key !== "/" || typing(event.target)) return;
@@ -37,6 +41,28 @@ function mount(view) {
 
 function show() {
   visible = true;
+}
+
+/**
+ * The rest of the address names a value, by its configuration and its path there
+ * (#tune/drivetrain/gains.steerKp): it's shown and focused.
+ */
+function route(rest) {
+  if (!rest || !robot.doc) return;
+  const cut = rest.indexOf("/");
+  const config = rest.slice(0, cut);
+  const field = rest.slice(cut + 1);
+  const path = Object.keys(robot.doc.tunables).find((candidate) =>
+    robot.doc.tunables[candidate].config === config && robot.doc.tunables[candidate].field === field);
+  if (!path) return;
+  if (!rows.has(path)) {
+    filter.value = ""; // filtered out: show everything again
+    build();
+  }
+  const row = rows.get(path);
+  if (!row) return;
+  row.el.scrollIntoView({ block: "center" });
+  row.input.focus({ preventScroll: true });
 }
 
 function hide() {
@@ -75,6 +101,7 @@ function build() {
   const refocus = focused && focused.dataset ? focused.dataset.path : null;
   rows.clear();
   counts.clear();
+  notes.clear();
   const query = filter.value.trim().toLowerCase();
   const configs = new Map(); // name -> group -> [paths]
   for (const [path, value] of Object.entries(doc.tunables)) {
@@ -89,6 +116,8 @@ function build() {
   for (const [config, groups] of configs) {
     const count = h("span", { class: "meta" });
     counts.set(config, count);
+    const configNote = h("div", { class: "group-note" });
+    notes.set(config + "/", configNote);
     const parts = [];
     for (const [group, paths] of groups) {
       const rowList = h("div", { class: "rowlist" });
@@ -99,12 +128,15 @@ function build() {
         updateRow(row);
         rowList.append(row.el);
       }
+      const note = h("div", { class: "group-note" });
+      if (group) notes.set(config + "/" + group, note);
       parts.push(h("section", { class: "group", "aria-label": config + (group ? " " + group : "") },
         group && h("h3", { class: "group-h" }, h("span", { class: "mono" }, group)),
+        group && note,
         rowList));
     }
     sections.push(h("section", { class: "mech", "aria-label": config },
-      h("h2", { class: "mech-h" }, config, count), parts));
+      h("h2", { class: "mech-h" }, config, count), configNote, parts));
   }
   if (sections.length === 0) {
     sections.push(h("p", { class: "muted" }, query
@@ -114,6 +146,7 @@ function build() {
   }
   list.replaceChildren(...sections);
   updateCounts();
+  updateNotes();
   if (refocus && rows.has(refocus)) rows.get(refocus).input.focus();
 }
 
@@ -130,6 +163,25 @@ function matches(value, query) {
     .filter(Boolean).join(" ").toLowerCase().includes(query);
 }
 
+/**
+ * A refusal's reasons that name no value (a record's check of itself) go under that record's
+ * heading, or its configuration's when the record has no values of its own here.
+ */
+function updateNotes() {
+  const placed = new Map();
+  const errors = (outcome.refusal && outcome.refusal.errors) || [];
+  for (const error of errors) {
+    if ((error.paths || []).length > 0 || !error.config) continue;
+    const key = notes.has(error.config + "/" + error.group) ? error.config + "/" + error.group
+        : error.config + "/";
+    if (!placed.has(key)) placed.set(key, []);
+    placed.get(key).push(h("div", null, "✗ Refused by " + refuser(error)
+        + (error.group && key.endsWith("/") ? " (" + error.group + ")" : "") + ": ",
+      h("span", null, error.text)));
+  }
+  for (const [key, note] of notes) replace(note, placed.get(key) || []);
+}
+
 /** Each configuration's heading says how many values it has, and how many are tuned. */
 function updateCounts() {
   const doc = robot.doc;
@@ -141,4 +193,4 @@ function updateCounts() {
   }
 }
 
-export default { id: "tune", title: "Tune", mount, show, hide };
+export default { id: "tune", title: "Tune", mount, show, hide, route };

@@ -13,6 +13,8 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.tunable.ComplexTunable;
 import org.wpilib.tunable.TunableBase;
@@ -79,6 +81,46 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   /** Where a tunable value is: the components leading to it from the root, then its own. */
   private record Slot(
       Knob knob, List<RecordComponent> route, RecordComponent component, @Nullable Unit unit) {}
+
+  /**
+   * One reason this configuration refuses a change, tied to the values it concerns.
+   *
+   * @param layer which check refused it: a value's own ({@code VALUE}, {@code LIMIT}), or a
+   *     record's ({@code RECORD})
+   * @param fields the values it concerns, by path: the one it names; for a record's check that
+   *     names none, the change's values in that record
+   * @param record for a record's check, the record that refused it ({@code SwerveConfig.Gains});
+   *     empty otherwise
+   * @param group for a record's check that names no value, where that record is in this
+   *     configuration ({@code travel}, empty for the root); empty otherwise
+   * @param text why, as the check said it
+   * @param line the reason as one line, under this configuration's name: {@code "drivetrain:
+   *     Gains.steerKd: 40 must be at most steerKp (16)"}
+   */
+  record Problem(
+      Outcome.Layer layer,
+      List<String> fields,
+      String record,
+      String group,
+      String text,
+      String line) {}
+
+  /**
+   * A record that refused its values as the configuration was rebuilt: which record, where it is,
+   * and what it threw.
+   */
+  private static final class Rejected extends RuntimeException {
+    private static final long serialVersionUID = 1;
+
+    private final Class<?> record;
+    private final String prefix;
+
+    Rejected(Class<?> record, String prefix, RuntimeException cause) {
+      super(cause);
+      this.record = record;
+      this.prefix = prefix;
+    }
+  }
 
   private final String name;
   private final T committed;
@@ -236,12 +278,20 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    *     steerKp (16)"}
    */
   public T candidate(Map<String, Double> values) {
-    List<String> problems = new ArrayList<>();
-    T candidate = check(values, problems);
+    List<Problem> problems = new ArrayList<>();
+    T candidate = candidate(values, problems);
     if (candidate == null) {
-      throw new IllegalArgumentException(String.join("\n", problems));
+      throw new IllegalArgumentException(String.join("\n", lines(problems)));
     }
     return candidate;
+  }
+
+  /**
+   * The configuration a change would make, as {@link #candidate(Map)} makes it, or null with every
+   * reason it can't be made added to {@code problems}, each tied to the values it concerns.
+   */
+  @Nullable T candidate(Map<String, Double> values, List<Problem> problems) {
+    return check(values, problems);
   }
 
   /**
@@ -253,12 +303,13 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    * @return null when it can be made
    */
   public @Nullable String whyNot(Map<String, Double> values) {
-    List<String> problems = new ArrayList<>();
+    List<Problem> problems = new ArrayList<>();
     T candidate = check(values, problems);
+    List<String> lines = new ArrayList<>(lines(problems));
     if (candidate != null) {
-      problems.addAll(brokenRules(values, candidate));
+      lines.addAll(brokenRules(values, candidate));
     }
-    return problems.isEmpty() ? null : String.join("\n", problems);
+    return lines.isEmpty() ? null : String.join("\n", lines);
   }
 
   /**
@@ -389,36 +440,108 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    * The configuration a change would make, or null with every reason it can't be made added to
    * {@code problems}.
    */
-  private @Nullable T check(Map<String, Double> values, List<String> problems) {
+  private @Nullable T check(Map<String, Double> values, List<Problem> problems) {
+    int before = problems.size();
     for (Map.Entry<String, Double> entry : values.entrySet()) {
       String path = entry.getKey();
       double value = entry.getValue();
       Slot slot = slots.get(path);
       if (slot == null) {
-        problems.add(name + ": " + path + " isn't tunable");
+        String why = path + " isn't tunable";
+        problems.add(value(Outcome.Layer.VALUE, path, why, name + ": " + why));
       } else if (!Double.isFinite(value)) {
-        problems.add(name + ": " + path + " takes a number, got " + value);
+        String why = path + " takes a number, got " + value;
+        problems.add(value(Outcome.Layer.VALUE, path, why, name + ": " + why));
       } else {
         String outside = slot.knob().limits().whyNot(value);
         if (outside != null) {
-          problems.add(name + ": " + path + ": " + outside);
+          problems.add(
+              value(Outcome.Layer.LIMIT, path, outside, name + ": " + path + ": " + outside));
         }
       }
     }
-    if (!problems.isEmpty()) {
+    if (problems.size() > before) {
       return null;
     }
     try {
       return rebuilt(values);
     } catch (RuntimeException refused) {
       // Whatever a record's checks throw refuses the change; a ConfigException has a line for
-      // each value it rejects.
-      String why = refused.getMessage();
-      for (String line : (why != null ? why : refused.toString()).split("\n")) {
-        problems.add(name + ": " + line);
+      // each value it rejects, each naming it from the record that checked it. Anything else
+      // thrown (a record that couldn't be read or built) refuses it too, as the root's.
+      Rejected rejected =
+          refused instanceof Rejected known
+              ? known
+              : new Rejected(committed.getClass(), "", refused);
+      Throwable cause = Objects.requireNonNull(rejected.getCause());
+      String why = cause.getMessage();
+      for (String line : (why != null ? why : cause.toString()).split("\n")) {
+        problems.add(refusedBy(rejected, line, values.keySet()));
       }
       return null;
     }
+  }
+
+  private static Problem value(Outcome.Layer layer, String path, String why, String line) {
+    return new Problem(layer, List.of(path), "", "", why, line);
+  }
+
+  /**
+   * A record's refusal, one line of it, tied to the value it names. A record names a value from
+   * itself, {@code where: what}: {@code Gains.steerKd}, {@code CameraConfig[front].tiltUp}, or a
+   * value further in, {@code SwerveConfig.limits.maxLinearSpeed}. A line naming no tunable value (a
+   * whole-record check, or a value that isn't tunable) concerns the change's values in that record,
+   * and the record itself.
+   */
+  private Problem refusedBy(Rejected rejected, String line, Set<String> changed) {
+    String record = nameOf(rejected.record);
+    String field = "";
+    String what = line;
+    int colon = line.indexOf(": ");
+    if (colon > 0) {
+      String rest = fromRecord(line.substring(0, colon), rejected.record.getSimpleName());
+      if (rest != null && slots.containsKey(rejected.prefix + rest)) {
+        field = rejected.prefix + rest;
+        what = line.substring(colon + 2);
+      }
+    }
+    if (!field.isEmpty()) {
+      return new Problem(
+          Outcome.Layer.RECORD, List.of(field), record, "", what, name + ": " + line);
+    }
+    List<String> within =
+        changed.stream().filter(path -> path.startsWith(rejected.prefix)).sorted().toList();
+    String group =
+        rejected.prefix.isEmpty() ? "" : rejected.prefix.substring(0, rejected.prefix.length() - 1);
+    return new Problem(Outcome.Layer.RECORD, within, record, group, line, name + ": " + line);
+  }
+
+  /**
+   * The path a record's violation names, from the record: {@code steerKd} for {@code Gains.steerKd}
+   * or {@code Gains[left].steerKd} in a record named Gains; null for one that names no value of
+   * that record.
+   */
+  private static @Nullable String fromRecord(String where, String simpleName) {
+    if (where.startsWith(simpleName + ".")) {
+      return where.substring(simpleName.length() + 1);
+    }
+    int named = where.indexOf("].");
+    if (where.startsWith(simpleName + "[") && named > 0) {
+      return where.substring(named + 2);
+    }
+    return null;
+  }
+
+  /** The reasons as lines, as {@link #candidate(Map)} and {@link #whyNot} give them. */
+  private static List<String> lines(List<Problem> problems) {
+    return problems.stream().map(Problem::line).toList();
+  }
+
+  /** A record's name as code in its package writes it: {@code SwerveConfig.Gains}. */
+  static String nameOf(Class<?> type) {
+    String name = type.getName();
+    String home = type.getPackageName();
+    return (home.isEmpty() ? name : name.substring(home.length() + 1)).replace('$', '.');
   }
 
   /** Why a candidate breaks the rules the change touches, one line for each rule broken. */
@@ -486,7 +609,15 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
       types[i] = components[i].getType();
       arguments[i] = value;
     }
-    return changed ? construct(record, types, arguments) : record;
+    if (!changed) {
+      return record;
+    }
+    try {
+      return construct(record, types, arguments);
+    } catch (RuntimeException refused) {
+      // Which record refused, and where it is, so its reasons can be tied to its values.
+      throw new Rejected(record.getClass(), prefix, refused);
+    }
   }
 
   private static boolean isAbove(String path, Map<String, Object> replacements) {

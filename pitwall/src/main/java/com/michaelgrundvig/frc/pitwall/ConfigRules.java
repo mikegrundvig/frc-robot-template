@@ -2,6 +2,8 @@ package com.michaelgrundvig.frc.pitwall;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -80,6 +82,17 @@ public final class ConfigRules {
 
   private record Rule(
       String name, List<Input> inputs, Function<Candidates, @Nullable String> check) {}
+
+  /**
+   * A rule a change breaks, and the values it reads, so each can say so.
+   *
+   * @param rule the rule's name
+   * @param text why it's broken, as the rule says it
+   * @param line the whole reason as one line: {@code "the intake and the hood: ..."}
+   * @param reads each configuration it reads, with the paths of the values it reads there; none for
+   *     any of them
+   */
+  record Broken(String rule, String text, String line, Map<LiveConfig<?>, Set<String>> reads) {}
 
   private final List<Rule> rules = new ArrayList<>();
 
@@ -201,9 +214,9 @@ public final class ConfigRules {
     List<String> broken = new ArrayList<>();
     Candidates committed = new Candidates(Map.of(), true);
     for (Rule rule : rules) {
-      String why = run(rule, committed);
+      Broken why = run(rule, committed);
       if (why != null) {
-        broken.add(why);
+        broken.add(why.line());
       }
     }
     if (!broken.isEmpty()) {
@@ -229,11 +242,22 @@ public final class ConfigRules {
   List<String> whyNot(
       Map<LiveConfig<?>, ? extends Collection<String>> changes,
       Map<LiveConfig<?>, ? extends Record> candidates) {
-    List<String> broken = new ArrayList<>();
+    return broken(changes, candidates).stream().map(Broken::line).toList();
+  }
+
+  /**
+   * The rules a change breaks, as {@link #whyNot} finds them, each with the values it reads.
+   *
+   * @return each rule broken; empty when none is
+   */
+  List<Broken> broken(
+      Map<LiveConfig<?>, ? extends Collection<String>> changes,
+      Map<LiveConfig<?>, ? extends Record> candidates) {
+    List<Broken> broken = new ArrayList<>();
     Candidates changed = new Candidates(candidates, false);
     for (Rule rule : rules) {
       if (rule.inputs().stream().anyMatch(input -> input.touchedBy(changes))) {
-        String why = run(rule, changed);
+        Broken why = run(rule, changed);
         if (why != null) {
           broken.add(why);
         }
@@ -270,14 +294,35 @@ public final class ConfigRules {
   }
 
   /** Runs a rule: why it's broken, under its name, or null. A rule that throws is broken. */
-  private static @Nullable String run(Rule rule, Candidates candidates) {
+  private static @Nullable Broken run(Rule rule, Candidates candidates) {
     try {
       String why = rule.check().apply(candidates);
-      return why == null ? null : rule.name() + ": " + why;
+      return why == null
+          ? null
+          : new Broken(rule.name(), why, rule.name() + ": " + why, reads(rule));
     } catch (RuntimeException e) {
       String failed = "rule '" + rule.name() + "' failed: " + e;
       TunableRegistry.reportWarning("Pitwall: " + failed);
-      return failed;
+      return new Broken(rule.name(), "failed: " + e, failed, reads(rule));
     }
+  }
+
+  /** The values a rule reads, by configuration: none for any of a configuration's. */
+  private static Map<LiveConfig<?>, Set<String>> reads(Rule rule) {
+    Map<LiveConfig<?>, Set<String>> reads = new LinkedHashMap<>();
+    for (Input input : rule.inputs()) {
+      reads.merge(input.config(), input.values(), ConfigRules::union);
+    }
+    return reads;
+  }
+
+  /** Two inputs' values of one configuration: none (any of them) wins. */
+  private static Set<String> union(Set<String> a, Set<String> b) {
+    if (a.isEmpty() || b.isEmpty()) {
+      return Set.of();
+    }
+    Set<String> both = new LinkedHashSet<>(a);
+    both.addAll(b);
+    return both;
   }
 }

@@ -304,7 +304,12 @@ class PitwallServerTest {
     assertThat(refused.body())
         .isEqualTo(
             "{\"type\":\"about:blank\",\"title\":\"Refused\",\"status\":422,"
-                + "\"detail\":\"/Machine/drive/limits/current: -1 is below its limit of 1\"}");
+                + "\"detail\":\"/Machine/drive/limits/current: -1 is below its limit of 1\","
+                + "\"errors\":[{\"layer\":\"limit\",\"by\":\"\","
+                + "\"path\":\"/Machine/drive/limits/current\","
+                + "\"paths\":[\"/Machine/drive/limits/current\"],\"config\":\"machine\","
+                + "\"group\":\"\",\"text\":\"-1 is below its limit of 1\","
+                + "\"line\":\"/Machine/drive/limits/current: -1 is below its limit of 1\"}]}");
     assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
   }
 
@@ -314,7 +319,10 @@ class PitwallServerTest {
     var refused = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/travel/min\": 12}");
 
     assertThat(refused.statusCode()).isEqualTo(422);
-    assertThat(refused.body()).contains("min must be below max, got 12.0 and 10.0");
+    assertThat(refused.body())
+        .contains(
+            "\"layer\":\"record\",\"by\":\"Fixtures.Range\",\"path\":\"/Machine/travel/min\"",
+            "\"group\":\"travel\",\"text\":\"min must be below max, got 12.0 and 10.0\"");
   }
 
   @Test

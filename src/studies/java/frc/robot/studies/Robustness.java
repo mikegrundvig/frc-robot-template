@@ -50,9 +50,9 @@ public final class Robustness {
   }
 
   /**
-   * The robust ranking: the smallest worst-trial 95% error, to the millimeter; a tie to fewer
-   * cameras, then the smaller worst error, the smaller median, and the name. A layout with no 95%
-   * error in some trial ranks after the rest, by the least of the field it placed within 5 cm.
+   * The robust ranking: the smallest worst-trial 95% error, rounded to the millimeter; a tie to
+   * fewer cameras, then the smaller worst error, the smaller median, and the name. A layout with no
+   * 95% error in some trial ranks after the rest, by the least of the field it placed within 5 cm.
    */
   public static final Comparator<Layout> RANKING =
       Comparator.comparingDouble((Layout layout) -> Math.round(layout.worstP95Meters() * 1000))

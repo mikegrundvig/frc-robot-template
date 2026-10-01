@@ -24,8 +24,9 @@ import org.wpilib.math.geometry.Transform3d;
  * @param sightMeters tags farther than this aren't detected
  * @param gyroErrorDegrees how far off the gyro's heading typically is (one standard deviation)
  * @param mountErrorMillimeters how far each camera really sits from where it's configured, at most,
- *     along each axis: each camera's own error is drawn within this, and stays the same everywhere
- *     on the field, as a mount's does
+ *     along each axis: each camera's offset along each axis is drawn evenly within plus or minus
+ *     this, fixed for these conditions, the same over the whole field and in every layout the
+ *     camera is part of, as a mount's error is
  * @param mountErrorDegrees how far each camera is really turned from how it's configured, at most,
  *     about each axis
  */

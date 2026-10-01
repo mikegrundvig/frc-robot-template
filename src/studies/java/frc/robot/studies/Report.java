@@ -66,8 +66,9 @@ final class Report {
     }
     md.append(
         "\n*Ranked by* the position error 95% of the field is within, from one set of images with"
-            + " the robot standing still: smaller is better, and a tie to the millimeter goes to"
-            + " fewer cameras. *None* means more than 5% of the field gets no measurement at all."
+            + " the robot standing still: smaller is better, errors that round to the same"
+            + " millimeter tie, and a tie goes to fewer cameras. *None* means more than 5% of the"
+            + " field gets no measurement at all."
             + " Every score is explained in docs/camera-placement.md.\n");
 
     md.append("\n## The best\n\n").append(HEADER);
@@ -111,9 +112,10 @@ final class Report {
     md.append(
         format(
             "%n*Ranked by* the worst of %d trials' 95%% error, each trial's conditions drawn from"
-                + " the plausible ranges in docs/camera-placement.md: smaller is better, a tie to"
-                + " the millimeter goes to fewer cameras. *None* means more than 5%% of the field"
-                + " went unmeasured in some trial.%n%n",
+                + " the plausible ranges in docs/camera-placement.md: smaller is better, errors"
+                + " that round to the same millimeter tie, and a tie goes to fewer cameras. *None*"
+                + " means more than 5%% of the field went unmeasured in some trial; those rank"
+                + " after the rest, by the least of the field they placed within 5 cm.%n%n",
             robustness.trials().size()));
     for (int t = 0; t < robustness.trials().size(); t++) {
       md.append(format("- Trial %d: %s.%n", t + 1, robustness.trials().get(t).described()));
@@ -157,7 +159,7 @@ final class Report {
 
   private static final String ROBUST_HEADER =
       "| Rank | Layout | Worst trial 95% | Median 95% | Nominal 95% | Nominal rank"
-          + " | Worst within 5 cm | Two cameras |\n"
+          + " | Worst within 5 cm | Nominal two cameras |\n"
           + "|---:|---|---:|---:|---:|---:|---:|---:|\n";
 
   private static String robustRow(int rank, Robustness.Layout layout) {

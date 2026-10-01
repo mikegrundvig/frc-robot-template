@@ -220,20 +220,27 @@ public final class CameraStudy {
       Score best = result.ranking().get(0);
       out.printf(
           Locale.ROOT,
-          "Done in %.0f s. Best: %s, 95%% of the field within %.1f cm.%n",
+          "Done in %.0f s. Best: %s, %s.%n",
           seconds,
           best.candidate().name(),
-          100 * best.positionP95Meters());
+          within(best.positionP95Meters(), "95%% of the field within %.1f cm"));
     } else {
       Robustness.Layout best = robustness.ranking().get(0);
       out.printf(
           Locale.ROOT,
-          "Done in %.0f s. Most robust: %s, 95%% of the field within %.1f cm in the worst trial.%n",
+          "Done in %.0f s. Most robust: %s, %s.%n",
           seconds,
           best.candidate().name(),
-          100 * best.worstP95Meters());
+          within(best.worstP95Meters(), "95%% of the field within %.1f cm in the worst trial"));
     }
     out.println("Report: " + directory.toAbsolutePath().resolve("summary.md"));
+  }
+
+  /** A 95% error in words, or that there's none: more than 5% of the field went unmeasured. */
+  private static String within(double meters, String pattern) {
+    return Double.isFinite(meters)
+        ? format(pattern, 100 * meters)
+        : "but more than 5% of the field goes unmeasured";
   }
 
   /** Prints how far along the scoring is, in tenths. */

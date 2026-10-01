@@ -20,11 +20,11 @@ mechanism through its whole travel, and a rigid mount; that's for CAD to check.
 ## How it works
 
 **Where the robot might be.** Positions on a grid over the whole field, every 0.5 m, kept half a
-robot's length off the walls, each at 8 headings. Each position's headings start at their own
-random fraction of the 45° step, so they don't all line up with the walls and with cameras splayed
-45°, which would favor the layouts that happen to match them. Every spot counts the same, because the study
-can't know what the next game rewards; a team that does can say so with weights (below). A spot the
-robot can't reach, inside a field element, counts too until a weights file leaves it out.
+robot's length off the walls, each at 8 headings. Each position's headings start at their own random
+fraction of the 45° step, so they don't all line up with the walls and with cameras splayed 45°,
+which would favor the layouts that happen to match them. Every spot counts the same, because the
+study can't know what the next game rewards; a team that does can say so with weights (below). A
+spot the robot can't reach, inside a field element, counts too until a weights file leaves it out.
 
 **The candidates.** A candidate is a set of cameras, each placed and pointed as a `CameraConfig`
 describes it: position, tilt up, and yaw. Every candidate uses the robot's own camera sensor. The
@@ -32,20 +32,20 @@ study tries:
 
 - the robot's own cameras, as `Robots` configures them, always;
 - every layout CAD's places allow, when CAD has said where cameras could go (`--mounts`, below);
-- otherwise, a family built around the robot's frame: one to four cameras at its corners and the middles of
-  its sides, facing out (ahead, back, sideways, or splayed 15°, 30°, or 45° from ahead or back), at
-  8, 16, and 24 in off the floor, tilted up 0°, 10°, 20°, or 30°.
+- otherwise, a family built around the robot's frame: one to four cameras at its corners and the
+  middles of its sides, facing out (ahead, back, sideways, or splayed 15°, 30°, or 45° from ahead or
+  back), at 8, 16, and 24 in off the floor, tilted up 0°, 10°, 20°, or 30°.
 
 Every camera must be within the robot: inside the bumpers, and between the floor and the robot's
 height (`Body.contains`), the check the robot's own configuration makes. A candidate with a camera
 outside is refused, naming it. The family leaves out heights the robot doesn't reach.
 
 **One set of images at each pose.** At each pose, every camera takes an image as PhotonVision's
-simulation takes it, with the camera model the simulator uses (`VisionSim`): the sensor's
-resolution and field of view, about a quarter pixel of noise on each tag corner, and tags seen up
-to 7 m. Each image goes through the robot's own vision pipeline (`VisionPipeline`), as on the
-robot: solved with the gyro's heading, correcting heading from a multi-tag solution when it
-qualifies, with the same filters and uncertainties. The robot stands still and level, and its gyro's heading is off by a
+simulation takes it, with the camera model the simulator uses (`VisionSim`): the sensor's resolution
+and field of view, about a quarter pixel of noise on each tag corner, and tags seen up to 7 m. Each
+image goes through the robot's own vision pipeline (`VisionPipeline`), as on the robot: solved with
+the gyro's heading, correcting heading from a multi-tag solution when it qualifies, with the same
+filters and uncertainties. The robot stands still and level, and its gyro's heading is off by a
 small random amount (a quarter degree, typically), as a real one is. The measurements from all the
 cameras are combined as the estimator combines them, each weighed by its uncertainty. Each camera
 takes two images at each pose, each with its own noise.
@@ -68,9 +68,9 @@ within; a spot with no measurement at all counts as missed by any distance. Smal
 puts coverage and accuracy in one number that keeps telling layouts apart: a share within a fixed
 distance stops doing that once every good layout reaches nearly all of a field rich in tags, as
 2026's is. A layout that leaves more than 5% of the field without a measurement has no such number
-("none"); those rank after the rest, by how much of the field they place within 5 cm. Errors within
-a millimeter of each other count as a tie, about the sampling's own noise, and a tie goes to fewer
-cameras.
+("none"); those rank after the rest, by how much of the field they place within 5 cm. Errors that
+round to the same millimeter count as a tie, about the sampling's own noise, and any tie goes to
+fewer cameras.
 
 **The other scores**, each a share of the field:
 
@@ -88,8 +88,9 @@ heading error's.
 
 **Deterministic.** Every random draw comes from the seed, so the same run gives the same report, to
 the digit, with any number of threads, on the same kind of computer (the same operating system and
-processor: the native solves may round differently on another). A camera's noise depends only on the seed,
-the pose, and where the camera is, so a layout scores the same whatever else is tried beside it.
+processor: the native solves may round differently on another). A camera's noise depends only on the
+seed, the pose, and where the camera is, so a layout scores the same whatever else is tried beside
+it.
 
 ## Running it
 
@@ -162,14 +163,17 @@ that's best only when those guesses are right is a risky one to build. So a robu
 trials, each drawing every error from a plausible range, and ranks the layouts by their 95% error
 in the worst trial: what the robot lives with when its cameras turn out worse than hoped. Every
 layout faces the same trials, so they're compared fairly; the median across trials is beside it.
-More trials make the worst a little worse for every layout alike.
+More trials make the worst a little worse, mostly for fragile layouts, whose worst trial is far
+from their median. A layout that leaves more than 5% of the field unmeasured in any trial has no
+worst 95% error ("none"): those rank after the rest, by the least of the field they placed within
+5 cm in any trial, then fewer cameras.
 
 | Error | Drawn from | Why that range |
 |---|---|---|
 | Tag corners off | 0.1 to 0.6 px on average (spread in the simulator's proportion) | A sharp, still image from a global-shutter camera locates corners to about a tenth of a pixel; defocus, a softer lens, or a little blur puts them half a pixel off or more. The simulator's 0.25 px sits low in the range. |
 | Tags seen to | 5 to 7 m | A 6.5 in tag 7 m from a 1280 x 800 camera with an 80° lens is about 20 pixels across, near where detection fails; exposure, blur, and detection settings bring it in. The pipeline already throws out tags farther than 6 m on average. |
 | Gyro heading off | 0.1° to 0.5°, typically | The estimator holds heading to a few tenths of a degree while cameras correct it; after a hit, or a stretch without two tags in view, half a degree. |
-| Each camera off its mount | up to 0 to 5 mm and 0° to 1° along and about each axis | A mount measured from CAD and checked with the camera calibration (docs/calibration.md) lands within a few millimeters and a fraction of a degree; a bumped camera, or one never calibrated, a degree or more. Each camera's error is its own and stays the same over the whole field, as a mount's does. |
+| Each camera off its mount | Per trial, a bound from 0 to 5 mm and one from 0° to 1°; each camera's offset along and about each axis drawn evenly within plus or minus those bounds | A mount measured from CAD and checked with the camera calibration (docs/calibration.md) lands within a few millimeters and a fraction of a degree; a bumped camera, or one never calibrated, a degree or more. Each camera's offset is its own, fixed for the trial: the same over the whole field, as a mount's error is, and the same in every layout the camera is part of. |
 
 The report's robust tables come first: each layout's worst-trial and median 95% error, its nominal
 95% error and rank, the least of the field it placed within 5 cm in any trial, and the rank

@@ -13,7 +13,7 @@
 // fleeting, a sight line that came and went, stays to be clicked; the robot keeps what it says
 // about such a shape for two seconds after it's gone.
 
-import { robot, onChange, showViews, send, h, replace, say } from "./core.js";
+import { robot, onChange, onConnection, showViews, send, h, replace, say } from "./core.js";
 
 let visible = false;
 let sceneId = null; // the scene shown
@@ -87,6 +87,8 @@ function mount(view) {
   document.addEventListener("pitwall-theme", recolor);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", recolor);
   onChange(changed);
+  // Run needs the robot there, as on Pit: the details' button follows the link.
+  onConnection(() => inspection && showDetails());
 }
 
 function show() {
@@ -296,7 +298,8 @@ function showDetails(waiting = "") {
   const actions = inspection.actions.map((asked) => {
     const now = (robot.doc && robot.doc.actions && robot.doc.actions[asked.name]) || asked;
     const running = now.phase === "RUNNING";
-    const locked = !running && now.locked;
+    // Stop is never locked; Run is, with why beside it, as on Pit.
+    const locked = !running && (robot.connected ? now.locked : "Not connected to the robot.");
     return h("div", { class: "world-action" },
       h("button", { type: "button", class: running ? "danger" : "primary", disabled: Boolean(locked),
                     "data-action": asked.name, "data-run": running ? "cancel" : "start",

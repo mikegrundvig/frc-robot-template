@@ -12,6 +12,7 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaField;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -23,6 +24,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import org.jspecify.annotations.NullMarked;
 import org.junit.jupiter.api.Test;
+import org.wpilib.math.filter.Debouncer;
+import org.wpilib.math.filter.EdgeCounterFilter;
+import org.wpilib.math.filter.SlewRateLimiter;
+import org.wpilib.math.util.MathSharedStore;
 
 /**
  * Localization's boundaries, checked on every build. Gradle keeps the robot program, the simulator,
@@ -73,6 +78,15 @@ class ArchitectureTest {
         .callMethod(LocalDate.class, "now")
         .orShould()
         .callMethod(LocalDateTime.class, "now")
+        // WPILib's math reads the robot's clock in a few places: its shared timestamp, the filters
+        // that time what they see, and its pose estimators' update without a time.
+        .orShould()
+        .callMethod(MathSharedStore.class, "getTimestamp")
+        .orShould()
+        .callMethodWhere(wpilibPoseEstimatorUpdateWithoutATime())
+        .orShould()
+        .dependOnClassesThat()
+        .belongToAnyOf(Debouncer.class, SlewRateLimiter.class, EdgeCounterFilter.class)
         .because(
             "an estimator that reads the clock decides differently in a replay than it did on the"
                 + " robot; take the time as an argument, stamped when the data was captured")
@@ -178,5 +192,17 @@ class ArchitectureTest {
         }
       }
     };
+  }
+
+  /**
+   * A WPILib pose estimator's {@code update}, which stamps what it's given with the clock's time.
+   */
+  private static DescribedPredicate<JavaMethodCall> wpilibPoseEstimatorUpdateWithoutATime() {
+    return DescribedPredicate.describe(
+        "a WPILib pose estimator's update, which reads the clock (updateWithTime doesn't)",
+        call ->
+            call.getName().equals("update")
+                && call.getTargetOwner().getPackageName().equals("org.wpilib.math.estimator")
+                && call.getTargetOwner().getSimpleName().contains("PoseEstimator"));
   }
 }

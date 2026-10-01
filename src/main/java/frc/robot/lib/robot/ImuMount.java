@@ -29,10 +29,10 @@ import org.wpilib.units.measure.Distance;
  *     x ({@code new Rotation3d(Math.PI, 0, 0)}) for one mounted upside down
  * @param accelerometerChecked whether this robot has passed the accelerometer check for this IMU
  *     (docs/calibration.md): driving forward reads forward, strafing left reads left, and level and
- *     still reads near zero. Until it has, the slip check doesn't compare the wheels' speed with
- *     its accelerometer (one turned on its mount would read every change of speed as a slide), and
- *     a jolt is judged by its size alone. Comparing the wheels' turn with the gyro's needs no
- *     check.
+ *     still reads near zero. Until it has, the slip check compares the wheels' speed with its
+ *     accelerometer by size, not direction (one turned on its mount would read every change of
+ *     speed as a slide sideways, but just as large), and a jolt is judged by its size alone.
+ *     Comparing the wheels' turn with the gyro's needs no check.
  */
 @ConfigRecord
 public record ImuMount(

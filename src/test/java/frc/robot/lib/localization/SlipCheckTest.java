@@ -47,6 +47,9 @@ class SlipCheckTest {
     /** What the accelerometer reads, turned this far from the robot's axes. */
     double imuTurned;
 
+    /** And its bias along the robot's forward axis. */
+    double bias;
+
     Robot() {
       this(Translation2d.ZERO, true);
     }
@@ -89,8 +92,9 @@ class SlipCheckTest {
               new Translation3d(imu.getX(), imu.getY(), 0.1),
               checked,
               new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
-              felt.getX(),
-              felt.getY()));
+              felt.getX() + bias,
+              felt.getY(),
+              0));
       return this;
     }
 
@@ -257,6 +261,39 @@ class SlipCheckTest {
     assertThat(robot.check.slipMetersPerSecond()).as("stopped").isZero();
   }
 
+  /**
+   * An accelerometer reading 0.3 m/s² too high, twice what the speed comparison lets go of:
+   * standing still for half a minute, it learns its bias, and no slide builds up; then a hard
+   * launch is no slide either.
+   */
+  @Test
+  void standingStillTheAccelerometersBiasIsLearned() {
+    Robot robot = new Robot();
+    robot.bias = 0.3;
+    double most = 0;
+    for (int i = 0; i < 1500; i++) {
+      robot.loop(0, 0, 0, 0);
+      most = Math.max(most, robot.check.slideMetersPerSecond());
+    }
+    robot.loops(50, 4.4 * LOOP, 0, 0, 0);
+
+    assertThat(most).as("standing").isLessThan(TOLERANCE);
+    assertThat(robot.check.slipMetersPerSecond()).as("launching").isZero();
+  }
+
+  /**
+   * A bias too large to be one (2 m/s²: the robot is taken to be moving, not standing) adds up as a
+   * slide, but none faster than the robot could go.
+   */
+  @Test
+  void noSlideIsFasterThanTheRobotCouldGo() {
+    Robot robot = new Robot();
+    robot.bias = 2;
+    robot.loops(1500, 0, 0, 0, 0);
+
+    assertThat(robot.check.slipMetersPerSecond()).isEqualTo(SETTINGS.maxSlideMetersPerSecond());
+  }
+
   /** A slide that turns and one that speeds up, at once: the root of their squares. */
   @Test
   void theTwoAddAsTheRootOfTheirSquares() {
@@ -284,21 +321,56 @@ class SlipCheckTest {
 
   /**
    * An accelerometer turned a quarter turn from the robot's axes reads every change of speed
-   * sideways. Not yet checked, it isn't compared, and a robot speeding up hard isn't taken for
-   * sliding; checked, the same reading would be.
+   * sideways. Not yet checked, it's compared by size, which a turn doesn't change: a robot speeding
+   * up hard while turning isn't taken for sliding; checked, the same reading would be.
    */
   @Test
-  void anUncheckedAccelerometerIsntComparedWithTheWheels() {
+  void anUncheckedAccelerometerTurnedOnItsMountSeesNoSlideWhereThereIsNone() {
     Robot unchecked = new Robot(Translation2d.ZERO, false);
     Robot checked = new Robot();
     unchecked.imuTurned = Math.PI / 2;
     checked.imuTurned = Math.PI / 2;
 
-    unchecked.loops(30, 4.4 * LOOP, 0, 0, 0);
-    checked.loops(30, 4.4 * LOOP, 0, 0, 0);
+    unchecked.loops(30, 4.4 * LOOP, 0, 2, 0);
+    checked.loops(30, 4.4 * LOOP, 0, 2, 0);
 
     assertThat(unchecked.check.slipMetersPerSecond()).isZero();
     assertThat(checked.check.speedSlipMetersPerSecond()).as("as it would be").isPositive();
+  }
+
+  /**
+   * Not yet checked, and turned a quarter turn on its mount, the accelerometer still sees wheels
+   * spinning in a launch, rolling ever faster than the robot moves, as one along the robot's axes
+   * does: the wheels' change of velocity outgrows what it feels. And a push the wheels don't see,
+   * and the push stopping.
+   */
+  @Test
+  void anUncheckedAccelerometerSeesASlideBySize() {
+    Robot unchecked = new Robot(Translation2d.ZERO, false);
+    unchecked.imuTurned = Math.PI / 2;
+    Robot checked = new Robot();
+    Robot pushed = new Robot(Translation2d.ZERO, false);
+    pushed.imuTurned = Math.PI / 2;
+    for (int i = 1; i <= 30; i++) {
+      unchecked.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
+      checked.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
+    }
+    for (int i = 1; i <= 50; i++) {
+      double speedUp = Math.min(3 * LOOP, 1 - pushed.fieldVy);
+      pushed.slide(0, -(pushed.fieldVy + speedUp)).loop(0, speedUp, 0, 0);
+    }
+    double whilePushed = pushed.check.slipMetersPerSecond();
+    for (int i = 1; i <= 25; i++) {
+      double slowDown = Math.min(3 * LOOP, pushed.fieldVy);
+      pushed.slide(0, -(pushed.fieldVy - slowDown)).loop(0, -slowDown, 0, 0);
+    }
+
+    assertThat(unchecked.check.slipMetersPerSecond())
+        .as("as the one along the robot's axes sees it")
+        .isPositive()
+        .isCloseTo(checked.check.slipMetersPerSecond(), within(1e-9));
+    assertThat(whilePushed).as("pushed, less what it let go of").isGreaterThan(0.75);
+    assertThat(pushed.check.slipMetersPerSecond()).as("stopped").isZero();
   }
 
   /**
@@ -403,7 +475,7 @@ class SlipCheckTest {
     assertThatThrownBy(
             () ->
                 new SlipCheck.Sample(
-                    0, 0, 0, 0, 0, Translation3d.ZERO, true, new ChassisVelocities(), 0, 0))
+                    0, 0, 0, 0, 0, Translation3d.ZERO, true, new ChassisVelocities(), 0, 0, 0))
         .hasMessageContaining("takes time");
   }
 }

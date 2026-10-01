@@ -3,6 +3,8 @@ package frc.robot.subsystems.localization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import frc.robot.RobotConfig;
+import frc.robot.RobotConfigBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
@@ -15,10 +17,15 @@ import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.YawSource;
+import frc.robot.lib.robot.ImuMount;
+import frc.robot.lib.robot.ImuMountBuilder;
+import frc.robot.lib.robot.Imus;
+import frc.robot.lib.robot.RobotDefinitionBuilder;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;
+import frc.robot.sim.SensorErrorsAccelErrorsBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -512,6 +519,51 @@ class LocalizationSimTest {
     assertThat(threeQuarters.stdDev()).isGreaterThan(2 * gripping.stdDev());
     assertThat(half.stdDev()).isGreaterThan(1.5 * threeQuarters.stdDev());
     assertThat(half.error()).as("the slide").isGreaterThan(threeQuarters.error());
+  }
+
+  /**
+   * A robot whose accelerometers aren't checked yet, as every robot starts, and the gyro's turned a
+   * quarter turn on its mount besides: wheels spinning in a launch at half grip are doubted about
+   * as a checked robot doubts them, its accelerometer compared with the wheels by size. Launched
+   * 1.5 s, the robot is 2.4 m behind its wheels.
+   */
+  @Test
+  void anUncheckedRobotStillDoubtsWheelsSpinningInALaunch() {
+    Outcome checked = launchingWithGrip(0.5);
+    ImuMount gyro =
+        ImuMountBuilder.builder(Robots.SIM.definition().imus().gyro())
+            .accelerometerChecked(false)
+            .build();
+    ImuMount backup =
+        ImuMountBuilder.builder(Robots.SIM.definition().imus().backup())
+            .accelerometerChecked(false)
+            .build();
+    RobotConfig unchecked =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .imus(Imus.builder().gyro(gyro).backup(backup).build())
+                    .build())
+            .build();
+    SensorErrors turned =
+        SensorErrors.TYPICAL.withAccelerometer(
+            SensorErrorsAccelErrorsBuilder.builder(SensorErrors.AccelErrors.PIGEON_2)
+                .turnedDegrees(90)
+                .build());
+    if (harness != null) {
+      harness.close();
+    }
+    harness = new DriveSimHarness(unchecked, turned);
+    DriveSimHarness robot = harness;
+    robot.idle(0.2);
+    robot.simulation.grip(0.5);
+    robot.drive(1.5, 1.0, 0, 0);
+
+    double claimed = robot.estimator.estimate().covariance().largestPositionStdDev();
+    assertThat(robot.positionError()).as("off").isGreaterThan(2);
+    assertThat(claimed)
+        .as("claimed, against the checked robot's %.2f m", checked.stdDev())
+        .isGreaterThan(0.8 * checked.stdDev());
   }
 
   /** Standing, then pushed sideways at this speed for a second, its wheels skidding. */

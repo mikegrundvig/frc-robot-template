@@ -30,20 +30,21 @@ class ScoreTest {
   void everyShareIsOfThePosesWeighed() {
     List<Sample> samples = List.of(weighing(1), weighing(3));
     Outcome[][] outcomes = {
-      {new Outcome(3, 2, 0.01, Math.toRadians(0.5))}, {new Outcome(1, 1, 0.08, Double.NaN)}
+      {new Outcome(3, 2, 0.01, Math.toRadians(0.5))}, {new Outcome(1, 1, 0.03, Double.NaN)}
     };
 
-    Score score = Score.of(TWO, samples, outcomes, 0.05);
+    Score score = Score.of(TWO, samples, outcomes);
 
     assertThat(score.oneTag()).isEqualTo(1.0);
     assertThat(score.twoTags()).isEqualTo(0.25);
     assertThat(score.twoCameras()).isEqualTo(0.25);
     assertThat(score.measured()).isEqualTo(1.0);
-    assertThat(score.localized()).as("only the 1 cm one is within 5 cm").isEqualTo(0.25);
+    assertThat(score.withinFiveCentimeters()).isEqualTo(1.0);
+    assertThat(score.withinTwoCentimeters()).as("only the 1 cm one").isEqualTo(0.25);
     assertThat(score.heading()).isEqualTo(0.25);
     assertThat(score.positionRmsMeters())
-        .isCloseTo(Math.sqrt((0.01 * 0.01 + 3 * 0.08 * 0.08) / 4), within(1e-12));
-    assertThat(score.positionP95Meters()).isEqualTo(0.08);
+        .isCloseTo(Math.sqrt((0.01 * 0.01 + 3 * 0.03 * 0.03) / 4), within(1e-12));
+    assertThat(score.positionP95Meters()).isEqualTo(0.03);
     assertThat(score.headingRmsDegrees()).isCloseTo(0.5, within(1e-12));
   }
 
@@ -51,7 +52,7 @@ class ScoreTest {
   void eachImageCountsItsShareOfItsPose() {
     Outcome[][] outcomes = {{placed(0.01), BLIND}};
 
-    Score score = Score.of(ONE, List.of(weighing(1)), outcomes, 0.05);
+    Score score = Score.of(ONE, List.of(weighing(1)), outcomes);
 
     assertThat(score.measured()).isEqualTo(0.5);
     assertThat(score.positionRmsMeters()).isCloseTo(0.01, within(1e-12));
@@ -66,27 +67,54 @@ class ScoreTest {
       outcomes[i] = new Outcome[] {placed((i + 1) / 100.0)};
     }
 
-    assertThat(Score.of(ONE, samples, outcomes, 0.05).positionP95Meters()).isEqualTo(0.19);
+    assertThat(Score.of(ONE, samples, outcomes).positionP95Meters()).isEqualTo(0.19);
+  }
+
+  /** A spot without a measurement is missed by any distance: past 5% of them, there's none. */
+  @Test
+  void spotsWithoutAMeasurementCountAgainstTheNinetyFifthPercentile() {
+    List<Sample> samples = new ArrayList<>();
+    Outcome[][] oneBlind = new Outcome[20][];
+    Outcome[][] twoBlind = new Outcome[20][];
+    for (int i = 0; i < 20; i++) {
+      samples.add(weighing(1));
+      oneBlind[i] = new Outcome[] {i == 0 ? BLIND : placed(0.01)};
+      twoBlind[i] = new Outcome[] {i < 2 ? BLIND : placed(0.01)};
+    }
+
+    assertThat(Score.of(ONE, samples, oneBlind).positionP95Meters()).isEqualTo(0.01);
+    assertThat(Score.of(ONE, samples, twoBlind).positionP95Meters()).isInfinite();
   }
 
   @Test
   void aFieldWeighingNothingCantBeScored() {
     Outcome[][] outcomes = {{placed(0.01)}};
 
-    assertThatThrownBy(() -> Score.of(ONE, List.of(weighing(0)), outcomes, 0.05))
+    assertThatThrownBy(() -> Score.of(ONE, List.of(weighing(0)), outcomes))
         .hasMessageContaining("weighs nothing");
   }
 
+  private static Score scored(Candidate candidate, double p95, double withinFive) {
+    return new Score(candidate, p95, withinFive, 0, 1, 1, 1, 1, 1, 0.01, 0.1);
+  }
+
+  /**
+   * The smaller 95th percentile first, to the millimeter; within a millimeter, fewer cameras; and
+   * those without one last, the most within 5 cm first.
+   */
   @Test
-  void theRankingPutsTheMostLocalizedFirstThenFewerCamerasThenTheSmallerError() {
-    Score better = new Score(TWO, 0.9, 1, 1, 1, 1, 1, 0.02, 0.03, 0.1);
-    Score cheaper = new Score(ONE, 0.8, 1, 1, 0, 1, 1, 0.02, 0.03, 0.1);
-    Score dearer = new Score(TWO, 0.8, 1, 1, 1, 1, 1, 0.01, 0.03, 0.1);
-    Score blind = new Score(ONE, 0.8, 0, 0, 0, 0, 0, Double.NaN, Double.NaN, Double.NaN);
-    List<Score> scores = new ArrayList<>(List.of(dearer, blind, cheaper, better));
+  void theRankingGoesByTheNinetyFifthPercentileThenFewerCameras() {
+    Score best = scored(TWO, 0.0201, 1);
+    Score cheaperTie = scored(ONE, 0.0254, 0.99);
+    Score dearerTie = scored(TWO, 0.0246, 0.99);
+    Score worse = scored(ONE, 0.031, 0.99);
+    Score blindButClose = scored(TWO, Double.POSITIVE_INFINITY, 0.9);
+    Score blind = scored(ONE, Double.POSITIVE_INFINITY, 0.5);
+    List<Score> scores =
+        new ArrayList<>(List.of(blind, worse, dearerTie, blindButClose, cheaperTie, best));
 
     scores.sort(Score.RANKING);
 
-    assertThat(scores).containsExactly(better, cheaper, blind, dearer);
+    assertThat(scores).containsExactly(best, cheaperTie, dearerTie, worse, blindButClose, blind);
   }
 }

@@ -25,12 +25,15 @@ final class Report {
    * @param own the robot's own layout
    * @param grid the positions sampled, for the maps
    */
-  record Run(
-      List<String> setup,
-      Candidate own,
-      FieldGrid grid,
-      CameraScoring.Result result,
-      List<Score> ranking) {}
+  record Run(List<String> setup, Candidate own, FieldGrid grid, CameraScoring.Result result) {
+    List<Score> ranking() {
+      return result.ranking();
+    }
+
+    Candidate best() {
+      return ranking().get(0).candidate();
+    }
+  }
 
   static void write(Path directory, Run run) throws IOException {
     Files.createDirectories(directory);
@@ -41,29 +44,27 @@ final class Report {
 
   static String summary(Run run) {
     List<Score> ranking = run.ranking();
-    double target = run.result().targetMeters();
     StringBuilder md = new StringBuilder("# Camera placement\n\n");
     for (String line : run.setup()) {
       md.append(line).append("\n");
     }
     md.append(
-        format(
-            "%n*Localized:* the cameras' combined measurement within %s of where the robot really"
-                + " is, from one set of images with the robot standing still. Every score is"
-                + " explained in docs/camera-placement.md.%n",
-            centimeters(target)));
+        "\n*Ranked by* the position error 95% of the field is within, from one set of images with"
+            + " the robot standing still: smaller is better, and a tie to the millimeter goes to"
+            + " fewer cameras. *None* means more than 5% of the field gets no measurement at all."
+            + " Every score is explained in docs/camera-placement.md.\n");
 
-    md.append("\n## The best\n\n").append(header("Rank"));
+    md.append("\n## The best\n\n").append(HEADER);
     for (int i = 0; i < Math.min(TOP, ranking.size()); i++) {
-      md.append(row(Integer.toString(i + 1), ranking.get(i)));
+      md.append(row(i + 1, ranking.get(i)));
     }
 
-    md.append("\n## The best at each camera count\n\n").append(header("Rank"));
+    md.append("\n## The best at each camera count\n\n").append(HEADER);
     int most = ranking.stream().mapToInt(Score::cameras).max().orElse(0);
     for (int cameras = 1; cameras <= most; cameras++) {
       for (int i = 0; i < ranking.size(); i++) {
         if (ranking.get(i).cameras() == cameras) {
-          md.append(row(Integer.toString(i + 1), ranking.get(i)));
+          md.append(row(i + 1, ranking.get(i)));
           break;
         }
       }
@@ -72,20 +73,18 @@ final class Report {
     int ownRank = rank(ranking, run.own());
     md.append(
         format("%n## The robot's own layout%n%nRanks %d of %d.%n%n", ownRank, ranking.size()));
-    md.append(header("Rank")).append(row(Integer.toString(ownRank), ranking.get(ownRank - 1)));
+    md.append(HEADER).append(row(ownRank, ranking.get(ownRank - 1)));
 
     md.append(
         format(
-            "%n## Maps%n%nAt each spot, the share of headings where the robot is localized: `.`"
-                + " none, `1` to `9` tenths, `#` all, blank where the weights leave it out. Blue's"
-                + " alliance wall is on the left; each character is %.2f m.%n",
+            "%n## Maps%n%nAt each spot, the share of headings where the robot is placed within 5"
+                + " cm: `.` none, `1` to `9` tenths, `#` all, blank where the weights leave it out."
+                + " Blue's alliance wall is on the left; each character is %.2f m.%n",
             run.grid().spacingMeters()));
-    Candidate best = ranking.get(0).candidate();
-    md.append("\n### ").append(run.own().name()).append("\n\n");
-    md.append(map(run, run.own()));
-    if (!best.equals(run.own())) {
-      md.append("\n### The best: ").append(best.name()).append("\n\n");
-      md.append(map(run, best));
+    md.append("\n### ").append(run.own().name()).append("\n\n").append(map(run, run.own()));
+    if (!run.best().equals(run.own())) {
+      md.append("\n### The best: ").append(run.best().name()).append("\n\n");
+      md.append(map(run, run.best()));
     }
     return md.toString();
   }
@@ -99,27 +98,25 @@ final class Report {
     throw new IllegalArgumentException("not ranked: " + candidate.name());
   }
 
-  private static String header(String first) {
-    return "| "
-        + first
-        + " | Layout | Localized | One tag | Two tags | Two cameras | Measured | Heading"
-        + " | Position RMS | Position 95% | Heading RMS |\n"
-        + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
-  }
+  private static final String HEADER =
+      "| Rank | Layout | 95% within | Within 2 cm | Within 5 cm | One tag | Two tags | Two cameras"
+          + " | Measured | Heading | Position RMS | Heading RMS |\n"
+          + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
 
-  private static String row(String first, Score score) {
+  private static String row(int rank, Score score) {
     return format(
-        "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
-        first,
+        "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
+        rank,
         score.candidate().name(),
-        percent(score.localized()),
+        centimeters(score.positionP95Meters()),
+        percent(score.withinTwoCentimeters()),
+        percent(score.withinFiveCentimeters()),
         percent(score.oneTag()),
         percent(score.twoTags()),
         percent(score.twoCameras()),
         percent(score.measured()),
         percent(score.heading()),
         centimeters(score.positionRmsMeters()),
-        centimeters(score.positionP95Meters()),
         Double.isNaN(score.headingRmsDegrees())
             ? "none"
             : format("%.2f°", score.headingRmsDegrees()));
@@ -127,12 +124,12 @@ final class Report {
 
   /**
    * A map of the field: one character per position, the share of its headings (and images) where
-   * the layout localizes the robot. The top row is the left side as blue's drivers see it.
+   * the layout places the robot within 5 cm. The top row is the left side as blue's drivers see it.
    */
   static String map(Run run, Candidate candidate) {
     FieldGrid grid = run.grid();
     List<Sample> samples = run.result().samples();
-    Outcome[][] outcomes = run.result().of(candidate);
+    Outcome[][] outcomes = run.result().outcomes(candidate);
     double[][] localized = new double[grid.rows()][grid.columns()];
     double[][] total = new double[grid.rows()][grid.columns()];
     boolean[][] counted = new boolean[grid.rows()][grid.columns()];
@@ -141,9 +138,8 @@ final class Report {
       counted[sample.row()][sample.column()] |= sample.weight() > 0;
       for (Outcome outcome : outcomes[i]) {
         total[sample.row()][sample.column()] += 1;
-        boolean close =
-            outcome.measured() && outcome.positionErrorMeters() <= run.result().targetMeters();
-        localized[sample.row()][sample.column()] += close ? 1 : 0;
+        localized[sample.row()][sample.column()] +=
+            outcome.localized(Score.FIVE_CENTIMETERS) ? 1 : 0;
       }
     }
     StringBuilder map = new StringBuilder("```\n");
@@ -164,25 +160,26 @@ final class Report {
   static List<String> candidates(List<Score> ranking) {
     List<String> lines = new ArrayList<>();
     lines.add(
-        "rank,layout,cameras,localized,one_tag,two_tags,two_cameras,measured,heading,"
-            + "position_rms_m,position_p95_m,heading_rms_deg");
+        "rank,layout,cameras,position_p95_m,within_2cm,within_5cm,one_tag,two_tags,two_cameras,"
+            + "measured,heading,position_rms_m,heading_rms_deg");
     for (int i = 0; i < ranking.size(); i++) {
       Score score = ranking.get(i);
       lines.add(
           format(
-              "%d,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.3f",
+              "%d,%s,%d,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s",
               i + 1,
               quoted(score.candidate().name()),
               score.cameras(),
-              score.localized(),
+              number(score.positionP95Meters(), 4),
+              score.withinTwoCentimeters(),
+              score.withinFiveCentimeters(),
               score.oneTag(),
               score.twoTags(),
               score.twoCameras(),
               score.measured(),
               score.heading(),
-              score.positionRmsMeters(),
-              score.positionP95Meters(),
-              score.headingRmsDegrees()));
+              number(score.positionRmsMeters(), 4),
+              number(score.headingRmsDegrees(), 3)));
     }
     return lines;
   }
@@ -193,20 +190,19 @@ final class Report {
         "layout,x_m,y_m,heading_deg,weight,image,most_tags_in_one_image,cameras_seeing_tags,"
             + "measured,position_error_m,heading_error_deg");
     List<Candidate> shown = new ArrayList<>(List.of(run.own()));
-    Candidate best = run.ranking().get(0).candidate();
-    if (!best.equals(run.own())) {
-      shown.add(best);
+    if (!run.best().equals(run.own())) {
+      shown.add(run.best());
     }
     List<Sample> samples = run.result().samples();
     for (Candidate candidate : shown) {
-      Outcome[][] outcomes = run.result().of(candidate);
+      Outcome[][] outcomes = run.result().outcomes(candidate);
       for (int i = 0; i < samples.size(); i++) {
         Sample sample = samples.get(i);
         for (int image = 0; image < outcomes[i].length; image++) {
           Outcome outcome = outcomes[i][image];
           lines.add(
               format(
-                  "%s,%.3f,%.3f,%.1f,%.3f,%d,%d,%d,%b,%.4f,%.3f",
+                  "%s,%.3f,%.3f,%.1f,%.3f,%d,%d,%d,%b,%s,%s",
                   quoted(candidate.name()),
                   sample.pose().getX(),
                   sample.pose().getY(),
@@ -216,12 +212,17 @@ final class Report {
                   outcome.mostTagsInOneImage(),
                   outcome.camerasSeeingTags(),
                   outcome.measured(),
-                  outcome.positionErrorMeters(),
-                  Math.toDegrees(outcome.headingErrorRadians())));
+                  number(outcome.positionErrorMeters(), 4),
+                  number(Math.toDegrees(outcome.headingErrorRadians()), 3)));
         }
       }
     }
     return lines;
+  }
+
+  /** A number for a spreadsheet, empty when there's none. */
+  private static String number(double value, int digits) {
+    return Double.isFinite(value) ? format("%." + digits + "f", value) : "";
   }
 
   private static String quoted(String text) {
@@ -233,7 +234,7 @@ final class Report {
   }
 
   private static String centimeters(double meters) {
-    return Double.isNaN(meters) ? "none" : format("%.1f cm", 100 * meters);
+    return Double.isFinite(meters) ? format("%.1f cm", 100 * meters) : "none";
   }
 
   private static String format(String pattern, Object... values) {

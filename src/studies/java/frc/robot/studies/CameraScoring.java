@@ -22,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -29,14 +30,15 @@ import org.wpilib.math.geometry.Rotation2d;
 
 /**
  * Scores camera layouts all over the field. At each pose, each camera takes its images (with
- * PhotonVision's simulation, {@link CameraImageSim}), the robot's own vision pipeline turns each
- * into a measurement or throws it out, and each layout's measurements are combined as the estimator
- * combines them. What each layout's cameras saw, and how close the combination came to the truth,
- * is its {@link Outcome} there.
+ * PhotonVision's simulation, {@link CameraImageSim}), and the robot's own vision pipeline turns
+ * each into a measurement or throws it out. Each layout's measurements are then combined as the
+ * estimator combines them, and what its cameras saw, and how close the combination came to the
+ * truth, is its {@link Outcome} there.
  *
  * <p>A camera that several layouts share (the same mount and sensor) takes its images once, and its
  * noise depends only on the seed, the pose, and the mount, so a layout scores the same whatever
- * else is tried beside it, and on any number of threads.
+ * else is tried beside it, and on any number of threads. What each camera saw is kept, not each
+ * layout's outcome, so thousands of layouts made of a few hundred cameras fit in memory.
  */
 public final class CameraScoring {
   private final RobotConfig robot;
@@ -46,16 +48,16 @@ public final class CameraScoring {
   private final VisionPipeline pipeline;
 
   /** Every distinct camera, over every layout: where it is, which way it looks, and its sensor. */
-  private final List<CameraConfig> mounts = new ArrayList<>();
+  private final List<CameraConfig> cameras = new ArrayList<>();
 
-  /** Each layout's cameras, as their places in {@link #mounts}. */
+  /** Each layout's cameras, as their places in {@link #cameras}. */
   private final int[][] layouts;
 
-  /** The distinct sensors, and each mount's among them. */
+  /** The distinct sensors, and each camera's among them. */
   private final List<CameraConfig.Sensor> sensors = new ArrayList<>();
 
   private final int[] sensorOf;
-  private final long[] mountSeeds;
+  private final long[] cameraSeeds;
 
   /**
    * @param robot the robot the cameras go on: its body, and its vision pipeline's settings
@@ -72,32 +74,34 @@ public final class CameraScoring {
     this.config = config;
     pipeline = new VisionPipeline(field);
     Map<Mount, Integer> index = new LinkedHashMap<>();
+    List<Long> seeds = new ArrayList<>();
     layouts = new int[candidates.size()][];
     for (int c = 0; c < candidates.size(); c++) {
       Candidate candidate = candidates.get(c);
-      candidate.on(robot);
-      List<CameraConfig> cameras = candidate.cameras();
-      layouts[c] = new int[cameras.size()];
-      for (int i = 0; i < cameras.size(); i++) {
-        CameraConfig camera = cameras.get(i);
-        Integer at = index.get(Mount.of(camera));
+      candidate.checkOn(robot);
+      layouts[c] = new int[candidate.cameras().size()];
+      for (int i = 0; i < layouts[c].length; i++) {
+        CameraConfig camera = candidate.cameras().get(i);
+        Mount mount = Mount.of(camera);
+        Integer at = index.get(mount);
         if (at == null) {
-          at = mounts.size();
-          index.put(Mount.of(camera), at);
-          mounts.add(camera);
+          at = cameras.size();
+          index.put(mount, at);
+          cameras.add(camera);
+          seeds.add(mount.seed());
         }
         layouts[c][i] = at;
       }
     }
-    sensorOf = new int[mounts.size()];
-    mountSeeds = new long[mounts.size()];
-    for (int m = 0; m < mounts.size(); m++) {
-      CameraConfig camera = mounts.get(m);
-      if (!sensors.contains(camera.sensor())) {
-        sensors.add(camera.sensor());
+    sensorOf = new int[cameras.size()];
+    cameraSeeds = new long[cameras.size()];
+    for (int m = 0; m < cameras.size(); m++) {
+      CameraConfig.Sensor sensor = cameras.get(m).sensor();
+      if (!sensors.contains(sensor)) {
+        sensors.add(sensor);
       }
-      sensorOf[m] = sensors.indexOf(camera.sensor());
-      mountSeeds[m] = Mount.of(camera).seed();
+      sensorOf[m] = sensors.indexOf(sensor);
+      cameraSeeds[m] = seeds.get(m);
     }
   }
 
@@ -128,47 +132,66 @@ public final class CameraScoring {
 
     /** A number from where the camera is and how it points: the same on every computer. */
     long seed() {
-      return mix(0, forward, left, up, roll, tiltUp, yaw);
+      return Seeds.mix(0, forward, left, up, roll, tiltUp, yaw);
     }
   }
 
-  /** How many distinct cameras the layouts have among them. */
-  public int mounts() {
-    return mounts.size();
+  /** How many distinct cameras the layouts have among them: each takes its images once. */
+  public int distinctCameras() {
+    return cameras.size();
   }
 
   /**
-   * Every layout's outcome at every sample.
+   * Every camera's images at every sample, then every layout's score from them.
    *
    * @param progress told how many samples are done, after each one
    */
   public Result score(List<Sample> samples, IntConsumer progress) {
-    Outcome[][][] outcomes = new Outcome[samples.size()][][];
-    AtomicInteger next = new AtomicInteger();
+    Views[] views = new Views[samples.size()];
     AtomicInteger done = new AtomicInteger();
     int threads = Math.min(config.threads(), Math.max(1, samples.size()));
-    List<List<CameraImageSim>> cameras = new ArrayList<>();
+    inParallel(
+        samples.size(),
+        threads,
+        () -> {
+          // Each thread its own cameras: their noise isn't shared.
+          List<CameraImageSim> images = new ArrayList<>();
+          for (CameraConfig.Sensor sensor : sensors) {
+            images.add(new CameraImageSim(field, sensor));
+          }
+          return i -> {
+            views[i] = at(samples.get(i).pose(), images);
+            progress.accept(done.incrementAndGet());
+          };
+        });
+    Score[] scores = new Score[candidates.size()];
+    inParallel(
+        candidates.size(),
+        threads,
+        () -> c -> scores[c] = Score.of(candidates.get(c), samples, outcomes(views, layouts[c])));
+    return new Result(candidates, layouts, samples, views, List.of(scores));
+  }
+
+  /**
+   * Runs work on every index from 0 to count, on several threads. Each thread's work is made here,
+   * one thread at a time, so what it holds is its own; which thread does an index doesn't matter.
+   */
+  private static void inParallel(int count, int threads, Supplier<IntConsumer> work) {
+    AtomicInteger next = new AtomicInteger();
+    List<IntConsumer> each = new ArrayList<>();
     for (int w = 0; w < threads; w++) {
-      List<CameraImageSim> own = new ArrayList<>(); // each thread its own: their noise isn't shared
-      for (CameraConfig.Sensor sensor : sensors) {
-        own.add(new CameraImageSim(field, sensor));
-      }
-      cameras.add(own);
+      each.add(work.get());
     }
     ExecutorService pool = Executors.newFixedThreadPool(threads);
     try {
       List<Future<?>> workers = new ArrayList<>();
-      for (List<CameraImageSim> own : cameras) {
+      for (IntConsumer own : each) {
         workers.add(
             pool.submit(
                 () -> {
-                  for (int i = next.getAndIncrement();
-                      i < samples.size();
-                      i = next.getAndIncrement()) {
-                    outcomes[i] = at(samples.get(i).pose(), own);
-                    progress.accept(done.incrementAndGet());
+                  for (int i = next.getAndIncrement(); i < count; i = next.getAndIncrement()) {
+                    own.accept(i);
                   }
-                  return null;
                 }));
       }
       for (Future<?> worker : workers) {
@@ -182,19 +205,16 @@ public final class CameraScoring {
     } finally {
       pool.shutdownNow();
     }
-    return new Result(candidates, samples, outcomes, config.targetMeters());
   }
 
-  /** Every layout's outcomes at one pose: one per set of images. */
-  private Outcome[][] at(Pose2d truth, List<CameraImageSim> images) {
-    Outcome[][] outcomes = new Outcome[candidates.size()][config.frames()];
+  /** What every camera saw at one pose, in each set of images. */
+  private Views at(Pose2d truth, List<CameraImageSim> images) {
+    Views views = new Views(config.frames(), cameras.size());
     Pose3d robotPose = new Pose3d(truth);
     long poseSeed =
-        mix(config.seed(), truth.getX(), truth.getY(), truth.getRotation().getRadians());
-    int[] tags = new int[mounts.size()];
-    VisionMeasurement[] measurements = new VisionMeasurement[mounts.size()];
+        Seeds.mix(config.seed(), truth.getX(), truth.getY(), truth.getRotation().getRadians());
     for (int frame = 0; frame < config.frames(); frame++) {
-      long frameSeed = mix(poseSeed, frame);
+      long frameSeed = Seeds.mix(poseSeed, frame);
       // One gyro for the whole robot, off by a little, the same for every camera.
       double gyroError =
           Math.toRadians(config.gyroErrorDegrees())
@@ -207,117 +227,197 @@ public final class CameraScoring {
               0,
               0,
               0);
-      for (int m = 0; m < mounts.size(); m++) {
-        CameraConfig camera = mounts.get(m);
+      for (int m = 0; m < cameras.size(); m++) {
+        CameraConfig camera = cameras.get(m);
         TagDetections seen =
             images
                 .get(sensorOf[m])
                 .image(
                     robotPose.transformBy(camera.robotToCamera()),
                     camera.name(),
-                    mix(frameSeed, mountSeeds[m]));
-        tags[m] = seen.tags().size();
-        measurements[m] =
+                    Seeds.mix(frameSeed, cameraSeeds[m]));
+        VisionMeasurement measurement =
             seen.tags().isEmpty()
                 ? null
                 : pipeline.process(seen, camera, standingStill, robot.vision()).measurement();
+        views.set(frame, m, seen.tags().size(), measurement, truth);
       }
-      for (int c = 0; c < candidates.size(); c++) {
-        outcomes[c][frame] = combine(layouts[c], tags, measurements, truth);
+    }
+    return views;
+  }
+
+  /** A layout's outcomes, from what its cameras saw: for each sample, one per set of images. */
+  private static Outcome[][] outcomes(Views[] views, int[] layout) {
+    Outcome[][] outcomes = new Outcome[views.length][];
+    for (int i = 0; i < views.length; i++) {
+      outcomes[i] = new Outcome[views[i].frames];
+      for (int frame = 0; frame < views[i].frames; frame++) {
+        outcomes[i][frame] = views[i].combine(frame, layout);
       }
     }
     return outcomes;
   }
 
   /**
-   * One layout's images, combined as the estimator would combine them from no prior belief: each
-   * measurement weighed by the inverse of its uncertainty, which is where a Kalman filter's
-   * updates, one camera after another, end up.
+   * One set of images from some cameras, combined. The measurements, each with its own uncertainty,
+   * as the cameras that took them would give them.
+   *
+   * @param cameras which cameras the layout has, as places in the arrays
+   * @param tags how many tags each camera saw
+   * @param measurements each camera's measurement, or null if its image made none
    */
   static Outcome combine(
       int[] cameras, int[] tags, @Nullable VisionMeasurement[] measurements, Pose2d truth) {
-    int most = 0;
-    int seeing = 0;
-    double weightX = 0;
-    double weightY = 0;
-    double weightHeading = 0;
-    double errorX = 0;
-    double errorY = 0;
-    double errorHeading = 0;
-    for (int m : cameras) {
-      most = Math.max(most, tags[m]);
-      seeing += tags[m] > 0 ? 1 : 0;
-      VisionMeasurement measurement = measurements[m];
-      if (measurement == null) {
-        continue;
-      }
-      PoseCovariance spread = measurement.covariance();
-      Pose2d pose = measurement.pose();
-      weightX += 1 / spread.xx();
-      weightY += 1 / spread.yy();
-      errorX += (pose.getX() - truth.getX()) / spread.xx();
-      errorY += (pose.getY() - truth.getY()) / spread.yy();
-      if (spread.hasHeading()) {
-        weightHeading += 1 / spread.heading();
-        errorHeading +=
-            pose.getRotation().minus(truth.getRotation()).getRadians() / spread.heading();
-      }
+    Views views = new Views(1, tags.length);
+    for (int m = 0; m < tags.length; m++) {
+      views.set(0, m, tags[m], measurements[m], truth);
     }
-    return new Outcome(
-        most,
-        seeing,
-        weightX > 0 ? Math.hypot(errorX / weightX, errorY / weightY) : Double.NaN,
-        weightHeading > 0 ? errorHeading / weightHeading : Double.NaN);
-  }
-
-  /** A seed from a seed and numbers, the same on every computer. */
-  static long mix(long seed, double... values) {
-    long mixed = seed;
-    for (double value : values) {
-      mixed = mix(mixed, Double.doubleToLongBits(value));
-    }
-    return mixed;
-  }
-
-  /** A seed from a seed and a number: SplitMix64's mixing, so nearby numbers seed far apart. */
-  static long mix(long seed, long value) {
-    long h = seed + value + 0x9E3779B97F4A7C15L;
-    h = (h ^ (h >>> 30)) * 0xBF58476D1CE4E5B9L;
-    h = (h ^ (h >>> 27)) * 0x94D049BB133111EBL;
-    return h ^ (h >>> 31);
+    return views.combine(0, cameras);
   }
 
   /**
-   * What every layout's cameras saw at every sample.
-   *
-   * @param outcomes for each sample, each layout's outcomes there: one per set of images
+   * What every camera saw in each set of images at one pose: how many tags, and how far its
+   * measurement was from the truth, with the measurement's own uncertainty. Plain numbers, so a few
+   * thousand poses of a few hundred cameras fit in memory.
    */
-  public record Result(
-      List<Candidate> candidates,
-      List<Sample> samples,
-      Outcome[][][] outcomes,
-      double targetMeters) {
+  private static final class Views {
+    final int frames;
+    final int cameras;
+    final int[] tags;
+    // Each measurement's miss along x and y and in heading (NaN for no measurement), and its
+    // covariance: xx, xy, yy, and the heading's variance (infinite when it says nothing).
+    final double[] missX;
+    final double[] missY;
+    final double[] missHeading;
+    final double[] xx;
+    final double[] xy;
+    final double[] yy;
+    final double[] headingVariance;
+
+    Views(int frames, int cameras) {
+      this.frames = frames;
+      this.cameras = cameras;
+      int size = frames * cameras;
+      tags = new int[size];
+      missX = new double[size];
+      missY = new double[size];
+      missHeading = new double[size];
+      xx = new double[size];
+      xy = new double[size];
+      yy = new double[size];
+      headingVariance = new double[size];
+    }
+
+    void set(
+        int frame, int camera, int seen, @Nullable VisionMeasurement measurement, Pose2d truth) {
+      int at = frame * cameras + camera;
+      tags[at] = seen;
+      if (measurement == null) {
+        missX[at] = Double.NaN;
+        return;
+      }
+      Pose2d pose = measurement.pose();
+      PoseCovariance spread = measurement.covariance();
+      missX[at] = pose.getX() - truth.getX();
+      missY[at] = pose.getY() - truth.getY();
+      missHeading[at] = pose.getRotation().minus(truth.getRotation()).getRadians();
+      xx[at] = spread.xx();
+      xy[at] = spread.xy();
+      yy[at] = spread.yy();
+      headingVariance[at] = spread.heading();
+    }
+
+    /**
+     * One layout's images, combined as the estimator would combine them from no prior belief: in
+     * information form, each measurement weighed by the inverse of its whole covariance (x and y
+     * together, as the estimator's filter does), which is where a Kalman filter's updates, one
+     * camera after another, end up. Heading is weighed on its own, as the estimator keeps it.
+     */
+    Outcome combine(int frame, int[] layout) {
+      int most = 0;
+      int seeing = 0;
+      // The summed information (the inverse covariance, a 2 x 2 [a b; b d]), and information
+      // times miss.
+      double a = 0;
+      double b = 0;
+      double d = 0;
+      double ax = 0;
+      double ay = 0;
+      double headingWeight = 0;
+      double headingSum = 0;
+      for (int camera : layout) {
+        int at = frame * cameras + camera;
+        most = Math.max(most, tags[at]);
+        seeing += tags[at] > 0 ? 1 : 0;
+        double determinant = xx[at] * yy[at] - xy[at] * xy[at];
+        if (Double.isNaN(missX[at]) || !(determinant > 0)) {
+          continue;
+        }
+        double ia = yy[at] / determinant;
+        double ib = -xy[at] / determinant;
+        double id = xx[at] / determinant;
+        a += ia;
+        b += ib;
+        d += id;
+        ax += ia * missX[at] + ib * missY[at];
+        ay += ib * missX[at] + id * missY[at];
+        if (Double.isFinite(headingVariance[at]) && headingVariance[at] > 0) {
+          headingWeight += 1 / headingVariance[at];
+          headingSum += missHeading[at] / headingVariance[at];
+        }
+      }
+      double determinant = a * d - b * b;
+      double position = Double.NaN;
+      if (determinant > 0) {
+        // The combined miss: the summed information's inverse times the summed information-miss.
+        double x = (d * ax - b * ay) / determinant;
+        double y = (a * ay - b * ax) / determinant;
+        position = Math.hypot(x, y);
+      }
+      return new Outcome(
+          most, seeing, position, headingWeight > 0 ? headingSum / headingWeight : Double.NaN);
+    }
+  }
+
+  /** What every camera saw at every sample, and every layout's score. */
+  public static final class Result {
+    private final List<Candidate> candidates;
+    private final int[][] layouts;
+    private final List<Sample> samples;
+    private final Views[] views;
+    private final List<Score> ranking;
+
+    private Result(
+        List<Candidate> candidates,
+        int[][] layouts,
+        List<Sample> samples,
+        Views[] views,
+        List<Score> scores) {
+      this.candidates = candidates;
+      this.layouts = layouts;
+      this.samples = List.copyOf(samples);
+      this.views = views;
+      List<Score> ranked = new ArrayList<>(scores);
+      ranked.sort(Score.RANKING);
+      ranking = List.copyOf(ranked);
+    }
+
     /** Every layout's score, best first. */
     public List<Score> ranking() {
-      List<Score> scores = new ArrayList<>();
-      for (Candidate candidate : candidates) {
-        scores.add(Score.of(candidate, samples, of(candidate), targetMeters));
-      }
-      scores.sort(Score.RANKING);
-      return scores;
+      return ranking;
+    }
+
+    public List<Sample> samples() {
+      return samples;
     }
 
     /** One layout's outcomes: for each sample, one per set of images. */
-    public Outcome[][] of(Candidate candidate) {
+    public Outcome[][] outcomes(Candidate candidate) {
       int c = candidates.indexOf(candidate);
       if (c < 0) {
         throw new IllegalArgumentException("not scored: " + candidate.name());
       }
-      Outcome[][] its = new Outcome[samples.size()][];
-      for (int i = 0; i < samples.size(); i++) {
-        its[i] = outcomes[i][c];
-      }
-      return its;
+      return CameraScoring.outcomes(views, layouts[c]);
     }
   }
 }

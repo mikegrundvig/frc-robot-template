@@ -21,6 +21,11 @@ public record Outcome(
     return !Double.isNaN(positionErrorMeters);
   }
 
+  /** Whether the combined measurement is within a distance of where the robot really is. */
+  public boolean localized(double withinMeters) {
+    return measured() && positionErrorMeters <= withinMeters;
+  }
+
   /** Whether any image corrected the gyro's heading. */
   public boolean correctsHeading() {
     return !Double.isNaN(headingErrorRadians);

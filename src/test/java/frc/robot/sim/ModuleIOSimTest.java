@@ -3,6 +3,7 @@ package frc.robot.sim;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Kilograms;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -22,9 +23,12 @@ class ModuleIOSimTest {
   /** The simulator's step: a fifth of a 20 ms loop. */
   private static final double STEP_SECONDS = 0.004;
 
+  /** A wheel's share of the template's robot. */
+  private static final double CARRIED_KILOGRAMS = Robots.SIM.body().mass().in(Kilograms) / 4;
+
   /** A module as configured, with the steering's current limit tuned to this. */
   private static ModuleIOSim module(double steerLimitAmps) {
-    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), 0, 0);
+    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), CARRIED_KILOGRAMS, 0, 0);
     module.configure(
         DRIVETRAIN.gains(),
         SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
@@ -70,7 +74,7 @@ class ModuleIOSimTest {
    * last 20 ms over the largest in the first 20. Small enough to stay under the current limit.
    */
   private static double growth(double steerKp) {
-    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), 0, 0);
+    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), CARRIED_KILOGRAMS, 0, 0);
     module.configure(
         SwerveConfigGainsBuilder.builder(DRIVETRAIN.gains()).steerKp(steerKp).build(),
         DRIVETRAIN.limits());

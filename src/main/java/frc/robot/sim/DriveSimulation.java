@@ -31,6 +31,9 @@ import org.wpilib.math.geometry.Twist2d;
  * {@link #hit} the way a collision does, and {@link #tilt} with {@link #grip} lifts it onto a bump.
  */
 public final class DriveSimulation {
+  /** The backup IMU's noise is drawn this far from the gyro's seed: no seed's gyro shares it. */
+  private static final long BACKUP_SEED_OFFSET = 1L << 32;
+
   /** Physics steps, and odometry readings, per robot loop: 250 Hz at a 50 Hz loop. */
   static final int STEPS_PER_LOOP = 5;
 
@@ -104,8 +107,9 @@ public final class DriveSimulation {
       builtTreadScale[i] = treadScale[i];
       trueRadiusMeters[i] = configuredRadiusMeters * treadScale[i];
     }
+    // Each IMU's noise from its own stream of the seed: the backup's isn't the next seed's gyro.
     gyro = new GyroIOSim(this, errors.gyro(), errors.seed());
-    backupGyro = new GyroIOSim(this, errors.backupGyro(), errors.seed() + 1);
+    backupGyro = new GyroIOSim(this, errors.backupGyro(), errors.seed() + BACKUP_SEED_OFFSET);
     lastTrue = trueWheels();
     gripLimit = config.wheelCoefficientOfFriction() * GRAVITY_METERS_PER_SECOND_SQUARED;
   }

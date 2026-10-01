@@ -52,6 +52,13 @@ The result is a scale for the robot's wiring: `.gyroYawScale(0.99702)`. It alrea
 scale the wiring had, so replace the old value. If the cameras don't measure the heading at least
 five times standing still, it says so: face more tags.
 
+Until the gyro is calibrated, the estimator allows for its scale being off by about a degree a
+turn (`EstimatorConfig.headingStdDevDegreesPerTurn`, one standard deviation), the same error every
+turn. Once it is, lower that to what's left: [the scale's repeatability](characterization.md#repeatability-of-the-gyros-scale).
+The backup IMU's allowance (`backupHeadingStdDevDegreesPerTurn`) is its own and stays: the procedure
+calibrates the gyro alone, and while the gyro is lost the backup turns odometry with its own
+uncalibrated scale.
+
 When: once for each gyro, and after replacing or remounting one.
 
 ## The wheel radius

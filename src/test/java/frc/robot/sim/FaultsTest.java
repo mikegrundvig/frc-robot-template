@@ -23,9 +23,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.system.RobotController;
 
 /**
@@ -107,7 +109,48 @@ class FaultsTest {
             Faults.module(1),
             Faults.module(2),
             Faults.module(3),
-            ROBOT);
+            ROBOT,
+            Faults.FIELD);
+  }
+
+  /**
+   * A tag moved: the cameras see it there from now on, and moving another puts the first back.
+   * Undone, every tag is where the field was built, a little off its layout if it was built so.
+   */
+  @Test
+  void aTagMovedIsSeenThereUntilPutBack() {
+    Translation3d built = new Translation3d(0.01, 0, 0);
+    SimulatedWorld world = world(SensorErrors.NONE.withTagErrors(Map.of(26, built)));
+    Pose3d layout = RobotSim.FIELD.tag(26).orElseThrow();
+    Pose3d other = RobotSim.FIELD.tag(25).orElseThrow();
+
+    apply(Faults.FIELD, Faults.TAG_MOVED, Map.of(Faults.TAG, 26.0, "X", 4.0, "Y", 0.0, "Up", -2.0));
+    Pose3d moved = world.vision().tagPose(26).orElseThrow();
+    apply(Faults.FIELD, Faults.TAG_MOVED, Map.of(Faults.TAG, 25.0, "X", 0.0, "Y", 4.0, "Up", 0.0));
+    Pose3d first = world.vision().tagPose(26).orElseThrow();
+    Pose3d second = world.vision().tagPose(25).orElseThrow();
+    undo(Faults.FIELD, Faults.TAG_MOVED);
+
+    Translation3d expected = built.plus(new Translation3d(0.1016, 0, -0.0508));
+    assertThat(moved.getTranslation().minus(layout.getTranslation()).getDistance(expected))
+        .isLessThan(1e-9);
+    assertThat(first.getTranslation().minus(layout.getTranslation()).getDistance(built))
+        .as("put back where it was built")
+        .isLessThan(1e-9);
+    assertThat(second.getY() - other.getY()).isCloseTo(0.1016, within(1e-9));
+    assertThat(world.vision().tagPose(25).orElseThrow()).isEqualTo(other);
+    assertThat(components.on()).isEmpty();
+  }
+
+  @Test
+  void aTagTheFieldDoesntHaveIsRefused() {
+    world();
+
+    assertThat(
+            components.apply(
+                Setting.of(Faults.FIELD, Faults.TAG_MOVED, Map.of(Faults.TAG, 26.5, "X", 4.0))))
+        .contains("whole number");
+    assertThat(components.on()).isEmpty();
   }
 
   @ParameterizedTest

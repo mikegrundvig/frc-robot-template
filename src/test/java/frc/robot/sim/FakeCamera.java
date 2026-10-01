@@ -14,8 +14,8 @@ import org.wpilib.math.geometry.Translation2d;
  * A plain camera for the drivetrain's estimator tests, lighter than PhotonVision's simulated ones
  * ({@code VisionSim}, which the whole-robot tests use): it sees the robot's true pose (never the
  * estimate), with noise, a frame rate, and a delay before each result arrives, and reports a
- * heading-constrained solve as a real pipeline would. It can be told to lie once, as a misread tag
- * does.
+ * heading-constrained solve as a real pipeline would, except that a heading error in the estimate
+ * never puts its positions off. It can be told to lie once, as a misread tag does.
  */
 public final class FakeCamera {
   private final DriveSimulation robot;
@@ -66,6 +66,9 @@ public final class FakeCamera {
               nowNanos,
               seen,
               PoseCovariance.fromStdDevs(stdDevMeters, stdDevMeters, Double.POSITIVE_INFINITY),
+              // It places the robot without the estimate's heading, so its position doesn't lean
+              // on it, as no real camera's heading-constrained solve does.
+              VisionMeasurement.Lever.NONE,
               "fake",
               List.of(26),
               VisionMeasurement.Solver.HEADING_CONSTRAINED));

@@ -316,6 +316,7 @@ class CameraScoringTest {
             0,
             new Pose2d(3.03, 4, Rotation2d.ZERO),
             PoseCovariance.fromStdDevs(0.01, 0.01, Double.POSITIVE_INFINITY),
+            VisionMeasurement.Lever.NONE,
             "sure",
             List.of(1),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -324,6 +325,7 @@ class CameraScoringTest {
             0,
             new Pose2d(2.97, 4, Rotation2d.fromDegrees(1)),
             PoseCovariance.fromStdDevs(0.02, 0.02, 0.01),
+            VisionMeasurement.Lever.NONE,
             "unsure",
             List.of(2, 3),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -357,6 +359,7 @@ class CameraScoringTest {
             0,
             new Pose2d(3.02, 4, Rotation2d.ZERO),
             new PoseCovariance(1e-4, 0, 1e-4, Double.POSITIVE_INFINITY),
+            VisionMeasurement.Lever.NONE,
             "round",
             List.of(1),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -365,6 +368,7 @@ class CameraScoringTest {
             0,
             new Pose2d(3, 4.02, Rotation2d.ZERO),
             new PoseCovariance(2e-4, 1e-4, 2e-4, Double.POSITIVE_INFINITY),
+            VisionMeasurement.Lever.NONE,
             "leaning",
             List.of(2),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);

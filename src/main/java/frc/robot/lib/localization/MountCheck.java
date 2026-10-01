@@ -30,11 +30,13 @@ public final class MountCheck {
   private final double[] x;
   private final double[] y;
   private final double[] z;
+  private final double[] distance;
   private int newest = -1;
   private int count;
   private double sumX;
   private double sumY;
   private double sumZ;
+  private double sumDistance;
 
   /**
    * @param sightings how many of the latest tags the camera is judged by: enough that noise and the
@@ -47,6 +49,7 @@ public final class MountCheck {
     x = new double[sightings];
     y = new double[sightings];
     z = new double[sightings];
+    distance = new double[sightings];
   }
 
   /**
@@ -64,21 +67,25 @@ public final class MountCheck {
       sumX -= x[newest];
       sumY -= y[newest];
       sumZ -= z[newest];
+      sumDistance -= distance[newest];
     } else {
       count++;
     }
     x[newest] = miss.getX();
     y[newest] = miss.getY();
     z[newest] = miss.getZ();
+    distance[newest] = seen.getTranslation().getDistance(robot.getTranslation());
     sumX += x[newest];
     sumY += y[newest];
     sumZ += z[newest];
+    sumDistance += distance[newest];
     if (newest == x.length - 1) {
       // Once around the ring, add the sums up afresh: what's taken off never quite cancels what
       // was put on, and over a match the difference would add up.
       sumX = sum(x);
       sumY = sum(y);
       sumZ = sum(z);
+      sumDistance = sum(distance);
     }
   }
 
@@ -101,6 +108,14 @@ public final class MountCheck {
    */
   public double offsetMeters() {
     return judged() ? Math.sqrt(sumX * sumX + sumY * sumY + sumZ * sumZ) / count : Double.NaN;
+  }
+
+  /**
+   * How far, on average, the camera's latest tags were from the robot: a mount turned by an angle
+   * puts them that angle times this off. NaN until it has seen enough tags to judge.
+   */
+  public double distanceMeters() {
+    return judged() ? sumDistance / count : Double.NaN;
   }
 
   /** Whether the camera's tags land farther off than a calibrated camera's do. */

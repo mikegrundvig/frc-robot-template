@@ -38,9 +38,32 @@ import frc.robot.lib.config.ConfigRecord;
  *     its wheels can't see, in meters after one second; the variance grows with time
  * @param headingDriftDegreesPerMinute how far the gyro's heading may drift in a minute
  * @param headingStdDevDegreesPerTurn how far the gyro's heading may be off after a full turn: its
- *     scale error
- * @param wheelHeadingStdDevDegreesPerTurn the same for heading from the wheels, used only while the
- *     gyro is lost
+ *     scale error, the same in every turn, so five turns are five times as far off (the estimator
+ *     considers it, but never corrects it: the gyro-scale procedure measures it)
+ * @param backupHeadingStdDevDegreesPerTurn the same for the backup IMU, while it turns odometry in
+ *     the gyro's place: its own scale error, the same in every turn it makes, and unrelated to the
+ *     gyro's (the gyro-scale procedure calibrates the gyro alone)
+ * @param headingNoiseDegreesPerTurn how far an IMU's heading may be off at random after a full
+ *     turn, beyond its scale: errors that don't repeat from turn to turn, whose variance grows with
+ *     the turning
+ * @param wheelHeadingStdDevDegreesPerTurn the same for heading from the wheels, used only while
+ *     both IMUs are lost; its errors are taken as new with every turn
+ * @param cameraTurnStdDevDegrees how far each camera may be turned from its configured mount, the
+ *     same in every image: what calibrating its mount leaves, and its lens. A camera turned by an
+ *     angle puts its tags, and so the robot, that angle times their distance off, as a heading
+ *     error does, and its headings by the angle. However many images it takes, the estimator never
+ *     trusts a camera's positions or headings more than this allows.
+ * @param cameraShiftStdDevMeters how far each camera's positions may be off the same way image
+ *     after image, beyond its turn: its mount's shift, and how far the tags it sees sit from where
+ *     the field's layout says (the field's tolerance, and how it was built)
+ * @param cameraShiftStdDevDegrees and how far its headings may, beyond its turn: tags off the
+ *     layout turn a multi-tag solve's heading by how far off they are over how far apart they sit
+ * @param headingCorrection what may correct the heading the gyro owns, beside measurements with a
+ *     heading of their own; three ways under comparison (docs/testing.md), {@link
+ *     HeadingCorrection#HEADING_MEASUREMENTS} until the team chooses
+ * @param cameraShiftCorrelationMeters how far the robot moves before a camera's shift is mostly a
+ *     new one: it sees other tags, or the same ones from elsewhere
+ * @param cameraShiftCorrelationDegrees and how far it turns
  * @param historySeconds how far back a late camera measurement can still be applied at its capture
  *     time
  * @param futureToleranceSeconds how far a measurement may be stamped after the newest odometry
@@ -82,7 +105,15 @@ public record EstimatorConfig(
     double handlingStdDevPerSqrtSecond,
     double headingDriftDegreesPerMinute,
     double headingStdDevDegreesPerTurn,
+    double backupHeadingStdDevDegreesPerTurn,
+    double headingNoiseDegreesPerTurn,
     double wheelHeadingStdDevDegreesPerTurn,
+    double cameraTurnStdDevDegrees,
+    double cameraShiftStdDevMeters,
+    double cameraShiftStdDevDegrees,
+    HeadingCorrection headingCorrection,
+    double cameraShiftCorrelationMeters,
+    double cameraShiftCorrelationDegrees,
     double historySeconds,
     double futureToleranceSeconds,
     double visionTimeoutSeconds,
@@ -112,8 +143,16 @@ public record EstimatorConfig(
           .collisionWindowSeconds(0.25)
           .handlingStdDevPerSqrtSecond(0.02)
           .headingDriftDegreesPerMinute(0.5)
-          .headingStdDevDegreesPerTurn(0.5)
+          .headingStdDevDegreesPerTurn(1.0)
+          .backupHeadingStdDevDegreesPerTurn(2.0)
+          .headingNoiseDegreesPerTurn(0.1)
           .wheelHeadingStdDevDegreesPerTurn(10)
+          .cameraTurnStdDevDegrees(0.25)
+          .cameraShiftStdDevMeters(0.01)
+          .cameraShiftStdDevDegrees(2.0)
+          .headingCorrection(HeadingCorrection.HEADING_MEASUREMENTS)
+          .cameraShiftCorrelationMeters(1.0)
+          .cameraShiftCorrelationDegrees(45)
           .historySeconds(1.5)
           .futureToleranceSeconds(0.05)
           .visionTimeoutSeconds(1.0)
@@ -145,7 +184,15 @@ public record EstimatorConfig(
         .field("handlingStdDevPerSqrtSecond", handlingStdDevPerSqrtSecond, nonNegative())
         .field("headingDriftDegreesPerMinute", headingDriftDegreesPerMinute, nonNegative())
         .field("headingStdDevDegreesPerTurn", headingStdDevDegreesPerTurn, nonNegative())
+        .field(
+            "backupHeadingStdDevDegreesPerTurn", backupHeadingStdDevDegreesPerTurn, nonNegative())
+        .field("headingNoiseDegreesPerTurn", headingNoiseDegreesPerTurn, nonNegative())
         .field("wheelHeadingStdDevDegreesPerTurn", wheelHeadingStdDevDegreesPerTurn, nonNegative())
+        .field("cameraTurnStdDevDegrees", cameraTurnStdDevDegrees, nonNegative())
+        .field("cameraShiftStdDevMeters", cameraShiftStdDevMeters, nonNegative())
+        .field("cameraShiftStdDevDegrees", cameraShiftStdDevDegrees, nonNegative())
+        .field("cameraShiftCorrelationMeters", cameraShiftCorrelationMeters, positive())
+        .field("cameraShiftCorrelationDegrees", cameraShiftCorrelationDegrees, positive())
         .field("historySeconds", historySeconds, positive())
         .field("futureToleranceSeconds", futureToleranceSeconds, nonNegative())
         .field("visionTimeoutSeconds", visionTimeoutSeconds, positive())
@@ -171,6 +218,37 @@ public record EstimatorConfig(
                         + shown(tiltStartDegrees)
                         + "): wheels stop counting above where they start to count less")
         .orThrow();
+  }
+
+  /**
+   * What corrects the heading beside the gyro. A camera's position solved with the gyro's heading
+   * leans on it, and so says something about the heading too; whether that's let correct the
+   * heading is the choice. Each is honest about its uncertainty; they differ in what they trust the
+   * cameras with.
+   */
+  public enum HeadingCorrection {
+    /**
+     * Only measurements with a heading of their own (multi-tag solves, under strict conditions),
+     * with all three of their rows: a position solved with the gyro's heading carries the heading's
+     * doubt but never turns it, so the gyro owns heading. Honest on a calibrated robot; a camera
+     * turned on its mount turns the heading with its own headings, and the mount check then doubts
+     * the cameras that disagree with it.
+     */
+    HEADING_MEASUREMENTS,
+    /**
+     * As {@link #HEADING_MEASUREMENTS}, and a camera the mount check doubts has that doubt added to
+     * the errors it repeats in every image (its turn and shift), so its headings can pull the
+     * heading only so far, however many there are. Only as good as the mount check's verdict: with
+     * a camera turned, the doubt lands mostly on its neighbours (docs/testing.md).
+     */
+    HEADING_MEASUREMENTS_AND_MOUNT_DOUBT,
+    /**
+     * Every fix: a position fix corrects the heading too, through how far its tags are and how the
+     * position's error has come to depend on the heading's. A full Kalman update: more accurate in
+     * heading after turns, and the mount check finds a turned camera, but the heading claims more
+     * than it knows (docs/testing.md).
+     */
+    EVERY_FIX
   }
 
   /** Starts building estimator settings, one named value at a time. */

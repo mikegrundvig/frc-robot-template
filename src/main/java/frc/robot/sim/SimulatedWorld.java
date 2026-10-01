@@ -53,7 +53,7 @@ public final class SimulatedWorld implements AutoCloseable {
     this.drivetrain =
         new DriveSimulation(drivetrain.modules(), drivetrain.moduleTranslations(body), errors);
     this.drivetrain.setTerrain(field.terrain());
-    vision = new VisionSim(field);
+    vision = new VisionSim(field, errors.tagErrors(), errors.seed());
     this.cameras = new CameraIOSim[cameras.size()];
     for (int i = 0; i < cameras.size(); i++) {
       CameraConfig camera = cameras.get(i);
@@ -100,6 +100,11 @@ public final class SimulatedWorld implements AutoCloseable {
   /** The field the robot drives on. */
   FieldModel field() {
     return field;
+  }
+
+  /** The cameras' simulation, which places the field's tags: for their faults. */
+  VisionSim vision() {
+    return vision;
   }
 
   /** The drive team puts the robot here. */

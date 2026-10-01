@@ -46,6 +46,12 @@ dependencies {
 tasks.named("test") {
     useJUnitPlatform()
     jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
+    // The template's own PhotonVision lock, which a test checks against PhotonLib's vendordep.
+    systemProperty "frc.projectDir", rootProject.projectDir.absolutePath
+    inputs.file(rootProject.file("coprocessor/photonvision.lock")).withPropertyName("lock")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("vendordeps/photonlib.json")).withPropertyName("vendordep")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.coprocessor"

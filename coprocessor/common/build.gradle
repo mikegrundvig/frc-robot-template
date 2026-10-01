@@ -1,0 +1,45 @@
+// What the vision coprocessors and the robot program share: the coprocessor table, the agent's API
+// records, and the JSON they're written in. Plain Java with no dependencies, so the agent stays
+// small and the robot program gets nothing it doesn't already have; and free of WPILib, which the
+// coprocessors don't run.
+
+plugins {
+    id "java-library"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+base {
+    archivesName = "coprocessor-common"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api libs.jspecify // @Nullable in the records' signatures
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    testImplementation libs.archunit
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.coprocessor"
+apply from: rootProject.file("gradle/quality.gradle")

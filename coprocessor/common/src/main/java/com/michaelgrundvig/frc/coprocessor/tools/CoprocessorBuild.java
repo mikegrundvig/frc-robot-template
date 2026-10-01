@@ -24,10 +24,17 @@ import java.util.Optional;
  * <ul>
  *   <li>{@code check-lock <repository> <marker>}: fails if the PhotonVision lock's version isn't
  *       PhotonLib's, and names the placeholders still in it;
- *   <li>{@code table <repository> <out.json>}: compiles the coprocessor table for the robot
- *       program, with PhotonLib's version, the recipe hash, and each computer's committed settings
- *       hash ({@link CompiledTable});
- *   <li>{@code recipe-hash <repository>}: prints the recipe hash ({@link RecipeHash}).
+ *   <li>{@code table <repository> <libraries> <out.json>}: compiles the coprocessor table for the
+ *       robot program, with PhotonLib's version, the recipe hash, and each computer's committed
+ *       settings hash ({@link CompiledTable});
+ *   <li>{@code recipe-hash <repository> <libraries> <out>}: prints the recipe hash ({@link
+ *       RecipeHash}), and writes it to {@code <out>}.
+ * </ul>
+ *
+ * <p>{@code <libraries>} is a file of the agent's runtime libraries, {@code group:name:version} one
+ * to a line, which the build writes from the agent's classpath.
+ *
+ * <ul>
  * </ul>
  *
  * <p>A failure prints what's wrong and exits with status 1.
@@ -51,25 +58,28 @@ public final class CoprocessorBuild {
         Files.writeString(Path.of(args[2]), "checked\n", StandardCharsets.UTF_8);
         return 0;
       }
-      if (args.length == 3 && args[0].equals("table")) {
-        Path target = Path.of(args[2]);
+      if (args.length == 4 && args[0].equals("table")) {
+        Path target = Path.of(args[3]);
         Files.createDirectories(target.toAbsolutePath().getParent());
-        Files.writeString(
-            target, Json.pretty(compile(Path.of(args[1]), out).toJson()), StandardCharsets.UTF_8);
+        CompiledTable table = compile(Path.of(args[1]), libraries(Path.of(args[2])), out);
+        Files.writeString(target, Json.pretty(table.toJson()), StandardCharsets.UTF_8);
         return 0;
       }
-      if (args.length == 2 && args[0].equals("recipe-hash")) {
-        RecipeHash.Result recipe = RecipeHash.of(Path.of(args[1]));
+      if (args.length == 4 && args[0].equals("recipe-hash")) {
+        RecipeHash.Result recipe = RecipeHash.of(Path.of(args[1]), libraries(Path.of(args[2])));
         if (recipe.hash().isEmpty()) {
           err.println("No recipe hash: " + recipe.why());
           return 1;
         }
+        Path target = Path.of(args[3]);
+        Files.createDirectories(target.toAbsolutePath().getParent());
+        Files.writeString(target, recipe.hash() + "\n", StandardCharsets.UTF_8);
         out.println(recipe.hash());
         return 0;
       }
       err.println(
-          "Usage: check-lock <repository> <marker> | table <repository> <out.json>"
-              + " | recipe-hash <repository>");
+          "Usage: check-lock <repository> <marker> | table <repository> <libraries> <out.json>"
+              + " | recipe-hash <repository> <libraries> <out>");
       return 2;
     } catch (IllegalArgumentException e) {
       err.println(e.getMessage());
@@ -101,8 +111,21 @@ public final class CoprocessorBuild {
         + "\n";
   }
 
-  /** The compiled table for the repository at {@code root}; warnings go to {@code out}. */
-  static CompiledTable compile(Path root, PrintStream out) throws IOException {
+  /** The agent's runtime libraries, as the build lists them: one to a line. */
+  static List<String> libraries(Path file) throws IOException {
+    return read(file, file.toString())
+        .lines()
+        .map(String::strip)
+        .filter(line -> !line.isEmpty())
+        .toList();
+  }
+
+  /**
+   * The compiled table for the repository at {@code root}, the agent running with {@code
+   * libraries}; warnings go to {@code out}.
+   */
+  static CompiledTable compile(Path root, List<String> libraries, PrintStream out)
+      throws IOException {
     Table table;
     try {
       table = Table.readYaml(root.resolve(Table.PATH));
@@ -124,12 +147,12 @@ public final class CoprocessorBuild {
       }
       hashes.put(computer.name(), settings.map(Settings::hash).orElse(""));
     }
-    RecipeHash.Result recipe = RecipeHash.of(root);
+    RecipeHash.Result recipe = RecipeHash.of(root, libraries);
     if (recipe.hash().isEmpty()) {
       out.println(
           "No recipe hash in the compiled coprocessor table ("
               + recipe.why()
-              + "): the robot will report every coprocessor's recipe as different.");
+              + "): the robot will report each coprocessor's recipe as unknown.");
     }
     return new CompiledTable(table, version, recipe.hash(), hashes);
   }

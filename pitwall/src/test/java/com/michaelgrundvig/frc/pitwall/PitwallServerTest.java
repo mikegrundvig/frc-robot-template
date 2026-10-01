@@ -23,6 +23,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -137,6 +139,51 @@ class PitwallServerTest {
     assertThat(page.body()).contains("<title>Pitwall</title>");
   }
 
+  /** The page is its shell and its modules, each served from the jar as written. */
+  @Test
+  void servesThePagesModulesAndStyles() throws Exception {
+    var main = get("/page/main.js", "*/*");
+    var styles = get("/page/pitwall.css", "*/*");
+
+    assertThat(get("/", "text/html").body())
+        .contains("src=\"/page/main.js\"", "src=\"/page/theme.js\"")
+        .as("the page runs no inline script")
+        .doesNotContain("<script>");
+    assertThat(get("/page/theme.js", "*/*").statusCode()).isEqualTo(200);
+    assertThat(main.statusCode()).isEqualTo(200);
+    assertThat(main.headers().firstValue("Content-Type"))
+        .hasValue("text/javascript; charset=utf-8");
+    assertThat(styles.headers().firstValue("Content-Type")).hasValue("text/css; charset=utf-8");
+    assertThat(get("/page/nothing.js").statusCode()).isEqualTo(404);
+    assertThat(get("/page/" + "a".repeat(64) + ".js").statusCode())
+        .as("a name too long to be one of the page's")
+        .isEqualTo(404);
+    assertThat(get("/page/%2E%2E/index.html").statusCode())
+        .as("only a plain name, never a way out of page/")
+        .isEqualTo(404);
+    assertThat(send("POST", "/page/main.js", null, null).statusCode()).isEqualTo(405);
+  }
+
+  /** A module a view imports but the jar lacks would leave the page blank: each one is here. */
+  @Test
+  void everyModuleThePageImportsIsServed() throws Exception {
+    Pattern imports = Pattern.compile("from \"\\./([a-z][a-z0-9-]*\\.js)\"");
+    List<String> seen = new ArrayList<>(List.of("main.js"));
+    for (int i = 0; i < seen.size(); i++) {
+      var module = get("/page/" + seen.get(i), "*/*");
+      assertThat(module.statusCode()).as(seen.get(i)).isEqualTo(200);
+      Matcher found = imports.matcher(module.body());
+      while (found.find()) {
+        if (!seen.contains(found.group(1))) {
+          seen.add(found.group(1));
+        }
+      }
+    }
+
+    assertThat(seen)
+        .contains("core.js", "pit.js", "tune.js", "experiment.js", "changes.js", "sim.js");
+  }
+
   @Test
   void showsTheStatusAsOfTheLastLoop() throws Exception {
     homed.set(true);
@@ -231,8 +278,11 @@ class PitwallServerTest {
     assertThat(get("/api/tunables").body())
         .contains(
             "\"/Machine/drive/gains/kP\":{\"config\":\"machine\",\"field\":\"drive.gains.kP\",\"unit\":\"\","
-                + "\"limits\":\"0 to 100\",\"committed\":16.0,\"record\":\"Fixtures.Gains\","
-                + "\"group\":\"drive.gains\",\"meaning\":\"volts per meter per second of error\"}")
+                + "\"limits\":\"0 to 100\",\"min\":0.0,\"max\":100.0,\"committed\":16.0,"
+                + "\"record\":\"Fixtures.Gains\",\"group\":\"drive.gains\","
+                + "\"meaning\":\"volts per meter per second of error\"}")
+        .as("no limits, no ends")
+        .contains("\"field\":\"travel.min\",\"unit\":\"\",\"limits\":\"\",\"committed\"")
         .as("undocumented")
         .contains("\"record\":\"Fixtures.Range\",\"group\":\"travel\",\"meaning\":\"\"");
     assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
@@ -287,7 +337,12 @@ class PitwallServerTest {
     assertThat(refused.body())
         .isEqualTo(
             "{\"type\":\"about:blank\",\"title\":\"Refused\",\"status\":422,"
-                + "\"detail\":\"/Machine/drive/limits/current: -1 is below its limit of 1\"}");
+                + "\"detail\":\"/Machine/drive/limits/current: -1 is below its limit of 1\","
+                + "\"errors\":[{\"layer\":\"limit\",\"by\":\"\","
+                + "\"path\":\"/Machine/drive/limits/current\","
+                + "\"paths\":[\"/Machine/drive/limits/current\"],\"config\":\"machine\","
+                + "\"group\":\"\",\"text\":\"-1 is below its limit of 1\","
+                + "\"line\":\"/Machine/drive/limits/current: -1 is below its limit of 1\"}]}");
     assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
   }
 
@@ -297,7 +352,10 @@ class PitwallServerTest {
     var refused = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/travel/min\": 12}");
 
     assertThat(refused.statusCode()).isEqualTo(422);
-    assertThat(refused.body()).contains("min must be below max, got 12.0 and 10.0");
+    assertThat(refused.body())
+        .contains(
+            "\"layer\":\"record\",\"by\":\"Fixtures.Range\",\"path\":\"/Machine/travel/min\"",
+            "\"group\":\"travel\",\"text\":\"min must be below max, got 12.0 and 10.0\"");
   }
 
   @Test
@@ -527,7 +585,12 @@ class PitwallServerTest {
 
     assertThat(page.headers().firstValue("X-Frame-Options")).hasValue("DENY");
     assertThat(page.headers().firstValue("Content-Security-Policy"))
-        .hasValueSatisfying(policy -> assertThat(policy).contains("frame-ancestors 'none'"));
+        .hasValueSatisfying(
+            policy ->
+                assertThat(policy)
+                    .contains("frame-ancestors 'none'")
+                    .as("no inline script or style runs")
+                    .doesNotContain("unsafe-inline"));
     assertThat(page.headers().firstValue("X-Content-Type-Options")).hasValue("nosniff");
   }
 
@@ -560,7 +623,8 @@ class PitwallServerTest {
                 + "\"signals\":[{\"name\":\"Voltage\",\"unit\":\"V\"}]}},"
                 + "\"experiments\":{\""
                 + STEP
-                + "\":{\"rig\":\"Arm\",\"settings\":\"step and back, 0 ° to 90 °, held 0.8 s\"}}}");
+                + "\":{\"rig\":\"Arm\",\"settings\":\"step and back, 0 ° to 90 °, held 0.8 s\","
+                + "\"seconds\":2.1}}}");
   }
 
   @Test
@@ -625,6 +689,30 @@ class PitwallServerTest {
 
     assertThat(heartbeat.statusCode()).isEqualTo(204);
     assertThat(heartbeat.body()).isEmpty();
+  }
+
+  /**
+   * A page without a simulator, as on a robot: nothing at any of its routes, so nothing can ever
+   * write the Driver Station's state there, and no section of it in the event stream. ({@code
+   * PitwallRobotTest} checks a robot gets such a page.)
+   */
+  @Test
+  void aRobotHasNoSimulatorControls() throws Exception {
+    for (String path :
+        List.of(
+            "/api/simulator",
+            "/api/simulator/step",
+            "/api/simulator/stop",
+            "/api/simulator/joysticks",
+            "/api/simulator/faults",
+            "/api/simulator/scenarios")) {
+      for (String method : List.of("GET", "PATCH", "POST", "PUT", "DELETE")) {
+        var answer = send(method, path, "application/json", method.equals("GET") ? null : "{}");
+        assertThat(answer.statusCode()).as(method + " " + path).isEqualTo(404);
+        assertThat(answer.body()).contains("a robot has no simulator controls");
+      }
+    }
+    assertThat(page.sections()).doesNotContainKeys("simulator", "components", "scenarios");
   }
 
   /** The status line of a GET naming this host, sent by hand: Java's client won't set Host. */

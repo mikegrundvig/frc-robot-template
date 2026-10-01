@@ -2,8 +2,12 @@ package com.michaelgrundvig.frc.pitwall;
 
 import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.backend.NetworkTablesTunableBackend;
@@ -39,6 +43,11 @@ import org.wpilib.util.Alert;
  * same changes at the same moments; while replaying, the page doesn't start. Without AdvantageKit
  * there is no replay, so nothing needs logging.
  *
+ * <p>In WPILib's simulation, and not while replaying, Pitwall also has the simulator's controls
+ * ({@link #simulator()}): the Driver Station, joysticks, pausing and stepping, stopping, and
+ * failing the simulated robot's parts live, an API the page's coming Sim view is built on, to take
+ * the place of WPILib's simulator GUI. On a robot there is no such thing.
+ *
  * @param <T> the robot's configuration record
  */
 public final class Pitwall implements AutoCloseable {
@@ -49,6 +58,12 @@ public final class Pitwall implements AutoCloseable {
   private final TunableTee tee;
   private final Page page;
   private final Broadcaster broadcaster;
+  private final @Nullable Simulator simulator;
+
+  /** What the simulator's controls said this loop, for the log; the robot loop's alone. */
+  private final List<String> said = new ArrayList<>();
+
+  private boolean saidLastLoop;
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
   private final Alert changedSwitches = new Alert("Pitwall", "", Alert.Level.HIGH);
   private final boolean advantageKit;
@@ -105,9 +120,26 @@ public final class Pitwall implements AutoCloseable {
               tuned.set(view.hasChanges());
             });
     TunableRegistry.registerBackend("", tee);
-    page = new Page(status, actions, tuning, tee, experiments);
-    // A page whose stream closes can't keep an experiment it started going.
-    broadcaster = new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, experiments::lost);
+    // In WPILib's simulation the page can drive it; on a robot, or anything not known to be the
+    // simulator, nothing can. A replay's Driver Station and hardware come from its log, so none
+    // there either.
+    Simulator simulated =
+        Simulator.inWpilibSimulation() && !replaying
+            ? simulatorControls(advantageKit, said::add)
+            : null;
+    simulator = simulated;
+    page = new Page(status, actions, tuning, tee, experiments, Pitwall::mode, simulated);
+    // A page whose stream closes can't keep an experiment it started going, or drive a joystick.
+    broadcaster =
+        new Broadcaster(
+            Broadcaster.MAX_STREAMS,
+            Broadcaster.MAILBOX,
+            stream -> {
+              experiments.lost(stream);
+              if (simulated != null) {
+                simulated.lost(stream);
+              }
+            });
     server = replaying ? null : startPage(page, broadcaster, port);
   }
 
@@ -126,6 +158,41 @@ public final class Pitwall implements AutoCloseable {
               + e);
       return null;
     }
+  }
+
+  /**
+   * The simulator's controls, on WPILib's simulation: what they do goes to the console, and to the
+   * log with AdvantageKit (an output: a replay has no simulator, so it never writes them); the
+   * page's Stop ends the log, then the program.
+   *
+   * @param said told each sentence the controls say, for the loop to log
+   */
+  private static Simulator simulatorControls(boolean advantageKit, Consumer<String> said) {
+    Components components =
+        new Components(
+            sentence -> {
+              System.out.println("Simulator: " + sentence);
+              said.accept(sentence);
+            });
+    return Simulator.wpilib(
+        RobotController::getTime,
+        components,
+        () -> {
+          if (!Simulator.inWpilibSimulation()) {
+            System.out.println("Pitwall: Stop refused: this isn't WPILib's simulation");
+            return;
+          }
+          System.out.println("Simulator: stopped from Pitwall's page");
+          if (advantageKit) {
+            AdvantageKitLog.end();
+          }
+          System.exit(0);
+        },
+        on -> {
+          if (advantageKit) {
+            AdvantageKitLog.recordOutput("Pitwall/Simulator/Faults", on.toArray(String[]::new));
+          }
+        });
   }
 
   /**
@@ -176,6 +243,15 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
+   * The simulator's controls, in WPILib's simulation: the robot's simulation declares the parts
+   * that can fail here ({@code simulator.components()}). Empty on a robot, where nothing may write
+   * the Driver Station's state, and while replaying a log.
+   */
+  public Optional<Simulator> simulator() {
+    return Optional.ofNullable(simulator);
+  }
+
+  /**
    * The port the page is served on, or -1 when it isn't (while replaying, or it couldn't start).
    */
   public int port() {
@@ -185,11 +261,17 @@ public final class Pitwall implements AutoCloseable {
 
   /**
    * Applies the page's requests, then reads the status and tells any open page what changed. Call
-   * it first thing in {@code robotPeriodic()}, before anything reads a configuration and before the
-   * command scheduler runs. When the robot disables, it prints (and logs) what tuning changed, so
-   * it can be committed.
+   * it first thing in {@code robotPeriodic()}, before anything reads a configuration or the Driver
+   * Station and before the command scheduler runs. When the robot disables, it prints (and logs)
+   * what tuning changed, so it can be committed.
    */
   public void periodic() {
+    // First, so everything after sees the Driver Station the page set, as AdvantageKit logs it.
+    Simulator simulated = simulator;
+    if (simulated != null) {
+      simulated.periodic();
+      logSaid();
+    }
     boolean enabled = RobotState.isEnabled();
     boolean fieldConnected = RobotState.isFMSAttached();
     if (fieldConnected && !wasFieldConnected) {
@@ -221,6 +303,21 @@ public final class Pitwall implements AutoCloseable {
     wasFieldConnected = fieldConnected;
     // Last, so an open page hears of everything this loop changed. With none open, nothing.
     broadcaster.periodic(page::sections, experiments.run());
+  }
+
+  /**
+   * Logs what the simulator's controls said since the last loop, every sentence, and an empty list
+   * the loop after, so the same sentence said again later shows in the log.
+   */
+  private void logSaid() {
+    if (said.isEmpty() && !saidLastLoop) {
+      return;
+    }
+    if (advantageKit) {
+      AdvantageKitLog.recordOutput("Pitwall/Simulator/Said", said.toArray(String[]::new));
+    }
+    saidLastLoop = !said.isEmpty();
+    said.clear();
   }
 
   /** Prints what tuning changed, and logs it, when there's anything to say. */

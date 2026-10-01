@@ -1,10 +1,12 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.SensorErrors;
+import frc.robot.sim.SimulatedWorld;
 import java.util.Objects;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
@@ -84,9 +86,35 @@ public final class SimulatedRobot implements AutoCloseable {
     driver.notifyNewData();
   }
 
-  /** Starts a scenario's event in the simulated world, now: a collision, a camera knocked. */
+  /**
+   * Applies a scenario's sensor faults through the simulator's controls, as {@code ./gradlew run
+   * -Pscenario=<name>} does before the robot's first loop: a camera knocked, a gyro erring.
+   *
+   * @throws IllegalStateException if one of them can't be applied, saying why
+   */
+  public void applyFaults(Scenario scenario) {
+    Robot.apply(scenario.sensorFaultsIn(world()), components());
+  }
+
+  /**
+   * Makes what happens in a scenario happen, now, through the simulator's controls: a collision, a
+   * push.
+   *
+   * @throws IllegalStateException if it can't, saying why
+   */
   public void start(Scenario scenario) {
-    scenario.startIn(Objects.requireNonNull(container.world()));
+    Robot.apply(scenario.eventsIn(world()), components());
+  }
+
+  private SimulatedWorld world() {
+    return Objects.requireNonNull(container.world(), "only the simulator has a world");
+  }
+
+  /**
+   * The simulated world's parts that can fail, as the simulator's controls on Pitwall have them.
+   */
+  private Components components() {
+    return pitwall.simulator().orElseThrow().components();
   }
 
   /** Starts the gyro-scale procedure, as the Pitwall page does. */

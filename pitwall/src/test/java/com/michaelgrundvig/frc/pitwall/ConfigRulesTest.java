@@ -77,6 +77,21 @@ class ConfigRulesTest {
 
     assertThat(outcome.getNow(null).result()).isEqualTo(Outcome.Result.REFUSED);
     assertThat(outcome.getNow(null).detail()).startsWith("the intake and the hood: the intake");
+    // The page shows the reason beside every value the rule reads, of both arms.
+    assertThat(outcome.getNow(null).reasons())
+        .singleElement()
+        .satisfies(
+            reason -> {
+              assertThat(reason.layer()).isEqualTo(Outcome.Layer.RULE);
+              assertThat(reason.by()).isEqualTo("the intake and the hood");
+              assertThat(reason.paths())
+                  .containsExactly(
+                      "/Intake/swing/from",
+                      "/Intake/swing/to",
+                      "/Hood/swing/from",
+                      "/Hood/swing/to");
+              assertThat(reason.text()).startsWith("the intake (20° to 120°) and the hood");
+            });
     assertThat(intake.get()).isEqualTo(Arms.intake());
   }
 

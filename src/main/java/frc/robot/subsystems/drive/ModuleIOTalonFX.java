@@ -3,6 +3,7 @@ package frc.robot.subsystems.drive;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Rotations;
+import static org.wpilib.units.Units.Seconds;
 
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
@@ -134,7 +135,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     driveConfig.MotorOutput.Inverted = direction(wiring.driveInverted());
     driveConfig.Feedback.SensorToMechanismRatio = driveGearing;
     driveConfig.CurrentLimits.StatorCurrentLimitEnable = true;
-    driveConfig.CurrentLimits.SupplyCurrentLimitEnable = true;
+    driveConfig.CurrentLimits.SupplyCurrentLimitEnable = true; // and its step-down: configure()
 
     // The steering closes its loop on the CANcoder, in module rotations, the short way around.
     steerConfig.MotorOutput.NeutralMode = NeutralModeValue.Brake;
@@ -145,6 +146,11 @@ final class ModuleIOTalonFX implements ModuleIO {
     steerConfig.Feedback.SensorToMechanismRatio = 1;
     steerConfig.ClosedLoopGeneral.ContinuousWrap = true;
     steerConfig.CurrentLimits.StatorCurrentLimitEnable = true;
+    // No supply limit for the steering: the current a motor draws from the battery is never more
+    // than the current through it, so the stator limit already caps it. Phoenix turns a supply
+    // limit on unless told not to (70 A, stepping down to 40 A after a second), so it's turned off
+    // here, where it shows. With it off, the step-down can't happen either: it's part of the limit.
+    steerConfig.CurrentLimits.SupplyCurrentLimitEnable = false;
 
     drivePosition = drive.getPosition();
     driveVelocity = drive.getVelocity();
@@ -302,7 +308,19 @@ final class ModuleIOTalonFX implements ModuleIO {
     // The template's gains are per meter per second and per radian; the devices' per rotation.
     driveConfig.Slot0.kP = gains.driveKp() * TWO_PI * wheelRadiusMeters;
     driveConfig.CurrentLimits.StatorCurrentLimit = limits.driveStatorCurrent().in(Amps);
+    // The supply limit, and its step-down. Supply current is what the motor draws from the battery,
+    // through its breaker. Phoenix lets the motor draw up to SupplyCurrentLimit, but once it has
+    // been held at that limit for SupplyCurrentLowerTime, it lowers the limit to
+    // SupplyCurrentLowerLimit until the motor draws less than that again. Phoenix does this even
+    // when the code doesn't ask: delete the last two lines below, and its defaults (40 A after 1 s)
+    // come back unseen, and the robot loses its push a second into a hard shove with nothing here
+    // to say why (PhoenixIOTest fails if they go). So all three come from the configuration. The
+    // step-down itself is worth keeping: a 40 A breaker carries 40 A for as long as you like, but
+    // can trip after 3.9 s at 60 A. SwerveConfig.Limits says more; docs/values.md, how the values
+    // were chosen.
     driveConfig.CurrentLimits.SupplyCurrentLimit = limits.driveSupplyCurrent().in(Amps);
+    driveConfig.CurrentLimits.SupplyCurrentLowerLimit = limits.driveSupplyLowerCurrent().in(Amps);
+    driveConfig.CurrentLimits.SupplyCurrentLowerTime = limits.driveSupplyLowerTime().in(Seconds);
     steerConfig.Slot0.kP = gains.steerKp() * TWO_PI;
     steerConfig.Slot0.kD = gains.steerKd() * TWO_PI;
     steerConfig.CurrentLimits.StatorCurrentLimit = limits.steerStatorCurrent().in(Amps);

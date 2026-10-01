@@ -1,7 +1,8 @@
 // Pit: is the robot ready, and the checks to run before a match. The status items, the actions,
 // and the switches: every other WPILib tunable in the robot program, which acts at once.
 
-import { robot, onChange, send, shown, h, say, replace } from "./core.js";
+import { robot, onChange, onConnection, send, shown, h, say, replace } from "./core.js";
+import { tuningOffBanner } from "./bar.js";
 
 let statusList;
 let actionCard;
@@ -17,7 +18,7 @@ const started = new Map(); // action -> when this page first saw it running
 
 function mount(view) {
   statusList = h("ul", { class: "slist" });
-  gate = h("p", { class: "gate" });
+  gate = h("p", { class: "gate", id: "pit-gate" });
   actionList = h("ul", { class: "alist" });
   actionCard = h("section", { class: "card", hidden: true }, h("h2", null, "Actions"), gate,
     actionList);
@@ -26,6 +27,7 @@ function mount(view) {
     h("p", { class: "meta" }, "Every other WPILib tunable in the robot program, as a dashboard "
         + "sees it. They act at once, only while tuning is on, and keep their setting into a "
         + "match."),
+    tuningOffBanner("Switches"),
     switchList);
   view.append(
     h("h1", { class: "view-title" }, "Pit"),
@@ -34,6 +36,11 @@ function mount(view) {
       h("section", { class: "card" }, h("h2", null, "Status"), statusList),
       h("div", null, actionCard, switchCard)));
   onChange(render);
+  onConnection(() => {
+    if (!robot.doc) return;
+    renderActions(false);
+    renderSwitches(false);
+  });
   // An action's running time, written in place each second.
   setInterval(tickActions, 1000);
 }
@@ -83,9 +90,14 @@ function renderActions(snapshot) {
         h("div", null, h("div", { class: "aname" }, name), parts.detail), parts.button);
     }));
   }
-  gate.className = "gate";
-  gate.textContent = "They run only with the robot enabled in Utility mode, never on the field, "
-      + "and stop when it disables or leaves Utility mode.";
+  // Why Run is off, beside it: the gate's own reason, and the mode now.
+  const why = !robot.connected ? "Not connected to the robot." : doc.robot.actionsLocked
+    ? capital(doc.robot.actionsLocked) + (doc.robot.mode ? ". Now: " + doc.robot.mode : "") + "."
+    : null;
+  gate.className = "gate " + (why ? "locked" : "ok");
+  gate.textContent = why ? "🔒 " + why
+    : "✓ Ready" + (doc.robot.mode ? ": " + doc.robot.mode : "") + ". They stop when the robot "
+      + "disables or leaves Utility mode.";
   for (const [name, { phase, detail }] of Object.entries(doc.actions)) {
     const parts = actions.get(name);
     const running = phase === "RUNNING";
@@ -97,7 +109,14 @@ function renderActions(snapshot) {
     parts.button.className = running ? "big danger" : "big primary";
     parts.button.textContent = running ? "■ Stop" : "▶ Run";
     parts.button.setAttribute("aria-label", (running ? "Stop " : "Run ") + name);
+    // Stop is never locked; Run is, with the reason beside it.
+    parts.button.disabled = !running && Boolean(why);
+    parts.button.setAttribute("aria-describedby", "pit-gate");
   }
+}
+
+function capital(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 async function runOrStop(name) {
@@ -132,7 +151,7 @@ function renderSwitches(snapshot) {
     switches.clear();
     switchList.replaceChildren(...list.map(([path, tunable]) => makeSwitch(path, tunable)));
   }
-  const locked = !doc.tuning.enabled;
+  const locked = !doc.tuning.enabled || !robot.connected;
   for (const [path, { value }] of list) {
     const parts = switches.get(path);
     if (!parts) continue;

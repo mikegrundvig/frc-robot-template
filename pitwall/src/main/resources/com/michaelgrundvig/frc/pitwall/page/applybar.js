@@ -5,6 +5,7 @@
 
 import { robot, onChange, onConnection, h, byId, go, replace } from "./core.js";
 import { onEdits, pending, apply, discard, closeRefusal, outcome } from "./edits.js";
+import { setTuning } from "./bar.js";
 
 /** The views it shows in: those with values to stage. */
 const VIEWS = new Set(["tune", "experiment"]);
@@ -24,6 +25,7 @@ let refusalBox;
 let line;
 let applyButton;
 let discardButton;
+let switchOn;
 let what;
 
 export function mountApplyBar() {
@@ -32,7 +34,9 @@ export function mountApplyBar() {
   what = h("span", { class: "what" });
   discardButton = h("button", { type: "button", onclick: () => discard() }, "Discard");
   applyButton = h("button", { type: "button", class: "primary", onclick: () => apply() });
-  line = h("div", { class: "ab-line" }, what, discardButton, applyButton);
+  switchOn = h("button", { type: "button", class: "primary", hidden: true,
+                           onclick: () => setTuning(true) }, "Switch tuning on");
+  line = h("div", { class: "ab-line" }, what, discardButton, switchOn, applyButton);
   bar.append(refusalBox, line);
   onEdits(render);
   onChange((patch, snapshot) => {
@@ -57,12 +61,19 @@ function render() {
   if (refusal) replace(refusalBox, refused(refusal));
   line.hidden = count === 0;
   const ready = Object.keys(changes).length;
-  const locked = !robot.doc.tuning.enabled || !robot.connected;
+  const session = robot.doc.tuning;
+  // Why nothing can be applied now, said where the edits wait, with the way out when there's one.
+  const lock = !robot.connected ? "Not connected to the robot: the edits wait here."
+    : session.fieldConnected ? "The field system is connected: nothing can change."
+    : !session.enabled ? "Tuning is off: switch it on to apply them." : null;
   replace(what, h("b", null, count + (count === 1 ? " edit" : " edits")),
     " staged, applied together or not at all.",
-    invalid.length > 0 && h("span", { class: "bad" },
+    lock && h("span", { class: "lockword" }, " 🔒 " + lock),
+    !lock && invalid.length > 0 && h("span", { class: "bad" },
       " ✗ " + invalid.length + " isn't a number: fix it to apply."));
-  applyButton.disabled = locked || invalid.length > 0 || outcome.applying;
+  switchOn.hidden = !(robot.connected && !session.enabled && !session.fieldConnected);
+  applyButton.hidden = !switchOn.hidden;
+  applyButton.disabled = Boolean(lock) || invalid.length > 0 || outcome.applying;
   applyButton.textContent = outcome.applying ? "Applying…" : "Apply " + ready;
 }
 

@@ -95,6 +95,9 @@ public final class Experiments {
   private volatile List<Rig> rigView = List.of();
   private volatile @Nullable Run run;
 
+  /** Why an experiment can't start now, as of the last loop; null while one can. */
+  private volatile @Nullable String locked = whyLocked(new Actions.Gate(false, false, false));
+
   /** What drives the run in progress; touched only by the robot loop. */
   private Actions.@Nullable Routine driving;
 
@@ -205,6 +208,14 @@ public final class Experiments {
   }
 
   /**
+   * Why an experiment can't start now, as of the last loop, such as "experiments run only with the
+   * robot enabled in utility mode"; null while one can. Safe to call from any thread.
+   */
+  public @Nullable String whyLocked() {
+    return locked;
+  }
+
+  /**
    * The run in progress, or the latest to end; null before the first. Safe to call from any thread.
    */
   public @Nullable Run run() {
@@ -277,6 +288,7 @@ public final class Experiments {
       current.cancel("Canceled: its command stopped before the run ended");
     }
     String locked = whyLocked(gate);
+    this.locked = locked;
     if (current != null && isRunning(current) && locked != null) {
       stop(current, "Canceled: " + locked);
     }

@@ -107,6 +107,9 @@ public final class Actions {
   private volatile Set<String> names = Set.of();
   private volatile List<State> view = List.of();
 
+  /** Why actions can't start now, as of the last loop; null while they can. */
+  private volatile @Nullable String locked = new Gate(false, false, false).whyNot();
+
   /**
    * @param logInputs logs the requests one loop applies, or in a replay replaces them with the
    *     logged ones
@@ -180,6 +183,14 @@ public final class Actions {
     return view;
   }
 
+  /**
+   * Why an action can't start now, as of the last loop, such as "actions run only with the robot
+   * enabled in utility mode"; null while one can. Safe to call from any thread.
+   */
+  public @Nullable String whyLocked() {
+    return locked;
+  }
+
   /** Whether an action has this name. Safe to call from any thread. */
   public boolean has(String name) {
     return names.contains(name);
@@ -219,6 +230,7 @@ public final class Actions {
       }
     }
     String whyNot = gate.whyNot();
+    locked = whyNot;
     if (whyNot != null) {
       for (Entry entry : actions.values()) {
         if (entry.phase == Phase.RUNNING) {

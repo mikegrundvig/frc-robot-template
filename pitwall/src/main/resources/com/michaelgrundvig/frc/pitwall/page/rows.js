@@ -94,8 +94,11 @@ export function updateRow(row) {
     const text = state.text !== null ? state.text : shown(now);
     if (row.input.value !== text) row.input.value = text;
   }
+  // Locked (tuning off, or the field), a value can't be edited; not connected, it's read only, and
+  // what's being typed stays.
   const locked = !doc.tuning.enabled;
   row.input.disabled = locked;
+  row.input.readOnly = !robot.connected;
   row.input.setAttribute("aria-invalid", bad ? "true" : "false");
   placeRange(row.range, value, now, state.valid && state.text !== null ? state.number : null);
   row.limits.textContent = value.limits
@@ -103,7 +106,7 @@ export function updateRow(row) {
   row.limits.classList.toggle("sr", !row.range.el.hidden); // the bar shows them; still read aloud
   replace(row.committed, "committed ", h("b", null, shown(value.committed)));
   row.revert.hidden = !tuned;
-  row.revert.disabled = locked;
+  row.revert.disabled = locked || !robot.connected;
   replace(row.note,
     state.isEdit && state.valid && h("div", { class: "edit" }, "✎ " + withUnit(now, value) + " → "
         + withUnit(state.number, value) + ", staged: not applied yet"),

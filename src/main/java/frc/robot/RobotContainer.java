@@ -1,9 +1,15 @@
 package frc.robot;
 
+import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Seconds;
+
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
+import com.michaelgrundvig.frc.pitwall.experiment.Profile;
+import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
@@ -493,14 +499,23 @@ public final class RobotContainer implements AutoCloseable {
   /** The drive check's name on the Pitwall page. */
   static final String DRIVE_CHECK = "Drive forward slowly (2 s)";
 
+  /** The steering's experiment on the Pitwall page, and its motion. */
+  static final String STEER_STEP = "Steer to 90° and back";
+
+  static final Profile STEER_STEP_PROFILE =
+      Profiles.stepAndBack().from(Degrees.of(0)).to(Degrees.of(90)).hold(Seconds.of(0.8));
+
   /**
    * Puts this robot's pit tools on its Pitwall page: the drive check and the calibrations as
-   * actions, and one status line each for the loop, the alliance, the placement, localization,
-   * scoring, the last calibration, and the cameras.
+   * actions, the steering's experiment for tuning it, and one status line each for the loop, the
+   * alliance, the placement, localization, scoring, the last calibration, and the cameras.
    */
   void addTo(Pitwall pitwall) {
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
     calibration.addTo(pitwall.actions(), scheduler);
+    pitwall
+        .experiments()
+        .add(new Experiment(STEER_STEP, drive.steeringRig(drivetrainTuning), STEER_STEP_PROFILE));
     pitwall
         .status()
         .add("Loop", this::loopStatus)

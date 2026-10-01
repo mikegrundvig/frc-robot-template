@@ -68,9 +68,30 @@ public class Module {
     return target;
   }
 
+  /**
+   * Points the wheel at an angle, relative to the robot, with the drive wheel held still: a
+   * steering test's motion. Unlike driving, it takes no shortcut (reversing the wheel rather than
+   * turning past 90°), so the steering makes the whole move asked of it.
+   */
+  void holdSteer(Rotation2d angle) {
+    commandedMetersPerSecond = 0;
+    io.setDriveVelocity(0, 0);
+    io.setSteerAngle(angle);
+  }
+
   void stop() {
     commandedMetersPerSecond = 0;
     io.stop();
+  }
+
+  /** The steering motor's voltage, as of this loop. */
+  double steerAppliedVolts() {
+    return inputs.steerAppliedVolts;
+  }
+
+  /** The steering motor's stator current, as of this loop. */
+  double steerCurrentAmps() {
+    return inputs.steerStatorCurrentAmps;
   }
 
   /** The module's devices that didn't take their configuration at startup, or empty. */

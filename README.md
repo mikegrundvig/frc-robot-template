@@ -63,6 +63,17 @@ Also built in:
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
     `pitwall.actions().add("Home arm", arm::home)`.
+  - **Experiments**: tuning a mechanism by test motion. A mechanism describes itself as a *rig*:
+    its gains (values of its `LiveConfig`), how to command it, how far it may go, and what to
+    record (`Drive.steeringRig`). An experiment runs a test motion on it from the page, such as
+    the steering's step to 90° and back (`pitwall.experiments().add(new Experiment(...))`), with an
+    action's safety, and only while the page that started it stays in touch. Each run is recorded
+    at the sensors' own rate (250 Hz for the steering) and scored: rise, overshoot, settling,
+    steady-state error, and peak voltage and current. The page lays the runs side by side, the
+    best of each score marked, with Restore to put a run's gains back and the builder calls that
+    commit them. A gain changes only the way any value does, through the checks below.
+  - **Pushed, not polled:** the page follows the robot through one event stream that carries
+    only what changed, so a page left open costs the robot almost nothing.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
     around WPILib's NetworkTables backend: dashboards such as Elastic see and change them as always,
     but a change applies only while tuning is on, never on the field, and within the tunable's

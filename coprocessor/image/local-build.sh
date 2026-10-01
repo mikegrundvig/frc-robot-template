@@ -3,7 +3,11 @@
 # privileged container (README.md, "Building on your own Linux machine").
 #
 #   coprocessor/image/local-build.sh --agent-jar PATH --agent-unit PATH \
-#       --settings-tool COMMAND [--release NAME] [--out DIR] [--outside-container]
+#       --settings-tool COMMAND [--recipe-hash HEX] [--release NAME] [--out DIR] \
+#       [--outside-container]
+#
+# The recipe hash is the build's, made beside the agent's jar (./gradlew :coprocessor-agent:jar
+# coprocessorRecipeHash): by default it's read from build/coprocessor/recipe-hash.txt.
 #
 # It mounts images and bind-mounts the machine's /dev into a chroot, so it refuses to run outside
 # a container unless told --outside-container.
@@ -24,6 +28,7 @@ repo=$(cd "$here/../.." && pwd)
 . "$here/lib/common.sh"
 
 agent_jar="" agent_unit="" settings_tool="" release="" out="$repo/build/coprocessor-image/local"
+recipe_hash=""
 outside_container=no
 while (($#)); do
   case $1 in
@@ -31,6 +36,7 @@ while (($#)); do
     --agent-unit) agent_unit=$(realpath "${2:?}"); shift 2 ;;
     --settings-tool) settings_tool=${2:?}; shift 2 ;;
     --release) release=${2:?}; shift 2 ;;
+    --recipe-hash) recipe_hash=${2:?}; shift 2 ;;
     --out) out=${2:?}; shift 2 ;;
     --outside-container) outside_container=yes; shift ;;
     *) die "unknown option: $1" ;;
@@ -54,7 +60,13 @@ out=$(cd "$out" && pwd)
 cd "$repo"
 
 # The workflow's plan, as shell variables.
-plan=$(GITHUB_OUTPUT='' "$here/plan.sh" --release "$release" --sha "$(git rev-parse HEAD)")
+if [[ -z $recipe_hash ]]; then
+  [[ -f $repo/$COPROC_RECIPE_HASH_FILE ]] ||
+    die "no $COPROC_RECIPE_HASH_FILE: run ./gradlew coprocessorRecipeHash first, or pass --recipe-hash"
+  recipe_hash=$(head -c 64 "$repo/$COPROC_RECIPE_HASH_FILE")
+fi
+plan=$(GITHUB_OUTPUT='' "$here/plan.sh" --recipe-hash "$recipe_hash" --release "$release" \
+  --sha "$(git rev-parse HEAD)")
 get() {
   sed -n "s/^$1=//p" <<<"$plan"
 }

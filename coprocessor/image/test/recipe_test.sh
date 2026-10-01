@@ -1,72 +1,50 @@
 # shellcheck shell=bash
-# recipe-hash.sh: its definition (which the robot build reproduces), and what changes it.
+# The recipe hash is the build's (./gradlew coprocessorRecipeHash, RecipeHash in
+# coprocessor/common). What provision.sh and stamping read from the repository makes the image, so
+# a change to any of it must change that hash: this checks the hash's definition covers all of it.
 
 # shellcheck disable=SC2153 # IMAGE comes from run.sh
-test_recipe_hash_is_the_sha256_of_git_ls_tree_over_the_listed_paths() {
-  need git
-  make_repo
-  local paths
-  paths=$(grep -Ev '^[[:space:]]*(#|$)' "$TMP/repo/coprocessor/image/recipe.paths")
-  local expected
-  # shellcheck disable=SC2086 # one path per word, as listed
-  expected=$(git -C "$TMP/repo" ls-tree -r --full-tree HEAD -- $paths | sha256sum | cut -c1-64)
-  assert_eq "$("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null)" "$expected"
-}
-
-test_recipe_hash_changes_with_the_recipe_not_its_documentation() {
-  need git
-  make_repo
-  local first
-  first=$("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null)
-  echo 'more on how to build' >>"$TMP/repo/coprocessor/image/README.md"
-  git_commit "$TMP/repo" "documentation"
-  assert_eq "$("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null)" "$first" "after a README change"
-  sed -i 's/alpha-2-69/alpha-2-70/' "$TMP/repo/coprocessor/photonvision.lock"
-  git_commit "$TMP/repo" "a new PhotonVision"
-  [[ $("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null) != "$first" ]] || fail "a lock change didn't change the hash"
-}
-
-test_recipe_hash_counts_committed_content_only() {
-  need git
-  make_repo
-  local first
-  first=$("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null)
-  echo 'echo uncommitted' >>"$TMP/repo/coprocessor/image/provision.sh"
-  assert_eq "$("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null)" "$first" "with an uncommitted change"
-}
-
-# What provision.sh reads from the repository by default makes the common image, so a change to
-# any of it must change the recipe hash: the scripts and their folders, the board files, the
-# installed files, the agent's unit, the lock, and what builds the agent's jar.
-test_recipe_covers_everything_provision_reads() {
+test_recipe_covers_everything_the_image_is_made_from() {
+  local java=$IMAGE/../common/src/main/java/com/michaelgrundvig/frc/coprocessor/tools/RecipeHash.java
+  [[ -f $java ]] || skip "no RecipeHash.java in this checkout"
   # shellcheck source=../lib/common.sh
   . "$IMAGE/lib/common.sh"
-  local entries=() line path missing=()
+  # The paths it lists, and the text of what it leaves out of them (documentation, tests, the
+  # coverage floors): any consumed path containing one of those is treated as left out.
+  local paths=() left_out=() line
   while IFS= read -r line; do
-    [[ $line =~ ^[[:space:]]*(#|$) ]] || entries+=("$line")
-  done <"$IMAGE/recipe.paths"
+    paths+=("$line")
+  done < <(awk '/List<String> PATHS =/,/\);/' "$java" | grep -oE '"[A-Za-z0-9._/-]+"' | tr -d '"')
+  while IFS= read -r line; do
+    left_out+=("$line")
+  done < <(awk '/static boolean inRecipe/,/^  }/' "$java" | grep -oE '"[A-Za-z0-9._/-]+"' | tr -d '"')
+  ((${#paths[@]} > 0)) || fail "found no PATHS in RecipeHash.java"
+  ((${#left_out[@]} > 0)) || fail "found nothing inRecipe leaves out in RecipeHash.java"
   covered() {
-    local entry
-    for entry in "${entries[@]}"; do
+    local entry rule
+    for rule in "${left_out[@]}"; do
+      [[ $1 == *"$rule"* ]] && return 1
+    done
+    for entry in "${paths[@]}"; do
       [[ $1 == "$entry" || $1 == "$entry"/* ]] && return 0
     done
     return 1
   }
-  local image=coprocessor/image
-  local consumed=("$image/provision.sh" "$image/lib/common.sh" "$COPROC_AGENT_UNIT" "$COPROC_LOCK")
+  local image=coprocessor/image path missing=()
+  local consumed=("$image/provision.sh" "$image/layout.sh" "$image/stamp.sh" "$image/stamp-image.sh"
+    "$image/lib/common.sh" "$COPROC_AGENT_UNIT" "$COPROC_LOCK")
   for path in "$IMAGE"/boards/* "$IMAGE"/files/*; do
     consumed+=("$image/${path#"$IMAGE"/}")
   done
-  # The agent's jar is built, not committed: what builds it is (but the version catalog, left out
-  # on purpose: recipe.paths says why).
+  # The agent's jar is built, not committed: what builds it (its libraries' versions the hash
+  # adds itself).
   consumed+=(coprocessor/agent/src/main/x coprocessor/agent/build.gradle coprocessor/common/src/main/x
-    coprocessor/common/build.gradle build.gradle settings.gradle gradle/quality.gradle
-    gradle/wrapper/gradle-wrapper.properties gradle/gradle-daemon-jvm.properties)
-  # The paths provision.sh names itself, from the repository, are all among those.
+    coprocessor/common/build.gradle gradle/quality.gradle)
+  # The paths provision.sh reads from the repository are among those.
   grep -qF "repo/\$COPROC_AGENT_JAR" "$IMAGE/provision.sh" || fail "provision.sh reads the agent's jar differently now"
   grep -qF "repo/\$COPROC_AGENT_UNIT" "$IMAGE/provision.sh" || fail "provision.sh reads the agent's unit differently now"
   for path in "${consumed[@]}"; do
     covered "$path" || missing+=("$path")
   done
-  ((${#missing[@]} == 0)) || fail "recipe.paths doesn't cover: ${missing[*]}"
+  ((${#missing[@]} == 0)) || fail "the recipe hash (RecipeHash.PATHS) doesn't cover: ${missing[*]}"
 }

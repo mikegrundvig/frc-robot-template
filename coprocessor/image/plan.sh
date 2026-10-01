@@ -2,7 +2,10 @@
 # plan.sh: checks the inputs of an image build and says what to build. The image workflow's first
 # job runs it; nothing is downloaded or built until it passes.
 #
-#   coprocessor/image/plan.sh [--repo DIR] [--release NAME] [--sha COMMIT]
+#   coprocessor/image/plan.sh --recipe-hash HEX [--repo DIR] [--release NAME] [--sha COMMIT]
+#
+# The recipe hash is the build's: ./gradlew -q coprocessorRecipeHash prints it (and writes it to
+# build/coprocessor/recipe-hash.txt), so the robot and the images compute it one way.
 #
 # It checks:
 #   - the table (coprocessors/coprocessors.yaml): the team number, and each computer's name,
@@ -27,8 +30,10 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 release=""
 sha=""
+recipe_hash=""
 while (($#)); do
   case $1 in
+    --recipe-hash) recipe_hash=${2:?}; shift 2 ;;
     --repo) repo=${2:?}; shift 2 ;;
     --release) release=${2-}; shift 2 ;;
     --sha) sha=${2:?}; shift 2 ;;
@@ -36,6 +41,8 @@ while (($#)); do
   esac
 done
 require_yq
+is_sha256 "$recipe_hash" ||
+  die "--recipe-hash: the build's recipe hash (./gradlew -q coprocessorRecipeHash), 64 lowercase hex digits"
 table="$repo/$COPROC_TABLE"
 lock="$repo/$COPROC_LOCK"
 vendordep="$repo/$COPROC_VENDORDEP"
@@ -95,7 +102,6 @@ fi
 [[ $release =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] ||
   die "release name '$release': up to 64 letters, digits, '.', '_', '-', starting with a letter or digit"
 
-recipe_hash=$("$here/recipe-hash.sh" "$repo")
 
 out=${GITHUB_OUTPUT:-/dev/stdout}
 {

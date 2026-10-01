@@ -14,7 +14,8 @@ COPROC_SETTINGS_ROOT=coprocessors                 # <root>/<computer>/settings/:
 COPROC_AUTHORIZED_KEYS=coprocessors/authorized_keys  # the team's SSH public keys (optional)
 COPROC_LOCK=coprocessor/photonvision.lock          # PhotonVision's version, jar, base images
 COPROC_VENDORDEP=vendordeps/photonlib.json         # the version the robot code is built against
-COPROC_RECIPE_PATHS=coprocessor/image/recipe.paths  # what the recipe hash covers
+# The recipe hash is the build's: ./gradlew -q coprocessorRecipeHash (RecipeHash, coprocessor/common).
+COPROC_RECIPE_HASH_FILE=build/coprocessor/recipe-hash.txt
 # The health agent, built by :coprocessor-agent, and its systemd unit.
 COPROC_AGENT_JAR=coprocessor/agent/build/libs/coprocessor-agent.jar
 COPROC_AGENT_UNIT=coprocessor/agent/coprocessor-agent.service

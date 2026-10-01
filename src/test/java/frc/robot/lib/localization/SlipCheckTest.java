@@ -47,6 +47,9 @@ class SlipCheckTest {
     /** What the accelerometer reads, turned this far from the robot's axes. */
     double imuTurned;
 
+    /** And its bias along the robot's forward axis. */
+    double bias;
+
     Robot() {
       this(Translation2d.ZERO, true);
     }
@@ -89,7 +92,7 @@ class SlipCheckTest {
               new Translation3d(imu.getX(), imu.getY(), 0.1),
               checked,
               new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
-              felt.getX(),
+              felt.getX() + bias,
               felt.getY()));
       return this;
     }
@@ -255,6 +258,39 @@ class SlipCheckTest {
     assertThat(held).as("still seen, two seconds on").isGreaterThan(0.45);
     assertThat(slipping).isPositive();
     assertThat(robot.check.slipMetersPerSecond()).as("stopped").isZero();
+  }
+
+  /**
+   * An accelerometer reading 0.3 m/s² too high, twice what the speed comparison lets go of:
+   * standing still for half a minute, it learns its bias, and no slide builds up; then a hard
+   * launch is no slide either.
+   */
+  @Test
+  void standingStillTheAccelerometersBiasIsLearned() {
+    Robot robot = new Robot();
+    robot.bias = 0.3;
+    double most = 0;
+    for (int i = 0; i < 1500; i++) {
+      robot.loop(0, 0, 0, 0);
+      most = Math.max(most, robot.check.slideMetersPerSecond());
+    }
+    robot.loops(50, 4.4 * LOOP, 0, 0, 0);
+
+    assertThat(most).as("standing").isLessThan(TOLERANCE);
+    assertThat(robot.check.slipMetersPerSecond()).as("launching").isZero();
+  }
+
+  /**
+   * A bias too large to be one (2 m/s²: the robot is taken to be moving, not standing) adds up as a
+   * slide, but none faster than the robot could go.
+   */
+  @Test
+  void noSlideIsFasterThanTheRobotCouldGo() {
+    Robot robot = new Robot();
+    robot.bias = 2;
+    robot.loops(1500, 0, 0, 0, 0);
+
+    assertThat(robot.check.slipMetersPerSecond()).isEqualTo(SETTINGS.maxSlideMetersPerSecond());
   }
 
   /** A slide that turns and one that speeds up, at once: the root of their squares. */

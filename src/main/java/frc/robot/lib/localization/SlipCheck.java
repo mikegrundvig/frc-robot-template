@@ -29,8 +29,11 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       a slide that holds at a steady speed stays seen; when it stops (the robot catches up with
  *       its wheels, or the push lets go), the accelerometer feels that too, and it's gone. Once
  *       past the accelerometer's noise, all of it is how fast the wheels slide: the tolerance tells
- *       a slide from the noise, it isn't a share of every slide. Only on a robot whose
- *       accelerometer is known to read along its axes ({@link ImuMount#accelerometerChecked}).
+ *       a slide from the noise, it isn't a share of every slide. Whenever the wheels and the IMU
+ *       say the robot is standing still, what the accelerometer reads is its bias, which is taken
+ *       off what it reads after; and no slide is counted faster than the robot could go. Only on a
+ *       robot whose accelerometer is known to read along its axes ({@link
+ *       ImuMount#accelerometerChecked}).
  *   <li><b>A jolt.</b> What the accelerometer feels that the wheels' own change of velocity doesn't
  *       explain (a robot stopping hard is felt by both, a hit only by the IMU) is a collision as
  *       far as it's past the tread's grip, which is the most the floor can explain (the robot
@@ -68,6 +71,16 @@ public final class SlipCheck {
    * @param speedToleranceMetersPerSecond how far the wheels' speed and the accelerometer's
    *     reckoning of the robot's may drift apart without a slide: its noise, and its lag as the
    *     robot's acceleration changes. Past it, the whole of it is the slide's speed.
+   * @param stillMetersPerSecond the robot is standing still when its wheels roll slower than this,
+   *     and turn it slower than this at their reach, and the IMU turns it slower than this too
+   * @param stillMetersPerSecSq and the accelerometer reads within this of its bias: further, the
+   *     robot is being moved (a push getting going), not standing
+   * @param biasSeconds how long the accelerometer's reading, standing still, is averaged over for
+   *     its bias: long enough to average out its noise, short enough to learn it before the robot
+   *     drives
+   * @param maxSlideMetersPerSecond the fastest the wheels and the robot can be sliding apart: past
+   *     it, what the speed comparison holds is no slide (a bias it hasn't learned, adding up), and
+   *     it counts no faster
    * @param joltMetersPerSecSq what the IMU feels and the wheels don't explain, past this, is a
    *     whole collision; past the tread's grip and short of this, a share of one
    * @param accelerometerRangeMetersPerSecSq the most the accelerometer reports on each axis: a
@@ -80,11 +93,16 @@ public final class SlipCheck {
       double turnScaleTolerance,
       double speedBiasMetersPerSecSq,
       double speedToleranceMetersPerSecond,
+      double stillMetersPerSecond,
+      double stillMetersPerSecSq,
+      double biasSeconds,
+      double maxSlideMetersPerSecond,
       double joltMetersPerSecSq,
       double accelerometerRangeMetersPerSecSq) {
     /**
      * The turn over a quarter second, within half a degree and 5% of it; the speed let go at 0.15
-     * m/s² and within 0.3 m/s; a jolt past 15 m/s², under a Pigeon 2's ±2 g range.
+     * m/s² and within 0.3 m/s, its bias learned over half a second still, and no slide past 5 m/s;
+     * a jolt past 15 m/s², under a Pigeon 2's ±2 g range.
      */
     public static final Settings DEFAULTS =
         builder()
@@ -93,6 +111,10 @@ public final class SlipCheck {
             .turnScaleTolerance(0.05)
             .speedBiasMetersPerSecSq(0.15)
             .speedToleranceMetersPerSecond(0.3)
+            .stillMetersPerSecond(0.05)
+            .stillMetersPerSecSq(1)
+            .biasSeconds(0.5)
+            .maxSlideMetersPerSecond(5)
             .joltMetersPerSecSq(15)
             .accelerometerRangeMetersPerSecSq(2 * ImuReadings.STANDARD_GRAVITY)
             .build();
@@ -104,6 +126,10 @@ public final class SlipCheck {
           .field("turnScaleTolerance", turnScaleTolerance, nonNegative())
           .field("speedBiasMetersPerSecSq", speedBiasMetersPerSecSq, nonNegative())
           .field("speedToleranceMetersPerSecond", speedToleranceMetersPerSecond, nonNegative())
+          .field("stillMetersPerSecond", stillMetersPerSecond, positive())
+          .field("stillMetersPerSecSq", stillMetersPerSecSq, positive())
+          .field("biasSeconds", biasSeconds, positive())
+          .field("maxSlideMetersPerSecond", maxSlideMetersPerSecond, positive())
           .field("joltMetersPerSecSq", joltMetersPerSecSq, positive())
           .field("accelerometerRangeMetersPerSecSq", accelerometerRangeMetersPerSecSq, positive())
           .check(
@@ -170,6 +196,10 @@ public final class SlipCheck {
   private final double turnScaleTolerance;
   private final double speedBias;
   private final double speedTolerance;
+  private final double stillSpeed;
+  private final double stillAcceleration;
+  private final double biasSeconds;
+  private final double maxSlide;
   private final double joltLimit;
   private final double grip;
   private final double saturation;
@@ -197,6 +227,14 @@ public final class SlipCheck {
   private double collision;
   private double unexplained;
 
+  /** The accelerometer's bias, along the robot's axes, as learned standing still. */
+  private double biasForward;
+
+  private double biasLeft;
+
+  /** How long the robot has been standing still. */
+  private double stillSeconds;
+
   /**
    * @param settings how closely the wheels must agree with the IMU
    * @param wheelReachMeters how far the wheels sit from the robot's center: a turn they see and the
@@ -214,6 +252,10 @@ public final class SlipCheck {
     turnScaleTolerance = settings.turnScaleTolerance();
     speedBias = settings.speedBiasMetersPerSecSq();
     speedTolerance = settings.speedToleranceMetersPerSecond();
+    stillSpeed = settings.stillMetersPerSecond();
+    stillAcceleration = settings.stillMetersPerSecSq();
+    biasSeconds = settings.biasSeconds();
+    maxSlide = settings.maxSlideMetersPerSecond();
     joltLimit = settings.joltMetersPerSecSq();
     if (!(gripMetersPerSecSq > 0) || !(gripMetersPerSecSq < joltLimit)) {
       throw new IllegalArgumentException(
@@ -251,8 +293,38 @@ public final class SlipCheck {
     forgetSpeeds();
     lastVelocityX = Double.NaN;
     lastVelocityY = Double.NaN;
+    // Another IMU may read next, with a bias of its own.
+    biasForward = 0;
+    biasLeft = 0;
+    stillSeconds = 0;
     collision =
         joltBySize(forwardAccelerationMetersPerSecSq, leftAccelerationMetersPerSecSq) ? 1 : 0;
+  }
+
+  /**
+   * Learns the accelerometer's bias while the robot stands still: its wheels and its IMU say it
+   * isn't moving or turning, and has been for the turn's window, and the accelerometer reads near
+   * what it did. Standing still, it feels nothing but its bias.
+   */
+  private void learnBias(Sample sample) {
+    ChassisVelocities wheels = sample.wheels();
+    double rate =
+        Double.isFinite(sample.yawRateRadiansPerSecond()) ? sample.yawRateRadiansPerSecond() : 0;
+    double forward = sample.forwardAccelerationMetersPerSecSq();
+    double left = sample.leftAccelerationMetersPerSecSq();
+    boolean still =
+        Math.hypot(wheels.vx, wheels.vy) < stillSpeed
+            && Math.abs(wheels.omega) * reachMeters < stillSpeed
+            && Math.abs(rate) * reachMeters < stillSpeed
+            && Double.isFinite(forward)
+            && Double.isFinite(left)
+            && Math.hypot(forward - biasForward, left - biasLeft) < stillAcceleration;
+    stillSeconds = still ? stillSeconds + sample.seconds() : 0;
+    if (stillSeconds >= windowSeconds) {
+      double share = 1 - Math.exp(-sample.seconds() / biasSeconds);
+      biasForward += (forward - biasForward) * share;
+      biasLeft += (left - biasLeft) * share;
+    }
   }
 
   /** Whether an acceleration is a jolt by its size alone: past the limit, or at the range. */
@@ -350,14 +422,16 @@ public final class SlipCheck {
   }
 
   private void compareSpeeds(Sample sample) {
-    double forward = sample.forwardAccelerationMetersPerSecSq();
-    double left = sample.leftAccelerationMetersPerSecSq();
     double yaw = sample.yawRadians();
     ChassisVelocities wheels = sample.wheels();
     if (!Double.isFinite(yaw) || !Double.isFinite(wheels.vx) || !Double.isFinite(wheels.vy)) {
-      startOver(forward, left);
+      startOver(
+          sample.forwardAccelerationMetersPerSecSq(), sample.leftAccelerationMetersPerSecSq());
       return;
     }
+    learnBias(sample);
+    double forward = sample.forwardAccelerationMetersPerSecSq() - biasForward;
+    double left = sample.leftAccelerationMetersPerSecSq() - biasLeft;
     // The wheels' velocity where the IMU sits: the robot's, plus its turn swinging the IMU around,
     // the turn's rate crossed with the IMU's position. Only the yaw rate is read, which swings it
     // level whatever its height: a robot pitching or rolling would swing a high IMU too.
@@ -403,8 +477,15 @@ public final class SlipCheck {
       double kept = size > speedBias * seconds ? 1 - speedBias * seconds / size : 0;
       slideX *= kept;
       slideY *= kept;
+      // No slide is faster than the robot can go: past that, it's an unlearned bias adding up.
+      double held = size * kept;
+      if (held > maxSlide) {
+        slideX *= maxSlide / held;
+        slideY *= maxSlide / held;
+        held = maxSlide;
+      }
       // Past the tolerance, all of it: the doubt keeps up with the slide from where it's seen.
-      speedSlip = size * kept > speedTolerance ? size * kept : 0;
+      speedSlip = held > speedTolerance ? held : 0;
     }
     lastVelocityX = velocityX;
     lastVelocityY = velocityY;

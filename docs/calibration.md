@@ -88,6 +88,15 @@ orientation is wrong: fix it in `Robots.java`, redeploy, and check again. Once a
 `.accelerometerChecked(true) // checked YYYY-MM-DD`. The simulator's robot is checked: its IMUs
 read along their axes by construction.
 
+Then measure what the slip check allows for, once the accelerometer is checked, in the same log or a
+new one: launches from standing at full stick, hard stops, and spins in place and while driving, all
+on carpet the wheels grip. `Localization/SlideMetersPerSecond`, how far apart the wheels and the
+accelerometer drift without a slide, should stay under 0.2 m/s throughout, and
+`Localization/UnexplainedJoltMetersPerSecSq` under the tread's grip. The slip check's tolerances
+(`SlipCheck.Settings`) were set against the simulator's accelerometer, whose noise, bias, and filter
+are guesses (CTRE publishes none of them for the Pigeon 2): if the slide passes 0.2 m/s, raise
+`speedToleranceMetersPerSecond` above what it reached, and say so in its comment.
+
 When: after mounting or moving an IMU, or changing its orientation.
 
 ## The gyro's scale

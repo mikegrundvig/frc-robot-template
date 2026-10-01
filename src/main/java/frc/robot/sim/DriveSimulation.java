@@ -124,6 +124,11 @@ public final class DriveSimulation {
     settle();
   }
 
+  /** The ground the robot drives on. */
+  public Terrain terrain() {
+    return terrain;
+  }
+
   /** Unplugs the gyro, or plugs it back in. */
   public void disconnectGyro(boolean disconnected) {
     gyro.setConnected(!disconnected);

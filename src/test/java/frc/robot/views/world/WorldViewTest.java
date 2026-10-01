@@ -176,8 +176,18 @@ class WorldViewTest {
     assertThat(said.title()).isEqualTo("front-left → tag 7");
     assertThat(said.details())
         .extracting(Inspection.Detail::value)
-        .contains("rejected: gate: 45.2 > 13.8", "0.80 m from the estimate", "45.2");
+        .contains(
+            "rejected: gate: 45.2 > 13.8",
+            "0.80 m from the estimate, before this measurement moved it",
+            "45.2");
     assertThat(said.actions()).containsExactly("Calibrate front-left");
+
+    // A good camera's innovation is millimeters, its χ² hundredths: shown, not rounded to nothing.
+    decisions = List.of(new VisionDecision(measurement, true, "accepted", 0.0058, 0.0189));
+    loop(feed);
+    assertThat(scenes.inspect(WorldView.ID, "ray.front-left.7.ok").orElseThrow().details())
+        .extracting(Inspection.Detail::value)
+        .contains("6 mm from the estimate, before this measurement moved it", "0.019");
 
     for (int i = 0; i < 10; i++) {
       loop(feed); // the line goes after a moment without a measurement

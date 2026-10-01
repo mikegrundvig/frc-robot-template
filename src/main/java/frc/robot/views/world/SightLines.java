@@ -211,12 +211,13 @@ final class SightLines implements Layer {
             .detail(
                 "Innovation",
                 Double.isFinite(decision.innovationMeters())
-                    ? WorldView.meters(decision.innovationMeters()) + " from the estimate"
+                    ? WorldView.offset(decision.innovationMeters())
+                        + " from the estimate, before this measurement moved it"
                     : "not compared")
             .detail(
                 "χ²",
                 Double.isFinite(decision.chiSquared())
-                    ? String.format(Locale.ROOT, "%.1f", decision.chiSquared())
+                    ? WorldView.chiSquared(decision.chiSquared())
                     : "not compared")
             .detail(
                 "Distance",

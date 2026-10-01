@@ -110,4 +110,23 @@ public final class WorldView {
   static String meters(double meters) {
     return Double.isFinite(meters) ? String.format(Locale.ROOT, "%.2f m", meters) : "not measured";
   }
+
+  /**
+   * A distance that's often small, such as a camera's innovation: to the millimeter under 10 cm,
+   * where two places of meters would show a few millimeters as 0.00 m.
+   */
+  static String offset(double meters) {
+    return Double.isFinite(meters) && Math.abs(meters) < 0.1
+        ? String.format(Locale.ROOT, "%.0f mm", meters * 1000)
+        : meters(meters);
+  }
+
+  /** A χ² to three figures, or to the whole number from 100: a small one isn't shown as 0.0. */
+  static String chiSquared(double value) {
+    String format =
+        Math.abs(value) >= 100
+            ? "%.0f"
+            : Math.abs(value) >= 10 ? "%.1f" : Math.abs(value) >= 1 ? "%.2f" : "%.3f";
+    return String.format(Locale.ROOT, format, value);
+  }
 }

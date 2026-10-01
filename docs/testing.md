@@ -237,16 +237,16 @@ their own, the default):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.13 | 0.55 | 0 | 0 | 1.4 cm | 0.19° |
-| standing | 1.85 | 0.36 | 0 | 0 | 1.2 cm | 0.15° |
+| driving | 1.08 | 0.56 | 0 | 0 | 1.5 cm | 0.20° |
+| standing | 1.83 | 0.37 | 0 | 0 | 1.2 cm | 0.15° |
 | turning | 1.44 | 0.68 | 0 | 0 | 1.5 cm | 0.68° |
 | gyro-scale | 2.10 | 1.05 | 0.09% | 0.00% | 1.8 cm | 1.36° |
-| collision | 1.66 | 0.62 | 0.94% | 0.94% | 1.8 cm | 0.21° |
+| collision | 1.40 | 0.63 | 0.65% | 0.65% | 1.7 cm | 0.21° |
 | gyro-lost | 1.71 | 0.46 | 0 | 0 | 1.5 cm | 0.46° |
-| camera-low | 1.04 | 0.76 | 0 | 0 | 1.3 cm | 0.21° |
-| camera-turned | 3.63 | 5.02 | 2.61% | 1.13% | 2.5 cm | 0.51° |
-| camera-turned-4 | 12.56 | 22.24 | 34.93% | 33.76% | 4.8 cm | 1.09° |
-| tag-moved | 1.85 | 2.01 | 1.30% | 1.00% | 1.6 cm | 0.31° |
+| camera-low | 0.99 | 0.73 | 0 | 0 | 1.4 cm | 0.21° |
+| camera-turned | 3.28 | 4.95 | 1.53% | 0.69% | 2.6 cm | 0.51° |
+| camera-turned-4 | 9.83 | 19.73 | 27.43% | 26.69% | 4.5 cm | 0.99° |
+| tag-moved | 1.71 | 2.03 | 1.28% | 0.98% | 1.7 cm | 0.32° |
 
 Every calibrated run is near its NEES or below it, timid rather than overconfident: the floor for
 what a camera repeats is sized for the worst of what it allows, and the noise model is a little
@@ -266,23 +266,21 @@ stamped each image up to a loop late ([below](#the-simulators-late-stamps)), and
 seeds shared draws (seed 2's first camera was seed 1's second, through `Seeds.mix` adding the seed
 to what it mixed) and the mounts and tags were drawn narrower than the configuration claims.
 
-On the same simulator, two estimators came before this table. The first doubted a quarter of its
-wheels' travel whenever a drive motor was at its current limit, for most of a second each time
-the robot got up to speed or changed course. The second doubted them only on evidence that they
-slid, but with a speed comparison that faded, an ideal simulated accelerometer, and all of the
-wheels' disagreement counted as slip that kept its direction. In NEES, the first, the second, and
-this table: driving 1.01, 1.08, 1.13; standing 1.80, 1.83, 1.85; collision 1.28, 1.47, 1.66;
-camera-low 0.90, 0.97, 1.04; tag-moved 1.56, 1.71, 1.85; the turned cameras 2.87, 3.19, 3.63 and
-9.00, 9.91, 12.56. The runs that turn in place didn't move. The doubt fell where it wasn't needed:
-in the tenth of the driving run's loops where the first claimed more than 5 cm, averaged over
-the seeds, it claimed 7.6 cm (11.0 at most), the second 4.2 cm (5.4), and this one 1.7 cm (2.5),
-1.1 cm off there on average (1.7 and 1.5 before), a NEES of 0.64 where it was 0.11; over the whole
-run, 2.7, 2.2 and 1.9 cm. The estimate is surer of its wheels and no worse for it: its worst error
-driving is 5.6 cm (11.9 and 10.7). In the collision run, the doubt the drive motors' limit added
-after the hit was what covered the knock's last 15 cm: without it the estimate is past its
-ellipse for a few loops more, and 0.94% of them in all, under the allowance. The turned cameras,
-eight and sixteen times what the configuration allows, grow more overconfident as the estimate
-grows surer of its wheels: the cameras' disagreement with each other is all that's left to doubt.
+On the same simulator, the estimator before this table doubted a quarter of its wheels' travel
+whenever a drive motor was at its current limit, for most of a second each time the robot got up to
+speed or changed course. In NEES, it and this table: driving 1.01 and 1.08, standing 1.80 and 1.83,
+collision 1.28 and 1.40, camera-low 0.90 and 0.99, tag-moved 1.56 and 1.71, the turned cameras 2.87
+and 3.28, 9.00 and 9.83; the runs that turn in place didn't move. The doubt it took off fell where
+it wasn't needed: in the tenth of the driving run's loops where the estimator before claimed more
+than 5 cm, averaged over the seeds, it claimed 7.6 cm (11.0 at most) and this one 4.2 cm (5.4), 1.5
+cm off there; over the whole run, 2.7 and 2.2 cm. In the collision run, the doubt the drive motors'
+limit added after the hit was what covered the knock's last 15 cm: without it the estimate is past
+its ellipse for a few loops more, 0.65% of them in all, under the allowance. The turned cameras,
+eight and sixteen times what the configuration allows, grow a little more overconfident: the doubt
+at the current limit had covered some of their error too. For a while, the wheels' disagreement
+counted as slip only where one wheel alone explained it (driving 1.13, the 4° camera 12.56, the
+mount check blaming its healthy neighbour), until two wheels slipping together, which that counted
+as noise, showed it wrong; it was reverted.
 
 ### Three ways to correct the heading
 
@@ -301,12 +299,11 @@ the study runs each (`--heading=`):
 Twelve matched seeds of each (a, b, c in that order), run while the estimate still doubted a
 quarter of the wheels' travel whenever the drive motors were at their current limit. The default
 (a) has been run again since, in the table above, with the estimate doubting its wheels only on
-evidence that they slid: the calibrated runs moved by at most 0.4 in NEES (the collision's, 1.28
-to 1.66) and 0.1 cm in mean error, and the turned cameras' NEES rose by 0.8 and 3.6. The mount
-check moved the most: at 4° it now doubts the healthy neighbour more than the turned camera (12
-seeds, 8.9 cm, out of calibration in 7, against 8 seeds, 5.1 cm, out in 8), and at 2° the two
-alike (3 seeds each, 1.2 and 0.8 cm). (b) and (c) weren't run again: the comparison below is as
-it stood.
+evidence that they slid: the calibrated runs moved by at most 0.15 in NEES (the tag-moved run's)
+and 0.1 cm in mean error, and the turned cameras' NEES rose by 0.4 and 0.8. The mount check still
+finds the 4° camera first (11 seeds, 7.4 cm, against its neighbour's 12, 5.7 cm; were 7.0 and
+5.2), and at 2° doubts it in 3 seeds (0.5 cm), its neighbour in 1. (b) and (c) weren't run again:
+the comparison below is as it stood.
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
@@ -471,22 +468,22 @@ Scoring and solving with the gyro's heading barely change: an honest position is
 2.5 cm on average, well inside 15 cm, and the heading's doubt stays under 5°. Calibrating passed in
 only 88 to 90% of the loops of the runs that keep driving the route: while the robot got up to speed
 or changed course, its drive motors at their current limit, the estimate doubted a quarter of its
-wheels' travel and claimed more than 5 cm. Doubting them only on evidence that they slid, and
-counting their disagreement with each other as slip only where one wheel alone explains it, (a)
-passes in 98.6 to 100% of those runs' loops now (driving 100, standing 100, collision 98.6,
-camera-low 100, camera-turned 99.99, camera-turned-4 99.7, tag-moved 99.8), and judging a mount in
-91.0 to 97.6% (95.7, 97.0, 91.0, 97.0, 97.6, 97.5, 97.5); the runs that turn in place are as in the
-table. (c) wasn't run again. Judging a mount is where honesty costs. It needs the position and
-heading together within the mount tolerance (5 cm) at the tag's distance, so the heading within
-about 0.95° at 3 m, and the gyro's scale allowance (`headingStdDevDegreesPerTurn`, 1° a turn) puts
-it past that after a turn or two, until a multi-tag heading brings it back: with (a), the mount
-check can judge a third of the turning run's loops and fewer than three in five of the gyro-scale
-procedure's. Every fix brings the heading's doubt back sooner (74% and 95%), and honestly: its
-heading is 0.2° off on average over either run, against (a)'s 0.7° and 1.4°. The estimator before
-passed nearly always because it was sure of a heading up to 2° off. And after the procedure's five
-turns, (a)'s heading claims more than a placed robot's 2° for a quarter of the run. None of these
-gates is retuned here: a lower allowance once the gyro is calibrated, a judging distance, or a
-tolerance are the team's to choose with these numbers.
+wheels' travel and claimed more than 5 cm. Doubting them only on evidence that they slid, (a) passes
+in 97.1 to 99.6% of those runs' loops now (driving 97.9, standing 99.6, collision 97.1, camera-low
+97.9, camera-turned 98.0, camera-turned-4 97.5, tag-moved 97.7), and judging a mount in 89.1 to
+96.5% (92.0, 96.5, 89.1, 93.5, 94.1, 94.0, 94.1); the runs that turn in place are as in the table.
+What still fails calibrating is the estimate changing course, its wheels disagreeing with each other
+as each reaches its new speed. (c) wasn't run again. Judging a mount is where honesty costs. It
+needs the position and heading together within the mount tolerance (5 cm) at the tag's distance, so
+the heading within about 0.95° at 3 m, and the gyro's scale allowance
+(`headingStdDevDegreesPerTurn`, 1° a turn) puts it past that after a turn or two, until a multi-tag
+heading brings it back: with (a), the mount check can judge a third of the turning run's loops and
+fewer than three in five of the gyro-scale procedure's. Every fix brings the heading's doubt back
+sooner (74% and 95%), and honestly: its heading is 0.2° off on average over either run, against
+(a)'s 0.7° and 1.4°. The estimator before passed nearly always because it was sure of a heading up
+to 2° off. And after the procedure's five turns, (a)'s heading claims more than a placed robot's 2°
+for a quarter of the run. None of these gates is retuned here: a lower allowance once the gyro is
+calibrated, a judging distance, or a tolerance are the team's to choose with these numbers.
 
 ### What it proves, and what it doesn't
 
@@ -522,8 +519,14 @@ and then seeing again), and the estimate recovers in each. What's known not to h
 
 - **A slide's first tenth of a second.** The slip check sees a slide only once the wheels and the
   accelerometer are 0.3 m/s apart, so the doubt starts behind it. With the camera's last fix still
-  recent, the scoring gate lets through up to 3 loops while the estimate is 15 to 20 cm off as a
+  recent, the scoring gate lets through up to 2 loops while the estimate is 15 to 18 cm off as a
   push or a launch at half grip gets going.
+- **Worn tread, far without a camera.** Tread worn a little unevenly puts the wheels' reckoning
+  off by a share of every meter, where the estimator allows for an error growing with the root of
+  the distance (`translationStdDevPerMeter`). Three seconds at full stick with no camera, the
+  season-worn simulated robot is 16 cm off claiming 10. Before the slip check, the estimate doubted
+  a quarter of the wheels' travel at the drive motors' current limit, which covered it in a launch
+  (and nowhere else).
 - **The end of a long slide.** What the speed comparison let go of while a slide held (0.15 m/s
   for each second) it under-reads as the slide slows. Pushed at 3 m/s for two seconds, the camera
   seeing, the last 0.6 m/s of the slowdown reads as no slide, and for 4 loops the estimate is 9 to

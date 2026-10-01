@@ -26,6 +26,7 @@ import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SensorErrorsAccelErrorsBuilder;
+import frc.robot.sim.SensorErrorsBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -117,6 +118,32 @@ class LocalizationSimTest {
     LocalizationEstimate estimate = seeing.estimator.estimate();
     assertThat(estimate.mode()).isEqualTo(LocalizationEstimate.Mode.TRACKING);
     assertThat(estimate.health().accepted()).isGreaterThan(300);
+  }
+
+  /**
+   * The route without a camera, four seeds of the season-worn robot's noise, checked at the end of
+   * every leg. After the first, three seconds at full stick, the estimate is 16 cm off claiming 10:
+   * the worn tread puts its reckoning off by a share of every meter, where the estimator allows for
+   * an error growing with the root of the distance (docs/testing.md, what it proves). After the
+   * rest it claims far more than it's off: through the route's hard changes of direction the
+   * simulated wheels disagree with each other for half a second, each reaching its new speed at its
+   * own pace, and every step's disagreement counts as slip that keeps its direction, but the
+   * simulated robot moves as the wheels' fit says, so their disagreement puts it nowhere. This
+   * holds it to no worse.
+   */
+  @Test
+  void blindTheEstimateIsNeverFarSurerThanItsRight() {
+    for (long seed = 1; seed <= 4; seed++) {
+      DriveSimHarness robot =
+          robot(SensorErrorsBuilder.builder(SensorErrors.TYPICAL).seed(seed).build());
+      for (double[] leg : ROUTE) {
+        robot.drive(leg[0], leg[1], leg[2], leg[3]);
+        double off = robot.positionError();
+        assertThat(robot.estimator.estimate().covariance().largestPositionStdDev())
+            .as("seed %d, %.2f m off", seed, off)
+            .isGreaterThan(off / 1.6);
+      }
+    }
   }
 
   /** Knocked 60 cm sideways: the camera disagrees, then keeps disagreeing, and wins. */
@@ -649,9 +676,10 @@ class LocalizationSimTest {
   /**
    * Pushed sideways at 1 m/s for a second while the camera is blind, and seen again half a second
    * after the push lets go: a meter off, and back within 10 cm in the camera's first fixes. The
-   * scoring gate lets through 3 loops more than 15 cm off, as the push gets going: the slip check
-   * sees the slide only once it's past its tolerance, and the doubt it adds grows only as fast as
-   * the slide, from then (docs/testing.md, known limits).
+   * scoring gate should let through no loop more than 15 cm off; it lets through 2, under 18 cm, as
+   * the push gets going and the camera's last fix is still recent: the slip check sees the slide
+   * only once it's past its tolerance, and the doubt it adds grows only as fast as the slide, from
+   * then (docs/testing.md, known limits). The bounds are what it does today, so it does no worse.
    */
   @Test
   void pushedWhileTheCameraIsBlindTheEstimateComesBackWhenItSees() {
@@ -667,14 +695,16 @@ class LocalizationSimTest {
 
     assertThat(pushed.worstError()).as("a meter off").isGreaterThan(0.9);
     assertThat(pushed.secondsBack()).as("back within 10 cm, seconds").isLessThanOrEqualTo(0.1);
-    assertThat(pushed.gateOpenWhileOff()).as("loops let through off").isLessThanOrEqualTo(3);
-    assertThat(pushed.worstWhileOpen()).as("the worst let through").isLessThan(0.2);
+    assertThat(pushed.gateOpenWhileOff()).as("loops let through off").isLessThanOrEqualTo(2);
+    assertThat(pushed.worstWhileOpen()).as("the worst let through").isLessThan(0.18);
   }
 
   /**
    * A launch at half grip while the camera is blind, seen again as the robot stops: 2.3 m off, and
    * back within 10 cm in half a second, through the camera's noise while the estimate still doubts
-   * its wheels. The scoring gate lets through 2 loops more than 15 cm off as the launch starts.
+   * its wheels. The scoring gate should let through no loop more than 15 cm off; it lets through 2,
+   * under 18 cm, as the launch starts, for the same reason as a push. The bounds are what it does
+   * today, so it does no worse.
    */
   @Test
   void aLaunchAtHalfGripWhileTheCameraIsBlindComesBackWhenItSees() {

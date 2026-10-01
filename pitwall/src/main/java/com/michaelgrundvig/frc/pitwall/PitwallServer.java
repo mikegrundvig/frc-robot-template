@@ -65,7 +65,8 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
  *       "value"}]}; 503 when the loop doesn't get to it within a second.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
- *       "detail"}]}. {@code POST} it {@code {"start": name}} or {@code {"cancel": name}}.
+ *       "detail", "locked"}]}, the last why it can't start now (empty while it can). {@code POST}
+ *       it {@code {"start": name}} or {@code {"cancel": name}}.
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected",
  *       "refused"}}, the last being the latest dashboard changes refused and why (a dashboard can't
  *       say). {@code PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
@@ -1396,6 +1397,7 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("name", state.name());
         shown.put("phase", state.phase().name());
         shown.put("detail", state.detail());
+        shown.put("locked", state.locked());
         states.add(shown);
       }
       return states;

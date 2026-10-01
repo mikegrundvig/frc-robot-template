@@ -178,4 +178,32 @@ class CoprocessorFaultsTest {
     assertThat(changed.stampedSettingsHash).isEqualTo("hash-1");
     assertThat(after(1).settingsHash).isEqualTo("hash-1");
   }
+
+  /** Asked to power down, it halts a few seconds later, and stays halted: the fault keeps it up. */
+  @Test
+  void askedToPowerDownItHaltsUnlessItIgnoresIt() {
+    after(1);
+    apply(Faults.IGNORES_POWER_DOWN, Map.of());
+    coprocessor.powerDown();
+    CoprocessorIOInputs ignoring = after(5);
+    undo(Faults.IGNORES_POWER_DOWN);
+
+    coprocessor.powerDown();
+    CoprocessorIOInputs halting = after(1);
+    CoprocessorIOInputs halted = after(4);
+    apply(Faults.UNREACHABLE, Map.of());
+    undo(Faults.UNREACHABLE);
+    CoprocessorIOInputs still = after(2);
+
+    assertThat(ignoring.powerDownAnswer).isEqualTo("answered 404");
+    assertThat(ignoring.agentPortOpen).isTrue();
+    assertThat(ignoring.answered).isTrue();
+    assertThat(halting.powerDownAnswer).isEqualTo("accepted");
+    assertThat(halting.photonVisionPortOpen).isTrue();
+    assertThat(halted.portsTried).isTrue();
+    assertThat(halted.agentPortOpen).isFalse();
+    assertThat(halted.photonVisionPortOpen).isFalse();
+    assertThat(halted.answered).isFalse();
+    assertThat(still.answered).as("halted until the simulator starts again").isFalse();
+  }
 }

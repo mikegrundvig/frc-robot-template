@@ -51,6 +51,9 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   /** How long the simulated board had been up when the robot program started. */
   private static final double UP_BEFORE_SECONDS = 40;
 
+  /** How long a board takes to power down once asked: PhotonVision stops, then the board halts. */
+  static final long HALT_NANOS = 3_000_000_000L;
+
   /** How long PhotonVision takes to come back after a restart. */
   private static final long RESTART_NANOS = 3_000_000_000L;
 
@@ -73,6 +76,15 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   private int unpluggedCamera = -1;
   private boolean twoBoards;
   private boolean settingsChanged;
+  private boolean ignoresPowerDown;
+
+  // Powering down: asked when, and how the agent answered. A halted board stays halted until the
+  // simulator starts again, as a real one does until its power is cycled.
+  private boolean powerDownAsked;
+  private long powerDownAskedNanos;
+  private String powerDownAnswer = "";
+  private boolean halted;
+  private boolean portsTried;
   private int restarts;
   private long restartedAtNanos;
 
@@ -120,7 +132,11 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     }
     nextPollNanos = nowNanos + periodNanos;
     polls++;
-    if (unreachable) {
+    if (powerDownAsked) {
+      halted |= powerDownAnswer.equals("accepted") && nowNanos - powerDownAskedNanos >= HALT_NANOS;
+      portsTried = true;
+    }
+    if (unreachable || halted) {
       answered = false;
       error = "connect timed out";
       return;
@@ -145,6 +161,27 @@ public final class CoprocessorIOSim implements CoprocessorIO {
       Answers.fill(inputs, latest);
       inputs.macsTakingTurns = takingTurns.toArray(String[]::new);
       filled = latest;
+    }
+    inputs.powerDownAsked = powerDownAsked;
+    inputs.powerDownAnswer = powerDownAnswer;
+    inputs.portsTried = portsTried;
+    // A board off the network, or halted, accepts no connection on either port.
+    inputs.agentPortOpen = !unreachable && !halted;
+    inputs.photonVisionPortOpen = !unreachable && !halted;
+  }
+
+  @Override
+  public void powerDown() {
+    powerDownAsked = true;
+    powerDownAskedNanos = nowNanos;
+    portsTried = false;
+    // An image from before powering down from the robot has no such request.
+    powerDownAnswer =
+        unreachable || halted
+            ? "connect timed out"
+            : ignoresPowerDown ? "answered 404" : "accepted";
+    if (powerDownAnswer.equals("accepted")) {
+      log(micros(), 6, "", "systemd-logind", "The system will power off now!", "");
     }
   }
 
@@ -388,6 +425,20 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     return settingsChanged;
   }
 
+  /** Its image predates powering down from the robot: its agent refuses, and it keeps running. */
+  public void ignoresPowerDown(boolean on) {
+    ignoresPowerDown = on;
+  }
+
+  public boolean isIgnoringPowerDown() {
+    return ignoresPowerDown;
+  }
+
+  /** Whether it has halted, powered down: until the simulator starts again. */
+  public boolean isHalted() {
+    return halted;
+  }
+
   /** Its latest answer, as its agent would serve it: for tests that serve it over HTTP. */
   Health answer() {
     return latest;
@@ -404,12 +455,12 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   }
 
   boolean isAnswering() {
-    return !unreachable;
+    return !unreachable && !halted;
   }
 
   @Override
   public byte[] settingsBackup() throws IOException {
-    if (unreachable) {
+    if (!isAnswering()) {
       throw new IOException("connect timed out");
     }
     ByteArrayOutputStream zip = new ByteArrayOutputStream();
@@ -428,7 +479,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
 
   @Override
   public JournalPage journal(String cursor, int priority, String unit) throws IOException {
-    if (unreachable) {
+    if (!isAnswering()) {
       throw new IOException("connect timed out");
     }
     int after = -1;

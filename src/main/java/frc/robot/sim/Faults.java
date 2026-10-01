@@ -73,6 +73,7 @@ public final class Faults {
   public static final String PHOTONVISION_RESTARTS = "PhotonVision restarts";
   public static final String DUPLICATED = "Duplicated address";
   public static final String SETTINGS_CHANGED = "Settings changed";
+  public static final String IGNORES_POWER_DOWN = "Ignores power-down";
 
   // Their parameters, as the scenarios give them.
   public static final String FORWARD = "Forward";
@@ -219,6 +220,15 @@ public final class Faults {
             .isOn(coprocessor::hasSettingsChanged)
             .apply(values -> coprocessor.settingsChanged(true))
             .undo("Back to its stamped settings.", () -> coprocessor.settingsChanged(false))
+            .build());
+    faults.add(
+        Fault.lasting(IGNORES_POWER_DOWN)
+            .does(
+                "Its image is older than powering down from the robot: asked, its agent refuses"
+                    + " (404), and it keeps running.")
+            .isOn(coprocessor::isIgnoringPowerDown)
+            .apply(values -> coprocessor.ignoresPowerDown(true))
+            .undo("Powers down when asked.", () -> coprocessor.ignoresPowerDown(false))
             .build());
     return new Component(coprocessor(coprocessor.name()), "coprocessor", faults);
   }

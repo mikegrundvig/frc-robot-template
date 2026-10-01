@@ -87,6 +87,13 @@ class CoprocessorIOHttpTest {
             out.write(zip);
           }
         });
+    server.createContext(
+        "/v1/shutdown",
+        exchange -> {
+          asked.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
+          exchange.sendResponseHeaders(202, -1);
+          exchange.close();
+        });
     server.start();
     io =
         new CoprocessorIOHttp(
@@ -205,5 +212,28 @@ class CoprocessorIOHttpTest {
     assertThatThrownBy(() -> io.journal("", 7, ""))
         .isInstanceOf(IOException.class)
         .hasMessageStartingWith("its journal can't be read");
+  }
+
+  /**
+   * Asked to power down, it posts the request, then tries both ports until neither answers: here
+   * the stand-in agent stops, and nothing listens on PhotonVision's port on this computer.
+   */
+  @Test
+  void poweringDownAsksThenWaitsUntilItsPortsAreGone() throws Exception {
+    CoprocessorIOInputs inputs = new CoprocessorIOInputs();
+    until(() -> inputs.everAnswered, inputs);
+
+    io.powerDown();
+    until(() -> inputs.portsTried, inputs);
+    boolean openWhileUp = inputs.agentPortOpen;
+    server.stop(0);
+    until(() -> !inputs.agentPortOpen, inputs);
+
+    assertThat(inputs.powerDownAsked).isTrue();
+    assertThat(inputs.powerDownAnswer).isEqualTo("accepted");
+    assertThat(asked).contains("POST /v1/shutdown");
+    assertThat(openWhileUp).isTrue();
+    assertThat(inputs.agentPortOpen).isFalse();
+    assertThat(inputs.photonVisionPortOpen).isFalse();
   }
 }

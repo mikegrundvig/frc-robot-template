@@ -154,10 +154,33 @@ public interface CoprocessorIO extends AutoCloseable {
 
     /** What the agent couldn't read, each saying what and why. */
     public String[] problems = new String[] {};
+
+    // Powering down, once the robot asked it to.
+
+    /** Whether the robot asked it to power down. */
+    public boolean powerDownAsked = false;
+
+    /** How its agent answered: "accepted", or why not; empty until it answered. */
+    public String powerDownAnswer = "";
+
+    /**
+     * Whether its ports have been tried since it was asked, and whether its agent's port and
+     * PhotonVision's (5800) still accept a connection: when neither does, it's gone.
+     */
+    public boolean portsTried = false;
+
+    public boolean agentPortOpen = false;
+    public boolean photonVisionPortOpen = false;
   }
 
   /** Reads the latest answer, and how old it is: never waits. */
   default void updateInputs(CoprocessorIOInputs inputs) {}
+
+  /**
+   * Asks it to power down ({@code POST /v1/shutdown}), then tries its ports until it's gone, on a
+   * thread of the IO's own: never waits. Asked again, it asks again.
+   */
+  default void powerDown() {}
 
   /**
    * Its settings backup ({@code /v1/settings.zip}): a zip laid out like the repository's folder for

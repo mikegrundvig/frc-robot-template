@@ -64,6 +64,30 @@ journal's errors. Each card ends in what can be done:
 Pitwall asks the agent for these on its own server threads, when the page asks, never in the robot
 loop; the browser never talks to a coprocessor.
 
+## Powering down before switching off
+
+A power cut can lose what a coprocessor was writing (its root is read-only; its settings aren't),
+so Pit has an action, **Power down coprocessors**, to run before someone flips the breaker. It runs
+only while the robot is disabled and the field system isn't connected, never in a match; enabling
+the robot stops it waiting.
+
+1. It asks every computer in the table to power down (`POST /v1/shutdown`, which the agent takes
+   only from the robot's own address): PhotonVision stops, then the board halts.
+2. It waits until each is gone on both its agent's port and PhotonVision's (5800), each tried once
+   a second on its IO's own thread.
+3. Then Pit and the state bar say **Safe to switch off**.
+
+A computer still answering 30 s after it was asked raises a high alert naming it, with what its
+agent answered (an image without the request answers 404): don't switch off yet. A halted board
+stays off while it has power, so a robot left on after powering down says, after three minutes,
+*Coprocessors halted: cycle the robot's power to restart them*, and the missing-coprocessor alerts
+say each was powered down from Pitwall, not that it failed.
+
+A button can start the same sequence: wire a push button between one of Systemcore's digital
+inputs and ground, and set `powerDownButton` in `Coprocessors.Settings` to that input (it's -1, no
+button, by default). Holding it a second asks Pitwall to run the action, under the same rule:
+disabled, and off the field.
+
 ## The check before a deploy
 
 `./gradlew deploy` first runs `coprocessorCheck`, which asks each coprocessor in the table for its
@@ -83,12 +107,14 @@ deploy that knowingly leaves a coprocessor as it is.
 Each computer in the table gets a simulated agent, which answers as a healthy board running this
 build's image would, once a second on the robot's clock, through the same records a real answer is
 read into. Its faults (unreachable, the wrong version, hot, a camera unplugged, PhotonVision
-restarting, a duplicated address, settings changed) are in Pitwall's *Sim* view, as
-[the simulator](simulator.md#what-can-fail-live) lists them, and show on its card and in its alerts
-as a real coprocessor's would. *Open PhotonVision* has no page behind it in the simulator.
+restarting, a duplicated address, settings changed, ignoring power-down) are in Pitwall's *Sim*
+view, as [the simulator](simulator.md#what-can-fail-live) lists them, and show on its card and in
+its alerts as a real coprocessor's would. Powered down, it halts three seconds later, and stays
+halted until the simulator starts again. *Open PhotonVision* has no page behind it in the simulator.
 
 ## Unverified
 
 - The vendor kernel's thermal trip points: the agent reads each board's at run time.
+- Whether Systemcore's SmartIO inputs are pulled up, as a roboRIO's are, for the button.
 - How quickly two boards at one address take turns answering: it depends on how often the robot
   renews its address table, so the window (a minute) may need tuning against a real pair.

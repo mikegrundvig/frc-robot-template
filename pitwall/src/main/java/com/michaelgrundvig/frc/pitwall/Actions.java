@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -17,7 +18,9 @@ import org.wpilib.command3.Scheduler;
  * Named routines started from the page, such as a pit check or homing a mechanism, each with its
  * state shown live. An action runs only while the robot is enabled in utility mode and the field
  * system isn't connected, so the Driver Station's enable stays the safety switch; leaving utility
- * mode or disabling cancels whatever is running.
+ * mode or disabling cancels whatever is running. An action that must not run while the robot can
+ * move (powering devices down) runs instead only while it's disabled, and never on the field
+ * ({@link When#DISABLED}); enabling cancels it.
  *
  * <p>Add one with a line: {@code actions.add("Home arm", arm::home)} for a Commands v3 command
  * (made fresh each run), or any {@link Routine}.
@@ -42,6 +45,14 @@ public final class Actions {
     void cancel();
   }
 
+  /** When an action may run. Never while the field system is connected, either way. */
+  public enum When {
+    /** Enabled in utility mode: a routine that moves the robot. The default. */
+    ENABLED_IN_UTILITY,
+    /** Disabled: a routine that mustn't run while the robot can move, such as powering down. */
+    DISABLED
+  }
+
   /** Where an action stands. */
   public enum Phase {
     /** Hasn't run yet. */
@@ -60,8 +71,9 @@ public final class Actions {
    * @param name what it's called on the page
    * @param phase where it stands
    * @param detail a sentence about it: why it was refused or canceled
+   * @param locked why it can't start now, or empty while it can
    */
-  public record State(String name, Phase phase, String detail) {}
+  public record State(String name, Phase phase, String detail, String locked) {}
 
   /**
    * Whether actions may run this loop.
@@ -83,23 +95,37 @@ public final class Actions {
      * @param what what's held, as the reason names it: "actions", "experiments"
      */
     public @Nullable String whyNot(String what) {
+      return whyNot(what + " run", When.ENABLED_IN_UTILITY);
+    }
+
+    /**
+     * Why something that runs at these times can't run now, or null when it can.
+     *
+     * @param runs what's held and its verb, as the reason names it: "actions run", "Power down
+     *     runs"
+     */
+    @Nullable String whyNot(String runs, When when) {
       if (fieldConnected) {
         return "the field system is connected";
       }
-      if (!enabled || !utility) {
-        return what + " run only with the robot enabled in utility mode";
-      }
-      return null;
+      return switch (when) {
+        case ENABLED_IN_UTILITY ->
+            !enabled || !utility ? runs + " only with the robot enabled in utility mode" : null;
+        case DISABLED -> enabled ? runs + " only with the robot disabled" : null;
+      };
     }
   }
 
   private static final class Entry {
     final Routine routine;
+    final When when;
     Phase phase = Phase.READY;
     String detail = "";
+    @Nullable String locked;
 
-    Entry(Routine routine) {
+    Entry(Routine routine, When when) {
       this.routine = routine;
+      this.when = when;
     }
 
     void set(Phase phase, String detail) {
@@ -145,10 +171,23 @@ public final class Actions {
    * @throws IllegalArgumentException if the name is blank or already used
    */
   public Actions add(String name, Routine routine) {
+    return add(name, routine, When.ENABLED_IN_UTILITY);
+  }
+
+  /**
+   * Adds an action that runs at other times than enabled in utility mode: {@link When#DISABLED},
+   * say, for powering devices down.
+   *
+   * @return this, to add the next action
+   * @throws IllegalArgumentException if the name is blank or already used
+   */
+  public Actions add(String name, Routine routine, When when) {
     if (name.isBlank()) {
       throw new IllegalArgumentException("an action needs a name");
     }
-    if (actions.putIfAbsent(name, new Entry(routine)) != null) {
+    Entry entry = new Entry(routine, when);
+    entry.locked = new Gate(false, false, false).whyNot(runs(name, when), when);
+    if (actions.putIfAbsent(name, entry) != null) {
       throw new IllegalArgumentException("two actions are named " + name);
     }
     names = Set.copyOf(actions.keySet());
@@ -239,18 +278,17 @@ public final class Actions {
         }
       }
     }
-    String whyNot = gate.whyNot();
-    locked = whyNot;
-    if (whyNot != null) {
-      for (Entry entry : actions.values()) {
-        if (entry.phase == Phase.RUNNING) {
-          entry.set(Phase.CANCELED, "Canceled: " + whyNot + cancel(entry));
-        }
+    locked = gate.whyNot();
+    for (Map.Entry<String, Entry> action : actions.entrySet()) {
+      Entry entry = action.getValue();
+      entry.locked = gate.whyNot(runs(action.getKey(), entry.when), entry.when);
+      if (entry.locked != null && entry.phase == Phase.RUNNING) {
+        entry.set(Phase.CANCELED, "Canceled: " + entry.locked + cancel(entry));
       }
     }
     List<Outcome> results = new ArrayList<>();
     for (int i = 0; i < inputs.kinds.length; i++) {
-      results.add(apply(ActionInputs.Kind.valueOf(inputs.kinds[i]), inputs.names[i], whyNot));
+      results.add(apply(ActionInputs.Kind.valueOf(inputs.kinds[i]), inputs.names[i]));
     }
     view = snapshot();
     // Only now, so whoever is waiting sees the state their request left. In replay, no one is.
@@ -259,7 +297,12 @@ public final class Actions {
     }
   }
 
-  private Outcome apply(ActionInputs.Kind kind, String name, @Nullable String whyNot) {
+  /** How a gate's reason names an action: actions in general, or one that runs at its own times. */
+  private static String runs(String name, When when) {
+    return when == When.ENABLED_IN_UTILITY ? "actions run" : name + " runs";
+  }
+
+  private Outcome apply(ActionInputs.Kind kind, String name) {
     Entry entry = actions.get(name);
     if (entry == null) {
       return new Outcome(Outcome.Result.REFUSED, "There is no action named " + name);
@@ -270,8 +313,12 @@ public final class Actions {
       }
       return Outcome.applied();
     }
+    String whyNot = entry.locked;
     if (whyNot != null) {
-      return new Outcome(Outcome.Result.LOCKED, "Actions are locked: " + whyNot);
+      return new Outcome(
+          Outcome.Result.LOCKED,
+          (entry.when == When.ENABLED_IN_UTILITY ? "Actions are locked: " : name + " is locked: ")
+              + whyNot);
     }
     if (entry.phase == Phase.RUNNING) {
       return new Outcome(Outcome.Result.REFUSED, name + " is already running");
@@ -334,7 +381,12 @@ public final class Actions {
     List<State> states = new ArrayList<>(actions.size());
     for (Map.Entry<String, Entry> action : actions.entrySet()) {
       Entry entry = action.getValue();
-      states.add(new State(action.getKey(), entry.phase, entry.detail));
+      states.add(
+          new State(
+              action.getKey(),
+              entry.phase,
+              entry.detail,
+              Objects.requireNonNullElse(entry.locked, "")));
     }
     return List.copyOf(states);
   }

@@ -107,17 +107,24 @@ final class Coprocessor implements AutoCloseable {
     String name = name();
     missing = !inputs.everAnswered || inputs.ageSeconds > settings.staleAfterSeconds();
     if (missing) {
+      // Powered down on purpose, it's missing for a reason: say so, not that it failed.
       text(
           enabled ? missingEnabled : missingDisabled,
-          "Coprocessor "
-              + name
-              + " ("
-              + address
-              + ") "
-              + (inputs.everAnswered
-                  ? "stopped answering"
-                  : "hasn't answered since the robot program started")
-              + reason());
+          inputs.powerDownAsked
+              ? "Coprocessor "
+                  + name
+                  + " ("
+                  + address
+                  + ") was powered down from Pitwall: cycle the robot's power to restart it"
+              : "Coprocessor "
+                  + name
+                  + " ("
+                  + address
+                  + ") "
+                  + (inputs.everAnswered
+                      ? "stopped answering"
+                      : "hasn't answered since the robot program started")
+                  + reason());
     }
     missingEnabled.set(missing && enabled);
     missingDisabled.set(missing && !enabled);
@@ -266,6 +273,27 @@ final class Coprocessor implements AutoCloseable {
     return !committed.isEmpty() && !inputs.settingsHash.equals(committed);
   }
 
+  /** Asks it to power down, on its IO's own thread. */
+  void powerDown() {
+    io.powerDown();
+  }
+
+  /**
+   * Whether it's gone, powered down: asked to, and since then neither its agent's port nor
+   * PhotonVision's accepts a connection.
+   */
+  boolean isGone() {
+    return inputs.powerDownAsked
+        && inputs.portsTried
+        && !inputs.agentPortOpen
+        && !inputs.photonVisionPortOpen;
+  }
+
+  /** How its agent answered the request to power down: empty until it did. */
+  String powerDownAnswer() {
+    return inputs.powerDownAnswer;
+  }
+
   /** The robot's time when it booted, by its latest answer. */
   private long bootedAtRobotNanos() {
     return inputs.answeredNanos - inputs.agentMonotonicNanos;
@@ -277,7 +305,10 @@ final class Coprocessor implements AutoCloseable {
   Card card() {
     List<Line> lines = new ArrayList<>();
     boolean twoBoards = inputs.macsTakingTurns.length > 1;
-    if (missing) {
+    if (inputs.powerDownAsked) {
+      lines.add(powerLine());
+    }
+    if (missing && !isGone()) {
       lines.add(
           new Line(
               "Answer",
@@ -349,8 +380,42 @@ final class Coprocessor implements AutoCloseable {
     for (Line line : lines) {
       level = line.level().compareTo(level) > 0 ? line.level() : level;
     }
-    String state = twoBoards ? "Two answer" : missing ? "Missing" : "Present";
-    return new Card(state, level, lines);
+    String state =
+        isGone()
+            ? "Powered down"
+            : inputs.powerDownAsked
+                ? "Powering down"
+                : twoBoards ? "Two answer" : missing ? "Missing" : "Present";
+    // Powered down on purpose, it's as it should be: the rest is its last answer.
+    return new Card(state, isGone() ? Level.NOTE : level, lines);
+  }
+
+  /** Where powering it down stands: what its agent said, and which ports still answer. */
+  private Line powerLine() {
+    if (isGone()) {
+      return new Line(
+          "Power",
+          "powered down from Pitwall: gone from its agent's port and PhotonVision's; cycle the"
+              + " robot's power to restart it",
+          Level.NOTE);
+    }
+    List<String> open = new ArrayList<>();
+    if (inputs.agentPortOpen) {
+      open.add("its agent");
+    }
+    if (inputs.photonVisionPortOpen) {
+      open.add("PhotonVision");
+    }
+    return new Line(
+        "Power",
+        "asked to power down"
+            + (inputs.powerDownAnswer.isEmpty() ? "" : ", " + inputs.powerDownAnswer)
+            + (inputs.portsTried && !open.isEmpty()
+                ? "; " + String.join(" and ", open) + " still answering"
+                : ""),
+        inputs.powerDownAnswer.isEmpty() || inputs.powerDownAnswer.equals("accepted")
+            ? Level.NOTE
+            : Level.WARNING);
   }
 
   private Line settingsLine() {

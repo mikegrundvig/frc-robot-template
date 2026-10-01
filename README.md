@@ -64,7 +64,12 @@ Also built in:
     `pitwall.status().add("Arm homed", arm::isHomed)`.
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
-    `pitwall.actions().add("Home arm", arm::home)`.
+    `pitwall.actions().add("Home arm", arm::home)`. One that mustn't run while the robot can move,
+    such as powering the coprocessors down, runs only while it's disabled instead
+    (`Actions.When.DISABLED`).
+  - **Notices**: what the robot has to tell whoever is at the page right now, such as "Safe to
+    switch off", shown in the state bar on every view and atop Pit:
+    `pitwall.notices().add("Coprocessors", coprocessors::notice)`.
   - **Experiments**: tuning a mechanism by test motion. A mechanism describes itself as a *rig*:
     its gains (values of its `LiveConfig`), how to command it, how far it may go, and what to
     record (`Drive.steeringRig`). An experiment runs a test motion on it from the page, such as

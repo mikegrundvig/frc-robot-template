@@ -167,8 +167,20 @@ it finds out from its sensors, as on a robot.
 | | Placed, as the drive team carries it | happens | x, y (m), heading (°) |
 | | Carried to the nearest bump, facing across it | happens | |
 | Field | Tag moved: one tag, from where the field was built; moving another puts it back. The robot's code and the cameras' multi-tag solves still believe the layout | lasts | tag (its ID), x, y, up (in), in the field's frame |
+| Each coprocessor (`Coprocessor vision-front`), its simulated health agent | Unreachable: its agent stops answering, as one off or off the network | lasts | |
+| | Wrong version: its image carries another PhotonVision (`v2026.3.4`), which it publishes too | lasts | |
+| | Hot: its big cores this far below their trip point (85 °C); at it or past it, their clock is capped | lasts | below its trip point (°C) |
+| | Camera unplugged: one of its cameras, by its number in the table | lasts | camera (from 1) |
+| | PhotonVision restarts: systemd restarts it, back after a few seconds; the count stays until it reboots | happens | |
+| | Duplicated address: a second board with its image answers too, by turns | lasts | |
+| | Settings changed: its PhotonVision settings differ from those it was stamped with, as tuning in its UI does | lasts | |
 
-Carrying the robot to a bump is declared only on a field with bumps. A world can also be built
+Carrying the robot to a bump is declared only on a field with bumps, and a coprocessor for each
+computer in the table compiled into the program (`coprocessors/coprocessors.yaml`); a computer
+with no cameras in the table has no camera to unplug. A simulated coprocessor answers as a healthy
+board running this build's image would, once a second on the robot's clock, through the same
+records a real agent's answer is read into, so its card and alerts on the robot are the real ones
+([the coprocessors](coprocessors.md)). A world can also be built
 with its tags a little off the layout (`SensorErrors.tagErrors`), as the consistency study builds
 it; undoing a moved tag puts it back there.
 
@@ -286,8 +298,8 @@ in when a loop runs.
 state bar, its band, and *Sim*, not that the link was lost, and reconnects by itself when the
 simulator starts again. Another page open on the simulator sees only the link lost.
 
-**What fails:** a card for each part (each camera, the gyro, the backup IMU, each module, and the
-robot), each fault with what it does and what undoing it does, as `frc.robot.sim.Faults` declares
+**What fails:** a card for each part (each camera, the gyro, the backup IMU, each module, the
+robot, and each coprocessor), each fault with what it does and what undoing it does, as `frc.robot.sim.Faults` declares
 them; each parameter with its unit and limits, checked on the page before it's sent; Apply, and
 Undo for a fault that's on. A lasting fault that's on is marked as a tuned value is, an amber bar,
 ●, and "on", with the values it was applied with; an event is a button that makes it happen once.

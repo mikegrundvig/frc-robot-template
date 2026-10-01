@@ -428,6 +428,25 @@ the new field's ramps.
 | `levelSeconds` | chosen | 0.1 s | guess | Why: five loops level is off the feature, not a wobble on its top. Lengthen it if a wobble on a feature's top ends a crossing early. |
 | `topSeconds` | chosen | 1.5 s | guess | Why: time to cross a feature's flat top; longer is two features, or a stop on top. Lengthen it if a wide feature's crossing isn't counted. |
 
+## The coprocessors
+
+### `Coprocessors.Settings`
+
+`frc.robot.subsystems.coprocessors.Coprocessors.Settings`: how the robot asks its vision
+coprocessors' health agents how they are, and when it raises alerts about them; the robot uses
+`Settings.DEFAULTS`. Each coprocessor's answers are logged under `Coprocessors/<name>`
+([the coprocessors](coprocessors.md)).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `pollPeriodSeconds` | chosen | 1 s | guess | Why: what the agent reports (heat, load, cameras, restarts) changes over seconds, and an answer is about 2 KB, so once a second is fresh enough for the pit and nothing to the network. Lower it only if an alert must come sooner. |
+| `connectTimeoutSeconds` | chosen | 0.25 s | guess | Why: on the robot's own network a connection takes milliseconds; a quarter second is far past that, and fails a poll to a coprocessor that's gone well inside the period. Check: `Coprocessors/<name>/Error` never says "connect timed out" while the coprocessor is up. |
+| `answerTimeoutSeconds` | chosen | 0.5 s | guess | Why: the agent answers from what it has already read; half a second covers a busy board, and with the connect timeout fits in the period, so a slow poll never delays the next. Check: `Coprocessors/<name>/Error` never says "Read timed out" while the coprocessor is up. |
+| `staleAfterSeconds` | chosen | 3 s | guess | Why: three polls without an answer: one lost answer isn't a coprocessor missing, and one that's gone shows within seconds. Raise it if the missing alert flickers on a healthy robot (`Coprocessors/<name>/AgeSeconds` past it). |
+| `hotMarginCelsius` | chosen | 5 °C | guess | Why: a board this close to its first passive trip point is about to slow its big cores, and PhotonVision with them. Check it against [coprocessor capacity](characterization.md#vision-coprocessor-capacity)'s ten minutes at full load, as mounted: the hottest zone (`Coprocessors/<name>/ZoneCelsius` against `ZoneTripCelsius`) should stay outside it. |
+| `turnsWindowSeconds` | chosen | 60 s | guess | Why: two boards at one address answer by turns as the robot's address table flips between them, which can take tens of seconds; a minute catches that. A board replaced by another never gives way to it again, so no window mistakes a swap for two boards. |
+| `downloadTimeoutSeconds` | chosen | 10 s | guess | Why: a settings backup, calibrations included, is a few megabytes, seconds over the robot's network. Raise it if a backup from Pitwall times out on a healthy coprocessor. |
+
 ## The simulator
 
 ### `SensorErrors`
@@ -582,6 +601,8 @@ code's choices, explained beside them.
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |
 | `Vision`: how recently another camera must have agreed for a camera's tags to count toward its mount | 2 s | chosen | simulation (half a second left out cameras facing other ways, which see tags at other moments) | Why: the other cameras hold the pose a camera is judged against. |
+| `CoprocessorIOSim`: where the simulated board's zones trip | 85 °C | characterized | datasheet (mainline Linux's RK3588 device tree) | The real boards' trip points are read at run time by their agents, since the vendor kernel's may differ; the simulator only needs a plausible one. |
+| `DeployCheck`: how long each coprocessor has to connect, and to answer with its stamp, before a deploy | 1 s | chosen | guess | Why: on the robot's network a stamp takes milliseconds, and a coprocessor that isn't there shouldn't hold a deploy up long: each one's wait is at most a second to connect and a second to answer, and one on PhotonVision's port. |
 
 ## Records that aren't configuration
 

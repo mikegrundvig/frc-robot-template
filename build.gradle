@@ -69,6 +69,9 @@ dependencies {
 
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
+    // What the robot shares with its vision coprocessors (coprocessor/common): the table, and the
+    // health agent's API, which the robot polls (frc.robot.subsystems.coprocessors).
+    implementation project(":coprocessor-common")
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
     // can say what each value means. It runs in the compiler only; none of it reaches the robot.
     annotationProcessor project(":pitwall:docs-processor")
@@ -145,6 +148,26 @@ gradle.taskGraph.whenReady { graph ->
 // Every check means ci: the robot program's and Pitwall's, which the robot runs too.
 tasks.matching { it.name == "deploy" }.configureEach {
     dependsOn "ci"
+    dependsOn "coprocessorCheck"
+}
+
+// Before a deploy, each coprocessor in the table is asked which image it runs, within a second
+// (frc.robot.subsystems.coprocessors.DeployCheck): one running another PhotonVision, recipe, name,
+// team, or address than this build's fails the deploy, as does one answering on PhotonVision's port
+// but not the agent's; one not answering only warns. -PskipCoprocessorCheck skips it, saying so.
+tasks.register("coprocessorCheck", JavaExec) {
+    group = "DeployUtils" // beside deploy
+    description = "Ask each coprocessor which image it runs, as deploy does first: -PskipCoprocessorCheck skips it."
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = "frc.robot.subsystems.coprocessors.DeployCheck"
+    args deploy.targets.systemcore.team.toString()
+    def skip = project.hasProperty("skipCoprocessorCheck")
+    onlyIf("-PskipCoprocessorCheck wasn't given") {
+        if (skip) {
+            logger.lifecycle("Coprocessor check skipped (-PskipCoprocessorCheck): the coprocessors' images weren't compared with this build")
+        }
+        !skip
+    }
 }
 
 // Store the team number: ./gradlew setTeamNumber -PteamNumber=NNNN

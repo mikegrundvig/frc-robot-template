@@ -123,10 +123,20 @@ tasks.named("jacocoTestReport") {
     executionData.from(fileTree(layout.buildDirectory.dir("jacoco")) { include "end-to-end.exec" })
 }
 
-// A copy of the source travels with every deploy, so the code on a robot can always be recovered.
+// A copy of the source travels with every deploy, so the code on a robot can always be recovered:
+// the robot program's, and the libraries' and Pitwall's that it's built with.
 tasks.named("jar") {
     from("src") { into "backup/src" }
     from("vendordeps") { into "backup/vendordeps" }
+    from("lib") {
+        exclude "**/build/**"
+        into "backup/lib"
+    }
+    from("pitwall") {
+        exclude "**/build/**"
+        into "backup/pitwall"
+    }
+    from("settings.gradle") { into "backup" }
 }
 
 tasks.withType(JavaCompile).configureEach {

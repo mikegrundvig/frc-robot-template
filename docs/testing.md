@@ -80,6 +80,13 @@ What it offers:
 - **The drivers:** `sim.driver()`, the gamepad on port 0.
 - **The truth:** `sim.simulation()` knows where the robot really is (`truePose()`), and can move
   it, tilt it, or hit it.
+- **Scenarios:** the simulator's named faults and events (`frc.robot.sim.Scenarios`), the ones
+  `./gradlew run -Pscenario=<name>` starts. `sim.build(Scenarios.named("camera-low"))` builds the
+  robot as `./gradlew run` does, with the scenario's faults on a season-worn robot's sensors
+  (`SensorErrors.TYPICAL`, where `sim.robot()` starts from `NONE`), and `sim.start(scenario)` makes
+  what happens in it happen (a collision, the gyro unplugged) at the moment the test chooses. `ScenarioSimTest`
+  runs every one on the robot. A new scenario goes in `Scenarios.ALL`, with a test in
+  `ScenariosTest` that it does to the simulated world what it says.
 - **What dashboards see:** `sim.telemetry()`; and the Pitwall page, `sim.pitwall()`: its status,
   its actions, and tuning, as the page uses them.
 

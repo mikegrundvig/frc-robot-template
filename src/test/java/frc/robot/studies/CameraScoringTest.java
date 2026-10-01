@@ -11,9 +11,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.Robots;
+import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.VisionMeasurement;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -135,15 +137,60 @@ class CameraScoringTest {
     List<Score> ranking =
         ranking(ONE_THREAD, List.of(FACING_THE_WALL, FACING_AWAY), AHEAD, AHEAD_AND_BACK, pair);
 
-    Score aheadAndBack = only(ranking, AHEAD_AND_BACK);
-    assertThat(aheadAndBack.oneLostMeasured()).isEqualTo(0.5);
-    assertThat(aheadAndBack.oneLostP95Meters()).isInfinite();
-    Score ahead = only(ranking, AHEAD);
-    assertThat(ahead.oneLostMeasured()).isZero();
-    assertThat(ahead.oneLostP95Meters()).isInfinite();
-    Score twoAhead = only(ranking(ONE_THREAD, List.of(FACING_THE_WALL), pair), pair);
-    assertThat(twoAhead.oneLostMeasured()).isEqualTo(1.0);
-    assertThat(twoAhead.oneLostP95Meters()).isFinite().isGreaterThan(0);
+    assertThat(only(ranking, AHEAD_AND_BACK).oneLost())
+        .as("blind half the time either way")
+        .isEqualTo(new Score.OneLost(Double.POSITIVE_INFINITY, 0.5));
+    assertThat(only(ranking, AHEAD).oneLost()).isEqualTo(Score.OneLost.NOTHING_LEFT);
+    Score.OneLost twoAhead =
+        Objects.requireNonNull(
+            only(ranking(ONE_THREAD, List.of(FACING_THE_WALL), pair), pair).oneLost());
+    assertThat(twoAhead.measured()).isEqualTo(1.0);
+    assertThat(twoAhead.p95Meters()).isFinite().isGreaterThan(0);
+  }
+
+  /**
+   * A layout's one-lost score is the worst of its sets less one camera, each scored as it would be
+   * as a layout of its own: a pair's is the worse of its two cameras alone; a triple's, the worst
+   * of its three pairs. The triple's pairs other than {left, right} aren't layouts, so they're
+   * scored apart.
+   */
+  @Test
+  void oneLostIsTheWorstOfTheLayoutsLessOneCamera() {
+    CameraConfig left = StudyFixtures.camera("left", 0.3, 20);
+    CameraConfig right = StudyFixtures.camera("right", 0.3, -20);
+    CameraConfig back = StudyFixtures.camera("back", -0.3, 180);
+    Candidate leftAlone = new Candidate("left", List.of(left));
+    Candidate rightAlone = new Candidate("right", List.of(right));
+    Candidate both = new Candidate("both", List.of(left, right));
+    Candidate three = new Candidate("three", List.of(left, right, back));
+    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    CameraScoring scoring =
+        new CameraScoring(
+            Robots.SIM, WALL, List.of(leftAlone, rightAlone, both, three), ONE_THREAD);
+
+    CameraScoring.Result result =
+        scoring.score(samples, Conditions.nominal(ONE_THREAD), done -> {});
+
+    Score one = only(result.ranking(), leftAlone);
+    Score other = only(result.ranking(), rightAlone);
+    assertThat(only(result.ranking(), both).oneLost())
+        .isEqualTo(
+            new Score.OneLost(
+                Math.max(one.positionP95Meters(), other.positionP95Meters()),
+                Math.min(one.measured(), other.measured())));
+    List<Score> pairs =
+        ranking(
+            ONE_THREAD,
+            samples,
+            both,
+            new Candidate("left and back", List.of(left, back)),
+            new Candidate("right and back", List.of(right, back)));
+    assertThat(only(result.ranking(), three).oneLost())
+        .isEqualTo(
+            new Score.OneLost(
+                pairs.stream().mapToDouble(Score::positionP95Meters).max().orElseThrow(),
+                pairs.stream().mapToDouble(Score::measured).min().orElseThrow()));
+    assertThat(result.scoredApart()).as("left and back, right and back").isEqualTo(2);
   }
 
   private static Score only(List<Score> ranking, Candidate candidate) {

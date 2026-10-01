@@ -215,7 +215,7 @@ public final class CameraStudy {
             Locale.ROOT, "Trial %d of %d: %s...%n", t + 1, config.trials(), trial.described());
         trials.add(trial);
         // Only the scores are kept: what the cameras saw in a trial goes with it.
-        trialScores.add(scoring.score(samples, trial, done -> {}).ranking());
+        trialScores.add(scoring.scoreAsBuilt(samples, trial).ranking());
       }
       robustness = new Robustness(result.ranking(), trials, trialScores);
     }

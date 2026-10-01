@@ -1,6 +1,7 @@
 package frc.robot.subsystems.vision;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
@@ -11,6 +12,7 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.CameraConfigBuilder;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Symmetry;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.EstimatorConfig;
@@ -23,12 +25,15 @@ import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.wpilib.command3.Command;
+import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -114,13 +119,18 @@ class VisionTest {
           new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed"));
   private Vision vision;
 
+  /** The robot's alliance, as the Driver Station would say it: unknown until set. */
+  private Optional<Alliance> ourAlliance = Optional.empty();
+
   /** The vision settings as Pitwall would hand them over, tuned or not. */
   private VisionConfig tuned = VisionConfig.DEFAULTS;
 
   @BeforeEach
   void setUp() {
     TunableRegistry.registerBackend("", new MockTunableBackend());
-    vision = new Vision(List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned);
+    vision =
+        new Vision(
+            List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned, () -> ourAlliance);
     for (int k = 0; k <= 10; k++) {
       estimator.addOdometry(T0 + k * 20_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
     }
@@ -353,7 +363,9 @@ class VisionTest {
                     crest,
                     1.0)));
     vision.close();
-    vision = new Vision(List.of(camera), new CameraIO[] {io}, estimator, bumpy, () -> tuned);
+    vision =
+        new Vision(
+            List.of(camera), new CameraIO[] {io}, estimator, bumpy, () -> tuned, () -> ourAlliance);
     io.see(
         T0 + 200_000_000L,
         camera,
@@ -428,6 +440,28 @@ class VisionTest {
     return decisions.stream().map(decision -> decision.measurement().tagIds()).toList();
   }
 
+  /** The next image of the hub's near face, each a millisecond after the last. */
+  private long nextImage = T0 + 200_000_000L;
+
+  /** The tags the next image's measurements came from, with the scheduler run first. */
+  private List<List<Integer>> nextImageAfter(Scheduler scheduler) {
+    scheduler.run();
+    io.see(nextImage++, camera);
+    return tagsMeasuredFrom();
+  }
+
+  /** A task that drives until it's interrupted: an approach that never quite arrives. */
+  private static Command approach(Mechanism drive, String name) {
+    return drive
+        .run(
+            coroutine -> {
+              while (true) {
+                coroutine.yield();
+              }
+            })
+        .named(name);
+  }
+
   /**
    * A task lining up on the hub trusts only the hub's tags while it runs; when it ends, or is
    * canceled partway, the cameras trust every tag again.
@@ -444,32 +478,146 @@ class VisionTest {
             .named("Approach the hub");
     Command task = vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach);
     scheduler.schedule(task);
-    scheduler.run();
-    io.see(T0 + 200_000_000L, camera);
 
-    assertThat(tagsMeasuredFrom()).containsExactly(List.of(26));
+    assertThat(task.name()).isEqualTo("Approach the hub (trusting Hub: 26)");
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    assertThat(vision.trustingFewerTagsAlertText()).isEqualTo("The cameras trust only Hub: 26");
     for (int k = 0; k < 5; k++) {
       scheduler.run();
     }
     assertThat(scheduler.isScheduledOrRunning(task)).as("done").isFalse();
-    io.see(T0 + 210_000_000L, camera);
-    assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+    assertThat(vision.trustingFewerTagsAlertText()).as("not active").isEmpty();
 
     Command canceled = vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach);
     scheduler.schedule(canceled);
     scheduler.run();
     scheduler.cancel(canceled);
-    io.see(T0 + 215_000_000L, camera);
-    assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+  }
+
+  /**
+   * A task that interrupts another on the same mechanism ends it first, so the one ending lets go
+   * of its tags before the one starting takes its own.
+   */
+  @Test
+  void aTaskThatInterruptsAnotherTrustsItsOwnTags() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Mechanism drive = new Mechanism() {};
+    Command first =
+        vision.trustingOnly(TagAllowlist.of("Hub", List.of(26)), approach(drive, "Approach"));
+    Command second =
+        vision.trustingOnly(TagAllowlist.of("Left face", List.of(25)), approach(drive, "Swerve"));
+    scheduler.schedule(first);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+
+    scheduler.schedule(second);
+
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25));
+    assertThat(scheduler.isScheduledOrRunning(first)).isFalse();
+    scheduler.cancel(second);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+  }
+
+  /** A task the scheduler refuses (a higher priority one holds the mechanism) never takes tags. */
+  @Test
+  void aTaskRefusedLeavesTheRunningTasksTags() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Mechanism drive = new Mechanism() {};
+    Command important =
+        vision.trustingOnly(
+            TagAllowlist.of("Hub", List.of(26)),
+            drive
+                .run(
+                    coroutine -> {
+                      while (true) {
+                        coroutine.yield();
+                      }
+                    })
+                .withPriority(10)
+                .named("Score"));
+    Command refused =
+        vision.trustingOnly(TagAllowlist.of("Left face", List.of(25)), approach(drive, "Swerve"));
+    scheduler.schedule(important);
+    scheduler.run();
+
+    assertThat(scheduler.schedule(refused).successful()).as("refused outright").isFalse();
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    assertThat(scheduler.isScheduledOrRunning(important)).isTrue();
+    assertThat(scheduler.isScheduledOrRunning(refused)).isFalse();
+  }
+
+  /**
+   * Two tasks on different mechanisms both run: the later one's tags are in effect, and when it
+   * ends, the earlier one's are again.
+   */
+  @Test
+  void whenTheLaterTaskEndsTheEarlierOnesTagsAreBack() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Command aiming =
+        vision.trustingOnly(
+            TagAllowlist.of("Hub", List.of(26)), approach(new Mechanism() {}, "Aim"));
+    Command reaching =
+        vision.trustingOnly(
+            TagAllowlist.of("Left face", List.of(25)), approach(new Mechanism() {}, "Reach"));
+    scheduler.schedule(aiming);
+    scheduler.run();
+    scheduler.schedule(reaching);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25));
+
+    scheduler.cancel(reaching);
+
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    scheduler.cancel(aiming);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(25, 26));
+  }
+
+  /**
+   * A task lining up on a place trusts that place's tags for the alliance the robot is on when it
+   * starts: a binding is made before the alliance is known.
+   */
+  @Test
+  void aTaskOnAPlaceTrustsItsAlliancesTagsWhenItStarts() {
+    Scheduler scheduler = Scheduler.createIndependentScheduler();
+    Place face = Place.facing("Hub face", 26, 1.0);
+    Command beforeTheAlliance = vision.trustingOnly(face, approach(new Mechanism() {}, "Line up"));
+    assertThat(beforeTheAlliance.name()).isEqualTo("Line up (trusting Hub face's tags)");
+
+    scheduler.schedule(beforeTheAlliance);
+    assertThat(nextImageAfter(scheduler))
+        .as("no alliance: every tag")
+        .containsExactly(List.of(25, 26));
+    assertThat(vision.trustingFewerTagsAlertText())
+        .isEqualTo("Hub face: the alliance isn't known, so every tag is trusted");
+    scheduler.cancel(beforeTheAlliance);
+
+    ourAlliance = Optional.of(Alliance.BLUE);
+    scheduler.schedule(beforeTheAlliance);
+    assertThat(nextImageAfter(scheduler)).containsExactly(List.of(26));
+    scheduler.cancel(beforeTheAlliance);
+
+    ourAlliance = Optional.of(Alliance.RED);
+    scheduler.schedule(beforeTheAlliance);
+    assertThat(nextImageAfter(scheduler)).as("red's face is across the field").isEmpty();
+  }
+
+  @Test
+  void aPlaceWrittenAsAPoseHasNoTagsToTrust() {
+    assertThatThrownBy(
+            () ->
+                vision.trustingOnly(
+                    Place.at("Start", Pose2d.ZERO), approach(new Mechanism() {}, "Line up")))
+        .hasMessage("Start is written as a pose, not found from tags: it has no tags to trust");
   }
 
   @Test
   void anImageWithNoTagTheTaskTrustsIsLeftOut() {
-    vision.trustOnly(TagAllowlist.of("Loading", List.of(13)));
+    Vision.TagLease lease = vision.trustOnly(TagAllowlist.of("Loading", List.of(13)));
     io.see(T0 + 200_000_000L, camera);
 
     assertThat(tagsMeasuredFrom()).isEmpty();
-    vision.trustEveryTag();
+    lease.release();
+    lease.release(); // twice changes nothing more
     io.see(T0 + 210_000_000L, camera);
     assertThat(tagsMeasuredFrom()).containsExactly(List.of(25, 26));
   }

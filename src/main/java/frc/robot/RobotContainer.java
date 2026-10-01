@@ -246,7 +246,14 @@ public final class RobotContainer implements AutoCloseable {
                 : new CameraIO() {};
       }
     }
-    vision = new Vision(cameras, cameraIOs, localization.forCameras(), field, visionTuning::get);
+    vision =
+        new Vision(
+            cameras,
+            cameraIOs,
+            localization.forCameras(),
+            field,
+            visionTuning::get,
+            () -> alliance);
     calibration =
         new Calibration(
             drive,

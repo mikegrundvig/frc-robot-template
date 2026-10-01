@@ -12,11 +12,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Stream;
@@ -47,6 +49,11 @@ import java.util.stream.Stream;
  *
  * <p>Either way, only names the writer can write count: what a computer leaves in a folder ({@code
  * .DS_Store}, {@code Thumbs.db}, {@code desktop.ini}) is no one's, and stays.
+ *
+ * <p>A folder the build wrote that the model no longer gives (a robot renamed or dropped) is
+ * removed with the writer's files in it, as each file would be. Only a folder the record shows the
+ * build wrote: a folder a team added by hand is never touched, and a folder holding a file the
+ * build didn't write is kept, with that file.
  */
 final class ToolConfigSync {
   /**
@@ -65,6 +72,9 @@ final class ToolConfigSync {
   private final String committedName;
   private final List<PathMatcher> writerFiles;
   private final boolean strict;
+
+  /** What computers leave in folders: removed with a folder the build no longer gives, no more. */
+  private static final Set<String> CLUTTER = Set.of(".DS_Store", "Thumbs.db", "desktop.ini");
 
   /**
    * @param generated where the generator wrote the files, freshly
@@ -152,6 +162,29 @@ final class ToolConfigSync {
                 + " doesn't give it, and the build didn't write it.");
       }
     }
+    List<String> goneFolders = goneFolders(remembered, wanted);
+    for (String folder : goneFolders) {
+      for (String path : files(committed.resolve(folder)).keySet()) {
+        String full = folder + "/" + path;
+        if (!writable(full)) {
+          continue;
+        }
+        byte[] now = Files.readAllBytes(committed.resolve(full));
+        if (hash(now).equals(remembered.get(full)) || overwrite) {
+          removals.add(full);
+          written.add(full + ": removed, " + source + " no longer gives its folder");
+        } else {
+          refused.add(
+              committedName
+                  + "/"
+                  + full
+                  + " was edited outside the build, and "
+                  + source
+                  + " no longer gives its folder. Delete it if the edit can go, or discard the"
+                  + " edit: ./gradlew build -PdiscardToolEdits");
+        }
+      }
+    }
     if (!refused.isEmpty()) {
       return new Outcome(List.of(), refused);
     }
@@ -163,6 +196,16 @@ final class ToolConfigSync {
     for (String path : removals) {
       Files.delete(committed.resolve(path));
     }
+    for (String folder : goneFolders) {
+      Path gone = committed.resolve(folder);
+      List<String> left = new ArrayList<>(files(gone).keySet());
+      if (CLUTTER.containsAll(left)) {
+        deleteFolder(gone);
+        written.add(folder + "/: removed, " + source + " no longer gives it");
+      } else {
+        written.add(folder + "/: kept, for the files in it the build didn't write");
+      }
+    }
     Map<String, String> remember = new TreeMap<>();
     for (Map.Entry<String, byte[]> file : wanted.entrySet()) {
       remember.put(file.getKey(), hash(file.getValue()));
@@ -171,17 +214,46 @@ final class ToolConfigSync {
     return new Outcome(written, List.of());
   }
 
-  /** The files in the committed copies of the generated folders that weren't generated. */
-  private List<String> stale(Map<String, byte[]> wanted) throws IOException {
-    List<String> stale = new ArrayList<>();
-    TreeSet<String> folders = new TreeSet<>();
-    for (String path : wanted.keySet()) {
+  /**
+   * The folders the build last wrote, by the record, that the model no longer gives and that are
+   * still there.
+   */
+  private List<String> goneFolders(Map<String, String> remembered, Map<String, byte[]> wanted) {
+    Set<String> now = folders(wanted.keySet());
+    List<String> gone = new ArrayList<>();
+    for (String folder : folders(remembered.keySet())) {
+      if (!now.contains(folder) && Files.isDirectory(committed.resolve(folder))) {
+        gone.add(folder);
+      }
+    }
+    return gone;
+  }
+
+  /** The top-level folders of some paths. */
+  private static Set<String> folders(Set<String> paths) {
+    Set<String> folders = new TreeSet<>();
+    for (String path : paths) {
       int slash = path.indexOf('/');
       if (slash > 0) {
         folders.add(path.substring(0, slash));
       }
     }
-    for (String folder : folders) {
+    return folders;
+  }
+
+  /** A folder, and everything left in it: only what computers leave there. */
+  private static void deleteFolder(Path folder) throws IOException {
+    try (Stream<Path> walk = Files.walk(folder)) {
+      for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
+        Files.delete(path);
+      }
+    }
+  }
+
+  /** The files in the committed copies of the generated folders that weren't generated. */
+  private List<String> stale(Map<String, byte[]> wanted) throws IOException {
+    List<String> stale = new ArrayList<>();
+    for (String folder : folders(wanted.keySet())) {
       Path inCommitted = committed.resolve(folder);
       if (Files.isDirectory(inCommitted)) {
         for (String path : files(inCommitted).keySet()) {

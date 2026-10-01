@@ -266,6 +266,23 @@ class AdvantageScopeAssetsPluginTest {
     assertThat(project.resolve("ascope_assets/Robot_comp/.DS_Store")).exists();
   }
 
+  /** A robot renamed: its old folder doesn't linger in AdvantageScope's list of robots. */
+  @Test
+  void aRenamedRobotsOldFolderIsRemovedAndATeamsOwnLeftAlone() throws IOException {
+    write("ascope_assets/Robot_Cad/config.json", "{\"name\": \"a team's own CAD robot\"}\n");
+    gradle("advantageScopeAssets").build();
+
+    write(
+        "src/main/java/fixture/Robots.java",
+        Files.readString(project.resolve("src/main/java/fixture/Robots.java"))
+            .replace("\"comp\"", "\"competition\""));
+    gradle("advantageScopeAssets").build();
+
+    assertThat(project.resolve("ascope_assets/Robot_competition/config.json")).exists();
+    assertThat(project.resolve("ascope_assets/Robot_comp")).doesNotExist();
+    assertThat(project.resolve("ascope_assets/Robot_Cad/config.json")).exists();
+  }
+
   @Test
   void eachRobotNamedGetsItsFolder() throws IOException {
     write(

@@ -50,7 +50,7 @@ public final class SimulatedWorld implements AutoCloseable {
   /**
    * @param field the field, with its tags and terrain
    * @param drivetrain the drivetrain's configuration
-   * @param body the robot's frame, which places the wheels
+   * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param cameras the robot's cameras, as configured
    * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
    */
@@ -61,8 +61,7 @@ public final class SimulatedWorld implements AutoCloseable {
       List<CameraConfig> cameras,
       SensorErrors errors) {
     this.field = field;
-    this.drivetrain =
-        new DriveSimulation(drivetrain.modules(), drivetrain.moduleTranslations(body), errors);
+    this.drivetrain = new DriveSimulation(body, drivetrain, errors);
     this.drivetrain.setTerrain(field.terrain());
     vision = new VisionSim(field, errors.tagErrors(), errors.seed());
     this.cameras = new CameraIOSim[cameras.size()];

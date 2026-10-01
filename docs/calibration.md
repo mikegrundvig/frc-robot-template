@@ -153,7 +153,8 @@ and feet out from under the robot, always: lift and lower it by the frame.
 
 **Mass:** two bathroom scales, one under the front wheels and one under the back (a board across
 each pair). The mass is the sum. The two readings also say how far forward the center of gravity
-is.
+is. The simulator's drive carries the mass, so the simulated robot speeds up as one this heavy
+does.
 
 **The center of gravity's height**, from CAD if the CAD is complete, or by tilting:
 
@@ -177,8 +178,9 @@ driving: [the safety rules](characterization.md#safety-first)), which fits the r
 in volts per rad/s². Then `I = 4 × (stall torque / nominal voltage) × driveGearing × r /
 (wheelRadius × kA)`, in kg m², with the drive motor's stall torque and nominal voltage from its
 datasheet (or `Motor.model()`), and `r` each wheel's distance from the robot's center. Friction
-makes it read a little high. Nothing in the code reads it yet; a simulator that models traction
-will.
+makes it read a little high. Nothing in the code reads it yet: the simulator spins the robot as
+if its mass sat at its wheels ([stand-ins](stand-ins.md)); a simulator that models the robot as one
+body will.
 
 When: once the robot is built, and after a big change.
 

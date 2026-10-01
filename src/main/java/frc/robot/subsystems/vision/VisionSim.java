@@ -15,18 +15,22 @@ import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
 import org.photonvision.simulation.VisionTargetSim;
+import org.photonvision.targeting.PhotonPipelineResult;
 import org.wpilib.fields.Field;
 import org.wpilib.fields.FieldTag;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.math.interpolation.TimeInterpolatableBuffer;
+import org.wpilib.system.Timer;
 
 /**
  * The simulator's cameras: PhotonVision's own simulation, rendering each camera's view of the tags
  * from where the robot really is (never from the estimate), with the camera's resolution, field of
  * view, frame rate, latency, and a little lens-calibration error. Its results reach the robot code
- * through the same {@link CameraIOPhotonVision} a real camera uses.
+ * through the same {@link CameraIOPhotonVision} a real camera uses, each image stamped with when it
+ * was taken ({@link #update}).
  *
  * <p>A camera can be knocked on its mount ({@link #mount}) or made later than its configuration
  * says ({@link #addLatency}), and a tag moved off where the field was built ({@link #moveTag}),
@@ -48,10 +52,17 @@ public final class VisionSim implements AutoCloseable {
   /** Each seed's cameras draw their noise from seeds this far apart. */
   private static final long SEEDS_PER_WORLD = 1000;
 
+  /** How far back the robot's true poses are kept, for the images taken that long ago. */
+  private static final double HISTORY_SECONDS = 1.5;
+
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
   private final long seed;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
+
+  /** Where the robot really was, loop by loop: what each image is taken from. */
+  private final TimeInterpolatableBuffer<Pose3d> truths =
+      TimeInterpolatableBuffer.createBuffer(HISTORY_SECONDS);
 
   /** A camera as added: PhotonVision's simulation of it, its configured mount and latency. */
   private record Added(PhotonCameraSim simulated, Transform3d configured, double latencyMillis) {}
@@ -244,8 +255,36 @@ public final class VisionSim implements AutoCloseable {
   /**
    * Renders every camera's view from where the robot is, tilted as it is. Call once per loop,
    * before reading.
+   *
+   * <p>An image falls due on the camera's frame rate, and is taken its latency before then, from
+   * where the robot was at that moment; it's stamped with that moment, as a real camera's time sync
+   * stamps it. PhotonVision's {@code VisionSystemSim.update} takes it the same way but stamps it as
+   * of the loop that renders it, up to a loop (20 ms) later. While the robot turns, every image
+   * then shows it where it was a little before its stamp, turned a little less, the same way image
+   * after image: just what a heading error does to a position solved with the gyro's heading. An
+   * estimator that lets every fix correct the heading took it for one, and grew sure of a heading
+   * 0.7° off after the gyro-scale procedure (docs/testing.md).
    */
   public void update(Pose3d truth) {
+    truths.addSample(Timer.getMonotonicTimestamp(), truth);
+    List<VisionTargetSim> targets = List.copyOf(world.getVisionTargets());
+    for (PhotonCameraSim camera : cameras) {
+      Optional<Long> due = camera.consumeNextEntryTime();
+      if (due.isEmpty()) {
+        continue;
+      }
+      long arrivedNanos = due.get();
+      double latencyMillis = camera.prop.estLatencyMs();
+      long takenNanos = arrivedNanos - Math.round(latencyMillis * 1e6);
+      double taken = takenNanos / 1e9;
+      Pose3d robot = truths.getSample(taken).orElse(truth);
+      Pose3d from = robot.plus(world.getRobotToCamera(camera, taken).orElseThrow());
+      PhotonPipelineResult image = camera.process(latencyMillis, from, targets);
+      image.metadata.captureTimestampNanos = takenNanos;
+      image.metadata.publishTimestampNanos = arrivedNanos;
+      camera.submitProcessedFrame(image, arrivedNanos);
+    }
+    // Every image due is taken, so PhotonVision's own update only keeps its record of the robot.
     world.update(truth);
   }
 

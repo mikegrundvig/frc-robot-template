@@ -80,7 +80,8 @@ password manager records where the private key lives. Each drive makes its own S
 **Soft-off.** The health agent runs unprivileged, never as root, as `coprocessor-agent`. A polkit
 rule (`files/coprocessor-agent.rules`) lets that account do exactly two things, for the agent's
 `POST /v1/shutdown` (accepted only from the robot controller, 10.TE.AM.2): stop
-`photonvision.service`, and power the board off. polkit refuses it everything else.
+`photonvision.service`, and power the board off, also while someone is logged in over SSH. polkit
+refuses it everything else.
 
 ## The files here
 
@@ -149,9 +150,12 @@ releases** (Settings, General, Releases), so a published release's files can't b
 release job, so anyone can check an image was built by this workflow from this repository
 (`gh attestation verify`).
 
-The recipe hash covers the build files too (`build.gradle`, `settings.gradle`, `gradle/`), since
-they build the agent: a dependency update changes it, and the robot then refuses to deploy until
-the coprocessors run a release built after it.
+The recipe hash covers the build files that build the agent too (`build.gradle`,
+`settings.gradle`, `gradle/quality.gradle`, the Gradle wrapper): a change to them changes it, and
+the robot then refuses to deploy until the coprocessors run a release built after it. The version
+catalog, `gradle/libs.versions.toml`, is left out on purpose, so the weekly dependency updates don't
+each demand a release: an update to a library the agent uses (its SQLite driver) reaches the boards
+only with the next image built for another reason.
 
 GitHub's arm64 runners are free for **public** repositories only. A private repository's builds
 need paid arm64 runners, or a mentor's machine (below).
@@ -276,13 +280,13 @@ interface the scripts expect (in `lib/common.sh` and the workflow's `env`, one p
   enabled. Its `ExecStart` must name that jar path (`provision.sh` checks). It never runs as root:
   the unit needs `User=coprocessor-agent`, or `DynamicUser=yes` with no `User=` (the account is
   then named after the unit), and the build refuses anything else. That name is `IMG_AGENT_USER` in
-  `lib/common.sh`, the one the soft-off rule names. A fixed `User=` is created as a system account
-  in the `systemd-journal` group.
+  `lib/common.sh`, the one the soft-off rule names. A fixed `User=` (the agent's unit has one) is
+  created as a system account with its own group, and added to `systemd-journal`.
 - **Soft-off**: the agent's account may run `systemctl stop photonvision.service` (polkit's
   `org.freedesktop.systemd1.manage-units`, unit `photonvision.service`, verb `stop`) and power the
-  board off (`org.freedesktop.login1.power-off`), and nothing else polkit decides. Powering off
-  while someone is logged in over SSH asks for `power-off-multiple-sessions` instead, which the rule
-  refuses.
+  board off (`org.freedesktop.login1.power-off`, and `power-off-multiple-sessions` when someone is
+  logged in over SSH). Any other request from that account is refused outright, rather than left to
+  polkit's defaults.
 - **What root reads for the agent**, every minute, into `/run/coprocessor/`:
   `nvme-smart-log.json` and `nvme-id-ctrl.json` (`nvme-cli`'s JSON) and `spi-uboot-version` (the
   first `U-Boot …` line in SPI flash). A missing file means there was nothing to read.

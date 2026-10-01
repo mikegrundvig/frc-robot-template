@@ -57,9 +57,11 @@ test_recipe_covers_everything_provision_reads() {
   for path in "$IMAGE"/boards/* "$IMAGE"/files/*; do
     consumed+=("$image/${path#"$IMAGE"/}")
   done
-  # The agent's jar is built, not committed: what builds it is.
+  # The agent's jar is built, not committed: what builds it is (but the version catalog, left out
+  # on purpose: recipe.paths says why).
   consumed+=(coprocessor/agent/src/main/x coprocessor/agent/build.gradle coprocessor/common/src/main/x
-    coprocessor/common/build.gradle build.gradle settings.gradle gradle/libs.versions.toml)
+    coprocessor/common/build.gradle build.gradle settings.gradle gradle/quality.gradle
+    gradle/wrapper/gradle-wrapper.properties gradle/gradle-daemon-jvm.properties)
   # The paths provision.sh names itself, from the repository, are all among those.
   grep -qF "repo/\$COPROC_AGENT_JAR" "$IMAGE/provision.sh" || fail "provision.sh reads the agent's jar differently now"
   grep -qF "repo/\$COPROC_AGENT_UNIT" "$IMAGE/provision.sh" || fail "provision.sh reads the agent's unit differently now"

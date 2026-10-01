@@ -95,7 +95,13 @@ if [[ -d $rows && -n $(find "$rows" -type f -print -quit) ]]; then
   [[ -n $settings_tool ]] || die "$computer has committed settings: --settings-tool is required"
   [[ -f $empty_db ]] || die "$computer has committed settings: --empty-db needs PhotonVision's empty database"
   read -r -a tool <<<"$settings_tool"
-  settings_hash=$("${tool[@]}" "$rows" "$empty_db" "$db") || die "the settings tool failed for $computer"
+  output=$("${tool[@]}" "$rows" "$empty_db" "$db") || die "the settings tool failed for $computer"
+  # The hash is its last line. Anything before it is passed on, not taken for the hash: a JVM
+  # prints its own warnings to standard output (one about cgroups, in some containers).
+  settings_hash=$(tail -n 1 <<<"$output")
+  if [[ $output == *$'\n'* ]]; then
+    say "the settings tool also said: $(sed '$d' <<<"$output")"
+  fi
   is_sha256 "$settings_hash" || die "the settings tool printed '$settings_hash', not a sha256"
   [[ -f $db ]] || die "the settings tool made no database at $db"
   chmod 0644 "$db"

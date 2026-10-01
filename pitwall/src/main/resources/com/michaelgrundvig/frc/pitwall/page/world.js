@@ -25,6 +25,7 @@ let held = false;
 let following = false;
 let inspected = null; // {id, layer} of the shape whose details are shown
 let inspection = null; // what the robot said of it
+let clickedX = null; // where it was clicked, in CSS pixels from the canvas's left
 let wasOffered = false;
 const ui = {};
 
@@ -269,6 +270,7 @@ async function clicked(x, y) {
   }
   inspected = picked;
   inspection = null;
+  clickedX = x - ui.canvas.getBoundingClientRect().left;
   renderer.select(picked.id);
   showDetails("Asking the robot…");
   const result = await send("GET", "/api/scenes/" + encodeURIComponent(sceneId) + "/inspect/"
@@ -285,7 +287,7 @@ async function clicked(x, y) {
 /** The details panel: what the robot said of the shape clicked, ending in what can be done. */
 function showDetails(waiting = "") {
   if (!inspected) return;
-  ui.details.hidden = false;
+  detailsShown(true);
   const close = h("button", { type: "button", class: "link world-close", "aria-label": "Close",
                               onclick: closeDetails }, "✕");
   if (!inspection) {
@@ -330,8 +332,18 @@ async function runAction(event) {
 function closeDetails() {
   inspected = null;
   inspection = null;
-  ui.details.hidden = true;
+  detailsShown(false);
   if (renderer) renderer.select(null);
+}
+
+/**
+ * Shows or hides the details beside the drawing, which takes or gives back their width: the
+ * drawing is fitted to what it has then, keeping the point clicked in sight.
+ */
+function detailsShown(shown) {
+  if (ui.details.hidden === !shown) return;
+  ui.details.hidden = !shown;
+  if (renderer && visible) renderer.refit(shown ? clickedX : null);
 }
 
 export default { id: "world", title: "World", mount, show, hide, route, offered };

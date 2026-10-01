@@ -55,6 +55,8 @@ export class SceneRenderer {
     this.followed = null;
     this.followedAt = null;
     this.fitted = new Set();
+    this.moved = new Set(); // the views turned, panned or zoomed by hand since Fit framed them
+    this.width = 0; // the canvas's width as last sized, in CSS pixels
     this.pending = false;
 
     // From above: x to the right, y up the screen, as a field's drawing has it.
@@ -72,7 +74,13 @@ export class SceneRenderer {
     this.aroundControls = new OrbitControls(this.around, canvas);
     this.aroundControls.maxPolarAngle = Math.PI / 2 - 0.02; // never under the floor
     for (const controls of [this.topControls, this.aroundControls]) {
-      controls.addEventListener("change", () => this.draw());
+      let dragging = false;
+      controls.addEventListener("start", () => (dragging = true));
+      controls.addEventListener("end", () => (dragging = false));
+      controls.addEventListener("change", () => {
+        if (dragging) this.moved.add(this.view); // by hand, not by Fit or Follow
+        this.draw();
+      });
     }
     this.use("top");
     this.recolor();
@@ -117,6 +125,7 @@ export class SceneRenderer {
     this.makeGrid();
     this.place();
     this.fitted = new Set();
+    this.moved = new Set();
     this.fit();
     this.draw();
   }
@@ -301,7 +310,49 @@ export class SceneRenderer {
     }
     this.controls.update();
     this.fitted.add(this.view);
+    this.moved.delete(this.view);
     this.followedAt = null;
+    this.draw();
+  }
+
+  /**
+   * Fits the drawing to the canvas after the page changed its width (the details panel opening or
+   * closing beside it), so what was clicked stays on screen. A view as Fit framed it is framed
+   * again; one moved by hand keeps its left edge, where the panel isn't, and pans just enough to
+   * keep the point clicked in sight. Following, the robot is put back in the middle.
+   *
+   * @param keepX where the point to keep was, in CSS pixels from the canvas's left; null for none
+   */
+  refit(keepX = null) {
+    const before = this.width;
+    this.resize();
+    const after = this.width;
+    if (!before || !after || before === after) return;
+    if (this.followed) {
+      this.followedAt = null;
+      this.draw();
+      return;
+    }
+    if (!this.moved.has(this.view)) {
+      this.fit();
+      return;
+    }
+    // A narrower canvas shows less on both sides alike: shifting it back by half the change keeps
+    // the left edge; then, if the point kept would land off the right, by as much more.
+    const margin = Math.min(40, after / 4);
+    let shift = (before - after) / 2;
+    if (keepX !== null && keepX > after - margin) shift -= keepX - (after - margin);
+    this.pan(shift);
+  }
+
+  /** Moves the view so the drawing shifts right on screen by some CSS pixels: left if negative. */
+  pan(pixels) {
+    this.camera.updateMatrixWorld();
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+    const move = right.multiplyScalar(-pixels * this.metersPerPixel(this.controls.target));
+    this.camera.position.add(move);
+    this.controls.target.add(move);
+    this.controls.update();
     this.draw();
   }
 
@@ -363,6 +414,7 @@ export class SceneRenderer {
     const width = this.canvas.clientWidth;
     const height = this.canvas.clientHeight;
     if (!width || !height) return;
+    this.width = width;
     this.renderer.setSize(width, height, false); // false: the stylesheet sizes the canvas
     const half = this.fitTop || 5;
     const aspect = width / height;

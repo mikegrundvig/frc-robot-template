@@ -135,7 +135,7 @@ function openLog(name) {
 }
 
 function makeViewer() {
-  const v = {};
+  const v = { loads: 0, next: "", name: "" };
   v.priority = h("select", { "aria-label": "Least important shown" },
     PRIORITIES.map((word, number) => h("option", { value: String(number) },
       number + " " + word + (number < 7 ? " and worse" : ": everything"))));
@@ -144,7 +144,8 @@ function makeViewer() {
                         autocomplete: "off", "aria-label": "Unit, such as photonvision.service" });
   v.list = h("ol", { class: "logview", "aria-live": "polite" });
   v.status = h("p", { class: "meta" });
-  v.more = h("button", { type: "button", onclick: () => load(true) }, "More");
+  // The agent pages forward only: from the latest entries, the next page is the newer ones.
+  v.more = h("button", { type: "button", onclick: () => load(true) }, "Newer");
   v.download = h("button", { type: "button" }, "Download as text");
   v.download.addEventListener("click", () => fetchFile(v.download,
     "/api/devices/" + v.name + "/log.txt?" + filters(""), v.name + "'s log"));
@@ -175,22 +176,30 @@ function filters(cursor) {
   return query.toString();
 }
 
-/** Loads the first page for the filters, or the next one after what's shown. */
+/**
+ * Loads the latest page for the filters, or the page of newer entries after what's shown. Only the
+ * latest load counts: one asked before it (another filter, another device) is dropped when it
+ * answers.
+ */
 async function load(more) {
   const v = viewer;
+  const asked = ++v.loads;
+  const cursor = more ? v.next : "";
   if (!more) {
     v.next = "";
     v.list.replaceChildren();
   }
   v.more.disabled = true;
   v.status.textContent = "Asking " + v.name + "…";
-  const response = await api("GET", "/api/devices/" + v.name + "/log?" + filters(more ? v.next : ""))
+  const response = await api("GET", "/api/devices/" + v.name + "/log?" + filters(cursor))
     .catch(() => null);
+  if (asked !== v.loads) return;
   if (!response) {
     v.status.textContent = "✗ The robot isn't answering.";
     return;
   }
   const body = await response.json().catch(() => null);
+  if (asked !== v.loads) return;
   if (!response.ok || !body) {
     v.status.textContent = "✗ " + (body && body.detail ? body.detail : response.statusText);
     return;
@@ -206,6 +215,6 @@ async function load(more) {
   v.next = body.next || "";
   v.more.disabled = !v.next;
   const shown = v.list.childElementCount;
-  v.status.textContent = shown === 0 ? "Nothing matches." : shown + " entries"
-    + (v.next ? "; More fetches the next page." : ".");
+  v.status.textContent = shown === 0 ? "Nothing matches." : shown + " entries, the latest"
+    + (v.next ? "; Newer fetches those since." : ".");
 }

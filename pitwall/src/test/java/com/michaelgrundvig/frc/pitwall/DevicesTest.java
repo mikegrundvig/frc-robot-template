@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.pitwall;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.michaelgrundvig.frc.pitwall.Devices.Card;
 import com.michaelgrundvig.frc.pitwall.Devices.Device;
@@ -21,7 +22,7 @@ class DevicesTest {
   private final Devices devices = new Devices(clock::get, Duration.ofSeconds(1));
   private final AtomicInteger reads = new AtomicInteger();
   private static final Devices.Fetch NO_FILE =
-      () -> new Devices.File("empty.zip", "application/zip", new byte[0]);
+      () -> Devices.File.of("empty.zip", "application/zip", new byte[0]);
 
   private Card card() {
     reads.incrementAndGet();
@@ -151,16 +152,36 @@ class DevicesTest {
   @Test
   void filesAndLogQueriesAreChecked() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.File("../passwd", "text/plain", new byte[0]));
+        .isThrownBy(() -> Devices.File.of("../passwd", "text/plain", new byte[0]));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.File(".hidden", "text/plain", new byte[0]));
+        .isThrownBy(() -> Devices.File.of(".hidden", "text/plain", new byte[0]));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.File("a.txt", "text/html\r\nX: y", new byte[0]));
+        .isThrownBy(() -> Devices.File.of("a.txt", "text/html\r\nX: y", new byte[0]));
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                new Devices.File(
+                    "a.txt", "text/plain", -2, new java.io.ByteArrayInputStream(new byte[0])));
     assertThatIllegalArgumentException().isThrownBy(() -> new Devices.LogQuery("", 8, ""));
     assertThatIllegalArgumentException().isThrownBy(() -> new Devices.LogQuery("", -1, ""));
     assertThatIllegalArgumentException()
         .isThrownBy(() -> new Devices.LogQuery("", 3, "photon vision"));
     assertThatIllegalArgumentException().isThrownBy(() -> new Devices.LogQuery("a b", 3, ""));
     assertThat(new Devices.LogQuery("s=1;i=2", 3, "photonvision.service").priority()).isEqualTo(3);
+  }
+
+  /** Once on the page, the server's threads read a device: it can't change after. */
+  @Test
+  void aDeviceIsDescribedWholeBeforeItsAdded() {
+    Device device = Device.named("vision-front", "Coprocessor", this::card);
+    devices.add(device);
+
+    assertThatThrownBy(() -> device.link("Open", "http://10.0.0.11:5800"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("describe a device whole");
+    assertThatThrownBy(() -> device.download("settings", "Settings", NO_FILE))
+        .isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> device.log(query -> new Devices.LogPage(List.of(), "")))
+        .isInstanceOf(IllegalStateException.class);
   }
 }

@@ -12,7 +12,6 @@ import com.michaelgrundvig.frc.pitwall.Devices;
 import com.michaelgrundvig.frc.pitwall.Devices.Card;
 import com.michaelgrundvig.frc.pitwall.Devices.Level;
 import com.michaelgrundvig.frc.pitwall.Devices.Line;
-import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +43,7 @@ class CoprocessorsTest {
   /** The table as this build would compile it, with or without settings committed. */
   private static CompiledTable table(String settingsHash) {
     return new CompiledTable(
-        new Table(1234, 5808, List.of(FRONT)),
+        new Table(24680, 5808, List.of(FRONT)),
         PhotonVersion.versionString,
         "recipe-1",
         settingsHash.isEmpty() ? Map.of() : Map.of("vision-front", settingsHash));
@@ -128,7 +127,7 @@ class CoprocessorsTest {
 
     assertThat(disabled)
         .containsExactly(
-            "MEDIUM: Coprocessor vision-front (10.12.34.11) hasn't answered since the robot"
+            "MEDIUM: Coprocessor vision-front (10.246.80.11) hasn't answered since the robot"
                 + " program started: connect timed out");
     assertThat(alerts()).hasSize(1).first().asString().startsWith("HIGH: ");
     assertThat(card().state()).isEqualTo("Missing");
@@ -149,7 +148,7 @@ class CoprocessorsTest {
     assertThat(missingSoon).as("its last answer is under 3 s old").isFalse();
     assertThat(alerts())
         .containsExactly(
-            "MEDIUM: Coprocessor vision-front (10.12.34.11) stopped answering: connect timed out");
+            "MEDIUM: Coprocessor vision-front (10.246.80.11) stopped answering: connect timed out");
     assertThat(line("Answer").value()).startsWith("none for 4 s: connect timed out");
     // What it said last stays on its card.
     assertThat(line("Version").value()).contains(PhotonVersion.versionString);
@@ -191,7 +190,7 @@ class CoprocessorsTest {
     coprocessors =
         new Coprocessors(
             new CompiledTable(
-                new Table(1234, 5808, List.of(FRONT)),
+                new Table(24680, 5808, List.of(FRONT)),
                 PhotonVersion.versionString,
                 "recipe-2",
                 Map.of()),
@@ -256,9 +255,9 @@ class CoprocessorsTest {
 
     assertThat(alerts())
         .contains(
-            "MEDIUM: PhotonVision on vision-front restarted once since boot: read its journal"
-                + " (Pit, its card's Download logs)")
-        .anySatisfy(alert -> assertThat(alert).contains("status=1/FAILURE"));
+            "MEDIUM: PhotonVision on vision-front restarted once since the robot first heard this"
+                + " boot: read its journal (Pit, its card's Download logs)")
+        .anySatisfy(alert -> assertThat(alert).contains("1 error to read", "status=1/FAILURE"));
     assertThat(line("Since boot").value()).contains("restarted once", "1 error in its journal");
     assertThat(line("Since boot").level()).isEqualTo(Level.WARNING);
   }
@@ -273,7 +272,7 @@ class CoprocessorsTest {
     assertThat(alerts())
         .singleElement()
         .asString()
-        .startsWith("HIGH: Two boards answer at 10.12.34.11 (vision-front), MACs ");
+        .startsWith("HIGH: Two boards answer at 10.246.80.11 (vision-front), MACs ");
     assertThat(card().state()).isEqualTo("Two answer");
     assertThat(line("Address").level()).isEqualTo(Level.PROBLEM);
   }
@@ -334,10 +333,10 @@ class CoprocessorsTest {
 
     Devices.Device device = devices.named("vision-front").orElseThrow();
     assertThat(device.links())
-        .containsExactly(new Devices.Link("Open PhotonVision", "http://10.12.34.11:5800"));
+        .containsExactly(new Devices.Link("Open PhotonVision", "http://10.246.80.11:5800"));
     Devices.File backup = device.download("settings").orElseThrow().fetch().fetch();
     assertThat(backup.name()).isEqualTo("vision-front-settings.zip");
-    try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(backup.bytes()))) {
+    try (ZipInputStream zip = new ZipInputStream(backup.body())) {
       assertThat(zip.getNextEntry().getName())
           .isEqualTo("coprocessors/vision-front/settings/README.txt");
     }
@@ -373,5 +372,256 @@ class CoprocessorsTest {
                     .staleAfterSeconds(1)
                     .build())
         .withMessageContaining("longer than pollPeriodSeconds");
+  }
+
+  // ---- What the review asked of the alerts ----
+
+  /** The table with a second computer, after this one in the table's order. */
+  private static final Computer BACK =
+      new Computer("vision-back", 12, Board.ORANGEPI_5, List.of("back-left"), 5808);
+
+  /** A PhotonVision version as the topic hands it over, loop by loop. */
+  private static final class FakeVersions implements PhotonVisionIO {
+    String reported = "";
+    String[] published = {};
+
+    @Override
+    public void updateInputs(PhotonVisionIOInputs inputs) {
+      inputs.library = PhotonVersion.versionString;
+      inputs.reported = reported;
+      inputs.published = published;
+      published = new String[] {};
+    }
+  }
+
+  /**
+   * One board publishes another version, then another board the right one, which the topic then
+   * holds: the wrong one was still heard, and stays said for the rest of the run.
+   */
+  @Test
+  void aWrongVersionPublishedBeforeTheRightOneStaysSaid() {
+    agent = new CoprocessorIOSim(table(""), FRONT, Coprocessors.Settings.DEFAULTS);
+    FakeVersions versions = new FakeVersions();
+    coprocessors =
+        new Coprocessors(
+            table(""), new CoprocessorIO[] {agent}, versions, Coprocessors.Settings.DEFAULTS);
+    built.add(coprocessors);
+    versions.published = new String[] {CoprocessorIOSim.OTHER_VERSION, PhotonVersion.versionString};
+    versions.reported = PhotonVersion.versionString;
+
+    run(5);
+
+    assertThat(alerts())
+        .singleElement()
+        .asString()
+        .startsWith("HIGH: PhotonVision reports " + CoprocessorIOSim.OTHER_VERSION + ",");
+  }
+
+  /** Each simulated board publishes as its PhotonVision starts, in the table's order. */
+  @Test
+  void theSimulatedBoardsPublishInTheTablesOrder() {
+    CompiledTable two =
+        new CompiledTable(
+            new Table(24680, 5808, List.of(FRONT, BACK)),
+            PhotonVersion.versionString,
+            "recipe-1",
+            Map.of());
+    CoprocessorIOSim front = new CoprocessorIOSim(two, FRONT, Coprocessors.Settings.DEFAULTS);
+    CoprocessorIOSim back = new CoprocessorIOSim(two, BACK, Coprocessors.Settings.DEFAULTS);
+    front.wrongVersion(true);
+    front.step(0);
+    back.step(0);
+    PhotonVisionIOSim versions = new PhotonVisionIOSim(List.of(front, back));
+    PhotonVisionIOInputsAutoLogged inputs = new PhotonVisionIOInputsAutoLogged();
+
+    versions.updateInputs(inputs);
+    String[] first = inputs.published;
+    versions.updateInputs(inputs);
+
+    assertThat(first).containsExactly(CoprocessorIOSim.OTHER_VERSION, PhotonVersion.versionString);
+    assertThat(inputs.reported).isEqualTo(PhotonVersion.versionString);
+    assertThat(inputs.published).as("published once, as it started").isEmpty();
+  }
+
+  /** A version heard from a board is said until that board boots again, and publishes anew. */
+  @Test
+  void aWrongVersionIsSaidUntilItsBoardReboots() {
+    build(table(""));
+    agent.wrongVersion(true);
+    run(2);
+    agent.wrongVersion(false); // reflashed meanwhile, say
+    run(2);
+    boolean stillSaid =
+        alerts().stream().anyMatch(alert -> alert.startsWith("HIGH: PhotonVision reports"));
+
+    agent.reboot();
+    run(2);
+
+    assertThat(stillSaid).as("the same boot").isTrue();
+    assertThat(alerts()).isEmpty();
+  }
+
+  /** The template's example table (team 0) watches nothing on a robot, and says what to set. */
+  @Test
+  void theTemplatesExampleTableWatchesNothingAndSaysSo() {
+    CompiledTable example =
+        new CompiledTable(
+            new Table(0, 5808, List.of(FRONT)), PhotonVersion.versionString, "recipe-1", Map.of());
+    CompiledTable none =
+        new CompiledTable(
+            new Table(0, 5808, List.of()), PhotonVersion.versionString, "recipe-1", Map.of());
+    Coprocessors watching =
+        new Coprocessors(
+            example,
+            new CoprocessorIO[] {},
+            new PhotonVisionIO() {},
+            Coprocessors.Settings.DEFAULTS);
+    built.add(watching);
+
+    watching.periodic(0, true);
+
+    assertThat(Coprocessors.isExample(example)).isTrue();
+    assertThat(Coprocessors.isExample(none)).as("none listed, on purpose").isFalse();
+    assertThat(watching.names()).isEmpty();
+    assertThat(watching.alerts())
+        .containsExactly(
+            "LOW: The coprocessor table is the template's example (team 0): a robot watches none"
+                + " of its coprocessors, and the simulator only simulates them. Set your team"
+                + " number and list your coprocessors in coprocessors/coprocessors.yaml, or"
+                + " computers: [] for none");
+  }
+
+  /**
+   * Restarts and errors from before the robot first heard a boot are on the card, not alerted: a
+   * board up all day has them. New ones are alerted.
+   */
+  @Test
+  void restartsAndErrorsAreAlertedAsTheyHappenNotFromBefore() {
+    build(table(""));
+    agent.restartPhotonVision(); // before the robot first hears this boot
+
+    run(5);
+    List<String> before = alerts();
+    String card = line("Since boot").value();
+    agent.restartPhotonVision();
+    run(2);
+
+    assertThat(before).isEmpty();
+    assertThat(card).contains("restarted once", "1 error in its journal");
+    assertThat(alerts())
+        .contains(
+            "MEDIUM: PhotonVision on vision-front restarted once since the robot first heard this"
+                + " boot: read its journal (Pit, its card's Download logs)")
+        .anySatisfy(alert -> assertThat(alert).contains("1 error to read"));
+    assertThat(line("Since boot").value()).contains("restarted 2 times", "2 errors in its journal");
+  }
+
+  /** A USB, UVC, filesystem, memory, or heat error this boot is alerted at once, however old. */
+  @Test
+  void hardwareErrorsAreAlertedAtOnce() {
+    build(table(""));
+    agent.unplugCamera(1);
+    agent.unplugCamera(-1); // plugged back in before the robot first heard it
+
+    run(2);
+
+    assertThat(alerts())
+        .singleElement()
+        .asString()
+        .startsWith("MEDIUM: Coprocessor vision-front's journal has 1 error to read, the latest:")
+        .contains("USB disconnect");
+  }
+
+  /** A new boot starts the count again. */
+  @Test
+  void aNewBootStartsTheCountAgain() {
+    build(table(""));
+    run(1);
+    agent.restartPhotonVision();
+    run(2);
+
+    agent.reboot();
+    run(2);
+
+    assertThat(alerts()).isEmpty();
+  }
+
+  /**
+   * Hot is said near the trip point, and unsaid only well clear of it (2 °C more) and after a while
+   * (10 s), so a board hovering at the margin doesn't flicker the alert.
+   */
+  @Test
+  void hotClearsOnlyWellClearAndAfterAWhile() {
+    build(table(""));
+    agent.heat(3);
+    run(2);
+    boolean hot = isHot();
+
+    agent.heat(6); // past the margin, within 2 °C of it
+    run(2);
+    boolean warm = isHot();
+    agent.heat(10);
+    run(5);
+    boolean cooling = isHot();
+    run(6);
+
+    assertThat(hot).isTrue();
+    assertThat(warm).isTrue();
+    assertThat(cooling).as("within 10 s of the last warm answer").isTrue();
+    assertThat(isHot()).isFalse();
+  }
+
+  private boolean isHot() {
+    return alerts().stream().anyMatch(alert -> alert.contains(" is hot: "));
+  }
+
+  /** One coprocessor's code failing is said, and the others are watched on. */
+  @Test
+  void aCoprocessorWhoseCodeFailsIsSaidAndTheOthersRunOn() {
+    CompiledTable two =
+        new CompiledTable(
+            new Table(24680, 5808, List.of(FRONT, BACK)),
+            PhotonVersion.versionString,
+            "recipe-1",
+            Map.of());
+    agent = new CoprocessorIOSim(two, BACK, Coprocessors.Settings.DEFAULTS);
+    CoprocessorIO broken =
+        new CoprocessorIO() {
+          @Override
+          public void updateInputs(CoprocessorIOInputs inputs) {
+            throw new IllegalStateException("boom");
+          }
+        };
+    coprocessors =
+        new Coprocessors(
+            two,
+            new CoprocessorIO[] {broken, agent},
+            new PhotonVisionIO() {},
+            Coprocessors.Settings.DEFAULTS);
+    built.add(coprocessors);
+
+    run(2);
+
+    assertThat(coprocessors.isMissing("vision-back")).isFalse();
+    assertThat(coprocessors.alerts())
+        .contains("HIGH: Watching coprocessor vision-front failed: boom");
+  }
+
+  @Test
+  void settingsHaveUpperBounds() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                CoprocessorsSettingsBuilder.builder(Coprocessors.Settings.DEFAULTS)
+                    .pollPeriodSeconds(120)
+                    .build())
+        .withMessageContaining("pollPeriodSeconds");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                CoprocessorsSettingsBuilder.builder(Coprocessors.Settings.DEFAULTS)
+                    .powerDownButton(99)
+                    .build())
+        .withMessageContaining("powerDownButton");
   }
 }

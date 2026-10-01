@@ -172,8 +172,8 @@ public final class Page {
    *   <li>{@code robot}: its name, the code, simulator or real, this program's id, its mode (empty
    *       when unknown), and why actions and experiments can't start now (empty while they can);
    *   <li>{@code status}, {@code units}: each item's value, and the unit of each number;
-   *   <li>{@code actions}: each action's phase, detail, and why it can't start now (empty while it
-   *       can);
+   *   <li>{@code actions}: each action's phase, detail, why it can't start now (empty while it
+   *       can), and when it may run ({@code ENABLED_IN_UTILITY} or {@code DISABLED});
    *   <li>{@code tuning}: whether it's on, the field, and refused dashboard changes;
    *   <li>{@code configs}: each configuration's documentation, as {@code /api/configs} gives it;
    *   <li>{@code tunables}, {@code values}, {@code changes}: the configurations' tunable values, by
@@ -390,6 +390,7 @@ public final class Page {
     for (Actions.State state : actions.view()) {
       Map<String, Object> each = pair("phase", state.phase().name(), "detail", state.detail());
       each.put("locked", state.locked());
+      each.put("when", state.when().name());
       shown.put(state.name(), each);
     }
     return shown;

@@ -73,6 +73,9 @@ public final class Pitwall implements AutoCloseable {
   private boolean wasEnabled;
   private boolean wasFieldConnected;
 
+  /** Whether the field system has connected since the robot program started. */
+  private boolean fieldSinceStart;
+
   private Pitwall(String name, int port, boolean advantageKit) {
     this.advantageKit = advantageKit;
     // Status items may change at most so often, timed on the robot's clock.
@@ -305,8 +308,13 @@ public final class Pitwall implements AutoCloseable {
           tuning.report());
     }
     tuning.periodic(fieldConnected);
+    fieldSinceStart |= fieldConnected;
     Actions.Gate gate =
-        new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected);
+        new Actions.Gate(
+            enabled,
+            RobotState.getRobotMode() == RobotMode.UTILITY,
+            fieldConnected,
+            fieldSinceStart);
     actions.periodic(gate);
     experiments.periodic(gate);
     status.periodic(broadcaster.watched());

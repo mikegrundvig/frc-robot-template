@@ -37,6 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
@@ -65,8 +66,9 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
  *       "value"}]}; 503 when the loop doesn't get to it within a second.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
- *       "detail", "locked"}]}, the last why it can't start now (empty while it can). {@code POST}
- *       it {@code {"start": name}} or {@code {"cancel": name}}.
+ *       "detail", "locked", "when"}]}: why it can't start now (empty while it can), and when it may
+ *       run ({@code ENABLED_IN_UTILITY} or {@code DISABLED}). {@code POST} it {@code {"start":
+ *       name}} or {@code {"cancel": name}}.
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected",
  *       "refused"}}, the last being the latest dashboard changes refused and why (a dashboard can't
  *       say). {@code PATCH} it with {@code {"enabled": true}} to switch tuning on or off.
@@ -110,7 +112,11 @@ import org.wpilib.hardware.hal.RobotMode;
  * </ul>
  *
  * <p>The device routes ask the device on the server's thread, never the robot loop's; the page
- * never talks to a device itself.
+ * never talks to a device itself. Each names the page's event stream ({@code Pitwall-Stream}), as
+ * only the page can (400 without), so another site's page can't make the robot ask a device
+ * anything; at most two are under way at once (503 beyond); and a download or a log's text waits
+ * until the field system disconnects (409). A file is streamed through as it arrives, up to 64 MB,
+ * and a log's text is cut off after 30 s.
  *
  * <p>In the simulator only, the simulator's controls ({@link Simulator}); on a robot every one of
  * these is 404, so nothing can write the Driver Station's state there. They are exempt from the
@@ -215,6 +221,16 @@ public final class PitwallServer implements AutoCloseable {
   }
 
   PitwallServer(Page page, Broadcaster broadcaster, int port, Duration wait, Duration idle) {
+    this(page, broadcaster, port, wait, idle, DeviceLimits.DEFAULT);
+  }
+
+  PitwallServer(
+      Page page,
+      Broadcaster broadcaster,
+      int port,
+      Duration wait,
+      Duration idle,
+      DeviceLimits deviceLimits) {
     this.port = port;
     // Small events go out at once, not held back to fill a packet (Nagle's algorithm). The server
     // reads this as it starts, so it's set first; a program that set it already keeps its choice.
@@ -230,7 +246,7 @@ public final class PitwallServer implements AutoCloseable {
     // or vanished page stalls only its own thread. They never keep the program running.
     threads = Executors.newVirtualThreadPerTaskExecutor();
     server.setExecutor(threads);
-    Api api = new Api(page, broadcaster, page(), bundled(), wait, idle);
+    Api api = new Api(page, broadcaster, page(), bundled(), wait, idle, deviceLimits);
     server.createContext("/", api::handle);
   }
 
@@ -379,12 +395,30 @@ public final class PitwallServer implements AutoCloseable {
    */
   private static final Pattern DEVICE_ROUTE =
       Pattern.compile(
-          "/api/devices/([a-z0-9][a-z0-9-]{0,62})/(downloads/([a-z0-9][a-z0-9-]{0,62})|log|log\\.txt)");
+          "/api/devices/("
+              + Devices.NAME.pattern()
+              + ")/(downloads/("
+              + Devices.NAME.pattern()
+              + ")|log|log\\.txt)");
 
   /** The most pages of a device's log one text download gathers, and the most text. */
   static final int MAX_LOG_PAGES = 100;
 
   static final int MAX_LOG_TEXT_BYTES = 8 * 1024 * 1024;
+
+  /**
+   * What asking devices may cost: how many requests at once (more are 503, never queued), the
+   * largest file passed on, and how long a log's text may take to gather.
+   *
+   * @param concurrent requests to devices at once, across every page
+   * @param maxFileBytes the largest file passed on from a device
+   * @param logDeadline how long gathering a log's text may take, after which it's cut off
+   */
+  record DeviceLimits(int concurrent, long maxFileBytes, Duration logDeadline) {
+    /** Two at once, 64 MB, 30 s. */
+    static final DeviceLimits DEFAULT =
+        new DeviceLimits(2, 64L * 1024 * 1024, Duration.ofSeconds(30));
+  }
 
   /** Syslog's priorities, by number, as a log's text names them. */
   private static final List<String> PRIORITIES =
@@ -445,6 +479,11 @@ public final class PitwallServer implements AutoCloseable {
 
     private final Duration wait;
     private final Duration idle;
+    private final DeviceLimits deviceLimits;
+
+    /** Requests to devices under way: a page can't make the robot ask more at once. */
+    private final Semaphore deviceRequests;
+
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
 
     Api(
@@ -453,8 +492,11 @@ public final class PitwallServer implements AutoCloseable {
         String page,
         Map<String, byte[]> bundled,
         Duration wait,
-        Duration idle) {
+        Duration idle,
+        DeviceLimits deviceLimits) {
       this.state = state;
+      this.deviceLimits = deviceLimits;
+      deviceRequests = new Semaphore(deviceLimits.concurrent());
       status = state.status();
       tuning = state.tuning();
       actions = state.actions();
@@ -797,9 +839,20 @@ public final class PitwallServer implements AutoCloseable {
 
     /**
      * A device's download or log, asked of the device now, on this thread: it may wait on the
-     * network, never the robot loop.
+     * network, never the robot loop. Only the page asks: a request names its event stream, which
+     * another site's page can't send. At most {@link DeviceLimits#concurrent} at once, and no
+     * downloads while the field system is connected.
      */
     private void device(HttpExchange exchange, Matcher route) throws IOException {
+      String stream = exchange.getRequestHeaders().getFirst(STREAM);
+      if (stream == null || stream.isBlank()) {
+        throw new Problem(
+            400,
+            "No page",
+            "Devices are asked from Pitwall's page: a request names the page's event stream ("
+                + STREAM
+                + ")");
+      }
       String name = route.group(1);
       Devices.Device device =
           state
@@ -808,30 +861,132 @@ public final class PitwallServer implements AutoCloseable {
               .orElseThrow(() -> new Problem(404, "No device", "There is no device named " + name));
       String what = route.group(2);
       String id = route.group(3);
+      Devices.Download download = null;
+      Devices.Log log = null;
+      Devices.LogQuery query = null;
       if (id != null) {
-        Devices.Download download =
+        download =
             device
                 .download(id)
                 .orElseThrow(
                     () -> new Problem(404, "No download", name + " has no download named " + id));
-        Devices.File file = fromDevice(name, download.fetch()::fetch);
-        sendFile(exchange, file.name(), file.contentType(), file.bytes());
-        return;
+      } else {
+        log = device.log().orElseThrow(() -> new Problem(404, "No log", name + " has no log"));
+        query = logQuery(exchange);
       }
-      Devices.Log log =
-          device.log().orElseThrow(() -> new Problem(404, "No log", name + " has no log"));
-      Devices.LogQuery query = logQuery(exchange);
-      if (what.equals("log")) {
-        Devices.LogPage page = fromDevice(name, () -> log.read(query));
-        Map<String, Object> shown = new LinkedHashMap<>();
-        shown.put("entries", page.entries().stream().map(Api::entry).toList());
-        shown.put("next", page.next());
-        sendJson(exchange, 200, shown);
-        return;
+      if ((download != null || what.equals("log.txt")) && tuning.isFieldConnected()) {
+        throw new Problem(
+            409,
+            "On the field",
+            "Downloads from devices wait until the field system disconnects: the match has the"
+                + " network");
       }
+      if (!deviceRequests.tryAcquire()) {
+        throw new Problem(
+            503,
+            "Busy",
+            "Pitwall is already asking devices for "
+                + deviceLimits.concurrent()
+                + " things: try again when one is done");
+      }
+      try {
+        if (download != null) {
+          sendDeviceFile(exchange, name, download);
+        } else if (what.equals("log")) {
+          Devices.Log reading = Objects.requireNonNull(log);
+          Devices.LogQuery asked = Objects.requireNonNull(query);
+          Devices.LogPage page = fromDevice(name, () -> reading.read(asked));
+          Map<String, Object> shown = new LinkedHashMap<>();
+          shown.put("entries", page.entries().stream().map(Api::entry).toList());
+          shown.put("next", page.next());
+          sendJson(exchange, 200, shown);
+        } else {
+          sendLogText(exchange, name, Objects.requireNonNull(log), Objects.requireNonNull(query));
+        }
+      } finally {
+        deviceRequests.release();
+      }
+    }
+
+    /**
+     * A device's file, streamed through as it arrives when the device says its length: one that
+     * ends short reaches the page cut off, as an error. One of unknown length is read whole first,
+     * up to the limit, so a file over it is refused rather than cut.
+     */
+    private void sendDeviceFile(HttpExchange exchange, String name, Devices.Download download)
+        throws IOException {
+      long most = deviceLimits.maxFileBytes();
+      try (Devices.File file = fromDevice(name, download.fetch()::fetch)) {
+        long length = file.length();
+        if (length > most) {
+          throw tooBig(name, file.name(), most);
+        }
+        if (length < 0) {
+          byte[] whole =
+              fromDevice(
+                  name,
+                  () -> file.body().readNBytes((int) Math.min(most + 1, Integer.MAX_VALUE - 8)));
+          if (whole.length > most) {
+            throw tooBig(name, file.name(), most);
+          }
+          sendFile(exchange, file.name(), file.contentType(), whole);
+          return;
+        }
+        attachment(exchange, file.name(), file.contentType());
+        exchange.sendResponseHeaders(200, length > 0 ? length : -1);
+        if (length > 0) {
+          // A body that ends early leaves the answer short of its length: closing it then cuts the
+          // connection, so the browser reports the download failed.
+          try (OutputStream out = exchange.getResponseBody()) {
+            InputStream body = file.body();
+            byte[] chunk = new byte[64 * 1024];
+            long left = length;
+            while (left > 0) {
+              int read = body.read(chunk, 0, (int) Math.min(chunk.length, left));
+              if (read < 0) {
+                break;
+              }
+              out.write(chunk, 0, read);
+              left -= read;
+            }
+          }
+        }
+      }
+    }
+
+    private static Problem tooBig(String name, String file, long most) {
+      return new Problem(
+          502,
+          "Too big",
+          name + "'s " + file + " is more than Pitwall passes on: " + most + " bytes");
+    }
+
+    /**
+     * A device's log as text, to save: every page from the cursor on, until the log ends, or a
+     * bound (pages, size, or time) cuts it off, which its last line says.
+     */
+    private void sendLogText(
+        HttpExchange exchange, String name, Devices.Log log, Devices.LogQuery query)
+        throws IOException {
       StringBuilder text = new StringBuilder();
       Devices.LogQuery next = query;
-      for (int pages = 0; pages < MAX_LOG_PAGES && text.length() < MAX_LOG_TEXT_BYTES; pages++) {
+      long deadline = System.nanoTime() + deviceLimits.logDeadline().toNanos();
+      String cut = "";
+      for (int pages = 0; ; pages++) {
+        if (pages >= MAX_LOG_PAGES || text.length() >= MAX_LOG_TEXT_BYTES) {
+          cut = "it's this long at most";
+          break;
+        }
+        if (System.nanoTime() >= deadline) {
+          long millis = deviceLimits.logDeadline().toMillis();
+          cut =
+              "gathering it took "
+                  + (millis % 1000 == 0
+                      ? String.valueOf(millis / 1000)
+                      : String.valueOf(millis / 1e3))
+                  + " s";
+          break;
+        }
         Devices.LogQuery asked = next;
         Devices.LogPage page = fromDevice(name, () -> log.read(asked));
         for (Devices.LogEntry entry : page.entries()) {
@@ -848,6 +1003,11 @@ public final class PitwallServer implements AutoCloseable {
           break;
         }
         next = new Devices.LogQuery(page.next(), query.priority(), query.unit());
+      }
+      if (!cut.isEmpty()) {
+        text.append("-- cut off here: ")
+            .append(cut)
+            .append(". Read on in the page's log viewer.\n");
       }
       sendFile(
           exchange,
@@ -935,17 +1095,22 @@ public final class PitwallServer implements AutoCloseable {
     /** A file, to save rather than show: never shown in the page, whatever it holds. */
     private static void sendFile(HttpExchange exchange, String name, String type, byte[] bytes)
         throws IOException {
-      headers(exchange, type);
-      exchange.getResponseHeaders().set("Content-Type", type);
-      exchange
-          .getResponseHeaders()
-          .set("Content-Disposition", "attachment; filename=\"" + name + "\"");
+      attachment(exchange, name, type);
       exchange.sendResponseHeaders(200, bytes.length > 0 ? bytes.length : -1);
       if (bytes.length > 0) {
         try (OutputStream out = exchange.getResponseBody()) {
           out.write(bytes);
         }
       }
+    }
+
+    /** The headers of a file to save rather than show. */
+    private static void attachment(HttpExchange exchange, String name, String type) {
+      headers(exchange, type);
+      exchange.getResponseHeaders().set("Content-Type", type);
+      exchange
+          .getResponseHeaders()
+          .set("Content-Disposition", "attachment; filename=\"" + name + "\"");
     }
 
     /** The simulator's controls: there are none on a robot, and their routes are 404 there. */
@@ -1398,6 +1563,7 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("phase", state.phase().name());
         shown.put("detail", state.detail());
         shown.put("locked", state.locked());
+        shown.put("when", state.when().name());
         states.add(shown);
       }
       return states;

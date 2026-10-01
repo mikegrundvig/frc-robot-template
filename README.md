@@ -65,8 +65,8 @@ Also built in:
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
     `pitwall.actions().add("Home arm", arm::home)`. One that mustn't run while the robot can move,
-    such as powering the coprocessors down, runs only while it's disabled instead
-    (`Actions.When.DISABLED`).
+    such as powering the coprocessors down, runs only while it's disabled instead, and only until
+    the field system first connects (`Actions.When.DISABLED`).
   - **Notices**: what the robot has to tell whoever is at the page right now, such as "Safe to
     switch off", shown in the state bar on every view and atop Pit:
     `pitwall.notices().add("Coprocessors", coprocessors::notice)`.
@@ -82,7 +82,8 @@ Also built in:
   - **Devices**: a card in Pit for each device the robot program asks after (a vision
     coprocessor, say), saying whether it's there and how it is, and ending in what can be done
     about it: its own page, a file to download from it, or its log to read. The robot program asks
-    the device, on Pitwall's server threads; the browser never reaches a device itself:
+    the device, on Pitwall's server threads, two requests at once at most and no downloads on the
+    field; the browser never reaches a device itself:
     `pitwall.devices().add(Devices.Device.named("vision-front", "Coprocessor", card))`.
   - **The simulator's controls**, in the page's Sim view (in the simulator only; a robot has
     none), in place of WPILib's simulator GUI: the Driver Station (enable, the mode, the alliance

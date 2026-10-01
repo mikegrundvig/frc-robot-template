@@ -2,6 +2,7 @@ package frc.robot.subsystems.coprocessors;
 
 import com.michaelgrundvig.frc.coprocessor.api.JournalPage;
 import java.io.IOException;
+import java.io.InputStream;
 import org.littletonrobotics.junction.AutoLog;
 
 /**
@@ -138,6 +139,14 @@ public interface CoprocessorIO extends AutoCloseable {
     /** Errors in the journal this boot: USB, UVC, the filesystem, memory, heat, and the rest. */
     public int journalErrors = 0;
 
+    /**
+     * Those errors by what they're about, each kind with its count: {@code usb}, {@code uvc},
+     * {@code filesystem}, {@code oom}, {@code thermal}, and {@code error} for the rest.
+     */
+    public String[] journalCategories = new String[] {};
+
+    public long[] journalCounts = new long[] {};
+
     /** The latest few, oldest first. */
     public String[] latestErrors = new String[] {};
 
@@ -160,7 +169,16 @@ public interface CoprocessorIO extends AutoCloseable {
     /** Whether the robot asked it to power down. */
     public boolean powerDownAsked = false;
 
-    /** How its agent answered: "accepted", or why not; empty until it answered. */
+    /**
+     * Whether its agent took the request (202, a request already under way included): only then can
+     * it count as gone.
+     */
+    public boolean powerDownAccepted = false;
+
+    /**
+     * How its agent answered: "accepted", "refused: answered 404", or why there was no answer;
+     * empty until it answered.
+     */
     public String powerDownAnswer = "";
 
     /**
@@ -177,10 +195,23 @@ public interface CoprocessorIO extends AutoCloseable {
   default void updateInputs(CoprocessorIOInputs inputs) {}
 
   /**
-   * Asks it to power down ({@code POST /v1/shutdown}), then tries its ports until it's gone, on a
-   * thread of the IO's own: never waits. Asked again, it asks again.
+   * Asks it to power down ({@code POST /v1/shutdown}), again each poll period until its agent takes
+   * the request (or refuses, or the power-down timeout passes), then tries its ports until it's
+   * gone, on a thread of the IO's own: never waits. Asked again, it starts again.
    */
   default void powerDown() {}
+
+  /** Stops asking it to power down, and watching its ports: where it stood stays in the inputs. */
+  default void stopPowerDown() {}
+
+  /**
+   * A settings backup as it arrives from the agent, to pass on without holding it whole: close it
+   * once read.
+   *
+   * @param length its length, or -1 when the agent didn't give it
+   * @param body what it holds
+   */
+  record Backup(long length, InputStream body) {}
 
   /**
    * Its settings backup ({@code /v1/settings.zip}): a zip laid out like the repository's folder for
@@ -188,7 +219,7 @@ public interface CoprocessorIO extends AutoCloseable {
    *
    * @throws IOException saying why there's none
    */
-  default byte[] settingsBackup() throws IOException {
+  default Backup settingsBackup() throws IOException {
     throw new IOException("there's no coprocessor to ask here");
   }
 

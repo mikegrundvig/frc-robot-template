@@ -214,7 +214,7 @@ class PitwallServerTest {
     assertThat(started.body())
         .isEqualTo(
             "[{\"name\":\"Home arm\",\"phase\":\"RUNNING\",\"detail\":\"Running\","
-                + "\"locked\":\"\"}]");
+                + "\"locked\":\"\",\"when\":\"ENABLED_IN_UTILITY\"}]");
     assertThat(homing.get()).isTrue();
 
     var canceled = send("POST", "/api/actions", "application/json", "{\"cancel\": \"Home arm\"}");

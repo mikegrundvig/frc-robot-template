@@ -30,12 +30,15 @@ class PowerDownTest {
       new Computer("vision-back", 12, Board.ORANGEPI_5, List.of("back-left"), 5808);
   private static final CompiledTable TABLE =
       new CompiledTable(
-          new Table(1234, 5808, List.of(FRONT, BACK)),
+          new Table(24680, 5808, List.of(FRONT, BACK)),
           PhotonVersion.versionString,
           "recipe-1",
           Map.of());
   private static final Actions.Gate DISABLED = new Actions.Gate(false, false, false);
   private static final Actions.Gate ENABLED = new Actions.Gate(true, false, false);
+
+  /** Disabled, after the field system connected once in this run (a match, then the queue). */
+  private static final Actions.Gate AFTER_THE_FIELD = new Actions.Gate(false, false, false, true);
 
   private final CoprocessorIOSim front =
       new CoprocessorIOSim(TABLE, FRONT, Coprocessors.Settings.DEFAULTS);
@@ -85,6 +88,16 @@ class PowerDownTest {
     run(seconds, DISABLED);
   }
 
+  /** Runs this long, and says whether the page ever said it was safe to switch off meanwhile. */
+  private boolean saidSafe(double seconds) {
+    boolean safe = false;
+    for (long end = now + Math.round(seconds * 1e9); now < end; ) {
+      run(0.02);
+      safe |= notice().equals("OK: Safe to switch off");
+    }
+    return safe;
+  }
+
   private Actions.Phase phase() {
     return actions.view().get(0).phase();
   }
@@ -123,8 +136,8 @@ class PowerDownTest {
     run(3);
     assertThat(coprocessors.alerts("vision-front"))
         .containsExactly(
-            "MEDIUM: Coprocessor vision-front (10.12.34.11) was powered down from Pitwall: cycle"
-                + " the robot's power to restart it");
+            "MEDIUM: Coprocessor vision-front (10.246.80.11) was powered down from Pitwall:"
+                + " cycle the robot's power to restart it");
 
     // The robot left on: halted boards stay off until its power is cycled.
     run(175);
@@ -134,31 +147,137 @@ class PowerDownTest {
         .isEqualTo("WARNING: Coprocessors halted: cycle the robot's power to restart them");
   }
 
+  /** A board that never got the request is never safe to switch off, however quiet it is. */
   @Test
-  void oneStillAnsweringAfterThirtySecondsIsNamed() {
+  void aBoardThatCouldntBeReachedIsNeverSafe() {
+    run(1);
+    front.unreachable(true); // its Ethernet unplugged: quiet on both ports, and still running
+
+    actions.requestStart(Coprocessors.POWER_DOWN);
+    boolean safe = saidSafe(40);
+
+    assertThat(safe).isFalse();
+    assertThat(front.isHalted()).as("it was never asked").isFalse();
+    assertThat(notice())
+        .isEqualTo(
+            "PROBLEM: Don't switch off: vision-front couldn't be reached: check it before switching"
+                + " off");
+    assertThat(coprocessors.card("vision-front").lines().get(0).value())
+        .isEqualTo("couldn't be asked to power down: connect timed out");
+    assertThat(coprocessors.card("vision-front").lines().get(0).level()).isEqualTo(Level.PROBLEM);
+    assertThat(coprocessors.alerts("vision-front"))
+        .contains(
+            "MEDIUM: Coprocessor vision-front (10.246.80.11) stopped answering: connect timed out")
+        .anySatisfy(
+            alert ->
+                assertThat(alert)
+                    .isEqualTo(
+                        "HIGH: Not powered down 30 s after being asked: vision-front (couldn't be"
+                            + " reached: connect timed out). Don't switch the robot off yet:"
+                            + " check each first"));
+  }
+
+  /** A request that found no one is asked again each second, until it's taken. */
+  @Test
+  void aRequestThatFoundNoOneIsAskedAgainUntilItsTaken() {
+    run(1);
+    front.unreachable(true);
+    actions.requestStart(Coprocessors.POWER_DOWN);
+    run(5);
+
+    front.unreachable(false); // plugged back in
+    run(5);
+
+    assertThat(front.isHalted()).isTrue();
+    assertThat(notice()).isEqualTo("OK: Safe to switch off");
+  }
+
+  /** A board that refuses (an image without the request) is said so, and not asked again. */
+  @Test
+  void aBoardThatRefusesIsNamedAndNotAskedAgain() {
     back.ignoresPowerDown(true);
     run(1);
 
     actions.requestStart(Coprocessors.POWER_DOWN);
     run(29);
     List<String> early = coprocessors.alerts("vision-back");
+    int asked = back.powerDownRequests();
     run(2);
 
     assertThat(early).isEmpty();
+    assertThat(asked).as("a refusal isn't asked again").isEqualTo(1);
     assertThat(coprocessors.alerts("vision-back"))
         .containsExactly(
-            "HIGH: Still answering 30 s after being asked to power down: vision-back (answered"
-                + " 404). Don't switch the robot off yet: power it down from its own page, or"
-                + " unplug it once it has been checked");
-    assertThat(coprocessors.card("vision-back").state()).isEqualTo("Powering down");
+            "HIGH: Not powered down 30 s after being asked: vision-back (refused: answered 404)."
+                + " Don't switch the robot off yet: check each first");
+    assertThat(coprocessors.card("vision-back").state()).isEqualTo("Not powered down");
     assertThat(coprocessors.card("vision-back").lines().get(0).value())
-        .isEqualTo("asked to power down, answered 404; its agent and PhotonVision still answering");
-    assertThat(coprocessors.card("vision-back").lines().get(0).level()).isEqualTo(Level.WARNING);
+        .isEqualTo("refused to power down: answered 404");
+    assertThat(coprocessors.card("vision-back").lines().get(0).level()).isEqualTo(Level.PROBLEM);
     assertThat(notice())
         .isEqualTo(
-            "PROBLEM: Don't switch off: vision-back still answering after being asked to power"
-                + " down");
+            "PROBLEM: Don't switch off: vision-back refused to power down: check it before"
+                + " switching off");
     assertThat(phase()).as("still waiting").isEqualTo(Actions.Phase.RUNNING);
+  }
+
+  /** One that took the request but is still up past the timeout is named as still answering. */
+  @Test
+  void oneStillAnsweringAfterThirtySecondsIsNamed() {
+    back.haltAfter(60);
+    run(1);
+
+    actions.requestStart(Coprocessors.POWER_DOWN);
+    run(31);
+
+    assertThat(coprocessors.alerts("vision-back"))
+        .containsExactly(
+            "HIGH: Not powered down 30 s after being asked: vision-back (still answering). Don't"
+                + " switch the robot off yet: check each first");
+    assertThat(coprocessors.card("vision-back").state()).isEqualTo("Powering down");
+    assertThat(coprocessors.card("vision-back").lines().get(0).value())
+        .isEqualTo("asked to power down, accepted; its agent and PhotonVision still answering");
+    assertThat(notice())
+        .isEqualTo(
+            "PROBLEM: Don't switch off: vision-back still answering: check it before switching"
+                + " off");
+  }
+
+  /** A button reading pressed from the start is wiring, not a press: it does nothing. */
+  @Test
+  void aButtonPressedFromTheStartDoesNothing() {
+    button.pressed = true;
+
+    run(3);
+
+    assertThat(phase()).isEqualTo(Actions.Phase.READY);
+    assertThat(front.isHalted()).isFalse();
+    assertThat(coprocessors.buttonAlert())
+        .isEqualTo(
+            "MEDIUM: The coprocessors' power-down button has read pressed since the robot program"
+                + " started: check its wiring. It works once it has read released");
+
+    button.pressed = false;
+    run(0.1);
+    button.pressed = true;
+    run(1.2);
+
+    assertThat(coprocessors.buttonAlert()).isEmpty();
+    assertThat(phase()).as("a press after a release works").isEqualTo(Actions.Phase.RUNNING);
+  }
+
+  /** Once the field system has connected in this run, the button powers nothing down. */
+  @Test
+  void theButtonDoesNothingOnceTheFieldHasConnected() {
+    run(1, AFTER_THE_FIELD);
+
+    button.pressed = true;
+    run(1.5, AFTER_THE_FIELD);
+    run(4, AFTER_THE_FIELD);
+
+    assertThat(phase()).isEqualTo(Actions.Phase.READY);
+    assertThat(front.powerDownRequests()).isZero();
+    assertThat(front.isHalted()).isFalse();
   }
 
   @Test

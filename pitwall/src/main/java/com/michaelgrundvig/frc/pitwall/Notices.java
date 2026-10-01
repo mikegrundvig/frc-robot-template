@@ -19,13 +19,25 @@ import org.jspecify.annotations.Nullable;
  * that throws says what it threw, rather than stopping the robot.
  */
 public final class Notices {
+  /** How a notice stands: the page marks each its own way, never by color alone. */
+  public enum Level {
+    /** Good news, such as "Safe to switch off": ✓. */
+    OK,
+    /** Under way, or worth knowing: •. */
+    NOTE,
+    /** Worth acting on: ▲. */
+    WARNING,
+    /** Wrong, and in the way: ✗. */
+    PROBLEM
+  }
+
   /**
    * One notice.
    *
    * @param text what it says, in a few words: it shows in the state bar
-   * @param level how it stands: {@link Devices.Level#OK} for good news ("Safe to switch off")
+   * @param level how it stands
    */
-  public record Notice(String text, Devices.Level level) {}
+  public record Notice(String text, Level level) {}
 
   private final Map<String, Supplier<@Nullable Notice>> sources = new LinkedHashMap<>();
   private volatile Map<String, Object> section = Map.of();
@@ -77,7 +89,7 @@ public final class Notices {
       return source.get();
     } catch (RuntimeException e) {
       String why = e.getMessage();
-      return new Notice("Error: " + (why != null ? why : e.toString()), Devices.Level.WARNING);
+      return new Notice("Error: " + (why != null ? why : e.toString()), Level.WARNING);
     }
   }
 }

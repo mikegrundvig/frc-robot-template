@@ -195,7 +195,8 @@ class CoprocessorFaultsTest {
     undo(Faults.UNREACHABLE);
     CoprocessorIOInputs still = after(2);
 
-    assertThat(ignoring.powerDownAnswer).isEqualTo("answered 404");
+    assertThat(ignoring.powerDownAnswer).isEqualTo("refused: answered 404");
+    assertThat(ignoring.powerDownAccepted).isFalse();
     assertThat(ignoring.agentPortOpen).isTrue();
     assertThat(ignoring.answered).isTrue();
     assertThat(halting.powerDownAnswer).isEqualTo("accepted");

@@ -18,6 +18,7 @@ import com.michaelgrundvig.frc.coprocessor.api.TripPoint;
 import com.michaelgrundvig.frc.coprocessor.api.UsbCamera;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.jspecify.annotations.Nullable;
@@ -69,8 +71,8 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   private final String mac;
   private final String otherMac;
 
-  // The faults.
-  private boolean unreachable;
+  // The faults. Those the page's downloads read, on Pitwall's threads, are volatile.
+  private volatile boolean unreachable;
   private boolean wrongVersion;
   private double belowTripCelsius = Double.NaN;
   private int unpluggedCamera = -1;
@@ -78,20 +80,32 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   private boolean settingsChanged;
   private boolean ignoresPowerDown;
 
-  // Powering down: asked when, and how the agent answered. A halted board stays halted until the
-  // simulator starts again, as a real one does until its power is cycled.
+  // Powering down: asked when, how often, and how the agent answered; asked again each poll until
+  // it takes the request, refuses it, or the power-down timeout passes. A halted board stays
+  // halted until the simulator starts again, as a real one does until its power is cycled.
   private boolean powerDownAsked;
+  private boolean powerDownAccepted;
+  private boolean powerDownRefused;
+  private boolean powerDownStopped;
   private long powerDownAskedNanos;
+  private long powerDownAcceptedNanos;
+  private int powerDownRequests;
   private String powerDownAnswer = "";
-  private boolean halted;
+  private volatile boolean halted;
   private boolean portsTried;
+  private long haltAfterNanos = HALT_NANOS;
+  private final long powerDownTimeoutNanos;
+
+  /** Which boot it's in, from 0, and when the robot's clock saw it start (0 for the first). */
+  private int boot;
+
+  private long bootStartNanos;
   private int restarts;
   private long restartedAtNanos;
 
   // The robot's clock, as the world steps it (from wherever it starts: the simulator's clock may
   // not start at zero), and the agent's polls on it.
   private boolean started;
-  private long startNanos;
   private long nowNanos;
   private long nextPollNanos;
   private long polls;
@@ -103,8 +117,11 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   private List<String> takingTurns = List.of();
   private @Nullable Health filled;
 
-  /** What its journal holds: the boot, then what its faults made happen. */
-  private final List<JournalEntry> journal = new ArrayList<>();
+  /**
+   * What its journal holds: each boot, then what its faults made happen. Pitwall's threads read it
+   * as the loop adds to it.
+   */
+  private final List<JournalEntry> journal = new CopyOnWriteArrayList<>();
 
   private final Map<String, Integer> errorCounts = new LinkedHashMap<>();
 
@@ -117,21 +134,37 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     this.table = table;
     this.computer = computer;
     periodNanos = Math.round(settings.pollPeriodSeconds() * 1e9);
+    powerDownTimeoutNanos = Math.round(settings.powerDownTimeoutSeconds() * 1e9);
     macs = new MacWatch(settings.turnsWindowSeconds());
     int at = computer.address();
     mac = String.format("02:00:00:00:00:%02x", at & 0xff);
     otherMac = String.format("02:00:00:00:01:%02x", at & 0xff);
+    booted();
+    latest = health();
+  }
+
+  /** What a boot writes to its journal, from its first microsecond. */
+  private void booted() {
     log(0, 6, "", "kernel", "Booting Linux on physical CPU 0x0", "");
     log(2_000_000, 6, "systemd-journald.service", "systemd-journald", "Journal started", "");
     log(9_000_000, 6, "photonvision.service", "systemd", "Started photonvision.service", "");
-    latest = health();
+  }
+
+  /** This boot's ID. */
+  private String bootId() {
+    return "sim-" + computer.name() + (boot == 0 ? "" : "-" + (boot + 1));
+  }
+
+  /** How long this boot has been up: the first had been, before the robot program started. */
+  private double uptimeSeconds() {
+    return (boot == 0 ? UP_BEFORE_SECONDS : 0) + (nowNanos - bootStartNanos) / 1e9;
   }
 
   /** The robot's clock moves on: the agent answers if a poll is due. */
   public void step(long nowNanos) {
     if (!started) {
       started = true;
-      startNanos = nowNanos;
+      bootStartNanos = nowNanos;
       nextPollNanos = nowNanos;
     }
     this.nowNanos = nowNanos;
@@ -140,8 +173,13 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     }
     nextPollNanos = nowNanos + periodNanos;
     polls++;
-    if (powerDownAsked) {
-      halted |= powerDownAnswer.equals("accepted") && nowNanos - powerDownAskedNanos >= HALT_NANOS;
+    if (powerDownAsked && !powerDownStopped) {
+      if (!powerDownAccepted
+          && !powerDownRefused
+          && nowNanos - powerDownAskedNanos < powerDownTimeoutNanos) {
+        askToPowerDown();
+      }
+      halted |= powerDownAccepted && nowNanos - powerDownAcceptedNanos >= haltAfterNanos;
       portsTried = true;
     }
     if (unreachable || halted) {
@@ -171,6 +209,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
       filled = latest;
     }
     inputs.powerDownAsked = powerDownAsked;
+    inputs.powerDownAccepted = powerDownAccepted;
     inputs.powerDownAnswer = powerDownAnswer;
     inputs.portsTried = portsTried;
     // A board off the network, or halted, accepts no connection on either port.
@@ -181,21 +220,40 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   @Override
   public void powerDown() {
     powerDownAsked = true;
+    powerDownAccepted = false;
+    powerDownRefused = false;
+    powerDownStopped = false;
     powerDownAskedNanos = nowNanos;
+    powerDownRequests = 0;
     portsTried = false;
-    // An image from before powering down from the robot has no such request.
-    powerDownAnswer =
-        unreachable || halted
-            ? "connect timed out"
-            : ignoresPowerDown ? "answered 404" : "accepted";
-    if (powerDownAnswer.equals("accepted")) {
+    askToPowerDown();
+  }
+
+  @Override
+  public void stopPowerDown() {
+    powerDownStopped = true;
+  }
+
+  /** One request to power down, as its agent would take it. */
+  private void askToPowerDown() {
+    powerDownRequests++;
+    if (unreachable || halted) {
+      powerDownAnswer = "connect timed out";
+    } else if (ignoresPowerDown) {
+      // An image from before powering down from the robot has no such request.
+      powerDownRefused = true;
+      powerDownAnswer = "refused: answered 404";
+    } else {
+      powerDownAccepted = true;
+      powerDownAcceptedNanos = nowNanos;
+      powerDownAnswer = "accepted";
       log(micros(), 6, "", "systemd-logind", "The system will power off now!", "");
     }
   }
 
   /** Its health now, as its agent would answer. */
   private Health health() {
-    double uptime = UP_BEFORE_SECONDS + (nowNanos - startNanos) / 1e9;
+    double uptime = uptimeSeconds();
     String version = wrongVersion ? OTHER_VERSION : table.photonvisionVersion();
     String settingsHash = table.settingsHash(computer);
     String liveHash = settingsChanged ? "changed-" + settingsHash : settingsHash;
@@ -212,7 +270,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
             table.recipeHash(),
             version,
             settingsHash,
-            "sim-" + computer.name(),
+            bootId(),
             answering);
     boolean restarting = restarts > 0 && nowNanos - restartedAtNanos < RESTART_NANOS;
     return new Health(
@@ -288,8 +346,11 @@ public final class CoprocessorIOSim implements CoprocessorIO {
   }
 
   private List<JournalEntry> latestErrors() {
+    String boot = bootId();
     List<JournalEntry> errors =
-        journal.stream().filter(entry -> !entry.category().isEmpty()).toList();
+        journal.stream()
+            .filter(entry -> !entry.category().isEmpty() && entry.bootId().equals(boot))
+            .toList();
     return errors.subList(Math.max(0, errors.size() - 5), errors.size());
   }
 
@@ -306,7 +367,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
             "sim-" + journal.size(),
             0,
             monotonicMicros,
-            "sim-" + computer.name(),
+            bootId(),
             priority,
             unit,
             identifier,
@@ -319,7 +380,7 @@ public final class CoprocessorIOSim implements CoprocessorIO {
 
   /** The agent's monotonic clock now, in microseconds since the simulated boot. */
   private long micros() {
-    return Math.round((UP_BEFORE_SECONDS + (nowNanos - startNanos) / 1e9) * 1e6);
+    return Math.round(uptimeSeconds() * 1e6);
   }
 
   // ---- Faults, as the simulator's controls apply them ----
@@ -452,6 +513,34 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     return latest;
   }
 
+  /**
+   * It boots again, as a power cycle does: a new boot ID, uptime from zero, its journal's counts
+   * and PhotonVision's restarts this boot from none, and anything it was asked forgotten.
+   */
+  void reboot() {
+    boot++;
+    bootStartNanos = nowNanos;
+    restarts = 0;
+    errorCounts.clear();
+    halted = false;
+    powerDownAsked = false;
+    powerDownAccepted = false;
+    powerDownRefused = false;
+    powerDownAnswer = "";
+    portsTried = false;
+    booted();
+  }
+
+  /** It takes this long to halt once it takes the request (3 s unless a test says). */
+  void haltAfter(double seconds) {
+    haltAfterNanos = Math.round(seconds * 1e9);
+  }
+
+  /** How often it has been asked to power down since the robot last asked anew. */
+  int powerDownRequests() {
+    return powerDownRequests;
+  }
+
   /** Its name, as the table gives it. */
   public String name() {
     return computer.name();
@@ -462,12 +551,17 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     return latest.stamp().photonvisionVersion();
   }
 
+  /** Which boot it's in: PhotonVision publishes its version anew each boot. */
+  int boot() {
+    return boot;
+  }
+
   boolean isAnswering() {
     return !unreachable && !halted;
   }
 
   @Override
-  public byte[] settingsBackup() throws IOException {
+  public Backup settingsBackup() throws IOException {
     if (!isAnswering()) {
       throw new IOException("connect timed out");
     }
@@ -482,7 +576,8 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
-    return zip.toByteArray();
+    byte[] bytes = zip.toByteArray();
+    return new Backup(bytes.length, new ByteArrayInputStream(bytes));
   }
 
   @Override
@@ -490,13 +585,15 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     if (!isAnswering()) {
       throw new IOException("connect timed out");
     }
+    // A snapshot: the loop may add to it meanwhile.
+    List<JournalEntry> entries = List.copyOf(journal);
     int after = -1;
     if (!cursor.isEmpty()) {
-      after = journal.stream().map(JournalEntry::cursor).toList().indexOf(cursor);
+      after = entries.stream().map(JournalEntry::cursor).toList().indexOf(cursor);
     }
     List<JournalEntry> matching = new ArrayList<>();
-    for (int i = after + 1; i < journal.size(); i++) {
-      JournalEntry entry = journal.get(i);
+    for (int i = after + 1; i < entries.size(); i++) {
+      JournalEntry entry = entries.get(i);
       if (entry.priority() <= priority && (unit.isEmpty() || unit.equals(entry.unit()))) {
         matching.add(entry);
       }

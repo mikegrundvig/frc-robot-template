@@ -14,11 +14,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The check {@code deploy} runs first: asks each coprocessor in the table for its stamp, within a
- * second, and compares it with this build. A coprocessor that answers with another PhotonVision,
- * image recipe, name, team, or address than this build's fails the deploy, as does one that answers
- * on PhotonVision's port but not the agent's (it isn't running this repository's image). One that
- * doesn't answer at all only warns, so a robot can be deployed with its vision off.
+ * The check {@code deploy} runs first: asks each coprocessor in the table for its stamp (a second
+ * to connect, a second to answer), and compares it with this build. One that doesn't answer is
+ * asked once more, two seconds on, as one restarting would answer then: at most about 8 s for a
+ * coprocessor that never answers. A coprocessor that answers with another PhotonVision, image
+ * recipe, name, team, or address than this build's fails the deploy, as does something else
+ * answering on the agent's port (a different image), or PhotonVision answering without its agent
+ * (the agent isn't running, or it isn't this repository's image). One that doesn't answer at all
+ * only warns, so a robot can be deployed with its vision off. The template's example table (team 0)
+ * is checked against nothing.
  *
  * <p>Run by Gradle ({@code ./gradlew coprocessorCheck}, which {@code deploy} depends on), on the
  * laptop, never on the robot. {@code -PskipCoprocessorCheck} skips it, and says so.
@@ -30,6 +34,9 @@ public final class DeployCheck {
   /** What a coprocessor's stamp can hold, at most. */
   private static final int MAX_STAMP_BYTES = 16 * 1024;
 
+  /** How long to wait before asking a coprocessor that didn't answer once more. */
+  static final long RETRY_MILLIS = 2000;
+
   private DeployCheck() {}
 
   /** What became of asking one coprocessor. */
@@ -37,10 +44,16 @@ public final class DeployCheck {
     /** Its agent answered with its stamp. */
     record Stamped(Stamp stamp) implements Asked {}
 
-    /** Its agent answered, but not with a stamp this build can read. */
+    /**
+     * Something answered on its agent's port, but not with a stamp this build reads (a 404, or not
+     * JSON): a different image.
+     */
     record Unreadable(String why) implements Asked {}
 
-    /** Its agent didn't answer, but PhotonVision's port did: not this repository's image. */
+    /**
+     * Its agent didn't answer (refused, or no answer in time), but PhotonVision's port did: the
+     * agent isn't running, or it isn't this repository's image.
+     */
     record PhotonVisionOnly(String why) implements Asked {}
 
     /** Nothing answered: off, unplugged, or not on this network. */
@@ -110,11 +123,11 @@ public final class DeployCheck {
           new Finding(
               name,
               Verdict.FAIL,
-              "its agent at "
+              "a different image answers at "
                   + at
-                  + " answered, but not with a stamp this build reads ("
+                  + ": its agent's port answered, but not with a stamp ("
                   + why
-                  + "): an image from another version of this repository?");
+                  + "). Flash it with this build's release");
       case Asked.PhotonVisionOnly(String why) ->
           new Finding(
               name,
@@ -123,8 +136,8 @@ public final class DeployCheck {
                   + at
                   + ", but its health agent doesn't ("
                   + why
-                  + "): it isn't running this repository's image. Flash it with this build's"
-                  + " release");
+                  + "): the agent isn't running, or this isn't this repository's image. Read its"
+                  + " journal, or flash it with this build's release");
       case Asked.Unreachable(String why) ->
           new Finding(
               name,
@@ -137,14 +150,30 @@ public final class DeployCheck {
     };
   }
 
+  /** Waits, before asking again: the clock for real, nothing in a test. */
+  @FunctionalInterface
+  interface Sleeper {
+    void sleep(long millis);
+  }
+
   /**
    * Every coprocessor's verdict, and one for the table itself when its team isn't the one being
-   * deployed to.
+   * deployed to. One that doesn't answer with a stamp is asked once more, {@link #RETRY_MILLIS} on.
    *
    * @param deployTeam the team number the deploy goes to; 0 or less when unknown
    */
-  static List<Finding> check(CompiledTable table, int deployTeam, Asker asker) {
+  static List<Finding> check(CompiledTable table, int deployTeam, Asker asker, Sleeper sleeper) {
     List<Finding> findings = new ArrayList<>();
+    if (Coprocessors.isExample(table)) {
+      findings.add(
+          new Finding(
+              "the table",
+              Verdict.WARN,
+              "coprocessors/coprocessors.yaml is the template's example (team 0), so no"
+                  + " coprocessor was checked: set your team number and list your coprocessors,"
+                  + " or computers: [] for none"));
+      return findings;
+    }
     int team = table.table().team();
     if (deployTeam > 0 && team != deployTeam) {
       findings.add(
@@ -158,7 +187,12 @@ public final class DeployCheck {
                   + "'s robot: set its team to ask the right addresses"));
     }
     for (Computer computer : table.table().computers()) {
-      Asked asked = asker.ask(table.table().ip(computer), computer.agentPort());
+      String address = table.table().ip(computer);
+      Asked asked = asker.ask(address, computer.agentPort());
+      if (!(asked instanceof Asked.Stamped)) {
+        sleeper.sleep(RETRY_MILLIS);
+        asked = asker.ask(address, computer.agentPort());
+      }
       findings.add(judge(table, computer, asked));
     }
     return findings;
@@ -166,17 +200,27 @@ public final class DeployCheck {
 
   /** Asks a coprocessor over the network: its agent's stamp, else whether PhotonVision answers. */
   static Asked ask(String address, int agentPort) {
+    return ask(address, agentPort, Coprocessors.PHOTONVISION_PORT);
+  }
+
+  /**
+   * Asks a coprocessor over the network: its agent's stamp, else whether PhotonVision answers.
+   *
+   * @param photonVisionPort where PhotonVision's page answers: 5800, but for a test's stand-in
+   */
+  static Asked ask(String address, int agentPort, int photonVisionPort) {
     AgentHttp agent =
         new AgentHttp(address, agentPort, TIMEOUT_SECONDS, TIMEOUT_SECONDS, MAX_STAMP_BYTES);
     byte[] body;
     try {
       body = agent.get(AgentApi.STAMP);
+    } catch (AgentHttp.Answered another) {
+      return new Asked.Unreadable(String.valueOf(another.getMessage()));
     } catch (IOException noAgent) {
       String why = CoprocessorPoller.why(noAgent);
       try (Socket photonVision = new Socket()) {
         photonVision.connect(
-            new InetSocketAddress(address, Coprocessors.PHOTONVISION_PORT),
-            (int) (TIMEOUT_SECONDS * 1000));
+            new InetSocketAddress(address, photonVisionPort), (int) (TIMEOUT_SECONDS * 1000));
         return new Asked.PhotonVisionOnly(why);
       } catch (IOException nothing) {
         return new Asked.Unreachable(why);
@@ -227,7 +271,15 @@ public final class DeployCheck {
   public static void main(String[] args) {
     int team = args.length > 0 && args[0].matches("\\d{1,5}") ? Integer.parseInt(args[0]) : 0;
     CompiledTable table = CompiledTable.load();
-    if (!report(check(table, team, DeployCheck::ask), System.out)) {
+    Sleeper sleeper =
+        millis -> {
+          try {
+            Thread.sleep(millis);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        };
+    if (!report(check(table, team, DeployCheck::ask, sleeper), System.out)) {
       System.exit(1);
     }
   }

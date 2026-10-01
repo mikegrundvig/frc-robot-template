@@ -122,13 +122,13 @@ function renderActions(snapshot) {
   gate.textContent = why ? "🔒 " + why
     : "✓ Ready" + (doc.robot.mode ? ": " + doc.robot.mode : "") + ". They stop when the robot "
       + "disables or leaves Utility mode.";
-  for (const [name, { phase, detail, locked }] of Object.entries(doc.actions)) {
+  for (const [name, { phase, detail, locked, when }] of Object.entries(doc.actions)) {
     const parts = actions.get(name);
     const running = phase === "RUNNING";
     if (running && !started.has(name)) started.set(name, Date.now());
     if (!running) started.delete(name);
     // An action with times of its own (one that runs only while disabled) says its own lock.
-    const own = locked !== undefined && locked !== (doc.robot.actionsLocked || "");
+    const own = when !== undefined && when !== "ENABLED_IN_UTILITY";
     const ownWhy = own && locked ? capital(locked) + "." : null;
     parts.detail.className = "adetail" + (running ? " running"
         : phase === "REFUSED" || phase === "CANCELED" ? " refused" : ownWhy ? " locked" : "");

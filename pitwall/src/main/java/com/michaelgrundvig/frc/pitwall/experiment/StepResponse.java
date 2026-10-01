@@ -16,7 +16,9 @@ import org.wpilib.units.Unit;
  * @param overshoot how far past the target it went, as a fraction of the jump (0.25 is 25%); 0 if
  *     it never passed it
  * @param settlingSeconds until it stayed within {@link #SETTLING_BAND} of the jump around the
- *     target, for good; empty if it hadn't settled by the end of the window
+ *     target, for good; empty if it left the band during the window's last tenth (the tail the
+ *     steady-state error averages over), since a mechanism still buzzing then hasn't settled,
+ *     wherever its last sample happens to fall
  * @param steadyStateError how far short of the target it stayed, averaged over the last tenth of
  *     the window, in the measurement's unit: positive when short, negative when past
  * @param samples how many samples the window held
@@ -110,6 +112,8 @@ public record StepResponse(
       highest = Math.max(highest, progress.at(i));
     }
 
+    // The window's last tenth: where the steady-state error is averaged, and where a mechanism that
+    // has settled stays in the band.
     double tailStart = endNanos - 0.1 * (endNanos - edgeNanos);
     double shortfall = 0;
     int tail = 0;
@@ -128,7 +132,7 @@ public record StepResponse(
         new StepResponse(
             rise,
             Math.max(0, highest - 1),
-            settling(measured, progress, first, last, edgeNanos),
+            settling(measured, progress, first, last, edgeNanos, tailStart),
             shortfall / tail,
             last - first + 1));
   }
@@ -157,9 +161,12 @@ public record StepResponse(
     return OptionalDouble.empty();
   }
 
-  /** Seconds from the jump until it stayed within the band for good; interpolated. */
+  /**
+   * Seconds from the jump until it stayed within the band for good; interpolated. Empty if it was
+   * outside the band at any sample from {@code tailStart} on, or at the last sample.
+   */
   private static OptionalDouble settling(
-      Series measured, Progress progress, int first, int last, long edgeNanos) {
+      Series measured, Progress progress, int first, int last, long edgeNanos, double tailStart) {
     int outside = -1;
     for (int i = last; i >= first; i--) {
       if (Math.abs(progress.at(i) - 1) > SETTLING_BAND) {
@@ -167,7 +174,7 @@ public record StepResponse(
         break;
       }
     }
-    if (outside == last) {
+    if (outside == last || (outside >= 0 && measured.time(outside) >= tailStart)) {
       return OptionalDouble.empty();
     }
     if (outside < 0) {

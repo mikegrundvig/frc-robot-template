@@ -2,9 +2,11 @@ package frc.robot.studies;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.SimulationTest;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.sim.SensorErrors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -38,13 +40,15 @@ class ConsistencyStudyTest {
         "--seed=3",
         "--mount-error-mm=2",
         "--mount-error-degrees=0.1",
+        "--tag-error-mm=3",
         "--noise-scale=0.5",
         "--out=" + folder);
 
     String summary = Files.readString(folder.resolve("summary.md"));
     assertThat(summary)
         .contains("1 seed of each run, seeds 3 to 3")
-        .contains("up to 2 mm along and 0.1° about each axis")
+        .contains(
+            "up to 2 mm along and 0.1° about each axis, and each tag off the layout by up to 3")
         .contains("The vision noise model scaled by 0.5.")
         .contains("| turning | ")
         .contains("- **turning:** 5 s standing, two turns in place");
@@ -69,15 +73,32 @@ class ConsistencyStudyTest {
   }
 
   @Test
-  void eachSeedDrawsEachCamerasOwnMountError() {
-    ConsistencyRuns.MountErrors mounts = ConsistencyRuns.MountErrors.CALIBRATED;
+  void eachSeedDrawsEachCamerasAndEachTagsOwnError() {
+    ConsistencyRuns.Placement placement = ConsistencyRuns.Placement.CALIBRATED;
 
-    assertThat(mounts.draw(1, 0)).isEqualTo(mounts.draw(1, 0));
-    assertThat(mounts.draw(1, 0)).isNotEqualTo(mounts.draw(1, 1));
-    assertThat(mounts.draw(1, 0)).isNotEqualTo(mounts.draw(2, 0));
-    assertThat(Math.abs(mounts.draw(1, 0).getX())).isLessThanOrEqualTo(0.005);
-    assertThat(Math.abs(mounts.draw(1, 0).getRotation().getZ()))
+    assertThat(placement.mount(1, 0)).isEqualTo(placement.mount(1, 0));
+    assertThat(placement.mount(1, 0)).isNotEqualTo(placement.mount(1, 1));
+    assertThat(placement.mount(1, 0)).isNotEqualTo(placement.mount(2, 0));
+    assertThat(Math.abs(placement.mount(1, 0).getX())).isLessThanOrEqualTo(0.005);
+    assertThat(Math.abs(placement.mount(1, 0).getRotation().getZ()))
         .isLessThanOrEqualTo(Math.toRadians(0.25));
-    assertThat(ConsistencyRuns.MountErrors.NONE.draw(1, 0).getTranslation().getNorm()).isZero();
+    assertThat(placement.tag(1, 26)).isEqualTo(placement.tag(1, 26));
+    assertThat(placement.tag(1, 26)).isNotEqualTo(placement.tag(1, 25));
+    assertThat(Math.abs(placement.tag(1, 26).getY())).isLessThanOrEqualTo(0.0127);
+    assertThat(ConsistencyRuns.Placement.EXACT.mount(1, 0).getTranslation().getNorm()).isZero();
+    assertThat(ConsistencyRuns.Placement.EXACT.tag(1, 26).getNorm()).isZero();
+  }
+
+  @Test
+  void theRobotsSensorsErrAsTheRunAndTheSeedSay() {
+    SensorErrors errors =
+        ConsistencyRuns.errors(
+            ConsistencyRuns.named("camera-low"), 7, ConsistencyRuns.Placement.CALIBRATED);
+
+    assertThat(errors.seed()).isEqualTo(7);
+    assertThat(errors.tagErrors()).hasSize(32);
+    assertThat(errors.cameraMountError("front-left").getZ()).isCloseTo(-0.1016, within(1e-9));
+    assertThat(errors.cameraMountError("back-right"))
+        .isEqualTo(ConsistencyRuns.Placement.CALIBRATED.mount(7, 3));
   }
 }

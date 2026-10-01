@@ -33,6 +33,7 @@ public final class ConsistencyStudy {
         --seed=N                  the first seed (default 1)
         --mount-error-mm=M        each camera off its mount by up to this along each axis (default 5)
         --mount-error-degrees=D   and turned by up to this about each axis (default 0.25)
+        --tag-error-mm=M          each tag off the field's layout by up to this along each axis (default 12.7)
         --noise-scale=F           the vision noise model scaled by this: fit tighter, or looser (default 1)
         --out=DIR                 where the report goes (default build/studies/consistency)
       """;
@@ -42,7 +43,14 @@ public final class ConsistencyStudy {
 
   private static final Set<String> OPTIONS =
       Set.of(
-          "runs", "seeds", "seed", "mount-error-mm", "mount-error-degrees", "noise-scale", "out");
+          "runs",
+          "seeds",
+          "seed",
+          "mount-error-mm",
+          "mount-error-degrees",
+          "tag-error-mm",
+          "noise-scale",
+          "out");
 
   private ConsistencyStudy() {}
 
@@ -86,19 +94,19 @@ public final class ConsistencyStudy {
     if (seeds < 1) {
       throw new IllegalArgumentException("--seeds must be 1 or more: " + seeds);
     }
-    ConsistencyRuns.MountErrors mounts =
-        new ConsistencyRuns.MountErrors(
-            number(options, "mount-error-mm", ConsistencyRuns.MountErrors.CALIBRATED.millimeters()),
-            number(
-                options, "mount-error-degrees", ConsistencyRuns.MountErrors.CALIBRATED.degrees()));
-
+    ConsistencyRuns.Placement calibrated = ConsistencyRuns.Placement.CALIBRATED;
+    ConsistencyRuns.Placement placement =
+        new ConsistencyRuns.Placement(
+            number(options, "mount-error-mm", calibrated.mountMillimeters()),
+            number(options, "mount-error-degrees", calibrated.mountDegrees()),
+            number(options, "tag-error-mm", calibrated.tagMillimeters()));
     double noiseScale = number(options, "noise-scale", 1);
     if (!(noiseScale > 0)) {
       throw new IllegalArgumentException("--noise-scale must be more than 0: " + noiseScale);
     }
 
     long start = System.nanoTime();
-    List<Result> results = study(runs, seeds, first, mounts, noiseScale, out);
+    List<Result> results = study(runs, seeds, first, placement, noiseScale, out);
     double seconds = (System.nanoTime() - start) / 1e9;
 
     Path directory = Path.of(options.getOrDefault("out", "build/studies/consistency"));
@@ -110,10 +118,11 @@ public final class ConsistencyStudy {
                     + " (SensorErrors.TYPICAL).",
                 seeds, seeds == 1 ? "seed" : "seeds", first, first + seeds - 1),
             format(
-                "Each camera off its mount by up to %s mm along and %s° about each axis, drawn"
-                    + " for each seed.%s",
-                shown(mounts.millimeters()),
-                shown(mounts.degrees()),
+                "Each camera off its mount by up to %s mm along and %s° about each axis, and each"
+                    + " tag off the layout by up to %s mm along each, drawn for each seed.%s",
+                shown(placement.mountMillimeters()),
+                shown(placement.mountDegrees()),
+                shown(placement.tagMillimeters()),
                 noiseScale == 1
                     ? ""
                     : " The vision noise model scaled by " + shown(noiseScale) + "."),
@@ -129,14 +138,14 @@ public final class ConsistencyStudy {
       List<ConsistencyRuns.Run> runs,
       int seeds,
       long first,
-      ConsistencyRuns.MountErrors mounts,
+      ConsistencyRuns.Placement placement,
       double noiseScale,
       PrintStream out) {
     List<Result> results = new ArrayList<>();
     for (ConsistencyRuns.Run run : runs) {
       Consistency consistency = new Consistency();
       for (long seed = first; seed < first + seeds; seed++) {
-        consistency.add(ConsistencyRuns.play(run, seed, mounts, noiseScale));
+        consistency.add(ConsistencyRuns.play(run, seed, placement, noiseScale));
       }
       Consistency.Summary summary = consistency.summary();
       out.printf(

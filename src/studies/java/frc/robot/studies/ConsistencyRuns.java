@@ -4,7 +4,9 @@ import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
 import frc.robot.SimulatedRobot;
+import frc.robot.game.Rebuilt;
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
@@ -14,18 +16,22 @@ import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SensorErrorsBuilder;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.SplittableRandom;
 import java.util.stream.Collectors;
 import org.wpilib.command3.Command;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The situations the consistency study puts the simulated robot through, each a script of what the
  * drive team does and what happens to the robot, run on a season-worn robot ({@link
  * SensorErrors#TYPICAL}) whose cameras each sit a little off their configured mounts, as a
- * calibrated camera still does.
+ * calibrated camera still does, on a field whose tags each sit a little off its layout, as a field
+ * built to its tolerance does.
  *
  * <p>Every run starts the same way: the robot placed on its start, disabled for a second while the
  * cameras find it, then enabled. From then on every loop is a sample: the estimate, what it claims,
@@ -44,6 +50,9 @@ final class ConsistencyRuns {
     {1.5, -0.3, -0.3, -0.4},
     {1.0, 0, 0, 0}
   };
+
+  /** The field the simulator's robot plays on: its tags, which each seed places a little off. */
+  private static final FieldModel FIELD = Rebuilt.field(Robots.SIM.body());
 
   /**
    * How long the gyro-scale procedure's part of its run lasts: the procedure (about 20 s: still,
@@ -157,40 +166,62 @@ final class ConsistencyRuns {
   }
 
   /**
-   * How far each camera sits off its configured mount, at most, along and about each axis: what a
-   * camera calibrated with the mount procedure (docs/calibration.md) still has. Each camera's own
-   * is drawn within these for each seed, and stays put for the run, as a mount's does.
+   * Where the cameras and the field's tags really are, against where the robot's configuration and
+   * the field's layout say: how far each may be off, at most, along and about each axis. Each
+   * camera's and each tag's own error is drawn within these for each seed, and stays put for the
+   * run, as a mount's and a tag's do.
    *
-   * @param millimeters along each axis
-   * @param degrees about each axis
+   * @param mountMillimeters a camera's mount, along each axis: what calibrating it leaves
+   * @param mountDegrees and about each axis
+   * @param tagMillimeters a tag, along each axis: the field's build tolerance
    */
-  record MountErrors(double millimeters, double degrees) {
-    /** A few millimeters and a quarter of a degree. */
-    static final MountErrors CALIBRATED = new MountErrors(5, 0.25);
+  record Placement(double mountMillimeters, double mountDegrees, double tagMillimeters) {
+    /**
+     * Cameras calibrated with the mount procedure (docs/calibration.md), a few millimeters and a
+     * quarter of a degree off, on a field built to its half-inch tolerance.
+     */
+    static final Placement CALIBRATED = new Placement(5, 0.25, 12.7);
 
-    static final MountErrors NONE = new MountErrors(0, 0);
+    static final Placement EXACT = new Placement(0, 0, 0);
 
-    MountErrors {
-      if (!(millimeters >= 0) || !(degrees >= 0)) {
+    Placement {
+      if (!(mountMillimeters >= 0) || !(mountDegrees >= 0) || !(tagMillimeters >= 0)) {
         throw new IllegalArgumentException(
-            "mount errors are zero or more: " + millimeters + " mm, " + degrees + "°");
+            "how far cameras and tags are off is zero or more: "
+                + mountMillimeters
+                + " mm, "
+                + mountDegrees
+                + "°, "
+                + tagMillimeters
+                + " mm");
       }
     }
 
     /** One camera's error, for a seed: the same every time for the same seed and camera. */
-    Transform3d draw(long seed, int camera) {
-      if (millimeters == 0 && degrees == 0) {
+    Transform3d mount(long seed, int camera) {
+      if (mountMillimeters == 0 && mountDegrees == 0) {
         return Transform3d.ZERO;
       }
       SplittableRandom random = new SplittableRandom(Seeds.mix(seed, camera + 1L));
-      double meters = millimeters / 1000;
-      double radians = Math.toRadians(degrees);
+      double meters = mountMillimeters / 1000;
+      double radians = Math.toRadians(mountDegrees);
       return new Transform3d(
           within(random, meters),
           within(random, meters),
           within(random, meters),
           new Rotation3d(
               within(random, radians), within(random, radians), within(random, radians)));
+    }
+
+    /** One tag's error, for a seed: the same every time for the same seed and tag. */
+    Translation3d tag(long seed, int id) {
+      if (tagMillimeters == 0) {
+        return Translation3d.ZERO;
+      }
+      SplittableRandom random = new SplittableRandom(Seeds.mix(seed, -id - 1L));
+      double meters = tagMillimeters / 1000;
+      return new Translation3d(
+          within(random, meters), within(random, meters), within(random, meters));
     }
 
     private static double within(SplittableRandom random, double bound) {
@@ -200,15 +231,20 @@ final class ConsistencyRuns {
 
   /**
    * How the robot's sensors err in a run with a seed: a season's wear, each camera's own small
-   * mount error, then the run's faults, which replace a knocked camera's.
+   * mount error and each tag's own placement, then the run's faults, which replace a knocked
+   * camera's.
    */
-  static SensorErrors errors(Run run, long seed, MountErrors mounts) {
+  static SensorErrors errors(Run run, long seed, Placement placement) {
     List<CameraConfig> cameras = Robots.SIM.cameras();
     SensorErrors errors = SensorErrorsBuilder.builder(SensorErrors.TYPICAL).seed(seed).build();
     for (int i = 0; i < cameras.size(); i++) {
-      errors = errors.withCameraMountError(cameras.get(i).name(), mounts.draw(seed, i));
+      errors = errors.withCameraMountError(cameras.get(i).name(), placement.mount(seed, i));
     }
-    return run.faults().apply(errors, cameras);
+    Map<Integer, Translation3d> tags = new HashMap<>();
+    for (int id : FIELD.tags().keySet()) {
+      tags.put(id, placement.tag(seed, id));
+    }
+    return run.faults().apply(errors.withTagErrors(tags), cameras);
   }
 
   /**
@@ -235,8 +271,9 @@ final class ConsistencyRuns {
    * @param noiseScale how much to scale the vision pipeline's noise model by ({@link #robot})
    * @return every loop once the robot is enabled
    */
-  static List<Consistency.Sample> play(Run run, long seed, MountErrors mounts, double noiseScale) {
-    try (SimulatedRobot robot = new SimulatedRobot(robot(noiseScale), errors(run, seed, mounts))) {
+  static List<Consistency.Sample> play(Run run, long seed, Placement placement, double noiseScale) {
+    try (SimulatedRobot robot =
+        new SimulatedRobot(robot(noiseScale), errors(run, seed, placement))) {
       for (int i = 0; i < RobotLoop.loops(1.0); i++) {
         robot.loop(); // placed on its start, and the cameras find it
       }

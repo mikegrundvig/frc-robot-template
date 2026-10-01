@@ -333,9 +333,11 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
 `EstimatorConfig.DEFAULTS`, which the code calls starting points, not measurements.
 
-The estimator's uncertainty should match its error. In the simulator, compare
-`Localization/PositionStdDevMeters` with `Sim/PoseErrorMeters`; on a robot, with how far the
-cameras move the estimate when they see tags again after a stretch without. An estimate often off by
+The estimator's uncertainty should match its error. In the simulator, the
+[consistency study](testing.md#is-the-estimator-honest-the-consistency-study) checks it over many
+runs (`./gradlew consistencyStudy`), and one run's log compares `Localization/PositionStdDevMeters`
+with `Sim/PoseErrorMeters`; on a robot, compare it with how far the cameras move the estimate when
+they see tags again after a stretch without. An estimate often off by
 three times its uncertainty is too sure of itself, and its gate rejects good measurements; one never
 off by half of it is too unsure, and the cameras pull it around.
 
@@ -352,8 +354,13 @@ off by half of it is too unsure, and the cameras pull it around.
 | `collisionWindowSeconds` | chosen | 0.25 s | guess | Why: one hit jolts for several loops; count it once. Check: one hit's jolts span less than it. |
 | `handlingStdDevPerSqrtSecond` | chosen | 0.02 m | guess (the idea: 254's loose trust while disabled) | Why: a disabled robot gets carried, and its wheels can't tell, so the cameras should lead. Check: placed and disabled, the estimate settles on the cameras before the match. |
 | `headingDriftDegreesPerMinute` | characterized | 0.5° | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise): the gyro's worst drift, standing still. |
-| `headingStdDevDegreesPerTurn` | characterized | 0.5° | guess | [The gyro's scale, repeated](characterization.md#repeatability-of-the-gyros-scale): how far its scale may still be off after calibrating it. |
+| `headingStdDevDegreesPerTurn` | characterized | 1° | simulation (covers the simulator's season-worn gyro, not yet calibrated: 0.3% high, 1.1° a turn; at 0.5°, its heading was 2.2 σ off through the gyro-scale procedure's turns, a heading NEES of 4.5 in the consistency study) | [The gyro's scale, repeated](characterization.md#repeatability-of-the-gyros-scale): how far its scale may still be off after calibrating it; until it's calibrated, how far an uncalibrated one may be. The estimator takes it as the same error every turn, so five turns are five times as far off: lower it once calibrated. |
 | `wheelHeadingStdDevDegreesPerTurn` | characterized | 10° | guess | [Odometry error](characterization.md#odometry-error): heading from the wheels against the gyro's, spinning at driving speed. Used only while the gyro is lost. |
+| `cameraTurnStdDevDegrees` | characterized | 0.25° | guess (the mount procedure placed a knocked camera within 0.1° in the simulator; more for the lens, and margin) | What calibrating a camera's mount leaves of its turn: [a camera's mount](calibration.md#a-cameras-mount), run five times from the same spots; the spread of the yaw it finds. Too small, and the estimator grows surer than the cameras know, standing still (the [consistency study](testing.md#is-the-estimator-honest-the-consistency-study): `--mount-error-degrees=1` puts standing at a NEES of 2.9 with this at 0.25°, 6 without it). |
+| `cameraShiftStdDevMeters` | characterized | 0.01 m | guess (the field's tags within half an inch of the layout, the mount's shift a few millimeters; checked in the consistency study, whose tags sit within that tolerance) | How far a camera's positions sit off the same way image after image, beyond its turn: standing on surveyed spots of a practice field, each camera's average position over 10 s against the spot; their root mean square, after taking out what the camera's turn explains (its tags' distance times the yaw it's off). At an event, a field built off its layout raises it. |
+| `cameraShiftStdDevDegrees` | characterized | 1° | simulation (the consistency study, tags within the field's half-inch tolerance: two tags a third of a meter apart turn a multi-tag heading by up to 4°; without it, standing after the gyro-scale procedure, the heading grew sure of a wrong value and 3.5% of loops went past 3.72 σ) | How far a camera's multi-tag headings sit off the same way while it sees the same tags, beyond its turn: on surveyed spots of a practice field, facing known headings, each camera's average multi-tag heading over 10 s against the truth; their root mean square, less the camera's turn. A surveyed field (WPIcal) needs less. |
+| `cameraShiftCorrelationMeters` | chosen | 1 m | guess | Why: about a meter on, a camera sees other tags, or the same ones from another angle, and what its positions share is mostly new. Check in the consistency study: lengthen it if the driving runs' NEES sits above its band, shorten it if well below. |
+| `cameraShiftCorrelationDegrees` | chosen | 45° | guess | Why: as `cameraShiftCorrelationMeters`, for turning: an eighth of a turn brings other tags into view. |
 | `historySeconds` | chosen | 1.5 s | guess (254 kept 1 s) | Why: a camera measurement must arrive within it to be applied; several times any camera's [latency](characterization.md#camera-latency-and-time-sync). Check for "too late" in `Decisions`. |
 | `futureToleranceSeconds` | chosen | 0.05 s | guess | Why: clocks differ a little, but a measurement stamped this far past the newest odometry has a wrong capture time. Check for "from the future" in `Decisions` ([time sync](characterization.md#camera-latency-and-time-sync)). |
 | `visionTimeoutSeconds` | chosen | 1 s | guess | Why: after a second without an accepted measurement, the estimate is dead reckoning, and says so. Check: `Localization/Mode` reads DEAD_RECKONING only where the cameras are really blind. |
@@ -425,6 +432,7 @@ replace them with a real robot's once it's calibrated.
 | `wheelRadiusScale` | characterized | 0.985, 0.99, 0.98, 0.988 | guess | The spread of each wheel's radius in [the wheel radius](calibration.md#the-wheel-radius)'s report, partway through a season, over the radius configured. |
 | `steerOffsetDegrees` | characterized | 0.5, -0.3, 0, 0.4 | guess | How far modules point off straight after their offsets are set: square the wheels against a straightedge, and read each module's angle (`Drive/Module<name>/SteerAngle`). |
 | `cameraMountErrors` | characterized | none | guess (calibrated mounts stay put) | How far a mount moves between calibrations: [a camera's mount](calibration.md#a-cameras-mount)'s "before" residual, run again weeks later. Scenarios set their own. |
+| `tagErrors` | characterized | none | none (the simulator's field is exactly its layout) | How far a field's tags sit from its layout: a survey of the field (WPIcal). The consistency study draws them within the field's half-inch tolerance. |
 | `seed` | chosen | 1 | none | Any number: fixed, so a run repeats exactly. |
 
 ### `SensorErrors.GyroErrors`
@@ -522,6 +530,20 @@ replaces the nominal values, and narrows the ranges.
 | Sight, robustness range | 5 to 7 m | chosen | guess | Where detection gives out for a field-size tag at the camera's resolution, with exposure and blur ([the study's reasons](camera-placement.md#robustness)). |
 | Gyro heading error, robustness range | 0.1° to 0.5° | chosen | guess | A few tenths of a degree while cameras correct it; half a degree after a hit or a stretch without two tags ([the study's reasons](camera-placement.md#robustness)). |
 | Mount error, robustness range | 0 to 5 mm and 0° to 1° per axis | chosen | guess | A mount checked by calibration lands within a few millimeters and a fraction of a degree; a bumped or uncalibrated one, a degree or more ([the study's reasons](camera-placement.md#robustness)). |
+
+## The consistency study's assumptions
+
+The estimator consistency study ([docs/testing.md](testing.md#is-the-estimator-honest-the-consistency-study))
+checks the estimator's uncertainty against the simulator's truth, so it assumes how a calibrated
+robot errs. Its options are a run's choices, not configuration; these are the assumptions inside
+them. The test doesn't check this list.
+
+| Assumption | Template's starting value | Kind | Source | How to measure it, or why |
+|---|---|---|---|---|
+| The robot's wear | `SensorErrors.TYPICAL` | characterized | guess (the simulator's season-worn robot) | Its rows [above](#sensorerrors). |
+| Each camera off its mount | up to 5 mm and 0.25° along and about each axis, drawn for each seed | calibrated | guess (what the mount procedure leaves) | [A camera's mount](calibration.md#a-cameras-mount): the spread of what five runs from the same spots find. Wider with `--mount-error-mm` and `--mount-error-degrees`. |
+| Each tag off the field's layout | up to 12.7 mm along each axis, drawn for each seed | characterized | rules (the field's half-inch tolerance) | A survey of the field (WPIcal). Real fields drift past their tolerance as play goes on; wider with `--tag-error-mm`. |
+| The vision noise model | as configured (`--noise-scale=1`) | characterized | 2026 code (`VisionConfig`'s) | [Camera noise](characterization.md#camera-noise). In the simulator it's about twice the cameras' real noise, so the study reads timid; `--noise-scale=0.5` shows how the estimator does with a model that fits. |
 
 ## Numbers still written in code
 

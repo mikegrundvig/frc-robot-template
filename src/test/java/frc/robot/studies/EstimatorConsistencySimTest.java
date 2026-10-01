@@ -18,7 +18,7 @@ class EstimatorConsistencySimTest {
     for (long seed = 1; seed <= SEEDS; seed++) {
       consistency.add(
           ConsistencyRuns.play(
-              ConsistencyRuns.named(run), seed, ConsistencyRuns.MountErrors.CALIBRATED, 1));
+              ConsistencyRuns.named(run), seed, ConsistencyRuns.Placement.CALIBRATED, 1));
     }
     return consistency.summary();
   }

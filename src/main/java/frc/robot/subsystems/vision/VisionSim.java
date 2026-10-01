@@ -8,13 +8,16 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
 import org.wpilib.fields.Field;
+import org.wpilib.fields.FieldTag;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The simulator's cameras: PhotonVision's own simulation, rendering each camera's view of the tags
@@ -43,13 +46,33 @@ public final class VisionSim implements AutoCloseable {
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
   /**
+   * @param tagErrors by tag ID, how far each tag really sits from where the field's layout says, in
+   *     the field's frame: the cameras see it there, while their multi-tag solves, as the
+   *     coprocessor's do, believe the layout
    * @param seed where the cameras' noise starts: each camera draws its own from it, so a run
    *     repeats exactly, and a run with another seed sees other noise. Seed 1's cameras draw from
    *     1, 2, 3, and on; seed 2's from 1001, 1002, and on.
    */
-  public VisionSim(FieldModel field, long seed) {
+  public VisionSim(FieldModel field, Map<Integer, Translation3d> tagErrors, long seed) {
     layout = field.toField();
-    world.addAprilTags(layout);
+    List<FieldTag> real = new ArrayList<>();
+    for (FieldTag tag : layout.getTags()) {
+      Translation3d off = tagErrors.getOrDefault(tag.getID(), Translation3d.ZERO);
+      Pose3d pose = tag.getPose();
+      real.add(
+          new FieldTag(
+              tag.getID(), new Pose3d(pose.getTranslation().plus(off), pose.getRotation())));
+    }
+    world.addAprilTags(
+        new Field(
+            layout.name,
+            layout.season,
+            layout.game,
+            null,
+            layout.length,
+            layout.width,
+            layout.program,
+            real));
     this.seed = seed;
   }
 

@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.coprocessor.table;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import com.michaelgrundvig.frc.coprocessor.api.Stamp;
 import com.michaelgrundvig.frc.coprocessor.json.Json;
@@ -122,6 +123,42 @@ class TableTest {
             "address is \"10.26.11.12\" on the coprocessor and \"10.26.11.11\" in this build",
             "PhotonVision is \"v2027.0.9\" on the coprocessor and \"v2027.1.0\" in this build",
             "recipe hash is \"abd\" on the coprocessor and \"abc\" in this build");
+  }
+
+  @Test
+  void eachMismatchSaysHowMuchItMatters() {
+    Table table = new Table(2611, 5808, List.of(FRONT));
+    Stamp stamp =
+        new Stamp(
+            "vision-front",
+            2611,
+            "10.26.11.11",
+            "orangepi-5",
+            List.of(),
+            "r1",
+            "old",
+            "v2027.0.9",
+            "",
+            "",
+            "");
+    CompiledTable built = new CompiledTable(table, "v2027.1.0", "new", Map.of());
+    assertThat(built.compare(FRONT, stamp))
+        .extracting(CompiledTable.Mismatch::field, CompiledTable.Mismatch::severity)
+        .containsExactly(
+            tuple("photonvisionVersion", CompiledTable.Severity.ERROR),
+            tuple("recipeHash", CompiledTable.Severity.WARNING));
+
+    // Built without Git: the recipe can't be judged, which isn't a mismatch.
+    CompiledTable noGit = new CompiledTable(table, "v2027.0.9", "", Map.of());
+    assertThat(noGit.compare(FRONT, stamp))
+        .singleElement()
+        .satisfies(
+            mismatch -> {
+              assertThat(mismatch.field()).isEqualTo("recipeHash");
+              assertThat(mismatch.severity()).isEqualTo(CompiledTable.Severity.UNKNOWN);
+              assertThat(mismatch.message()).contains("no recipe hash");
+            });
+    assertThat(noGit.mismatches(FRONT, stamp)).isEmpty();
   }
 
   @Test

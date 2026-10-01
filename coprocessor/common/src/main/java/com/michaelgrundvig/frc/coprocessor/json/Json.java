@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.coprocessor.json;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -62,29 +64,92 @@ public final class Json {
   /** The value with its members in their order and no spaces. */
   public static String compact(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Writer(out, false, false).write(value);
+    new Writer(out, false, false, Drain.NONE).write(value);
     return out.toString();
   }
 
   /** The value with its members sorted by name and no spaces. */
   public static String sorted(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Writer(out, true, false).write(value);
+    new Writer(out, true, false, Drain.NONE).write(value);
     return out.toString();
   }
 
   /** The value sorted, with every number in one form: what a hash is computed over. */
   public static String hashable(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Writer(out, true, true).write(value);
+    new Writer(out, true, true, Drain.NONE).write(value);
     return out.toString();
   }
 
   /** The value sorted and indented, ending in a newline: the form a file in Git takes. */
   public static String pretty(JsonValue value) {
     StringBuilder out = new StringBuilder();
-    new Pretty(out).write(value, 0);
+    new Pretty(out, Drain.NONE).write(value, 0);
     return out.append('\n').toString();
+  }
+
+  /**
+   * Writes {@link #compact} to {@code out} as it goes, a few kilobytes at a time, rather than
+   * building it all first: for answers too large to hold twice.
+   */
+  public static void writeCompact(JsonValue value, Appendable out) throws IOException {
+    write(out, (buffer, drain) -> new Writer(buffer, false, false, drain).write(value));
+  }
+
+  /** Writes {@link #hashable} to {@code out} as it goes (see {@link #writeCompact}). */
+  public static void writeHashable(JsonValue value, Appendable out) throws IOException {
+    write(out, (buffer, drain) -> new Writer(buffer, true, true, drain).write(value));
+  }
+
+  /** Writes {@link #pretty} to {@code out} as it goes (see {@link #writeCompact}). */
+  public static void writePretty(JsonValue value, Appendable out) throws IOException {
+    write(
+        out,
+        (buffer, drain) -> {
+          new Pretty(buffer, drain).write(value, 0);
+          buffer.append('\n');
+        });
+  }
+
+  private interface Writing {
+    void write(StringBuilder buffer, Drain drain);
+  }
+
+  private static void write(Appendable out, Writing writing) throws IOException {
+    StringBuilder buffer = new StringBuilder();
+    Drain drain =
+        full -> {
+          try {
+            out.append(full);
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
+          }
+          full.setLength(0);
+        };
+    try {
+      writing.write(buffer, drain);
+      drain.drain(buffer);
+    } catch (UncheckedIOException e) {
+      throw e.getCause();
+    }
+  }
+
+  /** Empties a writer's buffer into where it's going, once the buffer is full enough. */
+  private interface Drain {
+    /** Keeps everything in the buffer: for writing a String. */
+    Drain NONE = buffer -> {};
+
+    /** How full a buffer is before it's emptied, in characters. */
+    int SIZE = 8192;
+
+    void drain(StringBuilder buffer);
+
+    default void maybe(StringBuilder buffer) {
+      if (buffer.length() >= SIZE) {
+        drain(buffer);
+      }
+    }
   }
 
   /**
@@ -159,7 +224,7 @@ public final class Json {
   }
 
   /** Writes on one line. */
-  private record Writer(StringBuilder out, boolean sort, boolean normalize) {
+  private record Writer(StringBuilder out, boolean sort, boolean normalize, Drain drain) {
     void write(JsonValue value) {
       switch (value) {
         case JsonValue.Obj object -> {
@@ -173,6 +238,7 @@ public final class Json {
             writeString(out, member.getKey());
             out.append(':');
             write(member.getValue());
+            drain.maybe(out);
           }
           out.append('}');
         }
@@ -185,6 +251,7 @@ public final class Json {
             }
             first = false;
             write(item);
+            drain.maybe(out);
           }
           out.append(']');
         }
@@ -198,7 +265,7 @@ public final class Json {
   }
 
   /** Writes sorted and indented. */
-  private record Pretty(StringBuilder out) {
+  private record Pretty(StringBuilder out, Drain drain) {
     void write(JsonValue value, int depth) {
       String inline = inline(value);
       if (inline != null) {
@@ -215,6 +282,7 @@ public final class Json {
             out.append(": ");
             write(members.get(i).getValue(), depth + 1);
             out.append(i + 1 < members.size() ? ",\n" : "\n");
+            drain.maybe(out);
           }
           indent(depth);
           out.append('}');
@@ -226,6 +294,7 @@ public final class Json {
             indent(depth + 1);
             write(items.get(i), depth + 1);
             out.append(i + 1 < items.size() ? ",\n" : "\n");
+            drain.maybe(out);
           }
           indent(depth);
           out.append(']');
@@ -249,7 +318,7 @@ public final class Json {
             first = false;
             writeString(line, member.getKey());
             line.append(": ");
-            new Writer(line, true, false).write(member.getValue());
+            new Writer(line, true, false, Drain.NONE).write(member.getValue());
           }
           line.append('}');
         }
@@ -262,12 +331,12 @@ public final class Json {
             }
             line.append(first ? "" : ", ");
             first = false;
-            new Writer(line, true, false).write(item);
+            new Writer(line, true, false, Drain.NONE).write(item);
           }
           line.append(']');
         }
         default -> {
-          new Writer(line, true, false).write(value);
+          new Writer(line, true, false, Drain.NONE).write(value);
           return line.toString();
         }
       }

@@ -43,26 +43,100 @@ public record CompiledTable(
     return settingsHashes.getOrDefault(computer.name(), "");
   }
 
+  /** How much a difference between a stamp and this build matters. */
+  public enum Severity {
+    /**
+     * The wrong computer or PhotonVision: a different name, team, address, or PhotonVision version.
+     * A deploy fails on it, and the robot raises a high alert.
+     */
+    ERROR,
+    /**
+     * The image was built from a different recipe (the image's scripts, the agent, the lock): flash
+     * the current release when convenient. Worth a warning, not a failed deploy.
+     */
+    WARNING,
+    /**
+     * Not known: this build has no recipe hash (built without Git, from a downloaded copy, or in a
+     * folder of a larger repository), so the image's recipe can't be judged. Not a mismatch.
+     */
+    UNKNOWN
+  }
+
   /**
-   * How a computer's stamp differs from what this build expects of it: its name, team, address,
-   * PhotonVision version, and recipe hash, each as a sentence naming both values. Empty when they
-   * all match. The settings hash is left out: settings change while someone calibrates, which isn't
-   * a mismatch.
+   * One way a computer's stamp differs from this build, or couldn't be compared.
+   *
+   * @param field what differs: {@code name}, {@code team}, {@code address}, {@code
+   *     photonvisionVersion}, or {@code recipeHash}
+   * @param severity how much it matters
+   * @param message a sentence naming both values (or why there's no comparing)
    */
-  public List<String> mismatches(Computer computer, Stamp stamp) {
-    List<String> mismatches = new ArrayList<>();
-    compare(mismatches, "name", computer.name(), stamp.name());
-    compare(mismatches, "team", Integer.toString(table.team()), Integer.toString(stamp.team()));
-    compare(mismatches, "address", table.ip(computer), stamp.address());
-    compare(mismatches, "PhotonVision", photonvisionVersion, stamp.photonvisionVersion());
-    compare(mismatches, "recipe hash", recipeHash, stamp.recipeHash());
+  public record Mismatch(String field, Severity severity, String message) {}
+
+  /**
+   * How a computer's stamp compares with what this build expects of it: its name, team, address,
+   * and PhotonVision version (each an {@link Severity#ERROR} when it differs), and its recipe hash
+   * (a {@link Severity#WARNING} when it differs; {@link Severity#UNKNOWN} when this build has no
+   * recipe hash to compare). Empty when they all match. The settings hash is left out: settings
+   * change while someone calibrates, which isn't a mismatch.
+   */
+  public List<Mismatch> compare(Computer computer, Stamp stamp) {
+    List<Mismatch> mismatches = new ArrayList<>();
+    compare(mismatches, "name", Severity.ERROR, computer.name(), stamp.name());
+    compare(
+        mismatches,
+        "team",
+        Severity.ERROR,
+        Integer.toString(table.team()),
+        Integer.toString(stamp.team()));
+    compare(mismatches, "address", Severity.ERROR, table.ip(computer), stamp.address());
+    compare(
+        mismatches,
+        "photonvisionVersion",
+        Severity.ERROR,
+        photonvisionVersion,
+        stamp.photonvisionVersion());
+    if (recipeHash.isEmpty()) {
+      mismatches.add(
+          new Mismatch(
+              "recipeHash",
+              Severity.UNKNOWN,
+              "the image's recipe can't be checked: this build has no recipe hash (it needs Git"
+                  + " and the repository's own folder)"));
+    } else {
+      compare(mismatches, "recipeHash", Severity.WARNING, recipeHash, stamp.recipeHash());
+    }
     return mismatches;
   }
 
-  private static void compare(List<String> mismatches, String what, String built, String found) {
+  /**
+   * The messages of {@link #compare}'s errors and warnings: how a computer's stamp differs from
+   * this build, each as a sentence naming both values. Empty when nothing differs (or only the
+   * recipe is unknown).
+   */
+  public List<String> mismatches(Computer computer, Stamp stamp) {
+    return compare(computer, stamp).stream()
+        .filter(mismatch -> mismatch.severity() != Severity.UNKNOWN)
+        .map(Mismatch::message)
+        .toList();
+  }
+
+  private static void compare(
+      List<Mismatch> mismatches, String field, Severity severity, String built, String found) {
     if (!built.equals(found)) {
+      String what =
+          field.equals("photonvisionVersion")
+              ? "PhotonVision"
+              : field.equals("recipeHash") ? "recipe hash" : field;
       mismatches.add(
-          what + " is \"" + found + "\" on the coprocessor and \"" + built + "\" in this build");
+          new Mismatch(
+              field,
+              severity,
+              what
+                  + " is \""
+                  + found
+                  + "\" on the coprocessor and \""
+                  + built
+                  + "\" in this build"));
     }
   }
 

@@ -14,6 +14,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
@@ -44,7 +46,15 @@ final class Fixture {
   final List<String> log = new ArrayList<>();
   final Host host;
 
+  final Limits limits;
+
   Fixture(Path dir) throws IOException {
+    this(dir, Limits.DEFAULT);
+  }
+
+  /** The coprocessor, with the agent's limits set (small, to test them). */
+  Fixture(Path dir, Limits limits) throws IOException {
+    this.limits = limits;
     root = dir.resolve("root");
     copy(resource("rk3588"), root);
     try {
@@ -57,17 +67,30 @@ final class Fixture {
   }
 
   private Host host(Path at) {
+    return host(at, path -> LINKS.getOrDefault(path, path));
+  }
+
+  /** A host on this computer, its links resolved by {@code links}. */
+  Host host(Path at, Host.Links links) {
     return new Host(
         at,
+        limits,
         true,
         commands,
-        path -> LINKS.getOrDefault(path, path),
+        links,
         micros::get,
         message -> {
           synchronized (log) {
             log.add(message);
           }
         });
+  }
+
+  /** The agent's log, as it stands. */
+  List<String> log() {
+    synchronized (log) {
+      return List.copyOf(log);
+    }
   }
 
   /** An agent on this computer; the robot controller at {@code controller}. */
@@ -128,7 +151,19 @@ final class Fixture {
   /** Canned answers to commands, by how they start; every command run, recorded. */
   static final class FakeCommands implements Commands {
     private final Map<List<String>, Output> answers = new HashMap<>();
+    private final Map<List<String>, CountDownLatch> holds = new HashMap<>();
     final List<List<String>> ran = new ArrayList<>();
+    private final AtomicInteger waiting = new AtomicInteger();
+
+    /** How many commands are waiting on a hold now. */
+    int waiting() {
+      return waiting.get();
+    }
+
+    /** Commands starting so wait until the latch opens, as a slow command would. */
+    synchronized void hold(List<String> start, CountDownLatch latch) {
+      holds.put(start, latch);
+    }
 
     void answer(List<String> start, List<String> lines) {
       answers.put(start, new Output(0, lines, false, false));
@@ -139,8 +174,35 @@ final class Fixture {
     }
 
     @Override
-    public synchronized Output run(
-        List<String> command, Duration timeout, int maxLines, int maxBytes) throws IOException {
+    public Output run(List<String> command, Duration timeout, int maxLines, int maxBytes)
+        throws IOException {
+      CountDownLatch hold = null;
+      synchronized (this) {
+        for (Map.Entry<List<String>, CountDownLatch> held : holds.entrySet()) {
+          if (startsWith(command, held.getKey())) {
+            hold = held.getValue();
+          }
+        }
+      }
+      if (hold != null) {
+        waiting.incrementAndGet();
+        try {
+          hold.await();
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        } finally {
+          waiting.decrementAndGet();
+        }
+      }
+      return answer(command, maxLines, maxBytes);
+    }
+
+    private static boolean startsWith(List<String> command, List<String> start) {
+      return command.size() >= start.size() && command.subList(0, start.size()).equals(start);
+    }
+
+    private synchronized Output answer(List<String> command, int maxLines, int maxBytes)
+        throws IOException {
       ran.add(command);
       Output best = null;
       int length = -1;
@@ -156,9 +218,14 @@ final class Fixture {
       if (best == null) {
         throw new IOException("no such command: " + command.get(0));
       }
-      List<String> lines = best.lines();
-      if (lines.size() > maxLines) {
-        return new Output(-1, lines.subList(0, maxLines), true, false);
+      List<String> lines = new ArrayList<>();
+      int bytes = 0;
+      for (String line : best.lines()) {
+        bytes += line.length() + 1;
+        if (lines.size() == maxLines || bytes > maxBytes) {
+          return new Output(-1, lines, true, false);
+        }
+        lines.add(line);
       }
       return best;
     }

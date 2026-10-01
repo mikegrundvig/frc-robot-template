@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import com.michaelgrundvig.frc.pitwall.experiment.ExperimentInputs;
 import java.util.function.Consumer;
 import org.littletonrobotics.junction.LogTable;
 import org.littletonrobotics.junction.Logger;
@@ -28,6 +29,15 @@ final class AdvantageKitLog {
 
   static Consumer<ActionInputs> actions() {
     return new ActionLog();
+  }
+
+  static Consumer<ExperimentInputs> experiments() {
+    return new ExperimentLog();
+  }
+
+  /** Says how a run ended, in the log beside its requests. */
+  static void runEnded(String what) {
+    Logger.recordOutput("Pitwall/Experiments/Ended", what);
   }
 
   static Consumer<TunableInputs> tunables() {
@@ -75,6 +85,30 @@ final class AdvantageKitLog {
     public void fromLog(LogTable table) {
       inputs.paths = table.get("Paths", inputs.paths);
       inputs.values = table.get("Values", inputs.values);
+    }
+  }
+
+  static final class ExperimentLog implements Consumer<ExperimentInputs>, LoggableInputs {
+    private ExperimentInputs inputs = new ExperimentInputs();
+
+    @Override
+    public void accept(ExperimentInputs inputs) {
+      this.inputs = inputs;
+      Logger.processInputs("Pitwall/Experiments", this);
+    }
+
+    @Override
+    public void toLog(LogTable table) {
+      table.put("Kinds", inputs.kinds);
+      table.put("Names", inputs.names);
+      table.put("Runs", inputs.runs);
+    }
+
+    @Override
+    public void fromLog(LogTable table) {
+      inputs.kinds = table.get("Kinds", inputs.kinds);
+      inputs.names = table.get("Names", inputs.names);
+      inputs.runs = table.get("Runs", inputs.runs);
     }
   }
 

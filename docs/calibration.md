@@ -74,8 +74,53 @@ and after, how sure it is, and the camera's mount as the builder calls to put in
 down 2° put a tag 3 m away in the same wrong place, and only tags at different distances tell them
 apart.
 
-When: after mounting, bumping, or remounting a camera, and whenever the Vision log's
-`MeanTagResidualMeters` for one camera stands out from the others'.
+When: after mounting, bumping, or remounting a camera, and whenever the robot says a camera is out
+of calibration.
+
+### How the robot notices a camera that moved
+
+The robot checks every camera's mount all the time, from the tags it sees while the other cameras
+hold the robot's pose. Each tag, placed on the field through the robot's pose and the camera's
+configured mount, should land on the tag. Noise puts tags off every which way and averages out; a
+camera bumped since it was calibrated puts them off the same way every time. Over its latest 500
+tags (seconds of seeing tags), the average of how far they land off is the Vision log's
+`MountOffsetMeters` for that camera.
+
+A tag counts only when the pose it's placed through can be trusted: the robot turning slowly, the
+pose and heading sure enough that together they'd put a tag at that distance less than the
+tolerance off, no calibration running, and another camera's measurement agreeing with the pose
+within the tolerance in the last two seconds. A heading off by a degree puts a tag 3 m away 5 cm
+off, the same way every time, which is just what a camera turned on its mount looks like.
+
+Past 5 cm (the vision configuration's `mountToleranceMeters`, which the pit can tune), the alert
+*Camera front-left is out of calibration: its tags land 10 cm off* says to recalibrate it. Until
+then, the part of the offset across the floor (beyond the tolerance, taken off in squares) is how
+much less the camera is trusted: it's added to each of its measurements' uncertainty
+(`MountDoubtMeters` in the log), and the angle it makes at the tags' distance to its heading's. A
+camera turned on its mount puts the robot off to the side, and its heading off by its turn; one
+knocked straight down still places the robot right on the floor, so the alert fires but its trust
+stays. The alert says "so it counts for less" when that's the case.
+
+For example: a camera whose tags land 10 cm off across the floor, against the 5 cm tolerance, is
+√(10² − 5²) = 8.7 cm less sure of every measurement. One of two tags 2 m away, which it would
+place within 2 cm, it now places within √(2² + 8.7²) = 8.9 cm: it counts about a twentieth as
+much. Its far tags, already uncertain, lose less. The wider uncertainty also loosens the gate the
+estimator holds its measurements to, so they're rejected less often while they count for less.
+
+Two patterns point somewhere other than the mount:
+
+- **Tags that land farther off the farther away they are**, by a share of the distance (2 cm at
+  1 m, 6 cm at 3 m), along the camera's line of sight: its lens calibration (focal length) is off.
+  Recalibrate the lens in PhotonVision; recalibrating the mount only hides it at one distance.
+- **Every camera out of calibration at once at an event:** the field's tags aren't where the
+  layout says. Check the event's field layout (WPIcal) before touching any camera.
+
+The check measures against the robot's pose, so it needs other cameras to hold it: a robot with
+one camera can't tell that camera's mount moved. A wrong heading (the gyro's scale off, over many
+turns) puts every camera's tags off as if each had turned, until the cameras correct the heading;
+several cameras out of calibration at once more likely means that than several knocks. A badly
+knocked camera also pulls the pose a little, so a camera beside it can read a few centimeters off
+too: recalibrate the one farthest off first, and the other comes back with it.
 
 ## Done elsewhere
 

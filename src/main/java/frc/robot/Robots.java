@@ -108,7 +108,10 @@ public final class Robots {
 
   /**
    * A 1280 x 800 global-shutter camera with an 80 degree diagonal field of view, typical for
-   * AprilTags. The frame rate and latency are conservative guesses; measure yours.
+   * AprilTags. The frame rate and latency are guesses: measure yours (the Vision log's {@code
+   * LatencySeconds} for each camera). The latency matters on the robot, not only in the simulator,
+   * which runs its cameras with it: an image arriving more than {@code
+   * VisionConfig.latencyMarginSeconds} later than it is left out, so a guess too low drops images.
    */
   private static final CameraConfig.Sensor APRILTAG_CAMERA =
       CameraConfig.Sensor.builder()

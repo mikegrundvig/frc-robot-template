@@ -22,7 +22,7 @@ class SettingsFilesTest {
               SettingsRow.fromText(
                   "global",
                   "networkConfig",
-                  Map.of("contents", "{\"teamNumber\":2611,\"b\":[1,2]}")),
+                  Map.of("contents", "{\"teamNumber\":1234,\"b\":[1,2]}")),
               SettingsRow.fromText(
                   "cameras",
                   "front right",
@@ -41,7 +41,7 @@ class SettingsFilesTest {
             {
               "contents": {
                 "b": [1, 2],
-                "teamNumber": 2611
+                "teamNumber": 1234
               }
             }
             """);
@@ -90,6 +90,8 @@ class SettingsFilesTest {
     assertThatThrownBy(() -> SettingsFiles.decode("cameras/a%2.json", "a%2"))
         .hasMessage("cameras/a%2.json: a % in a name must be followed by two hex digits");
     assertThatThrownBy(() -> SettingsFiles.decode("x", "a%zz"))
+        .hasMessageContaining("two hex digits");
+    assertThatThrownBy(() -> SettingsFiles.decode("x", "a%+1"))
         .hasMessageContaining("two hex digits");
   }
 

@@ -92,11 +92,7 @@ public final class DriveSimHarness implements AutoCloseable {
       RobotConfig robot, SensorErrors errors, EstimatorConfig config, Terrain terrain) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     localization = localizationFor(robot, estimator, terrain);
-    simulation =
-        new DriveSimulation(
-            robot.drivetrain().modules(),
-            robot.drivetrain().moduleTranslations(robot.body()),
-            errors);
+    simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors);
     simulation.setTerrain(terrain);
     drive =
         new Drive(

@@ -41,21 +41,19 @@ public final class AgentMain {
     if (args.length > 0 && args[0].equals("settings-db")) {
       System.exit(settingsDb(List.of(args).subList(1, args.length), System.out, System.err));
     }
-    // Bound every request and answer, before the web server reads its settings.
-    System.setProperty("sun.net.httpserver.maxReqTime", "10");
+    // Bound every request and answer, before the web server reads its settings: 4 s to send a
+    // request, 60 to take an answer, 32 connections at once.
+    System.setProperty("sun.net.httpserver.maxReqTime", "4");
     System.setProperty("sun.net.httpserver.maxRspTime", "60");
     System.setProperty("sun.net.httpserver.maxIdleConnections", "8");
+    System.setProperty("jdk.httpserver.maxConnections", "32");
     ProcessCommands commands = new ProcessCommands();
     Host host = Host.system(commands, message -> System.err.println(message));
-    try (AgentServer server = serve(host, List.of(args), runnable -> start(runnable))) {
+    try (AgentServer server =
+        serve(host, List.of(args), runnable -> Thread.ofVirtual().start(runnable))) {
       System.err.println("Coprocessor agent serving on port " + server.port());
       new CountDownLatch(1).await();
     }
-  }
-
-  private static void start(Runnable shutdown) {
-    Thread thread = new Thread(shutdown, "coprocessor-agent-shutdown");
-    thread.start();
   }
 
   /** Starts serving a host, with the command line's options. */
@@ -75,7 +73,9 @@ public final class AgentMain {
             ? Integer.parseInt(options.getOrDefault("port", "0"))
             : agent.stampFile().agentPort();
     return new AgentServer(
-        agent, new InetSocketAddress(options.getOrDefault("bind", "0.0.0.0"), port));
+        agent,
+        new InetSocketAddress(options.getOrDefault("bind", "0.0.0.0"), port),
+        new RateLimitedLog(host::log, host::monotonicMicros, AgentServer.REFUSAL_LOG_MICROS));
   }
 
   /** {@code --name=value} options, after an optional {@code serve}. */

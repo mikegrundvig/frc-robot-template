@@ -23,6 +23,7 @@ final class Shutdown {
   private final String unit;
   private final Executor executor;
   private final AtomicBoolean requested = new AtomicBoolean();
+  private volatile String failure = "";
 
   Shutdown(Host host, String unit, Executor executor) {
     this.host = host;
@@ -30,9 +31,14 @@ final class Shutdown {
     this.executor = executor;
   }
 
-  /** Whether a shutdown has been asked for. */
+  /** Whether a shutdown is under way. */
   boolean requested() {
     return requested.get();
+  }
+
+  /** Why the last shutdown failed to power off, or empty: asking again tries again. */
+  String failure() {
+    return failure;
   }
 
   /**
@@ -44,6 +50,7 @@ final class Shutdown {
       host.log("Shutdown asked for again by " + from + ": already shutting down");
       return false;
     }
+    failure = "";
     host.log("Shutdown asked for by " + from + ": stopping " + unit + ", then powering off");
     executor.execute(this::run);
     return true;
@@ -59,14 +66,19 @@ final class Shutdown {
     } catch (IOException e) {
       host.log("Stopping " + unit + " failed (" + e.getMessage() + "); powering off anyway");
     }
+    String failed;
     try {
       Commands.Output off =
           host.commands().run(List.of("systemctl", "poweroff"), Duration.ofSeconds(30), 16, 4096);
-      if (off.exit() != 0) {
-        host.log("Powering off failed (" + describe(off) + ")");
-      }
+      failed = off.exit() == 0 ? "" : describe(off);
     } catch (IOException e) {
-      host.log("Powering off failed (" + e.getMessage() + ")");
+      failed = String.valueOf(e.getMessage());
+    }
+    if (!failed.isEmpty()) {
+      // Not shutting down after all: say so, and let the next request try again.
+      host.log("Powering off failed (" + failed + "); a shutdown may be asked for again");
+      failure = "powering off failed (" + failed + ")";
+      requested.set(false);
     }
   }
 

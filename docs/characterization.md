@@ -190,10 +190,12 @@ gyro's offset, the mount) is the same both ways. So the capture time's error is
 
 **What good looks like:** latency steady within a few milliseconds, with no long tail; a result
 100 ms late or more means a busy coprocessor or network. The capture time's error under about
-5 ms. More than a loop (20 ms) means the time sync isn't working: check that the coprocessor runs
-the PhotonVision version the robot's PhotonLib expects, and that the robot's clock and
-PhotonVision's agree. Results applied "too late" or "from the future" in
-`Vision/<camera>/Decisions` say the same.
+5 ms, and under about 2 ms if every fix corrects the heading (`EstimatorConfig.headingCorrection`
+`EVERY_FIX`): while the robot turns, each fix then leans on its capture time ([the consistency
+study](testing.md#the-simulators-late-stamps)). More than a loop (20 ms) means the time sync isn't
+working: check that the coprocessor runs the PhotonVision version the robot's PhotonLib expects,
+and that the robot's clock and PhotonVision's agree. Results applied "too late" or "from the
+future" in `Vision/<camera>/Decisions` say the same.
 
 ## Vision coprocessor capacity
 
@@ -353,7 +355,9 @@ spinning wheels.
 voltage steps, and fits kS, kV, and kA from the log. Follow
 [WPILib's SysId guide](https://docs.wpilib.org/en/stable/docs/software/advanced-controls/system-identification/index.html);
 the template doesn't have a SysId routine yet. The same tests on one module, lifted off the floor,
-give its inertia, which the simulator assumes today (`ModuleIOSim`).
+give the inertia of its wheel, gears, and motor, which the simulator estimates today
+(`ModuleIOSim.WHEEL_INERTIA_KG_M2`) and adds to the share of the robot's mass each wheel carries
+(`Body.mass`).
 
 **Units:** SysId reports in the units the routine logged; the template's gains are in volts per
 meter per second.

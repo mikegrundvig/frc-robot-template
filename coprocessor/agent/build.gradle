@@ -69,5 +69,27 @@ tasks.named("jar") {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
+// The libraries the agent runs with, group:name:version one to a line, for the recipe hash
+// (coprocessor/README.md): a new sqlite-jdbc is a new image; a new WPILib, which the agent doesn't
+// run, isn't.
+tasks.register("runtimeLibraries") {
+    description = "List the agent's runtime libraries, for the coprocessor recipe hash."
+    def classpath = configurations.runtimeClasspath
+    def out = layout.buildDirectory.file("coprocessor/runtime-libraries.txt")
+    inputs.files(classpath)
+    outputs.file(out)
+    doLast {
+        def libraries = new TreeSet<String>()
+        classpath.incoming.resolutionResult.allComponents.each { component ->
+            def id = component.id
+            if (id instanceof ModuleComponentIdentifier) {
+                libraries << "${id.group}:${id.module}:${id.version}".toString()
+            }
+        }
+        out.get().asFile.parentFile.mkdirs()
+        out.get().asFile.text = libraries.collect { it + "\n" }.join("")
+    }
+}
+
 ext.nullSafePackages = "com.michaelgrundvig.frc.coprocessor"
 apply from: rootProject.file("gradle/quality.gradle")

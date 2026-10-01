@@ -25,8 +25,9 @@ Released, but alpha: each is tied to one WPILib alpha, and moves with it.
 Not built here at all, because the library has no 2027 build yet. Add these when it does.
 
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
-- **Physics simulation** (traction, collisions, game pieces): maple-sim. Until then, simulation tests
-  the code, not the robot's traction or power. Power includes the drive motors' supply current
+- **Physics simulation** (traction, collisions, game pieces, the robot as one rigid body):
+  maple-sim. Until then, simulation tests the code, not the robot's traction or power. Power
+  includes the drive motors' supply current
   limit: the simulator models neither it nor Phoenix's step-down from it
   (`SwerveConfig.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`), and its battery holds
   12 V, so the supply current a simulated module reports is what its motor would draw with no supply
@@ -47,6 +48,35 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   and its gearbox's drag need measuring on a real module first (`CurrentLimitedMotorSim` says where
   they go). And it hears its CANcoder at the rate the code asks for
   (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
+
+  The drive carries the robot's configured mass. Each drive motor turns its wheel's share of
+  `Body.mass` as inertia at the configured `SwerveConfig.Modules.wheelRadius`, (m / 4) r², plus the
+  wheel's own moving parts (`ModuleIOSim.WHEEL_INERTIA_KG_M2`, an estimate: about 2% more), so the
+  robot speeds up as F = m a, and a heavier robot in `Robots.java` is a slower one in the
+  simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is within
+  10% of full speed in under a second. What that leaves out:
+
+  - **Traction:** past the tread's grip (`wheelCoefficientOfFriction` times g, 11.8 m/s² at the
+    template's 1.2), the simulated robot keeps speeding up as hard as its motors push, where a real
+    one's wheels spin. At the template's 30 A it never gets there; at 120 A it reaches 17 m/s².
+  - **Weight transfer:** every wheel carries a quarter of the mass however hard the robot speeds
+    up, where a real one's front wheels lighten and slip first (`Robots` estimates where).
+  - **The battery:** it holds 12 V through a launch, as above.
+  - **Yaw inertia beyond the wheels':** the robot spins as if all its mass sat at its wheels, about
+    11 kg m² for the template's robot against the 6.7 its body is configured with
+    (`Body.yawMomentOfInertia`, which nothing reads yet), so it spins up at 60% of the rate that
+    body would.
+  - **Coupling between the modules:** each wheel moves its own share of the robot, and the robot
+    follows the wheels' best fit, so a module pushing harder or weaker than the others, or pointed
+    off, doesn't drag on them through the frame as on a robot: its wheel just disagrees with
+    theirs.
+
+  The steering turns a fixed load, 0.004 kg m² (Phoenix Tuner X's generated simulation value, as
+  AdvantageKit's swerve templates use it; not measured). It assumes the module's turning parts and
+  its motor's rotor through the steering's gearing, the same whatever the robot weighs and however
+  hard the wheel is pressed to the carpet. It sets how fast a module turns at its current limit, so
+  the simulated steering's gains, and the rise, overshoot, and settling its experiment scores, hold
+  for a real module only as far as it does.
 
 ## Scenarios the simulator can't make yet
 

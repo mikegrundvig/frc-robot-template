@@ -202,20 +202,15 @@ class AgentTest {
 
   @Test
   void aCameraWhoseDeviceCantBeFollowedIsStillPresent() throws IOException {
-    Fixture.FakeCommands commands = fixture.commands;
     Host host =
-        new Host(
+        fixture.host(
             fixture.root,
-            true,
-            commands,
             path -> {
               if (path.endsWith("video0/device")) {
                 throw new IOException("unplugged as it was read");
               }
               return Fixture.LINKS.getOrDefault(path, path);
-            },
-            fixture.micros::get,
-            message -> {});
+            });
     List<UsbCamera> present = new CameraSource(host).present();
     assertThat(present).hasSize(2);
     assertThat(present.get(1))

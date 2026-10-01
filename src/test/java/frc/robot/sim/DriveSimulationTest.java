@@ -3,14 +3,22 @@ package frc.robot.sim;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+import static org.assertj.core.api.Assertions.withinPercentage;
+import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
+import frc.robot.lib.config.Body;
+import frc.robot.lib.config.BodyBuilder;
+import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.timing.RobotLoop;
+import frc.robot.subsystems.drive.ModuleIO;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +29,7 @@ import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.system.DCMotor;
 
 /**
  * The simulator keeps where the robot really is, and its wheels and gyro report that with the
@@ -214,6 +223,65 @@ class DriveSimulationTest {
     assertThat(moved).isGreaterThan(0.5);
     assertThat(rolled).isCloseTo(moved * Math.hypot(1, 0.25), within(0.01));
     assertThat(robot.positionError()).isLessThan(0.005);
+  }
+
+  /**
+   * The robot's configured mass is what its drive motors move. From rest, each drive motor at its
+   * stator limit I pushes its wheel's tread with F = Kt I G / r, and the robot speeds up at the
+   * four wheels' force over its mass: its configured mass, plus each wheel's own moving parts as
+   * mass at its tread (2% of the template's robot). The same for a robot 40% lighter: the simulator
+   * follows the configuration's mass. Within 4%: the simulator sets the motor controller's limit
+   * once a 4 ms step, and the current falls a little within each step as the wheel speeds up, so
+   * the robot speeds up slower than the limit allows, by 2% at the template's mass and 3.6% at the
+   * lighter one.
+   */
+  @Test
+  void fromRestAtItsStatorLimitTheRobotAcceleratesAsForceOverItsMass() {
+    double template = Robots.SIM.body().mass().in(Kilograms);
+    for (double kilograms : new double[] {template, 0.6 * template}) {
+      assertThat(accelerationFromRest(kilograms))
+          .as("%.1f kg", kilograms)
+          .isCloseTo(limitForceNewtons() / effectiveKilograms(kilograms), withinPercentage(4));
+    }
+  }
+
+  /** The four drive motors' push at their stator limit, in newtons. */
+  private static double limitForceNewtons() {
+    SwerveConfig drivetrain = Robots.SIM.drivetrain();
+    DCMotor motor = drivetrain.modules().driveMotor().model();
+    return 4
+        * motor.Kt
+        * drivetrain.limits().driveStatorCurrent().in(Amps)
+        * drivetrain.modules().driveGearing()
+        / drivetrain.modules().wheelRadius().in(Meters);
+  }
+
+  /** The robot's mass with its wheels' own inertia as mass at their treads, in kilograms. */
+  private static double effectiveKilograms(double kilograms) {
+    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    return kilograms + 4 * ModuleIOSim.WHEEL_INERTIA_KG_M2 / (radius * radius);
+  }
+
+  /**
+   * The template's robot at this mass, its drive motors asked for full voltage from rest: its
+   * average acceleration over 0.3 s, in m/s², while every motor stays at its stator limit.
+   */
+  private static double accelerationFromRest(double kilograms) {
+    Body body = BodyBuilder.builder(Robots.SIM.body()).mass(Kilograms.of(kilograms)).build();
+    SwerveConfig drivetrain = Robots.SIM.drivetrain();
+    DriveSimulation simulation = new DriveSimulation(body, drivetrain, SensorErrors.NONE);
+    for (ModuleIO module : simulation.modules()) {
+      module.configure(drivetrain.gains(), drivetrain.limits());
+      module.setDriveVoltage(12);
+    }
+    double seconds = 0.3;
+    long nanos = 0;
+    for (int i = 0; i < RobotLoop.loops(seconds); i++) {
+      nanos += Math.round(RobotLoop.PERIOD_SECONDS * 1e9);
+      simulation.step(RobotLoop.PERIOD_SECONDS, nanos);
+    }
+    assertThat(simulation.truePose().getY()).isCloseTo(0, within(1e-9));
+    return 2 * simulation.truePose().getX() / (seconds * seconds);
   }
 
   /** Noise comes from a seed, so a simulated run, like a test, gives the same answer every time. */

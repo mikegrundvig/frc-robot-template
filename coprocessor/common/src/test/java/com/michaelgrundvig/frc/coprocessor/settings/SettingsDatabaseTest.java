@@ -122,14 +122,42 @@ class SettingsDatabaseTest {
   }
 
   @Test
-  void aTableWithoutASingleKeyIsRefused() throws SQLException {
-    Path file = dir.resolve("odd.sqlite");
+  void whatIsntAPlainTableWithOneKeyIsLeftOutAndLeftAlone() throws SQLException {
+    Path file = PhotonVisionDatabase.configured(dir);
+    Settings before = read(file);
     try (Connection connection = PhotonVisionDatabase.open(file);
         Statement statement = connection.createStatement()) {
-      statement.executeUpdate("CREATE TABLE odd (a TEXT, b TEXT)");
-      assertThatThrownBy(() -> SettingsDatabase.read(connection))
+      statement.executeUpdate("CREATE TABLE unkeyed (a TEXT, b TEXT)");
+      statement.executeUpdate("INSERT INTO unkeyed VALUES ('x', 'y')");
+      statement.executeUpdate("CREATE TABLE twokeys (a TEXT, b TEXT, c TEXT, PRIMARY KEY (a, b))");
+      statement.executeUpdate("CREATE TABLE odd (k TEXT PRIMARY KEY, \"v.text\" TEXT)");
+      statement.executeUpdate("CREATE VIEW everything AS SELECT * FROM global");
+      statement.executeUpdate("CREATE VIRTUAL TABLE words USING fts5(word)");
+      statement.executeUpdate("INSERT INTO words VALUES ('calibration')");
+    }
+    assertThat(read(file)).isEqualTo(before);
+
+    try (Connection connection = PhotonVisionDatabase.open(file)) {
+      SettingsDatabase.write(connection, before);
+    }
+    try (Connection connection = PhotonVisionDatabase.open(file);
+        Statement statement = connection.createStatement();
+        java.sql.ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM unkeyed")) {
+      assertThat(rows.getInt(1)).as("left alone").isEqualTo(1);
+    }
+  }
+
+  @Test
+  void readingStopsOnceTheSettingsAreLargerThanAllowed() throws SQLException {
+    Path file = PhotonVisionDatabase.configured(dir);
+    try (Connection connection = PhotonVisionDatabase.open(file)) {
+      assertThatThrownBy(() -> SettingsDatabase.readText(connection, 1000, Long.MAX_VALUE))
           .isInstanceOf(SettingsException.class)
-          .hasMessage("table odd has no single primary key");
+          .hasMessageContaining("characters, more than the 1000 read");
+      assertThatThrownBy(() -> SettingsDatabase.readText(connection, Long.MAX_VALUE, 3000))
+          .isInstanceOf(SettingsException.class)
+          .hasMessage("the settings are more than the 3000 characters read");
+      assertThat(SettingsDatabase.readText(connection, 10_000, 100_000).rows()).hasSize(7);
     }
   }
 

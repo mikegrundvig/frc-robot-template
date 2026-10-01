@@ -52,6 +52,10 @@ tasks.named("test") {
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(rootProject.file("vendordeps/photonlib.json")).withPropertyName("vendordep")
             .withPathSensitivity(PathSensitivity.RELATIVE)
+    // The build files RecipeBoundaryTest checks.
+    inputs.files(rootProject.fileTree(rootProject.projectDir) {
+        include "*.gradle", "gradle/*.gradle", "coprocessor/*/build.gradle"
+    }).withPropertyName("buildFiles").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.coprocessor"

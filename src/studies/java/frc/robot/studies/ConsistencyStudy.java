@@ -41,7 +41,7 @@ public final class ConsistencyStudy {
         --tag-error-mm=M          each tag off the field's layout along each axis (default: cameraShiftStdDevMeters)
         --gyro-scale-error=F      the gyro's scale off by this share (default: headingStdDevDegreesPerTurn / 360)
         --backup-scale-error=F    the backup IMU's (default: backupHeadingStdDevDegreesPerTurn / 360)
-        --noise-scale=F           the vision noise model scaled by this (default 0.5, matching the simulated cameras)
+        --noise-scale=F           the vision noise model scaled by this (default 0.5, a little wider than the simulated cameras)
         --heading=W               what corrects the heading beside the gyro: measurements (the default:
                                   measurements with a heading of their own), doubt (those, and each
                                   camera's mount doubt in what it repeats), or every (every fix: a full update)

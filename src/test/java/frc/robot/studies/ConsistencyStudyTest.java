@@ -38,12 +38,14 @@ class ConsistencyStudyTest {
         "--seed=3",
         "--mount-error-mm=2",
         "--mount-error-degrees=0.1",
+        "--noise-scale=0.5",
         "--out=" + folder);
 
     String summary = Files.readString(folder.resolve("summary.md"));
     assertThat(summary)
         .contains("1 seed of each run, seeds 3 to 3")
         .contains("up to 2 mm along and 0.1° about each axis")
+        .contains("The vision noise model scaled by 0.5.")
         .contains("| turning | ")
         .contains("- **turning:** 5 s standing, two turns in place");
     List<String> loops = Files.readAllLines(folder.resolve("loops.csv"));
@@ -63,6 +65,7 @@ class ConsistencyStudyTest {
     assertThatThrownBy(() -> run("--seeds=many")).hasMessageContaining("must be a number");
     assertThatThrownBy(() -> run("--seeds=0")).hasMessageContaining("1 or more");
     assertThatThrownBy(() -> run("--mount-error-mm=-1")).hasMessageContaining("zero or more");
+    assertThatThrownBy(() -> run("--noise-scale=0")).hasMessageContaining("more than 0");
   }
 
   @Test

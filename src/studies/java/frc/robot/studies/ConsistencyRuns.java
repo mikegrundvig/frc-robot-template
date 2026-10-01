@@ -1,9 +1,13 @@
 package frc.robot.studies;
 
+import frc.robot.RobotConfig;
+import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
 import frc.robot.SimulatedRobot;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.VisionConfig;
+import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
@@ -208,12 +212,31 @@ final class ConsistencyRuns {
   }
 
   /**
+   * The simulator's robot, with its vision pipeline's noise model scaled: what if the model were
+   * fit tighter (below 1) or looser (above 1) than the one it ships with?
+   */
+  static RobotConfig robot(double noiseScale) {
+    if (noiseScale == 1) {
+      return Robots.SIM;
+    }
+    VisionConfig vision = Robots.SIM.vision();
+    return RobotConfigBuilder.builder(Robots.SIM)
+        .vision(
+            VisionConfigBuilder.builder(vision)
+                .linearStdDevBaseline(noiseScale * vision.linearStdDevBaseline())
+                .angularStdDevBaseline(noiseScale * vision.angularStdDevBaseline())
+                .build())
+        .build();
+  }
+
+  /**
    * Plays a run with a seed on the simulator's robot.
    *
+   * @param noiseScale how much to scale the vision pipeline's noise model by ({@link #robot})
    * @return every loop once the robot is enabled
    */
-  static List<Consistency.Sample> play(Run run, long seed, MountErrors mounts) {
-    try (SimulatedRobot robot = new SimulatedRobot(Robots.SIM, errors(run, seed, mounts))) {
+  static List<Consistency.Sample> play(Run run, long seed, MountErrors mounts, double noiseScale) {
+    try (SimulatedRobot robot = new SimulatedRobot(robot(noiseScale), errors(run, seed, mounts))) {
       for (int i = 0; i < RobotLoop.loops(1.0); i++) {
         robot.loop(); // placed on its start, and the cameras find it
       }

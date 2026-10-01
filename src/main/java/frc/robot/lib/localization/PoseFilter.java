@@ -12,6 +12,19 @@ import org.wpilib.math.util.MathUtil;
  * through odometry steps and corrects with measurements; what to feed it, when, and whether to
  * believe a measurement is the estimator's business.
  *
+ * <p>A camera's position solved with the gyro's heading leans on that heading: off by an angle, the
+ * position is off by the angle times the distance to the tags, square to them, the same way in
+ * every image ({@link VisionMeasurement#robotToTags}). So each such fix measures the position and
+ * the heading's error together, and the update says so (its H is [I | J d], d the robot-to-tags
+ * vector and J a quarter turn). Without that, the filter would take the heading's error, repeated
+ * in every image, for noise that averages out, and grow sure of a position that's off.
+ *
+ * <p>A measurement with no heading of its own is applied as a Schmidt "consider" update (Schmidt
+ * 1966; Zanetti and D'Souza 2015): it corrects the position, with the heading's doubt carried into
+ * its weight and into the position's uncertainty, but never the heading itself, which stays the
+ * gyro's (and the measurements with a heading's). The heading's variance is left as it was, and the
+ * position's ties to it are updated as the gain left them.
+ *
  * <p>The covariance is row-major: x, y, offset.
  */
 final class PoseFilter {
@@ -23,11 +36,15 @@ final class PoseFilter {
   private double offset;
   private final double[] covariance = new double[9];
 
-  // Scratch space for a measurement, from its innovation to its correction.
+  // Scratch space for a camera measurement, from its innovation to its correction: two rows for
+  // its position, a third for its heading if it has one. Row-major, three columns each.
+  private int rows;
   private final double[] innovation3 = new double[3];
-  private final double[] s3 = new double[9];
+  private final double[] h3 = new double[9]; // H: what each row measures of x, y, and the offset
+  private final double[] ph3 = new double[9]; // P H^T: 3 x rows
+  private final double[] s3 = new double[9]; // S = H P H^T + R: rows x rows
   private final double[] sInverse3 = new double[9];
-  private final double[] gain = new double[9];
+  private final double[] gain = new double[9]; // K = P H^T S^-1: 3 x rows
   private final double[] product = new double[9];
 
   /**
@@ -174,76 +191,129 @@ final class PoseFilter {
    */
   @Nullable Innovation innovation(VisionMeasurement measurement, double yawThen) {
     PoseCovariance noise = measurement.covariance();
-    double innovationX = measurement.pose().getX() - x;
-    double innovationY = measurement.pose().getY() - y;
-    // The position's own agreement, from the position block of S = P + R.
-    double s00 = covariance[0] + noise.xx();
-    double s01 = covariance[1] + noise.xy();
-    double s11 = covariance[4] + noise.yy();
-    double determinant = s00 * s11 - s01 * s01;
-    if (!(determinant > 0)) {
-      return null;
-    }
-    double i00 = s11 / determinant;
-    double i01 = -s01 / determinant;
-    double i11 = s00 / determinant;
-    double positionChiSquared =
-        innovationX * (i00 * innovationX + i01 * innovationY)
-            + innovationY * (i01 * innovationX + i11 * innovationY);
-    if (!noise.hasHeading()) {
-      // K = P H^T S^-1, for H picking out the position.
-      for (int row = 0; row < 3; row++) {
-        gain[row * 3] = covariance[row * 3] * i00 + covariance[row * 3 + 1] * i01;
-        gain[row * 3 + 1] = covariance[row * 3] * i01 + covariance[row * 3 + 1] * i11;
-      }
-      return new Innovation(
-          innovationX, innovationY, false, Double.NaN, positionChiSquared, positionChiSquared);
-    }
-    innovation3[0] = innovationX;
-    innovation3[1] = innovationY;
+    rows = noise.hasHeading() ? 3 : 2;
+    // H: each position row sees its own axis, and the heading through the tags' lever: a heading
+    // off by dθ moves the fix dθ times the robot-to-tags vector, turned a quarter turn.
+    double leverX = measurement.robotToTags().getX();
+    double leverY = measurement.robotToTags().getY();
+    h3[0] = 1;
+    h3[1] = 0;
+    h3[2] = -leverY;
+    h3[3] = 0;
+    h3[4] = 1;
+    h3[5] = leverX;
+    h3[6] = 0;
+    h3[7] = 0;
+    h3[8] = 1;
+    innovation3[0] = measurement.pose().getX() - x;
+    innovation3[1] = measurement.pose().getY() - y;
     innovation3[2] =
-        MathUtil.angleModulus(measurement.pose().getRotation().getRadians() - (yawThen + offset));
-    System.arraycopy(covariance, 0, s3, 0, 9);
+        rows == 3
+            ? MathUtil.angleModulus(
+                measurement.pose().getRotation().getRadians() - (yawThen + offset))
+            : Double.NaN;
+    // P H^T, then S = H P H^T + R.
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < rows; j++) {
+        ph3[i * 3 + j] =
+            covariance[i * 3] * h3[j * 3]
+                + covariance[i * 3 + 1] * h3[j * 3 + 1]
+                + covariance[i * 3 + 2] * h3[j * 3 + 2];
+      }
+    }
+    for (int i = 0; i < rows; i++) {
+      for (int j = 0; j < rows; j++) {
+        s3[i * 3 + j] =
+            h3[i * 3] * ph3[j] + h3[i * 3 + 1] * ph3[3 + j] + h3[i * 3 + 2] * ph3[6 + j];
+      }
+    }
     s3[0] += noise.xx();
     s3[1] += noise.xy();
     s3[3] += noise.xy();
     s3[4] += noise.yy();
-    s3[8] += noise.heading();
-    if (!Matrices.invert3(s3, sInverse3)) {
+    if (rows == 3) {
+      s3[8] += noise.heading();
+    }
+    // The position's own agreement, from the position block of S.
+    double s00 = s3[0];
+    double s01 = (s3[1] + s3[3]) / 2;
+    double s11 = s3[4];
+    double determinant = s00 * s11 - s01 * s01;
+    if (!(determinant > 0)) {
       return null;
     }
-    return new Innovation(
-        innovationX,
-        innovationY,
-        true,
-        innovation3[2],
-        Matrices.quadratic3(sInverse3, innovation3),
-        positionChiSquared);
-  }
-
-  /** Applies the camera measurement last given to {@link #innovation}, as a Kalman update. */
-  void correct(Innovation innovation) {
-    if (innovation.withHeading()) {
-      Matrices.multiply3(covariance, sInverse3, gain);
-      x += gain[0] * innovation3[0] + gain[1] * innovation3[1] + gain[2] * innovation3[2];
-      y += gain[3] * innovation3[0] + gain[4] * innovation3[1] + gain[5] * innovation3[2];
-      offset += gain[6] * innovation3[0] + gain[7] * innovation3[1] + gain[8] * innovation3[2];
-      // P = P - K P
-      Matrices.multiply3(gain, covariance, product);
+    double positionChiSquared =
+        (s11 * innovation3[0] * innovation3[0]
+                - 2 * s01 * innovation3[0] * innovation3[1]
+                + s00 * innovation3[1] * innovation3[1])
+            / determinant;
+    double chiSquared = positionChiSquared;
+    if (rows == 3) {
+      if (!Matrices.invert3(s3, sInverse3)) {
+        return null;
+      }
+      chiSquared = Matrices.quadratic3(sInverse3, innovation3);
     } else {
-      x += gain[0] * innovation.x() + gain[1] * innovation.y();
-      y += gain[3] * innovation.x() + gain[4] * innovation.y();
-      offset += gain[6] * innovation.x() + gain[7] * innovation.y();
-      // P = P - K H P, where H P is P's first two rows.
-      for (int row = 0; row < 3; row++) {
-        for (int column = 0; column < 3; column++) {
-          product[row * 3 + column] =
-              gain[row * 3] * covariance[column] + gain[row * 3 + 1] * covariance[3 + column];
+      sInverse3[0] = s11 / determinant;
+      sInverse3[1] = -s01 / determinant;
+      sInverse3[3] = -s01 / determinant;
+      sInverse3[4] = s00 / determinant;
+    }
+    // K = P H^T S^-1. A measurement without a heading of its own leaves the heading alone: its gain
+    // for the offset is zero, the Schmidt "consider" update.
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < rows; j++) {
+        double sum = 0;
+        for (int k = 0; k < rows; k++) {
+          sum += ph3[i * 3 + k] * sInverse3[k * 3 + j];
         }
+        gain[i * 3 + j] = i == 2 && rows == 2 ? 0 : sum;
       }
     }
-    for (int k = 0; k < 9; k++) {
-      covariance[k] -= product[k];
+    return new Innovation(
+        innovation3[0], innovation3[1], rows == 3, innovation3[2], chiSquared, positionChiSquared);
+  }
+
+  /**
+   * Applies the camera measurement last given to {@link #innovation}, as a Kalman update, or a
+   * consider update for one without heading.
+   */
+  void correct(Innovation innovation) {
+    for (int i = 0; i < 3; i++) {
+      double move = 0;
+      for (int j = 0; j < rows; j++) {
+        move += gain[i * 3 + j] * innovation3[j];
+      }
+      if (i == 0) {
+        x += move;
+      } else if (i == 1) {
+        y += move;
+      } else {
+        offset += move;
+      }
+    }
+    // P = P - K C^T - C K^T + K S K^T, with C = P H^T: right for any gain, so for the consider
+    // update's too. (For the full Kalman gain, the last two terms cancel to P - K C^T.)
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < rows; j++) {
+        double sum = 0;
+        for (int k = 0; k < rows; k++) {
+          sum += gain[i * 3 + k] * s3[k * 3 + j];
+        }
+        product[i * 3 + j] = sum; // K S
+      }
+    }
+    for (int i = 0; i < 3; i++) {
+      for (int j = 0; j < 3; j++) {
+        double change = 0;
+        for (int k = 0; k < rows; k++) {
+          change +=
+              -gain[i * 3 + k] * ph3[j * 3 + k]
+                  - ph3[i * 3 + k] * gain[j * 3 + k]
+                  + product[i * 3 + k] * gain[j * 3 + k];
+        }
+        covariance[i * 3 + j] += change;
+      }
     }
     symmetrize();
   }

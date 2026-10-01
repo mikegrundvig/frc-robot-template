@@ -131,6 +131,49 @@ class VisionPipelineTest {
   }
 
   /**
+   * A position solved with the gyro's heading leans on it: solved with the heading 1° off, it lands
+   * that angle times the distance to the tags off, square to them. The measurement says how far
+   * away its tags were, so the estimator can carry that.
+   */
+  @Test
+  void aPositionSolvedWithTheGyrosHeadingLeansOnIt() {
+    TagDetections seen = seeing(ROBOT, camera, false, 25, 26);
+    double angle = Math.toRadians(1);
+
+    VisionMeasurement right = measured(process(seen, steady(ROBOT.getRotation())));
+    VisionMeasurement turned =
+        measured(process(seen, steady(ROBOT.getRotation().plus(new Rotation2d(angle)))));
+
+    Translation2d toTags = right.robotToTags();
+    Translation2d tags =
+        FIELD
+            .tag(25)
+            .orElseThrow()
+            .toPose2d()
+            .getTranslation()
+            .plus(FIELD.tag(26).orElseThrow().toPose2d().getTranslation())
+            .div(2);
+    assertThat(toTags.getDistance(tags.minus(ROBOT.getTranslation())))
+        .as("toward the tags, as far as they are")
+        .isLessThan(0.2);
+    // Turning the view by the angle moves the position by the angle times the lever, square to it.
+    Translation2d moved = turned.pose().getTranslation().minus(right.pose().getTranslation());
+    Translation2d predicted = new Translation2d(-toTags.getY(), toTags.getX()).times(-angle);
+    assertThat(moved.getDistance(predicted)).isLessThan(0.002);
+    assertThat(moved.getNorm()).isGreaterThan(0.02);
+  }
+
+  /** A solve that finds its own heading doesn't lean on the gyro's. */
+  @Test
+  void aFullSolveDoesntLeanOnTheGyrosHeading() {
+    CaptureContext lost = new CaptureContext(null, Math.PI, 0, 0, 0, 0);
+
+    VisionMeasurement multi = measured(process(seeing(ROBOT, camera, true, 25, 26), lost));
+
+    assertThat(multi.robotToTags()).isEqualTo(Translation2d.ZERO);
+  }
+
+  /**
    * A single tag's two poses: the one that agrees with the gyro wins, even when it's the second.
    */
   @Test

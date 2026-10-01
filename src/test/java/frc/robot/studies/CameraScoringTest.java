@@ -22,6 +22,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 
 /**
  * Scoring camera layouts, on cases simple enough to check by hand: a wall of tags, a robot facing
@@ -316,6 +317,7 @@ class CameraScoringTest {
             0,
             new Pose2d(3.03, 4, Rotation2d.ZERO),
             PoseCovariance.fromStdDevs(0.01, 0.01, Double.POSITIVE_INFINITY),
+            Translation2d.ZERO,
             "sure",
             List.of(1),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -324,6 +326,7 @@ class CameraScoringTest {
             0,
             new Pose2d(2.97, 4, Rotation2d.fromDegrees(1)),
             PoseCovariance.fromStdDevs(0.02, 0.02, 0.01),
+            Translation2d.ZERO,
             "unsure",
             List.of(2, 3),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -357,6 +360,7 @@ class CameraScoringTest {
             0,
             new Pose2d(3.02, 4, Rotation2d.ZERO),
             new PoseCovariance(1e-4, 0, 1e-4, Double.POSITIVE_INFINITY),
+            Translation2d.ZERO,
             "round",
             List.of(1),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -365,6 +369,7 @@ class CameraScoringTest {
             0,
             new Pose2d(3, 4.02, Rotation2d.ZERO),
             new PoseCovariance(2e-4, 1e-4, 2e-4, Double.POSITIVE_INFINITY),
+            Translation2d.ZERO,
             "leaning",
             List.of(2),
             VisionMeasurement.Solver.HEADING_CONSTRAINED);

@@ -58,14 +58,15 @@ draws the robot for it from `Robots.java`. A layout in the repository puts it al
 2. **App > Use Custom Assets Folder** (**AdvantageScope >** on a Mac), and choose the
    repository's `ascope_assets/` folder. The robot's model arrives with every `git pull` from then
    on; AdvantageScope rereads the folder every five seconds.
-3. **App > Show Preferences...** (**Settings...** on a Mac), and set **Live Mode** to
-   **NetworkTables (AdvantageKit)**, so the simulator's values have the names its logs give them.
-4. **File > Import Layout...**, and choose `layouts/advantagescope.json`. AdvantageScope warns
+3. **File > Import Layout...**, and choose `layouts/advantagescope.json`. AdvantageScope warns
    when the layout came from another version; it was exported for this one.
 
-**Then:** `./gradlew run`, and **File > Connect to Simulator**. A log opens in the same layout
-(**File > Open Log(s)...**, from `logs/`), since a log and the live simulator name every value
-alike.
+**Then:** `./gradlew run`, and **File > Connect to Simulator > NetworkTables (AdvantageKit)**.
+AdvantageScope remembers the choice, so from then on **File > Connect to Simulator > Default**
+(Ctrl+Shift+K, Cmd+Shift+K on a Mac) connects the same way. It matters: connected as plain
+NetworkTables, the default, every value's name starts `NT:/AdvantageKit/`, and every view in the
+layout stays empty. A log opens in the same layout (**File > Open Log(s)...**, from `logs/`), since
+a log and the simulator connected this way name every value alike.
 
 | Tab | What it shows |
 |---|---|

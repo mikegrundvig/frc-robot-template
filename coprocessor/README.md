@@ -316,14 +316,33 @@ how much it matters (`Severity`):
 and its deploy check go by these, with no rules of their own. The settings hash isn't compared:
 settings change while someone calibrates, which isn't a mismatch.
 
-**The recipe hash** says how the common image is built. `coprocessor/image/recipe.paths` lists what
-it covers (the image's scripts, the agent's and the shared code, the lock), and the hash is the
-SHA-256 of what `git ls-tree -r --full-tree HEAD -- <those paths>` prints: committed files only, so
-it's the same on every machine and OS, and the same the image workflow computes
-(`coprocessor/image/recipe-hash.sh`). Uncommitted changes don't count: an image is built from a
-commit. Without Git (a downloaded copy, or no commit yet) the compiled table has no recipe hash,
-and the build says so. `CoprocessorBuild` runs these tasks, so the build checks with exactly the
-code the robot and the agents run.
+**The recipe hash** says how the common image is built, and changes only when what goes onto a
+board does: never for a robot-side change (a GradleRIO or WPILib update, the Gradle wrapper, the
+robot program, documentation, tests), which would otherwise fail every deploy until a new image
+nobody needs was flashed. It's the SHA-256, in lowercase hex, of:
+
+1. the lines `git -c core.quotePath=true ls-tree -r --full-tree HEAD --` prints for
+   `coprocessor/image`, `coprocessor/agent`, `coprocessor/common`, `coprocessor/photonvision.lock`,
+   and `gradle/quality.gradle` (the one build file the agent's build applies), leaving out
+   documentation (`*.md`), tests (`coprocessor/image/test/`, `src/test/`, `src/testFixtures/`), and
+   coverage floors; then
+2. a line `runtime <group>:<name>:<version>` for each library on the agent's runtime classpath,
+   sorted, so a new sqlite-jdbc is a new image (and a new WPILib, which the agent doesn't run,
+   isn't).
+
+Committed files only, so it's the same on every machine and system; uncommitted changes don't
+count, since an image is built from a commit. Without Git to ask (no git on the PATH, a downloaded
+copy, no commit yet, or the project in a folder of a larger repository) there's no hash: the
+compiled table's is empty, the build says so, and the robot reports each coprocessor's recipe as
+unknown rather than wrong.
+
+One implementation computes it, in the build: `./gradlew coprocessorRecipeHash` prints it (only it,
+with `-q`) and writes it to `build/coprocessor/recipe-hash.txt`, and the compiled table uses the
+same code. The image workflow runs that task, so the robot and the images never disagree on it.
+The agent's and the shared code's builds are self-contained: the robot's build files configure no
+other project, and the agent's build applies only files the hash covers (`RecipeBoundaryTest`
+checks both), so nothing the hash leaves out can change the agent's jar. `CoprocessorBuild` runs
+these tasks with the code the robot and the agents run.
 
 ## Tests
 

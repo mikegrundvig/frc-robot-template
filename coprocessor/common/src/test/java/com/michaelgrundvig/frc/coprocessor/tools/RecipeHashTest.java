@@ -16,8 +16,13 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The recipe hash is the SHA-256 of git ls-tree's listing of what recipe.paths names. */
+/**
+ * The recipe hash: what goes onto a board, committed, with the agent's libraries, and nothing else.
+ */
 class RecipeHashTest {
+  static final List<String> LIBRARIES =
+      List.of("org.xerial:sqlite-jdbc:3.53.4.0", "org.jspecify:jspecify:1.0.1");
+
   @TempDir Path root;
 
   private void write(String path, String text) throws IOException {
@@ -69,60 +74,112 @@ class RecipeHashTest {
             MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
   }
 
-  @Test
-  void theHashIsOfTheCommittedFilesRecipePathsNames() throws Exception {
-    write(
-        RecipeHash.PATHS,
-        "# what the recipe covers\n\ncoprocessor/image/provision.sh\ncoprocessor/agent/src/main\n");
+  /** A repository with a recipe, and what's around it; committed. */
+  private void aRepository() throws Exception {
     write("coprocessor/image/provision.sh", "#!/bin/sh\n");
-    write("coprocessor/agent/src/main/java/A.java", "class A {}\n");
+    write("coprocessor/agent/coprocessor-agent.service", "[Service]\n");
+    write("coprocessor/photonvision.lock", "{}\n");
+    write("gradle/quality.gradle", "// checks\n");
+    // Not the recipe:
+    write("coprocessor/README.md", "docs\n");
+    write("coprocessor/image/README.md", "docs\n");
+    write("coprocessor/image/test/provision_test.sh", "test\n");
     write("coprocessor/agent/src/test/java/ATest.java", "class ATest {}\n");
+    write("coprocessor/common/src/testFixtures/resources/x.sql", "x\n");
+    write("coprocessor/common/coverage-floor.properties", "line=50\n");
+    write("build.gradle", "plugins { id 'org.wpilib.GradleRIO' version '1' }\n");
+    write("settings.gradle", "include 'x'\n");
+    write("gradle/libs.versions.toml", "[versions]\n");
+    write("gradle/wrapper/gradle-wrapper.properties", "distributionUrl=x\n");
+    write("src/main/java/Robot.java", "class Robot {}\n");
     assumeTrue(git("init", "-q"), "needs git");
     assumeTrue(git("add", "."));
-    assumeTrue(git("commit", "-q", "-m", "recipe"));
+    assumeTrue(git("commit", "-q", "-m", "a repository"));
+  }
 
-    String listing =
-        "100644 blob "
-            + blob("class A {}\n")
-            + "\tcoprocessor/agent/src/main/java/A.java\n"
-            + "100644 blob "
-            + blob("#!/bin/sh\n")
-            + "\tcoprocessor/image/provision.sh\n";
-    RecipeHash.Result result = RecipeHash.of(root);
-    assertThat(result.hash()).isEqualTo(sha256(listing));
+  private void commit(String path, String text) throws Exception {
+    write(path, text);
+    assumeTrue(git("add", "."));
+    assumeTrue(git("commit", "-q", "-m", "changed " + path));
+  }
+
+  @Test
+  void theHashIsOfTheCommittedRecipeAndTheAgentsLibraries() throws Exception {
+    aRepository();
+    String expected =
+        sha256(
+            "100644 blob "
+                + blob("[Service]\n")
+                + "\tcoprocessor/agent/coprocessor-agent.service\n"
+                + "100644 blob "
+                + blob("#!/bin/sh\n")
+                + "\tcoprocessor/image/provision.sh\n"
+                + "100644 blob "
+                + blob("{}\n")
+                + "\tcoprocessor/photonvision.lock\n"
+                + "100644 blob "
+                + blob("// checks\n")
+                + "\tgradle/quality.gradle\n"
+                + "runtime org.jspecify:jspecify:1.0.1\n"
+                + "runtime org.xerial:sqlite-jdbc:3.53.4.0\n");
+    RecipeHash.Result result = RecipeHash.of(root, LIBRARIES);
     assertThat(result.why()).isEmpty();
+    assertThat(result.hash()).isEqualTo(expected);
+  }
 
+  @Test
+  void onlyWhatGoesOntoABoardChangesIt() throws Exception {
+    aRepository();
+    String hash = RecipeHash.of(root, LIBRARIES).hash();
+
+    // The robot's build, the wrapper, documentation, tests: the same image.
+    commit("build.gradle", "plugins { id 'org.wpilib.GradleRIO' version '2' }\n");
+    commit("settings.gradle", "include 'x', 'y'\n");
+    commit("gradle/libs.versions.toml", "[versions]\nwpilib = \"2\"\n");
+    commit("gradle/wrapper/gradle-wrapper.properties", "distributionUrl=y\n");
+    commit("coprocessor/image/README.md", "more docs\n");
+    commit("coprocessor/agent/src/test/java/ATest.java", "class ATest { int x; }\n");
+    assertThat(RecipeHash.of(root, LIBRARIES).hash()).isEqualTo(hash);
     // Uncommitted changes don't count: an image is built from a commit.
-    write("coprocessor/image/provision.sh", "#!/bin/sh\necho changed\n");
-    assertThat(RecipeHash.of(root).hash()).isEqualTo(sha256(listing));
-    assumeTrue(git("commit", "-q", "-a", "-m", "changed"));
-    assertThat(RecipeHash.of(root).hash()).isNotEqualTo(sha256(listing));
+    write("coprocessor/image/provision.sh", "#!/bin/sh\necho uncommitted\n");
+    assertThat(RecipeHash.of(root, LIBRARIES).hash()).isEqualTo(hash);
+
+    // A new library, or a change to what's built into the image: a new image.
+    assertThat(
+            RecipeHash.of(
+                    root, List.of("org.xerial:sqlite-jdbc:3.54.0.0", "org.jspecify:jspecify:1.0.1"))
+                .hash())
+        .isNotEqualTo(hash);
+    commit("coprocessor/agent/coprocessor-agent.service", "[Service]\nNice=10\n");
+    String unit = RecipeHash.of(root, LIBRARIES).hash();
+    assertThat(unit).isNotEqualTo(hash);
+    commit("gradle/quality.gradle", "// stricter checks\n");
+    assertThat(RecipeHash.of(root, LIBRARIES).hash()).isNotEqualTo(unit);
   }
 
   @Test
-  void withoutARecipeOrGitThereIsNoHashAndItSaysWhy() throws IOException {
-    assertThat(RecipeHash.of(root))
-        .isEqualTo(
-            new RecipeHash.Result("", "no coprocessor/image/recipe.paths, so no recipe to hash"));
-    write(RecipeHash.PATHS, "# nothing\n");
-    assertThat(RecipeHash.of(root).why())
-        .isEqualTo("coprocessor/image/recipe.paths lists no paths");
-    write(RecipeHash.PATHS, "coprocessor/image\n");
-    RecipeHash.Result notACheckout = RecipeHash.of(root);
-    assertThat(notACheckout.hash()).isEmpty();
-    assertThat(notACheckout.why()).isNotEmpty();
+  void withoutGitThereIsNoHashAndItSaysWhy() throws IOException {
+    RecipeHash.Result none = RecipeHash.of(root, LIBRARIES);
+    assertThat(none.hash()).isEmpty();
+    assertThat(none.why()).isNotEmpty();
   }
 
   @Test
-  void recipePathsListsEveryLineButBlanksAndComments() {
-    assertThat(RecipeHash.paths("# comment\n\n  # indented comment\na/b\r\nc d\n   \n"))
-        .containsExactly("a/b", "c d");
+  void docsAndTestsAreLeftOutHoweverGitQuotesTheirPaths() {
+    assertThat(RecipeHash.inRecipe("coprocessor/image/provision.sh")).isTrue();
+    assertThat(RecipeHash.inRecipe("coprocessor/image/bench-procedures.md")).isFalse();
+    assertThat(RecipeHash.inRecipe("\"coprocessor/image/caf\\303\\251.md\"")).isFalse();
+    assertThat(RecipeHash.inRecipe("\"coprocessor/image/test/caf\\303\\251.sh\"")).isFalse();
+    assertThat(RecipeHash.inRecipe("\"coprocessor/image/caf\\303\\251.sh\"")).isTrue();
+    assertThat(RecipeHash.inRecipe("coprocessor/common/src/testFixtures/x.sql")).isFalse();
+    assertThat(RecipeHash.inRecipe("coprocessor/agent/coverage-floor.properties")).isFalse();
   }
 
   @Test
-  void anEmptyListingHashesAsNothing() {
-    // What `printf '' | sha256sum` prints.
-    assertThat(RecipeHash.of(new byte[0]))
-        .isEqualTo("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  void aListingHashesItsRecipeLinesAndLibrariesOnly() throws NoSuchAlgorithmException {
+    assertThat(RecipeHash.of("100644 blob abc\tcoprocessor/image/README.md\n", List.of()))
+        .isEqualTo(sha256(""));
+    assertThat(RecipeHash.of("", List.of("b:b:1", "a:a:1")))
+        .isEqualTo(sha256("runtime a:a:1\nruntime b:b:1\n"));
   }
 }

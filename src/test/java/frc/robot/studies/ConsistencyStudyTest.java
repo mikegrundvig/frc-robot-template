@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.within;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
@@ -61,6 +62,9 @@ class ConsistencyStudyTest {
         .contains("The vision noise model scaled by 0.7.")
         .doesNotContain("matched")
         .contains("| Outside the ellipse")
+        .contains("## The mount check")
+        .contains("## The gates")
+        .contains("| turning | doubted 0/1")
         .contains("| turning | ")
         .contains("- **turning:** 5 s standing, two turns in place");
     List<String> loops = Files.readAllLines(folder.resolve("loops.csv"));
@@ -81,6 +85,40 @@ class ConsistencyStudyTest {
     assertThatThrownBy(() -> run("--seeds=0")).hasMessageContaining("1 or more");
     assertThatThrownBy(() -> run("--mount-error-mm=-1")).hasMessageContaining("zero or more");
     assertThatThrownBy(() -> run("--noise-scale=0")).hasMessageContaining("more than 0");
+    assertThatThrownBy(() -> run("--heading=sometimes")).hasMessageContaining("--heading must be");
+  }
+
+  @Test
+  void theHeadingOptionNamesEachWay() {
+    assertThat(ConsistencyStudy.heading("measurements"))
+        .isEqualTo(EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS);
+    assertThat(ConsistencyStudy.heading("doubt"))
+        .isEqualTo(EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT);
+    assertThat(ConsistencyStudy.heading("every"))
+        .isEqualTo(EstimatorConfig.HeadingCorrection.EVERY_FIX);
+    assertThat(ConsistencyStudy.heading(null))
+        .isEqualTo(Robots.SIM.estimator().headingCorrection());
+  }
+
+  /** Each gate on the claimed uncertainty, at its edges. */
+  @Test
+  void theGatesPassWhatTheRobotsCodeWould() {
+    PoseCovariance sure = PoseCovariance.fromStdDevs(0.02, 0.02, Math.toRadians(0.5));
+    PoseCovariance loose = PoseCovariance.fromStdDevs(0.2, 0.2, Math.toRadians(6));
+    Consistency.Sample tracking = new Consistency.Sample(0, 0, 0, sure, true);
+    Consistency.Sample lost = new Consistency.Sample(0, 0, 0, sure, false);
+    Consistency.Sample unsure = new Consistency.Sample(0, 0, 0, loose, true);
+
+    assertThat(Gates.calibrating(tracking)).isTrue();
+    assertThat(Gates.calibrating(lost)).isFalse();
+    assertThat(Gates.judgingMounts(tracking)).isTrue();
+    assertThat(Gates.judgingMounts(unsure)).isFalse();
+    assertThat(Gates.scoring(tracking)).isTrue();
+    assertThat(Gates.scoring(unsure)).isFalse();
+    assertThat(Gates.constraining(tracking)).isTrue();
+    assertThat(Gates.constraining(unsure)).isFalse();
+    assertThat(Gates.asPlaced(tracking)).isTrue();
+    assertThat(Gates.asPlaced(unsure)).isFalse();
   }
 
   @Test

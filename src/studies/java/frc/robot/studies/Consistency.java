@@ -1,5 +1,6 @@
 package frc.robot.studies;
 
+import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseCovariance;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,16 +71,28 @@ public final class Consistency {
    * @param errorY and its y
    * @param errorHeading the estimate's heading minus the truth's, radians, wrapped to ±π
    * @param covariance what the estimate claimed
+   * @param tracking whether the estimate was tracking: recent camera measurements agreed with it
    */
   public record Sample(
-      double errorX, double errorY, double errorHeading, PoseCovariance covariance) {
+      double errorX,
+      double errorY,
+      double errorHeading,
+      PoseCovariance covariance,
+      boolean tracking) {
+    /** A tracking estimate's errors and claim. */
+    public Sample(double errorX, double errorY, double errorHeading, PoseCovariance covariance) {
+      this(errorX, errorY, errorHeading, covariance, true);
+    }
+
     /** An estimate against the truth. */
-    public static Sample of(Pose2d estimate, PoseCovariance covariance, Pose2d truth) {
+    public static Sample of(LocalizationEstimate estimate, Pose2d truth) {
+      Pose2d pose = estimate.pose();
       return new Sample(
-          estimate.getX() - truth.getX(),
-          estimate.getY() - truth.getY(),
-          estimate.getRotation().minus(truth.getRotation()).getRadians(),
-          covariance);
+          pose.getX() - truth.getX(),
+          pose.getY() - truth.getY(),
+          pose.getRotation().minus(truth.getRotation()).getRadians(),
+          estimate.covariance(),
+          estimate.mode() == LocalizationEstimate.Mode.TRACKING);
     }
 
     /** The position error weighted by the claimed position covariance; infinite if it's flat. */

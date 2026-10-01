@@ -21,7 +21,6 @@ import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic;
 import javax.tools.FileObject;
 import javax.tools.StandardLocation;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Writes each configuration record's Javadoc into the compiled program, for Pitwall's page to show
@@ -43,8 +42,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Which records: those marked by the annotation the compiler option {@code
  * -Apitwall.docs.records} names ({@code frc.robot.lib.config.ConfigRecord}), nested records
  * included; without the option, every record. The annotation is named as text, so this never
- * depends on robot code. A record without a doc comment gets no file, and a component without a
- * {@code @param} no entry: Pitwall shows those as missing.
+ * depends on robot code; a name the compiler can't find fails the compile, saying so. A record
+ * without a doc comment gets no file, and a component without a {@code @param} no entry: Pitwall
+ * shows those as missing.
  *
  * <p>Each file comes from one record and nothing else, so Gradle runs this as an isolating
  * processor (META-INF/gradle/incremental.annotation.processors): changing one record rewrites only
@@ -59,16 +59,23 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
 
   private final Set<String> written = new HashSet<>();
 
+  /** Whether the option's annotation was found missing, and said so, already. */
+  private boolean saidMissing;
+
   @Override
   public Set<String> getSupportedOptions() {
     return Set.of(RECORDS_OPTION);
   }
 
-  /** The marking annotation, so the compiler runs this only when there's something to document. */
+  /**
+   * Every annotation, whatever the option names, so the compiler runs this on every compile. Run
+   * only for the marking annotation, it wouldn't run on a compile with nothing marked (Gradle
+   * recompiling one changed file, say), and the compiler would then warn that no processor knows
+   * the option, which {@code -Werror} turns into a failure that points the wrong way.
+   */
   @Override
   public Set<String> getSupportedAnnotationTypes() {
-    String marker = marker();
-    return Set.of(marker == null ? "*" : marker);
+    return Set.of("*");
   }
 
   @Override
@@ -79,29 +86,45 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
   @Override
   public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment round) {
     List<TypeElement> records = new ArrayList<>();
-    if (marker() == null) {
+    String option = processingEnv.getOptions().get(RECORDS_OPTION);
+    if (option == null || option.isBlank()) {
       for (Element element : round.getRootElements()) {
         addRecords(element, records);
       }
     } else {
-      // The marker is the one annotation supported, so it's the only one here.
-      for (TypeElement marker : annotations) {
-        for (Element marked : round.getElementsAnnotatedWith(marker)) {
-          if (marked instanceof TypeElement type && type.getKind() == ElementKind.RECORD) {
-            records.add(type);
-          }
+      TypeElement marker = processingEnv.getElementUtils().getTypeElement(option.strip());
+      if (marker == null || marker.getKind() != ElementKind.ANNOTATION_TYPE) {
+        sayMissing(option.strip());
+        return false;
+      }
+      for (Element marked : round.getElementsAnnotatedWith(marker)) {
+        if (marked instanceof TypeElement type && type.getKind() == ElementKind.RECORD) {
+          records.add(type);
         }
       }
     }
     for (TypeElement record : records) {
       write(record);
     }
-    return false; // the annotation is still the other processors' (RecordBuilder's builders)
+    return false; // every annotation is still the other processors' (RecordBuilder's, for one)
   }
 
-  private @Nullable String marker() {
-    String marker = processingEnv.getOptions().get(RECORDS_OPTION);
-    return marker == null || marker.isBlank() ? null : marker.strip();
+  /** Fails the compile once, saying how to fix the option. */
+  private void sayMissing(String marker) {
+    if (!saidMissing) {
+      saidMissing = true;
+      processingEnv
+          .getMessager()
+          .printMessage(
+              Diagnostic.Kind.ERROR,
+              "-A"
+                  + RECORDS_OPTION
+                  + "="
+                  + marker
+                  + " names no annotation the compiler can find. Fix the name in build.gradle:"
+                  + " it's the annotation that marks configuration records, with its package"
+                  + " (frc.robot.lib.config.ConfigRecord in the template).");
+    }
   }
 
   /** The records in a type, itself and its nested types included. */

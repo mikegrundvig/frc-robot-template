@@ -213,6 +213,52 @@ class ParameterDocsProcessorTest {
             "robot.Plain.json");
   }
 
+  /**
+   * A compile with nothing marked (Gradle recompiling one changed file, say) still knows the
+   * option: no warning, which the robot's {@code -Werror} would make a failure, and no files.
+   */
+  @Test
+  void theOptionWithNothingMarkedIsQuiet() throws IOException {
+    var written =
+        documented(
+            """
+            package robot;
+
+            /** Marks configuration. */
+            public @interface Config {}
+
+            /** Not marked. */
+            record Plain(double d) {}
+            """,
+            "-Apitwall.docs.records=robot.Config");
+
+    assertThat(written).isEmpty();
+  }
+
+  @Test
+  void anOptionNamingNoAnnotationFailsSayingWhereToFixIt() throws IOException {
+    String source =
+        """
+        package robot;
+
+        /** Not an annotation. */
+        public record Plain(double d) {}
+        """;
+
+    for (String name : List.of("robot.Missing", "robot.Plain")) {
+      Compiled compiled = compile(source, "-Apitwall.docs.records=" + name);
+
+      assertThat(compiled.ok()).as(name).isFalse();
+      assertThat(compiled.messages()).as(name).hasSize(1);
+      assertThat(compiled.messages().get(0))
+          .startsWith(
+              "ERROR: -Apitwall.docs.records="
+                  + name
+                  + " names no annotation the compiler can find. Fix the name in build.gradle");
+      assertThat(compiled.written()).as(name).isEmpty();
+    }
+  }
+
   @Test
   void anUndocumentedRecordGetsNoFile() throws IOException {
     var written =
@@ -244,13 +290,30 @@ class ParameterDocsProcessorTest {
   }
 
   /**
+   * What compiling a source with the processor gave.
+   *
+   * @param ok whether it compiled
+   * @param messages the compiler's messages, each as {@code "ERROR: ..."}
+   * @param written what the processor wrote, each file by its name
+   */
+  private record Compiled(boolean ok, List<String> messages, Map<String, String> written) {}
+
+  /**
    * Compiles the source with the processor alone, as strictly as the robot program compiles (any
-   * warning fails it), and returns what the processor wrote, each file by its name.
+   * warning fails it), and returns what the processor wrote, checking that nothing went wrong.
    */
   private Map<String, String> documented(String source, String... options) throws IOException {
+    Compiled compiled = compile(source, options);
+    assertThat(compiled.ok()).as(compiled.messages().toString()).isTrue();
+    assertThat(compiled.messages()).isEmpty();
+    return compiled.written();
+  }
+
+  private Compiled compile(String source, String... options) throws IOException {
     JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
     var diagnostics = new DiagnosticCollector<JavaFileObject>();
     Path classes = Files.createTempDirectory(output, "classes");
+    boolean ok;
     try (StandardJavaFileManager files =
         compiler.getStandardFileManager(diagnostics, Locale.ROOT, UTF_8)) {
       files.setLocationFromPaths(StandardLocation.CLASS_OUTPUT, List.of(classes));
@@ -258,9 +321,12 @@ class ParameterDocsProcessorTest {
       arguments.addAll(List.of(options));
       var task = compiler.getTask(null, files, diagnostics, arguments, null, List.of(file(source)));
       task.setProcessors(List.of(new ParameterDocsProcessor()));
-      assertThat(task.call()).as(diagnostics.getDiagnostics().toString()).isTrue();
-      assertThat(diagnostics.getDiagnostics()).isEmpty();
+      ok = task.call();
     }
+    List<String> messages =
+        diagnostics.getDiagnostics().stream()
+            .map(message -> message.getKind() + ": " + message.getMessage(Locale.ROOT))
+            .toList();
     Map<String, String> written = new TreeMap<>();
     Path folder = classes.resolve(ParameterDocsProcessor.FOLDER);
     if (Files.isDirectory(folder)) {
@@ -270,12 +336,12 @@ class ParameterDocsProcessorTest {
         }
       }
     }
-    return written;
+    return new Compiled(ok, messages, written);
   }
 
   /** A source file in memory, named for its first public type as the compiler requires. */
   private static JavaFileObject file(String source) {
-    String name = source.replaceAll("(?s).*?public (record|final class) (\\w+).*", "$2");
+    String name = source.replaceAll("(?s).*?public (record|final class|@interface) (\\w+).*", "$2");
     return new SimpleJavaFileObject(
         URI.create("string:///robot/" + name + ".java"), JavaFileObject.Kind.SOURCE) {
       @Override

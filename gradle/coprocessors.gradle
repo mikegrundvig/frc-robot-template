@@ -40,6 +40,23 @@ tasks.named("check") {
     dependsOn checkLock
 }
 
+// The agent's runtime libraries, which the recipe hash covers (:coprocessor-agent's
+// runtimeLibraries writes them).
+def agentLibraries = file("coprocessor/agent/build/coprocessor/runtime-libraries.txt")
+
+// The recipe hash: what a coprocessor image is built from (coprocessor/README.md). The image
+// workflow runs this too, so the robot and the images compute it one way.
+//   ./gradlew coprocessorRecipeHash   prints it, and writes it to build/coprocessor/recipe-hash.txt
+tasks.register("coprocessorRecipeHash", JavaExec) { task ->
+    group = "build"
+    description = "Print the coprocessor image recipe's hash (build/coprocessor/recipe-hash.txt)."
+    coprocessorTool(task)
+    dependsOn ":coprocessor-agent:runtimeLibraries"
+    outputs.upToDateWhen { false }
+    args "recipe-hash", projectDir.absolutePath, agentLibraries.absolutePath,
+            layout.buildDirectory.file("coprocessor/recipe-hash.txt").get().asFile.absolutePath
+}
+
 // coprocessors/coprocessors.yaml, checked and compiled into the robot program as
 // /coprocessor/table.json (CompiledTable), with PhotonLib's version, the image recipe's hash, and
 // each computer's committed settings hash. It runs on every build: the recipe hash is of the
@@ -48,9 +65,11 @@ def coprocessorTable = tasks.register("coprocessorTable", JavaExec) { task ->
     group = "build"
     description = "Compile coprocessors/coprocessors.yaml into the robot program."
     coprocessorTool(task)
+    dependsOn ":coprocessor-agent:runtimeLibraries"
     def out = layout.buildDirectory.dir("generated/coprocessor")
     outputs.dir(out)
     outputs.upToDateWhen { false }
-    args "table", projectDir.absolutePath, out.get().file("coprocessor/table.json").asFile.absolutePath
+    args "table", projectDir.absolutePath, agentLibraries.absolutePath,
+            out.get().file("coprocessor/table.json").asFile.absolutePath
 }
 sourceSets.main.resources.srcDir(coprocessorTable)

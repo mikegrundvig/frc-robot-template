@@ -380,9 +380,10 @@ final class ConsistencyRuns {
    */
   record Setup(Spread spread, double noiseScale, EstimatorConfig.HeadingCorrection heading) {
     /**
-     * The simulated cameras' noise is about half what the 2026 noise model claims (the study, at a
-     * scale of 1, reads a position NEES near 0.7 where it reads near 2 at half): so half the model
-     * is the one that matches.
+     * Half the 2026 noise model, a little wider than the simulated cameras' noise: the study reads
+     * a position NEES of 1.0 to 2.0 on a calibrated robot at half, and 1.3 to 2.5 at a quarter
+     * (docs/testing.md). Half was the match while the simulator stamped its images up to a loop
+     * late, which added error of its own; it stays, so the studies before and since compare.
      */
     static final double MATCHED_NOISE_SCALE = 0.5;
 

@@ -1,8 +1,9 @@
 # The simulator
 
 `./gradlew run` runs the robot program on your laptop, in WPILib's simulation, with this template's
-simulated world (`frc.robot.sim`): a drivetrain that really moves, cameras that render what they'd
-see, and sensors that err as a season-worn robot's do. AdvantageScope shows the field.
+simulated world (`frc.robot.sim`): a drivetrain that really moves, as heavy as the robot's
+configuration says, cameras that render what they'd see, and sensors that err as a season-worn
+robot's do. AdvantageScope shows the field.
 
 Pitwall's page drives the simulator from its *Sim* view (http://localhost:5820/#sim): the Driver
 Station, joysticks from the keyboard or a gamepad, pausing and stepping, Stop, and failing the

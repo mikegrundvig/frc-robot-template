@@ -90,7 +90,8 @@ public final class DriveSimulation {
     planeFit(moduleLocations, planeFit);
     double radius = config.wheelRadius().in(Meters);
     for (int i = 0; i < 4; i++) {
-      // Each module's CANcoder sends on its own clock: here, a quarter of its period apart.
+      // Each module's CANcoder sends on its own clock: here a quarter period after the last, to the
+      // steering loop's millisecond (0, 2, 5 and 7 ms into its cycle, at 100 Hz).
       modules[i] =
           new ModuleIOSim(config, Math.toRadians(errors.steerOffsetDegrees().get(i)), i / 4.0);
       trueRadiusMeters[i] = radius * errors.wheelRadiusScale().get(i);

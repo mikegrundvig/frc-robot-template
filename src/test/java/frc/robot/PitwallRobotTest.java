@@ -37,9 +37,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.hardware.hal.HALUtil;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.simulation.DriverStationSim;
+import org.wpilib.simulation.SimHooks;
 import org.wpilib.tunable.TunableBoolean;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
@@ -138,6 +140,27 @@ class PitwallRobotTest {
 
     loops(10);
     assertThat(phase()).as("its 0.1 s wait is over").isEqualTo(Actions.Phase.ENDED);
+  }
+
+  /**
+   * On a robot, Pitwall has no simulator controls: nothing answers at their routes, so nothing can
+   * write the Driver Station's state. The Driver Station is the robot's safety switch.
+   */
+  @Test
+  void aRealRobotHasNoSimulatorControls() throws Exception {
+    pitwall.close();
+    SimHooks.setHALRuntimeType(HALUtil.RUNTIME_SYSTEMCORE);
+    try {
+      pitwall = Pitwall.start(Robots.SIM.name(), 0);
+
+      var enable = patch("/api/simulator", "{\"enabled\": true}");
+
+      assertThat(pitwall.simulator()).isEmpty();
+      assertThat(enable.statusCode()).isEqualTo(404);
+      assertThat(DriverStationSim.getEnabled()).isFalse();
+    } finally {
+      SimHooks.setHALRuntimeType(HALUtil.RUNTIME_SIMULATION);
+    }
   }
 
   /**

@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
 import com.michaelgrundvig.frc.pitwall.experiment.Trace;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +32,7 @@ public final class Page {
   private final Tuning tuning;
   private final TunableTee tunables;
   private final Experiments experiments;
+  private final @Nullable Simulator simulator;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
   private final String program = UUID.randomUUID().toString();
@@ -50,13 +52,29 @@ public final class Page {
   private Map<String, Object> rigSection = Map.of();
   private Map<String, Object> experimentSection = Map.of();
 
+  /** A robot's page: no simulator. */
   public Page(
       Status status, Actions actions, Tuning tuning, TunableTee tunables, Experiments experiments) {
+    this(status, actions, tuning, tunables, experiments, null);
+  }
+
+  /**
+   * @param simulator the simulator's controls, in the simulator; null on a robot, where the page
+   *     has none
+   */
+  public Page(
+      Status status,
+      Actions actions,
+      Tuning tuning,
+      TunableTee tunables,
+      Experiments experiments,
+      @Nullable Simulator simulator) {
     this.status = status;
     this.actions = actions;
     this.tuning = tuning;
     this.tunables = tunables;
     this.experiments = experiments;
+    this.simulator = simulator;
   }
 
   public Status status() {
@@ -79,6 +97,11 @@ public final class Page {
     return experiments;
   }
 
+  /** The simulator's controls; null on a robot. */
+  public @Nullable Simulator simulator() {
+    return simulator;
+  }
+
   /**
    * The page's state now, section by section. Call it from the robot loop.
    *
@@ -92,7 +115,10 @@ public final class Page {
    *       and {@code /api/changes} give them;
    *   <li>{@code wpilibTunables}: every other WPILib tunable, by path;
    *   <li>{@code rigs}, {@code experiments}: what can be run;
-   *   <li>{@code run}: the run in progress, or the latest to end.
+   *   <li>{@code run}: the run in progress, or the latest to end;
+   *   <li>in the simulator only, {@code simulator} (the Driver Station, the clock, and the
+   *       joysticks the page drives), {@code components} (what can fail, and how), and {@code
+   *       scenarios}: see {@link Simulator#view}.
    * </ul>
    */
   public Map<String, Map<String, Object>> sections() {
@@ -112,6 +138,9 @@ public final class Page {
     sections.put("experiments", experimentSection);
     Run run = experiments.run();
     sections.put("run", run == null ? Map.of() : run(run));
+    if (simulator != null) {
+      sections.putAll(simulator.view());
+    }
     return sections;
   }
 

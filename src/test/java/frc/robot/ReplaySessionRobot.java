@@ -1,28 +1,32 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
+import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
+import org.wpilib.driverstation.Joystick;
 import org.wpilib.framework.RobotBase;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
-import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
 
 /**
  * The template's robot program with a scripted session on top, for {@link ReplayEndToEndTest}. In
- * the simulator it changes things the way people do in the pit: it picks the red alliance's station
- * 1 (which puts the robot on that start), enables utility mode, changes a configuration gain from
- * Pitwall's page (over HTTP), changes a WPILib tunable, runs an action that drives the robot under
- * a trench, and runs the steering's experiment, keeping it going as the page would. It records what
- * those affect, then stops. Replayed, it only records, and the replay must match.
+ * the simulator it changes things the way people do in the pit, through Pitwall's page: it picks
+ * the red alliance's station 1 (which puts the robot on that start) and enables utility mode from
+ * the simulator's controls, pushes the operator's stick from the page, changes a configuration gain
+ * (over HTTP), changes a WPILib tunable, runs an action that drives the robot under a trench, and
+ * runs the steering's experiment, keeping it going as the page would. It records what those affect,
+ * then stops. Replayed, it only records, and the replay must match.
  */
 final class ReplaySessionRobot extends Robot {
   /** How many loops the recorded session runs, about five and a half seconds. */
@@ -32,6 +36,10 @@ final class ReplaySessionRobot extends Robot {
 
   private final TunableDouble gain = TunableDouble.create(1.0);
   private final HttpClient http = HttpClient.newHttpClient();
+
+  /** The operator's joystick, which the page drives for a moment. */
+  private final Joystick operator = new Joystick(1);
+
   private int loop;
 
   ReplaySessionRobot() {
@@ -55,6 +63,8 @@ final class ReplaySessionRobot extends Robot {
     }
     super.robotPeriodic();
     Logger.recordOutput("Session/Gain", gain.get());
+    Logger.recordOutput(
+        "Session/Operator", operator.getHID().getAxesAvailable() > 0 ? operator.getRawAxis(0) : 0);
     Logger.recordOutput("Session/SteerKp", container().drivetrainTuning().get().gains().steerKp());
     Logger.recordOutput("Session/Action", pitwall().actions().view().get(0).phase().name());
     Run run = pitwall().experiments().run();
@@ -71,19 +81,25 @@ final class ReplaySessionRobot extends Robot {
                 .orElseThrow());
   }
 
+  private Simulator simulator() {
+    return pitwall().simulator().orElseThrow();
+  }
+
   /** The session, by loop: in a replay none of this runs, and the log supplies it instead. */
   private void script(int loop) {
     switch (loop) {
-      case 5 -> {
-        DriverStationSim.setAllianceStationId(AllianceStationID.RED_1);
-        DriverStationSim.notifyNewData();
-      }
-      case 10 -> {
-        DriverStationSim.setDsAttached(true);
-        DriverStationSim.setRobotMode(RobotMode.UTILITY);
-        DriverStationSim.setEnabled(true);
-        DriverStationSim.notifyNewData();
-      }
+      // The simulator's controls, as the page's Sim view uses them: applied by this loop's Pitwall.
+      case 5 ->
+          simulator()
+              .requestDriverStation(
+                  station -> station.withAllianceStation(AllianceStationID.RED_1));
+      case 10 ->
+          simulator()
+              .requestDriverStation(
+                  station -> station.withMode(RobotMode.UTILITY).withEnabled(true));
+      case 15 ->
+          simulator().joystick(1, new JoystickInput(List.of(0.5), List.of(), List.of()), null);
+      case 25 -> simulator().joystick(1, null, null); // let go
       case 20 ->
           http.sendAsync(
               HttpRequest.newBuilder(

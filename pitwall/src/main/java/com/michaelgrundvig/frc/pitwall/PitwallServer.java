@@ -5,6 +5,9 @@ import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import com.michaelgrundvig.frc.pitwall.push.Event;
 import com.michaelgrundvig.frc.pitwall.push.Stream;
+import com.michaelgrundvig.frc.pitwall.simulator.DriverStationState;
+import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.avaje.json.JsonException;
@@ -34,7 +37,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
+import org.wpilib.hardware.hal.AllianceStationID;
+import org.wpilib.hardware.hal.RobotMode;
 
 /**
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
@@ -77,6 +83,23 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@code POST /api/heartbeat}: nothing, but it keeps a run going: while an experiment runs,
  *       the page that started it sends a request at least every 500 ms (the deadman), naming its
  *       event stream in the {@code Pitwall-Stream} header, as it does with every request.
+ * </ul>
+ *
+ * <p>In the simulator only, the simulator's controls ({@link Simulator}); on a robot every one of
+ * these is 404, so nothing can write the Driver Station's state there. They are exempt from the
+ * field lock: in the simulator, they are the field. See docs/simulator.md for the details.
+ *
+ * <ul>
+ *   <li>{@code GET /api/simulator}: {@code {"simulator"}}, as the event stream's sections of those
+ *       names carry them. {@code PATCH} it with any of {@code "enabled"}, {@code "mode"} ({@code
+ *       "AUTONOMOUS"}, {@code "TELEOPERATED"}, {@code "UTILITY"}), {@code "allianceStation"}
+ *       ({@code "RED_1"} to {@code "BLUE_3"}, or {@code "UNKNOWN"}), {@code "fmsAttached"}, {@code
+ *       "dsAttached"}, {@code "matchTime"} (seconds, or null for none), and {@code "paused"}.
+ *   <li>{@code POST /api/simulator/step}: one loop of a paused simulator; 409 while it runs.
+ *   <li>{@code POST /api/simulator/stop}: ends the program, as closing the GUI's window did.
+ *   <li>{@code PUT /api/simulator/joysticks}: {@code {"0": {"axes": [...], "buttons": [...],
+ *       "povs": [...]}, "1": null}}, each joystick's whole input (null lets it go), at most once a
+ *       frame and again every 200 ms while anything is pressed; 204 at once.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
@@ -284,8 +307,18 @@ public final class PitwallServer implements AutoCloseable {
     }
   }
 
+  /** The simulator's routes, which a robot doesn't have. */
+  private static final String SIMULATOR = "/api/simulator";
+
   /** The page, and the resources of the API. */
   private static final class Api {
+    /** The modes the page may choose: a Driver Station's, not "no mode". */
+    private static final Set<RobotMode> MODES =
+        Set.of(RobotMode.AUTONOMOUS, RobotMode.TELEOPERATED, RobotMode.UTILITY);
+
+    /** The longest match time the page may set: a match is 2 min 30 s. */
+    private static final double MAX_MATCH_SECONDS = 600;
+
     private static final Map<String, List<String>> METHODS =
         Map.ofEntries(
             Map.entry("/", List.of("GET")),
@@ -300,6 +333,10 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/experiments", List.of("GET", "POST")),
             Map.entry("/api/run", List.of("GET")),
             Map.entry("/api/heartbeat", List.of("POST")),
+            Map.entry("/api/simulator", List.of("GET", "PATCH")),
+            Map.entry("/api/simulator/step", List.of("POST")),
+            Map.entry("/api/simulator/stop", List.of("POST")),
+            Map.entry("/api/simulator/joysticks", List.of("PUT")),
             Map.entry("/uPlot.iife.min.js", List.of("GET")),
             Map.entry("/uPlot.min.css", List.of("GET")));
 
@@ -342,6 +379,10 @@ public final class PitwallServer implements AutoCloseable {
         String method = exchange.getRequestMethod();
         try {
           checkAddressed(exchange, method);
+          if (path.startsWith(SIMULATOR) && state.simulator() == null) {
+            throw new Problem(
+                404, "Not found", "There is no simulator here: a robot has no simulator controls");
+          }
           List<String> allowed = METHODS.get(path);
           if (allowed == null) {
             throw new Problem(404, "Not found", "There is nothing at " + path);
@@ -372,6 +413,12 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/experiments" -> postExperiment(exchange);
             case "GET /api/run" -> sendJson(exchange, 200, run(true));
             case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
+            case "GET /api/simulator" -> sendJson(exchange, 200, simulatorView());
+            case "PATCH /api/simulator" -> patchSimulator(exchange);
+            case "POST /api/simulator/step" ->
+                answer(exchange, simulator().step(), this::simulatorState);
+            case "POST /api/simulator/stop" -> stopSimulator(exchange);
+            case "PUT /api/simulator/joysticks" -> putJoysticks(exchange);
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
             default -> throw new IllegalStateException("unrouted: " + method + " " + path);
           }
@@ -633,6 +680,228 @@ public final class PitwallServer implements AutoCloseable {
         values.put(field.getKey(), value);
       }
       answer(exchange, tunables.requestChanges(values), this::wpilibTunables);
+    }
+
+    /** The simulator's controls: there are none on a robot, and their routes are 404 there. */
+    private Simulator simulator() {
+      Simulator simulator = state.simulator();
+      if (simulator == null) {
+        throw new Problem(404, "Not found", "There is no simulator here");
+      }
+      return simulator;
+    }
+
+    /**
+     * The simulator as the next loop shows it; while paused, when no loop comes, as the last loop
+     * left it.
+     */
+    private Map<String, Map<String, Object>> simulatorView() {
+      Simulator simulator = simulator();
+      try {
+        return simulator.requestView().get(wait.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (TimeoutException | ExecutionException e) {
+        return simulator.lastView();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new Problem(503, "Interrupted", "The server stopped waiting for the robot loop");
+      }
+    }
+
+    private Object simulatorState() {
+      return simulator().lastView().getOrDefault("simulator", Map.of());
+    }
+
+    /**
+     * Changes the Driver Station's state, all in one loop, in the order given; resumes the clock at
+     * once, or pauses it once the rest is applied.
+     */
+    private void patchSimulator(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Map<String, @Nullable Object> patch = readObject(exchange);
+      UnaryOperator<DriverStationState> change = null;
+      Boolean paused = null;
+      for (Map.Entry<String, @Nullable Object> field : patch.entrySet()) {
+        String name = field.getKey();
+        Object value = field.getValue();
+        UnaryOperator<DriverStationState> next =
+            switch (name) {
+              case "enabled" -> {
+                boolean enabled = bool(name, value);
+                yield station -> station.withEnabled(enabled);
+              }
+              case "mode" -> {
+                RobotMode mode = named(name, value, RobotMode.class, MODES);
+                yield station -> station.withMode(mode);
+              }
+              case "allianceStation" -> {
+                AllianceStationID at =
+                    named(name, value, AllianceStationID.class, Set.of(AllianceStationID.values()));
+                yield station -> station.withAllianceStation(at);
+              }
+              case "fmsAttached" -> {
+                boolean attached = bool(name, value);
+                yield station -> station.withFmsAttached(attached);
+              }
+              case "dsAttached" -> {
+                boolean attached = bool(name, value);
+                yield station -> station.withDsAttached(attached);
+              }
+              case "matchTime" -> {
+                double seconds = value == null ? -1 : matchTime(value);
+                yield station -> station.withMatchTime(seconds);
+              }
+              case "paused" -> {
+                paused = bool(name, value);
+                yield null;
+              }
+              default ->
+                  throw new Problem(
+                      422,
+                      "Not changeable",
+                      name
+                          + " isn't the simulator's to change: enabled, mode, allianceStation,"
+                          + " fmsAttached, dsAttached, matchTime, or paused");
+            };
+        if (next != null) {
+          UnaryOperator<DriverStationState> before = change;
+          change = before == null ? next : station -> next.apply(before.apply(station));
+        }
+      }
+      CompletableFuture<Outcome> pending = null;
+      if (Boolean.FALSE.equals(paused)) {
+        pending = simulator.resume(); // now: a paused clock runs no loop to do it
+      }
+      if (change != null) {
+        pending = simulator.requestDriverStation(change);
+      }
+      if (Boolean.TRUE.equals(paused)) {
+        pending = simulator.requestPause(); // once the rest is applied, in the same loop
+      }
+      if (pending == null) {
+        sendJson(exchange, 200, simulatorState()); // an empty patch changes nothing
+        return;
+      }
+      answer(exchange, pending, this::simulatorState);
+    }
+
+    /** Says it's stopping, then has the loop stop the program: the answer goes out first. */
+    private void stopSimulator(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      sendJson(exchange, 202, Map.of("detail", "Stopping the simulator"));
+      simulator.stop();
+    }
+
+    /** Hands each joystick's input to the robot loop, which takes the latest. */
+    private void putJoysticks(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Map<String, @Nullable Object> body = readObject(exchange);
+      Map<Integer, @Nullable JoystickInput> inputs = new LinkedHashMap<>();
+      for (Map.Entry<String, @Nullable Object> joystick : body.entrySet()) {
+        int port = port(joystick.getKey());
+        Object value = joystick.getValue();
+        if (value == null) {
+          inputs.put(port, null);
+        } else if (value instanceof Map<?, ?> input) {
+          inputs.put(port, joystickInput(port, input));
+        } else {
+          throw new Problem(
+              400, "Not a joystick's input", "Send {\"axes\", \"buttons\", \"povs\"}, or null");
+        }
+      }
+      String stream = exchange.getRequestHeaders().getFirst(STREAM);
+      inputs.forEach((port, input) -> simulator.joystick(port, input, stream));
+      send(exchange, 204, "text/plain", "");
+    }
+
+    private static boolean bool(String name, @Nullable Object value) {
+      if (!(value instanceof Boolean bool)) {
+        throw new Problem(400, "Not true or false", name + " must be true or false");
+      }
+      return bool;
+    }
+
+    /** One of an enum's names, among those allowed. */
+    private static <E extends Enum<E>> E named(
+        String name, @Nullable Object value, Class<E> type, Set<E> allowed) {
+      for (E each : allowed) {
+        if (each.name().equals(value)) {
+          return each;
+        }
+      }
+      throw new Problem(
+          400,
+          "Not a " + name,
+          name
+              + " is one of "
+              + String.join(", ", allowed.stream().map(Enum::name).sorted().toList())
+              + ", not "
+              + value);
+    }
+
+    private static double matchTime(Object value) {
+      if (!(value instanceof Number number)
+          || !(number.doubleValue() >= 0 && number.doubleValue() <= MAX_MATCH_SECONDS)) {
+        throw new Problem(
+            400,
+            "Not a match time",
+            "matchTime is seconds from 0 to " + MAX_MATCH_SECONDS + ", or null for none");
+      }
+      return number.doubleValue();
+    }
+
+    private static int port(String name) {
+      for (int port = 0; port < Simulator.JOYSTICKS; port++) {
+        if (name.equals(Integer.toString(port))) {
+          return port;
+        }
+      }
+      throw new Problem(
+          422,
+          "Not a joystick",
+          "The page drives joysticks 0 to " + (Simulator.JOYSTICKS - 1) + ", not " + name);
+    }
+
+    private static JoystickInput joystickInput(int port, Map<?, ?> input) {
+      if (!Set.of("axes", "buttons", "povs").containsAll(input.keySet())) {
+        throw new Problem(
+            400, "Not a joystick's input", "A joystick's input is its axes, buttons, and povs");
+      }
+      List<Double> axes = new ArrayList<>();
+      List<Boolean> buttons = new ArrayList<>();
+      List<Integer> povs = new ArrayList<>();
+      for (Object axis : list(input.get("axes"))) {
+        if (!(axis instanceof Number number)) {
+          throw new Problem(400, "Not a joystick's input", "Each axis is a number");
+        }
+        axes.add(number.doubleValue());
+      }
+      for (Object button : list(input.get("buttons"))) {
+        if (!(button instanceof Boolean pressed)) {
+          throw new Problem(400, "Not a joystick's input", "Each button is true or false");
+        }
+        buttons.add(pressed);
+      }
+      for (Object pov : list(input.get("povs"))) {
+        if (!(pov instanceof Number number) || number.doubleValue() != number.intValue()) {
+          throw new Problem(400, "Not a joystick's input", "Each POV is a whole number of degrees");
+        }
+        povs.add(number.intValue());
+      }
+      String why = JoystickInput.whyNot(axes, buttons, povs);
+      if (why != null) {
+        throw new Problem(400, "Not a joystick's input", "Joystick " + port + ": " + why);
+      }
+      return new JoystickInput(axes, buttons, povs);
+    }
+
+    private static List<?> list(@Nullable Object value) {
+      if (value == null) {
+        return List.of();
+      }
+      if (!(value instanceof List<?> list)) {
+        throw new Problem(400, "Not a joystick's input", "axes, buttons, and povs are lists");
+      }
+      return list;
     }
 
     private void getChanges(HttpExchange exchange) throws IOException {

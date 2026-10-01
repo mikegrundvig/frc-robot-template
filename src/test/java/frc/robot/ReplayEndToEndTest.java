@@ -25,7 +25,8 @@ import org.wpilib.datalog.DataLogRecord;
 
 /**
  * AdvantageKit replay, end to end, with Pitwall in the loop. The real robot program records a
- * session in the simulator ({@link ReplaySessionRobot}): a tuning change from Pitwall's page, a
+ * session in the simulator ({@link ReplaySessionRobot}): the Driver Station set from the
+ * simulator's controls and a joystick driven from the page, a tuning change from Pitwall's page, a
  * WPILib tunable changed through Pitwall's tee, an action started from the page, which drives the
  * robot, and an experiment on the steering, scored from its trace. Then it replays its own log.
  * Every output the session recorded must come out of the replay the same, at the same moments,
@@ -42,6 +43,7 @@ class ReplayEndToEndTest {
   private static final List<String> OUTPUTS =
       List.of(
           "Session/Gain",
+          "Session/Operator",
           "Session/SteerKp",
           "Session/Action",
           "Session/Experiment",
@@ -75,6 +77,7 @@ class ReplayEndToEndTest {
 
     // The session happened: each change took effect while recording.
     assertThat(values(original, "Session/Gain")).contains(1.0, 2.5);
+    assertThat(values(original, "Session/Operator")).as("the page's stick").contains(0.0, 0.5);
     assertThat(values(original, "Session/SteerKp")).contains(16.0, 18.5);
     assertThat(values(original, "Session/Action")).contains("READY", "RUNNING", "ENDED");
     assertThat(values(original, "Session/Experiment")).contains("NONE", "RUNNING", "ENDED");

@@ -34,6 +34,10 @@ for a debugger before it starts, and takes one from any device on the robot's ne
 debugger attaches, the robot does nothing, and after a brownout or a power cycle it waits again.
 When you're done, deploy again without `-PdebugMode`, and never take a debug deploy onto the field.
 
+Gradle's configuration cache is off until GradleRIO supports it. Turn it on for yourself with
+`--configuration-cache` (`./gradlew ci --configuration-cache`), for anything but GradleRIO's own
+tasks (`run`, `deploy`, `vendordep`), which fail with it.
+
 ## IntelliJ IDEA
 
 1. **File > Open**, choose the repository folder, and trust the project when asked. IntelliJ reads

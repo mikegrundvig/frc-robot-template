@@ -66,10 +66,28 @@ class PoseEstimatorTest {
               when,
               pose,
               noise,
+              Translation2d.ZERO,
               "front",
               List.of(26),
               VisionMeasurement.Solver.HEADING_CONSTRAINED));
       return estimator.update();
+    }
+
+    /**
+     * A position solved with the gyro's heading, from tags this far from the robot on the field,
+     * taken now.
+     */
+    VisionDecision seeLeaning(Pose2d pose, Translation2d robotToTags, double stdDev) {
+      estimator.addVision(
+          new VisionMeasurement(
+              time,
+              pose,
+              position(stdDev),
+              robotToTags,
+              "front",
+              List.of(26),
+              VisionMeasurement.Solver.HEADING_CONSTRAINED));
+      return estimator.update().get(0);
     }
 
     /** A camera measurement with heading, from several tags, taken now. */
@@ -79,6 +97,7 @@ class PoseEstimatorTest {
               time,
               pose,
               PoseCovariance.fromStdDevs(0.05, 0.05, Math.toRadians(2)),
+              Translation2d.ZERO,
               "front",
               List.of(25, 26),
               VisionMeasurement.Solver.MULTI_TAG));
@@ -253,7 +272,13 @@ class PoseEstimatorTest {
 
     estimator.addVision(
         new VisionMeasurement(
-            5, START, position(0.05), "front", List.of(1), VisionMeasurement.Solver.MULTI_TAG));
+            5,
+            START,
+            position(0.05),
+            Translation2d.ZERO,
+            "front",
+            List.of(1),
+            VisionMeasurement.Solver.MULTI_TAG));
 
     assertThat(estimator.update().get(0).reason()).isEqualTo("before odometry started");
     assertThat(estimator.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.INITIALIZING);
@@ -286,6 +311,72 @@ class PoseEstimatorTest {
 
     assertSame(robot.pose(), START, 1e-9);
     assertThat(robot.estimate().health().recoveries()).isZero();
+  }
+
+  /**
+   * A position solved with the gyro's heading is off by the heading's error times the distance to
+   * its tags, square to them: with the heading unsure by 0.02 rad and tags 3 m ahead (along x), the
+   * fix may be 6 cm off along y on top of its own noise. So it pulls the estimate less along y than
+   * a fix that doesn't lean on the heading, and as much along x.
+   */
+  @Test
+  void aFixThatLeansOnAnUnsureHeadingCountsForLessSquareToItsTags() {
+    Robot leaning = new Robot().drive(1, 0, 0, 0);
+    Robot upright = new Robot().drive(1, 0, 0, 0);
+    Pose2d off = new Pose2d(START.getX() + 0.05, START.getY() + 0.05, Rotation2d.ZERO);
+
+    leaning.seeLeaning(off, new Translation2d(3, 0), 0.05);
+    upright.seeLeaning(off, Translation2d.ZERO, 0.05);
+
+    // Placed to 5 cm, the fix 5 cm: halfway along x for both. Along y the leaning one's spread is
+    // hypot(5, 6) cm, so it moves the estimate 25 / (25 + 25 + 36) of the way.
+    assertThat(leaning.pose().getX() - START.getX()).isCloseTo(0.025, within(1e-4));
+    assertThat(upright.pose().getX() - START.getX()).isCloseTo(0.025, within(1e-4));
+    assertThat(upright.pose().getY() - START.getY()).isCloseTo(0.025, within(1e-4));
+    assertThat(leaning.pose().getY() - START.getY()).isCloseTo(0.05 * 25 / 86, within(1e-4));
+  }
+
+  /**
+   * Driving with an unsure heading ties the position's error to the heading's, but a position fix
+   * still never turns the heading, nor makes it surer: that's the gyro's, and the measurements with
+   * a heading of their own.
+   */
+  @Test
+  void aPositionFixNeverTurnsTheHeading() {
+    Robot robot = new Robot().drive(500, 1.0, 0, 0); // 2 m ahead, the heading unsure by 0.02 rad
+    Rotation2d heading = robot.pose().getRotation();
+    double headingStdDev = robot.estimate().covariance().headingStdDev();
+
+    Pose2d aside = new Pose2d(robot.pose().getX(), robot.pose().getY() + 0.05, Rotation2d.ZERO);
+    VisionDecision decision = robot.seeLeaning(aside, new Translation2d(2, 1), 0.03);
+
+    assertThat(decision.accepted()).isTrue();
+    assertThat(robot.pose().getY()).as("the position moved").isGreaterThan(START.getY() + 0.01);
+    assertThat(robot.pose().getRotation()).isEqualTo(heading);
+    assertThat(robot.estimate().covariance().headingStdDev()).isEqualTo(headingStdDev);
+  }
+
+  /**
+   * Standing still, a thousand fixes from tags 3 m ahead, each 5 cm unsure: along the tags they
+   * average down to millimeters, but square to them each is off by the heading's error times 3 m,
+   * the same in every one, and no number of them can know the position better than that. (Placed
+   * only roughly, so the placement adds nothing that does.)
+   */
+  @Test
+  void manyFixesCantMakeThePositionSurerThanTheHeadingAllows() {
+    PoseReset rough = new PoseReset(T0, START, PoseCovariance.fromStdDevs(1, 1, 0.02), "rough");
+    Robot robot = new Robot(EstimatorConfig.DEFAULTS, rough);
+    robot.estimator.reset(rough);
+    robot.drive(1, 0, 0, 0);
+
+    for (int i = 0; i < 1000; i++) {
+      robot.drive(1, 0, 0, 0).seeLeaning(START, new Translation2d(3, 0), 0.05);
+    }
+
+    PoseCovariance covariance = robot.estimate().covariance();
+    double lever = 3 * covariance.headingStdDev(); // 6 cm
+    assertThat(covariance.xStdDev()).as("along the tags").isLessThan(0.002);
+    assertThat(covariance.yStdDev()).as("square to them").isCloseTo(lever, within(0.02 * lever));
   }
 
   @Test
@@ -325,6 +416,7 @@ class PoseEstimatorTest {
             T0 + STEP,
             START,
             position(0.05),
+            Translation2d.ZERO,
             "front",
             List.of(26),
             VisionMeasurement.Solver.MULTI_TAG));

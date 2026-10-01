@@ -2,6 +2,7 @@ package frc.robot.lib.localization;
 
 import java.util.List;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Translation2d;
 
 /**
  * A robot pose worked out from a camera's view of AprilTags, ready for the estimator: where the
@@ -13,6 +14,13 @@ import org.wpilib.math.geometry.Pose2d;
  * @param pose the robot's pose on the field
  * @param covariance its uncertainty. A solve that took its heading from the gyro says nothing new
  *     about heading, so its heading variance is infinite.
+ * @param robotToTags from the robot's center to the tags its position was solved from, on the
+ *     field: their middle, weighted as the solve weighed them. A position solved with the gyro's
+ *     heading placed the robot by turning its view of the tags by that heading, so a heading off by
+ *     an angle puts the position off by that angle times this, square to it, the same way in every
+ *     image: the estimator carries that in the measurement's uncertainty. Zero for a solve that
+ *     found its own heading (multi-tag, single tag, external), whose position doesn't lean on the
+ *     gyro's.
  * @param camera which camera
  * @param tagIds the tags it used
  * @param solver how it was solved
@@ -21,6 +29,7 @@ public record VisionMeasurement(
     long timestampNanos,
     Pose2d pose,
     PoseCovariance covariance,
+    Translation2d robotToTags,
     String camera,
     List<Integer> tagIds,
     Solver solver) {
@@ -45,6 +54,9 @@ public record VisionMeasurement(
     }
     if (tagIds.isEmpty()) {
       throw new IllegalArgumentException("a vision measurement comes from at least one tag");
+    }
+    if (!Double.isFinite(robotToTags.getX()) || !Double.isFinite(robotToTags.getY())) {
+      throw new IllegalArgumentException("the robot's offset to its tags: " + robotToTags);
     }
     tagIds = List.copyOf(tagIds);
   }

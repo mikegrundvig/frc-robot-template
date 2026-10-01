@@ -66,9 +66,22 @@ public final class Tuning {
    * @param limits the range it may be tuned in
    * @param committed its committed value
    * @param current its value now
+   * @param record the display name of the record that declares it, such as {@code
+   *     SwerveConfig.Gains}
+   * @param group the path of that record in the configuration, such as {@code gains}; empty at the
+   *     root
+   * @param meaning what it means, its {@code @param} there; empty when there's none
    */
   public record Value(
-      String path, String field, String unit, Limits limits, double committed, double current) {}
+      String path,
+      String field,
+      String unit,
+      Limits limits,
+      double committed,
+      double current,
+      String record,
+      String group,
+      String meaning) {}
 
   /** A request from the page, waiting for the robot loop. */
   private record Request(TuningInputs.Kind kind, CompletableFuture<Outcome> outcome) {}
@@ -281,9 +294,11 @@ public final class Tuning {
     List<ConfigView> views = new ArrayList<>();
     for (LiveConfig<?> config : configs.get()) {
       List<Value> values = new ArrayList<>();
+      LiveConfig.Documentation docs = config.documentation(); // read when it was published
       for (LiveConfig.Knob knob : config.knobs()) {
         String path = paths.pathOf(config, knob.path());
         if (path != null) {
+          LiveConfig.Documentation.Value doc = docs.value(knob.path());
           values.add(
               new Value(
                   path,
@@ -291,7 +306,10 @@ public final class Tuning {
                   knob.unit(),
                   knob.limits(),
                   config.committedValue(knob.path()),
-                  config.value(knob.path())));
+                  config.value(knob.path()),
+                  doc.record(),
+                  doc.group(),
+                  doc.meaning()));
         }
       }
       views.add(new ConfigView(config.name(), List.copyOf(values), config.changes()));

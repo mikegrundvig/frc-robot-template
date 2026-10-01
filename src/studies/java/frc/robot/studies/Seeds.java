@@ -4,6 +4,12 @@ package frc.robot.studies;
  * Seeds made from numbers, so each random draw in a study depends only on what it's for (the run's
  * seed, a pose, a camera), never on the order work happens in. The same numbers give the same seed
  * on every computer.
+ *
+ * <p>One step of mixing depends on the seed and the number only through their sum, so {@code mix(1,
+ * 2)} is {@code mix(2, 1)}, and {@code mix(s, t + 1)} is {@code mix(s + 1, t)}. Numbers mixed in
+ * after the first are mixed into a seed already scrambled, so their order matters. Where a run's
+ * seed and a count must stay apart (the robustness trials), mix the seed with a constant of its own
+ * first.
  */
 final class Seeds {
   private Seeds() {}

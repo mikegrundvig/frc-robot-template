@@ -1,0 +1,49 @@
+// Pitwall's documentation processor: an annotation processor that reads the configuration records'
+// Javadoc as the robot program compiles, and writes each record's into the jar, where Pitwall's
+// ParameterDocs finds it. So the page can say what a value means, from the text students already
+// write, without the source.
+//
+// It runs inside the compiler, never on the robot, so it depends on nothing but Java: the robot's
+// build adds it with annotationProcessor, and nothing of it reaches the robot program.
+
+plugins {
+    id "java-library"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+// Named for what it would be published as, beside Pitwall's own jar.
+base {
+    archivesName = "pitwall-docs-processor"
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly libs.jspecify // annotations the compiler checks; nothing at run time
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    testImplementation libs.archunit
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.pitwall.docs"
+apply from: rootProject.file("gradle/quality.gradle")

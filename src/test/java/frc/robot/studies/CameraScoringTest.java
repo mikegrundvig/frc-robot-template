@@ -11,10 +11,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.Robots;
+import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.VisionMeasurement;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 
@@ -29,8 +34,18 @@ class CameraScoringTest {
 
   private static List<Score> ranking(
       CameraStudyConfig config, List<Sample> samples, Candidate... candidates) {
+    return ranking(config, false, samples, candidates);
+  }
+
+  /**
+   * @param trial in a robustness trial's conditions (every error drawn, each camera off its mount),
+   *     rather than the nominal ones
+   */
+  private static List<Score> ranking(
+      CameraStudyConfig config, boolean trial, List<Sample> samples, Candidate... candidates) {
+    Conditions conditions = trial ? Conditions.trial(config, 0) : Conditions.nominal(config);
     return new CameraScoring(Robots.SIM, WALL, List.of(candidates), config)
-        .score(samples, Conditions.nominal(config), done -> {})
+        .score(samples, conditions, done -> {})
         .ranking();
   }
 
@@ -110,6 +125,114 @@ class CameraScoringTest {
     assertThat(off).isGreaterThan(exact + 0.02);
   }
 
+  /**
+   * Losing either of two cameras facing opposite ways leaves the robot blind half the time; losing
+   * either of two facing the same tags leaves it seeing them. A lone camera lost leaves nothing.
+   */
+  @Test
+  void losingAnyOneCamera() {
+    Candidate pair =
+        new Candidate(
+            "a pair",
+            List.of(StudyFixtures.camera("left", 0.3, 5), StudyFixtures.camera("right", 0.3, -5)));
+    List<Score> ranking =
+        ranking(ONE_THREAD, List.of(FACING_THE_WALL, FACING_AWAY), AHEAD, AHEAD_AND_BACK, pair);
+
+    assertThat(only(ranking, AHEAD_AND_BACK).oneLost())
+        .as("blind half the time either way")
+        .isEqualTo(new Score.OneLost(Double.POSITIVE_INFINITY, 0.5));
+    assertThat(only(ranking, AHEAD).oneLost()).isEqualTo(Score.OneLost.NOTHING_LEFT);
+    Score.OneLost twoAhead =
+        Objects.requireNonNull(
+            only(ranking(ONE_THREAD, List.of(FACING_THE_WALL), pair), pair).oneLost());
+    assertThat(twoAhead.measured()).isEqualTo(1.0);
+    assertThat(twoAhead.p95Meters()).isFinite().isGreaterThan(0);
+  }
+
+  /**
+   * A layout's one-lost score is the worst of its sets less one camera, each scored as it would be
+   * as a layout of its own: a pair's is the worse of its two cameras alone; a triple's, the worst
+   * of its three pairs. The triple's pairs other than {left, right} aren't layouts, so they're
+   * scored apart.
+   */
+  @Test
+  void oneLostIsTheWorstOfTheLayoutsLessOneCamera() {
+    CameraConfig left = StudyFixtures.camera("left", 0.3, 20);
+    CameraConfig right = StudyFixtures.camera("right", 0.3, -20);
+    CameraConfig back = StudyFixtures.camera("back", -0.3, 180);
+    Candidate leftAlone = new Candidate("left", List.of(left));
+    Candidate rightAlone = new Candidate("right", List.of(right));
+    Candidate both = new Candidate("both", List.of(left, right));
+    Candidate three = new Candidate("three", List.of(left, right, back));
+    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    CameraScoring scoring =
+        new CameraScoring(
+            Robots.SIM, WALL, List.of(leftAlone, rightAlone, both, three), ONE_THREAD);
+
+    CameraScoring.Result result =
+        scoring.score(samples, Conditions.nominal(ONE_THREAD), done -> {});
+
+    Score one = only(result.ranking(), leftAlone);
+    Score other = only(result.ranking(), rightAlone);
+    assertThat(only(result.ranking(), both).oneLost())
+        .isEqualTo(
+            new Score.OneLost(
+                Math.max(one.positionP95Meters(), other.positionP95Meters()),
+                Math.min(one.measured(), other.measured())));
+    List<Score> pairs =
+        ranking(
+            ONE_THREAD,
+            samples,
+            both,
+            new Candidate("left and back", List.of(left, back)),
+            new Candidate("right and back", List.of(right, back)));
+    assertThat(only(result.ranking(), three).oneLost())
+        .isEqualTo(
+            new Score.OneLost(
+                pairs.stream().mapToDouble(Score::positionP95Meters).max().orElseThrow(),
+                pairs.stream().mapToDouble(Score::measured).min().orElseThrow()));
+    assertThat(result.scoredApart()).as("left and back, right and back").isEqualTo(2);
+  }
+
+  private static Score only(List<Score> ranking, Candidate candidate) {
+    return ranking.stream()
+        .filter(score -> score.candidate().equals(candidate))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  /**
+   * Facing the wall, with five other robots around, placed anew for each of 16 sets of images: some
+   * stand between the camera and the wall, and the score changes.
+   */
+  @Test
+  void otherRobotsInTheWayChangeTheScoreFacingTheWall() {
+    CameraStudyConfig often = CameraStudyConfigBuilder.builder(ONE_THREAD).frames(16).build();
+    CameraStudyConfig crowded =
+        CameraStudyConfigBuilder.builder(often).otherRobotsLeast(5).otherRobotsMost(5).build();
+
+    Score clear = ranking(often, List.of(FACING_THE_WALL), AHEAD).get(0);
+    Score crowd = ranking(crowded, List.of(FACING_THE_WALL), AHEAD).get(0);
+
+    assertThat(clear.oneTag()).isEqualTo(1.0);
+    assertThat(crowd).isNotEqualTo(clear);
+    assertThat(crowd.twoTags()).isLessThan(clear.twoTags());
+  }
+
+  /** Over the whole field, too: five other robots cost the robot some of its view. */
+  @Test
+  void otherRobotsInTheWayCostTheRobotItsView() {
+    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    CameraStudyConfig crowded =
+        CameraStudyConfigBuilder.builder(ONE_THREAD).otherRobotsLeast(5).otherRobotsMost(5).build();
+
+    Score clear = ranking(ONE_THREAD, samples, AHEAD_AND_BACK).get(0);
+    Score crowd = ranking(crowded, samples, AHEAD_AND_BACK).get(0);
+
+    assertThat(crowd.oneTag()).isLessThan(clear.oneTag());
+    assertThat(crowd.measured()).isLessThan(clear.measured());
+  }
+
   @Test
   void aSpotWeighingNothingDoesntCount() {
     Sample ignored = new Sample(FACING_AWAY.pose(), 0, 1, 0);
@@ -137,32 +260,51 @@ class CameraScoringTest {
     assertThat(scoring.distinctCameras()).isEqualTo(2);
   }
 
-  @Test
-  void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads() {
+  /**
+   * In the nominal conditions, and in a trial's, where every camera is off its mount too; with and
+   * without other robots in the way.
+   */
+  @ParameterizedTest(name = "in a trial: {0}, other robots: {1}")
+  @CsvSource({"false, 0", "true, 0", "false, 2", "true, 2"})
+  void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads(boolean trial, int otherRobots) {
     List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig threes =
-        CameraStudyConfigBuilder.builder(ONE_THREAD).threads(3).frames(2).build();
+        CameraStudyConfigBuilder.builder(ONE_THREAD)
+            .threads(3)
+            .frames(2)
+            .otherRobotsLeast(otherRobots)
+            .otherRobotsMost(otherRobots == 0 ? 0 : otherRobots + 2)
+            .build();
     CameraStudyConfig otherSeed = CameraStudyConfigBuilder.builder(threes).seed(2).build();
 
     List<Score> once =
         ranking(
             CameraStudyConfigBuilder.builder(threes).threads(1).build(),
+            trial,
             samples,
             AHEAD,
             AHEAD_AND_BACK);
 
-    assertThat(ranking(threes, samples, AHEAD, AHEAD_AND_BACK)).isEqualTo(once);
-    assertThat(ranking(otherSeed, samples, AHEAD, AHEAD_AND_BACK)).isNotEqualTo(once);
+    assertThat(ranking(threes, trial, samples, AHEAD, AHEAD_AND_BACK)).isEqualTo(once);
+    assertThat(ranking(otherSeed, trial, samples, AHEAD, AHEAD_AND_BACK)).isNotEqualTo(once);
   }
 
-  @Test
-  void aLayoutScoresTheSameWhateverIsTriedBesideIt() {
+  /**
+   * In a trial, too: each camera's mount error is its own, whatever other layouts are tried, so a
+   * layout's score doesn't depend on its neighbors.
+   */
+  @ParameterizedTest(name = "in a trial: {0}")
+  @ValueSource(booleans = {false, true})
+  void aLayoutScoresTheSameWhateverIsTriedBesideIt(boolean trial) {
     List<Sample> samples = List.of(FACING_THE_WALL, FACING_AWAY);
+    Candidate other = new Candidate("other", List.of(StudyFixtures.camera("side", 0.2, 90)));
 
-    Score alone = ranking(ONE_THREAD, samples, AHEAD_AND_BACK).get(0);
-    Score beside = ranking(ONE_THREAD, samples, AHEAD, AHEAD_AND_BACK).get(0);
+    Score alone = ranking(ONE_THREAD, trial, samples, AHEAD_AND_BACK).get(0);
+    List<Score> beside = ranking(ONE_THREAD, trial, samples, other, AHEAD, AHEAD_AND_BACK);
 
-    assertThat(beside).isEqualTo(alone);
+    assertThat(beside)
+        .filteredOn(score -> score.candidate().equals(AHEAD_AND_BACK))
+        .containsExactly(alone);
   }
 
   /** Two cameras' measurements, one twice as sure as the other, combined as the estimator would. */

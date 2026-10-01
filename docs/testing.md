@@ -12,11 +12,12 @@ it, fool its sensors, and check what it believes against where it really is.
 | One robot test class, whatever its kind | `./gradlew :test --tests frc.robot.RobotContainerSimTest` |
 | A package's tests | `./gradlew :test --tests 'frc.robot.lib.field.*'` |
 | Pitwall's tests | `./gradlew :pitwall:test` |
+| The tests of Pitwall's documentation processor | `./gradlew :pitwall:docs-processor:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
 
 The colon in `:test` means the robot project's tests only. Without it, `--tests` also applies to
-Pitwall's project, which has no such test and fails the build saying so.
+Pitwall's projects, which have no such test and fail the build saying so.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
 analysis and coverage report that `ci` runs. The coverage report is at
@@ -114,7 +115,10 @@ What it offers:
   really needs longer says so with `@Timeout`.
 - **Tests run in `build/test-work`.** What simulated devices write (CTRE's `ctre_sim/`, for one)
   stays out of the project. To read a project file, start from the `frc.projectDir` system
-  property, as `DashboardLayoutTest` does.
+  property, as `DashboardLayoutTest` does, and declare the file an input of the test task in
+  `build.gradle`, so Gradle knows the tests depend on it. Today the tests run on every build
+  anyway (the build's time is compiled in), but if that changes, Gradle would call them up to
+  date after a change to an undeclared file, and skip them.
 - **Coverage has a floor.** The build fails below the floors in `coverage-floor.properties`. They
   catch code with no tests at all; they are not a target to chase.
 
@@ -139,6 +143,9 @@ checked by the tests `deploy` runs first:
   (`RobotTuningTest`).
 - **Its rules across mechanisms** (`RobotRules`): the committed configuration keeps every one
   (`RobotRulesTest`).
+- **Its register:** every configuration value, and every value a mechanism tunes, has a row in
+  [docs/values.md](values.md) saying what kind it is and where its number came from, and no row
+  names one that's gone (`ValuesRegisterTest`).
 
 A new rule gets a test of its own: a change that breaks it is refused, one that keeps it isn't,
 and changing both sides together works. Pitwall's `ConfigRulesTest` works one through, two arms

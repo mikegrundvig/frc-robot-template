@@ -148,6 +148,14 @@ class ApiRecordsTest {
   }
 
   @Test
+  void aShutdownAnswerRoundTrips() {
+    ShutdownAnswer answer = new ShutdownAnswer(true);
+    assertThat(Json.compact(answer.toJson()))
+        .isEqualTo("{\"shuttingDown\":true,\"alreadyRequested\":true}");
+    assertThat(ShutdownAnswer.parse(Json.compact(answer.toJson()))).isEqualTo(answer);
+  }
+
+  @Test
   void numbersThatArentNumbersAreSentAsNull() {
     JsonValue json = new ThermalZone("broken", Double.NaN, List.of()).toJson();
     assertThat(Json.compact(json)).contains("\"celsius\":null");

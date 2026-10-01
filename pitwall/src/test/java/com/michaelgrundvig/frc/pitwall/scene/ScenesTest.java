@@ -43,6 +43,7 @@ class ScenesTest {
 
   private boolean reseen;
   private @Nullable RuntimeException throwing;
+  private @Nullable RuntimeException configurationThrows;
   private String camerasConfiguration = "mounted";
 
   private final Layer field =
@@ -114,6 +115,10 @@ class ScenesTest {
 
         @Override
         public Object configuration() {
+          RuntimeException problem = configurationThrows;
+          if (problem != null) {
+            throw problem;
+          }
           return camerasConfiguration;
         }
       };
@@ -455,6 +460,26 @@ class ScenesTest {
             "Pitwall: scene world, layer robot couldn't update: java.lang.IllegalStateException:"
                 + " broken");
     assertThat(JSON.toJson(feed.sent())).contains("ray.ok").doesNotContain("robot\":");
+  }
+
+  @Test
+  void aLayerWhoseConfigurationThrowsCostsOnlyItselfAndIsReportedOnce() {
+    Feed feed = world();
+    Map<String, Object> before = scenes.descriptions();
+    configurationThrows = new IllegalStateException("unreadable");
+    for (int i = 0; i < 5; i++) {
+      assertThat(scenes.descriptions()).as("the description before stands").isSameAs(before);
+    }
+    robot = new Pose2d(3, 2, Rotation2d.ZERO);
+
+    assertThat(said)
+        .containsExactly(
+            "Pitwall: scene world, layer robot couldn't be described again:"
+                + " java.lang.IllegalStateException: unreadable");
+    assertThat(loop(feed)).as("its update still runs").contains("\"robot\":[3,2,0]");
+    configurationThrows = null;
+    camerasConfiguration = "recalibrated";
+    assertThat(scenes.descriptions()).as("described again once it answers").isNotSameAs(before);
   }
 
   @Test

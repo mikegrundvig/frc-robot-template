@@ -141,17 +141,18 @@ final class SceneFeed implements Feed, SceneState {
   }
 
   /**
-   * Describes again each layer whose configuration changed. A description that doesn't fit is
-   * reported, and the one before stands. Called in the robot loop while a page is open.
+   * Describes again each layer whose configuration changed. A description that doesn't fit, or a
+   * configuration that can't be read or compared, is reported, and the description before stands: a
+   * layer that throws costs only itself. Called in the robot loop while a page is open.
    */
   void redescribeChanged() {
     for (Running running : layers) {
-      Object now = running.layer.configuration();
-      if (Objects.equals(now, running.configuration)) {
-        continue;
-      }
-      running.configuration = now;
       try {
+        Object now = running.layer.configuration();
+        if (Objects.equals(now, running.configuration)) {
+          continue;
+        }
+        running.configuration = now;
         SceneBuilder described = describe(running.layer);
         List<SceneBuilder> all = new ArrayList<>();
         for (Running each : layers) {

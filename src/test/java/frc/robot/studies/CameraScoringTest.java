@@ -30,7 +30,7 @@ class CameraScoringTest {
   private static List<Score> ranking(
       CameraStudyConfig config, List<Sample> samples, Candidate... candidates) {
     return new CameraScoring(Robots.SIM, WALL, List.of(candidates), config)
-        .score(samples, done -> {})
+        .score(samples, Conditions.nominal(config), done -> {})
         .ranking();
   }
 
@@ -90,6 +90,24 @@ class CameraScoringTest {
 
     assertThat(score.twoCameras()).isEqualTo(1.0);
     assertThat(score.withinFiveCentimeters()).isEqualTo(1.0);
+  }
+
+  /**
+   * A camera knocked off its mount, the pipeline still solving with where it's configured: the
+   * robot is placed off by about the mount's error, carried out to the tags.
+   */
+  @Test
+  void aCameraOffItsMountPlacesTheRobotOff() {
+    CameraStudyConfig knocked =
+        CameraStudyConfigBuilder.builder(ONE_THREAD)
+            .mountErrorMillimeters(20)
+            .mountErrorDegrees(2)
+            .build();
+
+    double exact = score(AHEAD, FACING_THE_WALL).positionRmsMeters();
+    double off = ranking(knocked, List.of(FACING_THE_WALL), AHEAD).get(0).positionRmsMeters();
+
+    assertThat(off).isGreaterThan(exact + 0.02);
   }
 
   @Test

@@ -97,11 +97,13 @@ the pose, and where the camera is, so a layout scores the same whatever else is 
 ./gradlew cameraStudy                                   # the robot's cameras and the family
 ./gradlew cameraStudy --args="--weights=weights.csv"    # some spots count more
 ./gradlew cameraStudy --args="--layout=2027-field.json" # a field WPILib doesn't have yet
+./gradlew cameraStudy --args="--robust"                 # how layouts hold up when cameras err more
 ```
 
-The default run takes under a minute on two threads (45 to 50 s on the computer it was written
-on, for 3,840 poses and 157 layouts), and under 1 GB of memory. A finer grid costs the square:
-`--grid-meters=0.25` takes four times as long.
+The default run takes about a minute on two threads (45 to 60 s on the computer it was written
+on, for 3,840 poses and 157 layouts), and about 1 GB of memory. A robustness run (`--robust`) scores
+the field 13 times: 7.5 minutes there. A finer grid costs the square: `--grid-meters=0.25` takes
+four times as long.
 
 | Option | Default | What |
 |---|---|---|
@@ -114,7 +116,14 @@ on, for 3,840 poses and 157 layouts), and under 1 GB of memory. A finer grid cos
 | `--grid-meters=M` | 0.5 | Spacing of the positions |
 | `--headings=N` | 8 | Headings at each position |
 | `--frames=N` | 2 | Images each camera takes at each pose, each with its own noise |
-| `--gyro-error-degrees=D` | 0.25 | The gyro heading's typical error |
+| `--corner-noise-pixels=P` | the simulator's, 0.25 | How far each tag corner lands from where a perfect camera would put it, on average |
+| `--corner-spread-pixels=P` | the simulator's, 0.08 | That distance's spread |
+| `--sight-meters=M` | the simulator's, 7 | Tags farther than this aren't detected |
+| `--gyro-error-degrees=D` | 0.25 | The gyro heading's typical error (one standard deviation) |
+| `--mount-error-mm=M` | 0 | How far each camera really sits from its configured place, at most, along each axis |
+| `--mount-error-degrees=D` | 0 | How far each camera is really turned, at most, about each axis |
+| `--trials=N` | 0 | Robustness trials (below), each drawing all of these errors |
+| `--robust` | | Robustness with the usual 12 trials |
 | `--seed=N` | 1 | The seed every random draw comes from |
 | `--threads=N` | 2 | How many threads to run on (the computer may be shared) |
 | `--out=DIR` | `build/studies/camera-placement` | Where the report goes |
@@ -143,6 +152,29 @@ To turn it into requirements for CAD:
    at 30° to 45°, 16 to 24 in up, tilted up 10° to 20°".
 
 Rerun with weights once the strategy says where the robot must know where it is.
+
+## Robustness
+
+The camera errors above are guesses until the robot is built: the simulator's own corner noise and
+sight range, a gyro a quarter degree off, cameras mounted exactly where they're configured. A layout
+that's best only when those guesses are right is a risky one to build. So a robustness run
+(`--robust`, or `--trials=N`) scores the field in the nominal conditions, then again in each of 12
+trials, each drawing every error from a plausible range, and ranks the layouts by their 95% error
+in the worst trial: what the robot lives with when its cameras turn out worse than hoped. Every
+layout faces the same trials, so they're compared fairly; the median across trials is beside it.
+More trials make the worst a little worse for every layout alike.
+
+| Error | Drawn from | Why that range |
+|---|---|---|
+| Tag corners off | 0.1 to 0.6 px on average (spread in the simulator's proportion) | A sharp, still image from a global-shutter camera locates corners to about a tenth of a pixel; defocus, a softer lens, or a little blur puts them half a pixel off or more. The simulator's 0.25 px sits low in the range. |
+| Tags seen to | 5 to 7 m | A 6.5 in tag 7 m from a 1280 x 800 camera with an 80° lens is about 20 pixels across, near where detection fails; exposure, blur, and detection settings bring it in. The pipeline already throws out tags farther than 6 m on average. |
+| Gyro heading off | 0.1° to 0.5°, typically | The estimator holds heading to a few tenths of a degree while cameras correct it; after a hit, or a stretch without two tags in view, half a degree. |
+| Each camera off its mount | up to 0 to 5 mm and 0° to 1° along and about each axis | A mount measured from CAD and checked with the camera calibration (docs/calibration.md) lands within a few millimeters and a fraction of a degree; a bumped camera, or one never calibrated, a degree or more. Each camera's error is its own and stays the same over the whole field, as a mount's does. |
+
+The report's robust tables come first: each layout's worst-trial and median 95% error, its nominal
+95% error and rank, the least of the field it placed within 5 cm in any trial, and the rank
+correlation between the two rankings (1 is the same order). Each trial's draws are listed, and
+`candidates.csv` has every trial's 95% error.
 
 ## Designing with CAD
 
@@ -214,6 +246,13 @@ are all four cameras, 2.5 to 2.6 cm: cameras on the four sides, or at the corner
 behind them. REBUILT has 32 tags, many in mid-field on the hubs; a field with fewer tags spreads
 the layouts further apart.
 
+With `--robust` (12 trials, 7.5 minutes), the errors grow and the layouts spread apart: the most
+robust, four cameras on the sides, 8 in up, tilted 20°, has 5.9 cm in its worst trial (5.0 cm
+median), and the tenth 6.8 cm. The ranking holds its shape (rank correlation 0.94): the nominal
+best is second, the robust top ten all ranked in the nominal top 17, and the template robot's own
+moves from 19th to 20th (7.3 cm in its worst trial). Three cameras' best is 9.6 cm; one or two
+leave too much of the field unmeasured in every trial.
+
 ## At kickoff
 
 The study needs only the field's size and tags, never the game's class (`docs/kickoff.md`), so it
@@ -238,6 +277,8 @@ with those cameras, and run with `--robot=<its name>`: its cameras are "the robo
 - **Time:** the estimator combines many images over time, and the wheels between them, so the
   robot does better than one set of images. The study compares layouts; it doesn't predict the
   robot's accuracy on the field.
+- **Errors beyond the robustness ranges:** a camera knocked far off its mount, or a lens never
+  calibrated, is worse than any trial; calibrate cameras (docs/calibration.md).
 - **Small and failed tags:** a tag smaller than 100 square pixels in the image isn't detected,
   PhotonVision's default; a real camera's limit depends on its lens, exposure, and settings. A tag
   whose own solve fails is left out, as the robot leaves out a pose that isn't a number

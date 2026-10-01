@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -33,7 +35,9 @@ import java.util.stream.Stream;
  *       and the two ways out, unless the edit is to be discarded;
  *   <li>a new file is written;
  *   <li>a file in one of the generated folders that the model no longer gives is removed if it's
- *       what the build last wrote, and refused like an edit if not.
+ *       what the build last wrote, and refused like an edit if not. Only names the writer can write
+ *       count: what a computer leaves in a folder ({@code .DS_Store}, {@code Thumbs.db}, {@code
+ *       desktop.ini}) is no one's edit.
  * </ul>
  *
  * <p>So a pull that changed the model and its files together passes, and only the files change on
@@ -54,6 +58,7 @@ final class ToolConfigSync {
   private final Path sidecar;
   private final String source;
   private final String committedName;
+  private final List<PathMatcher> writerFiles;
 
   /**
    * @param generated where the generator wrote the files, freshly
@@ -61,14 +66,30 @@ final class ToolConfigSync {
    * @param sidecar what the build last wrote into {@code committed}, by each file's hash
    * @param source where the model comes from, as a person would change it ({@code Robots.java})
    * @param committedName how to name the committed folder in messages ({@code ascope_assets})
+   * @param writerFiles the names of the files the writer can write, as globs ({@code model*.glb})
    */
   ToolConfigSync(
-      Path generated, Path committed, Path sidecar, String source, String committedName) {
+      Path generated,
+      Path committed,
+      Path sidecar,
+      String source,
+      String committedName,
+      List<String> writerFiles) {
     this.generated = generated;
     this.committed = committed;
     this.sidecar = sidecar;
     this.source = source;
     this.committedName = committedName;
+    this.writerFiles =
+        writerFiles.stream()
+            .map(glob -> FileSystems.getDefault().getPathMatcher("glob:" + glob))
+            .toList();
+  }
+
+  /** Whether a file's name is one the writer can write. */
+  private boolean writable(String path) {
+    Path name = Path.of(path.substring(path.lastIndexOf('/') + 1));
+    return writerFiles.stream().anyMatch(matcher -> matcher.matches(name));
   }
 
   /**
@@ -154,7 +175,7 @@ final class ToolConfigSync {
       if (Files.isDirectory(inCommitted)) {
         for (String path : files(inCommitted).keySet()) {
           String full = folder + "/" + path;
-          if (!wanted.containsKey(full)) {
+          if (!wanted.containsKey(full) && writable(full)) {
             stale.add(full);
           }
         }

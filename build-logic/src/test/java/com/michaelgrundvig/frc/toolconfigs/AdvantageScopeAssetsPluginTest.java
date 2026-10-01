@@ -203,6 +203,19 @@ class AdvantageScopeAssetsPluginTest {
   }
 
   @Test
+  void whatTheComputerLeavesInAFolderDoesntFailTheBuild() throws IOException {
+    gradle("advantageScopeAssets").build();
+    write("ascope_assets/Robot_comp/.DS_Store", "Finder's");
+    write("ascope_assets/Robot_comp/Thumbs.db", "Explorer's");
+    write("ascope_assets/Robot_comp/desktop.ini", "Explorer's");
+    mass("67.8"); // so the check runs past them
+
+    assertThat(outcome(gradle("advantageScopeAssets").build())).isEqualTo(TaskOutcome.SUCCESS);
+    assertThat(config()).contains("67.8");
+    assertThat(project.resolve("ascope_assets/Robot_comp/.DS_Store")).exists();
+  }
+
+  @Test
   void eachRobotNamedGetsItsFolder() throws IOException {
     write(
         "build.gradle",

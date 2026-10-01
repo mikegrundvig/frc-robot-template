@@ -75,6 +75,13 @@ public abstract class ToolConfigTask extends DefaultTask {
   @Input
   public abstract Property<Boolean> getDiscardEdits();
 
+  /**
+   * The names of the files the writer can write, as globs on the name: only these are its to remove
+   * from a folder it writes.
+   */
+  @Input
+  public abstract ListProperty<String> getWriterFiles();
+
   /** Where the model comes from, as a person would change it: {@code Robots.java}. */
   @Input
   public abstract Property<String> getSource();
@@ -122,7 +129,8 @@ public abstract class ToolConfigTask extends DefaultTask {
                 committed.toPath(),
                 getSidecar().get().getAsFile().toPath(),
                 getSource().get(),
-                committed.getName())
+                committed.getName(),
+                getWriterFiles().get())
             .run(getDiscardEdits().get());
     if (!outcome.refused().isEmpty()) {
       throw new GradleException(String.join("\n\n", outcome.refused()));

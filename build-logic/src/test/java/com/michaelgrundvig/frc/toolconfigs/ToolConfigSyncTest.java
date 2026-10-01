@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,7 +24,12 @@ class ToolConfigSyncTest {
     committed = dir.resolve("ascope_assets");
     sync =
         new ToolConfigSync(
-            generated, committed, dir.resolve("sidecar"), "Robots.java", "ascope_assets");
+            generated,
+            committed,
+            dir.resolve("sidecar"),
+            "Robots.java",
+            "ascope_assets",
+            List.of("config.json", "model*.glb", "notes.txt"));
   }
 
   private void generate(String path, String text) throws IOException {
@@ -131,5 +137,21 @@ class ToolConfigSyncTest {
         .containsExactly("Robot_a/model_4.glb: removed, Robots.java no longer gives it");
     assertThat(Files.exists(committed.resolve("Robot_a/model_4.glb"))).isFalse();
     assertThat(Files.exists(committed.resolve("Robot_Cad/config.json"))).isTrue();
+  }
+
+  /** What a computer leaves in a folder is no one's edit, and stays. */
+  @Test
+  void filesTheWriterNeverWritesAreLeftAlone() throws IOException {
+    generate("Robot_a/model.glb", "base");
+    sync.run(false);
+    for (String clutter : List.of(".DS_Store", "Thumbs.db", "desktop.ini")) {
+      write(committed.resolve("Robot_a/" + clutter), "the computer's");
+    }
+
+    ToolConfigSync.Outcome outcome = sync.run(false);
+
+    assertThat(outcome.refused()).isEmpty();
+    assertThat(outcome.written()).isEmpty();
+    assertThat(committed.resolve("Robot_a/.DS_Store")).exists();
   }
 }

@@ -113,6 +113,8 @@ public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
                               .map(value -> !value.equals("false"))
                               .orElse(false));
                   task.getSource().set("Robots.java");
+                  task.getWriterFiles()
+                      .set(List.of("config.json", "model.glb", "model_*.glb", "GENERATED.md"));
                   task.getCommitted().set(extension.getFolder());
                   task.getGenerated()
                       .set(

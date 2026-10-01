@@ -107,6 +107,38 @@ class JsonTest {
   }
 
   @Test
+  void numbersAreBoundedSoNoneTakesLongToWork() {
+    String longest = "1".repeat(Json.MAX_NUMBER);
+    assertThat(Json.hashable(Json.parse(longest))).endsWith("e0");
+    assertThat(Json.hashable(Json.parse("1e999999999"))).isEqualTo("1e999999999");
+    assertThat(Json.hashable(Json.parse("-1." + "0".repeat(900) + "1e-999999999")))
+        .isEqualTo("-10" + "0".repeat(899) + "1e-1000000900");
+
+    long start = System.nanoTime();
+    assertThatThrownBy(() -> Json.parse("[" + "1".repeat(1_000_000) + "]"))
+        .isInstanceOf(JsonException.class)
+        .hasMessage("line 1, column 2: a number longer than 1000 characters");
+    assertThat(System.nanoTime() - start).isLessThan(2_000_000_000L);
+    assertThatThrownBy(() -> Json.parse("1e2147483647"))
+        .hasMessage("line 1, column 1: a number's exponent of more than 9 digits: 1e2147483647");
+    assertThatThrownBy(() -> Json.parse("1E+0000000001")).hasMessageContaining("exponent");
+    assertThatThrownBy(() -> new JsonValue.Num("1".repeat(1001))).hasMessageContaining("longer");
+    assertThatThrownBy(() -> new JsonValue.Num("2e-123456789").longValue("n"))
+        .hasMessageContaining("whole number");
+  }
+
+  @Test
+  void hexEscapesAreExactlyHexDigits() {
+    assertThat(Json.hexValue("00e9")).isEqualTo(0xe9);
+    assertThat(Json.hexValue("FFFF")).isEqualTo(0xffff);
+    assertThat(Json.hexValue("+123")).isEqualTo(-1);
+    assertThat(Json.hexValue("-1")).isEqualTo(-1);
+    assertThat(Json.hexValue("")).isEqualTo(-1);
+    assertThat(Json.hexValue("\uff11\uff12")).isEqualTo(-1); // fullwidth digits
+    assertThatThrownBy(() -> Json.parse("\"\\u+123\"")).hasMessageContaining("four hex digits");
+  }
+
+  @Test
   void numbersAreBuiltBriefly() {
     assertThat(JsonValue.of(45.0)).isEqualTo(new JsonValue.Num("45"));
     assertThat(JsonValue.of(0.1)).isEqualTo(new JsonValue.Num("0.1"));

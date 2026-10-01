@@ -91,6 +91,8 @@ class SettingsFilesTest {
         .hasMessage("cameras/a%2.json: a % in a name must be followed by two hex digits");
     assertThatThrownBy(() -> SettingsFiles.decode("x", "a%zz"))
         .hasMessageContaining("two hex digits");
+    assertThatThrownBy(() -> SettingsFiles.decode("x", "a%+1"))
+        .hasMessageContaining("two hex digits");
   }
 
   @Test

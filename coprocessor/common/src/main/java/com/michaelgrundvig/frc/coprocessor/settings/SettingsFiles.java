@@ -208,14 +208,11 @@ public final class SettingsFiles {
         bytes.writeBytes(String.valueOf(c).getBytes(StandardCharsets.UTF_8));
         continue;
       }
-      if (i + 2 >= encoded.length()) {
+      int value = i + 2 >= encoded.length() ? -1 : Json.hexValue(encoded.substring(i + 1, i + 3));
+      if (value < 0) {
         throw new SettingsException(path + ": a % in a name must be followed by two hex digits");
       }
-      try {
-        bytes.write(Integer.parseInt(encoded.substring(i + 1, i + 3), 16));
-      } catch (NumberFormatException e) {
-        throw new SettingsException(path + ": a % in a name must be followed by two hex digits");
-      }
+      bytes.write(value);
       i += 2;
     }
     return bytes.toString(StandardCharsets.UTF_8);

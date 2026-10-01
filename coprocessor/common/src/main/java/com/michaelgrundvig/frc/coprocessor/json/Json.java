@@ -33,6 +33,15 @@ public final class Json {
   /** Deeper nesting than this is refused: no settings come close, and it bounds the parser. */
   public static final int MAX_DEPTH = 256;
 
+  /**
+   * The longest a number may be, in characters. Longer ones are refused: no setting needs them, and
+   * exact arithmetic on a number takes time that grows with the square of its length.
+   */
+  public static final int MAX_NUMBER = 1000;
+
+  /** The most digits a number's exponent may have: 9 keeps every scale an {@code int}. */
+  public static final int MAX_EXPONENT_DIGITS = 9;
+
   /** The widest a container of plain values may be and still go on one line in {@link #pretty}. */
   static final int INLINE_WIDTH = 80;
 
@@ -93,6 +102,23 @@ public final class Json {
     }
     BigInteger digits = value.unscaledValue();
     return digits + "e" + (-(long) value.scale());
+  }
+
+  /**
+   * The value of exactly these hex digits (no sign, no prefix), or -1 when they aren't all hex
+   * digits: what a {@code \\u} or {@code %} escape needs, where Integer.parseInt would also take a
+   * sign.
+   */
+  public static int hexValue(String digits) {
+    int value = 0;
+    for (int i = 0; i < digits.length(); i++) {
+      int digit = Character.digit(digits.charAt(i), 16);
+      if (digit < 0 || digits.charAt(i) > 'f') {
+        return -1;
+      }
+      value = value * 16 + digit;
+    }
+    return digits.isEmpty() ? -1 : value;
   }
 
   static void writeString(StringBuilder out, String value) {
@@ -390,14 +416,11 @@ public final class Json {
           case 'r' -> value.append('\r');
           case 't' -> value.append('\t');
           case 'u' -> {
-            if (pos + 4 > text.length()) {
+            int code = pos + 4 > text.length() ? -1 : hexValue(text.substring(pos, pos + 4));
+            if (code < 0) {
               throw error("a \\u escape needs four hex digits");
             }
-            try {
-              value.append((char) Integer.parseInt(text.substring(pos, pos + 4), 16));
-            } catch (NumberFormatException e) {
-              throw error("a \\u escape needs four hex digits");
-            }
+            value.append((char) code);
             pos += 4;
           }
           default -> {
@@ -415,13 +438,17 @@ public final class Json {
       }
       while (pos < text.length() && "0123456789.eE+-".indexOf(text.charAt(pos)) >= 0) {
         pos++;
+        if (pos - start > MAX_NUMBER) {
+          pos = start;
+          throw error("a number longer than " + MAX_NUMBER + " characters");
+        }
       }
       String lexeme = text.substring(start, pos);
       try {
         return new JsonValue.Num(lexeme);
       } catch (JsonException e) {
         pos = start;
-        throw error("not a number: " + lexeme);
+        throw error(String.valueOf(e.getMessage()));
       }
     }
 

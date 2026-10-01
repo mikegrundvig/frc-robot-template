@@ -6,6 +6,24 @@ see, and sensors that err as a season-worn robot's do. Pitwall's page drives it
 (http://localhost:5820): the Driver Station, the keyboard or a gamepad, pausing and stepping, and
 failing the robot's parts live, which WPILib's simulator GUI can't do. AdvantageScope shows the field.
 
+| Job | Command |
+|---|---|
+| The simulator, enabled on a start and drivable | `./gradlew run` |
+| Without WPILib's simulator GUI: Pitwall's page drives it | `./gradlew run -Pgui=false` |
+| With the GUI, whatever the default | `./gradlew run -Pgui` |
+| Disabled, with no alliance station, like a real robot | `./gradlew run -PstartDisabled` |
+| In a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
+| List the scenarios | `./gradlew scenarios` |
+
+**The GUI is on by default for now**, and turns off by default once Pitwall's *Sim* view replaces
+it; `-Pgui` then brings it back. A real Driver Station can connect to the simulator either way
+(`halsim_ds_socket` stays loaded). Without the GUI you lose its HAL device views, its NetworkTables
+browser and plots, its `Field2d` window (AdvantageScope and Elastic show the same), its notifier
+table, keyboard remapping, and its joystick reading, which works whatever window has focus. With
+the GUI on, its Driver Station panel writes the joysticks it has mapped (the keyboard is joystick
+0 by default), so drive from one or the other; whether it also overwrites the page's input every
+frame is unverified.
+
 ## Pitwall's simulator controls
 
 Everything the page does to the simulator goes through an API it serves only in the simulator. On

@@ -8,6 +8,14 @@ import org.junit.jupiter.api.Test;
 
 /** Reads what the documentation processor wrote for the test fixtures as they compiled. */
 class ParameterDocsTest {
+  /**
+   * What a configuration writes that JSON must escape, or that isn't ASCII.
+   *
+   * @param heading the "zero" heading, in ° from C:\field's corner
+   * @param resistance in Ω, or &Omega;
+   */
+  record Symbols(double heading, double resistance) {}
+
   // Their resources are written by hand (src/test/resources), damaged as a jar's might be. They
   // have no Javadoc, so the processor writes nothing over them.
   record Broken(double x) {}
@@ -64,6 +72,15 @@ class ParameterDocsTest {
     assertThat(ParameterDocs.of(Odd.class))
         .as("values of the wrong kind are left out")
         .isEqualTo(new ParameterDocs("", "", Map.of("a", "an a")));
+  }
+
+  /** The processor escapes them for JSON, and they come back as written. */
+  @Test
+  void quotesBackslashesAndSymbolsComeBackAsWritten() {
+    assertThat(ParameterDocs.of(Symbols.class).params())
+        .containsExactly(
+            entry("heading", "the \"zero\" heading, in ° from C:\\field's corner"),
+            entry("resistance", "in Ω, or Ω"));
   }
 
   @Test

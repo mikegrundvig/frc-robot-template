@@ -167,6 +167,57 @@ class ParameterDocsProcessorTest {
         .contains("\"speed\": \"\\\"fast\\\", in m/s\"");
   }
 
+  /** A Markdown comment, written with three slashes, is read like a traditional one. */
+  @Test
+  void aMarkdownCommentIsDocumentedToo() throws IOException {
+    var written =
+        documented(
+            """
+            package robot;
+
+            /// Gains for [Drive], set with `kP(16)`.
+            ///
+            /// Tuned live.
+            ///
+            /// @param kP volts per [meter][Units#Meters] of error
+            public record Gains(double kP) {}
+            """);
+
+    assertThat(written.get("robot.Gains.json"))
+        .isEqualTo(
+            """
+            {
+              "summary": "Gains for Drive, set with `kP(16)`.",
+              "text": "Gains for Drive, set with `kP(16)`.\\n\\nTuned live.",
+              "params": {
+                "kP": "volts per meter of error"
+              }
+            }
+            """);
+  }
+
+  /** What JSON gives a meaning is escaped; everything else goes as it is, in UTF-8. */
+  @Test
+  void theTextIsEscapedAsJsonRequires() throws IOException {
+    var written =
+        documented(
+            """
+            package robot;
+
+            /**
+             * Symbols.
+             *
+             * @param heading the "zero" heading, in ° from C:\\field
+             * @param bell rings \\u0007 once
+             */
+            public record Symbols(double heading, double bell) {}
+            """);
+
+    assertThat(written.get("robot.Symbols.json"))
+        .contains("\"heading\": \"the \\\"zero\\\" heading, in ° from C:\\\\field\"")
+        .contains("\"bell\": \"rings \\u0007 once\"");
+  }
+
   @Test
   void theOptionDocumentsOnlyTheRecordsItsAnnotationMarks() throws IOException {
     String sources =

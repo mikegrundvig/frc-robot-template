@@ -46,7 +46,7 @@ public record ParameterDocs(String summary, String text, Map<String, String> par
   private static final JsonType<Object> JSON = Jsonb.builder().build().type(Object.class);
 
   /** Each record's documentation, read the first time it's asked for. */
-  private static final ClassValue<ParameterDocs> READ =
+  private static final ClassValue<ParameterDocs> BY_RECORD =
       new ClassValue<>() {
         @Override
         protected ParameterDocs computeValue(Class<?> record) {
@@ -60,7 +60,7 @@ public record ParameterDocs(String summary, String text, Map<String, String> par
 
   /** A record's documentation, or {@link #NONE}. Safe to call from any thread. */
   public static ParameterDocs of(Class<?> record) {
-    return READ.get(record);
+    return BY_RECORD.get(record);
   }
 
   /**

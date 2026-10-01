@@ -37,15 +37,22 @@ class ArchitectureTest {
     "com.ctre..", "org.photonvision..", "com.revrobotics..", "com.studica.."
   };
 
+  /**
+   * The component library: today's {@code frc.robot.lib}, and the packages moving to {@code
+   * com.michaelgrundvig.frc.world} (the tool writers, in {@code .bridges}).
+   */
+  private static final String[] COMPONENTS = {"frc.robot.lib..", "com.michaelgrundvig.frc.world.."};
+
   @Test
   void componentsNeverDependOnRobotCode() {
     classes()
         .that()
-        .resideInAPackage("frc.robot.lib..")
+        .resideInAnyPackage(COMPONENTS)
         .should()
         .onlyDependOnClassesThat(
             resideInAnyPackage(
                     "frc.robot.lib..",
+                    "com.michaelgrundvig.frc.world..",
                     "java..",
                     "org.wpilib.math..",
                     "org.wpilib.units..",
@@ -67,7 +74,7 @@ class ArchitectureTest {
   void componentsNeverReadTheClock() {
     noClasses()
         .that()
-        .resideInAPackage("frc.robot.lib..")
+        .resideInAnyPackage(COMPONENTS)
         .should()
         .callMethod(System.class, "nanoTime")
         .orShould()
@@ -126,7 +133,8 @@ class ArchitectureTest {
   void theSimulatorStaysOutOfTheRobotsCode() {
     noClasses()
         .that()
-        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..")
+        .resideInAnyPackage(
+            "frc.robot.lib..", "com.michaelgrundvig.frc.world..", "frc.robot.subsystems..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot.sim..")
@@ -142,6 +150,7 @@ class ArchitectureTest {
         .that()
         .resideInAnyPackage(
             "frc.robot.lib..",
+            "com.michaelgrundvig.frc.world..",
             "frc.robot.subsystems..",
             "frc.robot.commands..",
             "frc.robot.dashboard..",

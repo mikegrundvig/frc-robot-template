@@ -22,7 +22,7 @@ class ModuleIOSimTest {
 
   /** A module as configured, with the steering's current limit tuned to this. */
   private static ModuleIOSim module(double steerLimitAmps) {
-    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), 0);
+    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), 0, 0);
     module.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits());
     module.configure(
         DRIVETRAIN.gains(),

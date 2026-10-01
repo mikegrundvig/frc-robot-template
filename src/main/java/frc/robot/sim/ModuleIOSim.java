@@ -21,19 +21,41 @@ import org.wpilib.simulation.DCMotorSim;
 
 /**
  * A module simulated the standard way, as in AdvantageKit's swerve templates: each motor turns a
- * fixed load through its gearing, and the motor controllers' loops run once per step. A {@link
- * DriveSimulation} steps it and moves the robot with its true wheel motion; its absolute encoder
- * can read off true ({@link SensorErrors}). Both motors' stator current limits are modeled: the
- * drive's caps the torque that accelerates the robot and says when a wheel is at the edge of its
- * grip, and the steering's caps how hard the module turns and stops ({@link
- * CurrentLimitedMotorSim}). The battery is not, so this tests the code rather than the robot's
- * power.
+ * fixed load through its gearing, under its motor controller's loop. A {@link DriveSimulation}
+ * steps it and moves the robot with its true wheel motion; its absolute encoder can read off true
+ * ({@link SensorErrors}). Both motors' stator current limits are modeled: the drive's caps the
+ * torque that accelerates the robot and says when a wheel is at the edge of its grip, and the
+ * steering's caps how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery
+ * is not, so this tests the code rather than the robot's power.
+ *
+ * <p>The steering runs as a TalonFX without a Phoenix Pro license runs it: its loop every
+ * millisecond, on the angle the CANcoder last sent over CAN. Those, with its current limit, set how
+ * high its gains can go before it overshoots, as on a robot.
  */
 final class ModuleIOSim implements ModuleIO {
   // Tuner X's default simulated inertias, as AdvantageKit's template uses.
   private static final double DRIVE_INERTIA_KG_M2 = 0.025;
   private static final double STEER_INERTIA_KG_M2 = 0.004;
   private static final double MAX_VOLTS = 12.0;
+
+  /** A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz). */
+  private static final double STEER_LOOP_SECONDS = 0.001;
+
+  /**
+   * How often the module's CANcoder sends its angle to the steering motor, in seconds. Without a
+   * Phoenix Pro license the steering closes its loop on the CANcoder as a remote sensor, and takes
+   * a new angle and speed only when the CANcoder sends them over CAN: every 10 ms at Phoenix 6's
+   * default rate for a CANcoder's position (100 Hz). In between, its loop runs on what it last
+   * heard, up to 10 ms old, and that wait, more than the loop's rate or the current limit, is what
+   * makes the steering overshoot at high gains. The fraction of a millisecond a frame takes on the
+   * bus is left out. On a robot that has the CANcoder send faster, make this match; with Pro's
+   * FusedCANcoder, the loop reads the motor's own sensor every loop, and this is {@link
+   * #STEER_LOOP_SECONDS}.
+   */
+  private static final double ENCODER_PERIOD_SECONDS = 0.01;
+
+  private static final int ENCODER_PERIOD_LOOPS =
+      (int) Math.round(ENCODER_PERIOD_SECONDS / STEER_LOOP_SECONDS);
 
   private final DCMotorSim driveSim;
   private final CurrentLimitedMotorSim steerMotor;
@@ -68,14 +90,23 @@ final class ModuleIOSim implements ModuleIO {
   private boolean driveLimited;
   private boolean steering;
   private double steerSetpointRad;
-  private double steerVolts;
   private double steerStatorLimitAmps = Double.POSITIVE_INFINITY;
+
+  /** The angle and speed the steering's motor controller last heard from the CANcoder. */
+  private double heardSteerRadians;
+
+  private double heardSteerRadPerSec;
+
+  /** The steering's loops until the CANcoder next sends. */
+  private int loopsUntilEncoderSends;
 
   /**
    * @param modules the modules as configured; the motor controllers convert with this wheel radius
    * @param steerOffsetRadians how far the absolute encoder's zero is off
+   * @param encoderPhase when the CANcoder first sends, as a share of its period: each module's
+   *     CANcoder sends on its own clock
    */
-  ModuleIOSim(SwerveConfig.Modules modules, double steerOffsetRadians) {
+  ModuleIOSim(SwerveConfig.Modules modules, double steerOffsetRadians, double encoderPhase) {
     driveMotor = modules.driveMotor().model();
     driveGearing = modules.driveGearing();
     driveSim = motorSim(driveMotor, DRIVE_INERTIA_KG_M2, driveGearing);
@@ -84,6 +115,8 @@ final class ModuleIOSim implements ModuleIO {
             modules.steerMotor().model(), STEER_INERTIA_KG_M2, modules.steerGearing());
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     this.steerOffsetRadians = steerOffsetRadians;
+    heardSteerRadians = measuredSteerRadians();
+    loopsUntilEncoderSends = (int) (encoderPhase * ENCODER_PERIOD_LOOPS);
   }
 
   /** A motor turning a load. WPILib 2027 names this model for an arm; without gravity it's one. */
@@ -92,20 +125,17 @@ final class ModuleIOSim implements ModuleIO {
         Models.singleJointedArmFromPhysicalConstants(motor, inertiaKgM2, gearing), motor);
   }
 
-  /** Runs the motor controllers' loops, then the motors, for a step. */
+  /**
+   * Runs the motors for a step under their controllers' loops: the drive's once, the steering's
+   * every millisecond. The drive's motor is about sixty times slower than the steering's, and reads
+   * its own sensor, so its loop running once a step changes nothing that matters.
+   */
   void step(double seconds) {
     if (driveClosedLoop) {
       double error = driveSetpointRadPerSec - driveSim.getAngularVelocity();
       driveVolts = driveFeedforwardVolts + driveKp * error * wheelRadiusMeters;
     }
-    // The steering loop runs on what the absolute encoder reads, right or not.
-    steerVolts =
-        steering
-            ? steerKp * MathUtil.angleModulus(steerSetpointRad - measuredSteerRadians())
-                - steerKd * steerMotor.velocityRadPerSec()
-            : 0.0;
     driveVolts = Math.clamp(driveVolts, -MAX_VOLTS, MAX_VOLTS);
-    steerVolts = Math.clamp(steerVolts, -MAX_VOLTS, MAX_VOLTS);
     // The motor controller caps the current through the motor, and with it the torque: it applies
     // no more than the motor's back EMF plus the limit's worth of voltage across the windings.
     double backEmf = driveSim.getAngularVelocity() * driveGearing / driveMotor.Kv;
@@ -114,7 +144,30 @@ final class ModuleIOSim implements ModuleIO {
     driveLimited |= driveAppliedVolts != driveVolts;
     driveSim.setInputVoltage(driveAppliedVolts);
     driveSim.update(seconds);
-    steerMotor.run(steerVolts, steerStatorLimitAmps, seconds);
+    int loops = Math.max(1, (int) Math.round(seconds / STEER_LOOP_SECONDS));
+    for (int i = 0; i < loops; i++) {
+      steer(seconds / loops);
+    }
+  }
+
+  /** One pass of the steering's loop, on what the CANcoder last sent, then its motor that long. */
+  private void steer(double seconds) {
+    if (loopsUntilEncoderSends == 0) {
+      heardSteerRadians = measuredSteerRadians();
+      heardSteerRadPerSec = steerMotor.velocityRadPerSec();
+      loopsUntilEncoderSends = ENCODER_PERIOD_LOOPS;
+    }
+    loopsUntilEncoderSends--;
+    // The steering loop runs on what the absolute encoder sent, right or not.
+    double volts =
+        steering
+            ? Math.clamp(
+                steerKp * MathUtil.angleModulus(steerSetpointRad - heardSteerRadians)
+                    - steerKd * heardSteerRadPerSec,
+                -MAX_VOLTS,
+                MAX_VOLTS)
+            : 0.0;
+    steerMotor.run(volts, steerStatorLimitAmps, seconds);
   }
 
   /** Takes a reading for odometry, as a motor controller's high-rate signals would. */

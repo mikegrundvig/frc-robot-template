@@ -46,7 +46,15 @@ tasks.withType(JavaCompile).configureEach {
 // Tests produce a coverage report (JaCoCo), except in quick mode. None may run past two minutes
 // (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test fails
 // instead of hanging the build.
+//
+// Each project's tests may use up to 1.5 GB of memory, on every computer. Left to itself, Java
+// takes up to a quarter of the computer's memory, so a runaway test could take 2 GB on one laptop
+// and 8 GB on another. The tests need far less: what they keep after Java's garbage collection
+// peaks near 80 MB for the robot's and 50 MB for Pitwall's. So the cap guards against a runaway;
+// it isn't what the tests need. A test that fails with "OutOfMemoryError: Java heap space" raises
+// the cap here.
 tasks.named("test") {
+    maxHeapSize = "1536m"
     systemProperty "junit.jupiter.execution.timeout.default", "2 m"
     if (quick && !testsNamed) {
         useJUnitPlatform {

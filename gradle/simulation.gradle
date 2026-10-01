@@ -5,18 +5,42 @@
 // station, like a real robot), the keyboard is the driver's gamepad, and the field view is open. sim/ holds the default GUI settings; they are copied only when missing, so
 // a user's own layout and gamepad choices are kept.
 //
+// Start in a scenario, a fault in the robot's sensors or something that happens to it:
+// ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (frc.robot.sim.Scenarios).
+//
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
 
 wpi.sim.addGui().defaultEnabled = !project.hasProperty("replay")
 wpi.sim.addDriverstation()
 
+def scenario = project.findProperty("scenario")?.toString()
+
+// Lists the scenarios. With -Pscenario it gives that one's line instead, and a misspelled name
+// stops the build, with the list, before the simulator starts.
+def scenarios = tasks.register("scenarios", JavaExec) {
+    group = "application" // beside run
+    description = "List the simulator's scenarios, for ./gradlew run -Pscenario=<name>."
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = "frc.robot.sim.Scenarios"
+    if (scenario != null) {
+        args scenario
+    }
+}
+
 tasks.named("run") {
     if (project.hasProperty("replay")) {
+        if (scenario != null) {
+            throw new GradleException("A replay runs what its log recorded: -Pscenario is for the simulator")
+        }
         systemProperty "frc.simMode", "REPLAY"
     }
     systemProperty "frc.sim.autoEnable",
             !project.hasProperty("startDisabled") && !project.hasProperty("replay")
+    if (scenario != null) {
+        dependsOn scenarios
+        systemProperty "frc.sim.scenario", scenario
+    }
     def defaults = fileTree("sim") { include "simgui*.json" }
     def target = projectDir
     doFirst {

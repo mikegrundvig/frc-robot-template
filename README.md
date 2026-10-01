@@ -24,6 +24,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
 ./gradlew run                                # the simulator, enabled on a start and drivable from the keyboard
+./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
 ./gradlew deploy                             # to the robot, after every check passes
@@ -134,6 +135,15 @@ Also built in:
   it is; AdvantageScope gets `Sim/PoseErrorMeters`. Localization is tested against that gap, not
   against a perfect world: on a 15-second drive, odometry alone ends 12 cm off, and with a camera
   the estimate stays within 3.4 cm.
+- **Named scenarios for the simulator:** a fault in the robot's sensors or something that happens
+  to it, by name: `./gradlew run -Pscenario=camera-low` starts the simulator with a camera knocked
+  4 in low, and `collision`, `gyro-unplugged`, or `bump-crossing` happen once the robot is enabled.
+  Placing the robot again (a new alliance station while disabled) undoes a move.
+  `./gradlew scenarios` lists them all, and a misspelled name stops before the simulator starts,
+  with the list. The mechanisms and localization are never told: they find out from the sensors,
+  as on a robot, and the log names the scenario (`SimScenario`). Tests use the same catalog
+  (`frc.robot.sim.Scenarios`, and `RobotSim`'s `build` and `start`); what the simulator can't
+  make yet is in [docs/stand-ins.md](docs/stand-ins.md).
 - **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
   level, and each camera's mount, each measured on the robot and reported as the number to commit
   and where it goes ([docs/calibration.md](docs/calibration.md)).
@@ -156,7 +166,7 @@ Also built in:
 | `frc.robot.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `frc.robot.game` | The game: the field the robot plays on, 2026's (`Rebuilt`) until [kickoff](docs/kickoff.md), with its starts, targets, and zones written for the blue alliance. |
 | `frc.robot.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
-| `frc.robot.sim` | The simulated world: the drivetrain's physics, and sensors that err as a season-worn robot's do. Only the simulator builds it. |
+| `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, and the named scenarios (`Scenarios`). Only the simulator builds it. |
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |

@@ -8,6 +8,7 @@ import static frc.robot.lib.config.Rules.size;
 
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,6 +123,22 @@ public record SensorErrors(
     return SensorErrorsBuilder.builder(this)
         .wheelRadiusScale(List.of(scale, scale, scale, scale))
         .build();
+  }
+
+  /**
+   * The same errors, with one module's absolute encoder zeroed off by this much.
+   *
+   * @param module front left, front right, back left, back right: 0 to 3
+   */
+  public SensorErrors withSteerOffset(int module, double degrees) {
+    List<Double> offsets = new ArrayList<>(steerOffsetDegrees);
+    offsets.set(module, degrees);
+    return SensorErrorsBuilder.builder(this).steerOffsetDegrees(offsets).build();
+  }
+
+  /** The same errors, with the gyro reading like this; the backup IMU as it was. */
+  public SensorErrors withGyro(GyroErrors gyro) {
+    return SensorErrorsBuilder.builder(this).gyro(gyro).build();
   }
 
   /** The same errors, with both the gyro and the backup IMU reading like this. */

@@ -89,7 +89,9 @@ heading error's.
 **Losing any one camera.** A camera gets blocked by a mechanism or another robot, knocked out of
 calibration, or unplugged mid-match. For each layout of N cameras, the study scores it again with
 each camera in turn left out, and reports the worst: its 95% error and the share of the field it
-still measures with N - 1 cameras ("one lost"). That's the layout's tolerance of one fault. It's a
+still measures with N - 1 cameras ("one lost"). That's the layout's tolerance of one fault. The two
+are each the worst on its own, so they may come from losing different cameras. A layout of one
+camera, lost, has nothing left: "none" and 0%. It's a
 column, not part of the ranking: the ranking says how well a layout does as built, and whether a
 fifth or sixth camera is worth its cost, weight, and wiring as insurance is the team's call, which
 this column informs. Layouts share their N - 1 subsets, so this costs little.
@@ -312,7 +314,21 @@ the three heights; three cameras about 3 cm behind; one or two blind too often.
 
 **More than four cameras.** The family stops at four. To weigh a fifth or sixth, give the study
 places: here, eight places 16 in up, tilted 20°, at the four corners (splayed 30°) and the middles
-of the four sides, every layout of up to six cameras (247 with the robot's own, 3 s):
+of the four sides, every layout of up to six cameras (247 with the robot's own, 3 s), with
+`--mounts=eight.csv --cameras=6` and this file:
+
+```csv
+name,        forward (in), left (in), up (in), yaws (deg), tilts (deg)
+front-left,  12.25,        12.25,     16,      30,         20
+front-right, 12.25,        -12.25,    16,      -30,        20
+back-left,   -12.25,       12.25,     16,      150,        20
+back-right,  -12.25,       -12.25,    16,      -150,       20
+front,       12.25,        0,         16,      0,          20
+back,        -12.25,       0,         16,      180,        20
+left,        0,            12.25,     16,      90,         20
+right,       0,            -12.25,    16,      -90,        20
+```
+
 
 | Cameras | 95% within | Two cameras | One lost: 95% within | One lost: measured |
 |---:|---:|---:|---:|---:|

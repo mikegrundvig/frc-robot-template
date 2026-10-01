@@ -191,6 +191,7 @@ final class Report {
           + "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
 
   private static String row(int rank, Score score) {
+    Score.OneLost oneLost = score.oneLost();
     return format(
         "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |%n",
         rank,
@@ -207,8 +208,8 @@ final class Report {
         Double.isNaN(score.headingRmsDegrees())
             ? "none"
             : format("%.2f°", score.headingRmsDegrees()),
-        centimeters(score.oneLostP95Meters()),
-        percent(score.oneLostMeasured()));
+        oneLost == null ? "not scored" : centimeters(oneLost.p95Meters()),
+        oneLost == null ? "not scored" : percent(oneLost.measured()));
   }
 
   /**
@@ -296,8 +297,9 @@ final class Report {
   }
 
   private static String scoreColumns(Score score) {
+    Score.OneLost oneLost = score.oneLost();
     return format(
-        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s,%s,%.4f",
+        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s,%s,%s",
         number(score.positionP95Meters(), 4),
         score.withinTwoCentimeters(),
         score.withinFiveCentimeters(),
@@ -308,8 +310,8 @@ final class Report {
         score.heading(),
         number(score.positionRmsMeters(), 4),
         number(score.headingRmsDegrees(), 3),
-        number(score.oneLostP95Meters(), 4),
-        score.oneLostMeasured());
+        oneLost == null ? "" : number(oneLost.p95Meters(), 4),
+        oneLost == null ? "" : format("%.4f", oneLost.measured()));
   }
 
   static List<String> poses(Run run) {

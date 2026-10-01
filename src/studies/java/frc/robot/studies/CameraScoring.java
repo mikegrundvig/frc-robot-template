@@ -14,11 +14,13 @@ import frc.robot.lib.localization.VisionPipeline;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.SplittableRandom;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -149,12 +151,27 @@ public final class CameraScoring {
   }
 
   /**
-   * Every camera's images at every sample, then every layout's score from them.
+   * Every camera's images at every sample, then every layout's score from them, with how it does
+   * when it loses any one camera.
    *
    * @param conditions how the cameras and the robot err, this time
    * @param progress told how many samples are done, after each one
    */
   public Result score(List<Sample> samples, Conditions conditions, IntConsumer progress) {
+    return score(samples, conditions, progress, true);
+  }
+
+  /**
+   * Every layout's score as built, without losing a camera: all a robustness trial needs.
+   *
+   * @param conditions how the cameras and the robot err, this time
+   */
+  public Result scoreAsBuilt(List<Sample> samples, Conditions conditions) {
+    return score(samples, conditions, done -> {}, false);
+  }
+
+  private Result score(
+      List<Sample> samples, Conditions conditions, IntConsumer progress, boolean losingOne) {
     Views[] views = new Views[samples.size()];
     // Where each camera really is, off its configured mount as these conditions have it.
     Transform3d[] mounts = new Transform3d[cameras.size()];
@@ -179,56 +196,86 @@ public final class CameraScoring {
           };
         });
     Score[] scores = new Score[candidates.size()];
-    // Each layout less one camera, scored once however many layouts share it.
-    Map<List<Integer>, Score> lessOne = new ConcurrentHashMap<>();
     inParallel(
         candidates.size(),
         threads,
-        () ->
-            c -> {
-              Score score = Score.of(candidates.get(c), samples, outcomes(views, layouts[c]));
-              scores[c] = oneCameraLost(score, layouts[c], samples, views, lessOne);
-            });
-    return new Result(candidates, layouts, samples, views, List.of(scores));
+        () -> c -> scores[c] = Score.of(candidates.get(c), samples, outcomes(views, layouts[c])));
+    int apart = 0;
+    if (losingOne) {
+      apart = oneCameraLost(scores, samples, views, threads);
+    }
+    return new Result(candidates, layouts, samples, views, List.of(scores), apart);
   }
 
   /**
-   * A layout's score, with how it does when it loses any one camera: the worst of its 95% errors
-   * without each camera in turn, and the least of the field it still measures. A lone camera lost
-   * leaves nothing.
+   * Adds to each layout's score how it does with any one camera lost: the worst over each camera
+   * left out in turn. A set of cameras that's a layout already has its score; each other set a
+   * layout less one camera makes is scored once, however many layouts share it.
+   *
+   * @return how many sets of cameras were scored apart from the layouts
    */
-  private Score oneCameraLost(
-      Score score,
-      int[] layout,
-      List<Sample> samples,
-      Views[] views,
-      Map<List<Integer>, Score> lessOne) {
-    if (layout.length == 1) {
-      return score.withOneCameraLost(Double.POSITIVE_INFINITY, 0);
+  private int oneCameraLost(Score[] scores, List<Sample> samples, Views[] views, int threads) {
+    Map<List<Integer>, Score> bySet = new HashMap<>();
+    for (int c = 0; c < layouts.length; c++) {
+      bySet.putIfAbsent(sorted(layouts[c], -1), scores[c]);
     }
-    double worst = 0;
-    double least = 1;
-    for (int lost = 0; lost < layout.length; lost++) {
-      List<Integer> rest = new ArrayList<>();
-      for (int i = 0; i < layout.length; i++) {
-        if (i != lost) {
-          rest.add(layout[i]);
+    Set<List<Integer>> missing = new LinkedHashSet<>();
+    for (int[] layout : layouts) {
+      for (int lost = 0; layout.length > 1 && lost < layout.length; lost++) {
+        List<Integer> rest = sorted(layout, lost);
+        if (!bySet.containsKey(rest)) {
+          missing.add(rest);
         }
       }
-      rest.sort(Comparator.naturalOrder());
-      Score without =
-          lessOne.computeIfAbsent(
-              rest,
-              cameras -> {
-                List<CameraConfig> kept = cameras.stream().map(this.cameras::get).toList();
-                int[] places = cameras.stream().mapToInt(Integer::intValue).toArray();
-                return Score.of(
-                    new Candidate("less one camera", kept), samples, outcomes(views, places));
-              });
-      worst = Math.max(worst, without.positionP95Meters());
-      least = Math.min(least, without.measured());
     }
-    return score.withOneCameraLost(worst, least);
+    List<List<Integer>> apart = List.copyOf(missing);
+    Score[] apartScores = new Score[apart.size()];
+    inParallel(
+        apart.size(),
+        threads,
+        () ->
+            k -> {
+              List<Integer> set = apart.get(k);
+              apartScores[k] =
+                  Score.of(
+                      new Candidate("less one camera", set.stream().map(cameras::get).toList()),
+                      samples,
+                      outcomes(views, set.stream().mapToInt(Integer::intValue).toArray()));
+            });
+    for (int k = 0; k < apart.size(); k++) {
+      bySet.put(apart.get(k), apartScores[k]);
+    }
+    for (int c = 0; c < layouts.length; c++) {
+      int[] layout = layouts[c];
+      if (layout.length == 1) {
+        scores[c] = scores[c].withOneCameraLost(Score.OneLost.NOTHING_LEFT);
+        continue;
+      }
+      double worstP95 = 0;
+      double leastMeasured = 1;
+      for (int lost = 0; lost < layout.length; lost++) {
+        Score without = bySet.get(sorted(layout, lost));
+        if (without == null) {
+          throw new IllegalStateException("a layout less one camera went unscored");
+        }
+        worstP95 = Math.max(worstP95, without.positionP95Meters());
+        leastMeasured = Math.min(leastMeasured, without.measured());
+      }
+      scores[c] = scores[c].withOneCameraLost(new Score.OneLost(worstP95, leastMeasured));
+    }
+    return apart.size();
+  }
+
+  /** A layout's cameras, in order, less the one at {@code lost} (none, if it's negative). */
+  private static List<Integer> sorted(int[] layout, int lost) {
+    List<Integer> set = new ArrayList<>();
+    for (int i = 0; i < layout.length; i++) {
+      if (i != lost) {
+        set.add(layout[i]);
+      }
+    }
+    set.sort(Comparator.naturalOrder());
+    return List.copyOf(set);
   }
 
   /**
@@ -459,14 +506,17 @@ public final class CameraScoring {
     private final List<Sample> samples;
     private final Views[] views;
     private final List<Score> ranking;
+    private final int scoredApart;
 
     private Result(
         List<Candidate> candidates,
         int[][] layouts,
         List<Sample> samples,
         Views[] views,
-        List<Score> scores) {
+        List<Score> scores,
+        int scoredApart) {
       this.candidates = candidates;
+      this.scoredApart = scoredApart;
       this.layouts = layouts;
       this.samples = List.copyOf(samples);
       this.views = views;
@@ -478,6 +528,14 @@ public final class CameraScoring {
     /** Every layout's score, best first. */
     public List<Score> ranking() {
       return ranking;
+    }
+
+    /**
+     * How many sets of cameras, a layout less one camera, were scored apart from the layouts
+     * because no layout was that set.
+     */
+    public int scoredApart() {
+      return scoredApart;
     }
 
     public List<Sample> samples() {

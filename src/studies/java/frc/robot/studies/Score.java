@@ -3,6 +3,7 @@ package frc.robot.studies;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * How well a layout of cameras does over the whole field. Each share is of the poses, weighted, and
@@ -24,10 +25,8 @@ import java.util.List;
  * @param heading the share where an image corrects the gyro's heading
  * @param positionRmsMeters the position error where measured, root mean square; NaN if never
  * @param headingRmsDegrees the heading error where corrected, root mean square; NaN if never
- * @param oneLostP95Meters with any one of its cameras lost (blocked, knocked, or unplugged), the
- *     worst of the layout's 95% errors: infinite when losing one leaves more than 5% of the field
- *     unmeasured, as losing a lone camera does; NaN until scored
- * @param oneLostMeasured and the least share of the field still measured
+ * @param oneLost how the layout does with any one of its cameras lost (blocked, knocked, or
+ *     unplugged); null where it isn't scored, as in the robustness trials
  */
 public record Score(
     Candidate candidate,
@@ -41,8 +40,7 @@ public record Score(
     double heading,
     double positionRmsMeters,
     double headingRmsDegrees,
-    double oneLostP95Meters,
-    double oneLostMeasured) {
+    @Nullable OneLost oneLost) {
   static final double FIVE_CENTIMETERS = 0.05;
   static final double TWO_CENTIMETERS = 0.02;
 
@@ -60,8 +58,22 @@ public record Score(
           .thenComparingDouble(Score::positionP95Meters)
           .thenComparing(score -> score.candidate().name());
 
+  /**
+   * How a layout does with any one of its cameras lost: the worst over each camera left out in
+   * turn. The worst 95% error and the least share measured may come from losing different cameras.
+   * A lone camera lost leaves nothing: no 95% error, and nothing measured.
+   *
+   * @param p95Meters the worst of the 95% errors, infinite when a camera lost leaves more than 5%
+   *     of the field unmeasured
+   * @param measured the least share of the field still measured
+   */
+  public record OneLost(double p95Meters, double measured) {
+    /** A layout of one camera, lost. */
+    static final OneLost NOTHING_LEFT = new OneLost(Double.POSITIVE_INFINITY, 0);
+  }
+
   /** The same score, with how the layout does when it loses any one camera. */
-  public Score withOneCameraLost(double p95Meters, double measured) {
+  public Score withOneCameraLost(OneLost lost) {
     return new Score(
         candidate,
         positionP95Meters,
@@ -74,8 +86,7 @@ public record Score(
         heading,
         positionRmsMeters,
         headingRmsDegrees,
-        p95Meters,
-        measured);
+        lost);
   }
 
   /** How many cameras the layout has. */
@@ -151,8 +162,7 @@ public record Score(
         heading / total,
         measured > 0 ? Math.sqrt(squaredPosition / measured) : Double.NaN,
         heading > 0 ? Math.sqrt(squaredHeading / heading) : Double.NaN,
-        Double.NaN,
-        Double.NaN);
+        null);
   }
 
   /** The error that this share of the weight falls at or below. */

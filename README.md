@@ -136,6 +136,9 @@ Also built in:
 - **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
   level, and each camera's mount, each measured on the robot and reported as the number to commit
   and where it goes ([docs/calibration.md](docs/calibration.md)).
+- **Where every value comes from** ([docs/values.md](docs/values.md)): every configuration value,
+  whether it's calibrated, characterized, chosen, or as built, where today's number came from, and
+  how to measure it or why it is what it is.
 - **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
   match tab, checked against the code on every build, so no widget sits blank on the field.
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
@@ -162,7 +165,7 @@ Also built in:
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

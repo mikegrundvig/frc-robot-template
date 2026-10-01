@@ -14,12 +14,15 @@ import static org.wpilib.units.Units.Seconds;
 
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.ImuMount;
+import frc.robot.lib.config.Imus;
 import frc.robot.lib.config.Motor;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.VisionConfig;
 import java.util.List;
 import java.util.Optional;
+import org.wpilib.math.geometry.Rotation3d;
 
 /**
  * The team's robots, one {@link RobotConfig} each. A test builds every one, so an invalid value
@@ -187,6 +190,19 @@ public final class Robots {
               .build());
 
   /**
+   * The simulator's IMUs: at the center, 3 in up on the belly pan, level with x forward, and
+   * checked (they read along their axes by construction).
+   */
+  private static final ImuMount SIM_IMU =
+      ImuMount.builder()
+          .forward(Meters.of(0))
+          .left(Meters.of(0))
+          .up(Inches.of(3))
+          .orientation(Rotation3d.ZERO)
+          .accelerometerChecked(true)
+          .build();
+
+  /**
    * The template's robot. It has no wiring: on real hardware its drivetrain stays still and says
    * so. Give a real robot its own entry, with its wiring from Phoenix Tuner X's swerve generator.
    */
@@ -199,6 +215,11 @@ public final class Robots {
           .cameras(CAMERAS)
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)
+          // The simulator's IMUs sit at the center on the belly pan, level, x forward, and read
+          // along their axes by construction. A real robot starts from Imus.UNCHECKED, its IMUs
+          // measured where they're mounted, until each passes the accelerometer check
+          // (docs/calibration.md).
+          .imus(Imus.builder().gyro(SIM_IMU).backup(SIM_IMU).build())
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */

@@ -10,9 +10,11 @@ import org.wpilib.math.geometry.Translation2d;
  * A simulated gyro: the robot's true rotation, reported with the scale error, drift, and noise of
  * {@link SensorErrors}. Like a real gyro, it reads zero wherever the robot pointed when it started,
  * and it follows the robot when someone picks it up and turns it. The rest of the IMU reads the
- * robot's attitude and acceleration as they truly are. It can fail as a real one does, at any
- * moment: disconnected (no readings at all), frozen (still reporting, the same yaw every time),
- * erring differently from now on, or reset to zero, as one that browns out and restarts does.
+ * robot's attitude as it truly is, and its acceleration through its own accelerometer ({@link
+ * AccelerometerSim}), which feels a hit's jolt on its own; unplugged, it feels none. It can fail as
+ * a real one does, at any moment: disconnected (no readings at all), frozen (still reporting, the
+ * same yaw every time), erring differently from now on, or reset to zero, as one that browns out
+ * and restarts does.
  */
 final class GyroIOSim implements GyroIO {
   private final DriveSimulation robot;
@@ -22,6 +24,7 @@ final class GyroIOSim implements GyroIO {
   private double driftRadiansPerSecond;
   private double noiseRadians;
   private final Random noise;
+  private final AccelerometerSim accelerometer;
 
   /**
    * Added to its reading so the reading carries on from where it was when its errors change or it
@@ -37,8 +40,13 @@ final class GyroIOSim implements GyroIO {
   private boolean connected = true;
   private boolean frozen;
 
-  GyroIOSim(DriveSimulation robot, SensorErrors.GyroErrors errors, long seed) {
+  GyroIOSim(
+      DriveSimulation robot,
+      SensorErrors.GyroErrors errors,
+      AccelerometerSim accelerometer,
+      long seed) {
     this.robot = robot;
+    this.accelerometer = accelerometer;
     built = errors;
     this.errors = errors;
     takeErrors(errors);
@@ -102,6 +110,21 @@ final class GyroIOSim implements GyroIO {
         + driftRadiansPerSecond * robot.elapsedSeconds();
   }
 
+  /** After each physics step: its accelerometer feels it. */
+  void feel(double seconds) {
+    accelerometer.step(seconds);
+  }
+
+  /** At the end of each loop. */
+  void endLoop(double seconds) {
+    accelerometer.endLoop(seconds);
+  }
+
+  /** A hit's jolt, along the robot's axes: its next reading feels it. */
+  void jolt(Translation2d robotAxes) {
+    accelerometer.jolt(robotAxes);
+  }
+
   /** Takes a reading for odometry, with the modules' readings. */
   void sample(long timestampNanos) {
     if (!connected) {
@@ -127,9 +150,13 @@ final class GyroIOSim implements GyroIO {
     inputs.yawVelocityRadPerSec = robot.yawRateRadiansPerSecond() * scale;
     inputs.pitchRad = robot.pitchRadians();
     inputs.rollRad = robot.rollRadians();
-    Translation2d felt = robot.feltAcceleration();
-    inputs.accelerationXMetersPerSecSq = felt.getX();
-    inputs.accelerationYMetersPerSecSq = felt.getY();
+    if (connected) {
+      Translation2d felt = accelerometer.read();
+      inputs.accelerationXMetersPerSecSq = felt.getX();
+      inputs.accelerationYMetersPerSecSq = felt.getY();
+    } else {
+      accelerometer.missed();
+    }
     inputs.odometryTimestampsNanos = Arrays.copyOf(sampleTimes, samples);
     inputs.odometryYawsRad = Arrays.copyOf(sampleYaws, samples);
     samples = 0;

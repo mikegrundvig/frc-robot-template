@@ -349,7 +349,9 @@ class PoseFilterReferenceTest {
                   : 2 * (random.nextDouble() - 0.5);
           double dx = 0.04 * (random.nextDouble() - 0.5);
           double dy = 0.04 * (random.nextDouble() - 0.5);
-          double positionNoise = logUniform(random, 1e-9, 1e-4);
+          // As much as a step's doubt gets: a collision's 25 cm adds 0.0625 m², a slide's about as
+          // much.
+          double positionNoise = logUniform(random, 1e-9, 1e-1);
           double headingNoise = logUniform(random, 1e-12, 1e-5);
           double which = random.nextDouble();
           YawSource turnedBy =

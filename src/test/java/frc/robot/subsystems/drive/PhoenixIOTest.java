@@ -27,6 +27,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The CTRE IO against Phoenix's own simulated devices: set what a sensor reads, and check what the
@@ -266,7 +268,7 @@ class PhoenixIOTest {
 
   @Test
   void theGyroPassesItsAnglesThroughInWpilibsConvention() throws InterruptedException {
-    GyroIOPigeon2 io = new GyroIOPigeon2(20, BUS, 1.0, odometry);
+    GyroIOPigeon2 io = new GyroIOPigeon2(20, BUS, 1.0, Rotation3d.ZERO, odometry);
     odometry.start();
 
     var pigeon = new Pigeon2(20, BUS).getSimState();
@@ -286,5 +288,23 @@ class PhoenixIOTest {
     assertThat(Math.toDegrees(inputs.pitchRad)).isCloseTo(-5, within(0.1));
     assertThat(inputs.odometryYawsRad[inputs.odometryYawsRad.length - 1])
         .isCloseTo(Math.PI / 2, within(0.002));
+  }
+
+  /**
+   * The accelerometer reads along the Pigeon's case, whatever its mount pose: turned a quarter turn
+   * left on the robot, it feels the robot speed up forward on its -y axis; mounted logo down, it
+   * feels a push left on its -y axis and the floor holding it up on its -z axis. Turned by the
+   * orientation the robot's definition gives it, both read along the robot's axes again.
+   */
+  @Test
+  void theAccelerometerIsTurnedFromThePigeonsCaseToTheRobotsAxes() {
+    Rotation3d turnedLeft = new Rotation3d(0, 0, Math.PI / 2);
+    Rotation3d logoDown = new Rotation3d(Math.PI, 0, 0);
+
+    Translation3d forward = GyroIOPigeon2.robotAxes(turnedLeft, 0, -1, 0);
+    Translation3d left = GyroIOPigeon2.robotAxes(logoDown, 0, -1, -9.81);
+
+    assertThat(forward.getDistance(new Translation3d(1, 0, 0))).isLessThan(1e-12);
+    assertThat(left.getDistance(new Translation3d(0, 1, 9.81))).isLessThan(1e-12);
   }
 }

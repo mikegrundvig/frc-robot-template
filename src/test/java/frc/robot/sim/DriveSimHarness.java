@@ -4,6 +4,7 @@ import frc.robot.RobotConfig;
 import frc.robot.RobotSim;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
 import frc.robot.lib.localization.PoseReset;
@@ -71,7 +72,13 @@ public final class DriveSimHarness implements AutoCloseable {
     for (Translation2d wheel : wheels) {
       reach = Math.max(reach, wheel.getNorm());
     }
-    return new Localization(estimator, new SwerveKinematicsModel(wheels), terrain, reach);
+    return new Localization(
+        estimator,
+        new SwerveKinematicsModel(wheels),
+        terrain,
+        reach,
+        robot.drivetrain().modules().wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY,
+        robot.imus());
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */
@@ -92,7 +99,7 @@ public final class DriveSimHarness implements AutoCloseable {
       RobotConfig robot, SensorErrors errors, EstimatorConfig config, Terrain terrain) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     localization = localizationFor(robot, estimator, terrain);
-    simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors);
+    simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors, robot.imus());
     simulation.setTerrain(terrain);
     drive =
         new Drive(
@@ -112,6 +119,11 @@ public final class DriveSimHarness implements AutoCloseable {
   /** From now on, a camera's results reach the estimator every loop. */
   public void watchWith(FakeCamera camera) {
     this.camera = camera;
+  }
+
+  /** From now on, no camera's results reach the estimator: blinded, until watching again. */
+  public void stopWatching() {
+    camera = null;
   }
 
   /** Something to do at the end of every loop, such as feeding another estimator to compare. */

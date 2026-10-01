@@ -7,6 +7,7 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.VisionDecision;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;
@@ -43,7 +44,7 @@ class EstimatorGoldenSimTest {
 
   @Test
   void theEstimatorBehavesAsRecorded() throws IOException {
-    List<String> actual = session();
+    List<String> actual = session().rows();
 
     if ("1".equals(System.getenv("GOLDEN_UPDATE"))) {
       Path file =
@@ -67,8 +68,25 @@ class EstimatorGoldenSimTest {
     assertThat(actual).as("rows").hasSameSizeAs(expected);
   }
 
+  /**
+   * The misread tag, 1.5 m off and claiming 3 cm, comes as the robot reverses at full stick, its
+   * drive motors at their current limit: wheels that grip, so the estimate stays sure of them and
+   * the gate rejects it.
+   */
+  @Test
+  void theMisreadTagIsRejected() {
+    List<VisionDecision> misread =
+        session().decisions().stream().filter(decision -> decision.innovationMeters() > 1).toList();
+
+    assertThat(misread).hasSize(1);
+    assertThat(misread.get(0).accepted()).isFalse();
+  }
+
+  /** What the session did: a row per loop, and what became of every camera measurement. */
+  private record Session(List<String> rows, List<VisionDecision> decisions) {}
+
   /** The session, one row per loop: the loop, the pose, the mode, and the measurement counts. */
-  private static List<String> session() {
+  private static Session session() {
     List<String> rows = new ArrayList<>();
     rows.add("loop,x,y,heading,mode,accepted,rejected");
     try (DriveSimHarness robot = new DriveSimHarness(Robots.SIM, SensorErrors.TYPICAL)) {
@@ -89,8 +107,8 @@ class EstimatorGoldenSimTest {
       robot.drive(1, 0.6, 0, 0);
       robot.simulation.tilt(0, 0);
       robot.idle(1);
+      return new Session(rows, List.copyOf(robot.decisions));
     }
-    return rows;
   }
 
   private static String row(int loop, LocalizationEstimate estimate) {

@@ -293,12 +293,12 @@ class VisionSimTest {
   /**
    * The promises each way of correcting the heading keeps for a camera turned 4°, as measured. The
    * full update keeps the first two: the camera is out of calibration and counts for less, and the
-   * back cameras are never doubted; but it's doubted by only 2.6 cm, and the last lap is 5.0 cm
-   * off, against 5.7 cm with it trusted as before: closer, not a fifth closer. Leaving the heading
+   * back cameras are never doubted; but it's doubted by only 5.7 cm, and the last lap is 4.7 cm
+   * off, against 5.4 cm with it trusted as before: closer, not a fifth closer. Leaving the heading
    * to measurements with a heading of their own, a turned camera's headings pull the estimate's
    * heading its way, its neighbour's tags land off too, and the check doesn't doubt it at all: the
-   * last lap is 5.8 cm off, as with it trusted as before. Adding the doubt to what each camera
-   * repeats changes only the last lap (5.4 cm). This test shows which; it changes when one does,
+   * last lap is 5.6 cm off, against 5.5 cm trusted as before. Adding the doubt to what each camera
+   * repeats changes the last lap little (5.5 cm). This test shows which; it changes when one does,
    * either way.
    */
   @ParameterizedTest
@@ -327,9 +327,9 @@ class VisionSimTest {
 
   /**
    * A camera turned 2° stands out in its tag residuals, more than 1.4 times its worst neighbour's,
-   * however the heading is corrected, and most when every fix corrects it (2.4). Otherwise its
+   * however the heading is corrected, and most when every fix corrects it (2.5). Otherwise its
    * headings pull the estimate's heading partway its way, and its neighbour's tags land off too: it
-   * stands out less (1.6).
+   * stands out less (1.7).
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)

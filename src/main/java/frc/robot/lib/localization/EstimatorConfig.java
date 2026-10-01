@@ -2,7 +2,6 @@ package frc.robot.lib.localization;
 
 import static frc.robot.lib.config.Rules.atLeast;
 import static frc.robot.lib.config.Rules.below;
-import static frc.robot.lib.config.Rules.between;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.positive;
 import static frc.robot.lib.config.Rules.shown;
@@ -19,10 +18,8 @@ import frc.robot.lib.config.ConfigRecord;
  *     travel, in meters. Its variance grows with distance.
  * @param translationStdDevPerRadian how far odometry's position may be off after turning one
  *     radian, in meters: wheels scrub as they turn
- * @param residualScale how much of the wheels' disagreement (the kinematic residual) counts as
- *     suspect travel: 1 counts all of it
- * @param tractionLimitedSlipFraction while the wheels are at the edge of their grip, this share of
- *     their travel counts as suspect
+ * @param residualScale how much of the wheels' disagreement (the kinematic residual, which says how
+ *     far it may have put their travel off) counts as suspect travel: 1 counts all of it
  * @param tiltStartDegrees below this tilt the wheels are trusted fully
  * @param tiltZeroDegrees at and above this tilt the wheels' travel counts for nothing: a robot
  *     climbing a bump or a ramp has wheels in the air (6328 scaled to zero at 25 degrees). Between
@@ -96,7 +93,6 @@ public record EstimatorConfig(
     double translationStdDevPerMeter,
     double translationStdDevPerRadian,
     double residualScale,
-    double tractionLimitedSlipFraction,
     double tiltStartDegrees,
     double tiltZeroDegrees,
     double slipCorrelationSeconds,
@@ -135,7 +131,6 @@ public record EstimatorConfig(
           .translationStdDevPerMeter(0.03)
           .translationStdDevPerRadian(0.02)
           .residualScale(1.0)
-          .tractionLimitedSlipFraction(0.25)
           .tiltStartDegrees(5)
           .tiltZeroDegrees(25)
           .slipCorrelationSeconds(0.5)
@@ -175,7 +170,6 @@ public record EstimatorConfig(
         .field("translationStdDevPerMeter", translationStdDevPerMeter, nonNegative())
         .field("translationStdDevPerRadian", translationStdDevPerRadian, nonNegative())
         .field("residualScale", residualScale, nonNegative())
-        .field("tractionLimitedSlipFraction", tractionLimitedSlipFraction, between(0, 1))
         .field("tiltStartDegrees", tiltStartDegrees, nonNegative())
         .field("tiltZeroDegrees", tiltZeroDegrees, below(90))
         .field("slipCorrelationSeconds", slipCorrelationSeconds, positive())

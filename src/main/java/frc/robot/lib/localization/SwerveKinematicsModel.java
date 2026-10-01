@@ -9,6 +9,13 @@ import org.wpilib.math.util.MathUtil;
  * best fits all of them (least squares, as WPILib's odometry does). How badly it fits is the
  * residual: modules that disagree with every rigid motion are slipping, lifted, or being pushed,
  * which is when odometry deserves the least trust (6800's skid ratio, 2056's wheel scores).
+ *
+ * <p>The residual is reported as how far the disagreement may have put the fitted travel off: the
+ * modules' misses, spread over what the fit leaves free (two numbers a module, less the motion's
+ * three), carried into the travel as least squares carries each module's error into it. One module
+ * of four slipping puts the fit off by a quarter of its slip, and the residual says that much,
+ * within about a tenth, whichever way it slips (exactly, for a square drivetrain's wheel slipping
+ * forward or sideways).
  */
 public final class SwerveKinematicsModel implements DriveKinematicsModel {
   private final double[] moduleX;
@@ -16,6 +23,12 @@ public final class SwerveKinematicsModel implements DriveKinematicsModel {
 
   /** (A^T A)^-1 A^T for the rigid-motion model: 3 rows of 2n, row-major. */
   private final double[] pseudoInverse;
+
+  /**
+   * How the modules' misses, squared, carry into the fitted travel's error, squared: the travel's
+   * share of (A^T A)^-1, over the fit's spare degrees of freedom, 2n - 3.
+   */
+  private final double missToTravel;
 
   /**
    * @param modules where each module sits, from the robot's center, in the samples' order
@@ -44,6 +57,7 @@ public final class SwerveKinematicsModel implements DriveKinematicsModel {
     if (!Matrices.invert3(normal, inverse)) {
       throw new IllegalArgumentException("the modules must not all sit at one point");
     }
+    missToTravel = (inverse[0] + inverse[4]) / (2 * n - 3);
     pseudoInverse = new double[3 * 2 * n];
     for (int row = 0; row < 3; row++) {
       for (int i = 0; i < n; i++) {
@@ -86,6 +100,6 @@ public final class SwerveKinematicsModel implements DriveKinematicsModel {
       double missY = travel[2 * i + 1] - (dy + moduleX[i] * dtheta);
       squares += missX * missX + missY * missY;
     }
-    return new BodyMotion(dx, dy, dtheta, Math.sqrt(squares / n));
+    return new BodyMotion(dx, dy, dtheta, Math.sqrt(squares * missToTravel));
   }
 }

@@ -23,6 +23,7 @@ import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Placement;
 import frc.robot.lib.field.Zone;
 import frc.robot.lib.field.ZoneTrigger;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.PoseEstimator;
@@ -227,19 +228,26 @@ public final class RobotContainer implements AutoCloseable {
     // and a robot without wiring stays still rather than guess at motors, and says so).
     DriveHardware driveHardware;
     if (mode == Constants.Mode.SIM) {
-      world = new SimulatedWorld(field, drivetrain.get(), body, cameras, simulatedErrors);
+      world =
+          new SimulatedWorld(field, drivetrain.get(), body, cameras, robot.imus(), simulatedErrors);
       hardware = null;
       driveHardware = world.drivetrainHardware();
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
       world = null;
       PhoenixDrivetrain phoenix =
-          new PhoenixDrivetrain(robot.drivetrainWiring().get(), drivetrain.get().modules());
+          new PhoenixDrivetrain(
+              robot.drivetrainWiring().get(),
+              drivetrain.get().modules(),
+              robot.imus().gyro().orientation());
       hardware = phoenix;
       driveHardware =
           DriveHardware.builder()
               .modules(List.of(phoenix.modules()))
               .gyro(phoenix.gyro())
-              .backupImu(new GyroIOSystemcore(robot.drivetrainWiring().get().systemcoreMount()))
+              .backupImu(
+                  new GyroIOSystemcore(
+                      robot.drivetrainWiring().get().systemcoreMount(),
+                      robot.imus().backup().orientation()))
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {
@@ -269,7 +277,9 @@ public final class RobotContainer implements AutoCloseable {
                     "not placed yet")),
             new SwerveKinematicsModel(wheels),
             field.terrain(),
-            wheelReach);
+            wheelReach,
+            drivetrain.get().modules().wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY,
+            robot.imus());
     drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (world != null) {

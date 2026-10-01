@@ -62,6 +62,10 @@ class ValuesRegisterTest {
     committed.put(
         "SensorErrors.GyroErrors",
         new Committed("SensorErrors.TYPICAL's gyro", SensorErrors.TYPICAL.gyro()));
+    committed.put(
+        "SensorErrors.AccelErrors",
+        new Committed(
+            "SensorErrors.TYPICAL's accelerometer", SensorErrors.TYPICAL.accelerometer()));
     committed.put("Body", new Committed("Robots.SIM's body", robot.body()));
     committed.put("SwerveConfig", new Committed("Robots.SIM's drivetrain", robot.drivetrain()));
     committed.put(

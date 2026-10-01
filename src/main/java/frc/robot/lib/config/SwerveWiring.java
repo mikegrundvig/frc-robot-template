@@ -32,7 +32,10 @@ import org.wpilib.units.measure.Angle;
  *     coupling.
  * @param modules front left, front right, back left, back right
  * @param systemcoreMount how Systemcore itself is mounted, for its onboard IMU, the backup to the
- *     gyro: flat, or on edge along its long side (landscape) or short side (portrait)
+ *     gyro: flat, or on edge along its long side (landscape) or short side (portrait). WPILib takes
+ *     its yaw about the axis this says is up. How the board is turned on the robot, which turns its
+ *     accelerometer's axes into the robot's, is its mount in the robot's definition ({@code
+ *     Imus.backup}).
  */
 @ConfigRecord
 public record SwerveWiring(

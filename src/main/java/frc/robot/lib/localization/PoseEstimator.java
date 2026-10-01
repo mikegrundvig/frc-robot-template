@@ -26,9 +26,9 @@ import org.wpilib.math.util.MathUtil;
  *
  * <p>Each odometry step predicts: the wheels' motion, along the arc the gyro turned through, moves
  * the position, and the uncertainty grows with the distance driven, the turning, and time, and with
- * whatever makes the wheels suspect: their disagreement, a tilt that lifts them, a grip at its
- * limit, a collision (see {@link DriveConditions}). A camera measurement is applied at the moment
- * its image was taken, however late it arrives: the estimator keeps {@link
+ * whatever makes the wheels suspect: their disagreement with each other, the IMU's with them, a
+ * tilt that lifts them, a collision (see {@link DriveConditions}). A camera measurement is applied
+ * at the moment its image was taken, however late it arrives: the estimator keeps {@link
  * EstimatorConfig#historySeconds} of steps, rewinds to the measurement, applies it, and replays the
  * steps since, so measurements give the same result in any order of arrival. Each is gated against
  * the estimate first; when several rejected ones agree with each other, odometry was the one that
@@ -99,7 +99,10 @@ public final class PoseEstimator implements CameraLocalizer {
   // What the wheels are going through, and the doubt it adds up to.
   private DriveConditions conditions = DriveConditions.NORMAL;
   private double suspectTravel;
-  private boolean collisionPending;
+
+  /** The doubt of a collision felt since the last step, for the next to take. */
+  private double collisionPendingVariance;
+
   private long collisionUntilNanos = Long.MIN_VALUE;
 
   private PoseReset initial;
@@ -261,12 +264,22 @@ public final class PoseEstimator implements CameraLocalizer {
    * until the next call. A new collision makes the next step uncertain by {@link
    * EstimatorConfig#collisionStdDevMeters}: the robot may have moved without its wheels seeing it.
    * Jolts within {@link EstimatorConfig#collisionWindowSeconds} of the last are the same collision.
+   * A share of one (a jolt the wheels partly explain) adds that share of its spread, outside a
+   * collision's window, and opens none.
    */
   public void setConditions(DriveConditions conditions) {
     this.conditions = conditions;
-    if (conditions.collision() && started) {
-      collisionPending |= !(history.newestTime() <= collisionUntilNanos);
+    if (!started) {
+      return;
+    }
+    boolean inWindow = history.newestTime() <= collisionUntilNanos;
+    if (conditions.collision()) {
+      if (!inWindow) {
+        collisionPendingVariance += collisionVariance;
+      }
       collisionUntilNanos = history.newestTime() + collisionWindowNanos;
+    } else if (!inWindow) {
+      collisionPendingVariance += square(conditions.collisionShare()) * collisionVariance;
     }
   }
 
@@ -807,25 +820,25 @@ public final class PoseEstimator implements CameraLocalizer {
 
   /**
    * A step's position variance beyond the base terms. Its suspect travel (the share of the wheels'
-   * travel the tilt left out or the grip put in doubt, and the wheels' disagreement) adds to the
-   * recent suspect travel before squaring, since slip keeps its direction for a while; a new
-   * collision adds its variance; and a disabled robot may be carried.
+   * travel the tilt left out, how far their disagreement with each other may have put it off, and
+   * how far the IMU says they slid) adds to the recent suspect travel before squaring, since slip
+   * keeps its direction for a while; a new collision adds its variance; and a disabled robot may be
+   * carried.
    */
   private double extraVariance(long from, long to, double distance, double trust, double residual) {
-    double share =
-        Math.max(
-            1 - trust, conditions.tractionLimited() ? config.tractionLimitedSlipFraction() : 0);
     double seconds = Timestamps.toSeconds(to - from);
     double carried = suspectTravel * Math.exp(-seconds / config.slipCorrelationSeconds());
-    suspectTravel = carried + share * distance + config.residualScale() * residual;
+    suspectTravel =
+        carried
+            + (1 - trust) * distance
+            + config.residualScale() * residual
+            + conditions.slipMetersPerSecond() * seconds;
     double variance = square(suspectTravel) - square(carried);
     if (conditions.disabled()) {
       variance += handlingVariancePerSecond * seconds;
     }
-    if (collisionPending) {
-      variance += collisionVariance;
-      collisionPending = false;
-    }
+    variance += collisionPendingVariance;
+    collisionPendingVariance = 0;
     return variance;
   }
 

@@ -21,7 +21,8 @@ public interface ModuleIO {
 
     /**
      * Whether the drive motor hit its stator current limit since the last loop: the torque it can
-     * give is capped, and a wheel at that edge of its grip slips.
+     * give is capped. Logged for tuning the limit; it isn't slip, which a limit set below the
+     * tread's grip prevents.
      */
     public boolean driveTorqueLimited = false;
 

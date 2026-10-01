@@ -54,9 +54,6 @@ import org.wpilib.util.Alert;
 public class Drive implements Mechanism, AutoCloseable {
   private static final double STICK_DEADBAND = 0.1;
 
-  /** A wheel this far short of its commanded speed, in m/s, is at the edge of its grip. */
-  private static final double SPEED_DEFICIT = 0.5;
-
   /**
    * Wheels that report connected but send no readings this long have lost what reads them: on a
    * robot, the thread that records their high-rate readings.
@@ -156,7 +153,6 @@ public class Drive implements Mechanism, AutoCloseable {
             .gyro(ImuReadings.NONE)
             .backupImu(ImuReadings.NONE)
             .velocities(new ChassisVelocities())
-            .tractionLimited(false)
             .build();
 
     odometryStopped =
@@ -235,7 +231,6 @@ public class Drive implements Mechanism, AutoCloseable {
             .gyro(imuReadings(gyroInputs))
             .backupImu(imuReadings(backupInputs))
             .velocities(getRobotRelativeVelocities())
-            .tractionLimited(tractionLimited())
             .build();
 
     for (int i = 0; i < 4; i++) {
@@ -300,6 +295,7 @@ public class Drive implements Mechanism, AutoCloseable {
     return ImuReadings.builder()
         .reporting(imu.connected)
         .yawRadians(imu.yaw.getRadians())
+        .yawRateRadiansPerSecond(imu.yawVelocityRadPerSec)
         .pitchRadians(imu.pitchRad)
         .rollRadians(imu.rollRad)
         .forwardAccelerationMetersPerSecSq(imu.accelerationXMetersPerSecSq)
@@ -307,19 +303,6 @@ public class Drive implements Mechanism, AutoCloseable {
         .yawTimesNanos(times)
         .yawsRadians(yaws)
         .build();
-  }
-
-  /**
-   * Whether the wheels are at the edge of their grip: a drive motor at its current limit, or a
-   * wheel well short of the speed it was sent (581 and 1678 watched for that shortfall).
-   */
-  private boolean tractionLimited() {
-    for (Module module : modules) {
-      if (module.isTorqueLimited() || module.speedDeficitMetersPerSecond() > SPEED_DEFICIT) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /** Sends new gains and limits to the modules, and keeps the limits driving uses. */

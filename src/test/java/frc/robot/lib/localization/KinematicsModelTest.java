@@ -61,9 +61,12 @@ class KinematicsModelTest {
     }
   }
 
-  /** A wheel that spins without the robot moving to match disagrees with every rigid motion. */
+  /**
+   * A wheel that spins without the robot moving to match disagrees with every rigid motion, and the
+   * residual says how far that put the motion off: no more, no less.
+   */
   @Test
-  void aSlippingWheelShowsAsAResidual() {
+  void aSlippingWheelShowsAsAResidualAsLargeAsTheErrorItCauses() {
     OdometrySample after = afterRigidMotion(0.1, 0, 0);
     double[] distances = new double[4];
     double[] angles = new double[4];
@@ -76,8 +79,42 @@ class KinematicsModelTest {
 
     BodyMotion found = swerve.motion(startingFrom(after), slipped);
 
-    assertThat(found.residualMeters()).isGreaterThan(0.01);
-    assertThat(found.dxMeters()).as("the others outvote it").isCloseTo(0.11, within(0.001));
+    assertThat(found.dxMeters()).as("the others outvote it").isCloseTo(0.11, within(1e-12));
+    assertThat(found.residualMeters())
+        .as("the centimeter it put the motion off")
+        .isCloseTo(0.01, within(1e-12));
+  }
+
+  /**
+   * Whichever way a wheel slips, on a rectangular drivetrain too, its residual is within about a
+   * tenth of the error it causes.
+   */
+  @Test
+  void onARectangleTheResidualIsCloseToTheError() {
+    Translation2d[] rectangle = {
+      new Translation2d(0.35, 0.2),
+      new Translation2d(0.35, -0.2),
+      new Translation2d(-0.35, 0.2),
+      new Translation2d(-0.35, -0.2)
+    };
+    SwerveKinematicsModel rectangular = new SwerveKinematicsModel(rectangle);
+    double[] angles = new double[4];
+    for (int k = 0; k < 12; k++) {
+      double direction = k * Math.PI / 12;
+      for (int slipping = 0; slipping < 4; slipping++) {
+        double[] distances = new double[4];
+        double[] pointing = angles.clone();
+        pointing[slipping] = direction;
+        distances[slipping] = 0.04; // standing still, one wheel spins 4 cm
+        BodyMotion found =
+            rectangular.motion(
+                new OdometrySample(0, new double[4], pointing),
+                new OdometrySample(1, distances, pointing));
+
+        double error = Math.hypot(found.dxMeters(), found.dyMeters());
+        assertThat(found.residualMeters()).isCloseTo(error, within(0.11 * error));
+      }
+    }
   }
 
   /** A module steering during the interval traveled, on average, along its middle angle. */

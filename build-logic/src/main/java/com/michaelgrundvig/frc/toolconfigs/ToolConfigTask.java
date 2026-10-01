@@ -21,11 +21,13 @@ import org.gradle.api.tasks.Classpath;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Nested;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.jvm.toolchain.JavaLauncher;
 import org.gradle.process.ExecOperations;
 import org.gradle.work.DisableCachingByDefault;
 
@@ -65,6 +67,13 @@ public abstract class ToolConfigTask extends DefaultTask {
   /** Everything the writer runs on: the program and its libraries, as they're run. */
   @Internal
   public abstract ConfigurableFileCollection getRuntimeClasspath();
+
+  /**
+   * The Java the writer runs on: the project's toolchain (Java 25 for the template), not whatever
+   * Java runs Gradle.
+   */
+  @Nested
+  public abstract Property<JavaLauncher> getLauncher();
 
   /** The writer's class, with its {@code main}. */
   @Input
@@ -132,6 +141,7 @@ public abstract class ToolConfigTask extends DefaultTask {
     getExecOperations()
         .javaexec(
             spec -> {
+              spec.setExecutable(getLauncher().get().getExecutablePath().getAsFile());
               spec.classpath(getRuntimeClasspath());
               spec.getMainClass().set(getMainClass());
               spec.args(arguments);

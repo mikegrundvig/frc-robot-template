@@ -6,11 +6,13 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.plugins.JavaPlugin;
+import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.ListProperty;
 import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.api.tasks.SourceSetContainer;
 import org.gradle.api.tasks.TaskProvider;
+import org.gradle.jvm.toolchain.JavaToolchainService;
 
 /**
  * {@code frc.advantagescope-assets}: AdvantageScope's robot assets ({@code ascope_assets/}),
@@ -94,6 +96,16 @@ public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
                   task.getProgram().from(main.getOutput().getResourcesDir());
                   task.getLibraries().from(main.getRuntimeClasspath().minus(main.getOutput()));
                   task.getMainClass().set(WRITER);
+                  task.getLauncher()
+                      .convention(
+                          project
+                              .getExtensions()
+                              .getByType(JavaToolchainService.class)
+                              .launcherFor(
+                                  project
+                                      .getExtensions()
+                                      .getByType(JavaPluginExtension.class)
+                                      .getToolchain()));
                   task.getArguments()
                       .set(
                           extension

@@ -3,6 +3,7 @@ package frc.robot;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.timing.RobotLoop;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.driverstation.internal.DriverStationBackend;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.HAL;
 import org.wpilib.hardware.hal.RobotMode;
@@ -96,12 +98,14 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
 
   /**
    * Builds the simulator's robot in a scenario ({@link frc.robot.sim.Scenarios}), as {@code
-   * ./gradlew run -Pscenario=<name>} does: the scenario's faults in sensors that err as a
-   * season-worn robot's do. What happens to the robot in it waits until the test starts it ({@link
-   * #start}).
+   * ./gradlew run -Pscenario=<name>} does: the scenario's sensor faults on sensors that err as a
+   * season-worn robot's do, applied through the simulator's controls before the first loop. What
+   * happens to the robot in it waits until the test starts it ({@link #start}).
    */
   public RobotContainer build(Scenario scenario) {
-    return build(Robots.SIM, scenario.errorsOn(Robots.SIM.cameras()));
+    RobotContainer built = build(Robots.SIM, SensorErrors.TYPICAL);
+    Robot.apply(scenario.sensorFaultsIn(world()), components());
+    return built;
   }
 
   /** Builds a robot in the simulator. */
@@ -153,7 +157,15 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
    * simulated world. {@code ./gradlew run} starts it on the first loop the robot is enabled.
    */
   public void start(Scenario scenario) {
-    scenario.startIn(world());
+    Robot.apply(scenario.eventsIn(world()), components());
+  }
+
+  /**
+   * The simulated world's parts that can fail, and the scenarios, as the simulator's controls on
+   * the Pitwall page have them: apply a fault here as the page does.
+   */
+  public Components components() {
+    return pitwall().simulator().orElseThrow().components();
   }
 
   /** The robot's command scheduler. */
@@ -172,12 +184,15 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   }
 
   /**
-   * One robot loop: the clock moves a loop's time, then the robot runs {@link Robot#loop}, then
-   * WPILib's tunables update, as WPILib's own loop does after the robot's.
+   * One robot loop, as WPILib's runs it: the clock moves a loop's time, WPILib reads the Driver
+   * Station's newest data (which is how the simulator's controls on the Pitwall page reach the
+   * robot, a loop after they're asked), then the robot runs {@link Robot#loop}, then WPILib's
+   * tunables update.
    */
   public void loop() {
     RobotContainer robot = robot();
     stepClock();
+    DriverStationBackend.refreshData();
     Robot.loop(pitwall(), robot, scheduler(), Objects.requireNonNull(loopHealth));
     TunableRegistry.update();
   }

@@ -2,9 +2,10 @@ package frc.robot.sim;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
-import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.game.Rebuilt;
@@ -17,8 +18,10 @@ import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.ModuleIO.ModuleIOInputs;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,9 +34,9 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.system.RobotController;
 
 /**
- * The simulator's scenarios: each is found by its name, a misspelled name lists them all, and each
- * does to the simulated world what it says. What the robot's code makes of each is for the
- * whole-robot tests ({@code ScenarioSimTest}).
+ * The simulator's scenarios: each is found by its name, a misspelled name lists them all, each is
+ * made of the simulated world's faults, and each does to the simulated world what it says. What the
+ * robot's code makes of each is for the whole-robot tests ({@code ScenarioSimTest}).
  */
 @ExtendWith(RobotSim.class)
 class ScenariosTest {
@@ -44,6 +47,9 @@ class ScenariosTest {
 
   private final List<SimulatedWorld> worlds = new ArrayList<>();
 
+  /** The parts of the world built last, as Pitwall's simulator controls have them. */
+  private Components components = new Components(said -> {});
+
   @AfterEach
   void tearDown() {
     worlds.forEach(SimulatedWorld::close);
@@ -51,14 +57,17 @@ class ScenariosTest {
 
   /** The simulator's world on 2026's field, without cameras, sensors exact, the robot standing. */
   private SimulatedWorld world() {
+    return world(List.of(), SensorErrors.NONE);
+  }
+
+  /** A world, its parts declared to a fresh set of simulator controls, the robot standing. */
+  private SimulatedWorld world(List<CameraConfig> cameras, SensorErrors errors) {
     SimulatedWorld built =
         new SimulatedWorld(
-            RobotSim.FIELD,
-            Robots.SIM.drivetrain(),
-            Robots.SIM.body(),
-            List.of(),
-            SensorErrors.NONE);
+            RobotSim.FIELD, Robots.SIM.drivetrain(), Robots.SIM.body(), cameras, errors);
     worlds.add(built);
+    components = new Components(said -> {});
+    built.addTo(components);
     built.place(STANDING);
     step(built);
     return built;
@@ -69,12 +78,14 @@ class ScenariosTest {
     world.step(RobotController.getTime());
   }
 
-  private static SensorErrors sensorsIn(String scenario) {
-    return Scenarios.named(scenario).errorsOn(CAMERAS);
+  /** Applies all of a scenario's faults to the world built last, as the page does. */
+  private void start(String scenario, SimulatedWorld world) {
+    assertThat(apply(Scenarios.named(scenario).faultsIn(world))).as(scenario).isNull();
   }
 
-  private static void start(String scenario, SimulatedWorld world) {
-    Scenarios.named(scenario).startIn(world);
+  /** Applies faults to the world built last, as a scenario does: why any were refused, or null. */
+  private @Nullable String apply(List<Setting> faults) {
+    return components.apply(faults);
   }
 
   static Stream<String> names() {
@@ -92,20 +103,45 @@ class ScenariosTest {
   }
 
   /**
-   * Every scenario does something: its faults make the sensors err differently from a season-worn
-   * robot's, or its event changes where the robot is or what its sensors read, a step later, from a
-   * world it didn't happen in.
+   * Every scenario is made of faults the world declares, with values they take, so the simulator's
+   * controls offer every one.
+   */
+  @Test
+  void everyScenarioIsMadeOfTheWorldsFaults() {
+    SimulatedWorld world = world(CAMERAS.subList(0, 1), SensorErrors.TYPICAL);
+
+    Scenarios.addTo(components, world); // refuses a fault the world doesn't declare
+
+    assertThat(components.scenarioView()).containsOnlyKeys(names().toArray(String[]::new));
+  }
+
+  /** A robot without cameras isn't offered a scenario that knocks one. */
+  @Test
+  void aRobotWithoutCamerasHasNoCameraScenarios() {
+    SimulatedWorld world = world();
+
+    Scenarios.addTo(components, world);
+
+    assertThat(components.scenarioView().keySet())
+        .doesNotContain("camera-low", "camera-turned", "camera-late", "camera-frozen")
+        .contains("collision", "gyro-unplugged");
+  }
+
+  /**
+   * Every scenario does something: it turns a lasting fault on, or what happens in it changes where
+   * the robot is or what its gyros and wheels read, a step later, from a world it didn't happen in.
    */
   @ParameterizedTest
   @MethodSource("names")
   void everyScenarioDoesSomething(String name) {
     Scenario scenario = Scenarios.named(name);
-    SimulatedWorld untouched = world();
-    SimulatedWorld started = world();
+    List<CameraConfig> cameras = name.startsWith("camera") ? CAMERAS.subList(0, 1) : List.of();
+    SimulatedWorld untouched = world(cameras, SensorErrors.TYPICAL);
+    SimulatedWorld started = world(cameras, SensorErrors.TYPICAL);
 
-    scenario.startIn(started);
+    assertThat(apply(scenario.faultsIn(started))).isNull();
 
-    boolean faults = !scenario.errorsOn(CAMERAS).equals(SensorErrors.TYPICAL);
+    boolean faults = !components.on().isEmpty();
     boolean happened = !afterATurn(started).equals(afterATurn(untouched));
     assertThat(faults || happened).isTrue();
   }
@@ -166,7 +202,7 @@ class ScenariosTest {
                     .name("Camera Low")
                     .description(" ")
                     .sensorFaults(Scenario.NO_FAULTS)
-                    .event(Scenario.NOTHING)
+                    .events(Scenario.NOTHING)
                     .build())
         .withMessageContaining(
             "Scenario.name: \"Camera Low\" must be lowercase words joined by hyphens")
@@ -175,51 +211,84 @@ class ScenariosTest {
 
   @Test
   void aCameraKnockedLowIsTheFirstCameraAlone() {
-    SensorErrors errors = sensorsIn("camera-low");
+    SimulatedWorld world = world(CAMERAS.subList(0, 2), SensorErrors.TYPICAL);
 
-    String first = CAMERAS.get(0).name();
-    assertThat(errors.cameraMountError(first).getZ()).isCloseTo(-0.1016, within(1e-9));
-    assertThat(errors.cameraMountError(CAMERAS.get(1).name()).getZ()).isZero();
-    assertThat(errors.gyro()).isEqualTo(SensorErrors.TYPICAL.gyro());
+    start("camera-low", world);
+
+    assertThat(Scenarios.named("camera-low").sensorFaultsIn(world))
+        .containsExactly(
+            Setting.of(
+                Faults.camera(CAMERAS.get(0).name()),
+                Faults.MOVED,
+                Map.of(Faults.FORWARD, 0.0, Faults.LEFT, 0.0, Faults.UP, -4.0)));
+    assertThat(world.camera(0).isMoved()).isTrue();
+    assertThat(world.camera(1).isMoved()).isFalse();
+    assertThat(world.drivetrain().gyroSim().errors()).isEqualTo(SensorErrors.TYPICAL.gyro());
   }
 
   @Test
   void aCameraTurnedIsTwoDegreesOfYaw() {
-    SensorErrors errors = sensorsIn("camera-turned");
+    SimulatedWorld world = world(CAMERAS.subList(0, 1), SensorErrors.TYPICAL);
 
-    var turn = errors.cameraMountError(CAMERAS.get(0).name()).getRotation();
-    assertThat(Math.toDegrees(turn.getZ())).isCloseTo(2, within(1e-9));
-    assertThat(turn.getX()).isCloseTo(0, within(1e-12));
-    assertThat(turn.getY()).isCloseTo(0, within(1e-12));
+    assertThat(Scenarios.named("camera-turned").sensorFaultsIn(world).get(0).values())
+        .containsEntry(Faults.YAW, 2.0)
+        .containsEntry(Faults.ROLL, 0.0)
+        .containsEntry(Faults.PITCH, 0.0);
   }
 
   @Test
   void aCameraScenarioNeedsACamera() {
+    SimulatedWorld world = world();
+
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> Scenarios.named("camera-low").errorsOn(List.of()))
+        .isThrownBy(() -> Scenarios.named("camera-low").faultsIn(world))
         .withMessage("this scenario knocks a camera, and the robot has none");
   }
 
   @Test
   void theGyroScaleIsTheGyrosAlone() {
-    SensorErrors errors = sensorsIn("gyro-scale");
+    SimulatedWorld world = world(List.of(), SensorErrors.TYPICAL);
 
-    assertThat(errors.gyro().scale()).isEqualTo(1.15);
-    assertThat(errors.gyro().driftDegreesPerMinute())
+    start("gyro-scale", world);
+
+    SensorErrors.GyroErrors gyro = world.drivetrain().gyroSim().errors();
+    assertThat(gyro.scale()).isEqualTo(1.15);
+    assertThat(gyro.driftDegreesPerMinute())
         .isEqualTo(SensorErrors.TYPICAL.gyro().driftDegreesPerMinute());
-    assertThat(errors.backupGyro()).isEqualTo(SensorErrors.TYPICAL.backupGyro());
+    assertThat(world.drivetrain().backupGyroSim().errors())
+        .isEqualTo(SensorErrors.TYPICAL.backupGyro());
   }
 
   @Test
   void wornTreadAndAModuleZeroedOffChangeTheWheels() {
-    assertThat(sensorsIn("worn-tread").wheelRadiusScale()).containsOnly(0.97);
-    assertThat(sensorsIn("module-zero-off").steerOffsetDegrees())
-        .containsExactly(
-            5.0,
-            SensorErrors.TYPICAL.steerOffsetDegrees().get(1),
-            SensorErrors.TYPICAL.steerOffsetDegrees().get(2),
-            SensorErrors.TYPICAL.steerOffsetDegrees().get(3));
-    assertThat(sensorsIn("exact-sensors")).isEqualTo(SensorErrors.NONE);
+    SimulatedWorld worn = world(List.of(), SensorErrors.TYPICAL);
+    start("worn-tread", worn);
+    for (int i = 0; i < 4; i++) {
+      assertThat(worn.drivetrain().treadScale(i)).isEqualTo(0.97);
+    }
+
+    SimulatedWorld zeroedOff = world(List.of(), SensorErrors.TYPICAL);
+    start("module-zero-off", zeroedOff);
+    assertThat(Math.toDegrees(zeroedOff.drivetrain().moduleSim(0).steerOffsetRadians()))
+        .isCloseTo(5.0, within(1e-9));
+    assertThat(Math.toDegrees(zeroedOff.drivetrain().moduleSim(1).steerOffsetRadians()))
+        .isCloseTo(SensorErrors.TYPICAL.steerOffsetDegrees().get(1), within(1e-9));
+  }
+
+  /** Exact sensors on a season-worn robot: every wheel and IMU as {@link SensorErrors#NONE}. */
+  @Test
+  void exactSensorsAreExactlyAsConfigured() {
+    SimulatedWorld world = world(List.of(), SensorErrors.TYPICAL);
+
+    start("exact-sensors", world);
+
+    DriveSimulation drivetrain = world.drivetrain();
+    for (int i = 0; i < 4; i++) {
+      assertThat(drivetrain.treadScale(i)).isEqualTo(1.0);
+      assertThat(drivetrain.moduleSim(i).steerOffsetRadians()).isZero();
+    }
+    assertThat(drivetrain.gyroSim().errors()).isEqualTo(SensorErrors.GyroErrors.EXACT);
+    assertThat(drivetrain.backupGyroSim().errors()).isEqualTo(SensorErrors.GyroErrors.EXACT);
   }
 
   @Test
@@ -337,7 +406,7 @@ class ScenariosTest {
       double offset = bump.acrossOffset(spot);
       assertThat(Math.abs(offset))
           .as("from x = " + x)
-          .isCloseTo(bump.depthMeters() / 2 + Scenarios.BUMP_CLEARANCE_METERS, within(1e-9));
+          .isCloseTo(bump.depthMeters() / 2 + Faults.BUMP_CLEARANCE_METERS, within(1e-9));
       assertThat(Math.signum(offset))
           .isEqualTo(Math.signum(bump.acrossOffset(new Translation2d(x, 5.5))));
       assertThat(bump.alongOffset(spot)).isCloseTo(bump.length() / 2, within(1e-9));
@@ -351,11 +420,30 @@ class ScenariosTest {
   @Test
   void aBumpCrossingNeedsABump() {
     SimulatedWorld world = world();
-    world.drivetrain().setTerrain(Terrain.FLAT);
+    world.drivetrain().setTerrain(Terrain.FLAT); // the field's bumps gone since it was declared
 
-    assertThatIllegalStateException()
-        .isThrownBy(() -> start("bump-crossing", world))
-        .withMessage("bump-crossing needs a field with bumps, and this one has none");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Scenarios.named("bump-crossing").faultsIn(world))
+        .withMessage("this scenario carries the robot to a bump, and the field has none");
+    assertThat(apply(List.of(Setting.of(Faults.ROBOT, Faults.TO_A_BUMP))))
+        .isEqualTo(
+            "Robot: Carried to a bump failed: carrying the robot to a bump needs a field with"
+                + " bumps, and this one has none");
+  }
+
+  /** A field without bumps isn't offered the bump scenario, nor carrying the robot to a bump. */
+  @Test
+  void aFieldWithoutBumpsHasNoBumpScenario() {
+    SimulatedWorld world = world();
+    world.drivetrain().setTerrain(Terrain.FLAT);
+    Components flat = new Components(said -> {});
+    world.addTo(flat);
+
+    Scenarios.addTo(flat, world);
+
+    assertThat(flat.scenarioView()).doesNotContainKey("bump-crossing").containsKey("collision");
+    assertThat(flat.whyNot(Setting.of(Faults.ROBOT, Faults.TO_A_BUMP)))
+        .startsWith("Robot has no fault named Carried to a bump");
   }
 
   private static ModuleIOInputs read(ModuleIO module) {

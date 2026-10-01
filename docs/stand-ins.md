@@ -36,28 +36,19 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   its sensors (`DriveSimulation`, `SensorErrors`), the drive and steering motors obey their stator
   current limits, the steering's loop runs as a TalonFX's does (every millisecond, on the angle its
   CANcoder sends every 10 ms), the robot rides over the field's bumps (tilted and raised by the
-  ground under its wheels), and faults can be made by hand or by name (`frc.robot.sim.Scenarios`,
-  `./gradlew run -Pscenario=<name>`): a slipping wheel, a push, a hit the IMU feels, a gyro
-  unplugged or frozen, a camera knocked off its mount. Wheels still never slip on their own, and no
-  one wheel can leave the floor: `wheel-lifted` tilts the robot by hand (which holds over any bump
-  for the rest of the run) and scales every wheel's grip alike, so its wheels never disagree as a
-  lifted one's would, and the robot isn't raised. The steering has no friction: a wheel's scrub on
-  the carpet and its gearbox's drag need measuring on a real module first
-  (`CurrentLimitedMotorSim` says where they go). And it hears its CANcoder at the rate the code
-  asks for (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
+  ground under its wheels), and faults can be made while it runs, from the Pitwall page, by name
+  (`frc.robot.sim.Scenarios`, `./gradlew run -Pscenario=<name>`), or in a test
+  (`frc.robot.sim.Faults`, listed in [simulator.md](simulator.md)): a slipping wheel, a push, a hit
+  the IMU feels, a gyro unplugged, frozen, or reset, a camera knocked off its mount, frozen, or
+  late, a module's encoders gone stale. Wheels still never slip on their own, and no one wheel can
+  leave the floor: `wheel-lifted` tilts the robot by hand (which holds over any bump for the rest of
+  the run) and scales every wheel's grip alike, so its wheels never disagree as a lifted one's
+  would, and the robot isn't raised. The steering has no friction: a wheel's scrub on the carpet
+  and its gearbox's drag need measuring on a real module first (`CurrentLimitedMotorSim` says where
+  they go). And it hears its CANcoder at the rate the code asks for
+  (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
 
 ## Scenarios the simulator can't make yet
 
-Faults a robot meets that the simulator's named scenarios (`frc.robot.sim.Scenarios`) don't
-cover yet. These wait on nothing but work in the simulator; add each to the catalog when the
-simulator can make it.
-
-- Camera axes swapped in the configuration.
-- Camera latency the code doesn't know of: `VisionSim` takes latency from the camera's
-  configuration.
-- A frozen camera, still reporting its last image.
-- A gyro reset mid-match: the simulated gyro has no offset to reset.
-- A stale module encoder.
-- Ramp crossings: the terrain has bumps only.
-- The wrong field variant, or one camera with the wrong tag layout.
-- One wheel off the floor (see `wheel-lifted` above).
+Faults a robot meets that the simulator can't make yet are listed in one place, [the simulator's
+own guide](simulator.md#what-the-simulator-cant-make-fail-yet).

@@ -17,6 +17,7 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Rerun the tests on every save | `./gradlew test -Pquick --continuous` |
 | Run one test class ([more on tests](testing.md)) | `./gradlew :test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, enabled and drivable from the keyboard | `./gradlew run` |
+| Start it without WPILib's simulator GUI, disabled; Pitwall's simulator API drives it ([more](simulator.md)) | `./gradlew run -Pgui=false` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
 | Start it in a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the simulator's scenarios | `./gradlew scenarios` |

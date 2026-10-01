@@ -40,6 +40,7 @@ import org.wpilib.math.geometry.Transform3d;
 class CameraImageSimTest {
   private static final FieldModel FIELD = TagLayouts.named("FRC_2026_REBUILT_WELDED");
   private static final CameraConfig.Sensor SENSOR = Robots.SIM.cameras().get(0).sensor();
+  private static final Conditions NOMINAL = Conditions.nominal(CameraStudyConfig.DEFAULTS);
 
   /** The worst difference found, of each kind, for the summary line. */
   private final Map<String, Double> worst = new HashMap<>();
@@ -63,7 +64,7 @@ class CameraImageSimTest {
 
   @Test
   void itSeesWhatPhotonVisionsSimulationSees() {
-    CameraImageSim study = new CameraImageSim(FIELD, SENSOR);
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
     List<VisionTargetSim> targets = new ArrayList<>();
     FIELD
         .tags()
@@ -173,7 +174,7 @@ class CameraImageSimTest {
    */
   @Test
   void aTagWhoseOwnSolveFailsIsLeftOutButItsCornersStillCount() {
-    CameraImageSim study = new CameraImageSim(FIELD, SENSOR);
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
     Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
     List<CameraImageSim.Seen> seen = new ArrayList<>(study.seen(cameraPose, 1));
     assertThat(seen).hasSizeGreaterThanOrEqualTo(2);
@@ -195,7 +196,7 @@ class CameraImageSimTest {
 
   @Test
   void anImageWithNoTagInViewHasNothingInIt() {
-    CameraImageSim study = new CameraImageSim(FIELD, SENSOR);
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
 
     // The middle of the field, looking straight up.
     TagDetections sky =

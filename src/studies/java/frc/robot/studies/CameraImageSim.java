@@ -26,13 +26,13 @@ import org.wpilib.vision.camera.OpenCvLoader;
 /**
  * A camera's images of the field's tags, taken as PhotonVision's simulation takes them ({@code
  * PhotonCameraSim.process}), with the camera model the simulator uses ({@link
- * VisionSim#properties}), step for step: which tags are in view, where their corners land in the
- * image, the same model of pixel noise (given the same seed, the very same draws, which is how its
- * test compares the two), the same detection limits, and PhotonVision's own solves. What it leaves
- * out is the picture: PhotonVision draws every image into native memory that only the garbage
- * collector frees, which is harmless at a simulator's 30 images a second and exhausts the
- * computer's memory at a study's million and a half. Its test checks it against PhotonVision's own
- * simulation over a sample of the field.
+ * VisionSim#properties}), its errors as the study's {@link Conditions} set them, step for step:
+ * which tags are in view, where their corners land in the image, the same model of pixel noise
+ * (given the same seed, the very same draws, which is how its test compares the two), the same
+ * detection limits, and PhotonVision's own solves. What it leaves out is the picture: PhotonVision
+ * draws every image into native memory that only the garbage collector frees, which is harmless at
+ * a simulator's 30 images a second and exhausts the computer's memory at a study's million and a
+ * half. Its test checks it against PhotonVision's own simulation over a sample of the field.
  *
  * <p>One difference is on purpose: a tag whose own solve fails is left out, as {@code Vision}
  * leaves out a tag whose pose isn't a number, where PhotonVision's simulation would report it at
@@ -46,6 +46,7 @@ final class CameraImageSim {
   static final double MIN_AREA_PIXELS = 100;
 
   private final SimCameraProperties camera;
+  private final double sightMeters;
   private final double minAreaPercent;
   private final double fx;
   private final double fy;
@@ -70,9 +71,16 @@ final class CameraImageSim {
     }
   }
 
-  CameraImageSim(FieldModel field, CameraConfig.Sensor sensor) {
+  /**
+   * @param conditions how far its tag corners land off, and how far it sees tags
+   */
+  CameraImageSim(FieldModel field, CameraConfig.Sensor sensor, Conditions conditions) {
     OpenCvLoader.forceStaticLoad(); // the solves are OpenCV's
-    camera = VisionSim.properties(sensor, 0);
+    camera =
+        VisionSim.properties(sensor, 0)
+            .setCalibError(
+                conditions.cornerNoiseMeanPixels(), conditions.cornerNoiseStdDevPixels());
+    sightMeters = conditions.sightMeters();
     for (double coefficient : camera.getDistCoeffs().getData()) {
       if (coefficient != 0) {
         throw new IllegalStateException(
@@ -156,7 +164,7 @@ final class CameraImageSim {
     return Math.abs(relation.camToTargYaw.getDegrees()) < halfWidthDegrees
         && Math.abs(relation.camToTargPitch.getDegrees()) < halfHeightDegrees
         && Math.abs(relation.targToCamAngle.getDegrees()) < 90
-        && relation.camToTarg.getTranslation().getNorm() <= VisionSim.MAX_SIGHT_METERS;
+        && relation.camToTarg.getTranslation().getNorm() <= sightMeters;
   }
 
   /**

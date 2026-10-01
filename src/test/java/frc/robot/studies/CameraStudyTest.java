@@ -113,6 +113,58 @@ class CameraStudyTest {
         .contains("2 cameras: front 0°, up 10°; back 180°, up 20°");
   }
 
+  /** Robustness: the nominal scoring, then each trial's, and the layouts ranked by the worst. */
+  @Test
+  void aRobustnessRunRanksByTheWorstTrial() throws IOException {
+    run(
+        "--field=FRC_2026_REBUILT_WELDED",
+        "--trials=2",
+        "--cameras=2",
+        "--grid-meters=6",
+        "--headings=2",
+        "--frames=1",
+        "--out=" + folder.resolve("report"));
+
+    List<String> candidates = Files.readAllLines(folder.resolve("report/candidates.csv"));
+    assertThat(candidates.get(0))
+        .startsWith("rank,layout,cameras,worst_p95_m,median_p95_m,worst_within_5cm")
+        .contains("trial_1_p95_m,trial_2_p95_m,nominal_rank,nominal_position_p95_m");
+    assertThat(Files.readString(folder.resolve("report/summary.md")))
+        .contains("*Ranked by* the worst of 2 trials' 95% error")
+        .contains("- Trial 1: corners off ")
+        .contains("rank correlation is ")
+        .contains("## The most robust at each camera count")
+        .contains("## The robot's own layout, across the trials")
+        .contains("## In the nominal conditions");
+    assertThat(printed()).contains("Trial 2 of 2: ").contains("Most robust: ");
+  }
+
+  @Test
+  void theOptionsSetTheErrorsAndTheTrials() {
+    CameraStudyConfig set =
+        CameraStudy.config(
+            CameraStudy.options(
+                new String[] {
+                  "--corner-noise-pixels=0.4",
+                  "--corner-spread-pixels=0.1",
+                  "--sight-meters=5",
+                  "--gyro-error-degrees=0.5",
+                  "--mount-error-mm=3",
+                  "--mount-error-degrees=0.5",
+                  "--robust"
+                }));
+
+    assertThat(set.cornerNoiseMeanPixels()).isEqualTo(0.4);
+    assertThat(set.cornerNoiseStdDevPixels()).isEqualTo(0.1);
+    assertThat(set.sightMeters()).isEqualTo(5);
+    assertThat(set.gyroErrorDegrees()).isEqualTo(0.5);
+    assertThat(set.mountErrorMillimeters()).isEqualTo(3);
+    assertThat(set.mountErrorDegrees()).isEqualTo(0.5);
+    assertThat(set.trials()).isEqualTo(CameraStudyConfig.ROBUST_TRIALS);
+    assertThat(CameraStudy.config(CameraStudy.options(new String[] {"--trials=3"})).trials())
+        .isEqualTo(3);
+  }
+
   @Test
   void aWrongOptionSaysWhich() {
     assertThatThrownBy(() -> run("--grid=0.5")).hasMessageContaining("not an option: --grid=0.5");

@@ -27,6 +27,7 @@ import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Transform3d;
 
 /**
  * Scores camera layouts all over the field. At each pose, each camera takes its images (with
@@ -144,10 +145,21 @@ public final class CameraScoring {
   /**
    * Every camera's images at every sample, then every layout's score from them.
    *
+   * @param conditions how the cameras and the robot err, this time
    * @param progress told how many samples are done, after each one
    */
-  public Result score(List<Sample> samples, IntConsumer progress) {
+  public Result score(List<Sample> samples, Conditions conditions, IntConsumer progress) {
     Views[] views = new Views[samples.size()];
+    // Where each camera really is, off its configured mount as these conditions have it.
+    Transform3d[] mounts = new Transform3d[cameras.size()];
+    for (int m = 0; m < cameras.size(); m++) {
+      Transform3d configured = cameras.get(m).robotToCamera();
+      Transform3d error = conditions.mountError(cameraSeeds[m]);
+      mounts[m] =
+          new Transform3d(
+              configured.getTranslation().plus(error.getTranslation()),
+              configured.getRotation().rotateBy(error.getRotation()));
+    }
     AtomicInteger done = new AtomicInteger();
     int threads = Math.min(config.threads(), Math.max(1, samples.size()));
     inParallel(
@@ -157,10 +169,10 @@ public final class CameraScoring {
           // Each thread its own cameras: their noise isn't shared.
           List<CameraImageSim> images = new ArrayList<>();
           for (CameraConfig.Sensor sensor : sensors) {
-            images.add(new CameraImageSim(field, sensor));
+            images.add(new CameraImageSim(field, sensor, conditions));
           }
           return i -> {
-            views[i] = at(samples.get(i).pose(), images);
+            views[i] = at(samples.get(i).pose(), images, conditions, mounts);
             progress.accept(done.incrementAndGet());
           };
         });
@@ -207,22 +219,26 @@ public final class CameraScoring {
     }
   }
 
-  /** What every camera saw at one pose, in each set of images. */
-  private Views at(Pose2d truth, List<CameraImageSim> images) {
+  /**
+   * What every camera saw at one pose, in each set of images: each camera where it really is, and
+   * the pipeline solving with where it's configured, as on a robot.
+   */
+  private Views at(
+      Pose2d truth, List<CameraImageSim> images, Conditions conditions, Transform3d[] mounts) {
     Views views = new Views(config.frames(), cameras.size());
     Pose3d robotPose = new Pose3d(truth);
     long poseSeed =
-        Seeds.mix(config.seed(), truth.getX(), truth.getY(), truth.getRotation().getRadians());
+        Seeds.mix(conditions.seed(), truth.getX(), truth.getY(), truth.getRotation().getRadians());
     for (int frame = 0; frame < config.frames(); frame++) {
       long frameSeed = Seeds.mix(poseSeed, frame);
       // One gyro for the whole robot, off by a little, the same for every camera.
       double gyroError =
-          Math.toRadians(config.gyroErrorDegrees())
+          Math.toRadians(conditions.gyroErrorDegrees())
               * new SplittableRandom(frameSeed).nextGaussian();
       CaptureContext standingStill =
           new CaptureContext(
               truth.getRotation().plus(Rotation2d.fromRadians(gyroError)),
-              Math.toRadians(config.gyroErrorDegrees()),
+              Math.toRadians(conditions.gyroErrorDegrees()),
               0,
               0,
               0,
@@ -233,7 +249,7 @@ public final class CameraScoring {
             images
                 .get(sensorOf[m])
                 .image(
-                    robotPose.transformBy(camera.robotToCamera()),
+                    robotPose.transformBy(mounts[m]),
                     camera.name(),
                     Seeds.mix(frameSeed, cameraSeeds[m]));
         VisionMeasurement measurement =

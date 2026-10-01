@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.fields.Fields;
@@ -41,7 +42,14 @@ public final class CameraStudy {
         --grid-meters=M           how far apart the positions are (default 0.5)
         --headings=N              headings at each position (default 8)
         --frames=N                images each camera takes at each pose (default 2)
+        --corner-noise-pixels=P   how far tag corners land off, on average (default: the simulator's)
+        --corner-spread-pixels=P  and its spread (default: the simulator's)
+        --sight-meters=M          tags farther aren't detected (default: the simulator's)
         --gyro-error-degrees=D    the gyro heading's typical error (default 0.25)
+        --mount-error-mm=M        cameras off their mounts by up to this (default 0)
+        --mount-error-degrees=D   and turned by up to this (default 0)
+        --trials=N                robustness trials, each drawing those errors (default 0)
+        --robust                  robustness, with the usual trials (12: under ten minutes)
         --seed=N                  where every random draw starts (default 1)
         --threads=N               how many threads to run on (default 2)
         --out=DIR                 where the report goes (default build/studies/camera-placement)
@@ -58,7 +66,13 @@ public final class CameraStudy {
           "grid-meters",
           "headings",
           "frames",
+          "corner-noise-pixels",
+          "corner-spread-pixels",
+          "sight-meters",
           "gyro-error-degrees",
+          "mount-error-mm",
+          "mount-error-degrees",
+          "trials",
           "seed",
           "threads",
           "out");
@@ -155,7 +169,7 @@ public final class CameraStudy {
     setup.add(
         format(
             "%d poses: %d x %d positions %.2f m apart, at %d headings; %d %s per camera at"
-                + " each; the gyro off by %.2f° typically; seed %d.",
+                + " each; seed %d.",
             samples.size(),
             grid.columns(),
             grid.rows(),
@@ -163,8 +177,9 @@ public final class CameraStudy {
             config.headings(),
             config.frames(),
             config.frames() == 1 ? "image" : "images",
-            config.gyroErrorDegrees(),
             config.seed()));
+    Conditions nominal = Conditions.nominal(config);
+    setup.add("Nominal conditions: " + nominal.described() + ".");
     out.println(setup.get(0));
     out.printf(
         Locale.ROOT,
@@ -175,17 +190,21 @@ public final class CameraStudy {
         config.threads());
 
     long start = System.nanoTime();
-    AtomicInteger shown = new AtomicInteger();
-    CameraScoring.Result result =
-        scoring.score(
-            samples,
-            done -> {
-              int tenths = 10 * done / samples.size();
-              int before = shown.get();
-              if (tenths > before && shown.compareAndSet(before, tenths)) {
-                out.printf(Locale.ROOT, "  %d%%%n", 10 * tenths);
-              }
-            });
+    CameraScoring.Result result = scoring.score(samples, nominal, progress(out, samples.size()));
+    Robustness robustness = null;
+    if (config.trials() > 0) {
+      List<Conditions> trials = new ArrayList<>();
+      List<List<Score>> trialScores = new ArrayList<>();
+      for (int t = 0; t < config.trials(); t++) {
+        Conditions trial = Conditions.trial(config, t);
+        out.printf(
+            Locale.ROOT, "Trial %d of %d: %s...%n", t + 1, config.trials(), trial.described());
+        trials.add(trial);
+        // Only the scores are kept: what the cameras saw in a trial goes with it.
+        trialScores.add(scoring.score(samples, trial, done -> {}).ranking());
+      }
+      robustness = new Robustness(result.ranking(), trials, trialScores);
+    }
     double seconds = (System.nanoTime() - start) / 1e9;
     setup.add(
         format(
@@ -193,23 +212,45 @@ public final class CameraStudy {
             candidates.size(), scoring.distinctCameras(), seconds, config.threads()));
 
     Path directory = Path.of(options.getOrDefault("out", "build/studies/camera-placement"));
-    Report.write(directory, new Report.Run(setup, own, grid, result));
-    Score best = result.ranking().get(0);
-    out.printf(
-        Locale.ROOT,
-        "Done in %.0f s. Best: %s, 95%% of the field within %.1f cm.%n",
-        seconds,
-        best.candidate().name(),
-        100 * best.positionP95Meters());
+    Report.write(directory, new Report.Run(setup, own, grid, result, robustness));
+    if (robustness == null) {
+      Score best = result.ranking().get(0);
+      out.printf(
+          Locale.ROOT,
+          "Done in %.0f s. Best: %s, 95%% of the field within %.1f cm.%n",
+          seconds,
+          best.candidate().name(),
+          100 * best.positionP95Meters());
+    } else {
+      Robustness.Layout best = robustness.ranking().get(0);
+      out.printf(
+          Locale.ROOT,
+          "Done in %.0f s. Most robust: %s, 95%% of the field within %.1f cm in the worst trial.%n",
+          seconds,
+          best.candidate().name(),
+          100 * best.worstP95Meters());
+    }
     out.println("Report: " + directory.toAbsolutePath().resolve("summary.md"));
+  }
+
+  /** Prints how far along the scoring is, in tenths. */
+  private static IntConsumer progress(PrintStream out, int samples) {
+    AtomicInteger shown = new AtomicInteger();
+    return done -> {
+      int tenths = 10 * done / samples;
+      int before = shown.get();
+      if (tenths > before && shown.compareAndSet(before, tenths)) {
+        out.printf(Locale.ROOT, "  %d%%%n", 10 * tenths);
+      }
+    };
   }
 
   /** The options, by name: {@code --grid-meters=0.25} is {@code grid-meters} = {@code 0.25}. */
   static Map<String, String> options(String[] args) {
     Map<String, String> options = new LinkedHashMap<>();
     for (String arg : args) {
-      if (arg.equals("--help")) {
-        options.put("help", "");
+      if (arg.equals("--help") || arg.equals("--robust")) {
+        options.put(arg.substring(2), "");
         continue;
       }
       int equals = arg.indexOf('=');
@@ -229,7 +270,18 @@ public final class CameraStudy {
           .gridMeters(number(options, "grid-meters", d.gridMeters()))
           .headings(count(options, "headings", d.headings()))
           .frames(count(options, "frames", d.frames()))
+          .cornerNoiseMeanPixels(number(options, "corner-noise-pixels", d.cornerNoiseMeanPixels()))
+          .cornerNoiseStdDevPixels(
+              number(options, "corner-spread-pixels", d.cornerNoiseStdDevPixels()))
+          .sightMeters(number(options, "sight-meters", d.sightMeters()))
           .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
+          .mountErrorMillimeters(number(options, "mount-error-mm", d.mountErrorMillimeters()))
+          .mountErrorDegrees(number(options, "mount-error-degrees", d.mountErrorDegrees()))
+          .trials(
+              count(
+                  options,
+                  "trials",
+                  options.containsKey("robust") ? CameraStudyConfig.ROBUST_TRIALS : d.trials()))
           .mostCameras(count(options, "cameras", d.mostCameras()))
           .seed(seed(options, d.seed()))
           .threads(count(options, "threads", d.threads()))

@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The study's report, written over on each run: {@code summary.md}, short, for people; {@code
@@ -24,8 +25,15 @@ final class Report {
    * @param setup the run's inputs, in words: the robot, the field, the weights, the grid
    * @param own the robot's own layout
    * @param grid the positions sampled, for the maps
+   * @param result the scoring in the nominal conditions
+   * @param robustness how every layout held up across the robustness trials, if there were any
    */
-  record Run(List<String> setup, Candidate own, FieldGrid grid, CameraScoring.Result result) {
+  record Run(
+      List<String> setup,
+      Candidate own,
+      FieldGrid grid,
+      CameraScoring.Result result,
+      @Nullable Robustness robustness) {
     List<Score> ranking() {
       return result.ranking();
     }
@@ -37,7 +45,10 @@ final class Report {
 
   static void write(Path directory, Run run) throws IOException {
     Files.createDirectories(directory);
-    Files.write(directory.resolve("candidates.csv"), candidates(run.ranking()));
+    Robustness robustness = run.robustness();
+    Files.write(
+        directory.resolve("candidates.csv"),
+        robustness == null ? candidates(run.ranking()) : candidates(robustness));
     Files.write(directory.resolve("poses.csv"), poses(run));
     Files.writeString(directory.resolve("summary.md"), summary(run));
   }
@@ -47,6 +58,11 @@ final class Report {
     StringBuilder md = new StringBuilder("# Camera placement\n\n");
     for (String line : run.setup()) {
       md.append(line).append("\n");
+    }
+    Robustness robustness = run.robustness();
+    if (robustness != null) {
+      robust(md, robustness, run.own());
+      md.append("\n## In the nominal conditions\n");
     }
     md.append(
         "\n*Ranked by* the position error 95% of the field is within, from one set of images with"
@@ -87,6 +103,74 @@ final class Report {
       md.append(map(run, run.best()));
     }
     return md.toString();
+  }
+
+  /** The robust ranking's tables, and how far it moved from the nominal one. */
+  private static void robust(StringBuilder md, Robustness robustness, Candidate own) {
+    List<Robustness.Layout> ranking = robustness.ranking();
+    md.append(
+        format(
+            "%n*Ranked by* the worst of %d trials' 95%% error, each trial's conditions drawn from"
+                + " the plausible ranges in docs/camera-placement.md: smaller is better, a tie to"
+                + " the millimeter goes to fewer cameras. *None* means more than 5%% of the field"
+                + " went unmeasured in some trial.%n%n",
+            robustness.trials().size()));
+    for (int t = 0; t < robustness.trials().size(); t++) {
+      md.append(format("- Trial %d: %s.%n", t + 1, robustness.trials().get(t).described()));
+    }
+    int nominalBest = 0;
+    for (int i = 0; i < ranking.size(); i++) {
+      if (ranking.get(i).nominalRank() == 1) {
+        nominalBest = i + 1;
+      }
+    }
+    md.append(
+        format(
+            "%nAgainst the nominal ranking: the nominal best ranks %d here, and the two rankings'"
+                + " rank correlation is %.2f (1 is the same order).%n",
+            nominalBest, robustness.rankCorrelation()));
+
+    md.append("\n## The most robust\n\n").append(ROBUST_HEADER);
+    for (int i = 0; i < Math.min(TOP, ranking.size()); i++) {
+      md.append(robustRow(i + 1, ranking.get(i)));
+    }
+    md.append("\n## The most robust at each camera count\n\n").append(ROBUST_HEADER);
+    int most = ranking.stream().mapToInt(Robustness.Layout::cameras).max().orElse(0);
+    for (int cameras = 1; cameras <= most; cameras++) {
+      for (int i = 0; i < ranking.size(); i++) {
+        if (ranking.get(i).cameras() == cameras) {
+          md.append(robustRow(i + 1, ranking.get(i)));
+          break;
+        }
+      }
+    }
+    for (int i = 0; i < ranking.size(); i++) {
+      if (ranking.get(i).candidate().equals(own)) {
+        md.append(
+            format(
+                "%n## The robot's own layout, across the trials%n%nRanks %d of %d.%n%n",
+                i + 1, ranking.size()));
+        md.append(ROBUST_HEADER).append(robustRow(i + 1, ranking.get(i)));
+      }
+    }
+  }
+
+  private static final String ROBUST_HEADER =
+      "| Rank | Layout | Worst trial 95% | Median 95% | Nominal 95% | Nominal rank"
+          + " | Worst within 5 cm | Two cameras |\n"
+          + "|---:|---|---:|---:|---:|---:|---:|---:|\n";
+
+  private static String robustRow(int rank, Robustness.Layout layout) {
+    return format(
+        "| %d | %s | %s | %s | %s | %d | %s | %s |%n",
+        rank,
+        layout.candidate().name(),
+        centimeters(layout.worstP95Meters()),
+        centimeters(layout.medianP95Meters()),
+        centimeters(layout.nominal().positionP95Meters()),
+        layout.nominalRank(),
+        percent(layout.worstWithinFiveCentimeters()),
+        percent(layout.nominal().twoCameras()));
   }
 
   private static int rank(List<Score> ranking, Candidate candidate) {
@@ -157,31 +241,68 @@ final class Report {
     return map.append("```\n").toString();
   }
 
+  private static final String SCORE_COLUMNS =
+      "position_p95_m,within_2cm,within_5cm,one_tag,two_tags,two_cameras,measured,heading,"
+          + "position_rms_m,heading_rms_deg";
+
   static List<String> candidates(List<Score> ranking) {
     List<String> lines = new ArrayList<>();
-    lines.add(
-        "rank,layout,cameras,position_p95_m,within_2cm,within_5cm,one_tag,two_tags,two_cameras,"
-            + "measured,heading,position_rms_m,heading_rms_deg");
+    lines.add("rank,layout,cameras," + SCORE_COLUMNS);
     for (int i = 0; i < ranking.size(); i++) {
       Score score = ranking.get(i);
       lines.add(
           format(
-              "%d,%s,%d,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s",
-              i + 1,
-              quoted(score.candidate().name()),
-              score.cameras(),
-              number(score.positionP95Meters(), 4),
-              score.withinTwoCentimeters(),
-              score.withinFiveCentimeters(),
-              score.oneTag(),
-              score.twoTags(),
-              score.twoCameras(),
-              score.measured(),
-              score.heading(),
-              number(score.positionRmsMeters(), 4),
-              number(score.headingRmsDegrees(), 3)));
+              "%d,%s,%d,%s",
+              i + 1, quoted(score.candidate().name()), score.cameras(), scoreColumns(score)));
     }
     return lines;
+  }
+
+  /** Every layout, the most robust first: its robust scores, then its nominal ones. */
+  static List<String> candidates(Robustness robustness) {
+    List<String> lines = new ArrayList<>();
+    StringBuilder header =
+        new StringBuilder("rank,layout,cameras,worst_p95_m,median_p95_m,worst_within_5cm");
+    for (int t = 1; t <= robustness.trials().size(); t++) {
+      header.append(",trial_").append(t).append("_p95_m");
+    }
+    header.append(",nominal_rank,");
+    lines.add(header + SCORE_COLUMNS.replaceAll("([a-z0-9_]+)", "nominal_$1"));
+    List<Robustness.Layout> ranking = robustness.ranking();
+    for (int i = 0; i < ranking.size(); i++) {
+      Robustness.Layout layout = ranking.get(i);
+      StringBuilder line =
+          new StringBuilder(
+              format(
+                  "%d,%s,%d,%s,%s,%.4f",
+                  i + 1,
+                  quoted(layout.candidate().name()),
+                  layout.cameras(),
+                  number(layout.worstP95Meters(), 4),
+                  number(layout.medianP95Meters(), 4),
+                  layout.worstWithinFiveCentimeters()));
+      for (double p95 : layout.trialP95Meters()) {
+        line.append(',').append(number(p95, 4));
+      }
+      line.append(',').append(layout.nominalRank()).append(',');
+      lines.add(line + scoreColumns(layout.nominal()));
+    }
+    return lines;
+  }
+
+  private static String scoreColumns(Score score) {
+    return format(
+        "%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s",
+        number(score.positionP95Meters(), 4),
+        score.withinTwoCentimeters(),
+        score.withinFiveCentimeters(),
+        score.oneTag(),
+        score.twoTags(),
+        score.twoCameras(),
+        score.measured(),
+        score.heading(),
+        number(score.positionRmsMeters(), 4),
+        number(score.headingRmsDegrees(), 3));
   }
 
   static List<String> poses(Run run) {

@@ -26,6 +26,14 @@ public final class VisionSim implements AutoCloseable {
   /** Tags farther than this are not detected: small in the image, and noisy. */
   public static final double MAX_SIGHT_METERS = 7.0;
 
+  /**
+   * How far each tag corner lands from where a perfect camera would put it, in pixels, on average
+   * and its spread: a little lens-calibration error. PhotonVision's own example values.
+   */
+  public static final double CORNER_NOISE_MEAN_PIXELS = 0.25;
+
+  public static final double CORNER_NOISE_STD_DEV_PIXELS = 0.08;
+
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
@@ -66,7 +74,8 @@ public final class VisionSim implements AutoCloseable {
   /**
    * A camera as PhotonVision's simulation models it: the sensor's resolution, field of view, frame
    * rate, and latency, and a little lens-calibration error, which moves each tag corner about a
-   * quarter pixel. The camera placement study takes its images with the same model.
+   * quarter pixel. The camera placement study takes its images with the same model, and starts from
+   * the same errors.
    *
    * @param seed where the noise starts, so a run repeats exactly
    */
@@ -76,7 +85,7 @@ public final class VisionSim implements AutoCloseable {
             sensor.widthPixels(),
             sensor.heightPixels(),
             Rotation2d.fromDegrees(sensor.diagonalFieldOfView().in(Degrees)))
-        .setCalibError(0.25, 0.08)
+        .setCalibError(CORNER_NOISE_MEAN_PIXELS, CORNER_NOISE_STD_DEV_PIXELS)
         .setFPS(sensor.frameRate().in(Hertz))
         .setAvgLatencyMs(sensor.latency().in(Milliseconds))
         .setLatencyStdDevMs(5)

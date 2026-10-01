@@ -1,5 +1,6 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
@@ -8,10 +9,12 @@ import frc.robot.game.Rebuilt;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.sim.Faults;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
@@ -19,6 +22,7 @@ import frc.robot.sim.SensorErrorsBuilder;
 import frc.robot.sim.SensorErrorsGyroErrorsBuilder;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
@@ -120,6 +124,7 @@ final class ConsistencyRuns {
               }),
           named(
               "collision",
+              "The route, hit partway, then 3 s standing.",
               robot -> {
                 robot.route(0, 3);
                 robot.start(); // the hit
@@ -140,24 +145,64 @@ final class ConsistencyRuns {
               }),
           named(
               "camera-low",
+              "The route four times.",
               robot -> {
-                robot.route(2);
+                robot.route(4);
                 robot.stand(3);
               }),
           named(
               "camera-turned",
+              "The route four times.",
               robot -> {
-                robot.route(2);
+                robot.route(4);
+                robot.stand(3);
+              }),
+          new Run(
+              "camera-turned-4",
+              "The robot's first camera turned 4° on its mount. Driving the route four times.",
+              Scenario.builder()
+                  .name("camera-turned-4")
+                  .description("The robot's first camera turned 4° on its mount.")
+                  .sensorFaults(
+                      world ->
+                          List.of(
+                              Setting.of(
+                                  Faults.camera(world.cameraNames().get(0)),
+                                  Faults.TURNED,
+                                  Map.of(Faults.ROLL, 0.0, Faults.PITCH, 0.0, Faults.YAW, 4.0))))
+                  .events(Scenario.NOTHING)
+                  .build(),
+              robot -> {
+                robot.route(4);
+                robot.stand(3);
+              }),
+          new Run(
+              "tag-moved",
+              "Tag 26, on the blue hub's face toward the route, moved 4 in along the field. Driving"
+                  + " the route four times.",
+              Scenario.builder()
+                  .name("tag-moved")
+                  .description("Tag 26 moved 4 in along the field.")
+                  .sensorFaults(
+                      Scenario.faults(
+                          Setting.of(
+                              Faults.FIELD,
+                              Faults.TAG_MOVED,
+                              Map.of(
+                                  Faults.TAG, 26.0, Faults.X, 4.0, Faults.Y, 0.0, Faults.UP, 0.0))))
+                  .events(Scenario.NOTHING)
+                  .build(),
+              robot -> {
+                robot.route(4);
                 robot.stand(3);
               }));
 
   private ConsistencyRuns() {}
 
-  /** A run in one of the simulator's named scenarios, with this script. */
-  private static Run named(String scenario, Script script) {
+  /** A run in one of the simulator's named scenarios, with this script, described so. */
+  private static Run named(String scenario, String script, Script plays) {
     Scenario named = Scenarios.named(scenario);
-    return new Run(
-        scenario, named.description() + " Driving the route, there and back.", named, script);
+    return new Run(scenario, named.description() + " " + script, named, plays);
   }
 
   /**
@@ -330,8 +375,9 @@ final class ConsistencyRuns {
    *
    * @param spread how widely each seed's errors are drawn
    * @param noiseScale the vision pipeline's noise model scaled by this ({@link #robot})
+   * @param heading what may correct the heading beside the gyro
    */
-  record Setup(Spread spread, double noiseScale) {
+  record Setup(Spread spread, double noiseScale, EstimatorConfig.HeadingCorrection heading) {
     /**
      * The simulated cameras' noise is about half what the 2026 noise model claims (the study, at a
      * scale of 1, reads a position NEES near 0.7 where it reads near 2 at half): so half the model
@@ -344,7 +390,15 @@ final class ConsistencyRuns {
      * them: an honest estimator reads a NEES near its number of dimensions.
      */
     static final Setup MATCHED =
-        new Setup(Spread.matched(Robots.SIM.estimator()), MATCHED_NOISE_SCALE);
+        new Setup(
+            Spread.matched(Robots.SIM.estimator()),
+            MATCHED_NOISE_SCALE,
+            Robots.SIM.estimator().headingCorrection());
+
+    /** The same, with another way to correct the heading. */
+    Setup with(EstimatorConfig.HeadingCorrection other) {
+      return new Setup(spread, noiseScale, other);
+    }
 
     Setup {
       if (!(noiseScale > 0)) {
@@ -354,31 +408,44 @@ final class ConsistencyRuns {
   }
 
   /**
-   * The simulator's robot, with its vision pipeline's noise model scaled: what if the model were
-   * fit tighter (below 1) or looser (above 1) than the one it ships with?
+   * The simulator's robot as a setup runs it: its vision pipeline's noise model scaled (what if the
+   * model were fit tighter, below 1, or looser, above 1, than the one it ships with?), and its
+   * estimator correcting the heading as the setup says.
    */
-  static RobotConfig robot(double noiseScale) {
-    if (noiseScale == 1) {
-      return Robots.SIM;
-    }
+  static RobotConfig robot(Setup setup) {
     VisionConfig vision = Robots.SIM.vision();
     return RobotConfigBuilder.builder(Robots.SIM)
         .vision(
             VisionConfigBuilder.builder(vision)
-                .linearStdDevBaseline(noiseScale * vision.linearStdDevBaseline())
-                .angularStdDevBaseline(noiseScale * vision.angularStdDevBaseline())
+                .linearStdDevBaseline(setup.noiseScale() * vision.linearStdDevBaseline())
+                .angularStdDevBaseline(setup.noiseScale() * vision.angularStdDevBaseline())
+                .build())
+        .estimator(
+            EstimatorConfigBuilder.builder(Robots.SIM.estimator())
+                .headingCorrection(setup.heading())
                 .build())
         .build();
   }
 
   /**
+   * One run with one seed: every loop once the robot is enabled, and what the mount check made of
+   * each camera.
+   *
+   * @param mostDoubtMeters by camera, the most its mount was doubted at any loop
+   * @param offsetMeters by camera, how far its tags landed at the end (NaN if never judged)
+   */
+  record Played(
+      List<Consistency.Sample> samples,
+      Map<String, Double> mostDoubtMeters,
+      Map<String, Double> offsetMeters) {}
+
+  /**
    * Plays a run with a seed on the simulator's robot.
    *
-   * @return every loop once the robot is enabled
+   * @return every loop once the robot is enabled, and the mount check's verdicts
    */
-  static List<Consistency.Sample> play(Run run, long seed, Setup setup) {
-    try (SimulatedRobot robot =
-        new SimulatedRobot(robot(setup.noiseScale()), errors(seed, setup.spread()))) {
+  static Played play(Run run, long seed, Setup setup) {
+    try (SimulatedRobot robot = new SimulatedRobot(robot(setup), errors(seed, setup.spread()))) {
       Scenario scenario = run.scenario();
       if (scenario != null) {
         robot.applyFaults(scenario);
@@ -389,7 +456,11 @@ final class ConsistencyRuns {
       robot.setEnabled(true);
       Driver driver = new Driver(robot, scenario);
       run.script().play(driver);
-      return driver.samples;
+      Map<String, Double> offsets = new LinkedHashMap<>();
+      for (CameraConfig camera : Robots.SIM.cameras()) {
+        offsets.put(camera.name(), robot.mountOffsetMeters(camera.name()));
+      }
+      return new Played(driver.samples, Map.copyOf(driver.mostDoubt), offsets);
     }
   }
 
@@ -398,6 +469,7 @@ final class ConsistencyRuns {
     private final SimulatedRobot robot;
     private final @Nullable Scenario scenario;
     private final List<Consistency.Sample> samples = new ArrayList<>();
+    private final Map<String, Double> mostDoubt = new LinkedHashMap<>();
 
     Driver(SimulatedRobot robot, @Nullable Scenario scenario) {
       this.robot = robot;
@@ -470,6 +542,9 @@ final class ConsistencyRuns {
       robot.loop();
       LocalizationEstimate estimate = robot.estimate();
       samples.add(Consistency.Sample.of(estimate.pose(), estimate.covariance(), robot.truePose()));
+      for (CameraConfig camera : Robots.SIM.cameras()) {
+        mostDoubt.merge(camera.name(), robot.mountDoubtMeters(camera.name()), Math::max);
+      }
     }
   }
 }

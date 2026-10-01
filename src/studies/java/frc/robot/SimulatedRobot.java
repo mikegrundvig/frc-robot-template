@@ -139,6 +139,16 @@ public final class SimulatedRobot implements AutoCloseable {
     return Objects.requireNonNull(container.simulation()).truePose();
   }
 
+  /** How much less a camera is trusted for its mount, in meters ({@code MountCheck}). */
+  public double mountDoubtMeters(String camera) {
+    return container.vision().mountDoubtMeters(camera);
+  }
+
+  /** How far, on average, a camera's latest tags landed off; NaN until judged. */
+  public double mountOffsetMeters(String camera) {
+    return container.vision().mountOffsetMeters(camera);
+  }
+
   /** What localization believes, as of the last loop. */
   public LocalizationEstimate estimate() {
     return container.estimate();

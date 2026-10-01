@@ -30,7 +30,8 @@ class EstimatorConsistencySimTest {
     Consistency consistency = new Consistency();
     for (long seed = 1; seed <= SEEDS; seed++) {
       consistency.add(
-          ConsistencyRuns.play(ConsistencyRuns.named(run), seed, ConsistencyRuns.Setup.MATCHED));
+          ConsistencyRuns.play(ConsistencyRuns.named(run), seed, ConsistencyRuns.Setup.MATCHED)
+              .samples());
     }
     return consistency.summary();
   }

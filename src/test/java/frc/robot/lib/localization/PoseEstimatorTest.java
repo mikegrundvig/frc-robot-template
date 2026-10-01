@@ -393,6 +393,38 @@ class PoseEstimatorTest {
     assertThat(covariance.yStdDev()).as("square to them").isCloseTo(lever, within(0.02 * lever));
   }
 
+  /**
+   * A camera the mount check doubts by 5 cm, its tags 2 m away: corrected heading measurements
+   * only, the doubt is the vision pipeline's business; with the doubt added to what the camera
+   * repeats, a thousand of its fixes can't place the robot better than the doubt along its tags.
+   */
+  @Test
+  void aCamerasMountDoubtCanRaiseWhatItRepeats() {
+    double[] alongTheTags = new double[2];
+    EstimatorConfig.HeadingCorrection[] ways = {
+      EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS,
+      EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT
+    };
+    for (int way = 0; way < 2; way++) {
+      PoseReset rough = new PoseReset(T0, START, PoseCovariance.fromStdDevs(1, 1, 0.02), "rough");
+      Robot robot = new Robot(with().headingCorrection(ways[way]).build(), rough);
+      robot.estimator.reset(rough);
+      robot.drive(1, 0, 0, 0);
+      robot.estimator.mountDoubt("front", 0.05, 2); // doubted before its first fix
+      robot.estimator.update();
+      for (int i = 0; i < 1000; i++) {
+        robot.estimator.mountDoubt("front", 0.05, 2);
+        robot.drive(1, 0, 0, 0).seeLeaning(START, new Translation2d(2, 0), 0.05);
+      }
+      alongTheTags[way] = robot.estimate().covariance().xStdDev();
+    }
+
+    double shift = EstimatorConfig.DEFAULTS.cameraShiftStdDevMeters();
+    assertThat(alongTheTags[0]).as("the doubt ignored").isCloseTo(shift, within(0.1 * shift));
+    double doubted = Math.hypot(shift, 0.05);
+    assertThat(alongTheTags[1]).as("the doubt added").isCloseTo(doubted, within(0.1 * doubted));
+  }
+
   @Test
   void aMeasurementWithHeadingCorrectsTheGyroOffset() {
     Robot robot = new Robot(TEXTBOOK, new PoseReset(0, START, PLACED, "x"));

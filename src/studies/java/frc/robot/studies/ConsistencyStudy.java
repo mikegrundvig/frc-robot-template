@@ -1,6 +1,7 @@
 package frc.robot.studies;
 
 import frc.robot.Robots;
+import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The estimator consistency study: does the pose estimator's uncertainty tell the truth? The whole
@@ -40,6 +42,9 @@ public final class ConsistencyStudy {
         --gyro-scale-error=F      the gyro's scale off by this share (default: headingStdDevDegreesPerTurn / 360)
         --backup-scale-error=F    the backup IMU's (default: backupHeadingStdDevDegreesPerTurn / 360)
         --noise-scale=F           the vision noise model scaled by this (default 0.5, matching the simulated cameras)
+        --heading=W               what corrects the heading beside the gyro: measurements (the default:
+                                  measurements with a heading of their own), doubt (those, and each
+                                  camera's mount doubt in what it repeats), or every (every fix: a full update)
         --out=DIR                 where the report goes (default build/studies/consistency)
       """;
 
@@ -57,6 +62,7 @@ public final class ConsistencyStudy {
           "gyro-scale-error",
           "backup-scale-error",
           "noise-scale",
+          "heading",
           "out");
 
   private ConsistencyStudy() {}
@@ -72,8 +78,20 @@ public final class ConsistencyStudy {
     }
   }
 
-  /** What one run showed, over every seed. */
-  record Result(ConsistencyRuns.Run run, Consistency consistency) {}
+  /**
+   * What one run showed, over every seed.
+   *
+   * @param doubted by camera, how many seeds' mount checks doubted it at some loop
+   * @param mostDoubtMeters by camera, the most it was doubted, averaged over the seeds
+   * @param outOfCalibration by camera, how many seeds ended with its tags landing past the
+   *     tolerance
+   */
+  record Result(
+      ConsistencyRuns.Run run,
+      Consistency consistency,
+      Map<String, Integer> doubted,
+      Map<String, Double> mostDoubtMeters,
+      Map<String, Integer> outOfCalibration) {}
 
   /**
    * Runs the study as the options say, and writes its report.
@@ -110,7 +128,8 @@ public final class ConsistencyStudy {
             number(options, "gyro-scale-error", matched.gyroScale()),
             number(options, "backup-scale-error", matched.backupScale()));
     double noiseScale = number(options, "noise-scale", ConsistencyRuns.Setup.MATCHED.noiseScale());
-    ConsistencyRuns.Setup setup = new ConsistencyRuns.Setup(spread, noiseScale);
+    ConsistencyRuns.Setup setup =
+        new ConsistencyRuns.Setup(spread, noiseScale, heading(options.get("heading")));
 
     long start = System.nanoTime();
     List<Result> results = study(runs, seeds, first, setup, out);
@@ -135,9 +154,11 @@ public final class ConsistencyStudy {
                 shown(100 * spread.gyroScale()),
                 shown(100 * spread.backupScale()),
                 shown(noiseScale),
-                setup.equals(ConsistencyRuns.Setup.MATCHED)
+                setup.spread().equals(ConsistencyRuns.Setup.MATCHED.spread())
+                        && noiseScale == ConsistencyRuns.Setup.MATCHED.noiseScale()
                     ? " As the estimator's configuration claims: matched."
                     : ""),
+            format("The heading corrected by: %s.", setup.heading()),
             format("%.0f s.", seconds));
     Files.writeString(directory.resolve("summary.md"), summary(described, results));
     Files.write(directory.resolve("loops.csv"), loops(results), StandardCharsets.UTF_8);
@@ -153,11 +174,24 @@ public final class ConsistencyStudy {
       ConsistencyRuns.Setup setup,
       PrintStream out) {
     List<Result> results = new ArrayList<>();
+    double tolerance = Robots.SIM.vision().mountToleranceMeters();
     for (ConsistencyRuns.Run run : runs) {
       Consistency consistency = new Consistency();
+      Map<String, Integer> doubted = new LinkedHashMap<>();
+      Map<String, Double> mostDoubt = new LinkedHashMap<>();
+      Map<String, Integer> outOfCalibration = new LinkedHashMap<>();
       for (long seed = first; seed < first + seeds; seed++) {
-        List<Consistency.Sample> samples = ConsistencyRuns.play(run, seed, setup);
+        ConsistencyRuns.Played played = ConsistencyRuns.play(run, seed, setup);
+        List<Consistency.Sample> samples = played.samples();
         consistency.add(samples);
+        for (Map.Entry<String, Double> camera : played.mostDoubtMeters().entrySet()) {
+          doubted.merge(camera.getKey(), camera.getValue() > 0 ? 1 : 0, Integer::sum);
+          mostDoubt.merge(camera.getKey(), camera.getValue() / seeds, Double::sum);
+        }
+        for (Map.Entry<String, Double> camera : played.offsetMeters().entrySet()) {
+          outOfCalibration.merge(
+              camera.getKey(), camera.getValue() > tolerance ? 1 : 0, Integer::sum);
+        }
         Consistency alone = new Consistency();
         alone.add(samples);
         Consistency.Summary one = alone.summary();
@@ -187,7 +221,7 @@ public final class ConsistencyStudy {
           percent(summary.exceedance()),
           summary.worstRatio(),
           100 * summary.meanErrorMeters());
-      results.add(new Result(run, consistency));
+      results.add(new Result(run, consistency, doubted, mostDoubt, outOfCalibration));
     }
     return results;
   }
@@ -253,6 +287,37 @@ public final class ConsistencyStudy {
               s.meanHeadingErrorDegrees(),
               100 * s.meanSpreadMeters()));
     }
+    md.append(
+        """
+
+        ## The mount check
+
+        For each camera, how many seeds' mount checks doubted it at some loop (so its measurements
+        counted for less), the most it was doubted on average, and how many seeds ended with its
+        tags landing past the tolerance (the alert to recalibrate it). The first camera is the one
+        the camera runs knock.
+
+        """);
+    md.append("| Run | ");
+    List<String> cameras =
+        Robots.SIM.cameras().stream().map(frc.robot.lib.config.CameraConfig::name).toList();
+    md.append(String.join(" | ", cameras)).append(" |\n|---|");
+    md.append("---|".repeat(cameras.size())).append('\n');
+    for (Result result : results) {
+      md.append("| ").append(result.run().name()).append(" |");
+      int seeds = result.consistency().runs();
+      for (String camera : cameras) {
+        md.append(
+            format(
+                " doubted %d/%d, %.1f cm; out %d/%d |",
+                result.doubted().getOrDefault(camera, 0),
+                seeds,
+                100 * result.mostDoubtMeters().getOrDefault(camera, 0.0),
+                result.outOfCalibration().getOrDefault(camera, 0),
+                seeds));
+      }
+      md.append('\n');
+    }
     md.append("\n## The runs\n\n");
     for (Result result : results) {
       md.append(format("- **%s:** %s%n", result.run().name(), result.run().description()));
@@ -283,6 +348,21 @@ public final class ConsistencyStudy {
       }
     }
     return lines;
+  }
+
+  /** The way to correct the heading an option names; the configuration's without one. */
+  static EstimatorConfig.HeadingCorrection heading(@Nullable String name) {
+    if (name == null) {
+      return ConsistencyRuns.Setup.MATCHED.heading();
+    }
+    return switch (name) {
+      case "measurements" -> EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS;
+      case "doubt" -> EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT;
+      case "every" -> EstimatorConfig.HeadingCorrection.EVERY_FIX;
+      default ->
+          throw new IllegalArgumentException(
+              "--heading must be measurements, doubt, or every: " + name);
+    };
   }
 
   /** The options, by name: {@code --seeds=50} is {@code seeds} = {@code 50}. */

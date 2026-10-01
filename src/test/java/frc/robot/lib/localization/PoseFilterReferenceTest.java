@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
@@ -31,6 +33,9 @@ class PoseFilterReferenceTest {
   private static final double SHIFT_METERS = 1.0;
   private static final double SHIFT_RADIANS = Math.toRadians(45);
 
+  /** Whether a position fix corrects the heading too, as {@link PoseFilter} is built to. */
+  private boolean fixesTurnHeading;
+
   /** The reference: the augmented state's mean (just x, y, offset: the rest stay zero) and P. */
   private final double[] mean = new double[3];
 
@@ -45,8 +50,8 @@ class PoseFilterReferenceTest {
     return 3 + 2 + PER_CAMERA * camera + which;
   }
 
-  /** A considered error's own variance, by its index among them. */
-  private static double consideredVariance(int k) {
+  /** A considered error's own variance as configured, by its index among them. */
+  private static double considered(int k) {
     return k == 0
         ? SCALE * SCALE
         : k == 1 ? BACKUP_SCALE * BACKUP_SCALE : ownVariance((k - 2) % PER_CAMERA);
@@ -55,7 +60,7 @@ class PoseFilterReferenceTest {
   private void startConsidered() {
     p = new double[N][N];
     for (int k = 0; k < C; k++) {
-      p[3 + k][3 + k] = consideredVariance(k);
+      p[3 + k][3 + k] = considered(k);
     }
   }
 
@@ -116,7 +121,7 @@ class PoseFilterReferenceTest {
       for (int which = 1; which < PER_CAMERA; which++) {
         int k = column(camera, which);
         fade[k][k] = remains;
-        q[k][k] = (1 - remains * remains) * ownVariance(which);
+        q[k][k] = (1 - remains * remains) * p[k][k]; // back to the camera's own variance
       }
     }
     double[][] phi = multiply(fade, multiply(g, f));
@@ -196,7 +201,7 @@ class PoseFilterReferenceTest {
         gain[i][j] = 0;
       }
     }
-    if (rows == 2) {
+    if (rows == 2 && !fixesTurnHeading) {
       gain[2][0] = gain[2][1] = 0;
     }
     joseph(gain, h, r, innovation);
@@ -256,17 +261,46 @@ class PoseFilterReferenceTest {
   }
 
   /**
+   * A camera's turn and shift variances set afresh: falling, the error's relations to everything
+   * fall with them in proportion, which keeps the joint covariance positive.
+   */
+  private void setCameraVariances(int camera, double turn, double shift) {
+    setVariance(column(camera, 0), turn);
+    setVariance(column(camera, 1), shift);
+    setVariance(column(camera, 2), shift);
+  }
+
+  private void setVariance(int k, double variance) {
+    if (variance < p[k][k]) {
+      double factor = Math.sqrt(variance / p[k][k]);
+      for (int j = 0; j < N; j++) {
+        if (j != k) {
+          p[k][j] *= factor;
+          p[j][k] *= factor;
+        }
+      }
+    }
+    p[k][k] = variance;
+  }
+
+  /**
    * The joint covariance is positive semidefinite exactly when the estimate's covariance, less what
-   * the considered errors explain of it, is: its smallest eigenvalue, over its trace.
+   * the considered errors explain of it, is: its smallest eigenvalue, over its trace. The
+   * considered errors' variances are the reference's.
    */
   private double leastEigenvalue(PoseFilter filter) {
+    return leastEigenvalue(filter, k -> p[3 + k][3 + k]);
+  }
+
+  private double leastEigenvalue(
+      PoseFilter filter, java.util.function.IntToDoubleFunction variances) {
     filter.copyUncertaintyTo(kept, 0);
     double[][] schur = new double[3][3];
     for (int i = 0; i < 3; i++) {
       for (int j = 0; j < 3; j++) {
         double value = kept[i * 3 + j];
         for (int k = 0; k < C; k++) {
-          double variance = consideredVariance(k);
+          double variance = variances.applyAsDouble(k);
           if (variance > 0) {
             value -= kept[9 + i * C + k] * kept[9 + j * C + k] / variance;
           }
@@ -277,8 +311,10 @@ class PoseFilterReferenceTest {
     return smallestEigenvalue(schur) / Math.max(kept[0] + kept[4] + kept[8], 1e-300);
   }
 
-  @Test
-  void everyOperationMatchesTheAugmentedSchmidtKalmanFilter() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void everyOperationMatchesTheAugmentedSchmidtKalmanFilter(boolean fixesTurnHeading) {
+    this.fixesTurnHeading = fixesTurnHeading;
     PoseFilter.Considered considered =
         new PoseFilter.Considered(
             SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS);
@@ -287,7 +323,7 @@ class PoseFilterReferenceTest {
     int operations = 0;
     for (int sequence = 0; sequence < 60; sequence++) {
       SplittableRandom random = new SplittableRandom(sequence * 7919L + 1);
-      PoseFilter filter = new PoseFilter(considered);
+      PoseFilter filter = new PoseFilter(considered, fixesTurnHeading);
       double start = logUniform(random, 0.01, 100);
       double startHeading = logUniform(random, 1e-3, 3);
       filter.set(
@@ -382,6 +418,13 @@ class PoseFilterReferenceTest {
           mean[0] += 0.1;
           mean[1] -= 0.1;
           setPosition(variance, 0, variance);
+        } else if (u < 0.975) {
+          // A camera's mount doubted, or no longer: its turn and shift raised, or back down.
+          int camera = random.nextInt(PoseFilter.MAX_CAMERAS);
+          double turn = TURN * TURN * logUniform(random, 0.25, 40);
+          double shift = SHIFT * SHIFT * logUniform(random, 0.25, 40);
+          filter.setCameraVariances(camera, turn, shift);
+          setCameraVariances(camera, turn, shift);
         } else if (u < 0.98) {
           double positionVariance = logUniform(random, 1e-4, 1);
           double headingVariance = logUniform(random, 1e-6, 1);
@@ -446,7 +489,8 @@ class PoseFilterReferenceTest {
         filter.predict(yaw, 0.001, 0.001, 0, 1e-12, 1e-14, YawSource.GYRO);
         yaw += 0.001;
       }
-      worstEigenvalue = Math.min(worstEigenvalue, leastEigenvalue(filter));
+      worstEigenvalue =
+          Math.min(worstEigenvalue, leastEigenvalue(filter, PoseFilterReferenceTest::considered));
     }
 
     assertThat(worstEigenvalue).as("least eigenvalue, over the trace").isGreaterThan(-1e-9);

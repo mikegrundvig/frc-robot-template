@@ -253,6 +253,11 @@ final class Camera implements AutoCloseable {
     return mountDoubt;
   }
 
+  /** How far the tags its mount was judged by were, on average; NaN until judged. */
+  double mountDistanceMeters() {
+    return mount.distanceMeters();
+  }
+
   /**
    * A tag this loop's image saw, placed on the field through the estimated pose and the camera's
    * configured mount, and where the tag really is, if the field has it.

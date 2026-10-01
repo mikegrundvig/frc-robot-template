@@ -4,16 +4,23 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
+import frc.robot.lib.localization.VisionConfig;
+import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
@@ -196,51 +203,138 @@ class VisionSimTest {
     assertThat(worst).isLessThan(0.08);
   }
 
-  /**
-   * A camera turned 4° on its mount puts the robot off to the side by 7 cm for every meter to its
-   * tags, and turns its own headings by 4°. Once judged (about 20 s in: it sees tags only part of
-   * the time, and only while another camera holds the pose), it's found out of calibration and
-   * counts for less, and the back cameras never are.
-   *
-   * <p>But from one camera, a turned mount and a heading error look the same, and only a
-   * measurement with a heading of its own turns the estimate: its headings pull the estimate's
-   * heading a degree or more its way, its front neighbor's tags then land off too, and the neighbor
-   * is doubted about as much. So here the check doesn't make the estimate better (the last lap's
-   * mean error is about 5 cm with it, 4 cm trusted as before); comparing the cameras with each
-   * other, not with the estimate, is what would.
-   */
-  @Test
-  void aCameraTurnedOnItsMountIsFoundOutOfCalibration() {
-    Transform3d turned = new Transform3d(0, 0, 0, new Rotation3d(0, 0, Math.toRadians(4)));
-    sim.build(SensorErrors.TYPICAL.withCameraMountError("front-left", turned));
-
-    drive(4);
-
-    assertThat(activeAlerts())
-        .anyMatch(
-            text ->
-                text.startsWith("Camera front-left is out of calibration")
-                    && text.contains("so it counts for less"));
-    assertThat(sim.robot().vision().mountDoubtMeters("front-left")).isGreaterThan(0.04);
-    assertThat(mostDoubted.get("back-left")).isZero();
-    assertThat(mostDoubted.get("back-right")).isZero();
-    assertThat(lastLapMean).as("the last lap's mean error").isLessThan(0.07);
+  /** The simulator's robot, its estimator correcting the heading this way. */
+  private static RobotConfig correcting(
+      EstimatorConfig.HeadingCorrection heading, VisionConfig vision) {
+    return RobotConfigBuilder.builder(Robots.SIM)
+        .vision(vision)
+        .estimator(
+            EstimatorConfigBuilder.builder(Robots.SIM.estimator())
+                .headingCorrection(heading)
+                .build())
+        .build();
   }
 
   /**
-   * A camera turned 2°: its headings pull the estimate's heading partway its way, so its tags land
-   * little farther off than its neighbor's, and it doesn't stand out on its own. The estimate stays
-   * within a few centimeters.
+   * Which of the mount check's original promises about a camera turned 4° on its mount (it puts the
+   * robot off to the side by 7 cm for every meter to its tags, and turns its own headings by 4°)
+   * hold, on a robot correcting the heading this way: once judged (about 20 s in), it's out of
+   * calibration and counts for less; the back cameras are never doubted; it's doubted by more than
+   * 8 cm; and over the last lap the estimate is at least a fifth closer to the truth than with the
+   * camera trusted as before (the tolerance at its tuning limit).
+   *
+   * @return each promise broken, with what was measured
    */
-  @Test
-  void aCameraTurnedTwoDegreesKeepsTheEstimateWithinCentimeters() {
+  private List<String> turnedFourDegrees(EstimatorConfig.HeadingCorrection heading) {
+    Transform3d turned = new Transform3d(0, 0, 0, new Rotation3d(0, 0, Math.toRadians(4)));
     sim.build(
+        correcting(heading, Robots.SIM.vision()),
+        SensorErrors.TYPICAL.withCameraMountError("front-left", turned));
+    drive(4);
+    double mean = lastLapMean;
+    double doubt = sim.robot().vision().mountDoubtMeters("front-left");
+    boolean alert =
+        activeAlerts().stream()
+            .anyMatch(
+                text ->
+                    text.startsWith("Camera front-left is out of calibration")
+                        && text.contains("so it counts for less"));
+    double backs =
+        Math.max(
+            mostDoubted.getOrDefault("back-left", 0.0),
+            mostDoubted.getOrDefault("back-right", 0.0));
+
+    RobotSim.setEnabled(false);
+    mostDoubted.clear();
+    VisionConfig asBefore =
+        VisionConfigBuilder.builder(Robots.SIM.vision()).mountToleranceMeters(0.5).build();
+    sim.build(
+        correcting(heading, asBefore),
+        SensorErrors.TYPICAL.withCameraMountError("front-left", turned));
+    drive(4);
+    double meanAsBefore = lastLapMean;
+
+    List<String> broken = new ArrayList<>();
+    if (!alert) {
+      broken.add("no alert that it counts for less");
+    }
+    if (backs > 0) {
+      broken.add(String.format(Locale.ROOT, "a back camera doubted %.1f cm", 100 * backs));
+    }
+    if (!(doubt > 0.08)) {
+      broken.add(String.format(Locale.ROOT, "doubted %.1f cm, not over 8", 100 * doubt));
+    }
+    if (!(mean < 0.8 * meanAsBefore)) {
+      broken.add(
+          String.format(
+              Locale.ROOT,
+              "last lap %.1f cm against %.1f cm trusted as before",
+              100 * mean,
+              100 * meanAsBefore));
+    }
+    return broken;
+  }
+
+  /**
+   * A camera turned 2° stands out in its tag residuals, 1.4 times its worst neighbour's, after a
+   * lap, on a robot correcting the heading this way.
+   *
+   * @return how far it stands out
+   */
+  private double turnedTwoDegrees(EstimatorConfig.HeadingCorrection heading) {
+    sim.build(
+        correcting(heading, Robots.SIM.vision()),
         SensorErrors.TYPICAL.withCameraMountError(
             "front-left", new Transform3d(0, 0, 0, new Rotation3d(0, 0, Math.toRadians(2)))));
+    drive();
+    return standsOut("front-left");
+  }
 
-    double worst = drive();
+  /**
+   * The promises each way of correcting the heading keeps for a camera turned 4°, as measured: the
+   * full update keeps them all. Leaving the heading to measurements with a heading of their own, a
+   * turned camera's headings pull the estimate's heading its way, its neighbour's tags land off
+   * too, and the check can't single it out: doubted 4.4 cm, the last lap 6.1 cm against 3.7 cm
+   * trusted as before. Adding the doubt to what each camera repeats makes it worse (3.8 cm, and 9.6
+   * cm against 3.7): both front cameras are doubted alike, and the floor holds both off. This test
+   * shows which; it changes when one does, either way.
+   */
+  @ParameterizedTest
+  @EnumSource(EstimatorConfig.HeadingCorrection.class)
+  void aCameraTurnedOnItsMountCountsForLess(EstimatorConfig.HeadingCorrection heading) {
+    List<String> broken = turnedFourDegrees(heading).stream().map(VisionSimTest::promise).toList();
 
-    assertThat(lastLapMean).as("the lap's mean error").isLessThan(0.035);
-    assertThat(worst).as("worst").isLessThan(0.08);
+    if (heading == EstimatorConfig.HeadingCorrection.EVERY_FIX) {
+      assertThat(broken).as("every promise kept").isEmpty();
+    } else {
+      assertThat(broken).as("the promises broken").containsExactly("doubted", "last lap");
+    }
+  }
+
+  /** Which promise a broken one was: the words before its numbers. */
+  private static String promise(String broken) {
+    for (String name : List.of("no alert", "a back camera", "doubted", "last lap")) {
+      if (broken.startsWith(name)) {
+        return name;
+      }
+    }
+    return broken;
+  }
+
+  /**
+   * A camera turned 2° stands out in its tag residuals, 1.4 times its worst neighbour's, only when
+   * every fix corrects the heading (1.6). Otherwise its headings pull the estimate's heading
+   * partway its way, and its neighbour's tags land off nearly as far (0.83).
+   */
+  @ParameterizedTest
+  @EnumSource(EstimatorConfig.HeadingCorrection.class)
+  void aCameraTurnedTwoDegreesStandsOutToo(EstimatorConfig.HeadingCorrection heading) {
+    double standsOut = turnedTwoDegrees(heading);
+
+    if (heading == EstimatorConfig.HeadingCorrection.EVERY_FIX) {
+      assertThat(standsOut).isGreaterThan(1.4);
+    } else {
+      assertThat(standsOut).as("doesn't stand out").isLessThan(1.4);
+    }
   }
 }

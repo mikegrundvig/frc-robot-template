@@ -60,8 +60,11 @@
  *
  * <ul>
  *   <li>a position a camera solved with the gyro's heading leans on that heading, in every image:
- *       it carries the heading's doubt, and never corrects the heading (the gyro owns it; only a
- *       measurement with a heading of its own corrects its drift);
+ *       it carries the heading's doubt, and by default doesn't correct the heading (the gyro owns
+ *       it; a measurement with a heading of its own corrects its drift, with all three of its rows:
+ *       its position too, through how the position's error has come to depend on the heading's).
+ *       {@link frc.robot.lib.localization.EstimatorConfig#headingCorrection} can let every fix
+ *       correct it;
  *   <li>a gyro reading its turns a little long or short is off the same way every turn;
  *   <li>each camera's turn on its mount, and its shift (its mount's offset, and how far the tags it
  *       sees sit from the field's layout), are in every image it takes, until it moves on and sees

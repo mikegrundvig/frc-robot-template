@@ -40,10 +40,11 @@ import org.wpilib.math.util.MathUtil;
  * it: the error should go past 3.72 times the spread it claims no more than once in a thousand
  * loops, which the consistency study checks in the simulator (docs/testing.md). So errors that
  * repeat are never averaged away as if each were new: a position a camera solved with the gyro's
- * heading carries the heading's doubt (and never turns it), the gyro's scale error is the same
- * every turn, and each camera's turn on its mount and its shift (its mount's offset, the tags'
- * placement) are in every image it takes ({@link PoseFilter} considers them). Each camera is told
- * apart by its name.
+ * heading carries the heading's doubt (and turns it only if {@link
+ * EstimatorConfig#headingCorrection} lets every fix), the gyro's scale error is the same every
+ * turn, and each camera's turn on its mount and its shift (its mount's offset, the tags' placement)
+ * are in every image it takes ({@link PoseFilter} considers them). Each camera is told apart by its
+ * name.
  *
  * <p>Its parts: {@link OdometryHistory} keeps the steps, {@link PoseFilter} does the filter's math,
  * and {@link Recovery} judges when the cameras agree against odometry. This class feeds them and

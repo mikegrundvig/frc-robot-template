@@ -257,8 +257,8 @@ The gyro owns the heading; what else may correct it is `EstimatorConfig.headingC
 the study runs each (`--heading=`):
 
 - **`measurements`** (`HEADING_MEASUREMENTS`, the default): only measurements with a heading of
-  their own, multi-tag solves. A position solved with the gyro's heading carries the heading's
-  doubt but never turns it.
+  their own, multi-tag solves, with all three of their rows. A position solved with the gyro's
+  heading carries the heading's doubt but never turns it.
 - **`doubt`** (`HEADING_MEASUREMENTS_AND_MOUNT_DOUBT`): those, and a camera the mount check doubts
   has the doubt added to what it repeats (its turn, at its tags' distance, and its shift), so its
   headings pull the heading only so far, however many it sends.

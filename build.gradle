@@ -169,3 +169,4 @@ apply from: "gradle/quality.gradle"     // formatting, static analysis, coverage
 apply from: "gradle/build-info.gradle"  // git SHA and build time, logged by the robot at startup
 apply from: "gradle/simulation.gradle"  // simulator defaults for ./gradlew run
 apply from: "gradle/studies.gradle"     // simulation studies, such as camera placement
+apply from: "gradle/coprocessors.gradle" // the coprocessor table and the PhotonVision version lock

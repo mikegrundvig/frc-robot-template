@@ -7,6 +7,8 @@ the robot polls. This folder holds what they share with the robot program.
 | Path | What |
 |---|---|
 | `coprocessors/coprocessors.yaml` (at the repository's root) | The table: the team's coprocessors, the one place they're described |
+| `coprocessors/<computer>/settings/` | Each computer's PhotonVision settings and calibrations, one file per row |
+| `coprocessor/photonvision.lock` | The PhotonVision version the coprocessors run, with the checksums an image is built from |
 | `coprocessor/common/` (Gradle `:coprocessor-common`) | What the robot program, the agent, and the build share: the table, the agent's API records, the settings' canonical form and hash, and the JSON they're written in |
 
 ## The table: `coprocessors/coprocessors.yaml`
@@ -16,7 +18,7 @@ team: 0                # the team number; addresses are 10.TE.AM.x
 agentPort: 5808        # the health agent's port, unless a computer says otherwise
 computers:
   - name: vision-front # its hostname: lowercase letters, digits, hyphens
-    address: 11        # the last number of its address: 10.TE.AM.11
+    address: 11        # the last number of its address: 10.TE.AM.11 (.6 to .19)
     board: orangepi-5  # orangepi-5 | orangepi-5b | orangepi-5-plus | orangepi-5-pro | orangepi-5-max
     cameras: [front-left, front-right]   # the PhotonVision camera names it runs (its role)
 ```
@@ -27,13 +29,17 @@ computers:
 | `agentPort` | no, 5808 | 1024 to 65535, except 5800 (PhotonVision's page) and 5810 (NetworkTables). 5808 sits in FRC's team range, 5800-5810 |
 | `computers` | yes (`[]` for none) | A list of computers |
 | `computers[].name` | yes | A hostname: lowercase letters, digits, and hyphens, starting with a letter and not ending with a hyphen, at most 63 characters. Unique |
-| `computers[].address` | yes | 11 to 254. Unique |
+| `computers[].address` | yes | 6 to 19: FRC's static range for devices on the robot (WPILib's "IP Configurations"; .20-.199 is the field's DHCP pool, .200-.219 the radio's). 11 and up by convention. Unique |
 | `computers[].board` | yes | One of the five boards above |
 | `computers[].cameras` | no, none | PhotonVision camera names: the names robot code gives `PhotonCamera`. Not empty, no `/` or control characters, at most 64 characters. Unique across the whole table, since PhotonVision publishes each one at `/photonvision/<camera>` |
 | `computers[].agentPort` | no, the table's | As `agentPort` |
 
 The build reads the table and refuses one with a problem, listing every problem with its line. A
 key it doesn't know is a problem too, so a misspelling can't pass silently.
+
+The template's table is an example: team 0, one computer, no settings. The robot's build accepts
+team 0 and an empty list, but the image workflow builds nothing until a team sets its number and
+lists at least one computer.
 
 **The YAML it reads.** The table is read without a YAML library, so nothing extra reaches the robot
 program or the agent. It reads the YAML above and anything shaped like it: one `key: value` per
@@ -173,13 +179,54 @@ a fixed order (`SettingsHash.RULES`, each with its reason; `SettingsHashTest` pi
 confirms it: the hash holding steady across reboots, replugs, and pipeline switches. Changing the
 list changes every hash, so every image needs stamping again.
 
+## The version lock: `coprocessor/photonvision.lock`
+
+PhotonLib's vendordep (`vendordeps/photonlib.json`) says which PhotonVision the robot program is
+built for; the lock says the same version, with what pins an image's inputs:
+
+```json
+{
+  "version": "dev-v2027.0.0-alpha-2-69-g71416112",
+  "jar": {"url": "...", "sha256": "..."},
+  "images": {"orangepi-5": {"url": ".../photonvision_opi5.img.xz", "sha256": "..."}, ...}
+}
+```
+
+`version` must equal the vendordep's. `jar` is the PhotonVision jar for 64-bit ARM Linux, and
+`images` each board's base image: PhotonVision's own image for that board, from the
+[photon-image-modifier](https://github.com/PhotonVision/photon-image-modifier) release the pinned
+PhotonVision version builds on, whose file name it keeps. A value not known yet is a placeholder,
+text starting `PLACEHOLDER`: the robot's build allows it and names it, and the image build refuses
+it. The template's lock has the base images of release v2027.2.3, with the SHA-256 digests the
+release publishes, and placeholders for the jar: PhotonVision's rolling development release no
+longer holds this version's, so it has to be archived (built from its commit, if need be) before
+images can be built. The lock is JSON, which YAML tools read too (the image scripts use yq).
+
+**Every build checks it:** `./gradlew checkPhotonVisionLock` (part of `check`, so of `build`,
+`ci`, and `deploy`) fails when the lock's version isn't the vendordep's, saying both. So when
+PhotonLib is updated, the lock moves with it, in the same commit, with the new jar's and images'
+addresses and checksums (or placeholders until they're known).
+
 ## The compiled table
 
-The build compiles the table into the robot program as `/coprocessor/table.json`, with what the
-robot checks each coprocessor against: the PhotonVision version (the vendordep's), the image
-recipe's hash, and each computer's committed settings hash. `CompiledTable.load()` reads it, and
-`mismatches(computer, stamp)` says, as sentences naming both values, how a coprocessor's stamp
-differs from this build in name, team, address, PhotonVision version, or recipe hash.
+Every build compiles the table into the robot program as `/coprocessor/table.json` (the
+`coprocessorTable` task, from `gradle/coprocessors.gradle`; a generated resource, not source), with
+what the robot checks each coprocessor against: PhotonLib's PhotonVision version, the recipe hash,
+and each computer's committed settings hash (empty for a computer with none). A table with a
+problem, or settings that can't be read, fail the build there.
+
+`CompiledTable.load()` reads it, and `mismatches(computer, stamp)` says, as sentences naming both
+values, how a coprocessor's stamp differs from this build in name, team, address, PhotonVision
+version, or recipe hash.
+
+**The recipe hash** says how the common image is built. `coprocessor/image/recipe.paths` lists what
+it covers (the image's scripts, the agent's and the shared code, the lock), and the hash is the
+SHA-256 of what `git ls-tree -r --full-tree HEAD -- <those paths>` prints: committed files only, so
+it's the same on every machine and OS, and the same the image workflow computes
+(`coprocessor/image/recipe-hash.sh`). Uncommitted changes don't count: an image is built from a
+commit. Without Git (a downloaded copy, or no commit yet) the compiled table has no recipe hash,
+and the build says so. `CoprocessorBuild` runs these tasks, so the build checks with exactly the
+code the robot and the agents run.
 
 ## JSON, without a library
 

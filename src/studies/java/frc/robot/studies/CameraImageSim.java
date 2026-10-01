@@ -56,8 +56,30 @@ final class CameraImageSim {
   private final double halfHeightDegrees;
   private final List<Tag> tags = new ArrayList<>();
 
-  /** A tag on the field, and where its corners are, in PhotonVision's order. */
-  record Tag(int id, Pose3d pose, List<Translation3d> corners) {}
+  /**
+   * A tag on the field.
+   *
+   * @param corners where its corners are, in PhotonVision's order
+   * @param outline the points another robot must leave clear for the tag to be detected: its
+   *     corners, the middles of its edges, and its center
+   */
+  record Tag(int id, Pose3d pose, List<Translation3d> corners, List<Translation3d> outline) {
+    Tag(int id, Pose3d pose, List<Translation3d> corners) {
+      this(id, pose, corners, outline(corners));
+    }
+
+    private static List<Translation3d> outline(List<Translation3d> corners) {
+      List<Translation3d> points = new ArrayList<>(corners);
+      Translation3d center = Translation3d.ZERO;
+      for (int i = 0; i < corners.size(); i++) {
+        Translation3d corner = corners.get(i);
+        points.add(corner.plus(corners.get((i + 1) % corners.size())).div(2));
+        center = center.plus(corner.div(corners.size()));
+      }
+      points.add(center);
+      return List.copyOf(points);
+    }
+  }
 
   /**
    * A tag in an image: where its corners landed, noise and all, and its pose solved from them.
@@ -118,7 +140,7 @@ final class CameraImageSim {
   }
 
   /**
-   * One image, with other robots in the way: a tag any of whose corners they hide isn't detected.
+   * One image, with other robots in the way: a tag they hide, even partly, isn't detected.
    *
    * @param blockers the other robots on the field
    */
@@ -187,11 +209,14 @@ final class CameraImageSim {
         && relation.camToTarg.getTranslation().getNorm() <= sightMeters;
   }
 
-  /** Whether another robot stands between the camera and any of a tag's corners. */
+  /**
+   * Whether another robot stands between the camera and any of a tag's corners, the middles of its
+   * edges, or its center: a tag partly hidden isn't detected.
+   */
   private static boolean hidden(Translation3d lens, Tag tag, List<OtherRobots.Blocker> blockers) {
     for (OtherRobots.Blocker blocker : blockers) {
-      for (Translation3d corner : tag.corners()) {
-        if (blocker.blocks(lens, corner)) {
+      for (Translation3d point : tag.outline()) {
+        if (blocker.blocks(lens, point)) {
           return true;
         }
       }

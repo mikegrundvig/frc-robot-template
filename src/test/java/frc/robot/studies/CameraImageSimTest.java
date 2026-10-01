@@ -212,6 +212,26 @@ class CameraImageSimTest {
         .isEqualTo(study.image(cameraPose, "front", 1).tags());
   }
 
+  /**
+   * A post between the camera and one of the hub face's two tags hides that one alone. The other
+   * tags' corners are exactly as in the clear image: the hidden tag's noise is still drawn, in
+   * PhotonVision's order, so the rest of the image is the same.
+   */
+  @Test
+  void aNarrowPostHidesOneTagAndLeavesTheRestAsTheyWere() {
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
+    Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
+    // Halfway to the face, where the line to tag 25 (y 4.39) passes y 4.30, and tag 26's, 4.11.
+    OtherRobots.Blocker post = new OtherRobots.Blocker(3.2, 4.30, 0, 0.05, 0.03, 2);
+
+    TagDetections clear = study.image(cameraPose, "front", 1);
+    TagDetections hidden = study.image(cameraPose, "front", 1, List.of(post));
+
+    assertThat(clear.tags()).extracting(TagDetections.Tag::id).contains(25, 26);
+    assertThat(hidden.tags())
+        .containsExactlyElementsOf(clear.tags().stream().filter(tag -> tag.id() != 25).toList());
+  }
+
   @Test
   void anImageWithNoTagInViewHasNothingInIt() {
     CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);

@@ -133,7 +133,8 @@ A finer grid costs the square: `--grid-meters=0.25` takes four times as long.
 | `--gyro-error-degrees=D` | 0.25 | The gyro heading's typical error (one standard deviation) |
 | `--mount-error-mm=M` | 0 | How far each camera really sits from its configured place, at most, along each axis |
 | `--mount-error-degrees=D` | 0 | How far each camera is really turned, at most, about each axis |
-| `--other-robots=N` or `N-M` | 0 | Other robots in the cameras' way around each pose (below) |
+| `--other-robots=N` or `N-M` | 0 | Other robots in the cameras' way around each pose, five at most (below) |
+| `--other-robots-height-meters=M` | as tall as this robot | How tall the other robots are |
 | `--trials=N` | 0 | Robustness trials (below), each drawing all of these errors |
 | `--robust` | | Robustness with the usual 12 trials |
 | `--seed=N` | 1 | The seed every random draw comes from |
@@ -168,30 +169,44 @@ Rerun with weights once the strategy says where the robot must know where it is.
 
 ## Other robots in the way
 
-On the field, other robots stand between the cameras and the tags. With `--other-robots=3-5`, each
-set of images has 3 to 5 other robots around the robot (as many as the seed draws), each a box the
-size of the robot being designed (its bumpers' outline, as tall as it is), placed at random within
-6 m (beyond that, the pipeline drops the tags anyway), turned at random, clear of the robot, of each
-other, and of the walls, and placed anew for every set of images. A tag is hidden when the line
-from the camera to any of its corners passes through one. Nothing about any game goes in, so field
-elements, which block views too, are left out; after kickoff they could be added from the new
-field's drawings.
+On the field, other robots stand between the cameras and the tags. With `--other-robots=3-5` (five
+at most: an FRC field has five other robots), each set of images has 3 to 5 other robots around the
+robot, as many as the seed draws. Each is a solid box with the outline of the robot being designed
+(its bumpers') and as tall as it, unless `--other-robots-height-meters` says otherwise. Each stands
+at a random place near the robot, evenly over the area within reach (the farthest a camera sees a
+tag, 7 m, plus how far a camera and another robot's outline reach from their centers), turned at
+random, anywhere its outline fits: clear of the robot, of each other, and of the walls, and not in
+a region the weights leave out. They're placed anew for every set of images. A tag is hidden, and
+not detected, when the line from the camera to any of its corners, the middles of its edges, or
+its center passes through one.
+
+It's a comparison under one crowded case, not a prediction. What it leaves out:
+
+- **Real robots aren't solid boxes:** they're open frames, which hide less, and their mechanisms
+  can reach higher than the robot's starting height. Use `--other-robots-height-meters` for taller
+  ones.
+- **Where robots really go:** a game puts robots in some places (scoring, loading, defending) and
+  not others; here they're anywhere near the robot, evenly.
+- **Field elements:** they block views too, and other robots can stand where an element is unless
+  a weights file leaves those spots out. Nothing about any game goes in; after kickoff, elements
+  could be added from the new field's drawings.
+- **Room:** the count is the same however crowded the spot, short only of robots that don't fit.
 
 On the example (2026's field standing in), 3 to 5 other robots barely move the ranking (rank
-correlation 0.995 with the clear field; the top tens share 8 or 9 layouts), but they cost every
-layout, and they cost a layout with few cameras most, so each camera is worth more:
+correlation 0.996 to 0.997 with the clear field; the top tens share 8 to 10 layouts), but they cost
+every layout, and they cost a layout with few cameras most, so each camera is worth more:
 
 | Cameras | 95% within, clear | 95% within, robots in the way | One lost, clear | One lost, robots in the way |
 |---:|---:|---:|---:|---:|
-| 3 | 3.3 cm | 5.7 cm | none | none |
-| 4 | 2.4 cm | 3.0 cm | 3.6 cm | none (94.2% measured) |
-| 5 | 2.1 cm | 2.4 cm | 2.9 cm | 3.5 cm |
+| 3 | 3.3 cm | 4.7 cm | none | none |
+| 4 | 2.4 cm | 2.8 cm | 3.6 cm | none (94.97% measured) |
+| 5 | 2.1 cm | 2.3 cm | 2.9 cm | 3.5 cm |
 | 6 | 1.8 cm | 2.0 cm | 2.2 cm | 2.5 cm |
 
 (The best layout of each count at the eight places in "More than four cameras", below.) With other
 robots in the way, the best four cameras can't lose one and still measure 95% of the field; five
-can. The family's best four cameras go from 2.5 to 2.9 cm, and with one lost, from 3.7 to 8.9 cm.
-Robots in the way cost no measurable time.
+can. The family's best four cameras go from 2.5 to 2.9 cm, and with one lost, from 3.7 cm to none
+(94.7% measured). Robots in the way cost no measurable time.
 
 ## Robustness
 
@@ -210,7 +225,7 @@ worst 95% error ("none"): those rank after the rest, by the least of the field t
 | Error | Drawn from | Why that range |
 |---|---|---|
 | Tag corners off | 0.1 to 0.6 px on average (spread in the simulator's proportion) | A sharp, still image from a global-shutter camera locates corners to about a tenth of a pixel; defocus, a softer lens, or a little blur puts them half a pixel off or more. The simulator's 0.25 px sits low in the range. |
-| Tags seen to | 5 to 7 m | A 6.5 in tag 7 m from a 1280 x 800 camera with an 80° lens is about 20 pixels across, near where detection fails; exposure, blur, and detection settings bring it in. The pipeline already throws out tags farther than 6 m on average. |
+| Tags seen to | 5 to 7 m | A 6.5 in tag 7 m from a 1280 x 800 camera with an 80° lens is about 20 pixels across, near where detection fails; exposure, blur, and detection settings bring it in. Single tags count to the sight range; the pipeline throws out an image whose tags average farther than 6 m. |
 | Gyro heading off | 0.1° to 0.5°, typically | The estimator holds heading to a few tenths of a degree while cameras correct it; after a hit, or a stretch without two tags in view, half a degree. |
 | Each camera off its mount | Per trial, a bound from 0 to 5 mm and one from 0° to 1°; each camera's offset along and about each axis drawn evenly within plus or minus those bounds | A mount measured from CAD and checked with the camera calibration (docs/calibration.md) lands within a few millimeters and a fraction of a degree; a bumped camera, or one never calibrated, a degree or more. Each camera's offset is its own, fixed for the trial: the same over the whole field, as a mount's error is, and the same in every layout the camera is part of. |
 
@@ -356,9 +371,9 @@ with those cameras, and run with `--robot=<its name>`: its cameras are "the robo
 
 ## What it leaves out
 
-- **Field elements and the robot's own mechanisms blocking a tag:** where they stand is the
-  game's, and the design's. Other robots are modeled when asked (`--other-robots`); without it,
-  and in any case for these, every layout's scores are an upper bound.
+- **Field elements and the robot's own mechanisms blocking a tag:** never modeled; where they
+  stand is the game's and the design's. Other robots are modeled only as boxes, and only when
+  asked (`--other-robots`, above). So every layout's scores are an upper bound.
 - **Motion:** the robot stands still, so there's no blur and no latency. Motion costs every layout,
   more so for far tags.
 - **Tilt:** the robot is level.

@@ -1,5 +1,7 @@
 package frc.robot.studies;
 
+import static org.wpilib.units.Units.Meters;
+
 import frc.robot.RobotConfig;
 import frc.robot.Robots;
 import frc.robot.lib.config.CameraConfig;
@@ -48,7 +50,8 @@ public final class CameraStudy {
         --gyro-error-degrees=D    the gyro heading's typical error (default 0.25)
         --mount-error-mm=M        cameras off their mounts by up to this (default 0)
         --mount-error-degrees=D   and turned by up to this (default 0)
-        --other-robots=N or N-M   other robots in the cameras' way around each pose (default 0)
+        --other-robots=N or N-M   other robots in the cameras' way around each pose, 5 at most
+        --other-robots-height-meters=M  how tall they are (default: as tall as this robot)
         --trials=N                robustness trials, each drawing those errors (default 0)
         --robust                  robustness, with the usual trials (12: under ten minutes)
         --seed=N                  where every random draw starts (default 1)
@@ -74,6 +77,7 @@ public final class CameraStudy {
           "mount-error-mm",
           "mount-error-degrees",
           "other-robots",
+          "other-robots-height-meters",
           "trials",
           "seed",
           "threads",
@@ -150,7 +154,7 @@ public final class CameraStudy {
               "Layouts: the robot's own, and all of up to %d cameras at the places in `%s`.",
               Math.min(config.mostCameras(), places.options().size()), mountsFile);
     }
-    CameraScoring scoring = new CameraScoring(robot, field, candidates, config);
+    CameraScoring scoring = new CameraScoring(robot, field, candidates, config, weights);
 
     List<String> setup = new ArrayList<>();
     setup.add(
@@ -187,11 +191,14 @@ public final class CameraStudy {
         config.otherRobotsMost() == 0
             ? "No other robots in the way."
             : format(
-                "Other robots in the cameras' way: %s around each pose, each this robot's size,"
-                    + " placed anew for each set of images.",
+                "Other robots in the cameras' way: %s around each pose, each a solid box with this"
+                    + " robot's outline, %.2f m tall, placed anew for each set of images.",
                 config.otherRobotsLeast() == config.otherRobotsMost()
                     ? Integer.toString(config.otherRobotsMost())
-                    : config.otherRobotsLeast() + " to " + config.otherRobotsMost()));
+                    : config.otherRobotsLeast() + " to " + config.otherRobotsMost(),
+                config.otherRobotsHeightMeters() > 0
+                    ? config.otherRobotsHeightMeters()
+                    : robot.body().height().in(Meters)));
     Conditions nominal = Conditions.nominal(config);
     setup.add("Nominal conditions: " + nominal.described() + ".");
     out.println(setup.get(0));
@@ -300,6 +307,8 @@ public final class CameraStudy {
           .mountErrorDegrees(number(options, "mount-error-degrees", d.mountErrorDegrees()))
           .otherRobotsLeast(otherRobots(options, d)[0])
           .otherRobotsMost(otherRobots(options, d)[1])
+          .otherRobotsHeightMeters(
+              number(options, "other-robots-height-meters", d.otherRobotsHeightMeters()))
           .trials(
               count(
                   options,

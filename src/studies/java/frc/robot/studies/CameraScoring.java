@@ -51,7 +51,11 @@ public final class CameraScoring {
   private final FieldModel field;
   private final List<Candidate> candidates;
   private final CameraStudyConfig config;
+  private final Weights weights;
   private final VisionPipeline pipeline;
+
+  /** Where the other robots' places come from, apart from the images' noise. */
+  private static final long OTHER_ROBOTS = 0x6f7468657273L; // "others"
 
   /** Every distinct camera, over every layout: where it is, which way it looks, and its sensor. */
   private final List<CameraConfig> cameras = new ArrayList<>();
@@ -74,10 +78,24 @@ public final class CameraScoring {
    */
   public CameraScoring(
       RobotConfig robot, FieldModel field, List<Candidate> candidates, CameraStudyConfig config) {
+    this(robot, field, candidates, config, Weights.NONE);
+  }
+
+  /**
+   * @param weights where other robots may stand: not where the weights leave a spot out (inside a
+   *     field element, say)
+   */
+  public CameraScoring(
+      RobotConfig robot,
+      FieldModel field,
+      List<Candidate> candidates,
+      CameraStudyConfig config,
+      Weights weights) {
     this.robot = robot;
     this.field = field;
     this.candidates = List.copyOf(candidates);
     this.config = config;
+    this.weights = weights;
     pipeline = new VisionPipeline(field);
     Map<Mount, Integer> index = new LinkedHashMap<>();
     List<Long> seeds = new ArrayList<>();
@@ -141,9 +159,6 @@ public final class CameraScoring {
       return Seeds.mix(0, forward, left, up, roll, tiltUp, yaw);
     }
   }
-
-  /** Where the other robots' places come from, apart from the images' noise. */
-  private static final long OTHER_ROBOTS = 0x6f7468657273L; // "others"
 
   /** How many distinct cameras the layouts have among them: each takes its images once. */
   public int distinctCameras() {
@@ -331,7 +346,17 @@ public final class CameraScoring {
           config.otherRobotsLeast()
               + placing.nextInt(config.otherRobotsMost() - config.otherRobotsLeast() + 1);
       List<OtherRobots.Blocker> blockers =
-          OtherRobots.around(truth, field, robot.body(), others, placing);
+          OtherRobots.around(
+              truth,
+              field,
+              robot.body(),
+              config.otherRobotsHeightMeters() > 0
+                  ? config.otherRobotsHeightMeters()
+                  : robot.body().height().in(Meters),
+              others,
+              OtherRobots.reachMeters(conditions.sightMeters(), robot.body()),
+              spot -> weights.at(field, spot) > 0,
+              placing);
       // One gyro for the whole robot, off by a little, the same for every camera.
       double gyroError =
           Math.toRadians(conditions.gyroErrorDegrees())

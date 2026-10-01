@@ -3,6 +3,7 @@ package frc.robot.studies;
 import static frc.robot.lib.config.Rules.atLeast;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.positive;
+import static frc.robot.lib.config.Rules.shown;
 
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
@@ -25,7 +26,10 @@ import frc.robot.subsystems.vision.VisionSim;
  *     along each axis: none by default, as in the simulator
  * @param mountErrorDegrees how far each camera is really turned, at most, about each axis
  * @param otherRobotsLeast the fewest other robots in the way of the cameras, around each pose
- * @param otherRobotsMost the most: each set of images has a number between, drawn from the seed
+ * @param otherRobotsMost the most, five at most: each set of images has a number between, drawn
+ *     from the seed
+ * @param otherRobotsHeightMeters how tall the other robots are; 0, the default, makes them as tall
+ *     as the robot being designed
  * @param trials how many robustness trials, each drawing all of these errors from plausible ranges;
  *     0 scores the field once, with the errors as set here
  * @param mostCameras the most cameras a layout may have: larger layouts from the family, or from
@@ -46,6 +50,7 @@ public record CameraStudyConfig(
     double mountErrorDegrees,
     int otherRobotsLeast,
     int otherRobotsMost,
+    double otherRobotsHeightMeters,
     int trials,
     int mostCameras,
     long seed,
@@ -71,6 +76,7 @@ public record CameraStudyConfig(
           .mountErrorDegrees(0)
           .otherRobotsLeast(0)
           .otherRobotsMost(0)
+          .otherRobotsHeightMeters(0)
           .trials(0)
           .mostCameras(4)
           .seed(1)
@@ -89,7 +95,14 @@ public record CameraStudyConfig(
         .field("mountErrorMillimeters", mountErrorMillimeters, nonNegative())
         .field("mountErrorDegrees", mountErrorDegrees, nonNegative())
         .field("otherRobotsLeast", otherRobotsLeast, atLeast(0))
-        .field("otherRobotsMost", otherRobotsMost, atLeast(0))
+        .field(
+            "otherRobotsMost",
+            otherRobotsMost,
+            most ->
+                most >= 0 && most <= OtherRobots.MOST
+                    ? null
+                    : shown(most) + " must be from 0 to 5: an FRC field has five other robots")
+        .field("otherRobotsHeightMeters", otherRobotsHeightMeters, nonNegative())
         .field("trials", trials, atLeast(0))
         .field("mostCameras", mostCameras, atLeast(1))
         .field("threads", threads, atLeast(1))

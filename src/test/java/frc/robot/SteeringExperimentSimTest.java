@@ -280,9 +280,9 @@ class SteeringExperimentSimTest {
   }
 
   /**
-   * Tuning steerKp from the page: a stiffer gain answers faster and settles sooner, and without
-   * steerKd to damp it, overshoots more. (The simulated steering is damped hard by its motor's back
-   * EMF: with the committed steerKd it doesn't overshoot at any steerKp in its range.)
+   * Tuning steerKp from the page: a stiffer gain answers faster and settles sooner, and overshoots
+   * more. At the top of its range the module comes in so fast that the motor, held to its current
+   * limit, can't stop it in time: it overshoots by about 5%, with the committed steerKd or none.
    */
   @Test
   void raisingSteerKpRisesFasterAndOvershootsMore() throws Exception {
@@ -305,7 +305,7 @@ class SteeringExperimentSimTest {
         .as("settling, s")
         .isLessThan(committed.worst("settling") * 0.6);
     assertThat(committed.worst("overshoot")).isZero();
-    assertThat(stiff.worst("overshoot")).isZero();
+    assertThat(stiff.worst("overshoot")).isBetween(0.03, 0.07);
     assertThat(harder.worst("overshoot"))
         .as("overshoot at 100, against %s at 60", softer.worst("overshoot"))
         .isGreaterThan(softer.worst("overshoot") * 3)

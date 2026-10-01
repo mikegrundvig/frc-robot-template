@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.coprocessor.json;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -263,6 +264,9 @@ public final class Json {
   /** A recursive-descent parser over the text, with the position for messages. */
   private static final class Parser {
     private final String text;
+    // One copy of each member name: settings repeat a few names ("x", "y") tens of thousands of
+    // times.
+    private final Map<String, String> names = new HashMap<>();
     private int pos;
 
     Parser(String text) {
@@ -307,7 +311,7 @@ public final class Json {
           throw error("expected a member's name in quotes");
         }
         int at = pos;
-        String name = string();
+        String name = names.computeIfAbsent(string(), n -> n);
         skipWhitespace();
         expect(':');
         skipWhitespace();

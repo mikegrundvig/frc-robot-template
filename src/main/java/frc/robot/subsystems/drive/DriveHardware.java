@@ -1,9 +1,9 @@
 package frc.robot.subsystems.drive;
 
-import static frc.robot.lib.config.Rules.size;
+import static com.michaelgrundvig.frc.world.config.Rules.size;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;

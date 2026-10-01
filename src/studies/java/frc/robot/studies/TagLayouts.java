@@ -1,7 +1,7 @@
 package frc.robot.studies;
 
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Symmetry;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Symmetry;
 import io.avaje.json.JsonException;
 import io.avaje.jsonb.JsonType;
 import io.avaje.jsonb.Jsonb;

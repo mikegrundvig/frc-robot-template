@@ -9,11 +9,12 @@ import static org.assertj.core.groups.Tuple.tuple;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
+import com.michaelgrundvig.frc.world.robot.BodyBuilder;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
-import frc.robot.lib.config.BodyBuilder;
-import frc.robot.lib.config.CameraConfig;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -31,7 +32,7 @@ class CandidatesTest {
   void theRobotsOwnComesFirstThenTheFamily() {
     List<Candidate> candidates = Candidates.of(Robots.SIM);
 
-    assertThat(candidates.get(0).cameras()).isEqualTo(Robots.SIM.cameras());
+    assertThat(candidates.get(0).cameras()).isEqualTo(Robots.SIM.definition().cameras());
     assertThat(candidates).hasSize(1 + ARRANGEMENTS * HEIGHTS.size() * TILTS.size());
     Set<String> names = new HashSet<>();
     for (Candidate candidate : candidates) {
@@ -39,7 +40,7 @@ class CandidatesTest {
       candidate.checkOn(Robots.SIM); // within the robot, or it throws
       assertThat(candidate.cameras())
           .extracting(CameraConfig::sensor)
-          .containsOnly(Robots.SIM.cameras().get(0).sensor());
+          .containsOnly(Robots.SIM.definition().cameras().get(0).sensor());
     }
   }
 
@@ -77,8 +78,14 @@ class CandidatesTest {
   void heightsTheRobotDoesntReachAreLeftOut() {
     RobotConfig shortRobot =
         RobotConfigBuilder.builder(Robots.SIM)
-            .body(BodyBuilder.builder(Robots.SIM.body()).height(Inches.of(20)).build())
-            .cameras(List.of(StudyFixtures.FRONT))
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .body(
+                        BodyBuilder.builder(Robots.SIM.definition().body())
+                            .height(Inches.of(20))
+                            .build())
+                    .cameras(List.of(StudyFixtures.FRONT))
+                    .build())
             .build();
 
     // Only the two lower heights fit under 20 in.
@@ -87,7 +94,8 @@ class CandidatesTest {
 
   @Test
   void theFamilyLeavesOutLayoutsOfMoreCameras() {
-    List<Candidate> upToTwo = Candidates.family(Robots.SIM.body(), StudyFixtures.SENSOR, 2);
+    List<Candidate> upToTwo =
+        Candidates.family(Robots.SIM.definition().body(), StudyFixtures.SENSOR, 2);
 
     // Ahead; front corners at each splay; ahead and back; left and right.
     assertThat(upToTwo).hasSize((1 + SPLAYS.size() + 2) * HEIGHTS.size() * TILTS.size());
@@ -96,7 +104,11 @@ class CandidatesTest {
 
   @Test
   void aRobotWithoutCamerasHasNoSensorToTry() {
-    RobotConfig blind = RobotConfigBuilder.builder(Robots.SIM).cameras(List.of()).build();
+    RobotConfig blind =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition()).cameras(List.of()).build())
+            .build();
 
     assertThatThrownBy(() -> Candidates.of(blind)).hasMessageContaining("has no cameras");
   }

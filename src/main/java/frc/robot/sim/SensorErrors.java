@@ -1,14 +1,14 @@
 package frc.robot.sim;
 
-import static frc.robot.lib.config.Rules.each;
-import static frc.robot.lib.config.Rules.finite;
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.positive;
-import static frc.robot.lib.config.Rules.size;
+import static com.michaelgrundvig.frc.world.config.Rules.each;
+import static com.michaelgrundvig.frc.world.config.Rules.finite;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.size;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
-import frc.robot.lib.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

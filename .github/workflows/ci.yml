@@ -62,4 +62,6 @@ jobs:
             pitwall/docs-processor/build/test-results/
             coprocessor/*/build/reports/
             coprocessor/*/build/test-results/
+            lib/*/build/reports/
+            lib/*/build/test-results/
           if-no-files-found: warn

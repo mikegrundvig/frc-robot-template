@@ -22,9 +22,9 @@ import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveWiring;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
@@ -107,13 +107,13 @@ final class ModuleIOTalonFX implements ModuleIO {
   ModuleIOTalonFX(
       SwerveWiring.ModuleWiring wiring,
       CANBus bus,
-      SwerveConfig.Modules hardware,
+      DrivetrainGeometry.Modules hardware,
       double couplingRatio,
       PhoenixOdometryThread odometry) {
     drive = new TalonFX(wiring.driveId(), bus);
     steer = new TalonFX(wiring.steerId(), bus);
     CANcoder encoder = new CANcoder(wiring.encoderId(), bus);
-    driveGearing = hardware.driveGearing();
+    driveGearing = hardware.driveGearing().ratio();
     this.couplingRatio = couplingRatio;
     wheelRadiusMeters = hardware.wheelRadius().in(Meters);
 
@@ -142,7 +142,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     steerConfig.MotorOutput.Inverted = direction(wiring.steerInverted());
     steerConfig.Feedback.FeedbackSensorSource = FeedbackSensorSourceValue.RemoteCANcoder;
     steerConfig.Feedback.FeedbackRemoteSensorID = wiring.encoderId();
-    steerConfig.Feedback.RotorToSensorRatio = hardware.steerGearing();
+    steerConfig.Feedback.RotorToSensorRatio = hardware.steerGearing().ratio();
     steerConfig.Feedback.SensorToMechanismRatio = 1;
     steerConfig.ClosedLoopGeneral.ContinuousWrap = true;
     steerConfig.CurrentLimits.StatorCurrentLimitEnable = true;
@@ -304,7 +304,7 @@ final class ModuleIOTalonFX implements ModuleIO {
    * robot loop that waits on a device stutters.
    */
   @Override
-  public void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
+  public void configure(DrivetrainControl.Gains gains, DrivetrainControl.Limits limits) {
     // The template's gains are per meter per second and per radian; the devices' per rotation.
     driveConfig.Slot0.kP = gains.driveKp() * TWO_PI * wheelRadiusMeters;
     driveConfig.CurrentLimits.StatorCurrentLimit = limits.driveStatorCurrent().in(Amps);
@@ -316,8 +316,8 @@ final class ModuleIOTalonFX implements ModuleIO {
     // come back unseen, and the robot loses its push a second into a hard shove with nothing here
     // to say why (PhoenixIOTest fails if they go). So all three come from the configuration. The
     // step-down itself is worth keeping: a 40 A breaker carries 40 A for as long as you like, but
-    // can trip after 3.9 s at 60 A. SwerveConfig.Limits says more; docs/values.md, how the values
-    // were chosen.
+    // can trip after 3.9 s at 60 A. DrivetrainControl.Limits says more; docs/values.md, how the
+    // values were chosen.
     driveConfig.CurrentLimits.SupplyCurrentLimit = limits.driveSupplyCurrent().in(Amps);
     driveConfig.CurrentLimits.SupplyCurrentLowerLimit = limits.driveSupplyLowerCurrent().in(Amps);
     driveConfig.CurrentLimits.SupplyCurrentLowerTime = limits.driveSupplyLowerTime().in(Seconds);

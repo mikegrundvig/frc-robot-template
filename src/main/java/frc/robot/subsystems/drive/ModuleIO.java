@@ -1,6 +1,5 @@
 package frc.robot.subsystems.drive;
 
-import frc.robot.lib.config.SwerveConfig;
 import org.littletonrobotics.junction.AutoLog;
 import org.wpilib.math.geometry.Rotation2d;
 
@@ -67,7 +66,7 @@ public interface ModuleIO {
    * Sets the motor controllers' gains and current limits: at startup, and again whenever tuning
    * changes them.
    */
-  default void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {}
+  default void configure(DrivetrainControl.Gains gains, DrivetrainControl.Limits limits) {}
 
   /** Closed-loop wheel velocity on the motor controller, plus robot-computed feedforward. */
   default void setDriveVelocity(double wheelRadPerSec, double feedforwardVolts) {}

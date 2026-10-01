@@ -5,6 +5,13 @@ import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.PoseEstimator;
+import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
@@ -12,24 +19,17 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
 import com.michaelgrundvig.frc.pitwall.experiment.Profile;
 import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
+import com.michaelgrundvig.frc.world.field.Placement;
+import com.michaelgrundvig.frc.world.field.Zone;
+import com.michaelgrundvig.frc.world.field.ZoneTrigger;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
-import frc.robot.lib.field.Placement;
-import frc.robot.lib.field.Zone;
-import frc.robot.lib.field.ZoneTrigger;
-import frc.robot.lib.localization.ImuReadings;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.PoseEstimator;
-import frc.robot.lib.localization.PoseReset;
-import frc.robot.lib.localization.SwerveKinematicsModel;
-import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
@@ -44,6 +44,7 @@ import frc.robot.subsystems.coprocessors.PowerButtonIO;
 import frc.robot.subsystems.coprocessors.PowerButtonIODigitalInput;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
+import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.localization.Localization;
@@ -64,7 +65,6 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.button.CommandGamepad;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
@@ -113,7 +113,7 @@ public final class RobotContainer implements AutoCloseable {
    * @param drivetrain the drivetrain's gains and limits ({@link Drive#tuning})
    * @param vision how far the cameras are trusted ({@link Vision#tuning})
    */
-  record Tunings(LiveConfig<SwerveConfig> drivetrain, LiveConfig<VisionConfig> vision) {
+  record Tunings(LiveConfig<DrivetrainControl> drivetrain, LiveConfig<VisionConfig> vision) {
     /** Every one. */
     List<LiveConfig<?>> all() {
       return List.of(drivetrain, vision);
@@ -126,7 +126,7 @@ public final class RobotContainer implements AutoCloseable {
   }
 
   /** The drivetrain's and vision's configurations as the pit tunes them. */
-  private final LiveConfig<SwerveConfig> drivetrainTuning;
+  private final LiveConfig<DrivetrainControl> drivetrainTuning;
 
   private final LiveConfig<VisionConfig> visionTuning;
   private final FieldModel field;
@@ -210,14 +210,14 @@ public final class RobotContainer implements AutoCloseable {
     // The rules across mechanisms: checked on every change the pit makes, and here, as committed,
     // so a configuration that breaks one stops the program with every rule it breaks.
     ConfigRules rules = new ConfigRules();
-    RobotRules.register(rules, drivetrainTuning, visionTuning);
+    RobotDefinition definition = robot.definition();
+    RobotRules.register(rules, definition, drivetrainTuning, visionTuning);
     rules.checkCommitted();
-    Supplier<SwerveConfig> drivetrain = drivetrainTuning::get;
+    Supplier<DrivetrainControl> drivetrain = drivetrainTuning::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
     loop = loopHealth.monitor();
-    Body body = robot.body();
-    List<CameraConfig> cameras = robot.cameras();
+    List<CameraConfig> cameras = definition.cameras();
     this.field = field;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
@@ -229,7 +229,13 @@ public final class RobotContainer implements AutoCloseable {
     DriveHardware driveHardware;
     if (mode == Constants.Mode.SIM) {
       world =
-          new SimulatedWorld(field, drivetrain.get(), body, cameras, robot.imus(), simulatedErrors);
+          new SimulatedWorld(
+              field,
+              definition.drivetrain(),
+              definition.body(),
+              cameras,
+              definition.imus(),
+              simulatedErrors);
       hardware = null;
       driveHardware = world.drivetrainHardware();
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
@@ -237,8 +243,8 @@ public final class RobotContainer implements AutoCloseable {
       PhoenixDrivetrain phoenix =
           new PhoenixDrivetrain(
               robot.drivetrainWiring().get(),
-              drivetrain.get().modules(),
-              robot.imus().gyro().orientation());
+              definition.drivetrain().modules(),
+              definition.imus().gyro().orientation());
       hardware = phoenix;
       driveHardware =
           DriveHardware.builder()
@@ -247,7 +253,7 @@ public final class RobotContainer implements AutoCloseable {
               .backupImu(
                   new GyroIOSystemcore(
                       robot.drivetrainWiring().get().systemcoreMount(),
-                      robot.imus().backup().orientation()))
+                      definition.imus().backup().orientation()))
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {
@@ -260,7 +266,7 @@ public final class RobotContainer implements AutoCloseable {
     // Until the robot is placed it could be anywhere: the middle of the field stands in, with an
     // uncertainty as big as the field, so the first camera measurement wins.
     Pose2d middle = new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO);
-    Translation2d[] wheels = drivetrain.get().moduleTranslations(body);
+    Translation2d[] wheels = definition.moduleTranslations();
     double wheelReach = 0;
     for (Translation2d wheel : wheels) {
       wheelReach = Math.max(wheelReach, wheel.getNorm());
@@ -278,9 +284,11 @@ public final class RobotContainer implements AutoCloseable {
             new SwerveKinematicsModel(wheels),
             field.terrain(),
             wheelReach,
-            drivetrain.get().modules().wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY,
-            robot.imus());
-    drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
+            definition.drivetrain().modules().wheelCoefficientOfFriction()
+                * ImuReadings.STANDARD_GRAVITY,
+            definition.imus());
+    drive =
+        new Drive("Drive", driveHardware, definition, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (world != null) {
       world.place(middle);
@@ -348,7 +356,7 @@ public final class RobotContainer implements AutoCloseable {
             localization,
             cameras,
             robot.drivetrainWiring(),
-            drivetrain,
+            definition.drivetrain(),
             LocalDate::now);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
@@ -389,7 +397,7 @@ public final class RobotContainer implements AutoCloseable {
    */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
-    alliance = MatchState.getAlliance();
+    alliance = MatchState.getAlliance().map(RobotContainer::alliance);
     location = MatchState.getLocation();
     Optional<Place> chosen = chosenStart();
     Optional<Pose2d> chosenPose = alliance.flatMap(ours -> chosen.map(s -> s.on(field, ours)));
@@ -507,6 +515,17 @@ public final class RobotContainer implements AutoCloseable {
       }
       Telemetry.log("Field", fieldView);
     }
+  }
+
+  /**
+   * The Driver Station's alliance, as the field model names it: the model has its own, so that
+   * nothing reading it needs WPILib's Driver Station.
+   */
+  static Alliance alliance(org.wpilib.driverstation.Alliance driverStation) {
+    return switch (driverStation) {
+      case BLUE -> Alliance.BLUE;
+      case RED -> Alliance.RED;
+    };
   }
 
   /** The alliance and station, such as "Red 2", or "Unknown". */
@@ -646,7 +665,7 @@ public final class RobotContainer implements AutoCloseable {
   }
 
   /** The drivetrain's configuration as the pit tunes it. */
-  LiveConfig<SwerveConfig> drivetrainTuning() {
+  LiveConfig<DrivetrainControl> drivetrainTuning() {
     return drivetrainTuning;
   }
 

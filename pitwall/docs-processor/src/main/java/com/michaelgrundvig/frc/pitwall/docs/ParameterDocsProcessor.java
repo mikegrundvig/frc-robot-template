@@ -41,11 +41,11 @@ import javax.tools.StandardLocation;
  * </pre>
  *
  * <p>Which records: those marked by the annotation the compiler option {@code
- * -Apitwall.docs.records} names ({@code frc.robot.lib.config.ConfigRecord}), nested records
- * included; without the option, every record. The annotation is named as text, so this never
- * depends on robot code; a name the compiler can't find fails the compile, saying so. A record
- * without a doc comment gets no file, and a component without a {@code @param} no entry: Pitwall
- * shows those as missing.
+ * -Apitwall.docs.records} names ({@code com.michaelgrundvig.frc.world.config.ConfigRecord}), nested
+ * records included; without the option, every record. The annotation is named as text, so this
+ * never depends on robot code; a name the compiler can't find fails the compile, saying so. A
+ * record without a doc comment gets no file, and a component without a {@code @param} no entry:
+ * Pitwall shows those as missing.
  *
  * <p>Each file comes from one record and nothing else, so Gradle runs this as an isolating
  * processor (META-INF/gradle/incremental.annotation.processors): changing one record rewrites only
@@ -131,8 +131,8 @@ public final class ParameterDocsProcessor extends AbstractProcessor {
                   + " "
                   + wrong
                   + ". Fix the name in build.gradle: it's the annotation that marks configuration"
-                  + " records, with its package (frc.robot.lib.config.ConfigRecord in the"
-                  + " template).");
+                  + " records, with its package (com.michaelgrundvig.frc.world.config.ConfigRecord"
+                  + " in the template).");
     }
   }
 

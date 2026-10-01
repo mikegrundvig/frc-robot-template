@@ -67,6 +67,11 @@ dependencies {
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
+    // The libraries (lib/, each its own project): the world model (the validation kit, the field,
+    // and the robot's definition), and localization, which reads it.
+    implementation project(":world")
+    implementation project(":localization")
+
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
@@ -118,10 +123,20 @@ tasks.named("jacocoTestReport") {
     executionData.from(fileTree(layout.buildDirectory.dir("jacoco")) { include "end-to-end.exec" })
 }
 
-// A copy of the source travels with every deploy, so the code on a robot can always be recovered.
+// A copy of the source travels with every deploy, so the code on a robot can always be recovered:
+// the robot program's, and the libraries' and Pitwall's that it's built with.
 tasks.named("jar") {
     from("src") { into "backup/src" }
     from("vendordeps") { into "backup/vendordeps" }
+    from("lib") {
+        exclude "**/build/**"
+        into "backup/lib"
+    }
+    from("pitwall") {
+        exclude "**/build/**"
+        into "backup/pitwall"
+    }
+    from("settings.gradle") { into "backup" }
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -130,7 +145,7 @@ tasks.withType(JavaCompile).configureEach {
 // Pitwall's documentation processor documents only the configuration records, which it knows by
 // their annotation's name.
 tasks.named("compileJava") {
-    options.compilerArgs.add "-Apitwall.docs.records=frc.robot.lib.config.ConfigRecord"
+    options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
 }
 
 // Nothing reaches a robot without a team number, or without passing every check.

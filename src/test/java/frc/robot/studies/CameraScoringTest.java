@@ -10,10 +10,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.VisionMeasurement;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
@@ -164,7 +164,8 @@ class CameraScoringTest {
     Candidate rightAlone = new Candidate("right", List.of(right));
     Candidate both = new Candidate("both", List.of(left, right));
     Candidate three = new Candidate("three", List.of(left, right, back));
-    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    List<Sample> samples =
+        new FieldGrid(WALL, Robots.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
     CameraScoring scoring =
         new CameraScoring(
             Robots.SIM, WALL, List.of(leftAlone, rightAlone, both, three), ONE_THREAD);
@@ -222,7 +223,8 @@ class CameraScoringTest {
   /** Over the whole field, too: five other robots cost the robot some of its view. */
   @Test
   void otherRobotsInTheWayCostTheRobotItsView() {
-    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    List<Sample> samples =
+        new FieldGrid(WALL, Robots.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig crowded =
         CameraStudyConfigBuilder.builder(ONE_THREAD).otherRobotsLeast(5).otherRobotsMost(5).build();
 
@@ -267,7 +269,8 @@ class CameraScoringTest {
   @ParameterizedTest(name = "in a trial: {0}, other robots: {1}")
   @CsvSource({"false, 0", "true, 0", "false, 2", "true, 2"})
   void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads(boolean trial, int otherRobots) {
-    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    List<Sample> samples =
+        new FieldGrid(WALL, Robots.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig threes =
         CameraStudyConfigBuilder.builder(ONE_THREAD)
             .threads(3)

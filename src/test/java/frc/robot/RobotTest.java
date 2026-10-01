@@ -131,8 +131,8 @@ class RobotTest {
     try (SimulatedWorld world =
         new SimulatedWorld(
             RobotSim.FIELD,
-            Robots.SIM.drivetrain(),
-            Robots.SIM.body(),
+            Robots.SIM.definition().drivetrain(),
+            Robots.SIM.definition().body(),
             List.of(),
             SensorErrors.NONE)) {
       Components components = new Components(said -> {});
@@ -173,8 +173,8 @@ class RobotTest {
     try (SimulatedWorld world =
         new SimulatedWorld(
             RobotSim.FIELD,
-            Robots.SIM.drivetrain(),
-            Robots.SIM.body(),
+            Robots.SIM.definition().drivetrain(),
+            Robots.SIM.definition().body(),
             List.of(),
             SensorErrors.TYPICAL)) {
       Components components = new Components(said -> {});

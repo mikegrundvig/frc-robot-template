@@ -103,7 +103,7 @@ configuration: the test refuses to list it as not.
   switch's on or off) are checked: per-camera values and names are left to people.
 
 So a new value starts in its record, and the test asks for its row. A section is a `###` heading
-naming the record in backticks (`` ### `SwerveConfig.Limits` ``, a nested record with its outer
+naming the record in backticks (`` ### `DrivetrainControl.Limits` ``, a nested record with its outer
 one), followed by a table whose header starts with **Value** and has a **Kind** and a **Source**
 column; a tuning's is headed `` ### `drivetrain` tuning ``, with a table whose header starts with
 **Knob**. A table under such a heading must be one of those. Write a `|` inside a cell as `\|`. An
@@ -164,17 +164,27 @@ The values that move the robot most, and are least known today:
 
 ### `RobotConfig`
 
-`frc.robot.RobotConfig`: one robot, in `Robots`. Its other values are records with sections of
-their own.
+`frc.robot.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
+what the robot is (its definition, which names it), and how this program drives it, wires it, and
+judges what its sensors say.
+
+### `RobotDefinition`
+
+`com.michaelgrundvig.frc.world.robot.RobotDefinition`: what the robot is, read by localization, the
+simulator, and the views (`RobotConfig.definition`). Its values are records with sections of their
+own: the body, the drivetrain as built, the cameras, and the IMUs. It checks them against each
+other: the wheels inside the frame, every camera and IMU inside the robot. Mechanisms' joints join
+it with the first mechanism that describes one.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `name` | chosen | `sim` | none | Which robot this is, as its logs name it. One per robot; keep it. |
+| `name` | chosen | `sim` | none | Which robot this is, as its logs and its checks' messages name it (`RobotDefinition[sim].cameras: ...`). One per robot; keep it. |
 
 ### `Body`
 
-`frc.robot.lib.config.Body`: the frame, bumpers, and mass. Per robot, in `Robots`. The template's
-robot is the largest and heaviest the 2026 rules allowed, with the best case center of gravity.
+`com.michaelgrundvig.frc.world.robot.Body`: the frame, bumpers, and mass. Per robot, in `Robots`.
+The template's robot is the largest and heaviest the 2026 rules allowed, with the best case center
+of gravity.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -188,18 +198,18 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 
 ### `Imus`
 
-`frc.robot.lib.config.Imus`: the robot's IMUs, each where it's mounted (`RobotConfig.imus`): the
-gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are mounts, with a section of
-their own.
+`com.michaelgrundvig.frc.world.robot.Imus`: the robot's IMUs, each where it's mounted
+(`RobotDefinition.imus`): the gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are
+mounts, with a section of their own.
 
 ### `ImuMount`
 
-`frc.robot.lib.config.ImuMount`: where an IMU sits, how it's turned, and whether its accelerometer
-has been checked to read along the robot's axes. Per IMU, in `Robots`. Localization compares the
-wheels' velocity with what the IMU feels where it sits (an IMU off the center is swung around it as
-the robot turns), the drivetrain's IO turns the IMU's own axes into the robot's by its orientation,
-and the simulator mounts its IMUs here. A new robot starts from `Imus.UNCHECKED`: both at the
-center, level, and unchecked.
+`com.michaelgrundvig.frc.world.robot.ImuMount`: where an IMU sits, how it's turned, and whether its
+accelerometer has been checked to read along the robot's axes. Per IMU, in `Robots`. Localization
+compares the wheels' velocity with what the IMU feels where it sits (an IMU off the center is swung
+around it as the robot turns), the drivetrain's IO turns the IMU's own axes into the robot's by its
+orientation, and the simulator mounts its IMUs here. A new robot starts from `Imus.UNCHECKED`: both
+at the center, level, and unchecked.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -211,28 +221,75 @@ center, level, and unchecked.
 
 ## The drivetrain
 
-### `SwerveConfig`
+### `DrivetrainGeometry`
 
-`frc.robot.lib.config.SwerveConfig`: the swerve drivetrain. Per robot, in `Robots`.
+`com.michaelgrundvig.frc.world.robot.DrivetrainGeometry`: the swerve drivetrain as built
+(`RobotDefinition.drivetrain`). Per robot, in `Robots`. How it's driven, its limits and gains, is
+[`DrivetrainControl`](#drivetraincontrol).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `wheelInset` | as built | 2.625 in | datasheet (SDS MK4i's footprint) | The module's footprint drawing, or CAD: from the outside of the frame to the wheel's center. |
 
-### `SwerveConfig.Modules`
+### `DrivetrainGeometry.Modules`
 
-The module hardware, the same at every corner.
+The module hardware, the same at every corner: a Kraken X60 driving each wheel and another turning
+each module (`driveMotor`, `steerMotor`; an `_FOC` model only with a Phoenix Pro license), each
+through its gearing (`driveGearing`, `steerGearing`), with sections of their own:
+[`Motor`](#motor) and [`Gearing`](#gearing).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `driveMotor` | as built | Kraken X60 | guess (a typical build) | The motor on the module. An `_FOC` model only with a Phoenix Pro license. |
-| `steerMotor` | as built | Kraken X60 | guess (a typical build) | As `driveMotor`. |
 | `wheelRadius` | calibrated | 2 in | datasheet (a 4 in wheel) | [The wheel radius](calibration.md#the-wheel-radius), before each event: tread wears. The simulator's drive motors feel the robot's mass through it. |
-| `driveGearing` | as built | 6.75 | datasheet (SDS MK4i L2) | The module's datasheet: motor turns per wheel turn. |
-| `steerGearing` | as built | 150/7 (21.43) | datasheet (SDS MK4i) | The module's datasheet: motor turns per turn of the module. |
 | `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread. The simulator's grip; with `cgHeight`, it sets the drive's current limit. |
+| `driveInertia` | characterized | 0.001 kg m² | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. The drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of `Body.mass` at `wheelRadius`. About 2% of what the template's robot puts on each wheel, so a rough number costs little. The simulator turns it. |
+| `steerInertia` | characterized | 0.004 kg m² | datasheet (Phoenix Tuner X's generated simulation value, as AdvantageKit's swerve templates use it) | [Feedforward](characterization.md#feedforward): SysId on one module's steering. The simulator's steering turns it, so it sets how fast the steering turns at its current limit, and how high its gains can go. What it assumes is in [stand-ins](stand-ins.md). |
 
-### `SwerveConfig.Limits`
+### `Motor`
+
+`com.michaelgrundvig.frc.world.robot.Motor`: a DC motor, as its datasheet gives it. The motors FRC
+robots commonly use are named presets (`Motor.KRAKEN_X60`), with WPILib's numbers (its `DCMotor`);
+any other is described from its datasheet (`Motor.fromDatasheet()`). The template's robot drives and
+steers with Kraken X60s; the starting values are its.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | as built | Kraken X60 | none | What the motor is called, for messages. |
+| `nominalVoltage` | as built | 12 V | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet: the voltage its numbers were measured at. |
+| `stallTorque` | characterized | 7.09 N m | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet, or a dynamometer's curve: torque with the shaft held still. A motor's own often differs from its datasheet by a few percent. |
+| `stallCurrent` | characterized | 366 A | datasheet (WPILib's `DCMotor`, from CTRE's) | As `stallTorque`: the current then. |
+| `freeCurrent` | characterized | 2 A | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet, or the motor spinning freely on the bench: the current with nothing on its shaft. |
+| `freeSpeed` | characterized | 6000 rpm (628.3 rad/s) | datasheet (WPILib's `DCMotor`, from CTRE's) | As `freeCurrent`: its speed then. |
+
+### `Gearing`
+
+`com.michaelgrundvig.frc.world.robot.Gearing`: what stands between a motor and what it turns. The
+template's drivetrain has two: the drive's, whose numbers are the starting values, and the
+steering's.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `ratio` | as built | 6.75 (drive), 150/7 (21.43, steering) | datasheet (SDS MK4i L2) | The module's datasheet: motor turns per wheel turn, and per turn of the module. |
+| `efficiency` | characterized | 1 | math (no losses modeled: the drivetrain's numbers didn't change when its gearing became a record) | Why: the share of the motor's torque, through the ratio, that reaches the wheel. A gear stage loses a few percent, so the real one is lower; the simulator takes it off the motors' torque. Measure it with SysId on a module lifted off the floor ([feedforward](characterization.md#feedforward)), or keep 1 until a mechanism's simulation needs it. |
+
+### `Actuator.Motors`
+
+`com.michaelgrundvig.frc.world.robot.Actuator.Motors`: one or more identical motors driving one
+thing through one gearing. Its motor and gearing have sections of their own. The template's
+drivetrain derives one for each module's drive and steering (`DrivetrainGeometry.Modules.drive()`,
+`steer()`), which the simulator turns its wheels with.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `count` | as built | 1 (each drive and steering) | none (one motor per wheel and per module) | How many motors drive it together: two on an arm's shaft is 2. |
+
+### `DrivetrainControl`
+
+`frc.robot.subsystems.drive.DrivetrainControl`: how the drivetrain is driven
+(`RobotConfig.drivetrain`), all tunable live as the [`drivetrain` tuning](#drivetrain-tuning). Its
+values are records with sections of their own.
+
+### `DrivetrainControl.Limits`
 
 Current and speed limits, all tunable live within their [tuning limits](#tuning-limits). Check them
 in a log of hard driving: each drive motor's currents (`Drive/Module<name>/DriveStatorCurrentAmps`,
@@ -250,7 +307,7 @@ how far the wheels disagree with each other).
 | `maxLinearSpeed` | chosen | 4.4 m/s | guess (headroom under the 4.73 m/s free speed) | Why: velocity control needs headroom under the free speed to correct with. Lower it if modules can't reach their setpoints at full stick (`Drive/ModuleVelocities` against `Drive/SetpointsOptimized`). |
 | `maxAngularSpeed` | chosen | 1 rot/s | guess (driver-friendly) | Why: fast enough to turn around, slow enough to control. Ask the drivers. At full spin (6.3 rad/s) the cameras' images are thrown out: they're over `VisionConfig.maxYawRateRadiansPerSecond`. |
 
-### `SwerveConfig.Gains`
+### `DrivetrainControl.Gains`
 
 Drive feedforward and feedback, and steering feedback, all tunable live. Check them in AdvantageScope:
 each module's speed against its setpoint (`Drive/ModuleVelocities` against
@@ -267,7 +324,7 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 
 ### `SwerveWiring`
 
-`frc.robot.lib.config.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
+`frc.robot.lib.wiring.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
 read. Per robot, in `Robots`. Phoenix Tuner X's swerve generator reports every value here; copy them
 across. The template's robot runs only in simulation and has no wiring, so nothing is set today.
 
@@ -297,8 +354,8 @@ One module's devices.
 
 ### `CameraConfig`
 
-`frc.robot.lib.config.CameraConfig`: one camera on the robot. Per camera, in `Robots`. The
-template's four are a 2026 competition robot's, as that team's 2026 code gives them.
+`com.michaelgrundvig.frc.world.robot.CameraConfig`: one camera on the robot. Per camera, in
+`Robots`. The template's four are a 2026 competition robot's, as that team's 2026 code gives them.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -328,10 +385,10 @@ that use it. The simulator builds its cameras from it.
 
 ### `VisionConfig`
 
-`frc.robot.lib.localization.VisionConfig`: which camera results are thrown out, and how far the rest
-are trusted. Per robot (`RobotConfig.vision`); every robot starts from `VisionConfig.DEFAULTS`. Five
-are tunable live. Each image's outcome, with the number that decided it, is in
-`Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
+`com.michaelgrundvig.frc.localization.VisionConfig`: which camera results are thrown out, and how
+far the rest are trusted. Per robot (`RobotConfig.vision`); every robot starts from
+`VisionConfig.DEFAULTS`. Five are tunable live. Each image's outcome, with the number that decided
+it, is in `Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -354,8 +411,8 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 
 ### `EstimatorConfig`
 
-`frc.robot.lib.localization.EstimatorConfig`: how the pose estimator weighs odometry, the gyro, and
-the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
+`com.michaelgrundvig.frc.localization.EstimatorConfig`: how the pose estimator weighs odometry, the
+gyro, and the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
 `EstimatorConfig.DEFAULTS`, which the code calls starting points, not measurements.
 
 The estimator's uncertainty should match its error. In the simulator, the
@@ -411,10 +468,10 @@ together, the χ² gate's number): it should average 2 for a position, 3 with a 
 
 ### `LocalizationGate`
 
-`frc.robot.lib.localization.LocalizationGate`: whether an estimate is good enough to score from;
-the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and `NotReadyBecause`
-in a match log: ready whenever the robot is lined up with tags in view, and never while the estimate
-is off.
+`com.michaelgrundvig.frc.localization.LocalizationGate`: whether an estimate is good enough to score
+from; the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and
+`NotReadyBecause` in a match log: ready whenever the robot is lined up with tags in view, and never
+while the estimate is off.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -425,19 +482,20 @@ is off.
 
 ### `SlipCheck.Settings`
 
-`frc.robot.lib.localization.SlipCheck.Settings`: how closely the wheels must agree with the IMU
-before the estimate doubts them for sliding over the floor together, which their disagreement with
-each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be sliding counts as
-suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current limit isn't asked:
-at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the tread's 11.8 m/s²
-(`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain read as at its grip's
-edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500 loops with the wheels
-gripping. Doubting a quarter of the travel there made the estimate claim up to 65 cm through the
-hard driving (31 cm on average over those loops), and let a tag misread by 1.5 m through its gate.
-Check in a log of hard driving: `Localization/TurnApartDegrees` and `SlideMetersPerSecond` stay
-under their tolerances through clean launches, turns, and stops, and `TurnSlipMetersPerSecond` and
-`SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels spin in a launch, or the robot
-is pushed, with the cameras then finding the estimate off by about as much as it doubted.
+`com.michaelgrundvig.frc.localization.SlipCheck.Settings`: how closely the wheels must agree with
+the IMU before the estimate doubts them for sliding over the floor together, which their
+disagreement with each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be
+sliding counts as suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current
+limit isn't asked: at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the
+tread's 11.8 m/s² (`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain
+read as at its grip's edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500
+loops with the wheels gripping. Doubting a quarter of the travel there made the estimate claim up to
+65 cm through the hard driving (31 cm on average over those loops), and let a tag misread by 1.5 m
+through its gate. Check in a log of hard driving: `Localization/TurnApartDegrees` and
+`SlideMetersPerSecond` stay under their tolerances through clean launches, turns, and stops, and
+`TurnSlipMetersPerSecond` and `SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels
+spin in a launch, or the robot is pushed, with the cameras then finding the estimate off by about as
+much as it doubted.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -456,8 +514,8 @@ is pushed, with the cameras then finding the estimate off by about as much as it
 
 ### `ImuCrossCheck.Settings`
 
-`frc.robot.lib.localization.ImuCrossCheck.Settings`: how closely the gyro and the backup IMU must
-agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. Check
+`com.michaelgrundvig.frc.localization.ImuCrossCheck.Settings`: how closely the gyro and the backup
+IMU must agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. Check
 `Localization/ImuDisagreementDegrees`: well inside the tolerance in normal driving, and over it only
 for a real fault.
 
@@ -469,10 +527,10 @@ for a real fault.
 
 ### `TerrainCrossing.Settings`
 
-`frc.robot.lib.localization.TerrainCrossing.Settings`: what counts as climbing, level, and one
-feature; the robot uses `Settings.DEFAULTS`. Check them with a
-[terrain crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from
-the new field's ramps.
+`com.michaelgrundvig.frc.localization.TerrainCrossing.Settings`: what counts as climbing, level, and
+one feature; the robot uses `Settings.DEFAULTS`. Check them with a [terrain
+crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from the
+new field's ramps.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -577,7 +635,7 @@ a robot keeps wanting to go past it, after asking why.
 | `limits.driveSupplyLowerCurrent` | 10 to 40 A | datasheet (40 A: the drive motors' breakers' rating) | Never above what the breaker carries indefinitely. |
 | `limits.driveSupplyLowerTime` | 0.1 to 1 s | datasheet (the fastest 40 A breaker, Snap Action's, can trip after 1.5 s at 80 A, the top of `limits.driveSupplyCurrent`) | At any supply limit in its range, the step-down comes at least half a second before the fastest breaker can trip (a warm breaker trips sooner than its datasheet's cold figures). Under 0.1 s it would cut into every hard launch; even 0.1 s cuts into one with `driveStatorCurrent` raised to 80 A or more, which holds a drive motor at 60 A or more for 0.12 to 0.2 s in the simulator. |
 | `limits.steerStatorCurrent` | 5 to 80 A | guess | Steering needs little; the top is for finding out how little. |
-| `limits.maxLinearSpeed` | 0.5 to 6 m/s | guess | Slow enough for a first drive; the record refuses anything past the free speed. |
+| `limits.maxLinearSpeed` | 0.5 to 6 m/s | guess | Slow enough for a first drive. Anything past the drivetrain's free speed is refused by the robot's rules (`RobotRules`), which hold it to the definition. |
 | `limits.maxAngularSpeed` | 0.1 to 3 rot/s | guess | Slow enough for a first drive, and three times the template's. |
 
 ### `vision` tuning
@@ -672,8 +730,6 @@ code's choices, explained beside them.
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
 | `PhoenixDrivetrain`: how often each module's CANcoder sends its position and velocity (the simulator's steering hears it as often) | 100 Hz | chosen | datasheet (Phoenix 6's default for a CANcoder's position) | Why: without Phoenix Pro, the steering's loop sees a new angle only this often, which sets how high its gains can go. Faster allows higher gains, for more traffic on the CAN bus: check the bus's load before raising it. Check that a robot's CANcoders send this often: Phoenix Tuner X's plot of a CANcoder's position shows a new sample every 10 ms, and in a log of a module turning, its odometry angles (`Drive/Module<name>/OdometrySteerAnglesRad`) change only every 10 ms, the same angle two or three readings running. |
 | `ModuleIOSim`: how often the steering's motor controller runs its loop | 1 ms | as built | datasheet (CTRE's Phoenix 6 documentation: a TalonFX's closed loop runs at 1 kHz) | A fact of the motor controller. |
-| `ModuleIOSim`: the drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of `Body.mass` at `wheelRadius` | 0.001 kg m² | characterized | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. About 2% of what the template's robot puts on each wheel, so a rough number costs little. |
-| `ModuleIOSim`: the steering's inertia | 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's generated simulation value, as AdvantageKit's swerve templates use it) | [Feedforward](characterization.md#feedforward): SysId on one module's steering. What it assumes is in [stand-ins](stand-ins.md). |
 | `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |
 | `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |

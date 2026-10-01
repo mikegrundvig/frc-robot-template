@@ -160,7 +160,7 @@ class DriveBasicsTest {
     return new Drive(
         name,
         hardware,
-        Robots.SIM.body(),
+        Robots.SIM.definition(),
         Robots.SIM::drivetrain,
         harness.scheduler,
         () -> Pose2d.ZERO);

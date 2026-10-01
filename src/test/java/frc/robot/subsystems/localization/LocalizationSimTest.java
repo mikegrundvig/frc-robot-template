@@ -3,25 +3,26 @@ package frc.robot.subsystems.localization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.localization.DriveConditions;
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.LocalizationGate;
+import com.michaelgrundvig.frc.localization.SlipCheck;
+import com.michaelgrundvig.frc.localization.TerrainCrossing;
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.localization.YawSource;
+import com.michaelgrundvig.frc.world.robot.ImuMount;
+import com.michaelgrundvig.frc.world.robot.ImuMountBuilder;
+import com.michaelgrundvig.frc.world.robot.Imus;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.config.ImuMount;
-import frc.robot.lib.config.ImuMountBuilder;
-import frc.robot.lib.config.Imus;
-import frc.robot.lib.localization.DriveConditions;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.EstimatorConfigBuilder;
-import frc.robot.lib.localization.ImuReadings;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.LocalizationGate;
-import frc.robot.lib.localization.SlipCheck;
-import frc.robot.lib.localization.TerrainCrossing;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.VisionMeasurement;
-import frc.robot.lib.localization.YawSource;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
@@ -557,11 +558,18 @@ class LocalizationSimTest {
   /** The simulator's robot as every robot starts: its IMUs' accelerometers not yet checked. */
   private static RobotConfig unchecked() {
     ImuMount gyro =
-        ImuMountBuilder.builder(Robots.SIM.imus().gyro()).accelerometerChecked(false).build();
+        ImuMountBuilder.builder(Robots.SIM.definition().imus().gyro())
+            .accelerometerChecked(false)
+            .build();
     ImuMount backup =
-        ImuMountBuilder.builder(Robots.SIM.imus().backup()).accelerometerChecked(false).build();
+        ImuMountBuilder.builder(Robots.SIM.definition().imus().backup())
+            .accelerometerChecked(false)
+            .build();
     return RobotConfigBuilder.builder(Robots.SIM)
-        .imus(Imus.builder().gyro(gyro).backup(backup).build())
+        .definition(
+            RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                .imus(Imus.builder().gyro(gyro).backup(backup).build())
+                .build())
         .build();
   }
 
@@ -806,7 +814,11 @@ class LocalizationSimTest {
     DriveSimHarness robot = robot(SensorErrors.NONE);
     FakeCamera camera = camera(robot);
     SwerveDriveKinematics kinematics =
-        new SwerveDriveKinematics(Robots.SIM.drivetrain().moduleTranslations(Robots.SIM.body()));
+        new SwerveDriveKinematics(
+            Robots.SIM
+                .definition()
+                .drivetrain()
+                .moduleTranslations(Robots.SIM.definition().body()));
     SwerveDrivePoseEstimator wpilib =
         new SwerveDrivePoseEstimator(
             kinematics, robot.drive.gyroYaw(), robot.drive.modulePositions(), Pose2d.ZERO);

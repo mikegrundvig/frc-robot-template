@@ -1,7 +1,9 @@
 package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.wpilib.units.Units.MetersPerSecond;
 
+import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
@@ -80,28 +82,26 @@ class RobotTuningTest {
   /** Within its limits isn't enough: the records' own checks have the last word, and say which. */
   @Test
   void aValueTheRecordsRejectIsRefusedNamingTheRecordsValue() {
-    var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+    var vision = Vision.tuning(Robots.SIM.vision());
 
-    assertThat(drivetrain.whyNot(Map.of("limits.maxLinearSpeed", 6.0)))
-        .startsWith(
-            "drivetrain: SwerveConfig.limits.maxLinearSpeed: 6 m/s is faster than the"
-                + " drivetrain's free speed");
+    assertThat(vision.whyNot(Map.of("maxAmbiguity", 0.0)))
+        .startsWith("vision: VisionConfig.maxAmbiguity: 0 ");
   }
 
   /**
    * The page shows a refusal beside the value it concerns. A record's message names the value the
    * way {@code Checks} writes it, from the record that checked it ({@code
-   * SwerveConfig.limits.maxLinearSpeed}), and Pitwall reads that back to the value's tunable.
+   * VisionConfig.maxAmbiguity}), and Pitwall reads that back to the value's tunable.
    */
   @Test
   void aRecordsRefusalIsTiedToTheTunableItNames() {
     var tee = new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false);
     TunableRegistry.registerBackend("", tee);
     try {
-      TunableRegistry.publish("Drive/config", Drive.tuning(Robots.SIM.drivetrain()));
+      TunableRegistry.publish("Vision/config", Vision.tuning(Robots.SIM.vision()));
       tee.update();
 
-      var outcome = tee.requestChanges(Map.of("/Drive/config/limits/maxLinearSpeed", 6.0));
+      var outcome = tee.requestChanges(Map.of("/Vision/config/maxAmbiguity", 0.0));
       tee.update();
 
       assertThat(outcome.getNow(null).reasons())
@@ -109,14 +109,30 @@ class RobotTuningTest {
           .satisfies(
               reason -> {
                 assertThat(reason.layer()).isEqualTo(Outcome.Layer.RECORD);
-                assertThat(reason.by()).isEqualTo("SwerveConfig");
-                assertThat(reason.paths()).containsExactly("/Drive/config/limits/maxLinearSpeed");
-                assertThat(reason.text())
-                    .startsWith("6 m/s is faster than the drivetrain's free speed");
+                assertThat(reason.by()).isEqualTo("VisionConfig");
+                assertThat(reason.paths()).containsExactly("/Vision/config/maxAmbiguity");
               });
     } finally {
       TunableRegistry.reset();
     }
+  }
+
+  /**
+   * The drivetrain's top speed is tuned live, but never past what its motors and gearing can reach,
+   * which the robot's definition says and the pit can't change: the robot's rules hold it there,
+   * and the page shows why beside the value.
+   */
+  @Test
+  void theTopSpeedIsHeldToTheDrivetrainsFreeSpeed() {
+    var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+    RobotRules.register(
+        new ConfigRules(), Robots.SIM.definition(), drivetrain, Vision.tuning(Robots.SIM.vision()));
+
+    assertThat(drivetrain.set(Map.of("limits.maxLinearSpeed", 4.5))).isTrue();
+    assertThat(drivetrain.whyNot(Map.of("limits.maxLinearSpeed", 6.0)))
+        .contains("6 m/s is faster than the drivetrain's free speed of 4.729 m/s");
+    assertThat(drivetrain.set(Map.of("limits.maxLinearSpeed", 6.0))).isFalse();
+    assertThat(drivetrain.get().limits().maxLinearSpeed().in(MetersPerSecond)).isEqualTo(4.5);
   }
 
   /** Vision's thresholds are tuned like the drivetrain's gains: its configuration, live. */

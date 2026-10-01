@@ -1,9 +1,10 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.localization.VisionConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import frc.robot.subsystems.drive.DrivetrainControl;
 
 /**
  * The rules across this robot's mechanisms: checks that read more than one mechanism's
@@ -15,8 +16,11 @@ import frc.robot.lib.localization.VisionConfig;
  * change. The committed configuration is checked against every rule at startup, and in the tests
  * for every robot ({@code RobotRulesTest}), so a colliding configuration never reaches a robot.
  *
- * <p>The template's robot has none: its drivetrain and vision never constrain each other. Pitwall's
- * {@code ConfigRulesTest} works one through, an intake and a hood; a rule reads like this:
+ * <p>A rule also holds a mechanism's tuning to what the robot is, its definition, which the pit
+ * can't change: the drivetrain's top speed stays within what its motors and gearing can reach. The
+ * template's robot has no rule across two mechanisms: its drivetrain and vision never constrain
+ * each other. Pitwall's {@code ConfigRulesTest} works one through, an intake and a hood; a rule
+ * reads like this:
  *
  * <pre>{@code
  * rules.when(intake, "swing.from", "swing.to")
@@ -30,9 +34,18 @@ final class RobotRules {
   /**
    * Registers this robot design's rules over its mechanisms' live configurations. A robot without a
    * mechanism registers none of the rules that read it.
+   *
+   * @param definition what the robot is, which the rules hold the mechanisms' tuning to
    */
   static void register(
-      ConfigRules rules, LiveConfig<SwerveConfig> drivetrain, LiveConfig<VisionConfig> vision) {
-    // None yet: see above.
+      ConfigRules rules,
+      RobotDefinition definition,
+      LiveConfig<DrivetrainControl> drivetrain,
+      LiveConfig<VisionConfig> vision) {
+    rules
+        .when(drivetrain, "limits.maxLinearSpeed")
+        .check(
+            "the drivetrain's top speed",
+            control -> control.whyTooFastFor(definition.drivetrain()));
   }
 }

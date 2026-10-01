@@ -8,7 +8,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Component;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
-import frc.robot.lib.field.Bump;
+import com.michaelgrundvig.frc.world.field.Bump;
 import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;

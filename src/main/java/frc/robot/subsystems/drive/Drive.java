@@ -9,14 +9,13 @@ import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 import static org.wpilib.units.Units.Volts;
 
+import com.michaelgrundvig.frc.localization.DrivetrainReadings;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.OdometrySample;
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.experiment.Rig;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.localization.DrivetrainReadings;
-import frc.robot.lib.localization.ImuReadings;
-import frc.robot.lib.localization.OdometrySample;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,7 +63,7 @@ public class Drive implements Mechanism, AutoCloseable {
   private static final List<String> WHEELS =
       List.of("Front left", "Front right", "Back left", "Back right");
 
-  private final Supplier<SwerveConfig> config;
+  private final Supplier<DrivetrainControl> config;
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
   private final GyroIOInputsAutoLogged gyroInputs = new GyroIOInputsAutoLogged();
@@ -76,7 +75,7 @@ public class Drive implements Mechanism, AutoCloseable {
   private final Lock odometryLock;
 
   /** The configuration the motor controllers have, and the limits taken from it. */
-  private SwerveConfig applied;
+  private DrivetrainControl applied;
 
   private double maxLinearSpeedMps;
   private double maxAngularSpeedRadPerSec;
@@ -100,7 +99,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * that's safe to dial in on a running robot (a range narrower than what's valid). Publish it, and
    * give the drivetrain its {@link LiveConfig#get}.
    */
-  public static LiveConfig<SwerveConfig> tuning(SwerveConfig committed) {
+  public static LiveConfig<DrivetrainControl> tuning(DrivetrainControl committed) {
     return LiveConfig.of("drivetrain", committed)
         .number("gains.driveKs", Limits.between(0, 1)) // volts
         .number("gains.driveKv", Limits.between(0, 5)) // volts per meter per second
@@ -123,15 +122,15 @@ public class Drive implements Mechanism, AutoCloseable {
   /**
    * @param name alert group name: "Drive" on the robot, another name for a second instance
    * @param hardware the modules, the gyro, and the backup IMU
-   * @param body the robot's frame, which places the wheels
-   * @param config the drivetrain's configuration, read every loop so tuned values take effect
+   * @param robot the robot's definition: its frame and its drivetrain's geometry place the wheels
+   * @param config how the drivetrain is driven, read every loop so tuned values take effect
    * @param pose where the robot is, from localization: field-relative driving turns by its heading
    */
   public Drive(
       String name,
       DriveHardware hardware,
-      Body body,
-      Supplier<SwerveConfig> config,
+      RobotDefinition robot,
+      Supplier<DrivetrainControl> config,
       Scheduler scheduler,
       Supplier<Pose2d> pose) {
     this.config = config;
@@ -140,13 +139,14 @@ public class Drive implements Mechanism, AutoCloseable {
     this.backupImuIO = hardware.backupImu();
     this.pose = pose;
     this.odometryLock = hardware.odometryLock();
-    SwerveConfig initial = config.get();
+    DrivetrainControl initial = config.get();
     for (int i = 0; i < 4; i++) {
-      modules[i] = new Module(hardware.modules().get(i), i, initial.modules().wheelRadius());
+      modules[i] =
+          new Module(hardware.modules().get(i), i, robot.drivetrain().modules().wheelRadius());
     }
     applied = initial;
     apply(initial);
-    kinematics = new SwerveDriveKinematics(initial.moduleTranslations(body));
+    kinematics = new SwerveDriveKinematics(robot.moduleTranslations());
     readings =
         DrivetrainReadings.builder()
             .wheels(List.of())
@@ -192,7 +192,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * @param enabled whether the robot is enabled
    */
   public void periodic(boolean enabled) {
-    SwerveConfig now = config.get();
+    DrivetrainControl now = config.get();
     if (!now.equals(applied)) {
       apply(now);
     }
@@ -306,7 +306,7 @@ public class Drive implements Mechanism, AutoCloseable {
   }
 
   /** Sends new gains and limits to the modules, and keeps the limits driving uses. */
-  private void apply(SwerveConfig drivetrain) {
+  private void apply(DrivetrainControl drivetrain) {
     for (Module module : modules) {
       module.configure(drivetrain.gains(), drivetrain.limits());
     }
@@ -423,7 +423,7 @@ public class Drive implements Mechanism, AutoCloseable {
    *
    * @param tuning the drivetrain's configuration as the pit tunes it
    */
-  public Rig steeringRig(LiveConfig<SwerveConfig> tuning) {
+  public Rig steeringRig(LiveConfig<DrivetrainControl> tuning) {
     Rig.Builder rig =
         Rig.builder()
             .name("Steering")

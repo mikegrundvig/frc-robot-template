@@ -1,7 +1,7 @@
 package frc.robot.sim;
 
-import frc.robot.lib.config.ImuMount;
-import frc.robot.lib.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.world.robot.ImuMount;
 import java.util.Random;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;

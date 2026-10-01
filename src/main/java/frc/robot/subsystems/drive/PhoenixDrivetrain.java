@@ -2,9 +2,9 @@ package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
-import frc.robot.lib.config.CanBus;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveWiring;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.SwerveWiring;
 import java.util.concurrent.locks.Lock;
 import org.wpilib.math.geometry.Rotation3d;
 
@@ -45,7 +45,7 @@ public final class PhoenixDrivetrain implements AutoCloseable {
    * @param gyroOrientation how the Pigeon 2 is turned on the robot, from the robot's definition
    */
   public PhoenixDrivetrain(
-      SwerveWiring wiring, SwerveConfig.Modules hardware, Rotation3d gyroOrientation) {
+      SwerveWiring wiring, DrivetrainGeometry.Modules hardware, Rotation3d gyroOrientation) {
     SignalLogger.enableAutoLogging(false);
     CANBus bus = bus(wiring.canBus());
     for (int i = 0; i < 4; i++) {

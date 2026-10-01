@@ -2,56 +2,51 @@ package frc.robot.sim;
 
 import static frc.robot.lib.config.Rules.notBlank;
 
-import frc.robot.lib.config.CameraConfig;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
 import frc.robot.lib.config.Rule;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * A named situation for the simulated robot: a fault in its sensors, or something that happens to
- * it, such as a collision. The simulator starts in one with {@code ./gradlew run
- * -Pscenario=<name>}, and a test builds its robot in one ({@code RobotSim}). {@link Scenarios}
- * lists them.
+ * it, such as a collision. It's a named set of the simulated world's faults ({@link Faults}). The
+ * simulator starts in one with {@code ./gradlew run -Pscenario=<name>}, the Pitwall page applies
+ * one to a running simulation, and a test builds its robot in one ({@code RobotSim}). {@link
+ * Scenarios} lists them.
  *
  * <p>A scenario changes only the simulated world. The robot's mechanisms and localization are never
  * told: they have to find out from the sensors, as on a real robot.
  *
  * <p>A scenario has two parts, either of which may be empty. Its {@link #sensorFaults} change how
- * the robot's sensors err, and take effect when the world is built ({@link #errorsOn}), since the
- * simulated sensors are built with it. Its {@link #event} happens to the robot in a running world
- * ({@link #startIn}): {@code ./gradlew run} starts it once the robot is enabled, and a test when it
- * chooses.
+ * the robot's sensors err, and {@code ./gradlew run} applies them before the robot's first loop, so
+ * the robot starts with them. Its {@link #events} are what happens to the robot: {@code ./gradlew
+ * run} makes them happen once the robot is enabled, and a test when it chooses. The page applies
+ * both at once.
  *
  * @param name how it's asked for: lowercase words joined by hyphens, such as {@code camera-low}
  * @param description what it does to the robot
  * @param sensorFaults how the robot's sensors err in it; {@link #NO_FAULTS} for none
- * @param event what happens to the robot when it starts; {@link #NOTHING} for nothing
+ * @param events what happens to the robot when it starts; {@link #NOTHING} for nothing
  */
 @ConfigRecord
-public record Scenario(String name, String description, SensorFaults sensorFaults, Event event) {
+public record Scenario(String name, String description, Settings sensorFaults, Settings events) {
   /** The sensors err as they otherwise would. */
-  public static final SensorFaults NO_FAULTS = (errors, cameras) -> errors;
+  public static final Settings NO_FAULTS = world -> List.of();
 
   /** Nothing happens when the scenario starts. */
-  public static final Event NOTHING = world -> {};
+  public static final Settings NOTHING = world -> List.of();
 
-  /** How a scenario changes the robot's sensors. */
+  /** Some of the simulated world's faults, by name, with their values. */
   @FunctionalInterface
-  public interface SensorFaults {
+  public interface Settings {
     /**
-     * @param errors how the robot's sensors would otherwise err
-     * @param cameras the robot's cameras, for a scenario that knocks one
-     * @return how they err in the scenario
+     * @param world the simulated world, for a scenario that knocks its first camera, say
+     * @return the faults, on that world's parts
+     * @throws IllegalArgumentException if the world lacks a part the scenario needs
      */
-    SensorErrors apply(SensorErrors errors, List<CameraConfig> cameras);
-  }
-
-  /** What happens to the robot when a scenario starts. */
-  @FunctionalInterface
-  public interface Event {
-    /** Makes it happen, in the simulated world: a hit, a slip, a gyro unplugged. */
-    void happen(SimulatedWorld world);
+    List<Setting> in(SimulatedWorld world);
   }
 
   public Scenario {
@@ -66,19 +61,27 @@ public record Scenario(String name, String description, SensorFaults sensorFault
     return ScenarioBuilder.builder();
   }
 
-  /**
-   * How the robot's sensors err in this scenario: its faults, on a season-worn robot's sensors
-   * ({@link SensorErrors#TYPICAL}), as the simulator's robot has them.
-   *
-   * @param cameras the robot's cameras
-   */
-  public SensorErrors errorsOn(List<CameraConfig> cameras) {
-    return sensorFaults.apply(SensorErrors.TYPICAL, cameras);
+  /** These faults, whatever the world. */
+  public static Settings faults(Setting... faults) {
+    List<Setting> all = List.of(faults);
+    return world -> all;
   }
 
-  /** Starts this scenario's event in the simulated world: now. */
-  public void startIn(SimulatedWorld world) {
-    event.happen(world);
+  /** Its sensor faults, on this world's parts. */
+  public List<Setting> sensorFaultsIn(SimulatedWorld world) {
+    return sensorFaults.in(world);
+  }
+
+  /** What happens to the robot in it, on this world's parts. */
+  public List<Setting> eventsIn(SimulatedWorld world) {
+    return events.in(world);
+  }
+
+  /** Everything it does, sensor faults first: what the page applies to a running simulation. */
+  public List<Setting> faultsIn(SimulatedWorld world) {
+    List<Setting> all = new ArrayList<>(sensorFaultsIn(world));
+    all.addAll(eventsIn(world));
+    return all;
   }
 
   /** Lowercase letters and digits, in words joined by single hyphens: typed on a command line. */

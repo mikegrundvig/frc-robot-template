@@ -24,6 +24,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ./gradlew ci                                 # every check CI runs; run before pushing
 ./gradlew test -Pquick --continuous          # rerun tests on every save while you work
 ./gradlew run                                # the simulator, enabled on a start and drivable from the keyboard
+./gradlew run -Pgui=false                    # the simulator without WPILib's GUI, disabled (docs/simulator.md)
 ./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
@@ -73,10 +74,16 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to stage a run's gains again and the builder calls
     that commit them. A gain changes only the way any value does, through the checks below.
+  - **The simulator's controls** (in the simulator only; a robot has none), so far the server
+    side, an API the page's Sim view (coming) will drive: the Driver Station (enable, the mode,
+    the alliance station, the field system, the match time), joysticks from the keyboard or a
+    gamepad, pausing and stepping, Stop, and failing the simulated robot's parts while it runs,
+    which WPILib's simulator GUI can't do: a camera unplugged or knocked, the gyro frozen, a
+    module's encoder gone stale, the robot hit. See [docs/simulator.md](docs/simulator.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
-  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim in the
-    simulator), under a state bar that always says which robot (SIM or ROBOT), whether it's
+  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and, in the
+    simulator, the Sim view to come), under a state bar that always says which robot (SIM or ROBOT), whether it's
     heard, its mode, whether tuning is on, and what isn't committed. Edits are staged and applied
     together; a refusal's reasons show beside the values they concern, an edit outside its limits
     is caught before it's sent, and a big step (over a quarter of a value's range) is warned of.
@@ -157,12 +164,14 @@ Also built in:
 - **Named scenarios for the simulator:** a fault in the robot's sensors or something that happens
   to it, by name: `./gradlew run -Pscenario=camera-low` starts the simulator with a camera knocked
   4 in low, and `collision`, `gyro-unplugged`, or `bump-crossing` happen once the robot is enabled.
-  Placing the robot again (a new alliance station while disabled) undoes a move.
-  `./gradlew scenarios` lists them all, and a misspelled name stops before the simulator starts,
-  with the list. The mechanisms and localization are never told: they find out from the sensors,
-  as on a robot, and the log names the scenario (`SimScenario`). Tests use the same catalog
-  (`frc.robot.sim.Scenarios`, and `RobotSim`'s `build` and `start`); what the simulator can't
-  make yet is in [docs/stand-ins.md](docs/stand-ins.md).
+  Each is a named set of the simulated world's live faults (`frc.robot.sim.Faults`), so the Pitwall
+  page applies one to a running simulation too, and undoes what lasts. Placing the robot again (a
+  new alliance station while disabled) undoes a move. `./gradlew scenarios` lists them all, and a
+  misspelled name stops before the simulator starts, with the list. The mechanisms and
+  localization are never told: they find out from the sensors, as on a robot, and the log names
+  the scenario (`SimScenario`) and the faults on (`Pitwall/Simulator/Faults`). Tests use the same
+  catalog (`frc.robot.sim.Scenarios`, and `RobotSim`'s `build` and `start`); what the simulator
+  can't make yet is in [docs/simulator.md](docs/simulator.md).
 - **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
   level, and each camera's mount, each measured on the robot and reported as the number to commit
   and where it goes ([docs/calibration.md](docs/calibration.md)).
@@ -191,15 +200,15 @@ Also built in:
 | `frc.robot.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `frc.robot.game` | The game: the field the robot plays on, 2026's (`Rebuilt`) until [kickoff](docs/kickoff.md), with its starts, targets, and zones written for the blue alliance. |
 | `frc.robot.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
-| `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, and the named scenarios (`Scenarios`). Only the simulator builds it. |
+| `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, what can fail while it runs (`Faults`, for Pitwall's simulator controls), and the named scenarios (`Scenarios`). Only the simulator builds it. |
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
-| `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
+| `sim/` | Default simulator GUI settings, used on the first `./gradlew run` with the GUI. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

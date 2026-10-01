@@ -316,12 +316,14 @@ What it shows:
   its allowance is an error the configuration says can't happen.
 - **With a moved tag**, the three are alike, within the allowance, and no camera is doubted.
 
-`VisionSimTest`'s mount-check tests run under each. `every` keeps the original promises for a
-camera turned 4° (out of calibration and counting for less, the back cameras never doubted,
-doubted by more than 8 cm, the last lap a fifth closer than trusting it as before), and one turned
-2° stands out in its tag residuals. `measurements` and `doubt` break two of the first (doubted by
-less than 8 cm, and the last lap no closer), and the 2° camera doesn't stand out: each test says
-which, and changes when one does.
+`VisionSimTest`'s mount-check tests run under each. For a camera turned 4°, `every` keeps all but
+the last of the original promises (out of calibration and counting for less, the back cameras
+never doubted, doubted by more than 8 cm, the last lap a fifth closer than trusting it as before):
+doubted by 9.2 cm, its last lap is 4.2 cm off, no closer than trusting it as before (4.2 cm).
+`measurements` and `doubt` break two (doubted by 5.5 and 6.1 cm, and the last lap 5.6 and 8.7 cm
+against 3.8 cm trusted as before). A camera turned 2° stands out in its tag residuals only under
+`every` (1.6 times its worst neighbour's, against 0.95). Each test says which, and changes when
+one does.
 
 ### The gates on the claimed uncertainty
 

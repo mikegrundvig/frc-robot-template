@@ -181,7 +181,9 @@
   // ---- The stream ----
 
   function connect() {
-    source = new EventSource("/api/events");
+    // Reconnecting, it names the stream it had, which the robot then closes rather than keep a
+    // place for it until a write to it fails.
+    source = new EventSource(stream ? "/api/events?replaces=" + encodeURIComponent(stream) : "/api/events");
     lastEvent = Date.now();
     source.addEventListener("snapshot", (event) => {
       heard();

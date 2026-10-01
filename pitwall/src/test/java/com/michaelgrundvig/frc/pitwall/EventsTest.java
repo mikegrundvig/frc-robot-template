@@ -286,20 +286,39 @@ class EventsTest {
     assertThat(closed).containsExactly("1");
   }
 
+  /** With eight pages following, a ninth takes the place of the one that wrote least lately. */
   @Test
-  void beyondEightStreamsAPageIsTurnedAway() throws Exception {
+  void aNinthPageTakesTheStalestPlace() throws Exception {
     PitwallServer running = start(PitwallServer.IDLE);
+    List<Listener> pages = new ArrayList<>();
     for (int i = 0; i < Broadcaster.MAX_STREAMS; i++) {
-      new Listener(running);
+      Listener page = new Listener(running);
+      page.snapshot();
+      pages.add(page);
     }
 
-    var ninth =
-        client.send(
-            HttpRequest.newBuilder(uri(running, "/api/events")).GET().build(),
-            HttpResponse.BodyHandlers.ofString());
+    Listener ninth = new Listener(running);
 
-    assertThat(ninth.statusCode()).isEqualTo(503);
-    assertThat(ninth.body()).contains("At most 8 pages");
+    assertThat(ninth.snapshot().json()).containsEntry("stream", "9");
+    loopUntil(() -> closed.size() == 1);
+    assertThat(broadcaster.size()).isEqualTo(Broadcaster.MAX_STREAMS);
+  }
+
+  /** A page that reconnects names the stream it had, which closes at once. */
+  @Test
+  void aPageThatReconnectsReplacesItsStream() throws Exception {
+    PitwallServer running = start(PitwallServer.IDLE);
+    new Listener(running).snapshot();
+
+    var again =
+        answered(
+            client.sendAsync(
+                HttpRequest.newBuilder(uri(running, "/api/events?replaces=1")).GET().build(),
+                HttpResponse.BodyHandlers.ofLines()));
+    open.add(again.body()::close);
+
+    loopUntil(() -> closed.contains("1"));
+    assertThat(broadcaster.size()).isEqualTo(1);
   }
 
   /**

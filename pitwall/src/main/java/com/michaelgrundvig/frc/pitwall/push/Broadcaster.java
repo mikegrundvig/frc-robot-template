@@ -4,6 +4,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.Series;
 import com.michaelgrundvig.frc.pitwall.experiment.Trace;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,7 @@ public final class Broadcaster implements AutoCloseable {
   /** How many pages may have a stream open at once. */
   public static final int MAX_STREAMS = 8;
 
-  /** How many events may wait for a stream before it counts as fallen behind: 2.5 s of loops. */
+  /** How many events may wait for a stream before it counts as fallen behind: 2.56 s of loops. */
   public static final int MAILBOX = 128;
 
   private final int maxStreams;
@@ -65,11 +66,27 @@ public final class Broadcaster implements AutoCloseable {
   /**
    * Opens a stream, which gets its snapshot at the next loop. Safe from any thread.
    *
-   * @return empty when {@link #MAX_STREAMS} are open already, or the broadcaster has closed
+   * <p>With {@link #MAX_STREAMS} open already, the one that wrote least lately is closed for it: a
+   * page that has gone without its stream noticing (a laptop that slept, a dropped link) holds a
+   * place until its next write fails, and a page that's here shouldn't wait for that.
+   *
+   * @param replaces the stream a page reconnecting had, closed now rather than when a write to it
+   *     fails; null for none
+   * @return empty when the broadcaster has closed
    */
-  public synchronized Optional<Stream> open() {
-    if (closed || streams.size() + waiting.size() >= maxStreams) {
+  public synchronized Optional<Stream> open(@Nullable String replaces) {
+    if (closed) {
       return Optional.empty();
+    }
+    for (Stream stream : all()) {
+      if (stream.id().equals(replaces)) {
+        stream.close("its page reconnected");
+      }
+    }
+    if (streams.size() + waiting.size() >= maxStreams) {
+      all().stream()
+          .min(Comparator.comparingLong(Stream::wroteNanos))
+          .ifPresent(stalest -> stalest.close("another page needed its place"));
     }
     opened++;
     Stream stream = new Stream(Integer.toString(opened), mailbox, this::closed);
@@ -123,10 +140,15 @@ public final class Broadcaster implements AutoCloseable {
     List<Stream> all;
     synchronized (this) {
       closed = true;
-      all = new ArrayList<>(streams);
-      all.addAll(waiting);
+      all = all();
     }
     all.forEach(stream -> stream.close("Pitwall stopped"));
+  }
+
+  private List<Stream> all() {
+    List<Stream> all = new ArrayList<>(streams);
+    all.addAll(waiting);
+    return all;
   }
 
   private synchronized void promote(Stream stream) {

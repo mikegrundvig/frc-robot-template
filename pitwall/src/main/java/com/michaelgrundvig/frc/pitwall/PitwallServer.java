@@ -47,8 +47,9 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  *   <li>{@code GET /api/events}: the page's state as server-sent events, pushed only when something
  *       changes: a {@code snapshot} first, then {@code patch} events (JSON merge patches) and the
- *       run's {@code samples}; a {@code heartbeat} after 5 s with nothing else to say. See {@link
- *       Broadcaster}.
+ *       run's {@code samples}; a {@code heartbeat} after 5 s with nothing else to say. A page
+ *       reconnecting names the stream it had ({@code ?replaces=id}), which closes; with eight open,
+ *       the one that wrote least lately makes way. See {@link Broadcaster}.
  *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
  *       "value"}]}.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
@@ -502,19 +503,18 @@ public final class PitwallServer implements AutoCloseable {
      * gone, and ends the stream.
      */
     private void stream(HttpExchange exchange) throws IOException {
+      String query = exchange.getRequestURI().getQuery();
+      String replaces =
+          query != null && query.startsWith("replaces=")
+              ? query.substring("replaces=".length())
+              : null;
       Stream stream =
           broadcaster
-              .open()
-              .orElseThrow(
-                  () ->
-                      new Problem(
-                          503,
-                          "Too many pages",
-                          "At most "
-                              + Broadcaster.MAX_STREAMS
-                              + " pages can follow the robot at once; close one"));
+              .open(replaces)
+              .orElseThrow(() -> new Problem(503, "Stopping", "Pitwall is stopping"));
       String why = "the page went away";
       try {
+        stream.writtenBy(Thread.currentThread());
         headers(exchange, "text/event-stream");
         exchange.sendResponseHeaders(200, 0);
         OutputStream out = exchange.getResponseBody();
@@ -525,6 +525,7 @@ public final class PitwallServer implements AutoCloseable {
           }
           out.write((event == null ? HEARTBEAT : event.wire()).getBytes(StandardCharsets.UTF_8));
           out.flush();
+          stream.wrote();
         }
       } catch (IOException gone) {
         // The page closed, or its connection did: nothing more to send.

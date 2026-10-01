@@ -14,13 +14,15 @@ public record Outcome(Result result, String detail) {
     /** Refused by the configuration's checks or by the action itself; nothing changed. */
     REFUSED,
     /**
-     * Locked out: tuning is off, the robot isn't enabled in utility mode (for actions), or the
-     * field system is connected; nothing changed.
+     * Locked out: tuning is off, the robot isn't enabled in utility mode (for actions and
+     * experiments), or the field system is connected; or there is nothing to act on, such as a
+     * cancel for an experiment that isn't running. Nothing changed.
      */
     LOCKED
   }
 
-  static Outcome applied() {
+  /** A request applied, all of it. */
+  public static Outcome applied() {
     return new Outcome(Result.APPLIED, "");
   }
 }

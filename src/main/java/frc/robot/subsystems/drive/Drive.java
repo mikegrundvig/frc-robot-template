@@ -1,13 +1,17 @@
 package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
+import static org.wpilib.units.Units.Volts;
 
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.localization.DrivetrainReadings;
@@ -59,6 +63,10 @@ public class Drive implements Mechanism, AutoCloseable {
    */
   private static final double STOPPED_SECONDS = 0.1;
 
+  /** The wheels by name, as a steering test records them. */
+  private static final List<String> WHEELS =
+      List.of("Front left", "Front right", "Back left", "Back right");
+
   private final Supplier<SwerveConfig> config;
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
@@ -86,6 +94,9 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /** Loops in a row that the wheels reported connected but sent no readings. */
   private int loopsWithoutReadings;
+
+  /** The steer angle last held for a steering test, in radians. */
+  private double heldSteerRadians;
 
   /**
    * The drivetrain's configuration as the pit tunes it: its gains and limits, each within the range
@@ -399,6 +410,59 @@ public class Drive implements Mechanism, AutoCloseable {
           runVelocity(new ChassisVelocities(0, 0, 0));
         })
         .named("Drive forward");
+  }
+
+  /**
+   * Points every wheel at one angle, relative to the robot, with the drive wheels held still: the
+   * steering's test motion. Call it every loop the test runs.
+   *
+   * @param radians the angle, counterclockwise from the robot's forward
+   */
+  public void holdSteerAngle(double radians) {
+    heldSteerRadians = radians;
+    Rotation2d angle = new Rotation2d(radians);
+    for (Module module : modules) {
+      module.holdSteer(angle);
+    }
+  }
+
+  /**
+   * The steering as a Pitwall rig, so the page can tune it by experiment: its gains ({@code
+   * steerKp} and {@code steerKd}, tuned where they always are), every wheel pointed at one angle as
+   * the setpoint, and for each wheel its angle at every high-rate reading (what's scored), and its
+   * steering motor's voltage and current once a loop. Everything it records is a logged input, so a
+   * replay records the same.
+   *
+   * @param tuning the drivetrain's configuration as the pit tunes it
+   */
+  public Rig steeringRig(LiveConfig<SwerveConfig> tuning) {
+    Rig.Builder rig =
+        Rig.builder()
+            .name("Steering")
+            .gains(tuning, "gains.steerKp", "gains.steerKd")
+            .setpoint(Radians, this::holdSteerAngle)
+            .limits(Degrees.of(-180), Degrees.of(180));
+    for (int i = 0; i < 4; i++) {
+      Module module = modules[i];
+      rig.measurement(
+          WHEELS.get(i),
+          Degrees,
+          (now, series) -> {
+            for (int k = 0; k < module.odometryReadings(); k++) {
+              // The angle nearest the one held, so a wheel near ±180° doesn't jump a turn.
+              double angle =
+                  heldSteerRadians
+                      + MathUtil.angleModulus(module.odometryAngleRadians(k) - heldSteerRadians);
+              series.add(module.odometryTimestampNanos(k), Math.toDegrees(angle));
+            }
+          });
+    }
+    for (int i = 0; i < 4; i++) {
+      Module module = modules[i];
+      rig.signal(WHEELS.get(i) + " voltage", Volts, module::steerAppliedVolts);
+      rig.signal(WHEELS.get(i) + " current", Amps, module::steerCurrentAmps);
+    }
+    return rig.requires(this).build();
   }
 
   /** Drive with sticks until interrupted. See {@link #driveWithSticks}. */

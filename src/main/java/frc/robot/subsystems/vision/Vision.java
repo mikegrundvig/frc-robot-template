@@ -69,6 +69,12 @@ import org.wpilib.util.Alert;
  * #trustingOnly}), as 254's auto-align did.
  */
 public final class Vision implements AutoCloseable {
+  /** The share of measurements accepted is shown to this many percent. */
+  private static final double ACCEPTED_STEP_PERCENT = 5;
+
+  /** The share of measurements accepted as last shown: NaN before there was one. */
+  private double shownAcceptedPercent = Double.NaN;
+
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
   private static final int YAW_RATE_LOOPS = RobotLoop.loops(0.3);
 
@@ -577,7 +583,13 @@ public final class Vision implements AutoCloseable {
     }
   }
 
-  /** One line for the pit: which cameras are connected, and how their measurements fare. */
+  /**
+   * One line for the pit: which cameras are connected, how many of their measurements are accepted,
+   * to 5%, and how many images were left out because they arrived out of step. The share shown
+   * moves only once the real one has moved 5% from it, so the line doesn't change with every
+   * measurement (or flicker at a rounding edge); the images left out are counted exactly, since
+   * each is news, and the page hears of the line at most once a second.
+   */
   public String summary() {
     int connected = 0;
     int accepts = 0;
@@ -589,14 +601,14 @@ public final class Vision implements AutoCloseable {
       rejects += camera.rejected();
       outOfStep += camera.leftOutOfStep();
     }
-    String fate =
-        accepts + rejects == 0
-            ? "no measurements yet"
-            : String.format(
-                Locale.ROOT,
-                "%.0f%% of %d measurements accepted",
-                100.0 * accepts / (accepts + rejects),
-                accepts + rejects);
+    String fate = "no measurements yet";
+    if (accepts + rejects > 0) {
+      double percent = 100.0 * accepts / (accepts + rejects);
+      if (!(Math.abs(percent - shownAcceptedPercent) < ACCEPTED_STEP_PERCENT)) {
+        shownAcceptedPercent = Math.round(percent / ACCEPTED_STEP_PERCENT) * ACCEPTED_STEP_PERCENT;
+      }
+      fate = String.format(Locale.ROOT, "%.0f%% of measurements accepted", shownAcceptedPercent);
+    }
     return connected
         + " of "
         + cameras.size()

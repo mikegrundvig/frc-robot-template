@@ -113,6 +113,10 @@ public class Drive implements Mechanism, AutoCloseable {
         .measure("gains.skewLookahead", Seconds.of(0), Seconds.of(0.1))
         .measure("limits.driveStatorCurrent", Amps.of(10), Amps.of(120))
         .measure("limits.driveSupplyCurrent", Amps.of(10), Amps.of(80))
+        // Never above a 40 A breaker's rating, and stepping down no later than the fastest one can
+        // trip at twice its rating (80 A, the supply limit's top): docs/values.md has the times.
+        .measure("limits.driveSupplyLowerCurrent", Amps.of(10), Amps.of(40))
+        .measure("limits.driveSupplyLowerTime", Seconds.of(0.1), Seconds.of(1.5))
         .measure("limits.steerStatorCurrent", Amps.of(5), Amps.of(80))
         .measure("limits.maxLinearSpeed", MetersPerSecond.of(0.5), MetersPerSecond.of(6))
         .measure("limits.maxAngularSpeed", RotationsPerSecond.of(0.1), RotationsPerSecond.of(3));

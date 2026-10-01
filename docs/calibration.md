@@ -139,7 +139,7 @@ with the bumpers and battery on.
 each pair). The mass is the sum. The two readings also say how far forward the center of gravity
 is.
 
-**The center of gravity's height** (M3), from CAD if the CAD is complete, or by tilting:
+**The center of gravity's height**, from CAD if the CAD is complete, or by tilting:
 
 1. With the robot level, front wheels on a scale and the back on the floor at the same height (a
    board as thick as the scale), read the scale: `F₀`. Measure `L`, the distance between the front
@@ -153,7 +153,7 @@ A bigger tilt gives a bigger change to read; check that nothing on the robot mov
 tilts. With the tread's friction ([characterization](characterization.md#tread-friction)), the
 height sets where the wheels slip as the robot accelerates, and so the drive's current limit.
 
-**The yaw moment of inertia** (M5): from CAD's mass properties, with the bumpers and battery
+**The yaw moment of inertia**: from CAD's mass properties, with the bumpers and battery
 modeled; or from SysId's rotation routine, which fits the robot's angular kA. Nothing in the code
 reads it yet; a simulator that models traction will.
 
@@ -161,7 +161,7 @@ When: once the robot is built, and after a big change.
 
 ## A terrain crossing
 
-*From a log of driving over a bump, with nothing to run (M7).*
+*From a log of driving over a bump, with nothing to run.*
 
 How the robot's IMU reads crossing a bump or a ramp: how far past the ramp's slope it tilts
 (bumpers, suspension, the IMU's mount), and how closely the moment the IMU says it crossed the

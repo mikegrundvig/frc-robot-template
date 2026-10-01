@@ -1,0 +1,39 @@
+# The coprocessor's health agent (coprocessor/README.md): the read-only web service the robot polls,
+# on the port in /etc/coprocessor/stamp.json. Installed by the image as
+# /etc/systemd/system/coprocessor-agent.service, with the agent at /opt/coprocessor/coprocessor-agent.jar.
+#
+# It stays out of PhotonVision's way: the small cores only (PhotonVision runs on the big ones, 4-7),
+# a lower priority, and a 64 MB heap with the serial collector and the quick compiler only.
+
+[Unit]
+Description=Coprocessor health agent
+After=network.target
+
+[Service]
+Type=simple
+# A system user the image makes, in systemd-journal to read the journal. Its one privilege, given by
+# a polkit rule the image installs, is a soft power-off: stopping photonvision.service, then
+# powering off (coprocessor/README.md).
+User=coprocessor-agent
+Group=coprocessor-agent
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/bin/java -Xmx64m -Xss512k -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:MaxMetaspaceSize=48m -XX:ReservedCodeCacheSize=24m -Dorg.sqlite.tmpdir=/run/coprocessor-agent -jar /opt/coprocessor/coprocessor-agent.jar
+# sqlite-jdbc unpacks its native library here; /tmp may not allow running it.
+RuntimeDirectory=coprocessor-agent
+Restart=always
+RestartSec=2
+Nice=10
+AllowedCPUs=0-3
+MemoryMax=160M
+# Read-only everywhere but its runtime directory: it writes nothing.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

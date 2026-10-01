@@ -101,6 +101,20 @@ camera turned on its mount puts the robot off to the side, and its heading off b
 knocked straight down still places the robot right on the floor, so the alert fires but its trust
 stays. The alert says "so it counts for less" when that's the case.
 
+For example: a camera whose tags land 10 cm off across the floor, against the 5 cm tolerance, is
+√(10² − 5²) = 8.7 cm less sure of every measurement. One of two tags 2 m away, which it would
+place within 2 cm, it now places within √(2² + 8.7²) = 8.9 cm: it counts about a twentieth as
+much. Its far tags, already uncertain, lose less. The wider uncertainty also loosens the gate the
+estimator holds its measurements to, so they're rejected less often while they count for less.
+
+Two patterns point somewhere other than the mount:
+
+- **Tags that land farther off the farther away they are**, by a share of the distance (2 cm at
+  1 m, 6 cm at 3 m), along the camera's line of sight: its lens calibration (focal length) is off.
+  Recalibrate the lens in PhotonVision; recalibrating the mount only hides it at one distance.
+- **Every camera out of calibration at once at an event:** the field's tags aren't where the
+  layout says. Check the event's field layout (WPIcal) before touching any camera.
+
 The check measures against the robot's pose, so it needs other cameras to hold it: a robot with
 one camera can't tell that camera's mount moved. A wrong heading (the gyro's scale off, over many
 turns) puts every camera's tags off as if each had turned, until the cameras correct the heading;

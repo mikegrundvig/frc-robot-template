@@ -44,6 +44,11 @@ final class Camera implements AutoCloseable {
   /** How far this loop's measurements may be off from where the mount moved, in meters. */
   private double mountDoubt;
 
+  /** The out-of-calibration alert, once up, comes down at this share of the tolerance. */
+  private static final double ALERT_CLEARS_AT = 0.8;
+
+  private boolean flaggedOutOfCalibration;
+
   // What the out-of-calibration alert says now.
   private int shownCentimeters = -1;
   private boolean shownTrustedLess;
@@ -216,7 +221,14 @@ final class Camera implements AutoCloseable {
    */
   void checkMount(double toleranceMeters) {
     mountDoubt = mount.doubtMeters(toleranceMeters);
-    boolean off = mount.outOfCalibration(toleranceMeters);
+    // Up past the tolerance, and down only once back under 0.8 of it: an offset hovering at the
+    // tolerance doesn't flicker the alert on and off.
+    double offset = mount.offsetMeters();
+    boolean off =
+        flaggedOutOfCalibration
+            ? offset > ALERT_CLEARS_AT * toleranceMeters
+            : offset > toleranceMeters;
+    flaggedOutOfCalibration = off;
     // The alert says how far off, in whole centimeters: its text changes only when that does.
     int centimeters = off ? (int) Math.round(mount.offsetMeters() * 100) : 0;
     boolean trustedLess = mountDoubt > 0;

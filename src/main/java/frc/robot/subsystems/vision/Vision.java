@@ -473,8 +473,7 @@ public final class Vision implements AutoCloseable {
                 motion.speed(),
                 motion.recentYawRate()),
             current,
-            camera.mountDoubtMeters(),
-            onlyTags());
+            new VisionPipeline.Trust(camera.mountDoubtMeters(), onlyTags()));
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.outcome(result.outcome());

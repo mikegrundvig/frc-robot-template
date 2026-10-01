@@ -4,6 +4,7 @@ import static frc.robot.studies.StudyFixtures.BACK;
 import static frc.robot.studies.StudyFixtures.FRONT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 
 import java.util.List;
@@ -14,6 +15,7 @@ class RobustnessTest {
   private static final Candidate SHARP = new Candidate("sharp", List.of(FRONT, BACK));
   private static final Candidate STEADY = new Candidate("steady", List.of(FRONT, BACK));
   private static final Candidate SINGLE = new Candidate("single", List.of(FRONT));
+  private static final Candidate BLIND = new Candidate("blind", List.of(BACK));
   private static final List<Conditions> TWO_TRIALS =
       List.of(
           Conditions.trial(CameraStudyConfig.DEFAULTS, 0),
@@ -57,7 +59,31 @@ class RobustnessTest {
     assertThat(robustness.rankCorrelation()).isCloseTo(0.5, within(1e-12));
   }
 
-  /** Worst trials within a millimeter are a tie, and a tie goes to fewer cameras. */
+  /**
+   * Layouts that leave more than 5% of the field unmeasured in some trial have no worst 95% error:
+   * they rank after the rest, the one placing more of the field within 5 cm in its worst trial
+   * first, whatever their nominal order.
+   */
+  @Test
+  void blindLayoutsRankByTheLeastOfTheFieldTheyPlaceWithinFiveCentimeters() {
+    List<Score> nominal =
+        List.of(scored(BLIND, 0.03, 0.95), scored(SINGLE, 0.04, 0.95), scored(STEADY, 0.025, 1));
+    List<List<Score>> trials =
+        List.of(
+            List.of(
+                scored(BLIND, Double.POSITIVE_INFINITY, 0.6),
+                scored(SINGLE, Double.POSITIVE_INFINITY, 0.7),
+                scored(STEADY, 0.03, 1)),
+            List.of(scored(BLIND, 0.05, 0.9), scored(SINGLE, 0.04, 0.92), scored(STEADY, 0.03, 1)));
+
+    Robustness robustness = new Robustness(nominal, TWO_TRIALS, trials);
+
+    assertThat(robustness.ranking())
+        .extracting(layout -> layout.candidate().name(), Robustness.Layout::nominalRank)
+        .containsExactly(tuple("steady", 1), tuple("single", 3), tuple("blind", 2));
+  }
+
+  /** Worst trials that round to the same millimeter are a tie, and a tie goes to fewer cameras. */
   @Test
   void aTieToTheMillimeterGoesToFewerCameras() {
     List<Score> nominal = List.of(scored(SHARP, 0.020, 1), scored(SINGLE, 0.021, 1));

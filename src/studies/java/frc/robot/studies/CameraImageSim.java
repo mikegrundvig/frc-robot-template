@@ -35,9 +35,9 @@ import org.wpilib.vision.camera.OpenCvLoader;
  * half. Its test checks it against PhotonVision's own simulation over a sample of the field.
  *
  * <p>One difference is on purpose: a tag whose own solve fails is left out, as {@code Vision}
- * leaves out a tag whose pose isn't a number, where PhotonVision's simulation would report it at
- * the camera itself, with no ambiguity. Its corners still count in the multi-tag solve, as they do
- * in PhotonVision's.
+ * leaves out a tag whose pose isn't a number, where PhotonVision's simulation would stop with an
+ * exception (it takes the solve from an empty {@code Optional}). Its corners still count in the
+ * multi-tag solve, as they would in PhotonVision's.
  *
  * <p>One per thread: its noise isn't thread-safe.
  */

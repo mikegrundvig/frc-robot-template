@@ -64,6 +64,17 @@ Also built in:
   - **Actions**: routines such as pit checks, run from the page with their state shown live, only
     while the robot is enabled in utility mode and never on the field:
     `pitwall.actions().add("Home arm", arm::home)`.
+  - **Experiments**: tuning a mechanism by test motion. A mechanism describes itself as a *rig*:
+    its gains (values of its `LiveConfig`), how to command it, how far it may go, and what to
+    record (`Drive.steeringRig`). An experiment runs a test motion on it from the page, such as
+    the steering's step to 90° and back (`pitwall.experiments().add(new Experiment(...))`), with an
+    action's safety, and only while the page that started it stays in touch. Each run is recorded
+    at the sensors' own rate (250 Hz for the steering) and scored: rise, overshoot, settling,
+    steady-state error, and peak voltage and current. The page lays the runs side by side, the
+    best of each score marked, with Restore to put a run's gains back and the builder calls that
+    commit them. A gain changes only the way any value does, through the checks below.
+  - **Pushed, not polled:** the page follows the robot through one event stream that carries
+    only what changed, so a page left open costs the robot almost nothing.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
     around WPILib's NetworkTables backend: dashboards such as Elastic see and change them as always,
     but a change applies only while tuning is on, never on the field, and within the tunable's
@@ -112,11 +123,14 @@ Also built in:
   while disabled to start somewhere else. At kickoff, write the new game's the same way.
 - **A pose estimator built to be trusted** (`lib/localization`): 250 Hz odometry, with the gyro
   owning heading and the wheels' disagreement (slip) lowering their trust; camera measurements
-  applied at the moment their image was taken, however late they arrive; every measurement gated
+  applied at the moment their image was taken, even when they arrive late (up to 1.5 s, and
+  within their camera's usual latency plus a margin, or the clocks are out of step and the image
+  is left out); every measurement gated
   against the estimate, so a misread tag can't move it; and recovery when the cameras agree with
-  each other that odometry is wrong (a collision). It reports what it rests on (tracking,
-  dead reckoning, lost, gyro lost) and how sure it is, on Pitwall and in the log. Swerve and tank
-  kinematics plug in; so will any other drivetrain.
+  each other that odometry is wrong (a collision). A camera knocked off its mount counts for less
+  until it's recalibrated, and says so; a task lining up on a target can trust only that target's
+  tags. It reports what it rests on (tracking, dead reckoning, lost, gyro lost) and how sure it
+  is, on Pitwall and in the log. Swerve and tank kinematics plug in; so will any other drivetrain.
 - **A simulator that knows where the robot really is:** its wheels and gyro report the truth with
   the errors a season-worn robot has (worn tread, encoder zeros a little off, gyro scale, drift, and
   noise; `SensorErrors`), so odometry drifts as a real robot's does, and a wheel can be made to slip
@@ -164,6 +178,7 @@ Also built in:
 | `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, and the named scenarios (`Scenarios`). Only the simulator builds it. |
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
+| `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
@@ -177,14 +192,17 @@ Also built in:
 AdvantageKit's templates (BSD 3-Clause, Littleton Robotics); WPILib is BSD 3-Clause (FIRST and other
 WPILib contributors). Their licenses are in [`licenses/`](licenses/).
 
-The libraries the robot program uses come under their own licenses. None is in this repository
-(Gradle downloads them), so sharing the source shares none of them. A built robot program (the jar
-`deploy` sends) contains them all, so share source, never built jars:
+The libraries the robot program uses come under their own licenses. Only one is in this
+repository: uPlot, the plotting library Pitwall's page loads from the robot (no internet at an
+event), whose license is in [`licenses/`](licenses/). Gradle downloads the rest, so sharing the
+source shares none of them. A built robot program (the jar `deploy` sends) contains them all, so
+share source, never built jars:
 
 | Library | License |
 |---|---|
 | WPILib, including Commands v3 | BSD 3-Clause |
 | AdvantageKit | BSD 3-Clause |
 | PhotonLib | MIT |
+| uPlot 1.6.32, in `pitwall/` | MIT |
 | PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
 | CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
 import frc.robot.lib.config.CameraConfig;
@@ -73,6 +74,7 @@ class VisionTest {
                   .diagonalFieldOfView(Degrees.of(80))
                   .frameRate(Hertz.of(30))
                   .latency(Milliseconds.of(30))
+                  .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
           .build();

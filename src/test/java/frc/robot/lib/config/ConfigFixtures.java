@@ -87,6 +87,7 @@ public final class ConfigFixtures {
         .diagonalFieldOfView(Degrees.of(80))
         .frameRate(Hertz.of(30))
         .latency(Milliseconds.of(30))
+        .sightRange(Meters.of(7))
         .build();
   }
 

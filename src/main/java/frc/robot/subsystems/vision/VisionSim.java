@@ -2,6 +2,7 @@ package frc.robot.subsystems.vision;
 
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
 import frc.robot.lib.config.CameraConfig;
@@ -38,9 +39,6 @@ import org.wpilib.system.Timer;
  * layout.
  */
 public final class VisionSim implements AutoCloseable {
-  /** Tags farther than this are not detected: small in the image, and noisy. */
-  public static final double MAX_SIGHT_METERS = 7.0;
-
   /**
    * How far each tag corner lands from where a perfect camera would put it, in pixels, on average
    * and its spread: a little lens-calibration error. PhotonVision's own example values.
@@ -177,7 +175,8 @@ public final class VisionSim implements AutoCloseable {
     long cameraSeed = (seed - 1) * SEEDS_PER_WORLD + cameras.size() + 1;
     PhotonCameraSim simulated =
         new PhotonCameraSim(io.camera(), properties(config.sensor(), cameraSeed), layout);
-    simulated.setMaxSightRange(MAX_SIGHT_METERS);
+    // Tags farther than the camera's sight range are not detected: small in the image, and noisy.
+    simulated.setMaxSightRange(config.sensor().sightRange().in(Meters));
     Transform3d configured = config.robotToCamera();
     world.addCamera(simulated, mounted(configured, mountError));
     cameras.add(simulated);

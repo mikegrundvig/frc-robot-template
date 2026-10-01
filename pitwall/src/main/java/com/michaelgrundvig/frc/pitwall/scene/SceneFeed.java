@@ -35,12 +35,11 @@ final class SceneFeed implements Feed, SceneState {
   /** A move this much less than a step still counts as the step: floating point's slack. */
   private static final double SLACK = 1 - 1e-9;
 
-  private static final double ANGLE_STEP = Math.toRadians(Wire.DEGREE_STEP);
-
-  /** A frame's pose: as set now, and as last sent. */
+  /** A frame's pose: as set now, and as last sent, and how far it must move to be sent again. */
   private static final class Pose {
     final double[] now = new double[6];
     final double[] sent = new double[6];
+    SceneBuilder.Deadband deadband = SceneBuilder.Deadband.RESOLUTION;
     boolean set;
     boolean everSent;
   }
@@ -317,7 +316,8 @@ final class SceneFeed implements Feed, SceneState {
       List<Map<String, Object>> layers,
       List<Map<String, Supplier<Inspection>>> inspections,
       Set<String> frames,
-      Map<String, Double> values) {}
+      Map<String, Double> values,
+      Map<String, SceneBuilder.Deadband> deadbands) {}
 
   /**
    * Checks the layers' descriptions fit together, and puts them in the page's form.
@@ -371,6 +371,11 @@ final class SceneFeed implements Feed, SceneState {
     }
     Set<String> frameNames = new LinkedHashSet<>(allFrames.keySet());
     frameNames.add(SceneBuilder.ROOT);
+    String focus = scene.focus();
+    if (focus != null && !frameNames.contains(focus)) {
+      throw new IllegalArgumentException(
+          "scene " + scene.id() + " follows frame " + focus + ", which it doesn't have");
+    }
     Set<String> ids = new HashSet<>();
     List<Map<String, Object>> wires = new ArrayList<>();
     List<Map<String, Supplier<Inspection>>> inspections = new ArrayList<>();
@@ -401,7 +406,11 @@ final class SceneFeed implements Feed, SceneState {
       wires.add(Collections.unmodifiableMap(wire));
       inspections.add(Map.copyOf(inspected));
     }
-    return new Checked(wires, inspections, frameNames, allValues);
+    Map<String, SceneBuilder.Deadband> deadbands = new LinkedHashMap<>();
+    for (SceneBuilder builder : described) {
+      deadbands.putAll(builder.deadbands());
+    }
+    return new Checked(wires, inspections, frameNames, allValues, deadbands);
   }
 
   /**
@@ -451,12 +460,18 @@ final class SceneFeed implements Feed, SceneState {
     }
     Map<String, Object> wire = new LinkedHashMap<>();
     wire.put("title", scene.title());
+    String focus = scene.focus();
+    if (focus != null) {
+      wire.put("focus", focus);
+    }
     wire.put("layers", Collections.unmodifiableMap(layersWire));
     description = Collections.unmodifiableMap(wire);
     Map<String, Pose> poses = new LinkedHashMap<>();
     for (String name : checked.frames()) {
       if (!name.equals(SceneBuilder.ROOT)) {
-        poses.put(name, frames.getOrDefault(name, new Pose()));
+        Pose pose = frames.getOrDefault(name, new Pose());
+        pose.deadband = checked.deadbands().getOrDefault(name, SceneBuilder.Deadband.RESOLUTION);
+        poses.put(name, pose);
       }
     }
     frames = poses;
@@ -595,15 +610,18 @@ final class SceneFeed implements Feed, SceneState {
     return patch;
   }
 
-  /** Whether a pose has moved a step, a millimeter or a tenth of a degree, since last sent. */
+  /**
+   * Whether a pose has moved its deadband since last sent: by default a step, a millimeter or a
+   * tenth of a degree.
+   */
   private static boolean moved(Pose pose) {
     for (int i = 0; i < 3; i++) {
-      if (Math.abs(pose.now[i] - pose.sent[i]) >= Wire.METER_STEP * SLACK) {
+      if (Math.abs(pose.now[i] - pose.sent[i]) >= pose.deadband.meters() * SLACK) {
         return true;
       }
     }
     for (int i = 3; i < 6; i++) {
-      if (Wire.angleBetween(pose.now[i], pose.sent[i]) >= ANGLE_STEP * SLACK) {
+      if (Wire.angleBetween(pose.now[i], pose.sent[i]) >= pose.deadband.radians() * SLACK) {
         return true;
       }
     }

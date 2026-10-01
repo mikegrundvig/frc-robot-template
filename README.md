@@ -232,8 +232,9 @@ WPILib contributors). Their licenses are in [`licenses/`](licenses/).
 The libraries the robot program uses come under their own licenses. Only one is in this
 repository: uPlot, the plotting library Pitwall's page loads from the robot (no internet at an
 event), whose license is in [`licenses/`](licenses/). Gradle downloads the rest, so sharing the
-source shares none of them. A built robot program (the jar `deploy` sends) contains them all, so
-share source, never built jars:
+source shares none of them; three.js, which draws Pitwall's World view, is one, and its license is
+in [`licenses/`](licenses/) too, since its files go into Pitwall's jar for the page to load. A
+built robot program (the jar `deploy` sends) contains them all, so share source, never built jars:
 
 | Library | License |
 |---|---|
@@ -241,5 +242,6 @@ share source, never built jars:
 | AdvantageKit | BSD 3-Clause |
 | PhotonLib | MIT |
 | uPlot 1.6.32, in `pitwall/` | MIT |
+| three.js 0.181.1, three of its files in Pitwall's jar | MIT |
 | PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
 | CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |

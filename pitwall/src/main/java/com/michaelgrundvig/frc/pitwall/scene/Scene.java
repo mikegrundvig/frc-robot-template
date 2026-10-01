@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.pitwall.scene;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A view of the world the page draws in 3D, from data the robot program gives it: named frames,
@@ -12,7 +13,8 @@ import java.util.List;
  * pitwall.scenes().add(Scene.named("world", "World")
  *     .layer(field)
  *     .layer(robot)
- *     .layer(rays, Visibility.OFF));
+ *     .layer(rays, Visibility.OFF)
+ *     .focus("robot"));
  * }</pre>
  *
  * <p>The page offers a view of it once one is added, and only then: Pitwall without scenes shows no
@@ -33,6 +35,7 @@ public final class Scene {
   private final String id;
   private final String title;
   private final List<Entry> layers = new ArrayList<>();
+  private @Nullable String focus;
 
   private Scene(String id, String title) {
     this.id = Wire.name("A scene's id", id);
@@ -67,6 +70,20 @@ public final class Scene {
     }
     layers.add(new Entry(layer, visibility));
     return this;
+  }
+
+  /**
+   * The frame the page's Follow keeps in the middle of the view as it moves: the robot. Without
+   * one, the page offers no Follow.
+   */
+  public Scene focus(String frame) {
+    focus = Wire.name("A frame", frame);
+    return this;
+  }
+
+  /** The frame the page can follow, or null for none. */
+  @Nullable String focus() {
+    return focus;
   }
 
   /** Its id. */

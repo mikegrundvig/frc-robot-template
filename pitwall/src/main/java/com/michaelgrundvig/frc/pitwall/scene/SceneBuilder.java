@@ -32,8 +32,21 @@ public final class SceneBuilder extends ShapeList {
   /** A frame as described: its parent, and its pose there as the page reads it. */
   record Frame(String parent, Map<String, Object> wire) {}
 
+  /**
+   * How far a frame must move before it's sent again.
+   *
+   * @param meters along any axis
+   * @param radians about any axis
+   */
+  record Deadband(double meters, double radians) {
+    /** What the page shows: a millimeter, and a tenth of a degree. */
+    static final Deadband RESOLUTION =
+        new Deadband(Wire.METER_STEP, Math.toRadians(Wire.DEGREE_STEP));
+  }
+
   private final Map<String, Frame> frames = new LinkedHashMap<>();
   private final Map<String, Double> values = new LinkedHashMap<>();
+  private final Map<String, Deadband> deadbands = new LinkedHashMap<>();
 
   SceneBuilder() {}
 
@@ -104,6 +117,26 @@ public final class SceneBuilder extends ShapeList {
   }
 
   /**
+   * How far one of this layer's frames must move before it's sent again: by default a millimeter
+   * and a tenth of a degree, what the page shows. A frame whose pose is an estimate that wanders
+   * while the robot stands still takes a wider one, so a still robot sends nothing.
+   *
+   * @param meters along any axis
+   * @param radians about any axis
+   */
+  public SceneBuilder deadband(String frame, double meters, double radians) {
+    if (!frames.containsKey(frame)) {
+      throw new IllegalArgumentException("a deadband is for a frame this layer adds: " + frame);
+    }
+    if (!(meters >= Wire.METER_STEP) || !(radians >= Math.toRadians(Wire.DEGREE_STEP))) {
+      throw new IllegalArgumentException(
+          frame + ": a deadband is at least a millimeter and a tenth of a degree");
+    }
+    deadbands.put(frame, new Deadband(meters, radians));
+    return this;
+  }
+
+  /**
    * A value a shape's size can follow, zero until {@code update} sets it.
    *
    * @param resolution the smallest change worth sending, in its unit (meters for a length)
@@ -128,5 +161,10 @@ public final class SceneBuilder extends ShapeList {
   /** The values described, by name, with their resolutions. */
   Map<String, Double> values() {
     return values;
+  }
+
+  /** The frames given a deadband wider than the page's resolution. */
+  Map<String, Deadband> deadbands() {
+    return deadbands;
   }
 }

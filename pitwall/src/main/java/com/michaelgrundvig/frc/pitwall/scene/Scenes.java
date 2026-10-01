@@ -19,7 +19,8 @@ import java.util.function.LongSupplier;
  *   <li><b>The description</b> (frames and shapes) is built when a scene is added, checked whole,
  *       and goes to each page once, in its snapshot; again only when a layer's configuration
  *       changes. It's the {@code scenes} section of the page's state: {@code {id: {"title",
- *       "layers": {id: {"title", "shown", "frames", "shapes"}}}}}.
+ *       "focus", "layers": {id: {"title", "shown", "frames", "shapes"}}}}}, the focus being the
+ *       frame the page may follow, if the scene names one.
  *   <li><b>What moves</b> goes only to the pages that show the scene, as JSON merge patches at
  *       {@code scenes.<id>.state}: {@code {"frames": {name: pose}, "values": {name: number},
  *       "styles": {shape: style}, "shapes": {layer: [shape, ...]}}}. Each layer updates every loop

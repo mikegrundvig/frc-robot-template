@@ -164,21 +164,35 @@ class PitwallServerTest {
     assertThat(send("POST", "/page/main.js", null, null).statusCode()).isEqualTo(405);
   }
 
-  /** A module a view imports but the jar lacks would leave the page blank: each one is here. */
+  /**
+   * A module a view imports but the jar lacks would leave the page blank: each one is here, those
+   * loaded only when needed ({@code import("./scene-render.js")}) too, and the third-party modules
+   * they import from their fixed routes.
+   */
   @Test
   void everyModuleThePageImportsIsServed() throws Exception {
-    Pattern imports = Pattern.compile("from \"\\./([a-z][a-z0-9-]*\\.js)\"");
+    Pattern imports =
+        Pattern.compile("(?:from |import\\()\"(\\./|/three/)([A-Za-z][A-Za-z0-9.-]*\\.js)\"");
     List<String> seen = new ArrayList<>(List.of("main.js"));
+    List<String> third = new ArrayList<>();
     for (int i = 0; i < seen.size(); i++) {
       var module = get("/page/" + seen.get(i), "*/*");
       assertThat(module.statusCode()).as(seen.get(i)).isEqualTo(200);
       Matcher found = imports.matcher(module.body());
       while (found.find()) {
-        if (!seen.contains(found.group(1))) {
-          seen.add(found.group(1));
+        List<String> into = found.group(1).equals("./") ? seen : third;
+        if (!into.contains(found.group(2))) {
+          into.add(found.group(2));
         }
       }
     }
+    for (String module : third) {
+      var served = get("/three/" + module, "*/*");
+      assertThat(served.statusCode()).as(module).isEqualTo(200);
+      assertThat(served.headers().firstValue("Content-Type"))
+          .hasValue("text/javascript; charset=utf-8");
+    }
+    assertThat(third).containsExactlyInAnyOrder("three.module.min.js", "OrbitControls.js");
 
     assertThat(seen)
         .contains(
@@ -190,7 +204,33 @@ class PitwallServerTest {
             "sim.js",
             "sim-drive.js",
             "sim-faults.js",
-            "sim-outcome.js");
+            "sim-outcome.js",
+            "world.js",
+            "scene-render.js",
+            "scene-shapes.js");
+  }
+
+  /**
+   * three.js comes from its WebJar, its own minified build served whole. Its orbit controls import
+   * the module beside them rather than the bare name 'three', which only an inline import map could
+   * resolve, and the page's policy runs no inline script.
+   */
+  @Test
+  void threeJsIsServedFromItsWebJarImportingOnlyWhatsBesideIt() throws Exception {
+    var module = get("/three/three.module.min.js", "*/*");
+    var core = get("/three/three.core.min.js", "*/*");
+    var controls = get("/three/OrbitControls.js", "*/*");
+
+    assertThat(module.statusCode()).isEqualTo(200);
+    assertThat(module.body()).contains("from\"./three.core.min.js\"").contains("@license");
+    assertThat(core.statusCode()).isEqualTo(200);
+    assertThat(controls.body())
+        .contains("from './three.module.min.js'")
+        .doesNotContainPattern("from\\s+['\"]three['\"]");
+    assertThat(controls.headers().firstValue("Cache-Control")).hasValue("max-age=3600");
+    assertThat(get("/three/three.webgpu.min.js").statusCode())
+        .as("only the files the page loads")
+        .isEqualTo(404);
   }
 
   @Test

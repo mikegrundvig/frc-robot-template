@@ -10,8 +10,9 @@ import tune from "./tune.js";
 import experiment from "./experiment.js";
 import changes from "./changes.js";
 import sim from "./sim.js";
+import world from "./world.js";
 
-const views = [pit, tune, experiment, changes, sim];
+const views = [pit, tune, experiment, world, changes, sim];
 mountBar();
 mountApplyBar();
 const sections = new Map(); // view id -> its section

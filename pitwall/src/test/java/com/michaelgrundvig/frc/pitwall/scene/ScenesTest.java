@@ -162,7 +162,8 @@ class ScenesTest {
         Scene.named("world", "World")
             .layer(field)
             .layer(robotLayer)
-            .layer(rays, Scene.Visibility.OFF));
+            .layer(rays, Scene.Visibility.OFF)
+            .focus("robot"));
     return scenes.feeds().getFirst();
   }
 
@@ -183,7 +184,9 @@ class ScenesTest {
     String described = JSON.toJson(scenes.descriptions());
 
     assertThat(described)
-        .startsWith("{\"world\":{\"title\":\"World\",\"layers\":{\"field\":{\"title\":\"Field\",")
+        .startsWith(
+            "{\"world\":{\"title\":\"World\",\"focus\":\"robot\","
+                + "\"layers\":{\"field\":{\"title\":\"Field\",")
         .contains("\"rays\":{\"title\":\"Sight lines\",\"shown\":false")
         .contains("\"tag.7\":{\"parent\":\"field\",\"pose\":[4,1,0.5,0,0,180]}")
         .contains("\"camera\":{\"parent\":\"robot\",\"pose\":[0.3,0,0.5,0,-10,0]}")
@@ -383,6 +386,45 @@ class ScenesTest {
   }
 
   @Test
+  void aFrameWhosePoseWandersCanTakeAWiderDeadband() {
+    Layer wandering =
+        new Layer() {
+          @Override
+          public String id() {
+            return "wandering";
+          }
+
+          @Override
+          public String title() {
+            return "Wandering";
+          }
+
+          @Override
+          public void describe(SceneBuilder scene) {
+            scene.frame("estimate", "field").deadband("estimate", 0.01, Math.toRadians(0.5));
+          }
+
+          @Override
+          public void update(SceneState state) {
+            state.pose("estimate", robot);
+          }
+        };
+    scenes.add(Scene.named("world", "World").layer(wandering));
+    Feed feed = scenes.feeds().getFirst();
+    assertThat(loop(feed)).isEqualTo("{\"frames\":{\"estimate\":[1,2,0]}}");
+    for (int i = 0; i < 20; i++) {
+      robot = new Pose2d(1 + (i % 2 == 0 ? 0.004 : -0.004), 2, Rotation2d.fromDegrees(0.3));
+      assertThat(loop(feed)).as("wandering within it").isEqualTo("{}");
+    }
+
+    robot = new Pose2d(1.012, 2, Rotation2d.ZERO);
+    assertThat(loop(feed)).isEqualTo("{\"frames\":{\"estimate\":[1.012,2,0]}}");
+    assertRefused(scene -> scene.deadband("elsewhere", 0.01, 0.01), "a frame this layer adds");
+    assertRefused(
+        scene -> scene.frame("f", "field").deadband("f", 0.0001, 0.01), "at least a millimeter");
+  }
+
+  @Test
   void aLayerDescribedAgainWhenItsConfigurationChanges() {
     Feed feed = world();
     Map<String, Object> before = scenes.descriptions();
@@ -458,6 +500,9 @@ class ScenesTest {
         scene -> scene.arrow("a", "field").to(1, 0, 0).length("speed"), "follows value speed");
     assertRefused(scene -> scene.frame("field", "field"), "root frame");
     assertRefused(scene -> scene.polyline("p", "field").point(0, 0, 0), "two points");
+    assertThatThrownBy(
+            () -> new Scenes(clock::get, said::add).add(Scene.named("s", "S").focus("robot")))
+        .hasMessageContaining("follows frame robot, which it doesn't have");
     assertThatThrownBy(() -> Scene.named("world", "World").layer(field).layer(field))
         .hasMessageContaining("two layers named field");
     scenes.add(Scene.named("world", "World"));

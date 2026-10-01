@@ -69,5 +69,67 @@ tasks.named("test") {
     useJUnitPlatform()
 }
 
+// three.js, which draws the page's scenes, from its WebJar on Maven Central. The WebJar holds all
+// of three.js (13 MB); the page loads three files of it, three.js's own minified build and its orbit
+// controls, which go into Pitwall's resources and are served at fixed routes (/three/...), as uPlot
+// is. Nothing is downloaded by hand, and nothing is built.
+//
+// The orbit controls import three.js by its bare name ('three'). A browser resolves a bare name
+// only through an import map, and an import map is written inline in the page, which the page's
+// Content-Security-Policy (no inline script) refuses. So the copy imports the module beside it
+// instead, and fails if the file stops matching what's rewritten.
+configurations {
+    threeJs {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+dependencies {
+    threeJs libs.three.webjar
+}
+def threeVersion = libs.versions.three.get()
+def threeFiles = [
+    "build/three.module.min.js",
+    // what the page imports
+    "build/three.core.min.js",
+    // what that imports, from beside it
+    "examples/jsm/controls/OrbitControls.js",
+    // turning, panning, and zooming the view
+    "LICENSE",
+]
+def threeOut = layout.buildDirectory.dir("generated/three")
+def vendorThree = tasks.register("vendorThree", Sync) {
+    description = "Copies the files of three.js the page loads out of its WebJar, its addon importing the module beside it."
+    def webjar = configurations.threeJs
+    inputs.files(webjar)
+    from({ zipTree(webjar.singleFile) }) {
+        threeFiles.each { include "META-INF/resources/webjars/three/${threeVersion}/${it}" }
+        eachFile { it.path = "com/michaelgrundvig/frc/pitwall/three/${it.name}" }
+        filesMatching("**/OrbitControls.js") {
+            filter { line -> line.replaceAll(/from\s+(['"])three\1/, "from './three.module.min.js'") }
+        }
+    }
+    includeEmptyDirs = false
+    into threeOut
+    doLast {
+        def dir = threeOut.get().dir("com/michaelgrundvig/frc/pitwall/three").asFile
+        def expected = threeFiles.collect { it.tokenize("/").last() } as Set
+        def missing = expected - (dir.list() as Set)
+        if (missing) {
+            throw new GradleException("three.js ${threeVersion}'s WebJar has no ${missing}")
+        }
+        def controls = new File(dir, "OrbitControls.js").text
+        if (controls =~ /from\s+['"]three['"]/ || !controls.contains("from './three.module.min.js'")) {
+            throw new GradleException(
+            "three.js ${threeVersion}'s OrbitControls.js no longer imports 'three' as pitwall/build.gradle rewrites it")
+        }
+        if (!new File(dir, "three.module.min.js").text.contains('from"./three.core.min.js"')) {
+            throw new GradleException(
+            "three.js ${threeVersion}'s three.module.min.js no longer imports ./three.core.min.js from beside it")
+        }
+    }
+}
+sourceSets.main.resources.srcDir(vendorThree)
+
 ext.nullSafePackages = "com.michaelgrundvig.frc.pitwall"
 apply from: rootProject.file("gradle/quality.gradle")

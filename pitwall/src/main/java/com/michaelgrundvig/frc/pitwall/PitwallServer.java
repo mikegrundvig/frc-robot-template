@@ -201,10 +201,17 @@ public final class PitwallServer implements AutoCloseable {
 
   /**
    * Third-party files the page loads from here, as the robot has no internet at an event: uPlot,
-   * which draws the experiments' plots. Each is served if it's bundled.
+   * which draws the experiments' plots, and three.js, which draws the scenes (the World view loads
+   * it only when it's first shown). Each is served if it's bundled; three.js is taken out of its
+   * WebJar as Pitwall builds (pitwall/build.gradle).
    */
   private static final Map<String, String> BUNDLED =
-      Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
+      Map.of(
+          "/uPlot.iife.min.js", "text/javascript",
+          "/uPlot.min.css", "text/css",
+          "/three/three.module.min.js", "text/javascript",
+          "/three/three.core.min.js", "text/javascript",
+          "/three/OrbitControls.js", "text/javascript");
 
   /**
    * The page's own files besides index.html: a script module for its core and one for each view,
@@ -497,7 +504,10 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/simulator/faults", List.of("POST", "DELETE")),
             Map.entry("/api/simulator/scenarios", List.of("POST")),
             Map.entry("/uPlot.iife.min.js", List.of("GET")),
-            Map.entry("/uPlot.min.css", List.of("GET")));
+            Map.entry("/uPlot.min.css", List.of("GET")),
+            Map.entry("/three/three.module.min.js", List.of("GET")),
+            Map.entry("/three/three.core.min.js", List.of("GET")),
+            Map.entry("/three/OrbitControls.js", List.of("GET")));
 
     private final Page state;
     private final Status status;
@@ -606,7 +616,12 @@ public final class PitwallServer implements AutoCloseable {
             case "DELETE /api/simulator/faults" ->
                 answer(exchange, simulator().requestUndoAll(), this::componentsView);
             case "POST /api/simulator/scenarios" -> postScenario(exchange);
-            case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
+            case "GET /uPlot.iife.min.js",
+                "GET /uPlot.min.css",
+                "GET /three/three.module.min.js",
+                "GET /three/three.core.min.js",
+                "GET /three/OrbitControls.js" ->
+                sendBundled(exchange, path);
             default -> {
               Matcher device = DEVICE_ROUTE.matcher(path);
               Matcher inspect = INSPECT_ROUTE.matcher(path);

@@ -51,6 +51,7 @@ public final class Run {
 
   private final int id;
   private final Experiment experiment;
+  private final String controller;
   private final Map<String, Double> gains;
   private final Trace trace;
   private volatile long startNanos;
@@ -62,10 +63,13 @@ public final class Run {
    * A run, before its first loop. Its gains are read now.
    *
    * @param capacity how many samples each signal can hold
+   * @param controller the event stream of the page that started it, which keeps it going; null for
+   *     none
    */
-  Run(int id, Experiment experiment, int capacity) {
+  Run(int id, Experiment experiment, int capacity, @Nullable String controller) {
     this.id = id;
     this.experiment = experiment;
+    this.controller = controller == null ? "" : controller;
     gains = experiment.rig().gainValues();
     trace = new Trace(experiment.rig().traced(), capacity);
   }
@@ -77,6 +81,14 @@ public final class Run {
 
   public Experiment experiment() {
     return experiment;
+  }
+
+  /**
+   * The event stream of the page that started it, which keeps it going with its requests; empty
+   * when it was started without one.
+   */
+  public String controller() {
+    return controller;
   }
 
   /** The rig's gains as the run started, by path, each in its knob's unit. */
@@ -168,14 +180,6 @@ public final class Run {
   void cancel(String detail) {
     if (state.phase() == Phase.RUNNING) {
       end(Phase.CANCELED, detail, null);
-    }
-  }
-
-  /** Says better why a canceled run was canceled, once whoever canceled it knows. */
-  void explain(String detail) {
-    State now = state;
-    if (now.phase() == Phase.CANCELED) {
-      state = new State(Phase.CANCELED, detail, null);
     }
   }
 

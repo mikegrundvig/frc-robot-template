@@ -1,15 +1,16 @@
 package com.michaelgrundvig.frc.pitwall.experiment;
 
-import com.michaelgrundvig.frc.pitwall.ActionInputs;
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
@@ -18,11 +19,12 @@ import org.jspecify.annotations.Nullable;
  * The experiments the page can run, and the run in progress. Add one with a line: {@code
  * pitwall.experiments().add(new Experiment("Step to 90° and back", steering, profile))}.
  *
- * <p>Each experiment runs as a Commands v3 command through {@link Actions}, so it has what actions
- * have: it runs only while the robot is enabled in utility mode and never on the field, leaving
- * utility mode or disabling cancels it, and with AdvantageKit its starts and cancels are logged, so
- * a replay runs it again. Its trace comes from the rig's signals, which read logged inputs, so the
- * replay records the same trace. One experiment runs at a time.
+ * <p>Each run is a Commands v3 command requiring its rig's mechanisms, held to what actions are
+ * held to: it starts only while the robot is enabled in utility mode and never on the field, and
+ * leaving utility mode or disabling cancels it. One runs at a time. Like the page's other requests,
+ * starts and cancels wait for the robot loop, which applies and logs them, so a replay runs the
+ * same runs. Its trace comes from the rig's signals, which read logged inputs, so the replay
+ * records the same trace.
  *
  * <p>An experiment moves a mechanism, so it has a deadman as well: it runs only while the page that
  * started it keeps in touch. Every request from that page counts, and the page sends an empty
@@ -59,28 +61,53 @@ public final class Experiments {
     Actions.Routine launch(Run run);
   }
 
+  /**
+   * A request from the page, waiting for the robot loop.
+   *
+   * @param run for a cancel, the run it's for; 0 for a start
+   * @param why for a cancel, why, as the run's detail shows it; empty for "from the page"
+   * @param stream for a start, the event stream of the page asking; null for none
+   */
+  private record Request(
+      ExperimentInputs.Kind kind,
+      String name,
+      long run,
+      String why,
+      @Nullable String stream,
+      CompletableFuture<Outcome> outcome) {}
+
+  /**
+   * Whom the run in progress answers to, as one value so it changes whole: the page's stream, when
+   * it was last heard from, and whether its stream has closed.
+   */
+  private record Controller(@Nullable String stream, long heardNanos, boolean lost) {}
+
   private final Robot robot;
-  private final Actions runs;
+  private final Consumer<ExperimentInputs> logInputs;
   private final LongSupplier wallClock;
   private final boolean replaying;
   private final Launcher launcher;
+  private final Consumer<String> report;
   private final Map<String, Experiment> experiments = new LinkedHashMap<>();
   private final Map<String, Rig> rigs = new LinkedHashMap<>();
+  private final ConcurrentLinkedQueue<Request> queue = new ConcurrentLinkedQueue<>();
+  private final ExperimentInputs inputs = new ExperimentInputs();
+  private final AtomicReference<Controller> controller =
+      new AtomicReference<>(new Controller(null, 0, false));
   private volatile List<Experiment> experimentView = List.of();
   private volatile List<Rig> rigView = List.of();
   private volatile @Nullable Run run;
+
+  /** What drives the run in progress; touched only by the robot loop. */
+  private Actions.@Nullable Routine driving;
+
   private int runsStarted;
 
-  /** Which page asked to start each experiment: its event stream's id, or "" for none. */
-  private final Map<String, String> askedBy = new ConcurrentHashMap<>();
+  /** The last run whose end was reported. */
+  private int reportedThrough;
 
-  // The deadman: which page started the run, when it was last heard from, and whether it's gone.
-  private volatile @Nullable String controller;
-  private volatile long heardNanos;
-  private volatile boolean controllerLost;
-
-  /** Why the deadman canceled the run in progress, or null if it hasn't. */
-  private @Nullable String fired;
+  /** Whether the deadman has asked to cancel the run in progress, so it asks once. */
+  private boolean deadmanAsked;
 
   /**
    * @param robot the robot runs are recorded on
@@ -89,15 +116,21 @@ public final class Experiments {
    * @param robotClock the robot's clock, in nanoseconds ({@code RobotController::getTime}), which a
    *     replay reproduces
    * @param replaying whether this is a replay, where the log's cancels stand in for the deadman
+   * @param report told each run's end, in a sentence, such as why the deadman canceled it
    */
   public Experiments(
-      Robot robot, Consumer<ActionInputs> logInputs, LongSupplier robotClock, boolean replaying) {
+      Robot robot,
+      Consumer<ExperimentInputs> logInputs,
+      LongSupplier robotClock,
+      boolean replaying,
+      Consumer<String> report) {
     this(
         robot,
         logInputs,
         System::nanoTime,
         replaying,
-        run -> Actions.command(run.experiment().rig()::scheduler, () -> run.command(robotClock)));
+        run -> Actions.command(run.experiment().rig()::scheduler, () -> run.command(robotClock)),
+        report);
   }
 
   /**
@@ -106,15 +139,17 @@ public final class Experiments {
    */
   Experiments(
       Robot robot,
-      Consumer<ActionInputs> logInputs,
+      Consumer<ExperimentInputs> logInputs,
       LongSupplier wallClock,
       boolean replaying,
-      Launcher launcher) {
+      Launcher launcher,
+      Consumer<String> report) {
     this.robot = robot;
-    runs = new Actions(logInputs);
+    this.logInputs = logInputs;
     this.wallClock = wallClock;
     this.replaying = replaying;
     this.launcher = launcher;
+    this.report = report;
   }
 
   /**
@@ -144,7 +179,6 @@ public final class Experiments {
     if (known != null && known != rig) {
       throw new IllegalArgumentException("two rigs are named " + rig.name());
     }
-    runs.add(name, routine(experiment));
     experiments.put(name, experiment);
     rigs.put(rig.name(), rig);
     experimentView = List.copyOf(experiments.values());
@@ -183,16 +217,22 @@ public final class Experiments {
    * Asks the robot loop to start an experiment. Safe to call from any thread.
    *
    * @param stream the event stream of the page asking, whose silence the deadman watches; null for
-   *     a client without one
+   *     none, when requests naming no stream keep the run going
    */
   public CompletableFuture<Outcome> requestStart(String name, @Nullable String stream) {
-    askedBy.put(name, stream == null ? "" : stream);
-    return runs.requestStart(name);
+    return enqueue(ExperimentInputs.Kind.START, name, 0, "", stream);
   }
 
-  /** Asks the robot loop to cancel an experiment, if it's running. Safe to call from any thread. */
-  public CompletableFuture<Outcome> requestCancel(String name) {
-    return runs.requestCancel(name);
+  /**
+   * Asks the robot loop to cancel a run, if it's still the one running. Safe to call from any
+   * thread.
+   *
+   * @param run the run to cancel: a cancel meant for a run that has ended never stops the next
+   * @param why why, as the run's detail will say, such as {@code "this tab was hidden"}; empty for
+   *     "from the page"
+   */
+  public CompletableFuture<Outcome> requestCancel(String name, long run, String why) {
+    return enqueue(ExperimentInputs.Kind.CANCEL, name, run, why, null);
   }
 
   /**
@@ -202,9 +242,9 @@ public final class Experiments {
    * @param stream the event stream of the page it came from; null for none
    */
   public void heard(@Nullable String stream) {
-    if (Objects.equals(stream, controller)) {
-      heardNanos = wallClock.getAsLong();
-    }
+    long now = wallClock.getAsLong();
+    controller.updateAndGet(
+        c -> Objects.equals(stream, c.stream()) ? new Controller(c.stream(), now, c.lost()) : c);
   }
 
   /**
@@ -212,9 +252,8 @@ public final class Experiments {
    * from any thread.
    */
   public void lost(String stream) {
-    if (stream.equals(controller)) {
-      controllerLost = true;
-    }
+    controller.updateAndGet(
+        c -> stream.equals(c.stream()) ? new Controller(c.stream(), c.heardNanos(), true) : c);
   }
 
   /**
@@ -223,99 +262,177 @@ public final class Experiments {
    */
   public void periodic(Actions.Gate gate) {
     Run current = run;
-    boolean wasRunning = current != null && current.state().phase() == Run.Phase.RUNNING;
-    if (current != null && wasRunning && !replaying && fired == null) {
+    reportIfEnded(current); // runs end in the scheduler, after the last loop's periodic
+    if (current != null && isRunning(current) && !replaying && !deadmanAsked) {
       String quiet = whyQuiet();
       if (quiet != null) {
         // A request like the page's own, so it's logged, and a replay cancels at the same moment.
-        fired = quiet;
-        runs.requestCancel(current.experiment().name());
+        deadmanAsked = true;
+        requestCancel(current.experiment().name(), current.id(), quiet);
       }
     }
-    runs.periodic(gate);
-    if (current == null || !wasRunning) {
-      return;
+    List<Request> requests = drainInto(inputs);
+    logInputs.accept(inputs); // in replay, this replaces them with the logged ones
+
+    Actions.Routine routine = driving;
+    if (current != null && isRunning(current) && routine != null && !isDriven(routine)) {
+      current.cancel("Canceled: its command stopped before the run ended");
     }
-    // Stopped by something other than its own end: say what, as the actions say it.
-    Actions.State action = stateOf(current.experiment().name());
-    String why =
-        fired != null
-            ? "Canceled: " + fired
-            : action.phase() == Actions.Phase.CANCELED
-                ? action.detail()
-                : "Canceled: its command stopped before the run ended";
-    if (current.state().phase() == Run.Phase.RUNNING && action.phase() != Actions.Phase.RUNNING) {
-      current.cancel(why); // it never got to run, so its command couldn't say
-    } else if (action.phase() == Actions.Phase.CANCELED) {
-      current.explain(why);
+    String locked = whyLocked(gate);
+    if (current != null && isRunning(current) && locked != null) {
+      stop(current, "Canceled: " + locked);
     }
+    List<Outcome> outcomes = new ArrayList<>();
+    for (int i = 0; i < inputs.kinds.length; i++) {
+      // In a replay the requests come from the log, which keeps what was asked, not why.
+      Request request = i < requests.size() ? requests.get(i) : null;
+      outcomes.add(
+          apply(
+              ExperimentInputs.Kind.valueOf(inputs.kinds[i]),
+              inputs.names[i],
+              i < inputs.runs.length ? inputs.runs[i] : 0,
+              request != null ? request.why() : "",
+              request != null ? request.stream() : null,
+              locked));
+    }
+    reportIfEnded(current);
+    reportIfEnded(run);
+    // Only now, so whoever is waiting sees the state their request left. In replay, no one is.
+    for (int i = 0; i < requests.size() && i < outcomes.size(); i++) {
+      requests.get(i).outcome().complete(outcomes.get(i));
+    }
+  }
+
+  private Outcome apply(
+      ExperimentInputs.Kind kind,
+      String name,
+      long runId,
+      String why,
+      @Nullable String stream,
+      @Nullable String locked) {
+    Experiment experiment = experiments.get(name);
+    if (experiment == null) {
+      return new Outcome(Outcome.Result.REFUSED, "There is no experiment named " + name);
+    }
+    Run current = run;
+    boolean busy = current != null && isRunning(current);
+    if (kind == ExperimentInputs.Kind.CANCEL) {
+      if (current == null || !busy || !current.experiment().name().equals(name)) {
+        return new Outcome(Outcome.Result.LOCKED, name + " isn't running");
+      }
+      if (runId != 0 && current.id() != runId) {
+        return new Outcome(Outcome.Result.LOCKED, "Run " + runId + " has ended already");
+      }
+      stop(current, why.isEmpty() ? "Canceled from the page" : "Canceled: " + why);
+      return Outcome.applied();
+    }
+    if (locked != null) {
+      return new Outcome(Outcome.Result.LOCKED, "Experiments are locked: " + locked);
+    }
+    if (current != null && busy) {
+      return new Outcome(
+          Outcome.Result.REFUSED,
+          current.experiment().name() + " is running; one experiment runs at a time");
+    }
+    Run next = new Run(runsStarted + 1, experiment, capacity(experiment), stream);
+    Actions.Routine launched = launcher.launch(next);
+    String refused;
+    try {
+      refused = launched.start();
+    } catch (RuntimeException e) {
+      refused = String.valueOf(e.getMessage());
+    }
+    if (refused != null) {
+      return new Outcome(Outcome.Result.REFUSED, refused);
+    }
+    runsStarted++;
+    driving = launched;
+    controller.set(new Controller(stream, wallClock.getAsLong(), false));
+    deadmanAsked = false;
+    run = next;
+    return Outcome.applied();
+  }
+
+  /**
+   * Stops a run, saying why first: its command's own cleanup, which runs as the command is
+   * canceled, then finds it ended and leaves the reason alone.
+   */
+  private void stop(Run current, String why) {
+    current.cancel(why);
+    Actions.Routine routine = driving;
+    if (routine != null) {
+      try {
+        routine.cancel();
+      } catch (RuntimeException e) {
+        report.accept(current + " (canceling its command failed: " + e + ")");
+      }
+    }
+  }
+
+  /** Says once how a run ended: printed for the team, and with AdvantageKit, logged. */
+  private void reportIfEnded(@Nullable Run ended) {
+    if (ended != null && !isRunning(ended) && ended.id() > reportedThrough) {
+      reportedThrough = ended.id();
+      report.accept(ended.toString());
+    }
+  }
+
+  private static boolean isRunning(Run run) {
+    return run.state().phase() == Run.Phase.RUNNING;
+  }
+
+  private static boolean isDriven(Actions.Routine routine) {
+    try {
+      return routine.isRunning();
+    } catch (RuntimeException e) {
+      return false;
+    }
+  }
+
+  /** Why experiments can't run now, or null when they can. */
+  private static @Nullable String whyLocked(Actions.Gate gate) {
+    if (gate.fieldConnected()) {
+      return "the field system is connected";
+    }
+    if (!gate.enabled() || !gate.utility()) {
+      return "experiments run only with the robot enabled in utility mode";
+    }
+    return null;
   }
 
   /** Why the deadman cancels the run in progress, or null while its page keeps in touch. */
   private @Nullable String whyQuiet() {
-    if (controllerLost) {
+    Controller now = Objects.requireNonNull(controller.get());
+    if (now.lost()) {
       return "the page that started it closed";
     }
-    if (wallClock.getAsLong() - heardNanos > DEADMAN.toNanos()) {
+    if (wallClock.getAsLong() - now.heardNanos() > DEADMAN.toNanos()) {
       return "the page that started it went quiet for over " + DEADMAN.toMillis() + " ms";
     }
     return null;
   }
 
-  private Actions.State stateOf(String name) {
-    for (Actions.State state : runs.view()) {
-      if (state.name().equals(name)) {
-        return state;
-      }
-    }
-    throw new IllegalStateException("no experiment named " + name);
+  private CompletableFuture<Outcome> enqueue(
+      ExperimentInputs.Kind kind, String name, long run, String why, @Nullable String stream) {
+    CompletableFuture<Outcome> outcome = new CompletableFuture<>();
+    queue.add(new Request(kind, name, run, why, stream, outcome));
+    return outcome;
   }
 
-  /**
-   * How an experiment starts as an action: refused while another runs; otherwise a new run, driven
-   * by the launcher, watched by the deadman from now.
-   */
-  private Actions.Routine routine(Experiment experiment) {
-    return new Actions.Routine() {
-      private Actions.@Nullable Routine running;
-
-      @Override
-      public @Nullable String start() {
-        Run current = run;
-        if (current != null && current.state().phase() == Run.Phase.RUNNING) {
-          return current.experiment().name() + " is running; one experiment runs at a time";
-        }
-        Run next = new Run(runsStarted + 1, experiment, capacity(experiment));
-        Actions.Routine launched = launcher.launch(next);
-        String refused = launched.start();
-        if (refused != null) {
-          return refused;
-        }
-        runsStarted++;
-        running = launched;
-        String asker = askedBy.remove(experiment.name());
-        controller = asker == null || asker.isEmpty() ? null : asker;
-        controllerLost = false;
-        heardNanos = wallClock.getAsLong();
-        fired = null;
-        run = next;
-        return null;
-      }
-
-      @Override
-      public boolean isRunning() {
-        Actions.Routine launched = running;
-        return launched != null && launched.isRunning();
-      }
-
-      @Override
-      public void cancel() {
-        Actions.Routine launched = running;
-        if (launched != null) {
-          launched.cancel();
-        }
-      }
-    };
+  /** Moves the queued requests into the inputs, and returns them in request order. */
+  private List<Request> drainInto(ExperimentInputs inputs) {
+    if (queue.isEmpty()) {
+      inputs.clearRequests();
+      return List.of();
+    }
+    List<Request> requests = new ArrayList<>();
+    for (Request request = queue.poll(); request != null; request = queue.poll()) {
+      requests.add(request);
+    }
+    inputs.kinds = requests.stream().map(r -> r.kind().name()).toArray(String[]::new);
+    inputs.names = requests.stream().map(Request::name).toArray(String[]::new);
+    inputs.runs = requests.stream().mapToLong(Request::run).toArray();
+    return requests;
   }
 
   /** Room in each signal's series for the whole run at 1 kHz, and half a second to spare. */

@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import com.michaelgrundvig.frc.pitwall.experiment.ExperimentInputs;
 import java.util.function.Consumer;
 import org.littletonrobotics.junction.LogTable;
 import org.littletonrobotics.junction.Logger;
@@ -27,12 +28,16 @@ final class AdvantageKitLog {
   }
 
   static Consumer<ActionInputs> actions() {
-    return new ActionLog("Pitwall/Actions");
+    return new ActionLog();
   }
 
-  /** The experiments' starts and cancels, logged like actions' (they run as actions). */
-  static Consumer<ActionInputs> experiments() {
-    return new ActionLog("Pitwall/Experiments");
+  static Consumer<ExperimentInputs> experiments() {
+    return new ExperimentLog();
+  }
+
+  /** Says how a run ended, in the log beside its requests. */
+  static void runEnded(String what) {
+    Logger.recordOutput("Pitwall/Experiments/Ended", what);
   }
 
   static Consumer<TunableInputs> tunables() {
@@ -83,18 +88,37 @@ final class AdvantageKitLog {
     }
   }
 
-  static final class ActionLog implements Consumer<ActionInputs>, LoggableInputs {
-    private final String key;
-    private ActionInputs inputs = new ActionInputs();
+  static final class ExperimentLog implements Consumer<ExperimentInputs>, LoggableInputs {
+    private ExperimentInputs inputs = new ExperimentInputs();
 
-    ActionLog(String key) {
-      this.key = key;
+    @Override
+    public void accept(ExperimentInputs inputs) {
+      this.inputs = inputs;
+      Logger.processInputs("Pitwall/Experiments", this);
     }
+
+    @Override
+    public void toLog(LogTable table) {
+      table.put("Kinds", inputs.kinds);
+      table.put("Names", inputs.names);
+      table.put("Runs", inputs.runs);
+    }
+
+    @Override
+    public void fromLog(LogTable table) {
+      inputs.kinds = table.get("Kinds", inputs.kinds);
+      inputs.names = table.get("Names", inputs.names);
+      inputs.runs = table.get("Runs", inputs.runs);
+    }
+  }
+
+  static final class ActionLog implements Consumer<ActionInputs>, LoggableInputs {
+    private ActionInputs inputs = new ActionInputs();
 
     @Override
     public void accept(ActionInputs inputs) {
       this.inputs = inputs;
-      Logger.processInputs(key, this);
+      Logger.processInputs("Pitwall/Actions", this);
     }
 
     @Override

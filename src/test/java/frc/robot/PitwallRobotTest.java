@@ -286,7 +286,7 @@ class PitwallRobotTest {
     Run run = Objects.requireNonNull(pitwall.experiments().run());
     assertThat(run.state().phase()).isEqualTo(Run.Phase.CANCELED);
     assertThat(run.state().detail())
-        .isEqualTo("Canceled: actions run only with the robot enabled in utility mode");
+        .isEqualTo("Canceled: experiments run only with the robot enabled in utility mode");
     assertThat(lag.scheduler.getRunningCommands()).isEmpty();
   }
 

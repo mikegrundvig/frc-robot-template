@@ -12,6 +12,7 @@ import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,6 +38,10 @@ class ExperimentsTest {
   private final Rig rig = lag.rig();
   private final AtomicLong wallClock = new AtomicLong();
   private final List<String> logged = new ArrayList<>();
+  private final List<String> reported = new ArrayList<>();
+
+  /** What a replay's log supplies, loop by loop. */
+  private final ExperimentInputs replayed = new ExperimentInputs();
 
   /** Drives each run by hand, as the scheduler would drive its command. */
   private @Nullable Run driven;
@@ -66,11 +71,23 @@ class ExperimentsTest {
   private Experiments experiments(boolean replaying) {
     return new Experiments(
             new Experiments.Robot("test", true, "abc12345 on main"),
-            inputs ->
-                logged.add(String.join(",", inputs.kinds) + "|" + String.join(",", inputs.names)),
+            inputs -> {
+              if (replaying) {
+                inputs.kinds = replayed.kinds;
+                inputs.names = replayed.names;
+                inputs.runs = replayed.runs;
+              }
+              logged.add(
+                  String.join(",", inputs.kinds)
+                      + "|"
+                      + String.join(",", inputs.names)
+                      + "|"
+                      + Arrays.toString(inputs.runs));
+            },
             wallClock::get,
             replaying,
-            byHand)
+            byHand,
+            reported::add)
         .add(new Experiment(STEP, rig, Lag.STEP_AND_BACK));
   }
 
@@ -169,7 +186,7 @@ class ExperimentsTest {
         .isEqualTo(
             new Run.State(
                 Run.Phase.CANCELED,
-                "Canceled: actions run only with the robot enabled in utility mode",
+                "Canceled: experiments run only with the robot enabled in utility mode",
                 null));
   }
 
@@ -178,7 +195,7 @@ class ExperimentsTest {
     start(experiments);
     loopsInTouch(10);
 
-    var outcome = experiments.requestCancel(STEP);
+    var outcome = experiments.requestCancel(STEP, run().id(), "");
     loop(READY);
 
     assertThat(outcome.getNow(null)).isEqualTo(new Outcome(Outcome.Result.APPLIED, ""));
@@ -240,7 +257,10 @@ class ExperimentsTest {
     wallClock.addAndGet(Duration.ofSeconds(1).toNanos());
     loop(READY);
 
-    assertThat(logged).containsExactly("CANCEL|" + STEP);
+    assertThat(logged).containsExactly("CANCEL|" + STEP + "|[1]");
+    assertThat(reported)
+        .containsExactly(
+            "run 1 of " + STEP + ": Canceled: the page that started it went quiet for over 500 ms");
   }
 
   @Test
@@ -276,14 +296,18 @@ class ExperimentsTest {
   @Test
   void aReplayRunsWithoutTheDeadman() {
     Experiments replay = experiments(true);
-    replay.requestStart(STEP, PAGE); // stands in for the logged start
+    replayed.kinds = new String[] {"START"};
+    replayed.names = new String[] {STEP};
+    replayed.runs = new long[] {0};
     replay.periodic(READY);
+    replayed.clearRequests();
     Run run = Objects.requireNonNull(replay.run());
 
     wallClock.addAndGet(Duration.ofSeconds(10).toNanos());
     replay.periodic(READY);
 
     assertThat(run.state().phase()).isEqualTo(Run.Phase.RUNNING);
+    assertThat(run.controller()).as("a replay has no page").isEmpty();
   }
 
   @Test
@@ -308,7 +332,8 @@ class ExperimentsTest {
 
                       @Override
                       public void cancel() {}
-                    })
+                    },
+                ended -> {})
             .add(new Experiment(STEP, rig, Lag.STEP_AND_BACK));
     stalled.requestStart(STEP, PAGE);
     stalled.periodic(READY);
@@ -343,7 +368,8 @@ class ExperimentsTest {
 
                       @Override
                       public void cancel() {}
-                    })
+                    },
+                ended -> {})
             .add(new Experiment(STEP, rig, Lag.STEP_AND_BACK));
 
     var outcome = busy.requestStart(STEP, PAGE);
@@ -392,6 +418,48 @@ class ExperimentsTest {
         .withMessage("an experiment needs a name");
     assertThat(new Experiment("x", rig, Lag.STEP_AND_BACK).settings())
         .isEqualTo(Lag.STEP_AND_BACK.toString());
+  }
+
+  /**
+   * A page cancels the run it sees just as that run ends and another page starts the next, all in
+   * one loop: the cancel names the run it meant, so the new run goes on.
+   */
+  @Test
+  void aCancelForARunThatHasEndedNeverStopsTheNext() {
+    start(experiments);
+    loopsInTouch(110);
+    assertThat(run().state().phase()).isEqualTo(Run.Phase.ENDED);
+
+    var started = experiments.requestStart(STEP, PAGE);
+    var late = experiments.requestCancel(STEP, 1, "");
+    loop(READY);
+
+    assertThat(started.getNow(null)).isEqualTo(Outcome.applied());
+    assertThat(late.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.LOCKED, "Run 1 has ended already"));
+    assertThat(run().id()).isEqualTo(2);
+    assertThat(run().state().phase()).isEqualTo(Run.Phase.RUNNING);
+    assertThat(logged.get(logged.size() - 1))
+        .isEqualTo("START,CANCEL|" + STEP + "," + STEP + "|[0, 1]");
+  }
+
+  @Test
+  void aCancelSaysWhyAndCancelingWhatIsntRunningChangesNothing() {
+    var idle = experiments.requestCancel(STEP, 0, "");
+    loop(READY);
+    start(experiments);
+
+    var hidden = experiments.requestCancel(STEP, run().id(), "this tab was hidden");
+    loop(READY);
+
+    assertThat(idle.getNow(null))
+        .isEqualTo(new Outcome(Outcome.Result.LOCKED, STEP + " isn't running"));
+    assertThat(hidden.getNow(null)).isEqualTo(Outcome.applied());
+    assertThat(run().state().detail())
+        .as("its command's own cleanup doesn't change it")
+        .isEqualTo("Canceled: this tab was hidden");
+    assertThat(run().controller()).isEqualTo(PAGE);
+    assertThat(reported).containsExactly("run 1 of " + STEP + ": Canceled: this tab was hidden");
   }
 
   /**

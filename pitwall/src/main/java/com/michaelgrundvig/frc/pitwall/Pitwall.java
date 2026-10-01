@@ -73,7 +73,14 @@ public final class Pitwall implements AutoCloseable {
             new Experiments.Robot(name, RobotBase.isSimulation(), code != null ? code.get() : ""),
             advantageKit ? AdvantageKitLog.experiments() : inputs -> {},
             RobotController::getTime,
-            replaying);
+            replaying,
+            ended -> {
+              // How a run ended, and why: in the Driver Station's console, and the log.
+              System.out.println("Pitwall: " + ended);
+              if (advantageKit) {
+                AdvantageKitLog.runEnded(ended);
+              }
+            });
     // Every WPILib tunable in the program goes through Pitwall's tee, wrapped around WPILib's own
     // NetworkTables backend: dashboards see what they always did, while changes are locked with
     // tuning and logged for replay, and the page lists every tunable.

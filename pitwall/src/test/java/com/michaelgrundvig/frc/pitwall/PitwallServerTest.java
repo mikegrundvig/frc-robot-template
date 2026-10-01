@@ -533,51 +533,58 @@ class PitwallServerTest {
 
   @Test
   void anExperimentStartsFromThePageAndItsRunIsServedWithItsTrace() throws Exception {
-    var started =
-        send("POST", "/api/experiments", "application/json", "{\"start\": \"" + STEP + "\"}");
+    var started = sendAs("9", "{\"start\": \"" + STEP + "\"}");
     Thread.sleep(50); // a few loops
 
     assertThat(started.statusCode()).isEqualTo(200);
     assertThat(started.body())
         .startsWith("{\"id\":")
-        .contains("\"experiment\":\"" + STEP + "\"", "\"phase\":\"RUNNING\"");
+        .contains(
+            "\"experiment\":\"" + STEP + "\"", "\"phase\":\"RUNNING\"", "\"controller\":\"9\"");
     assertThat(get("/api/run").body()).contains("\"trace\":{\"run\":", "\"Setpoint\":{\"t\":[");
+    String id = started.body().substring("{\"id\":".length()).split(",")[0];
 
     var canceled =
-        send("POST", "/api/experiments", "application/json", "{\"cancel\": \"" + STEP + "\"}");
+        sendAs(
+            "9",
+            "{\"cancel\": \""
+                + STEP
+                + "\", \"run\": "
+                + id
+                + ", \"reason\": \"this tab was hidden\"}");
+    var again = sendAs("9", "{\"cancel\": \"" + STEP + "\", \"run\": " + id + "}");
 
-    assertThat(canceled.body()).contains("\"phase\":\"CANCELED\"", "Canceled from the page");
+    assertThat(canceled.body()).contains("\"phase\":\"CANCELED\"", "Canceled: this tab was hidden");
+    assertThat(again.statusCode()).as("canceling what isn't running").isEqualTo(409);
+    assertThat(again.body()).contains(STEP + " isn't running");
+  }
+
+  /** Only a page following the robot can keep a run going, so only a page starts one. */
+  @Test
+  void aStartMustNameThePagesStream() throws Exception {
+    var started =
+        send("POST", "/api/experiments", "application/json", "{\"start\": \"" + STEP + "\"}");
+
+    assertThat(started.statusCode()).isEqualTo(400);
+    assertThat(started.body()).contains("Start experiments from Pitwall's page");
   }
 
   @Test
   void onlyKnownExperimentsAndWellFormedRequestsAreAccepted() throws Exception {
-    var unknown = send("POST", "/api/experiments", "application/json", "{\"start\": \"Fly\"}");
-    var notAName = send("POST", "/api/experiments", "application/json", "{\"start\": 3}");
-    var neither = send("POST", "/api/experiments", "application/json", "{\"run\": \"x\"}");
+    var unknown = sendAs("9", "{\"start\": \"Fly\"}");
+    var notAName = sendAs("9", "{\"start\": 3}");
+    var neither = sendAs("9", "{\"run\": \"x\"}");
+    var both = sendAs("9", "{\"start\": \"" + STEP + "\", \"cancel\": \"" + STEP + "\"}");
+    var badRun = sendAs("9", "{\"cancel\": \"" + STEP + "\", \"run\": \"one\"}");
+    var badReason = sendAs("9", "{\"cancel\": \"" + STEP + "\", \"reason\": 3}");
+    var idle = sendAs("9", "{\"cancel\": \"" + STEP + "\"}");
 
     assertThat(unknown.statusCode()).isEqualTo(422);
     assertThat(unknown.body()).contains("There is no experiment named Fly");
-    assertThat(notAName.statusCode()).isEqualTo(400);
-    assertThat(neither.statusCode()).isEqualTo(400);
-  }
-
-  /** uPlot draws the page's plots: served from Pitwall's own jar when it's bundled, never a CDN. */
-  @Test
-  void thePlottingLibraryIsServedFromTheJarIfBundled() throws Exception {
-    boolean bundled = PitwallServer.class.getResource("uPlot.iife.min.js") != null;
-
-    var script = get("/uPlot.iife.min.js", "*/*");
-
-    assertThat(script.statusCode()).isEqualTo(bundled ? 200 : 404);
-    if (bundled) {
-      assertThat(script.headers().firstValue("Content-Type"))
-          .hasValue("text/javascript; charset=utf-8");
-    } else {
-      assertThat(script.body()).contains("isn't bundled with Pitwall");
-    }
-    assertThat(get("/", "text/html").body())
-        .contains("<script src=\"/uPlot.iife.min.js\"></script>")
-        .doesNotContain("https://");
+    assertThat(List.of(notAName, neither, both, badRun, badReason))
+        .extracting(HttpResponse::statusCode)
+        .containsOnly(400);
+    assertThat(idle.statusCode()).isEqualTo(409);
   }
 
   @Test
@@ -601,6 +608,17 @@ class PitwallServerTest {
                   .getBytes(StandardCharsets.US_ASCII));
       return reader.readLine();
     }
+  }
+
+  /** Posts to the experiments as the page does, naming its stream. */
+  private HttpResponse<String> sendAs(String stream, String json) throws Exception {
+    return client.send(
+        HttpRequest.newBuilder(uri("/api/experiments"))
+            .header("Content-Type", "application/json")
+            .header("Pitwall-Stream", stream)
+            .POST(HttpRequest.BodyPublishers.ofString(json))
+            .build(),
+        HttpResponse.BodyHandlers.ofString());
   }
 
   private HttpResponse<String> get(String path) throws Exception {

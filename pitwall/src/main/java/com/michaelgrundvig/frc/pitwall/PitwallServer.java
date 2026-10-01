@@ -25,6 +25,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -69,7 +70,8 @@ import org.jspecify.annotations.Nullable;
  *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
  *       within its limits.
  *   <li>{@code GET /api/experiments}: the rigs and the experiments that run on them. {@code POST}
- *       it {@code {"start": name}} or {@code {"cancel": name}}.
+ *       it {@code {"start": name}}, naming the page's stream, or {@code {"cancel": name, "run": id,
+ *       "reason": why}}; canceling what isn't running is 409.
  *   <li>{@code GET /api/run}: the run in progress, or the latest to end, with its trace.
  *   <li>{@code POST /api/heartbeat}: nothing, but it keeps a run going: while an experiment runs,
  *       the page that started it sends a request at least every 500 ms (the deadman), naming its
@@ -436,13 +438,24 @@ public final class PitwallServer implements AutoCloseable {
           this::actionStates);
     }
 
+    /**
+     * Starts or cancels an experiment. A start names the page's stream, which the deadman watches:
+     * only a page following the robot can keep a run going. A cancel names the run, so one meant
+     * for a run that has just ended never stops the next, and may say why.
+     */
     private void postExperiment(HttpExchange exchange) throws IOException {
       Map<String, @Nullable Object> body = readObject(exchange);
       Object start = body.get("start");
       Object cancel = body.get("cancel");
       Object name = start != null ? start : cancel;
-      if (body.size() != 1 || name == null) {
-        throw new Problem(400, "Start or cancel", "Send {\"start\": name} or {\"cancel\": name}");
+      Set<String> allowed = start != null ? Set.of("start") : Set.of("cancel", "run", "reason");
+      if (name == null
+          || (start != null && cancel != null)
+          || !allowed.containsAll(body.keySet())) {
+        throw new Problem(
+            400,
+            "Start or cancel",
+            "Send {\"start\": name}, or {\"cancel\": name, \"run\": id, \"reason\": why}");
       }
       if (!(name instanceof String experiment)) {
         throw new Problem(400, "Not a name", "An experiment's name is a string");
@@ -450,12 +463,37 @@ public final class PitwallServer implements AutoCloseable {
       if (!experiments.has(experiment)) {
         throw new Problem(422, "Not an experiment", "There is no experiment named " + experiment);
       }
-      answer(
-          exchange,
-          start != null
-              ? experiments.requestStart(experiment, exchange.getRequestHeaders().getFirst(STREAM))
-              : experiments.requestCancel(experiment),
-          () -> run(false));
+      if (start != null) {
+        String stream = exchange.getRequestHeaders().getFirst(STREAM);
+        if (stream == null || stream.isBlank()) {
+          throw new Problem(
+              400,
+              "No page to keep it going",
+              "Start experiments from Pitwall's page: a start names the page's event stream ("
+                  + STREAM
+                  + "), and the run goes on only while that page keeps in touch");
+        }
+        answer(exchange, experiments.requestStart(experiment, stream), () -> run(false));
+        return;
+      }
+      long runId = 0;
+      if (body.get("run") instanceof Number number) {
+        runId = number.longValue();
+      } else if (body.containsKey("run")) {
+        throw new Problem(400, "Not a run", "A run is named by its number");
+      }
+      Object reason = body.getOrDefault("reason", "");
+      if (!(reason instanceof String why) || why.length() > 200) {
+        throw new Problem(400, "Not a reason", "A reason is a sentence of text");
+      }
+      Run running = experiments.run();
+      if (running == null
+          || running.state().phase() != Run.Phase.RUNNING
+          || !running.experiment().name().equals(experiment)
+          || (runId != 0 && running.id() != runId)) {
+        throw new Problem(409, "Not running", experiment + " isn't running");
+      }
+      answer(exchange, experiments.requestCancel(experiment, runId, why), () -> run(false));
     }
 
     /**

@@ -97,6 +97,42 @@ class RunTest {
     assertThat(run.gains()).containsEntry("gains.kP", 10.0).containsEntry("gains.kD", 0.0);
   }
 
+  /**
+   * A gain changed while a run runs (from the tuning table, or a dashboard) leaves its scores
+   * answering for two sets of gains: it ends saying so, even when the gain goes back.
+   */
+  @Test
+  void aRunWhoseGainsChangedWhileItRanSaysSo() {
+    Run run = run(lag.rig(), Lag.STEP_AND_BACK);
+    for (int i = 0; i < 30; i++) {
+      run.step(lag.nextLoop());
+    }
+    lag.config.set(Map.of("gains.kP", 20.0));
+    run.step(lag.nextLoop());
+    lag.config.set(Map.of("gains.kP", 10.0));
+
+    runToTheEnd(run);
+
+    assertThat(run.gainsChanged()).isTrue();
+    assertThat(run.state().phase()).as("still scored").isEqualTo(Run.Phase.ENDED);
+    assertThat(run.state().detail())
+        .isEqualTo(
+            "Ended, but its gains changed while it ran (gains.kP 10.0 to 20.0), so it's no fair"
+                + " comparison");
+  }
+
+  @Test
+  void aChangeToAnotherValueOfItsConfigurationIsNoChangeToItsGains() {
+    Run run = run(lag.rig(), Lag.STEP_AND_BACK);
+    run.step(lag.nextLoop());
+    lag.config.set(Map.of("gains.kD", 0.0)); // the same value: a new record, the same gains
+
+    runToTheEnd(run);
+
+    assertThat(run.gainsChanged()).isFalse();
+    assertThat(run.state().detail()).isEqualTo("Ended");
+  }
+
   @Test
   void aSetpointOutsideTheRigsLimitsIsHeldAtTheLimit() {
     List<Double> sent = new ArrayList<>();

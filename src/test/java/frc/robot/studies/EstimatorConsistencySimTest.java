@@ -6,42 +6,58 @@ import frc.robot.SimulationTest;
 import org.junit.jupiter.api.Test;
 
 /**
- * The consistency study's runs, two seeds of each, on the whole simulated robot: does the pose
- * estimator's uncertainty tell the truth? The cameras sit a little off their mounts and the field's
- * tags a little off its layout, as calibrated cameras on a field built to its tolerance do (see
- * docs/testing.md). Honest is a NEES near or below its number of dimensions, and an error never
- * past 3.72 times the spread the estimate claims; it must not get there by being less accurate.
+ * The consistency study's runs, six seeds of each, on the whole simulated robot: does the pose
+ * estimator's uncertainty tell the truth? Each seed draws its errors as the estimator's
+ * configuration claims them ({@link ConsistencyRuns.Setup#MATCHED}): its cameras off their mounts,
+ * its tags off the layout, its gyro's scale off, and the vision noise model as the simulated
+ * cameras are. See docs/testing.md.
  *
- * <p>The estimator these replaced claimed millimeters while centimeters off in every run here: a
- * position NEES from 7 standing to 107 after the gyro-scale procedure, past 3.72 σ in 15% to 72% of
- * loops, and a mean error 1.5 to 6 times today's.
+ * <p>What a seed draws lasts its whole run, so the seeds, not the loops, are the sample, and six of
+ * them can't pin a NEES down closely. So each run must land where six honest seeds do 999 times in
+ * 1000: its mean NEES inside that band (0.30 to 5.8 for position, 0.04 to 4.1 for heading), and the
+ * share of loops outside the claimed covariance's 99.9% ellipse within what six seeds allow (4%).
+ * Far above, and the estimate claims more than it knows; far below, it claims less. And it must not
+ * get there by being less accurate.
+ *
+ * <p>The estimator before the consistency work failed all four: a position NEES from 7 standing to
+ * 107 after the gyro-scale procedure (with milder errors than these).
  */
 @SimulationTest
 class EstimatorConsistencySimTest {
-  private static final int SEEDS = 2;
+  private static final int SEEDS = 6;
 
   private static Consistency.Summary play(String run) {
     Consistency consistency = new Consistency();
     for (long seed = 1; seed <= SEEDS; seed++) {
       consistency.add(
-          ConsistencyRuns.play(
-              ConsistencyRuns.named(run), seed, ConsistencyRuns.Placement.CALIBRATED, 1));
+          ConsistencyRuns.play(ConsistencyRuns.named(run), seed, ConsistencyRuns.Setup.MATCHED));
     }
     return consistency.summary();
   }
 
-  /** The uncertainty covers the error, and the estimate is within this of the truth on average. */
+  /** Honest, and the estimate within this of the truth on average. */
   private static void assertHonest(Consistency.Summary summary, double meanErrorMeters) {
-    assertThat(summary.positionNees()).as("position NEES, 2 if honest").isLessThan(3);
-    assertThat(summary.headingNees()).as("heading NEES, 1 if honest").isLessThan(2);
-    assertThat(summary.worstRatio()).as("worst error, in claimed σ").isLessThan(Consistency.BOUND);
+    double[] position = Consistency.band(2, SEEDS, 3.29);
+    double[] heading = Consistency.band(1, SEEDS, 3.29);
+    assertThat(summary.positionNees())
+        .as("position NEES, 2 if honest")
+        .isBetween(position[0], position[1]);
+    assertThat(summary.headingNees())
+        .as("heading NEES, 1 if honest")
+        .isBetween(heading[0], heading[1]);
+    assertThat(summary.ellipseExceedance())
+        .as("loops outside the 99.9% ellipse")
+        .isLessThanOrEqualTo(summary.allowedShare());
+    assertThat(summary.exceedance())
+        .as("loops past 3.72 σ along the long axis")
+        .isLessThanOrEqualTo(summary.allowedShare());
     assertThat(summary.meanErrorMeters()).as("mean error").isLessThan(meanErrorMeters);
   }
 
   /** The route there and back: the cameras' shifts, and the field's tags, change as it goes. */
   @Test
   void drivingTheUncertaintyCoversTheError() {
-    assertHonest(play("driving"), 0.025);
+    assertHonest(play("driving"), 0.03);
   }
 
   /**
@@ -51,13 +67,13 @@ class EstimatorConsistencySimTest {
    */
   @Test
   void standingStillTheUncertaintyCoversTheError() {
-    assertHonest(play("standing"), 0.02);
+    assertHonest(play("standing"), 0.025);
   }
 
   /** Two turns in place: the gyro's scale error is the same every turn, and it adds up. */
   @Test
   void turningInPlaceTheUncertaintyCoversTheError() {
-    assertHonest(play("turning"), 0.025);
+    assertHonest(play("turning"), 0.035);
   }
 
   /**

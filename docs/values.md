@@ -539,15 +539,18 @@ replaces the nominal values, and narrows the ranges.
 
 The estimator consistency study ([docs/testing.md](testing.md#is-the-estimator-honest-the-consistency-study))
 checks the estimator's uncertainty against the simulator's truth, so it assumes how a calibrated
-robot errs. Its options are a run's choices, not configuration; these are the assumptions inside
-them. The test doesn't check this list.
+robot errs: by default, as the estimator's configuration claims, so that an honest estimator reads
+a NEES near its number of dimensions. Its options are a run's choices, not configuration; these are
+the assumptions inside them. The test doesn't check this list.
 
 | Assumption | Template's starting value | Kind | Source | How to measure it, or why |
 |---|---|---|---|---|
-| The robot's wear | `SensorErrors.TYPICAL` | characterized | guess (the simulator's season-worn robot) | Its rows [above](#sensorerrors). |
-| Each camera off its mount | up to 5 mm and 0.25° along and about each axis, drawn for each seed | calibrated | guess (what the mount procedure leaves) | [A camera's mount](calibration.md#a-cameras-mount): the spread of what five runs from the same spots find. Wider with `--mount-error-mm` and `--mount-error-degrees`. |
-| Each tag off the field's layout | up to 12.7 mm along each axis, drawn for each seed | characterized | rules (the field's half-inch tolerance) | A survey of the field (WPIcal). Real fields drift past their tolerance as play goes on; wider with `--tag-error-mm`. |
-| The vision noise model | as configured (`--noise-scale=1`) | characterized | 2026 code (`VisionConfig`'s) | [Camera noise](characterization.md#camera-noise). In the simulator it's about twice the cameras' real noise, so the study reads timid; `--noise-scale=0.5` shows how the estimator does with a model that fits. |
+| The robot's wear | `SensorErrors.TYPICAL`, but each IMU's scale drawn per seed | characterized | guess (the simulator's season-worn robot) | Its rows [above](#sensorerrors). |
+| Each camera off its mount | Gaussian, 3 mm along and `cameraTurnStdDevDegrees` about each axis, drawn for each seed | calibrated | guess (3 mm: what the mount procedure leaves); math (the turn: as the configuration claims) | [A camera's mount](calibration.md#a-cameras-mount): the spread of what five runs from the same spots find. Wider with `--mount-error-mm` and `--mount-error-degrees`. |
+| Each tag off the field's layout | Gaussian, `cameraShiftStdDevMeters` along each axis, drawn for each seed | characterized | math (as the configuration claims) | A survey of the field (WPIcal). Wider with `--tag-error-mm`. |
+| The gyro's scale | Gaussian, off by `headingStdDevDegreesPerTurn` / 360, drawn for each seed | characterized | math (as the configuration claims) | [The gyro's scale, repeated](characterization.md#repeatability-of-the-gyros-scale). |
+| The backup IMU's scale | Gaussian, off by 0.5%, drawn for each seed | characterized | guess (`SensorErrors.TYPICAL`'s backup) | [The backup IMU's scale](characterization.md#repeatability-of-the-gyros-scale). |
+| The vision noise model | half the configured one (`--noise-scale=0.5`) | characterized | simulation (at 1, the study reads a position NEES near 0.7; at half, near 2) | [Camera noise](characterization.md#camera-noise): how noisy the robot's own cameras are against the 2026 model. |
 
 ## Numbers still written in code
 

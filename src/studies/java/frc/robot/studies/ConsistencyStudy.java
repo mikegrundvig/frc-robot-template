@@ -1,5 +1,6 @@
 package frc.robot.studies;
 
+import frc.robot.Robots;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -31,14 +32,18 @@ public final class ConsistencyStudy {
         --runs=A,B,...            which runs (default: all of them)
         --seeds=N                 runs of each, each with its own noise and mounts (default 12)
         --seed=N                  the first seed (default 1)
-        --mount-error-mm=M        each camera off its mount by up to this along each axis (default 5)
-        --mount-error-degrees=D   and turned by up to this about each axis (default 0.25)
-        --tag-error-mm=M          each tag off the field's layout by up to this along each axis (default 12.7)
-        --noise-scale=F           the vision noise model scaled by this: fit tighter, or looser (default 1)
+      Each seed draws its errors from Gaussians with these standard deviations; the defaults are
+      what the estimator's configuration claims, so an honest estimator reads a NEES near 2.
+        --mount-error-mm=M        each camera off its mount along each axis (default 3)
+        --mount-error-degrees=D   and turned about each axis (default: cameraTurnStdDevDegrees)
+        --tag-error-mm=M          each tag off the field's layout along each axis (default: cameraShiftStdDevMeters)
+        --gyro-scale-error=F      the gyro's scale off by this share (default: headingStdDevDegreesPerTurn / 360)
+        --backup-scale-error=F    the backup IMU's (default 0.005)
+        --noise-scale=F           the vision noise model scaled by this (default 0.5, matching the simulated cameras)
         --out=DIR                 where the report goes (default build/studies/consistency)
       """;
 
-  /** Runs of each, by default: the study takes about four minutes. */
+  /** Runs of each, by default: the study takes about five minutes. */
   static final int SEEDS = 12;
 
   private static final Set<String> OPTIONS =
@@ -49,6 +54,8 @@ public final class ConsistencyStudy {
           "mount-error-mm",
           "mount-error-degrees",
           "tag-error-mm",
+          "gyro-scale-error",
+          "backup-scale-error",
           "noise-scale",
           "out");
 
@@ -94,40 +101,45 @@ public final class ConsistencyStudy {
     if (seeds < 1) {
       throw new IllegalArgumentException("--seeds must be 1 or more: " + seeds);
     }
-    ConsistencyRuns.Placement calibrated = ConsistencyRuns.Placement.CALIBRATED;
-    ConsistencyRuns.Placement placement =
-        new ConsistencyRuns.Placement(
-            number(options, "mount-error-mm", calibrated.mountMillimeters()),
-            number(options, "mount-error-degrees", calibrated.mountDegrees()),
-            number(options, "tag-error-mm", calibrated.tagMillimeters()));
-    double noiseScale = number(options, "noise-scale", 1);
-    if (!(noiseScale > 0)) {
-      throw new IllegalArgumentException("--noise-scale must be more than 0: " + noiseScale);
-    }
+    ConsistencyRuns.Spread matched = ConsistencyRuns.Setup.MATCHED.spread();
+    ConsistencyRuns.Spread spread =
+        new ConsistencyRuns.Spread(
+            number(options, "mount-error-mm", matched.mountMillimeters()),
+            number(options, "mount-error-degrees", matched.mountDegrees()),
+            number(options, "tag-error-mm", matched.tagMillimeters()),
+            number(options, "gyro-scale-error", matched.gyroScale()),
+            number(options, "backup-scale-error", matched.backupScale()));
+    double noiseScale = number(options, "noise-scale", ConsistencyRuns.Setup.MATCHED.noiseScale());
+    ConsistencyRuns.Setup setup = new ConsistencyRuns.Setup(spread, noiseScale);
 
     long start = System.nanoTime();
-    List<Result> results = study(runs, seeds, first, placement, noiseScale, out);
+    List<Result> results = study(runs, seeds, first, setup, out);
     double seconds = (System.nanoTime() - start) / 1e9;
 
     Path directory = Path.of(options.getOrDefault("out", "build/studies/consistency"));
     Files.createDirectories(directory);
-    List<String> setup =
+    List<String> described =
         List.of(
             format(
                 "%d %s of each run, seeds %d to %d, on the simulator's robot with a season's wear"
                     + " (SensorErrors.TYPICAL).",
                 seeds, seeds == 1 ? "seed" : "seeds", first, first + seeds - 1),
             format(
-                "Each camera off its mount by up to %s mm along and %s° about each axis, and each"
-                    + " tag off the layout by up to %s mm along each, drawn for each seed.%s",
-                shown(placement.mountMillimeters()),
-                shown(placement.mountDegrees()),
-                shown(placement.tagMillimeters()),
-                noiseScale == 1
-                    ? ""
-                    : " The vision noise model scaled by " + shown(noiseScale) + "."),
+                "Each seed draws, from Gaussians: each camera off its mount by %s mm along and %s°"
+                    + " about each axis, each tag off the layout by %s mm along each, the gyro's"
+                    + " scale off by %s%% and the backup IMU's by %s%% (standard deviations). The"
+                    + " vision noise model scaled by %s.%s",
+                shown(spread.mountMillimeters()),
+                shown(spread.mountDegrees()),
+                shown(spread.tagMillimeters()),
+                shown(100 * spread.gyroScale()),
+                shown(100 * spread.backupScale()),
+                shown(noiseScale),
+                setup.equals(ConsistencyRuns.Setup.MATCHED)
+                    ? " As the estimator's configuration claims: matched."
+                    : ""),
             format("%.0f s.", seconds));
-    Files.writeString(directory.resolve("summary.md"), summary(setup, results));
+    Files.writeString(directory.resolve("summary.md"), summary(described, results));
     Files.write(directory.resolve("loops.csv"), loops(results), StandardCharsets.UTF_8);
     out.printf(Locale.ROOT, "Done in %.0f s.%n", seconds);
     out.println("Report: " + directory.toAbsolutePath().resolve("summary.md"));
@@ -138,22 +150,39 @@ public final class ConsistencyStudy {
       List<ConsistencyRuns.Run> runs,
       int seeds,
       long first,
-      ConsistencyRuns.Placement placement,
-      double noiseScale,
+      ConsistencyRuns.Setup setup,
       PrintStream out) {
     List<Result> results = new ArrayList<>();
     for (ConsistencyRuns.Run run : runs) {
       Consistency consistency = new Consistency();
       for (long seed = first; seed < first + seeds; seed++) {
-        consistency.add(ConsistencyRuns.play(run, seed, placement, noiseScale));
+        List<Consistency.Sample> samples = ConsistencyRuns.play(run, seed, setup);
+        consistency.add(samples);
+        Consistency alone = new Consistency();
+        alone.add(samples);
+        Consistency.Summary one = alone.summary();
+        out.printf(
+            Locale.ROOT,
+            "  seed %d (gyro %+.2f%%, cameras turned %s): NEES %.2f, heading %.2f, outside the"
+                + " ellipse %s, error %.1f cm, %.2f°%n",
+            seed,
+            100 * (setup.spread().gyroScale(seed) - 1),
+            turns(setup.spread(), seed),
+            one.positionNees(),
+            one.headingNees(),
+            percent(one.ellipseExceedance()),
+            100 * one.meanErrorMeters(),
+            one.meanHeadingErrorDegrees());
       }
       Consistency.Summary summary = consistency.summary();
       out.printf(
           Locale.ROOT,
-          "%-14s NEES %.1f (2), heading %.1f (1), past %s σ %s, worst %.1f σ, error %.1f cm%n",
+          "%-14s NEES %.2f (2), heading %.2f (1), outside the ellipse %s, past %s σ %s, worst %.1f"
+              + " σ, error %.1f cm%n",
           run.name(),
           summary.positionNees(),
           summary.headingNees(),
+          percent(summary.ellipseExceedance()),
           Consistency.BOUND_TEXT,
           percent(summary.exceedance()),
           summary.worstRatio(),
@@ -161,6 +190,15 @@ public final class ConsistencyStudy {
       results.add(new Result(run, consistency));
     }
     return results;
+  }
+
+  /** How far each of the robot's cameras is turned on its mount for a seed, in degrees. */
+  private static String turns(ConsistencyRuns.Spread spread, long seed) {
+    List<String> turns = new ArrayList<>();
+    for (int camera = 0; camera < Robots.SIM.cameras().size(); camera++) {
+      turns.add(format("%+.2f°", Math.toDegrees(spread.mount(seed, camera).getRotation().getZ())));
+    }
+    return String.join(" ", turns);
   }
 
   /** The report: what ran, then a row for each run, then what each run was. */
@@ -178,11 +216,13 @@ public final class ConsistencyStudy {
 
             Honest is NEES near 2 for position and 1 for heading, about 2.5%% of loops above and
             below the band (%.2f to %.2f for position, %.2f to %.2f for heading, averaged over %d
-            runs), and the error past %s σ in at most 0.1%% of loops (docs/testing.md).
+            runs), and at most 0.1%% of loops outside the claimed covariance's 99.9%% ellipse
+            (position NEES past 13.8) or past %s σ along its long axis, give or take what that many
+            loops allow (docs/testing.md).
 
-            | Run | NEES (2) | Above, below | Heading NEES (1) | Above, below | Past %s σ \
-            | Worst | Mean error | Worst error | Heading error | Claimed σ |
-            |---|---|---|---|---|---|---|---|---|---|---|
+            | Run | NEES (2) | Above, below | Heading NEES (1) | Above, below | Outside the ellipse \
+            | Past %s σ | Allowed | Worst | Mean error | Worst error | Heading error | Claimed σ |
+            |---|---|---|---|---|---|---|---|---|---|---|---|---|
             """,
             position[0],
             position[1],
@@ -195,8 +235,8 @@ public final class ConsistencyStudy {
       Consistency.Summary s = result.consistency().summary();
       md.append(
           format(
-              "| %s | %.2f | %s, %s | %.2f | %s, %s | %s | %.1f σ | %.1f cm | %.1f cm | %.2f° |"
-                  + " %.1f cm |%n",
+              "| %s | %.2f | %s, %s | %.2f | %s, %s | %s | %s | %s | %.1f σ | %.1f cm | %.1f cm |"
+                  + " %.2f° | %.1f cm |%n",
               result.run().name(),
               s.positionNees(),
               percent(s.positionAbove()),
@@ -204,7 +244,9 @@ public final class ConsistencyStudy {
               s.headingNees(),
               percent(s.headingAbove()),
               percent(s.headingBelow()),
+              percent(s.ellipseExceedance()),
               percent(s.exceedance()),
+              percent(s.allowedShare()),
               s.worstRatio(),
               100 * s.meanErrorMeters(),
               100 * s.worstErrorMeters(),

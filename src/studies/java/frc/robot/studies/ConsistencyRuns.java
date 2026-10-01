@@ -7,6 +7,7 @@ import frc.robot.SimulatedRobot;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
@@ -15,6 +16,7 @@ import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SensorErrorsBuilder;
+import frc.robot.sim.SensorErrorsGyroErrorsBuilder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,7 +34,7 @@ import org.wpilib.math.geometry.Translation3d;
  * drive team does and what happens to the robot, run on a season-worn robot ({@link
  * SensorErrors#TYPICAL}) whose cameras each sit a little off their configured mounts, as a
  * calibrated camera still does, on a field whose tags each sit a little off its layout, as a field
- * built to its tolerance does.
+ * built to its tolerance does, each seed drawing its own ({@link Spread}).
  *
  * <p>Every run starts the same way: the robot placed on its start, disabled for a second while the
  * cameras find it, then enabled. From then on every loop is a sample: the estimate, what it claims,
@@ -165,35 +167,75 @@ final class ConsistencyRuns {
   }
 
   /**
-   * Where the cameras and the field's tags really are, against where the robot's configuration and
-   * the field's layout say: how far each may be off, at most, along and about each axis. Each
-   * camera's and each tag's own error is drawn within these for each seed, and stays put for the
-   * run, as a mount's and a tag's do.
+   * How widely each seed's errors are drawn: where the cameras and the field's tags really are,
+   * against where the robot's configuration and the field's layout say, and how far the IMUs'
+   * scales are off. Each is drawn from a Gaussian with these standard deviations, once per seed (a
+   * camera's along and about each axis, a tag's along each), and stays put for the run, as a
+   * mount's, a tag's, and a gyro's scale do.
    *
-   * @param mountMillimeters a camera's mount, along each axis: what calibrating it leaves
+   * <p>Each kind of error draws from its own stream of the seed, so no two seeds share a draw: one
+   * seed's second camera is never another's first.
+   *
+   * @param mountMillimeters a camera's mount, along each axis
    * @param mountDegrees and about each axis
-   * @param tagMillimeters a tag, along each axis: the field's build tolerance
+   * @param tagMillimeters a tag, along each axis
+   * @param gyroScale the gyro's scale error: its reading per true turn, less 1
+   * @param backupScale the same for the backup IMU
    */
-  record Placement(double mountMillimeters, double mountDegrees, double tagMillimeters) {
-    /**
-     * Cameras calibrated with the mount procedure (docs/calibration.md), a few millimeters and a
-     * quarter of a degree off, on a field built to its half-inch tolerance.
-     */
-    static final Placement CALIBRATED = new Placement(5, 0.25, 12.7);
+  record Spread(
+      double mountMillimeters,
+      double mountDegrees,
+      double tagMillimeters,
+      double gyroScale,
+      double backupScale) {
+    /** Cameras, tags, and IMUs exactly as configured. */
+    static final Spread EXACT = new Spread(0, 0, 0, 0, 0);
 
-    static final Placement EXACT = new Placement(0, 0, 0);
+    /** How far a calibrated camera's mount is still off along each axis: a few millimeters. */
+    static final double MOUNT_MILLIMETERS = 3;
 
-    Placement {
-      if (!(mountMillimeters >= 0) || !(mountDegrees >= 0) || !(tagMillimeters >= 0)) {
+    /** How far an uncalibrated backup IMU's scale is off: the simulator's season-worn one's. */
+    static final double BACKUP_SCALE = 0.005;
+
+    // Each kind of error's stream of a seed.
+    private static final long MOUNTS = 1;
+    private static final long TAGS = 2;
+    private static final long IMUS = 3;
+
+    Spread {
+      if (!(mountMillimeters >= 0)
+          || !(mountDegrees >= 0)
+          || !(tagMillimeters >= 0)
+          || !(gyroScale >= 0)
+          || !(backupScale >= 0)) {
         throw new IllegalArgumentException(
-            "how far cameras and tags are off is zero or more: "
+            "how widely errors are drawn is zero or more: "
                 + mountMillimeters
                 + " mm, "
                 + mountDegrees
                 + "°, "
                 + tagMillimeters
-                + " mm");
+                + " mm, scales "
+                + gyroScale
+                + " and "
+                + backupScale);
       }
+    }
+
+    /**
+     * The errors the estimator's configuration allows for, drawn at the spread it claims: each
+     * camera turned by {@code cameraTurnStdDevDegrees} about each axis, each tag off by {@code
+     * cameraShiftStdDevMeters} along each, the gyro's scale off by {@code
+     * headingStdDevDegreesPerTurn}, and a few millimeters of mount. An estimator honest about these
+     * reads a NEES near its number of dimensions.
+     */
+    static Spread matched(EstimatorConfig config) {
+      return new Spread(
+          MOUNT_MILLIMETERS,
+          config.cameraTurnStdDevDegrees(),
+          1000 * config.cameraShiftStdDevMeters(),
+          config.headingStdDevDegreesPerTurn() / 360,
+          BACKUP_SCALE);
     }
 
     /** One camera's error, for a seed: the same every time for the same seed and camera. */
@@ -201,15 +243,17 @@ final class ConsistencyRuns {
       if (mountMillimeters == 0 && mountDegrees == 0) {
         return Transform3d.ZERO;
       }
-      SplittableRandom random = new SplittableRandom(Seeds.mix(seed, camera + 1L));
+      SplittableRandom random = stream(seed, MOUNTS, camera);
       double meters = mountMillimeters / 1000;
       double radians = Math.toRadians(mountDegrees);
       return new Transform3d(
-          within(random, meters),
-          within(random, meters),
-          within(random, meters),
+          meters * random.nextGaussian(),
+          meters * random.nextGaussian(),
+          meters * random.nextGaussian(),
           new Rotation3d(
-              within(random, radians), within(random, radians), within(random, radians)));
+              radians * random.nextGaussian(),
+              radians * random.nextGaussian(),
+              radians * random.nextGaussian()));
     }
 
     /** One tag's error, for a seed: the same every time for the same seed and tag. */
@@ -217,33 +261,86 @@ final class ConsistencyRuns {
       if (tagMillimeters == 0) {
         return Translation3d.ZERO;
       }
-      SplittableRandom random = new SplittableRandom(Seeds.mix(seed, -id - 1L));
+      SplittableRandom random = stream(seed, TAGS, id);
       double meters = tagMillimeters / 1000;
       return new Translation3d(
-          within(random, meters), within(random, meters), within(random, meters));
+          meters * random.nextGaussian(),
+          meters * random.nextGaussian(),
+          meters * random.nextGaussian());
     }
 
-    private static double within(SplittableRandom random, double bound) {
-      return bound * (2 * random.nextDouble() - 1);
+    /** The gyro's scale, for a seed: its reading per true turn. */
+    double gyroScale(long seed) {
+      return 1 + gyroScale * stream(seed, IMUS, 0).nextGaussian();
+    }
+
+    /** The backup IMU's scale, for a seed. */
+    double backupScale(long seed) {
+      return 1 + backupScale * stream(seed, IMUS, 1).nextGaussian();
+    }
+
+    /** A seed's stream for one kind of error and one item of it. */
+    private static SplittableRandom stream(long seed, long kind, long item) {
+      return new SplittableRandom(Seeds.mix(Seeds.mix(seed, kind), item));
     }
   }
 
   /**
-   * How the robot is built for a seed: a season's wear, each camera's own small mount error, and
-   * each tag's own placement. A run's scenario then knocks a camera from there, through the
-   * simulator's controls.
+   * How the robot is built for a seed: a season's wear, with its own IMU scales, each camera's own
+   * small mount error, and each tag's own placement. A run's scenario then knocks a camera from
+   * there, through the simulator's controls.
    */
-  static SensorErrors errors(long seed, Placement placement) {
+  static SensorErrors errors(long seed, Spread spread) {
     List<CameraConfig> cameras = Robots.SIM.cameras();
-    SensorErrors errors = SensorErrorsBuilder.builder(SensorErrors.TYPICAL).seed(seed).build();
+    SensorErrors typical = SensorErrors.TYPICAL;
+    SensorErrors errors =
+        SensorErrorsBuilder.builder(typical)
+            .seed(seed)
+            .gyro(
+                SensorErrorsGyroErrorsBuilder.builder(typical.gyro())
+                    .scale(spread.gyroScale(seed))
+                    .build())
+            .backupGyro(
+                SensorErrorsGyroErrorsBuilder.builder(typical.backupGyro())
+                    .scale(spread.backupScale(seed))
+                    .build())
+            .build();
     for (int i = 0; i < cameras.size(); i++) {
-      errors = errors.withCameraMountError(cameras.get(i).name(), placement.mount(seed, i));
+      errors = errors.withCameraMountError(cameras.get(i).name(), spread.mount(seed, i));
     }
     Map<Integer, Translation3d> tags = new HashMap<>();
     for (int id : FIELD.tags().keySet()) {
-      tags.put(id, placement.tag(seed, id));
+      tags.put(id, spread.tag(seed, id));
     }
     return errors.withTagErrors(tags);
+  }
+
+  /**
+   * How a study runs: how widely each seed's errors are drawn, and the vision noise model scaled.
+   *
+   * @param spread how widely each seed's errors are drawn
+   * @param noiseScale the vision pipeline's noise model scaled by this ({@link #robot})
+   */
+  record Setup(Spread spread, double noiseScale) {
+    /**
+     * The simulated cameras' noise is about half what the 2026 noise model claims (the study, at a
+     * scale of 1, reads a position NEES near 0.7 where it reads near 2 at half): so half the model
+     * is the one that matches.
+     */
+    static final double MATCHED_NOISE_SCALE = 0.5;
+
+    /**
+     * The errors and the noise model the robot's estimator configuration claims, drawn as it claims
+     * them: an honest estimator reads a NEES near its number of dimensions.
+     */
+    static final Setup MATCHED =
+        new Setup(Spread.matched(Robots.SIM.estimator()), MATCHED_NOISE_SCALE);
+
+    Setup {
+      if (!(noiseScale > 0)) {
+        throw new IllegalArgumentException("a noise scale is more than 0: " + noiseScale);
+      }
+    }
   }
 
   /**
@@ -267,11 +364,11 @@ final class ConsistencyRuns {
   /**
    * Plays a run with a seed on the simulator's robot.
    *
-   * @param noiseScale how much to scale the vision pipeline's noise model by ({@link #robot})
    * @return every loop once the robot is enabled
    */
-  static List<Consistency.Sample> play(Run run, long seed, Placement placement, double noiseScale) {
-    try (SimulatedRobot robot = new SimulatedRobot(robot(noiseScale), errors(seed, placement))) {
+  static List<Consistency.Sample> play(Run run, long seed, Setup setup) {
+    try (SimulatedRobot robot =
+        new SimulatedRobot(robot(setup.noiseScale()), errors(seed, setup.spread()))) {
       Scenario scenario = run.scenario();
       if (scenario != null) {
         robot.applyFaults(scenario);

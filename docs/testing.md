@@ -153,20 +153,29 @@ A scenario's sensor faults are applied through the simulator's controls before t
 loop, as `./gradlew run -Pscenario=<name>` applies them, and its events when the run's script
 says; a knocked camera is knocked from where the seed mounted it.
 
-Each seed draws its own noise, its own small error for each camera's mount (up to 5 mm and 0.25°
-along and about each axis, what calibrating a mount leaves), and its own for each tag (up to half
-an inch along each axis, the field's build tolerance: the cameras see a tag where it is, the
-robot believes the layout).
+Each seed draws its own: noise in every camera and IMU, an error for each camera's mount (along
+and about each axis), one for each tag (along each axis: the cameras see a tag where it is, the
+robot believes the layout), and the gyro's and the backup IMU's scales. Each kind of error, and
+each camera and tag, draws from its own stream of the seed, so no two seeds share a draw. They're
+drawn from Gaussians at the spread the estimator's configuration claims (`EstimatorConfig`'s
+`cameraTurnStdDevDegrees`, `cameraShiftStdDevMeters`, `headingStdDevDegreesPerTurn`), with the
+vision noise model halved, which is how noisy the simulated cameras are: an estimator honest about
+its own claims reads a NEES near its number of dimensions. Wider or narrower errors than it claims
+show it over- or under-confident, which is what the options are for.
 
 | Option | Default | What |
 |---|---|---|
 | `--runs=A,B` | all | Which runs |
 | `--seeds=N` | 12 | Runs of each, each with its own draws |
 | `--seed=N` | 1 | The first seed |
-| `--mount-error-mm=M`, `--mount-error-degrees=D` | 5, 0.25 | How far each camera may sit off its mount |
-| `--tag-error-mm=M` | 12.7 | How far each tag may sit off the layout; 0 for an exact field |
-| `--noise-scale=F` | 1 | The vision noise model scaled: what if it were fit tighter or looser |
+| `--mount-error-mm=M`, `--mount-error-degrees=D` | 3, `cameraTurnStdDevDegrees` | Each camera's mount off along and about each axis (standard deviations) |
+| `--tag-error-mm=M` | `cameraShiftStdDevMeters` | Each tag off the layout along each axis; 0 for an exact field |
+| `--gyro-scale-error=F`, `--backup-scale-error=F` | `headingStdDevDegreesPerTurn` / 360, 0.005 | Each IMU's scale off by this share |
+| `--noise-scale=F` | 0.5 | The vision noise model scaled; 1 is the model as shipped, twice the simulated cameras' noise |
 | `--out=DIR` | `build/studies/consistency` | Where the report goes |
+
+The console prints each seed's draws and numbers, so a run's result can be traced to the seeds
+behind it.
 
 ### Reading the report
 
@@ -180,25 +189,39 @@ robot believes the layout).
 - **Above, below:** at each loop, the NEES averaged over the seeds falls inside a 95% band (1.03
   to 3.28 for position with 12 seeds) if honest, so about 2.5% of loops land above it and 2.5%
   below. Many above is overconfidence at those moments, even when the average looks fine.
-- **Past 3.72 σ:** how often the position error goes past 3.72 times the claimed spread along its
-  least sure direction. For an honest estimate that's at most once in a thousand loops (0.1%):
-  the bound a two-dimensional Gaussian's tail holds a thousandth of. This is the claim a scoring
-  gate or a protection level relies on.
-- **Worst:** the most claimed spreads the error ever was.
+- **Outside the ellipse:** how often the position error falls outside the claimed covariance's
+  99.9% ellipse (its NEES past 13.8, χ² for two dimensions). Honest is a thousandth of loops.
+- **Past 3.72 σ:** how often the error goes past 3.72 times the claimed spread along its long
+  axis: the circle a bound on the error, such as a scoring gate's, would use. It holds the ellipse,
+  so it's past less often; the ellipse also catches an estimate too sure along its short axis.
+- **Allowed:** the most of either an honest estimator shows, 999 times in 1000. A seed's draws
+  last its whole run, so a seed that drew a gyro 2.4 σ off can spend a quarter of its loops outside
+  the ellipse: the seeds, not the loops, are the sample, and twelve allow 2.9%.
+- **Worst:** the most long-axis spreads the error ever was.
 - **Mean error, worst error, heading error, claimed σ:** accuracy beside honesty. An estimator
   that got honest by getting worse is no improvement.
 
 `loops.csv` has each run's NEES, error, and claimed spread loop by loop, averaged over the seeds,
 for a spreadsheet: it shows when a run goes wrong (during the turns, or standing after them).
 
-What to expect, today: every calibrated run below its NEES band, and nothing past 3.72 σ but the
-loop of the collision's hit (the robot has moved before the jolt is read). The estimator is timid
-in the simulator for two reasons, both on purpose: the vision noise model is 2026's, about twice
-the simulated cameras' noise (`--noise-scale=0.5` brings the NEES to about 1), and it allows for a
-real field's tags and real mounts. The `camera-turned` run's heading NEES is far above: a camera
-turned 2° is a fault eight times what the configuration allows, and the estimator can't tell it
-from a heading error. Catching that is the mount check's job, and comparing cameras with each
-other would do it better.
+What to expect, today (12 matched seeds):
+
+| Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
+|---|---|---|---|---|---|---|
+| driving | 1.67 | 0.83 | 0.08% | 0.07% | 1.8 cm | 0.24° |
+| standing | 1.98 | 0.41 | 0.05% | 0.04% | 1.4 cm | 0.16° |
+| turning | 1.90 | 1.41 | 1.88% | 0 | 2.1 cm | 0.81° |
+| gyro-scale | 3.25 | 2.05 | 4.88% | 2.62% | 2.6 cm | 1.47° |
+| collision | 2.82 | 0.87 | 0.70% | 0.67% | 1.9 cm | 0.22° |
+| camera-low | 1.68 | 0.91 | 0.01% | 0.01% | 1.8 cm | 0.25° |
+| camera-turned | 3.49 | 14.87 | 2.96% | 2.62% | 2.6 cm | 1.02° |
+
+The collision's exceedances are the loops of the hit, before the jolt is read. Standing after the
+gyro-scale procedure, the estimate grows surer than it should: tags 1 cm off each turn a two-tag
+heading by about 2°, where the configuration allows 1° (`cameraShiftStdDevDegrees`). The
+`camera-turned` run's heading NEES is far above: a camera turned 2° is eight times what the
+configuration allows, and the estimator can't tell it from a heading error. Catching that is the
+mount check's job, and comparing cameras with each other would do it better.
 
 ### What it proves, and what it doesn't
 
@@ -208,17 +231,20 @@ tolerances, a collision. It can't prove the real robot's numbers: that the noise
 real cameras, that the gyro's scale is as configured, that the field's tags are within half an
 inch. Those are measured ([characterization](characterization.md)), and on a robot the check is
 the same idea without the truth: a camera's normalized innovations (NIS), and the error at
-surveyed spots. A configured repeated error smaller than the real one shows here too: with mounts
-off by up to 1° (`--mount-error-degrees=1`), four times what the configuration allows, standing
-still goes past 3.72 σ in about 7% of loops.
+surveyed spots. A configured repeated error smaller than the real one shows here too, as the
+gyro-scale run's tags do above.
 
 ### Keeping it honest
 
 `EstimatorConsistencySimTest` runs four of the runs (driving, standing, turning, the gyro-scale
-procedure), two seeds each, on every build, about 30 s: each must keep its position NEES under 3,
-its heading NEES under 2, no loop past 3.72 σ, and a mean error of 2 to 3 cm at most. A change to
-the estimator, its configuration, or the vision pipeline that breaks one has made the estimate
-claim more than it knows, or got there by being worse. Run the whole study before and after such
+procedure), six matched seeds each, on every build, about 75 s. Each must land where six honest
+seeds do 999 times in 1000: its mean position NEES between 0.30 and 5.8 and its heading NEES
+between 0.04 and 4.1, its share of loops outside the ellipse and past 3.72 σ within what six seeds
+allow (4%), and its mean error under 2.5 to 3.5 cm. Six seeds can't pin a NEES down closely, so the
+test catches an estimator that's badly over- or under-confident, as the one before this study was
+(a NEES of 17 to 476 on these draws); the full study is the closer look. A change to the
+estimator, its configuration, or the vision pipeline that breaks one has made the estimate claim
+more or less than it knows, or got there by being worse. Run the whole study before and after such
 a change, and put both tables in the commit.
 
 ## Configuration is tested too

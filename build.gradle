@@ -69,9 +69,6 @@ dependencies {
 
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
-    // What the robot shares with its vision coprocessors (coprocessor/common): the table, and the
-    // health agent's API, which the robot polls (frc.robot.subsystems.coprocessors).
-    implementation project(":coprocessor-common")
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
     // can say what each value means. It runs in the compiler only; none of it reaches the robot.
     annotationProcessor project(":pitwall:docs-processor")

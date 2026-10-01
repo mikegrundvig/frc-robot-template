@@ -30,8 +30,8 @@ export function mountApplyBar() {
   bar = byId("applybar");
   refusalBox = h("div", { class: "refusal", hidden: true });
   what = h("span", { class: "what" });
-  discardButton = h("button", { type: "button", onclick: discard }, "Discard");
-  applyButton = h("button", { type: "button", class: "primary", onclick: apply });
+  discardButton = h("button", { type: "button", onclick: () => discard() }, "Discard");
+  applyButton = h("button", { type: "button", class: "primary", onclick: () => apply() });
   line = h("div", { class: "ab-line" }, what, discardButton, applyButton);
   bar.append(refusalBox, line);
   onEdits(render);

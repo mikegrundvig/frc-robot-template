@@ -2,7 +2,8 @@
 // whole on the robot, all or none. Tune and Experiment share them, so a value staged in one shows
 // staged in the other, and the apply bar counts them all.
 
-import { robot, onChange, send, shown, say, announce } from "./core.js";
+import { robot, onChange, send, shown, say, announce, near } from "./core.js";
+import { expect, record } from "./history.js";
 
 /** What's staged, by the value's tunable path: the text as typed, so a typo stays to be fixed. */
 const staged = new Map();
@@ -34,11 +35,6 @@ function changed() {
 /** A configuration value as the robot describes it ({config, field, unit, limits, committed}). */
 export function described(path) {
   return (robot.doc && robot.doc.tunables[path]) || null;
-}
-
-/** Whether two numbers are the same value, as the robot's report judges it. */
-export function near(a, b) {
-  return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
 }
 
 /**
@@ -84,6 +80,27 @@ export function closeRefusal() {
 /** Stages a number for a value, as people write it. */
 export function stageNumber(path, number) {
   stage(path, shown(Number(number.toPrecision(6))));
+}
+
+/**
+ * Stages several values at once, {path: number}, such as a run's gains or what a history entry
+ * changed: those still tunable, each as people write it.
+ *
+ * @return how many were staged
+ */
+export function stageAll(values) {
+  let count = 0;
+  for (const [path, number] of Object.entries(values)) {
+    if (!(path in robot.doc.values) || typeof number !== "number") continue;
+    const now = robot.doc.values[path];
+    if (near(number, now)) staged.delete(path);
+    else staged.set(path, shown(Number(number.toPrecision(6))));
+    forget(path);
+    count++;
+  }
+  changed();
+  say("Staged " + count + (count === 1 ? " value" : " values") + ": review, then apply.");
+  return count;
 }
 
 /** Drops a value's staged edit. */
@@ -133,15 +150,18 @@ export function pending() {
 /**
  * Applies every staged edit, all or none. The robot checks them whole (each value's limits, its
  * configuration's records, the robot's rules) and either applies all of them or none, saying why.
+ * The session's history records what it applied.
  *
+ * @param source where the history says it came from
  * @return whether they were applied
  */
-export async function apply() {
+export async function apply(source = "this page") {
   const { changes, invalid } = pending();
   if (invalid.length > 0 || Object.keys(changes).length === 0 || outcome.applying) return false;
   outcome.applying = true;
   outcome.refusal = null;
   changed();
+  const items = expect(changes);
   const result = await send("PATCH", "/api/values", changes);
   outcome.applying = false;
   const count = Object.keys(changes).length;
@@ -154,6 +174,7 @@ export async function apply() {
   }
   if (result.ok) {
     for (const path of Object.keys(changes)) staged.delete(path);
+    record(source, "apply", items);
     say("Applied " + count + (count === 1 ? " change." : " changes."));
     changed();
     return true;

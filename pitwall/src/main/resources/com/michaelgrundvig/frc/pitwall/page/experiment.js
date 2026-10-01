@@ -1,15 +1,18 @@
 // Experiment: run a test motion on a rig, see how it answered, change a gain, run again, compare.
-// Runs stay in this tab: they outlive reconnects and restarts of the robot.
+// Runs stay in this tab: they outlive reconnects and restarts of the robot, and a reload, kept in
+// the tab's sessionStorage.
 
 import {
   robot, onChange, onSamples, api, send, lastRequestAt, shown, h, say, replace,
 } from "./core.js";
-import { onEdits } from "./edits.js";
+import { onEdits, stageAll } from "./edits.js";
+import { load, save } from "./history.js";
 import { makeRow, updateRow } from "./rows.js";
 import { valueDocs } from "./docs.js";
 
-// Every run this tab has seen, oldest first.
-const runs = [];
+const KEY = "pitwall.runs";
+// Every run this tab has seen, oldest first: kept through a reload, until the tab closes.
+const runs = load(KEY, []);
 // Whether this page is starting a run: from the click on Run until the robot answers.
 let starting = false;
 // How many of a rig's runs its plot lays over each other, the latest in bold.
@@ -112,6 +115,7 @@ function noteRun() {
   if (!now || now.id === undefined) return;
   const key = runKey(doc.robot.program, now.id);
   let run = runs.find((r) => r.key === key);
+  const created = !run;
   if (!run) {
     run = { key, program: doc.robot.program, code: doc.robot.code, robot: doc.robot.name,
             simulated: doc.robot.simulated, trace: {} };
@@ -120,12 +124,34 @@ function noteRun() {
     runs.filter((r) => r.rig === now.rig && r !== run).slice(0, -(TRACES_KEPT - 1))
       .forEach((r) => (r.trace = {}));
   }
+  const ended = run.phase === "RUNNING" && now.phase !== "RUNNING";
   // A copy: the next run's patches change the document's run in place.
   Object.assign(run, structuredClone({
     id: now.id, experiment: now.experiment, rig: now.rig, settings: now.settings,
     gains: now.gains, signals: now.signals, phase: now.phase, detail: now.detail,
     scores: now.scores, gainsChanged: now.gainsChanged,
   }));
+  if (ended || (created && now.phase !== "RUNNING")) keepSoon();
+}
+
+let keeping = null;
+
+/** Keeps the runs once a run's last samples are in: they arrive just after it ends. */
+function keepSoon() {
+  clearTimeout(keeping);
+  keeping = setTimeout(keepRuns, 1000);
+}
+
+/**
+ * Keeps the runs for this tab, as many as fit: the browser gives a page about 5 MB, and a trace is
+ * most of a run, so the oldest runs' traces go first, their scores kept.
+ */
+function keepRuns() {
+  while (!save(KEY, runs)) {
+    const oldest = runs.find((run) => Object.keys(run.trace).length > 0);
+    if (!oldest) return;
+    oldest.trace = {};
+  }
 }
 
 /** Adds a run's samples to its trace; a snapshot's start it over. */
@@ -419,12 +445,10 @@ function renderScores(name, view) {
     } else {
       show(s, row);
     }
+    // Stages the run's gains, as any other edit: they apply with the rest, or with the next run.
     row.insertCell().append(h("button", { type: "button", class: "small",
-      title: "Put this run's gains back", disabled: !doc.tuning.enabled || view.busy,
-      onclick: async () => {
-        const result = await send("PATCH", "/api/values", run.gains);
-        if (!result.ok) say(result.problem.detail, true);
-      } }, "Restore"));
+      title: "Stage this run's gains", disabled: !doc.tuning.enabled || view.busy,
+      onclick: () => stageAll(run.gains) }, "Restore"));
     if (s && view.expanded.has(run.key)) {
       for (const measurement of view.rig.measurements) {
         const wheel = body.insertRow();

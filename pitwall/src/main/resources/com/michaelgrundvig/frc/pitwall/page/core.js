@@ -161,6 +161,11 @@ export async function send(method, path, body) {
 
 // ---- Helpers ----
 
+/** Whether two numbers are the same value, as the robot's report judges it. */
+export function near(a, b) {
+  return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+}
+
 /** A number as people write it: whole numbers plainly, others to six figures, as the robot does. */
 export function shown(number) {
   if (typeof number !== "number") return String(number);
@@ -227,6 +232,26 @@ export function announce(text, urgent = false) {
   const live = byId(urgent ? "live-urgent" : "live");
   live.textContent = "";
   setTimeout(() => (live.textContent = text), 30); // a change, so it's read even when repeated
+}
+
+/**
+ * Asks before something that can't be taken back with one press, in a dialog listing what it does.
+ *
+ * @param body the dialog's content, under its title
+ * @return whether it was confirmed
+ */
+export function confirm(title, body, yes) {
+  const dialog = byId("dialog");
+  return new Promise((resolve) => {
+    dialog.replaceChildren(h("form", { method: "dialog", class: "dlg" },
+      h("h2", null, title), body,
+      h("div", { class: "dlg-actions" },
+        h("button", { value: "no" }, "Cancel"),
+        h("button", { value: "yes", class: "primary" }, yes))));
+    dialog.returnValue = "";
+    dialog.onclose = () => resolve(dialog.returnValue === "yes");
+    dialog.showModal();
+  });
 }
 
 let toastTimer = null;

@@ -5,6 +5,7 @@
 
 plugins {
     id "java-library"
+    id "java-test-fixtures"
     id "jacoco"
     id "com.diffplug.spotless"
     id "net.ltgt.errorprone"
@@ -30,6 +31,11 @@ dependencies {
     errorprone libs.errorprone.core
     errorprone libs.nullaway
 
+    // PhotonVision's settings database for tests (src/testFixtures): this project's, and the
+    // agent's. Settings go in and out of the database through JDBC's own API (java.sql), so only
+    // the tests need a driver; the agent brings its own.
+    testFixturesRuntimeOnly libs.sqlite.jdbc
+
     testImplementation platform(libs.junit.bom)
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
@@ -39,6 +45,13 @@ dependencies {
 
 tasks.named("test") {
     useJUnitPlatform()
+    jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
+    // The template's own PhotonVision lock, which a test checks against PhotonLib's vendordep.
+    systemProperty "frc.projectDir", rootProject.projectDir.absolutePath
+    inputs.file(rootProject.file("coprocessor/photonvision.lock")).withPropertyName("lock")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("vendordeps/photonlib.json")).withPropertyName("vendordep")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 ext.nullSafePackages = "com.michaelgrundvig.frc.coprocessor"

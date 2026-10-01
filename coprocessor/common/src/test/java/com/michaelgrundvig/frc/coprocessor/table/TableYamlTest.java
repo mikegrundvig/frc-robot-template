@@ -106,7 +106,8 @@ class TableYamlTest {
                 + " digits, and hyphens, starting with a letter and not ending with a hyphen, at"
                 + " most 63 characters",
             "coprocessors.yaml:5: address 300 is out of range: the last number of 10.TE.AM.x,"
-                + " from 11 to 254",
+                + " from 6 to 19, FRC's static range for devices on the robot (11 and up by"
+                + " convention)",
             "coprocessors.yaml:6: unknown board \"raspberry-pi\"; known: orangepi-5, orangepi-5b,"
                 + " orangepi-5-plus, orangepi-5-pro, orangepi-5-max",
             "coprocessors.yaml:7: camera \"a/b\" has a '/' or a control character; PhotonVision"

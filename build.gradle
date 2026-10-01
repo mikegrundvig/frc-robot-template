@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.gradlerio)
     alias(libs.plugins.spotless)
     alias(libs.plugins.errorprone)
+    // AdvantageScope's robot assets (ascope_assets/), generated from Robots.java by every build and
+    // checked against what's committed (build-logic/). A team that doesn't use AdvantageScope
+    // removes this line, and nothing of it runs.
+    id "frc.advantagescope-assets"
 }
 
 // Java 25, downloaded automatically when missing (settings.gradle). Nothing to install by hand.

@@ -192,7 +192,7 @@ if (System.getenv("CI") == null && !quick) {
 spotless {
     lineEndings = "UNIX"
     java {
-        target "src/**/*.java"
+        target "src/**/*.java", "build-logic/src/**/*.java"
         toggleOffOn()
         googleJavaFormat()
         removeUnusedImports()
@@ -200,7 +200,7 @@ spotless {
         endWithNewline()
     }
     groovyGradle {
-        target "*.gradle", "gradle/*.gradle"
+        target "*.gradle", "gradle/*.gradle", "build-logic/*.gradle"
         greclipse()
         leadingTabsToSpaces(4)
         trimTrailingWhitespace()
@@ -217,6 +217,9 @@ tasks.register("ci") {
     group = "verification"
     description = "Run every check CI runs: formatting, the gated build and tests, coverage."
     dependsOn "spotlessCheck", "build"
-    // From the top of the build, every project's checks.
+    // From the top of the build, every project's checks, and the build's own plugins'.
     dependsOn project.subprojects.collect { it.path + ":ci" }
+    if (project == rootProject) {
+        dependsOn gradle.includedBuild("build-logic").task(":ci")
+    }
 }

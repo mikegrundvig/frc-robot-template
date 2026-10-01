@@ -4,3 +4,5 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 *.jar binary
+# Generated glTF models (ascope_assets/): compared byte for byte with what the build generates.
+*.glb binary

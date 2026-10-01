@@ -1,0 +1,268 @@
+package com.michaelgrundvig.frc.toolconfigs;
+
+import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.stream.Stream;
+
+/**
+ * Brings a tool's committed files in line with what the model generates, and refuses when that
+ * would overwrite an edit made outside the build. What it last wrote is remembered in a sidecar
+ * (each file's SHA-256, under {@code build/}), which tells a file the build wrote from one someone
+ * changed:
+ *
+ * <ul>
+ *   <li>a file that already matches the model is left as it is;
+ *   <li>a file that's what the build last wrote, while the model changed, is rewritten;
+ *   <li>a file that matches neither was edited outside the build (or, with no sidecar after a fresh
+ *       clone or a clean, may have been): nothing is written, and the failure names both versions
+ *       and the two ways out, unless the edit is to be discarded;
+ *   <li>a new file is written;
+ *   <li>a file in one of the generated folders that the model no longer gives is removed if it's
+ *       what the build last wrote, and refused like an edit if not.
+ * </ul>
+ *
+ * <p>So a pull that changed the model and its files together passes, and only the files change on
+ * disk that have to.
+ */
+final class ToolConfigSync {
+  /**
+   * What became of the files.
+   *
+   * @param written the files written or removed, each with why
+   * @param refused why each refused file was refused, in a sentence or two; nothing was written
+   *     when any was
+   */
+  record Outcome(List<String> written, List<String> refused) {}
+
+  private final Path generated;
+  private final Path committed;
+  private final Path sidecar;
+  private final String source;
+  private final String committedName;
+
+  /**
+   * @param generated where the generator wrote the files, freshly
+   * @param committed where the tool's files are kept, committed
+   * @param sidecar what the build last wrote into {@code committed}, by each file's hash
+   * @param source where the model comes from, as a person would change it ({@code Robots.java})
+   * @param committedName how to name the committed folder in messages ({@code ascope_assets})
+   */
+  ToolConfigSync(
+      Path generated, Path committed, Path sidecar, String source, String committedName) {
+    this.generated = generated;
+    this.committed = committed;
+    this.sidecar = sidecar;
+    this.source = source;
+    this.committedName = committedName;
+  }
+
+  /**
+   * Compares, then writes what it may.
+   *
+   * @param discardEdits write the model's files over any edit, as {@code -PdiscardToolEdits} asks
+   */
+  Outcome run(boolean discardEdits) throws IOException {
+    Map<String, String> remembered = readSidecar();
+    Map<String, byte[]> wanted = files(generated);
+    Map<String, byte[]> writes = new TreeMap<>();
+    List<String> removals = new ArrayList<>();
+    List<String> written = new ArrayList<>();
+    List<String> refused = new ArrayList<>();
+    for (Map.Entry<String, byte[]> file : wanted.entrySet()) {
+      String path = file.getKey();
+      Path target = committed.resolve(path);
+      if (!Files.exists(target)) {
+        writes.put(path, file.getValue());
+        written.add(path + ": new");
+        continue;
+      }
+      byte[] now = Files.readAllBytes(target);
+      if (Arrays.equals(now, file.getValue())) {
+        continue;
+      }
+      if (hash(now).equals(remembered.get(path))) {
+        writes.put(path, file.getValue());
+        written.add(path + ": " + source + " changed");
+      } else if (discardEdits) {
+        writes.put(path, file.getValue());
+        written.add(path + ": an edit discarded");
+      } else {
+        refused.add(different(path, now, file.getValue(), remembered.containsKey(path)));
+      }
+    }
+    for (String path : stale(wanted)) {
+      byte[] now = Files.readAllBytes(committed.resolve(path));
+      if (hash(now).equals(remembered.get(path)) || discardEdits) {
+        removals.add(path);
+        written.add(path + ": removed, " + source + " no longer gives it");
+      } else {
+        refused.add(
+            committedName
+                + "/"
+                + path
+                + " is in a folder the build writes, but "
+                + source
+                + " doesn't give it, and the build didn't write it.");
+      }
+    }
+    if (!refused.isEmpty() && !discardEdits) {
+      return new Outcome(List.of(), refused);
+    }
+    for (Map.Entry<String, byte[]> write : writes.entrySet()) {
+      Path target = committed.resolve(write.getKey());
+      Files.createDirectories(target.getParent());
+      Files.write(target, write.getValue());
+    }
+    for (String path : removals) {
+      Files.delete(committed.resolve(path));
+    }
+    Map<String, String> remember = new TreeMap<>();
+    for (Map.Entry<String, byte[]> file : wanted.entrySet()) {
+      remember.put(file.getKey(), hash(file.getValue()));
+    }
+    writeSidecar(remember);
+    return new Outcome(written, List.of());
+  }
+
+  /** The files in the committed copies of the generated folders that weren't generated. */
+  private List<String> stale(Map<String, byte[]> wanted) throws IOException {
+    List<String> stale = new ArrayList<>();
+    TreeSet<String> folders = new TreeSet<>();
+    for (String path : wanted.keySet()) {
+      int slash = path.indexOf('/');
+      if (slash > 0) {
+        folders.add(path.substring(0, slash));
+      }
+    }
+    for (String folder : folders) {
+      Path inCommitted = committed.resolve(folder);
+      if (Files.isDirectory(inCommitted)) {
+        for (String path : files(inCommitted).keySet()) {
+          String full = folder + "/" + path;
+          if (!wanted.containsKey(full)) {
+            stale.add(full);
+          }
+        }
+      }
+    }
+    return stale;
+  }
+
+  /**
+   * Why a file is refused: the first place it differs, the file's version beside the model's, and
+   * the two ways out.
+   *
+   * @param remembered whether the sidecar knew the file: without it, nothing says who changed what
+   */
+  private String different(String path, byte[] now, byte[] wanted, boolean remembered) {
+    String name = committedName + "/" + path;
+    StringBuilder why = new StringBuilder(name);
+    if (remembered) {
+      why.append(" was edited outside the build, and differs from what ").append(source);
+      why.append(" gives.");
+    } else {
+      why.append(" differs from what ").append(source).append(" gives, and nothing records what");
+      why.append(" the build last wrote there (a fresh clone, or after a clean), so it may have");
+      why.append(" been edited.");
+    }
+    if (isText(path)) {
+      String[] fileLines = new String(now, StandardCharsets.UTF_8).split("\n", -1);
+      String[] modelLines = new String(wanted, StandardCharsets.UTF_8).split("\n", -1);
+      int line = 0;
+      while (line < fileLines.length
+          && line < modelLines.length
+          && fileLines[line].equals(modelLines[line])) {
+        line++;
+      }
+      String theFile = "line " + (line + 1) + " of the file:";
+      String theModel = source + " gives:";
+      int width = Math.max(theFile.length(), theModel.length()) + 2;
+      why.append("\n  ").append(padded(theFile, width)).append(lineOf(fileLines, line));
+      why.append("\n  ").append(padded(theModel, width)).append(lineOf(modelLines, line));
+    } else {
+      int at = 0;
+      while (at < now.length && at < wanted.length && now[at] == wanted[at]) {
+        at++;
+      }
+      why.append("\n  the file's ").append(now.length).append(" bytes against the ");
+      why.append(wanted.length).append(" ").append(source).append(" gives, apart from byte ");
+      why.append(at);
+    }
+    why.append("\nChange ").append(source).append(" if the file is right, or discard the edit:");
+    why.append(" ./gradlew build -PdiscardToolEdits");
+    return why.toString();
+  }
+
+  private static String lineOf(String[] lines, int line) {
+    return line < lines.length ? lines[line].strip() : "(nothing: it ends before)";
+  }
+
+  private static String padded(String text, int width) {
+    return text + " ".repeat(width - text.length());
+  }
+
+  private static boolean isText(String path) {
+    return path.endsWith(".json") || path.endsWith(".md") || path.endsWith(".txt");
+  }
+
+  /** Every file under a folder, by its path from it with forward slashes, in order. */
+  private static Map<String, byte[]> files(Path folder) throws IOException {
+    Map<String, byte[]> files = new TreeMap<>();
+    if (!Files.isDirectory(folder)) {
+      return files;
+    }
+    try (Stream<Path> walk = Files.walk(folder)) {
+      for (Path file : walk.filter(Files::isRegularFile).toList()) {
+        String path = folder.relativize(file).toString().replace('\\', '/');
+        files.put(path, Files.readAllBytes(file));
+      }
+    }
+    return files;
+  }
+
+  private Map<String, String> readSidecar() throws IOException {
+    Map<String, String> remembered = new LinkedHashMap<>();
+    if (Files.exists(sidecar)) {
+      Properties properties = new Properties();
+      try (Reader in = Files.newBufferedReader(sidecar, StandardCharsets.UTF_8)) {
+        properties.load(in);
+      }
+      for (String path : properties.stringPropertyNames()) {
+        remembered.put(path, properties.getProperty(path));
+      }
+    }
+    return remembered;
+  }
+
+  private void writeSidecar(Map<String, String> remember) throws IOException {
+    Files.createDirectories(sidecar.getParent());
+    Properties properties = new Properties();
+    properties.putAll(remember);
+    try (Writer out = Files.newBufferedWriter(sidecar, StandardCharsets.UTF_8)) {
+      properties.store(out, "What the build last wrote into " + committedName + ", by SHA-256");
+    }
+  }
+
+  static String hash(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("every Java has SHA-256", e);
+    }
+  }
+}

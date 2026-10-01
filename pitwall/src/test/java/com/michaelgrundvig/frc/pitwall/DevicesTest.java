@@ -60,7 +60,7 @@ class DevicesTest {
         Device.named("vision-front", "Coprocessor", this::card)
             .link("Open PhotonVision", "http://10.0.0.11:5800")
             .download("settings", "Download settings backup", NO_FILE)
-            .log(query -> new Devices.LogPage(List.of(), "")));
+            .log(query -> new Devices.LogPage(List.of(), "", "")));
 
     devices.periodic(true);
 
@@ -162,12 +162,22 @@ class DevicesTest {
             () ->
                 new Devices.File(
                     "a.txt", "text/plain", -2, new java.io.ByteArrayInputStream(new byte[0])));
-    assertThatIllegalArgumentException().isThrownBy(() -> new Devices.LogQuery("", 8, ""));
-    assertThatIllegalArgumentException().isThrownBy(() -> new Devices.LogQuery("", -1, ""));
+    assertThatIllegalArgumentException().isThrownBy(() -> Devices.LogQuery.latest(8, ""));
+    assertThatIllegalArgumentException().isThrownBy(() -> Devices.LogQuery.latest(-1, ""));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.LogQuery("", 3, "photon vision"));
-    assertThatIllegalArgumentException().isThrownBy(() -> new Devices.LogQuery("a b", 3, ""));
-    assertThat(new Devices.LogQuery("s=1;i=2", 3, "photonvision.service").priority()).isEqualTo(3);
+        .isThrownBy(() -> Devices.LogQuery.latest(3, "photon vision"));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new Devices.LogQuery(Devices.From.AFTER, "a b", 3, ""));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new Devices.LogQuery(Devices.From.BEFORE, "", 3, ""))
+        .withMessageContaining("needs one");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new Devices.LogQuery(Devices.From.START, "s=1", 3, ""))
+        .withMessageContaining("takes none");
+    assertThat(
+            new Devices.LogQuery(Devices.From.AFTER, "s=1;i=2", 3, "photonvision.service")
+                .priority())
+        .isEqualTo(3);
   }
 
   /** Once on the page, the server's threads read a device: it can't change after. */
@@ -181,7 +191,7 @@ class DevicesTest {
         .hasMessageContaining("describe a device whole");
     assertThatThrownBy(() -> device.download("settings", "Settings", NO_FILE))
         .isInstanceOf(IllegalStateException.class);
-    assertThatThrownBy(() -> device.log(query -> new Devices.LogPage(List.of(), "")))
+    assertThatThrownBy(() -> device.log(query -> new Devices.LogPage(List.of(), "", "")))
         .isInstanceOf(IllegalStateException.class);
   }
 }

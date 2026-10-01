@@ -56,6 +56,9 @@ public final class DeployCheck {
      */
     record PhotonVisionOnly(String why) implements Asked {}
 
+    /** Its agent answered that it's busy (503), twice: not checked, not failed. */
+    record Busy(String why) implements Asked {}
+
     /** Nothing answered: off, unplugged, or not on this network. */
     record Unreachable(String why) implements Asked {}
   }
@@ -156,6 +159,11 @@ public final class DeployCheck {
                   + why
                   + "): the agent isn't running, or this isn't this repository's image. Read its"
                   + " journal, or flash it with this build's release");
+      case Asked.Busy(String why) ->
+          new Finding(
+              name,
+              Verdict.WARN,
+              "its agent at " + at + " is busy (" + why + "): not checked; deploying anyway");
       case Asked.Unreachable(String why) ->
           new Finding(
               name,
@@ -242,7 +250,9 @@ public final class DeployCheck {
     try {
       body = agent.get(AgentApi.STAMP);
     } catch (AgentHttp.Answered another) {
-      return new Asked.Unreadable(String.valueOf(another.getMessage()));
+      return another.busy()
+          ? new Asked.Busy(String.valueOf(another.getMessage()))
+          : new Asked.Unreadable(String.valueOf(another.getMessage()));
     } catch (IOException noAgent) {
       String why = CoprocessorPoller.why(noAgent);
       try (Socket photonVision = new Socket()) {

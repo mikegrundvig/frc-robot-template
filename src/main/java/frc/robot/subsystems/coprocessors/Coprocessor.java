@@ -135,10 +135,19 @@ final class Coprocessor implements AutoCloseable {
     io.updateInputs(inputs);
     Logger.processInputs(key, inputs);
     if (inputs.everAnswered) {
-      // The robot's time at the coprocessor's boot, by its latest answer: a journal entry's
-      // monotonic time after that is its time on the robot's clock.
-      Clock now = new Clock(inputs.bootId, inputs.answeredNanos - inputs.agentMonotonicNanos);
-      if (!now.equals(clock)) {
+      // The robot's time at the coprocessor's boot: a journal entry's monotonic time after that is
+      // its time on the robot's clock. An answer may carry a reading up to a poll old, its clock
+      // read then, which puts the boot late by as much, never early: so this boot's earliest
+      // estimate is its best.
+      long estimate = inputs.answeredNanos - inputs.agentMonotonicNanos;
+      Clock was = clock;
+      Clock now =
+          new Clock(
+              inputs.bootId,
+              was.bootId().equals(inputs.bootId)
+                  ? Math.min(was.bootedAtRobotNanos(), estimate)
+                  : estimate);
+      if (!now.equals(was)) {
         clock = now;
       }
       Logger.recordOutput(bootedKey, now.bootedAtRobotNanos());
@@ -455,9 +464,21 @@ final class Coprocessor implements AutoCloseable {
 
   /** Its settings backup, streamed from its agent as it arrives. */
   Devices.File settingsBackup() throws IOException {
-    CoprocessorIO.Backup backup = io.settingsBackup();
+    CoprocessorIO.Backup backup = busyAsBusy(io::settingsBackup);
     return new Devices.File(
         name() + "-settings.zip", "application/zip", backup.length(), backup.body());
+  }
+
+  /** A call to its agent, its agent still busy said as a device busy, for the page's 503. */
+  private static <T> T busyAsBusy(AgentHttp.Call<T> call) throws IOException {
+    try {
+      return call.call();
+    } catch (AgentHttp.Answered answered) {
+      if (answered.busy()) {
+        throw new Devices.Busy("its agent is busy with another such request");
+      }
+      throw answered;
+    }
   }
 
   /**
@@ -470,7 +491,15 @@ final class Coprocessor implements AutoCloseable {
           "its agent serves only these units' entries: "
               + String.join(", ", AgentApi.JOURNAL_UNITS));
     }
-    JournalPage page = io.journal(query.cursor(), query.priority(), query.unit());
+    CoprocessorIO.JournalPlace place =
+        switch (query.from()) {
+          case LATEST -> CoprocessorIO.JournalPlace.LATEST;
+          case AFTER -> CoprocessorIO.JournalPlace.AFTER;
+          case BEFORE -> CoprocessorIO.JournalPlace.BEFORE;
+          case START -> CoprocessorIO.JournalPlace.BOOT;
+        };
+    JournalPage page =
+        busyAsBusy(() -> io.journal(place, query.cursor(), query.priority(), query.unit()));
     Clock heard = clock; // read once: the loop replaces it whole
     List<Devices.LogEntry> entries = new ArrayList<>();
     for (JournalEntry entry : page.entries()) {
@@ -481,7 +510,20 @@ final class Coprocessor implements AutoCloseable {
               entry.unit().isEmpty() ? entry.identifier() : entry.unit(),
               entry.message()));
     }
-    return new Devices.LogPage(entries, page.more() ? page.cursor() : "");
+    List<JournalEntry> got = page.entries();
+    // The agent's one cursor goes the way the page was asked; the other side's is an entry's.
+    String newer =
+        switch (place) {
+          case BEFORE -> got.isEmpty() ? "" : got.getLast().cursor();
+          default -> page.cursor();
+        };
+    String older =
+        switch (place) {
+          case BEFORE -> page.more() ? page.cursor() : "";
+          case BOOT -> "";
+          default -> got.isEmpty() ? "" : got.get(0).cursor();
+        };
+    return new Devices.LogPage(entries, newer, older);
   }
 
   /**
@@ -501,6 +543,11 @@ final class Coprocessor implements AutoCloseable {
 
   boolean isMissing() {
     return missing;
+  }
+
+  /** The robot's time at its boot, as best known. */
+  long bootedAtRobotNanos() {
+    return clock.bootedAtRobotNanos();
   }
 
   /** Its alerts up now, each as its level and text. */

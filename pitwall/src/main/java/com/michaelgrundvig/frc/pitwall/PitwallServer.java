@@ -103,12 +103,17 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code GET /api/devices}: each device's card as of its last read, as the event stream's
  *       {@code devices} section carries them ({@link Devices}).
  *   <li>{@code GET /api/devices/<name>/downloads/<id>}: a file from a device, fetched now, as an
- *       attachment; 502 when the device doesn't give it.
- *   <li>{@code GET /api/devices/<name>/log?priority=&unit=&cursor=}: a page of a device's log,
- *       {@code {"entries": [{"time", "priority", "unit", "message"}], "next"}}: priority from 0 to
- *       7 (7, everything, when left out), only one unit's entries when one is named, and the page
- *       after a cursor; 502 when the device doesn't answer. {@code /log.txt} with the same query is
- *       the log as text, to save: every page from the cursor on, up to a bound.
+ *       attachment; 502 when the device doesn't give it, 503 (with {@code Retry-After}) when it's
+ *       busy.
+ *   <li>{@code GET /api/devices/<name>/log?priority=&unit=&cursor=&before=&from=}: a page of a
+ *       device's log, {@code {"entries": [{"time", "priority", "unit", "message"}], "newer",
+ *       "older"}}: priority from 0 to 7 (7, everything, when left out), only one unit's entries
+ *       when one is named, and the latest page, or the one after a cursor ({@code cursor}), before
+ *       one ({@code before}), or from the start ({@code from=start}), one of them at most; {@code
+ *       newer} and {@code older} are the cursors for the pages either side. 502 when the device
+ *       doesn't answer, 503 (with {@code Retry-After}) when it's busy. {@code /log.txt} with the
+ *       same filters is the log as text, to save: from the start of the device's run, up to a
+ *       bound.
  * </ul>
  *
  * <p>The device routes ask the device on the server's thread, never the robot loop's; the page
@@ -374,8 +379,17 @@ public final class PitwallServer implements AutoCloseable {
     /** For a refused change to tunables, each reason with the values it concerns. */
     private final transient List<Outcome.Reason> reasons;
 
+    /** For a busy device, when to ask again, in seconds: 0 for nothing to say. */
+    private int retryAfterSeconds;
+
     Problem(int status, String title, String detail) {
       this(status, title, detail, List.of());
+    }
+
+    /** This problem, saying when to ask again. */
+    Problem retryAfter(int seconds) {
+      retryAfterSeconds = seconds;
+      return this;
     }
 
     Problem(int status, String title, String detail, List<Outcome.Reason> reasons) {
@@ -898,7 +912,8 @@ public final class PitwallServer implements AutoCloseable {
           Devices.LogPage page = fromDevice(name, () -> reading.read(asked));
           Map<String, Object> shown = new LinkedHashMap<>();
           shown.put("entries", page.entries().stream().map(Api::entry).toList());
-          shown.put("next", page.next());
+          shown.put("newer", page.newer());
+          shown.put("older", page.older());
           sendJson(exchange, 200, shown);
         } else {
           sendLogText(exchange, name, Objects.requireNonNull(log), Objects.requireNonNull(query));
@@ -962,14 +977,16 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     /**
-     * A device's log as text, to save: every page from the cursor on, until the log ends, or a
-     * bound (pages, size, or time) cuts it off, which its last line says.
+     * A device's log as text, to save: every page from the start of its current run (a computer's
+     * boot), until the log ends, or a bound (pages, size, or time) cuts it off, which its last line
+     * says.
      */
     private void sendLogText(
-        HttpExchange exchange, String name, Devices.Log log, Devices.LogQuery query)
+        HttpExchange exchange, String name, Devices.Log log, Devices.LogQuery filters)
         throws IOException {
       StringBuilder text = new StringBuilder();
-      Devices.LogQuery next = query;
+      Devices.LogQuery next =
+          new Devices.LogQuery(Devices.From.START, "", filters.priority(), filters.unit());
       long deadline = System.nanoTime() + deviceLimits.logDeadline().toNanos();
       String cut = "";
       for (int pages = 0; ; pages++) {
@@ -999,10 +1016,14 @@ public final class PitwallServer implements AutoCloseable {
               .append(entry.message())
               .append('\n');
         }
-        if (page.next().isEmpty() || page.next().equals(asked.cursor())) {
+        if (page.entries().isEmpty()
+            || page.newer().isEmpty()
+            || page.newer().equals(asked.cursor())) {
           break;
         }
-        next = new Devices.LogQuery(page.next(), query.priority(), query.unit());
+        next =
+            new Devices.LogQuery(
+                Devices.From.AFTER, page.newer(), filters.priority(), filters.unit());
       }
       if (!cut.isEmpty()) {
         text.append("-- cut off here: ")
@@ -1016,10 +1037,13 @@ public final class PitwallServer implements AutoCloseable {
           text.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    /** Something a device gives, or 502 saying why it didn't. */
+    /** Something a device gives, or 502 saying why it didn't (503 when it's busy). */
     private static <T> T fromDevice(String name, DeviceCall<T> call) {
       try {
         return call.call();
+      } catch (Devices.Busy busy) {
+        throw new Problem(503, name + " is busy", name + " is busy: " + busy.getMessage())
+            .retryAfter(1);
       } catch (IOException | RuntimeException e) {
         String why = e.getMessage();
         throw new Problem(
@@ -1039,10 +1063,31 @@ public final class PitwallServer implements AutoCloseable {
     private static Devices.LogQuery logQuery(HttpExchange exchange) {
       Map<String, String> asked = query(exchange.getRequestURI().getRawQuery());
       for (String key : asked.keySet()) {
-        if (!Set.of("priority", "unit", "cursor").contains(key)) {
-          throw new Problem(400, "Not a filter", "A log is asked by priority, unit, and cursor");
+        if (!Set.of("priority", "unit", "cursor", "before", "from").contains(key)) {
+          throw new Problem(
+              400,
+              "Not a filter",
+              "A log is asked by priority and unit, and one of cursor, before, and from=start");
         }
       }
+      String after = asked.getOrDefault("cursor", "");
+      String before = asked.getOrDefault("before", "");
+      String from = asked.getOrDefault("from", "");
+      if (!from.isEmpty() && !from.equals("start")) {
+        throw new Problem(400, "Not a place", "A log is read from=start, or not from anywhere");
+      }
+      int places =
+          (after.isEmpty() ? 0 : 1) + (before.isEmpty() ? 0 : 1) + (from.isEmpty() ? 0 : 1);
+      if (places > 1) {
+        throw new Problem(
+            400, "Two places", "A page of a log is after a cursor, before one, or from the start");
+      }
+      Devices.From where =
+          !after.isEmpty()
+              ? Devices.From.AFTER
+              : !before.isEmpty()
+                  ? Devices.From.BEFORE
+                  : !from.isEmpty() ? Devices.From.START : Devices.From.LATEST;
       int priority = 7;
       String given = asked.get("priority");
       if (given != null && !given.isEmpty()) {
@@ -1053,7 +1098,7 @@ public final class PitwallServer implements AutoCloseable {
       }
       try {
         return new Devices.LogQuery(
-            asked.getOrDefault("cursor", ""), priority, asked.getOrDefault("unit", ""));
+            where, after + before, priority, asked.getOrDefault("unit", ""));
       } catch (IllegalArgumentException e) {
         throw new Problem(400, "Not a log's filter", String.valueOf(e.getMessage()));
       }
@@ -1660,6 +1705,11 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     private void sendProblem(HttpExchange exchange, Problem problem) throws IOException {
+      if (problem.retryAfterSeconds > 0) {
+        exchange
+            .getResponseHeaders()
+            .set("Retry-After", Integer.toString(problem.retryAfterSeconds));
+      }
       Map<String, Object> body = new LinkedHashMap<>();
       body.put("type", "about:blank");
       body.put("title", problem.title);

@@ -52,6 +52,10 @@ class CoprocessorIOHttpTest {
   private final List<String> asked = new CopyOnWriteArrayList<>();
   private volatile boolean garbled;
 
+  /** How many more journal requests answer busy (503). */
+  private final java.util.concurrent.atomic.AtomicInteger busyFor =
+      new java.util.concurrent.atomic.AtomicInteger();
+
   @SuppressWarnings("NullAway.Init")
   private HttpServer server;
 
@@ -71,10 +75,25 @@ class CoprocessorIOHttpTest {
         exchange -> {
           String query = exchange.getRequestURI().getRawQuery();
           asked.add(query);
+          if (busyFor.getAndDecrement() > 0) {
+            exchange.getResponseHeaders().set("Retry-After", "1");
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+            return;
+          }
           Map<String, String> parameters = parameters(query);
+          CoprocessorIO.JournalPlace place =
+              parameters.containsKey("cursor")
+                  ? CoprocessorIO.JournalPlace.AFTER
+                  : parameters.containsKey("before")
+                      ? CoprocessorIO.JournalPlace.BEFORE
+                      : parameters.containsKey("from")
+                          ? CoprocessorIO.JournalPlace.BOOT
+                          : CoprocessorIO.JournalPlace.LATEST;
           JournalPage page =
               agent.journal(
-                  parameters.getOrDefault("cursor", ""),
+                  place,
+                  parameters.getOrDefault("cursor", parameters.getOrDefault("before", "")),
                   Integer.parseInt(parameters.getOrDefault("priority", "7")),
                   parameters.getOrDefault("unit", ""));
           send(exchange, garbled ? "not JSON" : Json.compact(page.toJson()));
@@ -209,8 +228,11 @@ class CoprocessorIOHttpTest {
     try (var body = backup.body()) {
       zip = body.readAllBytes();
     }
-    JournalPage errors = io.journal("", 3, "photonvision.service");
-    JournalPage after = io.journal(errors.cursor(), 7, "");
+    JournalPage errors =
+        io.journal(CoprocessorIO.JournalPlace.LATEST, "", 3, "photonvision.service");
+    JournalPage after = io.journal(CoprocessorIO.JournalPlace.AFTER, errors.cursor(), 7, "");
+    JournalPage before = io.journal(CoprocessorIO.JournalPlace.BEFORE, errors.cursor(), 7, "");
+    JournalPage boot = io.journal(CoprocessorIO.JournalPlace.BOOT, "", 7, "");
 
     assertThat(zip).startsWith('P', 'K');
     assertThat(backup.length()).as("the agent gave its length").isEqualTo(zip.length);
@@ -218,16 +240,35 @@ class CoprocessorIOHttpTest {
         .singleElement()
         .satisfies(e -> assertThat(e.priority()).isEqualTo(3));
     assertThat(after.entries()).hasSize(1);
+    assertThat(before.entries()).hasSize(3);
+    assertThat(boot.entries()).hasSize(5);
     assertThat(asked)
         .containsExactly(
-            "priority=3&limit=500&unit=photonvision.service", "priority=7&limit=500&cursor=sim-3");
+            "priority=3&limit=500&unit=photonvision.service",
+            "priority=7&limit=500&cursor=sim-3",
+            "priority=7&limit=500&before=sim-3",
+            "priority=7&limit=500&from=boot");
+  }
+
+  /** A busy agent is asked once more, a second on; still busy, it says so. */
+  @Test
+  void aBusyAgentIsAskedOnceMore() throws Exception {
+    busyFor.set(1);
+    JournalPage page = io.journal(CoprocessorIO.JournalPlace.LATEST, "", 7, "");
+
+    busyFor.set(2);
+    assertThatThrownBy(() -> io.journal(CoprocessorIO.JournalPlace.LATEST, "", 7, ""))
+        .isInstanceOfSatisfying(
+            AgentHttp.Answered.class, answered -> assertThat(answered.busy()).isTrue());
+    assertThat(page.entries()).isNotEmpty();
+    assertThat(asked).hasSize(4);
   }
 
   @Test
   void aJournalThatCantBeReadSaysSo() {
     garbled = true;
 
-    assertThatThrownBy(() -> io.journal("", 7, ""))
+    assertThatThrownBy(() -> io.journal(CoprocessorIO.JournalPlace.LATEST, "", 7, ""))
         .isInstanceOf(IOException.class)
         .hasMessageStartingWith("its journal can't be read");
   }

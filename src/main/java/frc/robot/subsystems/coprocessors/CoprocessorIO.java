@@ -206,7 +206,7 @@ public interface CoprocessorIO extends AutoCloseable {
 
   /**
    * A settings backup as it arrives from the agent, to pass on without holding it whole: close it
-   * once read.
+   * once read. Asked once more, a second on, when the agent is busy with another such request.
    *
    * @param length its length, or -1 when the agent didn't give it
    * @param body what it holds
@@ -223,16 +223,32 @@ public interface CoprocessorIO extends AutoCloseable {
     throw new IOException("there's no coprocessor to ask here");
   }
 
+  /** Where in its journal a page is. */
+  enum JournalPlace {
+    /** The latest entries. */
+    LATEST,
+    /** The entries just after a cursor. */
+    AFTER,
+    /** The entries just before a cursor. */
+    BEFORE,
+    /** The first entries of its current boot. */
+    BOOT
+  }
+
   /**
-   * A page of its journal ({@code /v1/journal}): the latest entries, or those after a cursor.
-   * Fetched now, on the caller's thread.
+   * A page of its journal ({@code /v1/journal}), at most 500 entries, oldest first. Fetched now, on
+   * the caller's thread; asked once more, a second on, when the agent is busy with another such
+   * request.
    *
-   * @param cursor the entries after this one; empty for the latest
+   * @param place where the page is
+   * @param cursor the cursor it's after or before; empty for the latest or the boot's start
    * @param priority that priority and worse: 0 (emergency) to 7 (debug)
-   * @param unit one systemd unit's entries; empty for all
-   * @throws IOException saying why there's none
+   * @param unit one of the units the agent serves ({@code AgentApi.JOURNAL_UNITS}); empty for all
+   * @throws IOException saying why there's none: {@link AgentHttp.Answered} with 503 when the agent
+   *     is still busy
    */
-  default JournalPage journal(String cursor, int priority, String unit) throws IOException {
+  default JournalPage journal(JournalPlace place, String cursor, int priority, String unit)
+      throws IOException {
     throw new IOException("there's no coprocessor to ask here");
   }
 

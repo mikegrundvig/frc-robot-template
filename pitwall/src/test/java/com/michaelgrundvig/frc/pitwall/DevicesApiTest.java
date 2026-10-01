@@ -74,6 +74,7 @@ class DevicesApiTest {
 
   private final AtomicInteger fetched = new AtomicInteger();
   private volatile boolean answering = true;
+  private volatile boolean busy;
   private final AtomicBoolean fieldConnected = new AtomicBoolean();
 
   /** Holds the slow download until a test lets it go. */
@@ -172,21 +173,38 @@ class DevicesApiTest {
     } catch (InterruptedException e) {
       throw new IOException(e);
     }
-    return new LogPage(List.of(new LogEntry("1 s", 6, "kernel", "more")), "x" + query.cursor());
+    return new LogPage(List.of(new LogEntry("1 s", 6, "kernel", "more")), "x" + query.cursor(), "");
   }
 
-  /** Three pages: the first, then the one after "a", then the last after "b". */
+  /**
+   * Three entries, one a page: the latest is "c"'s; from the start, "a"'s; after "a", "b"'s; after
+   * "b", "c"'s; after "c", nothing yet; before "c", "b"'s.
+   */
   private LogPage journal(LogQuery query) throws IOException {
     asked.add(query);
+    if (busy) {
+      throw new Devices.Busy("another journal request is under way");
+    }
     if (!answering) {
       throw new IOException("connect timed out");
     }
-    return switch (query.cursor()) {
-      case "" -> new LogPage(List.of(new LogEntry("12.0 s", 3, "kernel", "usb 3-1: reset")), "a");
+    String at =
+        switch (query.from()) {
+          case LATEST -> "c";
+          case START -> "a";
+          case AFTER -> query.cursor().equals("a") ? "b" : query.cursor().equals("b") ? "c" : "";
+          case BEFORE -> query.cursor().equals("c") ? "b" : query.cursor().equals("b") ? "a" : "";
+        };
+    return switch (at) {
       case "a" ->
+          new LogPage(List.of(new LogEntry("12.0 s", 3, "kernel", "usb 3-1: reset")), "a", "");
+      case "b" ->
           new LogPage(
-              List.of(new LogEntry("13.5 s", 6, "photonvision.service", "<b>started</b>")), "b");
-      default -> new LogPage(List.of(), "");
+              List.of(new LogEntry("13.5 s", 6, "photonvision.service", "<b>started</b>")),
+              "b",
+              "b");
+      case "c" -> new LogPage(List.of(new LogEntry("14.0 s", 6, "kernel", "later")), "c", "c");
+      default -> new LogPage(List.of(), "", "");
     };
   }
 
@@ -339,18 +357,50 @@ class DevicesApiTest {
   @Test
   void aLogPageIsAskedWithTheFiltersGiven() throws Exception {
     asked.clear();
-    HttpResponse<String> first = get("/api/devices/vision-front/log?priority=3&unit=kernel");
-    HttpResponse<String> second =
+    HttpResponse<String> latest = get("/api/devices/vision-front/log?priority=3&unit=kernel");
+    HttpResponse<String> newer =
         get("/api/devices/vision-front/log?priority=3&unit=kernel&cursor=a");
+    HttpResponse<String> older =
+        get("/api/devices/vision-front/log?priority=3&unit=kernel&before=c");
+    HttpResponse<String> start = get("/api/devices/vision-front/log?from=start");
 
-    assertThat(first.statusCode()).isEqualTo(200);
-    assertThat(first.body())
+    assertThat(latest.statusCode()).isEqualTo(200);
+    assertThat(latest.body())
         .isEqualTo(
-            "{\"entries\":[{\"time\":\"12.0 s\",\"priority\":3,\"unit\":\"kernel\","
-                + "\"message\":\"usb 3-1: reset\"}],\"next\":\"a\"}");
-    assertThat(second.body()).contains("\"next\":\"b\"");
+            "{\"entries\":[{\"time\":\"14.0 s\",\"priority\":6,\"unit\":\"kernel\","
+                + "\"message\":\"later\"}],\"newer\":\"c\",\"older\":\"c\"}");
+    assertThat(newer.body()).contains("<b>started</b>");
+    assertThat(older.body()).contains("<b>started</b>");
+    assertThat(start.body()).contains("usb 3-1: reset", "\"older\":\"\"");
     assertThat(asked)
-        .containsExactly(new LogQuery("", 3, "kernel"), new LogQuery("a", 3, "kernel"));
+        .containsExactly(
+            new LogQuery(Devices.From.LATEST, "", 3, "kernel"),
+            new LogQuery(Devices.From.AFTER, "a", 3, "kernel"),
+            new LogQuery(Devices.From.BEFORE, "c", 3, "kernel"),
+            new LogQuery(Devices.From.START, "", 7, ""));
+  }
+
+  @Test
+  void aPageIsAtOnePlaceAtMost() throws Exception {
+    assertThat(get("/api/devices/vision-front/log?cursor=a&before=c").statusCode()).isEqualTo(400);
+    assertThat(get("/api/devices/vision-front/log?from=start&cursor=a").statusCode())
+        .isEqualTo(400);
+    assertThat(get("/api/devices/vision-front/log?from=yesterday").statusCode()).isEqualTo(400);
+  }
+
+  /** A device busy with another such request is passed on as busy, saying when to ask again. */
+  @Test
+  void aBusyDeviceIsServiceUnavailable() throws Exception {
+    busy = true;
+    try {
+      HttpResponse<String> page = get("/api/devices/vision-front/log");
+
+      assertThat(page.statusCode()).isEqualTo(503);
+      assertThat(page.headers().firstValue("Retry-After")).hasValue("1");
+      assertThat(page.body()).contains("vision-front is busy");
+    } finally {
+      busy = false;
+    }
   }
 
   @Test
@@ -362,7 +412,7 @@ class DevicesApiTest {
   }
 
   @Test
-  void theLogAsTextFollowsEveryPage() throws Exception {
+  void theLogAsTextIsFromTheStart() throws Exception {
     asked.clear();
     HttpResponse<String> text = get("/api/devices/vision-front/log.txt?priority=6");
 
@@ -372,8 +422,15 @@ class DevicesApiTest {
     assertThat(text.body())
         .isEqualTo(
             "12.0 s err kernel: usb 3-1: reset\n"
-                + "13.5 s info photonvision.service: <b>started</b>\n");
-    assertThat(asked).extracting(LogQuery::cursor).containsExactly("", "a", "b");
+                + "13.5 s info photonvision.service: <b>started</b>\n"
+                + "14.0 s info kernel: later\n");
+    assertThat(asked)
+        .extracting(LogQuery::from, LogQuery::cursor)
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple(Devices.From.START, ""),
+            org.assertj.core.groups.Tuple.tuple(Devices.From.AFTER, "a"),
+            org.assertj.core.groups.Tuple.tuple(Devices.From.AFTER, "b"),
+            org.assertj.core.groups.Tuple.tuple(Devices.From.AFTER, "c"));
   }
 
   /** A log that never ends is cut off at its deadline, and its last line says so. */

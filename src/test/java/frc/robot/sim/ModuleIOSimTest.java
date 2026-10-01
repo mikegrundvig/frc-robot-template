@@ -56,17 +56,27 @@ class ModuleIOSimTest {
     assertThat(atTen).as("%s s at 10 A, %s s at 40 A", atTen, atForty).isGreaterThan(atForty * 1.5);
   }
 
-  /** What the module reports of its steering while turning: never past the limit. */
+  /**
+   * The steering's current, as the module reports it, is the most since the last loop: the limit in
+   * the loop that starts a turn, though by that loop's end the motor is at speed and draws next to
+   * nothing.
+   */
   @Test
-  void theSteeringsCurrentStaysWithinItsLimit() {
+  void theSteeringReportsItsPeakCurrentWhichStaysWithinItsLimit() {
     ModuleIOSim module = module(20);
     ModuleIO.ModuleIOInputs inputs = new ModuleIO.ModuleIOInputs();
     module.setSteerAngle(Rotation2d.CCW_90DEG);
 
-    for (int step = 0; step < 50; step++) {
-      module.step(STEP_SECONDS);
+    for (int loop = 0; loop < 25; loop++) {
+      for (int step = 0; step < 5; step++) {
+        module.step(STEP_SECONDS);
+      }
       module.updateInputs(inputs);
-      assertThat(inputs.steerStatorCurrentAmps).isLessThanOrEqualTo(20 + 1e-9);
+      assertThat(inputs.steerStatorCurrentAmps).isLessThanOrEqualTo(20);
+      if (loop == 0) {
+        assertThat(inputs.steerStatorCurrentAmps).as("the turn's first loop").isEqualTo(20);
+      }
     }
+    assertThat(inputs.steerStatorCurrentAmps).as("turned and holding").isLessThan(1);
   }
 }

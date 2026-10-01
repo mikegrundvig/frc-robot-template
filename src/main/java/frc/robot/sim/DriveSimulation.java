@@ -7,6 +7,7 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
+import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.SwerveKinematicsModel;
@@ -87,18 +88,33 @@ public final class DriveSimulation {
   private double riseForward;
   private double riseLeft;
 
-  // The robot's motion on the field, for what its IMU feels: its velocity over the last physics
-  // step, and how that changed over the last loop.
+  /** The robot's velocity on the field over the last physics step, for what its IMUs feel. */
   private Translation2d lastVelocity = Translation2d.ZERO;
-  private Translation2d loopAcceleration = Translation2d.ZERO;
 
   /** A push the wheels don't see, in the field's frame: the velocity it's headed for, and now. */
   private Translation2d pushTarget = Translation2d.ZERO;
 
   private Translation2d pushVelocity = Translation2d.ZERO;
 
-  /** A hit's jolt, in the robot's frame, until the IMU reads it. */
-  private Translation2d jolt = Translation2d.ZERO;
+  /**
+   * The robot's velocity on the field: what its wheels ask of it, followed no faster than the
+   * floor's grip allows.
+   */
+  private Translation2d chassisVelocity = Translation2d.ZERO;
+
+  /** The most acceleration the floor's grip allows the robot: its wheels' friction times g. */
+  private final double gripLimit;
+
+  /**
+   * On flat ground until given its terrain ({@link #setTerrain}), its IMUs at the robot's center.
+   *
+   * @param body the robot's frame, which places the wheels, and its mass, which they carry
+   * @param drivetrain the drivetrain as configured: the code's belief about its modules
+   * @param errors how the real wheels and sensors differ from the configuration
+   */
+  public DriveSimulation(Body body, SwerveConfig drivetrain, SensorErrors errors) {
+    this(body, drivetrain, errors, ImuPlacement.UNCHECKED);
+  }
 
   /**
    * On flat ground until given its terrain ({@link #setTerrain}).
@@ -106,8 +122,11 @@ public final class DriveSimulation {
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param drivetrain the drivetrain as configured: the code's belief about its modules
    * @param errors how the real wheels and sensors differ from the configuration
+   * @param imus where the robot's configuration places its IMUs: they really sit off that by their
+   *     accelerometers' errors
    */
-  public DriveSimulation(Body body, SwerveConfig drivetrain, SensorErrors errors) {
+  public DriveSimulation(
+      Body body, SwerveConfig drivetrain, SensorErrors errors, ImuPlacement imus) {
     SwerveConfig.Modules config = drivetrain.modules();
     Translation2d[] moduleLocations = drivetrain.moduleTranslations(body);
     kinematics = new SwerveKinematicsModel(moduleLocations);
@@ -127,9 +146,24 @@ public final class DriveSimulation {
       builtTreadScale[i] = treadScale[i];
       trueRadiusMeters[i] = configuredRadiusMeters * treadScale[i];
     }
+    gripLimit = config.wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY;
     // Each IMU's noise from its own stream of the seed: the backup's isn't the next seed's gyro.
-    gyro = new GyroIOSim(this, errors.gyro(), errors.seed());
-    backupGyro = new GyroIOSim(this, errors.backupGyro(), errors.seed() + BACKUP_SEED_OFFSET);
+    gyro =
+        new GyroIOSim(
+            this,
+            errors.gyro(),
+            new AccelerometerSim(this, errors.accelerometer(), imus.gyro(), errors.seed() + 1),
+            errors.seed());
+    backupGyro =
+        new GyroIOSim(
+            this,
+            errors.backupGyro(),
+            new AccelerometerSim(
+                this,
+                errors.backupAccelerometer(),
+                imus.backup(),
+                errors.seed() + BACKUP_SEED_OFFSET + 1),
+            errors.seed() + BACKUP_SEED_OFFSET);
     lastTrue = trueWheels();
   }
 
@@ -240,7 +274,6 @@ public final class DriveSimulation {
     }
     double dt = seconds / STEPS_PER_LOOP;
     long dtNanos = Math.round(dt * 1e9);
-    Translation2d loopStartVelocity = lastVelocity;
     for (int remaining = STEPS_PER_LOOP - 1; remaining >= 0; remaining--) {
       for (ModuleIOSim module : modules) {
         module.step(dt);
@@ -256,24 +289,31 @@ public final class DriveSimulation {
               ? (riseForward * motion.dxMeters() + riseLeft * motion.dyMeters()) / travel
               : 0;
       double level = grip / Math.sqrt(1 + rise * rise);
-      truePose =
+      Pose2d asked =
           truePose.plus(
               new Twist2d(
                       level * motion.dxMeters(),
                       level * motion.dyMeters(),
                       grip * motion.dthetaRadians())
                   .exp());
+      // The robot goes where its wheels take it, as fast as the floor's grip lets it change course:
+      // past that, they skid.
+      chassisVelocity =
+          toward(chassisVelocity, asked.getTranslation().minus(before).div(dt), gripLimit * dt);
       pushVelocity =
           toward(pushVelocity, pushTarget, PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED * dt);
       truePose =
           new Pose2d(
-              truePose.getTranslation().plus(pushVelocity.times(dt)), truePose.getRotation());
+              before.plus(chassisVelocity.times(dt)).plus(pushVelocity.times(dt)),
+              asked.getRotation());
       settle();
       yawTurnedRadians += grip * motion.dthetaRadians();
       yawRateRadiansPerSecond = grip * motion.dthetaRadians() / dt;
       lastVelocity = truePose.getTranslation().minus(before).div(dt);
       lastTrue = wheels;
       elapsedSeconds += dt;
+      gyro.feel(dt);
+      backupGyro.feel(dt);
       long readingTime = nowNanos - remaining * dtNanos;
       for (ModuleIOSim module : modules) {
         module.sample(readingTime);
@@ -283,7 +323,8 @@ public final class DriveSimulation {
         backupGyro.sample(readingTime);
       }
     }
-    loopAcceleration = lastVelocity.minus(loopStartVelocity).div(seconds);
+    gyro.endLoop(seconds);
+    backupGyro.endLoop(seconds);
   }
 
   /** A velocity moved toward another by at most so much. */
@@ -402,7 +443,9 @@ public final class DriveSimulation {
    */
   public void hit(Transform2d shove) {
     Rotation2d direction = shove.getTranslation().getAngle().orElse(Rotation2d.ZERO);
-    jolt = new Translation2d(HIT_JOLT_METERS_PER_SECOND_SQUARED, direction);
+    Translation2d jolt = new Translation2d(HIT_JOLT_METERS_PER_SECOND_SQUARED, direction);
+    gyro.jolt(jolt);
+    backupGyro.jolt(jolt);
     shove(shove);
   }
 
@@ -480,24 +523,16 @@ public final class DriveSimulation {
   }
 
   /**
-   * What the IMU feels, in the robot's frame: the robot's acceleration over the last loop, as an
-   * IMU's filter reads it once a loop, gravity's share as the robot tilts, and the jolt of any hit
-   * since it last read. The simulated robot follows its wheels without slipping, so where it turns
-   * or stops harder than a real robot's grip allows (a module steering at speed sends it the new
-   * way at once), its IMU feels that too: what the simulated robot does, not what a real one would,
-   * so the wheels and the IMU agree as they would on a robot that really moved so.
+   * How fast a point fixed on the robot moves across the field, after the last physics step: the
+   * robot's velocity, and its turn swinging the point around its center.
+   *
+   * @param place where the point sits, from the robot's center
    */
-  Translation2d feltAcceleration() {
-    Translation2d driving = loopAcceleration.rotateBy(truePose.getRotation().unaryMinus());
-    // WPILib's attitude: a positive pitch is nose down, a positive roll the left side up. The IMU
-    // feels the floor holding it up, tipped along the robot's axes.
-    Translation2d gravity =
+  Translation2d pointVelocity(Translation2d place) {
+    Translation2d arm = place.rotateBy(truePose.getRotation());
+    return lastVelocity.plus(
         new Translation2d(
-            -ImuReadings.STANDARD_GRAVITY * Math.sin(pitchRadians),
-            ImuReadings.STANDARD_GRAVITY * Math.sin(rollRadians) * Math.cos(pitchRadians));
-    Translation2d felt = driving.plus(gravity).plus(jolt);
-    jolt = Translation2d.ZERO;
-    return felt;
+            -yawRateRadiansPerSecond * arm.getY(), yawRateRadiansPerSecond * arm.getX()));
   }
 
   /** The wheels as they truly rolled: the rotation that moved the robot, at the true radius. */

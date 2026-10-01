@@ -183,7 +183,8 @@ make it.
 
 - One wheel off the floor: `wheel-lifted` tilts the robot and scales every wheel's grip alike, so
   its wheels never disagree as a lifted one's would, and the robot isn't raised.
-- A wheel slipping on its own under acceleration: traction isn't modeled (maple-sim,
+- One wheel slipping on its own under acceleration: the robot keeps to its tread's grip as a whole,
+  and every wheel carries the same share, so they slip all alike or not at all (maple-sim,
   [stand-ins](stand-ins.md)).
 - A CAN device dropping off the bus, or browning out: the simulated modules have no bus.
 - The battery sagging: the simulated world models no battery.

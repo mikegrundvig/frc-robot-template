@@ -449,9 +449,10 @@ class LocalizationSimTest {
 
   /**
    * Pushed sideways by another robot, its wheels never turning: only the accelerometer feels it, as
-   * the push gets going. The doubt grows with the push. The steady slide after that fades from what
-   * the speed comparison remembers, and the stop cancels against the faded start, so neither is
-   * seen: how far the robot slid, the cameras find.
+   * the push gets going. The slide stays seen while the push holds, let go no faster than the
+   * accelerometer's bias could have added it, and when the push lets go the accelerometer feels the
+   * robot slow, and it's over. The doubt grows with the push; how far the robot slid, the cameras
+   * find.
    */
   @Test
   void aPushSidewaysIsDoubtedTheMoreTheFasterItSlides() {

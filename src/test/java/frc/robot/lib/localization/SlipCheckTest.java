@@ -197,9 +197,10 @@ class SlipCheckTest {
     }
 
     assertThat(robot.slideX).isCloseTo(0, within(1e-12));
-    // What it carried faded while the robot fell behind, and the catching up didn't: a little of
-    // it is left over, the other way, until that fades too.
-    assertThat(robot.check.speedSlipMetersPerSecond()).isLessThan(0.05);
+    assertThat(robot.check.speedSlipMetersPerSecond()).isZero();
+    assertThat(robot.check.slideMetersPerSecond())
+        .as("what was let go while it slid, at the bias's rate, is under the tolerance")
+        .isLessThan(TOLERANCE);
   }
 
   /** Pushed sideways while the wheels stand still: the IMU feels the push get going. */
@@ -215,8 +216,35 @@ class SlipCheckTest {
 
     // 0.3 m/s in all, within the accelerometer's tolerance; 0.6 m/s, past it.
     assertThat(slow.check.speedSlipMetersPerSecond()).isZero();
-    assertThat(fast.check.slideMetersPerSecond()).isBetween(0.9 * 0.6, 0.6);
+    assertThat(fast.check.slideMetersPerSecond()).isBetween(0.8 * 0.6, 0.6);
     assertThat(fast.check.speedSlipMetersPerSecond()).isPositive();
+  }
+
+  /**
+   * A push that holds at a steady speed: the accelerometer felt it get going, and nothing since,
+   * but the slide stays seen, let go only as fast as a bias could have added it. When the push lets
+   * go, the accelerometer feels the robot slow to its wheels' pace, and the slide is over.
+   */
+  @Test
+  void aSteadySlideStaysSeenUntilItStops() {
+    Robot robot = new Robot().loops(5, 0, 0, 0, 0);
+    for (int i = 1; i <= 100; i++) {
+      // To 1 m/s sideways at 3 m/s², then held there: two seconds in all. The wheels roll none of
+      // it.
+      double speedUp = Math.min(3 * LOOP, 1 - robot.fieldVy);
+      robot.slide(0, -(robot.fieldVy + speedUp)).loop(0, speedUp, 0, 0);
+    }
+    double held = robot.check.slideMetersPerSecond();
+    double slipping = robot.check.slipMetersPerSecond();
+    for (int i = 1; i <= 25; i++) {
+      double slowDown = Math.min(3 * LOOP, robot.fieldVy);
+      robot.slide(0, -(robot.fieldVy - slowDown)).loop(0, -slowDown, 0, 0);
+    }
+
+    // Let go at the bias's rate: 0.5 m/s of the 1 m/s in two seconds.
+    assertThat(held).as("still seen, two seconds on").isGreaterThan(0.45);
+    assertThat(slipping).isPositive();
+    assertThat(robot.check.slipMetersPerSecond()).as("stopped").isZero();
   }
 
   /** A slide that turns and one that speeds up, at once: the root of their squares. */
@@ -263,19 +291,28 @@ class SlipCheckTest {
     assertThat(checked.check.speedSlipMetersPerSecond()).as("as it would be").isPositive();
   }
 
-  /** A hit: the IMU feels 4 g that the wheels don't. A robot stopping as hard is felt by both. */
+  /**
+   * A hit: the IMU feels 18 m/s² that the wheels don't. A robot stopping as hard is felt by both.
+   * And one felt at the accelerometer's range is past what it can say: a jolt, whatever the wheels
+   * did.
+   */
   @Test
   void aJoltTheWheelsDontExplainIsACollision() {
     Robot hit = new Robot().loops(10, 0, 0, 0, 0);
     Robot stopping = new Robot();
     stopping.fieldVx = 2;
     stopping.loops(10, 0, 0, 0, 0);
+    Robot slammed = new Robot();
+    slammed.fieldVx = 2;
+    slammed.loops(10, 0, 0, 0, 0);
 
-    hit.slide(-0.8, 0).loop(0.8, 0, 0, 0); // shoved to 0.8 m/s in a loop: 40 m/s²
-    stopping.loop(-0.8, 0, 0, 0); // slows as fast, its wheels with it
+    hit.slide(-0.36, 0).loop(0.36, 0, 0, 0); // shoved to 0.36 m/s in a loop: 18 m/s²
+    stopping.loop(-0.36, 0, 0, 0); // slows as fast, its wheels with it
+    slammed.loop(-0.8, 0, 0, 0); // 40 m/s², past the range, its wheels with it
 
     assertThat(hit.check.jolt()).isTrue();
     assertThat(stopping.check.jolt()).isFalse();
+    assertThat(slammed.check.jolt()).isTrue();
     assertThat(hit.check.speedSlipMetersPerSecond()).as("the collision's doubt covers it").isZero();
   }
 
@@ -286,7 +323,7 @@ class SlipCheckTest {
     stopping.fieldVx = 2;
     stopping.loops(10, 0, 0, 0, 0);
 
-    stopping.loop(-0.8, 0, 0, 0);
+    stopping.loop(-0.36, 0, 0, 0);
 
     assertThat(stopping.check.jolt()).isTrue();
   }

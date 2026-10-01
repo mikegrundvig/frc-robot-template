@@ -340,7 +340,8 @@ class FaultsTest {
       undo(Faults.module(i), Faults.WORN);
     }
 
-    assertThat(wornDistance / fresh).isCloseTo(0.9, within(1e-6));
+    // Within a thousandth: the robot follows its wheels no faster than its grip lets it.
+    assertThat(wornDistance / fresh).isCloseTo(0.9, within(1e-3));
     assertThat(worn.drivetrain().treadScale(0)).isEqualTo(1.0);
     assertThat(components.on()).isEmpty();
   }
@@ -489,7 +490,8 @@ class FaultsTest {
     double slipping = drive(world, 3.0, 1.0);
     undo(ROBOT, Faults.SLIPPING);
 
-    assertThat(slipping / gripping).isCloseTo(0.5, within(1e-6));
+    // Within a thousandth: the robot follows its wheels no faster than its grip lets it.
+    assertThat(slipping / gripping).isCloseTo(0.5, within(1e-3));
     assertThat(world.drivetrain().grip()).isEqualTo(1);
   }
 

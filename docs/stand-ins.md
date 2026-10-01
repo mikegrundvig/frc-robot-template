@@ -56,17 +56,20 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is within
   10% of full speed in under a second. What that leaves out:
 
-  - **Traction:** past the tread's grip (`wheelCoefficientOfFriction` times g, 11.8 m/s² at the
-    template's 1.2), the simulated robot keeps speeding up as hard as its motors push, where a real
-    one's wheels spin. At the template's 30 A it never gets there; at 120 A it reaches 17 m/s².
-    Its wheels slip only when a fault makes them (a wheel spinning past the floor, a launch with
-    less grip, a push), and its IMU feels what the simulated robot does, so the wheels and the IMU
-    disagree only then, as localization's slip check expects of a robot whose wheels grip. That
-    IMU is ideal: no noise, no bias, no range (a Pigeon 2 reports up to ±2 g), read as the loop's
-    average acceleration at the robot's center. And what it feels, a real robot never would: the
-    simulated robot follows its wheels through a change of direction at speed, a module turned a
-    quarter turn sending it the new way at once, at up to about 8 g (76 m/s² in the estimator's
-    golden run), where a real robot's grip holds it to about 1.2 g and its wheels scrub.
+  - **Traction:** the robot follows its wheels only as fast as the tread's grip lets it change
+    course (`wheelCoefficientOfFriction` times g, 11.8 m/s² at the template's 1.2): past that, the
+    chassis keeps its momentum and the wheels skid, as a real robot's do when a module turns at
+    speed. That's all of traction there is. Each wheel still turns as its own motor drives it,
+    not as the floor drags it, so wheels that disagree with each other (each speeding up or
+    slowing to its own new speed after a change of direction) stay apart longer than a real
+    robot's would, and push and pull the chassis between them at up to the grip, shuddering at the
+    steering's 100 Hz as the modules re-steer. And a robot whose motors push harder than the grip
+    (a stator limit of 120 A, 17 m/s²) speeds up at 11.8 m/s² while its wheels spin up past it,
+    all alike: a launch that slips, which only the accelerometer can see. No one wheel slips on
+    its own: that's a fault to make by hand (a module Spinning).
+    Its IMUs read as a Pigeon 2's do on the season-worn robot (`SensorErrors.AccelErrors`), so the
+    slip check sees what a real accelerometer would: its noise, bias, range, and its filter and
+    100 Hz sampling, which smooth that shudder before it's read once a loop.
   - **Weight transfer:** every wheel carries a quarter of the mass however hard the robot speeds
     up, where a real one's front wheels lighten and slip first (`Robots` estimates where).
   - **The battery:** it holds 12 V through a launch, as above.

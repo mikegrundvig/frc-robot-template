@@ -5,6 +5,7 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.vision.CameraIO;
@@ -49,8 +50,26 @@ public final class SimulatedWorld implements AutoCloseable {
       Body body,
       List<CameraConfig> cameras,
       SensorErrors errors) {
+    this(field, drivetrain, body, cameras, ImuPlacement.UNCHECKED, errors);
+  }
+
+  /**
+   * @param field the field, with its tags and terrain
+   * @param drivetrain the drivetrain's configuration
+   * @param body the robot's frame, which places the wheels, and its mass, which they carry
+   * @param cameras the robot's cameras, as configured
+   * @param imus where the robot's IMUs are configured to sit
+   * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
+   */
+  public SimulatedWorld(
+      FieldModel field,
+      SwerveConfig drivetrain,
+      Body body,
+      List<CameraConfig> cameras,
+      ImuPlacement imus,
+      SensorErrors errors) {
     this.field = field;
-    this.drivetrain = new DriveSimulation(body, drivetrain, errors);
+    this.drivetrain = new DriveSimulation(body, drivetrain, errors, imus);
     this.drivetrain.setTerrain(field.terrain());
     vision = new VisionSim(field, errors.tagErrors(), errors.seed());
     this.cameras = new CameraIOSim[cameras.size()];

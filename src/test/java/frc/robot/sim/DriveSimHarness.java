@@ -91,26 +91,16 @@ public final class DriveSimHarness implements AutoCloseable {
   /** On this terrain: the simulator rides over it, and localization knows it. */
   public DriveSimHarness(
       RobotConfig robot, SensorErrors errors, EstimatorConfig config, Terrain terrain) {
-    this(robot, errors, config, terrain, FlawedImu.NONE);
-  }
-
-  /** With the gyro's accelerometer reading as this flawed one does. */
-  public DriveSimHarness(
-      RobotConfig robot,
-      SensorErrors errors,
-      EstimatorConfig config,
-      Terrain terrain,
-      FlawedImu gyroFlaws) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     localization = localizationFor(robot, estimator, terrain);
-    simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors);
+    simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors, robot.imus());
     simulation.setTerrain(terrain);
     drive =
         new Drive(
             "Drive",
             DriveHardware.builder()
                 .modules(List.of(simulation.modules()))
-                .gyro(gyroFlaws.wrap(simulation.gyro()))
+                .gyro(simulation.gyro())
                 .backupImu(simulation.backupGyro())
                 .odometryLock(new ReentrantLock())
                 .build(),

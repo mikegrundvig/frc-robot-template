@@ -23,12 +23,12 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *   <li><b>The speed.</b> The wheels' velocity, carried to where the IMU sits (an IMU off the
  *       center is swung around it as the robot turns), should change as the accelerometer feels it
  *       change. What it doesn't feel, added up loop by loop, is how much faster or slower than the
- *       robot the wheels roll: wheels spinning in a launch, or a push they don't see. It fades as
- *       it's carried, so the accelerometer's bias can't build up, and so does a slide that holds at
- *       a steady speed; when one stops, what's left cancels against its faded start, and the stop
- *       isn't seen either. Beyond the accelerometer's noise, that's how fast the wheels slide. Only
- *       on a robot whose accelerometer is known to read along its axes ({@link
- *       ImuPlacement#accelerometerChecked}).
+ *       robot the wheels roll: wheels spinning in a launch, or a push they don't see. It's let go
+ *       no faster than the most the accelerometer's bias could add, so a bias can't build up, while
+ *       a slide that holds at a steady speed stays seen; when it stops (the robot catches up with
+ *       its wheels, or the push lets go), the accelerometer feels that too, and it's gone. Beyond
+ *       the accelerometer's noise, that's how fast the wheels slide. Only on a robot whose
+ *       accelerometer is known to read along its axes ({@link ImuPlacement#accelerometerChecked}).
  *   <li><b>A jolt.</b> The accelerometer feeling more than {@link Settings#joltMetersPerSecSq} is a
  *       collision, unless the wheels' own change of velocity explains it as well (a robot stopping
  *       hard is felt by both, a hit only by the IMU). Without a checked accelerometer, its size
@@ -55,35 +55,39 @@ public final class SlipCheck {
    *     wheels' reckoning as the robot drives straight
    * @param turnScaleTolerance and this share of the turning on top: worn tread turns the wheels'
    *     reckoning a little further than the robot, the gyro's scale a little less
-   * @param speedMemorySeconds how long the speed's comparison remembers what the accelerometer
-   *     didn't feel: it fades by e over this, so a bias in the accelerometer adds up to no more
-   *     than the bias times this
+   * @param speedBiasMetersPerSecSq the most the accelerometer's bias may be: what it didn't feel is
+   *     let go at this rate and no faster, so a bias up to it never builds up, and a slide stays
+   *     seen until it stops
    * @param speedToleranceMetersPerSecond how far the wheels' speed and the accelerometer's
-   *     reckoning of the robot's may drift apart without a slide: its noise and bias over the
-   *     memory, and the wheels' own errors (worn tread reads a little fast)
+   *     reckoning of the robot's may drift apart without a slide: its noise, and its lag as the
+   *     robot's acceleration changes
    * @param joltMetersPerSecSq an acceleration past this, which the wheels don't explain, is a
    *     collision
+   * @param accelerometerRangeMetersPerSecSq the most the accelerometer reports on each axis: a
+   *     reading at it is a jolt past what it can say, whatever the wheels did
    */
   @ConfigRecord
   public record Settings(
       double windowSeconds,
       double turnToleranceDegrees,
       double turnScaleTolerance,
-      double speedMemorySeconds,
+      double speedBiasMetersPerSecSq,
       double speedToleranceMetersPerSecond,
-      double joltMetersPerSecSq) {
+      double joltMetersPerSecSq,
+      double accelerometerRangeMetersPerSecSq) {
     /**
-     * The turn over a quarter second, within half a degree and 5% of it; the speed remembered for a
-     * second, within 0.4 m/s; a jolt past 20 m/s².
+     * The turn over a quarter second, within half a degree and 5% of it; the speed let go at 0.15
+     * m/s² and within 0.3 m/s; a jolt past 15 m/s², under a Pigeon 2's ±2 g range.
      */
     public static final Settings DEFAULTS =
         builder()
             .windowSeconds(0.25)
             .turnToleranceDegrees(0.5)
             .turnScaleTolerance(0.05)
-            .speedMemorySeconds(1.0)
-            .speedToleranceMetersPerSecond(0.4)
-            .joltMetersPerSecSq(20)
+            .speedBiasMetersPerSecSq(0.15)
+            .speedToleranceMetersPerSecond(0.3)
+            .joltMetersPerSecSq(15)
+            .accelerometerRangeMetersPerSecSq(2 * ImuReadings.STANDARD_GRAVITY)
             .build();
 
     public Settings {
@@ -91,9 +95,19 @@ public final class SlipCheck {
           .field("windowSeconds", windowSeconds, positive())
           .field("turnToleranceDegrees", turnToleranceDegrees, nonNegative())
           .field("turnScaleTolerance", turnScaleTolerance, nonNegative())
-          .field("speedMemorySeconds", speedMemorySeconds, positive())
+          .field("speedBiasMetersPerSecSq", speedBiasMetersPerSecSq, nonNegative())
           .field("speedToleranceMetersPerSecond", speedToleranceMetersPerSecond, nonNegative())
           .field("joltMetersPerSecSq", joltMetersPerSecSq, positive())
+          .field("accelerometerRangeMetersPerSecSq", accelerometerRangeMetersPerSecSq, positive())
+          .check(
+              "joltMetersPerSecSq",
+              () ->
+                  joltMetersPerSecSq < accelerometerRangeMetersPerSecSq
+                      ? null
+                      : joltMetersPerSecSq
+                          + " must be under the accelerometer's range ("
+                          + accelerometerRangeMetersPerSecSq
+                          + "), or a jolt along one axis can never pass it")
           .orThrow();
     }
 
@@ -143,9 +157,10 @@ public final class SlipCheck {
   private final double windowSeconds;
   private final double turnToleranceRadians;
   private final double turnScaleTolerance;
-  private final double speedMemorySeconds;
+  private final double speedBias;
   private final double speedTolerance;
   private final double joltLimit;
+  private final double saturation;
   private final double reachMeters;
   private final boolean accelerometerChecked;
 
@@ -185,9 +200,11 @@ public final class SlipCheck {
     windowSeconds = settings.windowSeconds();
     turnToleranceRadians = Math.toRadians(settings.turnToleranceDegrees());
     turnScaleTolerance = settings.turnScaleTolerance();
-    speedMemorySeconds = settings.speedMemorySeconds();
+    speedBias = settings.speedBiasMetersPerSecSq();
     speedTolerance = settings.speedToleranceMetersPerSecond();
     joltLimit = settings.joltMetersPerSecSq();
+    // A reading within a hair of the range is at it.
+    saturation = 0.99 * settings.accelerometerRangeMetersPerSecSq();
     reachMeters = wheelReachMeters;
     this.accelerometerChecked = accelerometerChecked;
   }
@@ -215,8 +232,17 @@ public final class SlipCheck {
     forgetSpeeds();
     lastVelocityX = Double.NaN;
     lastVelocityY = Double.NaN;
-    jolt =
-        Math.hypot(forwardAccelerationMetersPerSecSq, leftAccelerationMetersPerSecSq) > joltLimit;
+    jolt = joltBySize(forwardAccelerationMetersPerSecSq, leftAccelerationMetersPerSecSq);
+  }
+
+  /** Whether an acceleration is a jolt by its size alone: past the limit, or at the range. */
+  private boolean joltBySize(double forward, double left) {
+    return Math.hypot(forward, left) > joltLimit || saturated(forward, left);
+  }
+
+  /** Whether the accelerometer read at its range on either axis: past what it can say. */
+  private boolean saturated(double forward, double left) {
+    return Math.abs(forward) >= saturation || Math.abs(left) >= saturation;
   }
 
   /**
@@ -315,8 +341,8 @@ public final class SlipCheck {
     double feltY = sin * forward + cos * left;
     double seconds = sample.seconds();
     boolean before = Double.isFinite(lastVelocityX);
-    jolt = Math.hypot(forward, left) > joltLimit;
-    if (jolt && accelerometerChecked && before) {
+    jolt = joltBySize(forward, left);
+    if (jolt && accelerometerChecked && before && !saturated(forward, left)) {
       // Felt by the wheels too, it's driving; only what they don't explain is a jolt.
       jolt =
           Math.hypot(
@@ -327,11 +353,15 @@ public final class SlipCheck {
     if (!accelerometerChecked || jolt || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
       forgetSpeeds();
     } else if (before) {
-      // How the wheels' velocity changed over the loop, less what the accelerometer felt.
-      double fade = Math.exp(-seconds / speedMemorySeconds);
-      slideX = slideX * fade + velocityX - lastVelocityX - feltX * seconds;
-      slideY = slideY * fade + velocityY - lastVelocityY - feltY * seconds;
-      speedSlip = Math.max(0, Math.hypot(slideX, slideY) - speedTolerance);
+      // How the wheels' velocity changed over the loop, less what the accelerometer felt...
+      slideX += velocityX - lastVelocityX - feltX * seconds;
+      slideY += velocityY - lastVelocityY - feltY * seconds;
+      // ... let go toward none at the most a bias could have added, and no faster.
+      double size = Math.hypot(slideX, slideY);
+      double kept = size > speedBias * seconds ? 1 - speedBias * seconds / size : 0;
+      slideX *= kept;
+      slideY *= kept;
+      speedSlip = Math.max(0, size * kept - speedTolerance);
     }
     lastVelocityX = velocityX;
     lastVelocityY = velocityY;

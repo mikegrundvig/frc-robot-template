@@ -215,7 +215,8 @@ public final class RobotContainer implements AutoCloseable {
     // and a robot without wiring stays still rather than guess at motors, and says so).
     DriveHardware driveHardware;
     if (mode == Constants.Mode.SIM) {
-      world = new SimulatedWorld(field, drivetrain.get(), body, cameras, simulatedErrors);
+      world =
+          new SimulatedWorld(field, drivetrain.get(), body, cameras, robot.imus(), simulatedErrors);
       hardware = null;
       driveHardware = world.drivetrainHardware();
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {

@@ -298,7 +298,10 @@ class ScenariosTest {
     start("collision", world);
 
     assertThat(world.truePose().getY()).isCloseTo(4.6, within(1e-9));
-    assertThat(world.drivetrain().feltAcceleration().getY())
+    assertThat(read(world.drivetrain().gyro()).accelerationYMetersPerSecSq)
+        .isCloseTo(DriveSimulation.HIT_JOLT_METERS_PER_SECOND_SQUARED, within(1e-9));
+    assertThat(read(world.drivetrain().backupGyro()).accelerationYMetersPerSecSq)
+        .as("the backup IMU feels it too")
         .isCloseTo(DriveSimulation.HIT_JOLT_METERS_PER_SECOND_SQUARED, within(1e-9));
   }
 
@@ -309,7 +312,9 @@ class ScenariosTest {
     start("shove", world);
 
     assertThat(world.truePose().getY()).isCloseTo(4.6, within(1e-9));
-    assertThat(world.drivetrain().feltAcceleration().getNorm()).isCloseTo(0, within(1e-9));
+    GyroIO.GyroIOInputs felt = read(world.drivetrain().gyro());
+    assertThat(Math.hypot(felt.accelerationXMetersPerSecSq, felt.accelerationYMetersPerSecSq))
+        .isCloseTo(0, within(1e-9));
   }
 
   @Test
@@ -341,7 +346,8 @@ class ScenariosTest {
     assertThat(Math.toDegrees(world.drivetrain().rollRadians()))
         .as("left side up")
         .isCloseTo(5, within(1e-9));
-    assertThat(lifted / flat).isCloseTo(0.75, within(1e-9));
+    // Within a thousandth: the robot follows its wheels no faster than its grip lets it.
+    assertThat(lifted / flat).isCloseTo(0.75, within(1e-3));
   }
 
   /** How far the robot goes with every drive motor at 3 V for a second. */

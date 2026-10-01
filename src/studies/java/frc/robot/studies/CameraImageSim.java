@@ -129,32 +129,20 @@ final class CameraImageSim {
 
   /**
    * One image from a camera at a place on the field, with its own pixel noise, and the tags in it
-   * as the robot reads them ({@code CameraIOPhotonVision}, then {@code Vision}).
+   * as the robot reads them ({@code CameraIOPhotonVision}, then {@code Vision}). A tag other robots
+   * hide, even partly, isn't detected.
    *
    * @param cameraPose where the camera is on the field, and which way it looks
    * @param cameraName which camera took it, as the vision pipeline knows it
    * @param seed where this image's noise starts
-   */
-  TagDetections image(Pose3d cameraPose, String cameraName, long seed) {
-    return image(cameraPose, cameraName, seed, List.of());
-  }
-
-  /**
-   * One image, with other robots in the way: a tag they hide, even partly, isn't detected.
-   *
-   * @param blockers the other robots on the field
+   * @param blockers the other robots on the field: none, for a clear view
    */
   TagDetections image(
       Pose3d cameraPose, String cameraName, long seed, List<OtherRobots.Blocker> blockers) {
     return detections(seen(cameraPose, seed, blockers), cameraName);
   }
 
-  /** The tags an image has in it, each with its corners and its own solve. */
-  List<Seen> seen(Pose3d cameraPose, long seed) {
-    return seen(cameraPose, seed, List.of());
-  }
-
-  /** The tags an image has in it, with other robots in the way. */
+  /** The tags an image has in it, each with its corners and its own solve, other robots aside. */
   List<Seen> seen(Pose3d cameraPose, long seed, List<OtherRobots.Blocker> blockers) {
     camera.setRandomSeed(seed);
     RotTrlTransform3d toCamera = RotTrlTransform3d.makeRelativeTo(cameraPose);

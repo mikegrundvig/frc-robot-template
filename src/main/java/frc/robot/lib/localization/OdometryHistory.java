@@ -24,7 +24,10 @@ final class OdometryHistory {
   private final double[] xAfter;
   private final double[] yAfter;
   private final double[] offsetAfter;
-  private final double[] covarianceAfter;
+
+  /** The filter's uncertainty after each step: {@link PoseFilter#UNCERTAINTY} numbers a step. */
+  private final double[] uncertaintyAfter;
+
   private int oldest;
   private int size;
 
@@ -43,7 +46,7 @@ final class OdometryHistory {
     xAfter = new double[capacity];
     yAfter = new double[capacity];
     offsetAfter = new double[capacity];
-    covarianceAfter = new double[capacity * 9];
+    uncertaintyAfter = new double[capacity * PoseFilter.UNCERTAINTY];
   }
 
   /** Starts over with a single step: where odometry starts. */
@@ -147,13 +150,18 @@ final class OdometryHistory {
     xAfter[slot] = filter.x();
     yAfter[slot] = filter.y();
     offsetAfter[slot] = filter.offset();
-    filter.copyCovarianceTo(covarianceAfter, slot * 9);
+    filter.copyUncertaintyTo(uncertaintyAfter, slot * PoseFilter.UNCERTAINTY);
   }
 
   /** Puts the filter back in its state after a step. */
   void restore(int step, PoseFilter filter) {
     int slot = slot(step);
-    filter.restore(xAfter[slot], yAfter[slot], offsetAfter[slot], covarianceAfter, slot * 9);
+    filter.restore(
+        xAfter[slot],
+        yAfter[slot],
+        offsetAfter[slot],
+        uncertaintyAfter,
+        slot * PoseFilter.UNCERTAINTY);
   }
 
   /** Drops every step but the newest, which becomes the history's start. */

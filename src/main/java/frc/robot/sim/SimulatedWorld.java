@@ -44,7 +44,7 @@ public final class SimulatedWorld implements AutoCloseable {
     this.drivetrain =
         new DriveSimulation(drivetrain.modules(), drivetrain.moduleTranslations(body), errors);
     this.drivetrain.setTerrain(field.terrain());
-    vision = new VisionSim(field, errors.seed());
+    vision = new VisionSim(field, errors.tagErrors(), errors.seed());
     this.cameras = new CameraIO[cameras.size()];
     for (int i = 0; i < cameras.size(); i++) {
       CameraConfig camera = cameras.get(i);

@@ -2,8 +2,10 @@ package frc.robot.lib.localization;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 import org.jspecify.annotations.Nullable;
@@ -32,6 +34,15 @@ import org.wpilib.math.util.MathUtil;
  * that is what they agree is wrong (a bad heading reset, a robot placed backwards), since every
  * position worked out with a wrong heading is wrong too.
  *
+ * <p>Its uncertainty is meant to be honest, since gates, χ² tests, and any bound on the error trust
+ * it: the error should go past 3.72 times the spread it claims no more than once in a thousand
+ * loops, which the consistency study checks in the simulator (docs/testing.md). So errors that
+ * repeat are never averaged away as if each were new: a position a camera solved with the gyro's
+ * heading carries the heading's doubt (and never turns it), the gyro's scale error is the same
+ * every turn, and each camera's turn on its mount and its shift (its mount's offset, the tags'
+ * placement) are in every image it takes ({@link PoseFilter} considers them). Each camera is told
+ * apart by its name.
+ *
  * <p>Its parts: {@link OdometryHistory} keeps the steps, {@link PoseFilter} does the filter's math,
  * and {@link Recovery} judges when the cameras agree against odometry. This class feeds them and
  * keeps the books.
@@ -47,7 +58,6 @@ public final class PoseEstimator implements CameraLocalizer {
   private final double translationVariancePerMeter;
   private final double translationVariancePerRadian;
   private final double headingVariancePerSecond;
-  private final double headingVariancePerRadian;
   private final double wheelHeadingVariancePerRadian;
   private final long historyNanos;
   private final long futureToleranceNanos;
@@ -60,8 +70,11 @@ public final class PoseEstimator implements CameraLocalizer {
   private final long disagreementWindowNanos;
 
   private final OdometryHistory history;
-  private final PoseFilter filter = new PoseFilter();
+  private final PoseFilter filter;
   private final Recovery recovery;
+
+  /** Each camera's place among the errors the filter keeps apart, by name, as cameras appear. */
+  private final Map<String, Integer> cameraSlots = new HashMap<>();
 
   // The gyro's reading, unwrapped into one continuous yaw.
   private boolean started;
@@ -124,8 +137,6 @@ public final class PoseEstimator implements CameraLocalizer {
     translationVariancePerMeter = square(config.translationStdDevPerMeter());
     translationVariancePerRadian = square(config.translationStdDevPerRadian());
     headingVariancePerSecond = square(Math.toRadians(config.headingDriftDegreesPerMinute())) / 60;
-    headingVariancePerRadian =
-        square(Math.toRadians(config.headingStdDevDegreesPerTurn())) / (2 * Math.PI);
     wheelHeadingVariancePerRadian =
         square(Math.toRadians(config.wheelHeadingStdDevDegreesPerTurn())) / (2 * Math.PI);
     historyNanos = Timestamps.fromSeconds(config.historySeconds());
@@ -141,6 +152,15 @@ public final class PoseEstimator implements CameraLocalizer {
     history =
         new OdometryHistory(Math.max(16, (int) Math.ceil(config.historySeconds() * 1000) + 1));
     recovery = new Recovery(config);
+    filter =
+        new PoseFilter(
+            new PoseFilter.Considered(
+                Math.toRadians(config.headingStdDevDegreesPerTurn()) / (2 * Math.PI),
+                Math.toRadians(config.cameraTurnStdDevDegrees()),
+                config.cameraShiftStdDevMeters(),
+                Math.toRadians(config.cameraShiftStdDevDegrees()),
+                config.cameraShiftCorrelationMeters(),
+                Math.toRadians(config.cameraShiftCorrelationDegrees())));
     filter.set(initial, yaw);
   }
 
@@ -520,7 +540,8 @@ public final class PoseEstimator implements CameraLocalizer {
   private void applyCamera(
       CameraCorrection camera, boolean fresh, double yawThen, List<VisionDecision> decisions) {
     VisionMeasurement measurement = camera.measurement();
-    PoseFilter.Innovation innovation = filter.innovation(measurement, yawThen);
+    PoseFilter.Innovation innovation =
+        filter.innovation(measurement, yawThen, cameraSlot(measurement.camera()));
     if (innovation == null) {
       return;
     }
@@ -646,6 +667,23 @@ public final class PoseEstimator implements CameraLocalizer {
     recovery.clear();
   }
 
+  /**
+   * A camera's place among the errors the filter keeps apart, given as cameras first appear; -1
+   * once there are more cameras than places, and a camera without one counts each image's errors as
+   * new.
+   */
+  private int cameraSlot(String camera) {
+    Integer slot = cameraSlots.get(camera);
+    if (slot != null) {
+      return slot;
+    }
+    if (cameraSlots.size() >= PoseFilter.MAX_CAMERAS) {
+      return -1;
+    }
+    cameraSlots.put(camera, cameraSlots.size());
+    return cameraSlots.size() - 1;
+  }
+
   /** Moves the current state through part of step j: from fraction f0 of it to f1. */
   private void advance(int j, double f0, double f1) {
     double fraction = f1 - f0;
@@ -668,8 +706,8 @@ public final class PoseEstimator implements CameraLocalizer {
                 + history.extra(j)),
         fraction
             * (headingVariancePerSecond * seconds
-                + (history.gyro(j) ? headingVariancePerRadian : wheelHeadingVariancePerRadian)
-                    * Math.abs(stepTurn)));
+                + (history.gyro(j) ? 0 : wheelHeadingVariancePerRadian * Math.abs(stepTurn))),
+        history.gyro(j));
   }
 
   /**

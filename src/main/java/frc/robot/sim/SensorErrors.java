@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * How the simulated robot's wheels and sensors differ from what the code believes: the errors that
@@ -33,6 +34,10 @@ import org.wpilib.math.geometry.Transform3d;
  * @param backupGyro the backup IMU's errors (Systemcore's own), read once a loop
  * @param cameraMountErrors by camera name, how each camera is really mounted off its configured
  *     mount, in the robot's frame: a camera knocked 4 in low, or turned 2 degrees
+ * @param tagErrors by tag ID, how far each tag really sits from where the field's layout says, in
+ *     the field's frame: a field built to its tolerance, or a tag knocked at an event. The cameras
+ *     see the tags where they really are; the robot, and its cameras' own multi-tag solves, believe
+ *     the layout.
  * @param seed for the noise, the gyros' and the cameras', so a run repeats exactly
  */
 @ConfigRecord
@@ -42,6 +47,7 @@ public record SensorErrors(
     GyroErrors gyro,
     GyroErrors backupGyro,
     Map<String, Transform3d> cameraMountErrors,
+    Map<Integer, Translation3d> tagErrors,
     long seed) {
   /**
    * Wheels and sensors exactly as configured: odometry is the truth. For tests of exact numbers.
@@ -53,6 +59,7 @@ public record SensorErrors(
           .gyro(GyroErrors.EXACT)
           .backupGyro(GyroErrors.EXACT)
           .cameraMountErrors(Map.of())
+          .tagErrors(Map.of())
           .seed(1)
           .build();
 
@@ -79,6 +86,7 @@ public record SensorErrors(
                   .noiseDegrees(0.05)
                   .build())
           .cameraMountErrors(Map.of())
+          .tagErrors(Map.of())
           .seed(1)
           .build();
 
@@ -156,6 +164,11 @@ public record SensorErrors(
     Map<String, Transform3d> errors = new HashMap<>(cameraMountErrors);
     errors.put(camera, error);
     return SensorErrorsBuilder.builder(this).cameraMountErrors(errors).build();
+  }
+
+  /** The same errors, with the field's tags sitting off its layout like this, by tag ID. */
+  public SensorErrors withTagErrors(Map<Integer, Translation3d> errors) {
+    return SensorErrorsBuilder.builder(this).tagErrors(errors).build();
   }
 
   /** How a camera is really mounted off its configuration: none, unless one was set. */

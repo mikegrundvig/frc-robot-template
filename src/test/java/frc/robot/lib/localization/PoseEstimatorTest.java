@@ -22,6 +22,17 @@ class PoseEstimatorTest {
   private static final Pose2d START = new Pose2d(1, 1, Rotation2d.ZERO);
   private static final PoseCovariance PLACED = PoseCovariance.fromStdDevs(0.05, 0.05, 0.02);
 
+  /**
+   * Cameras whose images' errors are each new, nothing repeating: the textbook filter, so a test
+   * can work its numbers out by hand. (PoseFilterTest covers what repeats.)
+   */
+  private static final EstimatorConfig TEXTBOOK =
+      EstimatorConfigBuilder.builder(EstimatorConfig.DEFAULTS)
+          .cameraTurnStdDevDegrees(0)
+          .cameraShiftStdDevMeters(0)
+          .cameraShiftStdDevDegrees(0)
+          .build();
+
   /** A robot driven by hand: a clock, a gyro, and wheels that report steady motion. */
   private static final class Robot {
     final PoseEstimator estimator;
@@ -34,7 +45,7 @@ class PoseEstimatorTest {
     }
 
     Robot() {
-      this(EstimatorConfig.DEFAULTS, new PoseReset(0, START, PLACED, "start"));
+      this(TEXTBOOK, new PoseReset(0, START, PLACED, "start"));
       estimator.reset(new PoseReset(T0, START, PLACED, "placed"));
     }
 
@@ -178,7 +189,7 @@ class PoseEstimatorTest {
 
   @Test
   void aMeasurementPullsTheEstimateByTheKalmanGain() {
-    Robot robot = new Robot(EstimatorConfig.DEFAULTS, new PoseReset(0, START, position(0.1), "x"));
+    Robot robot = new Robot(TEXTBOOK, new PoseReset(0, START, position(0.1), "x"));
     robot.estimator.reset(
         new PoseReset(T0, START, PoseCovariance.fromStdDevs(0.1, 0.1, 0.02), "x"));
     robot.drive(1, 0, 0, 0);
@@ -365,7 +376,7 @@ class PoseEstimatorTest {
   @Test
   void manyFixesCantMakeThePositionSurerThanTheHeadingAllows() {
     PoseReset rough = new PoseReset(T0, START, PoseCovariance.fromStdDevs(1, 1, 0.02), "rough");
-    Robot robot = new Robot(EstimatorConfig.DEFAULTS, rough);
+    Robot robot = new Robot(TEXTBOOK, rough);
     robot.estimator.reset(rough);
     robot.drive(1, 0, 0, 0);
 
@@ -381,7 +392,7 @@ class PoseEstimatorTest {
 
   @Test
   void aMeasurementWithHeadingCorrectsTheGyroOffset() {
-    Robot robot = new Robot(EstimatorConfig.DEFAULTS, new PoseReset(0, START, PLACED, "x"));
+    Robot robot = new Robot(TEXTBOOK, new PoseReset(0, START, PLACED, "x"));
     robot.estimator.reset(
         new PoseReset(T0, START, PoseCovariance.fromStdDevs(0.05, 0.05, 0.1), "x"));
     robot.drive(1, 0, 0, 0);

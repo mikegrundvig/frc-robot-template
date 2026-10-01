@@ -257,7 +257,8 @@ class SteeringExperimentSimTest {
       assertThat(Math.abs(number(jump.get("error")))).as("error, degrees").isLessThan(1.0);
     }
     assertThat(number(asMap(run.state.get("gains")).get(STEER_KP))).isEqualTo(16.0);
-    // Each turn starts with 12 V across a motor standing still: it draws its limit, 40 A.
+    // Each turn starts with the loop asking 12 V of a motor standing still, enough to draw its
+    // stall current, 366 A: it draws its limit, 40 A.
     for (String wheel : WHEELS) {
       assertThat(run.peak(wheel + " current")).as(wheel + ", amps").isCloseTo(40, within(1e-9));
       assertThat(run.peak(wheel + " voltage")).as(wheel + ", volts").isCloseTo(12, within(1e-9));

@@ -1,11 +1,13 @@
 package frc.robot.sim;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.config.SwerveConfigGainsBuilder;
 import frc.robot.lib.config.SwerveConfigLimitsBuilder;
 import frc.robot.subsystems.drive.ModuleIO;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,6 @@ class ModuleIOSimTest {
   /** A module as configured, with the steering's current limit tuned to this. */
   private static ModuleIOSim module(double steerLimitAmps) {
     ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), 0, 0);
-    module.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits());
     module.configure(
         DRIVETRAIN.gains(),
         SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
@@ -32,28 +33,60 @@ class ModuleIOSimTest {
     return module;
   }
 
-  /** Steps the module, told to turn a quarter turn, until it has turned this far: the seconds. */
-  private static double secondsToTurn(ModuleIOSim module, double degrees) {
-    module.setSteerAngle(Rotation2d.CCW_90DEG);
-    double seconds = 0;
-    while (module.trueSteerAngle().getDegrees() < degrees) {
-      module.step(STEP_SECONDS);
-      seconds += STEP_SECONDS;
-      assertThat(seconds).as("turned within a second").isLessThan(1);
-    }
-    return seconds;
+  /**
+   * The steering's current limit comes from the configuration, as tuned live. Held to its limit,
+   * the motor gives a steady torque, so in the first 4 ms of a turn, while it's still at its limit,
+   * a quarter of the limit turns the module a quarter as far.
+   */
+  @Test
+  void aQuarterOfTheCurrentLimitTurnsTheModuleAQuarterAsFarAtFirst() {
+    ModuleIOSim atForty = module(40);
+    ModuleIOSim atTen = module(10);
+    atForty.setSteerAngle(Rotation2d.CCW_90DEG);
+    atTen.setSteerAngle(Rotation2d.CCW_90DEG);
+
+    atForty.step(STEP_SECONDS);
+    atTen.step(STEP_SECONDS);
+
+    assertThat(atForty.trueSteerAngle().getDegrees()).isBetween(1.0, 3.0);
+    assertThat(atTen.trueSteerAngle().getRadians())
+        .isCloseTo(atForty.trueSteerAngle().getRadians() / 4, within(1e-12));
   }
 
   /**
-   * The steering's current limit comes from the configuration, as tuned live: a lower one gets the
-   * module under way more slowly, since the motor gives less torque while it speeds up.
+   * The steering's loop runs on the angle the CANcoder last sent, every 10 ms. A stiff steerKp
+   * corrects too far on each angle it hears, and past about 77 (at the committed steerKd, 0.08)
+   * each correction overshoots by more than the error it corrected: a small error grows instead of
+   * dying away. Each side of that edge, a tenth of a degree's error over 100 ms.
    */
   @Test
-  void aLowerSteeringCurrentLimitGetsTheModuleTurningMoreSlowly() {
-    double atForty = secondsToTurn(module(40), 10);
-    double atTen = secondsToTurn(module(10), 10);
+  void pastTheEdgeTheCanCodersWaitSetsASmallErrorGrowsInsteadOfDying() {
+    assertThat(growth(70)).as("steerKp 70").isLessThan(0.5);
+    assertThat(growth(85)).as("steerKp 85").isGreaterThan(2);
+  }
 
-    assertThat(atTen).as("%s s at 10 A, %s s at 40 A", atTen, atForty).isGreaterThan(atForty * 1.5);
+  /**
+   * How a tenth of a degree's error grows over 100 ms at this steerKp: the largest error in the
+   * last 20 ms over the largest in the first 20. Small enough to stay under the current limit.
+   */
+  private static double growth(double steerKp) {
+    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), 0, 0);
+    module.configure(
+        SwerveConfigGainsBuilder.builder(DRIVETRAIN.gains()).steerKp(steerKp).build(),
+        DRIVETRAIN.limits());
+    module.setSteerAngle(Rotation2d.fromDegrees(0.1));
+    double first = 0;
+    double last = 0;
+    for (int step = 1; step <= 25; step++) {
+      module.step(STEP_SECONDS);
+      double error = Math.abs(0.1 - module.trueSteerAngle().getDegrees());
+      if (step <= 5) {
+        first = Math.max(first, error);
+      } else if (step > 20) {
+        last = Math.max(last, error);
+      }
+    }
+    return last / first;
   }
 
   /**

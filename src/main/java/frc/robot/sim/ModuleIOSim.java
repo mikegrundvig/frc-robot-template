@@ -22,13 +22,13 @@ import org.wpilib.math.util.MathUtil;
 import org.wpilib.simulation.DCMotorSim;
 
 /**
- * A module simulated the standard way, as in AdvantageKit's swerve templates: each motor turns a
- * fixed load through its gearing, under its motor controller's loop. A {@link DriveSimulation}
- * steps it and moves the robot with its true wheel motion; its absolute encoder can read off true
- * ({@link SensorErrors}). Both motors' stator current limits are modeled: the drive's caps the
- * torque that accelerates the robot and says when a wheel is at the edge of its grip, and the
- * steering's caps how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery
- * is not, so this tests the code rather than the robot's power.
+ * A simulated swerve module: as in AdvantageKit's swerve templates, each motor turns a fixed load
+ * through its gearing, under its motor controller's loop. A {@link DriveSimulation} steps it and
+ * moves the robot with its true wheel motion; its absolute encoder can read off true ({@link
+ * SensorErrors}). Both motors' stator current limits are modeled: the drive's caps the torque that
+ * accelerates the robot and says when a wheel is at the edge of its grip, and the steering's caps
+ * how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery is not, so this
+ * tests the code rather than the robot's power.
  *
  * <p>The steering runs as a TalonFX without a Phoenix Pro license runs it: its loop every
  * millisecond, on the angle the CANcoder last sent over CAN. Those, with its current limit, set how
@@ -72,7 +72,7 @@ final class ModuleIOSim implements ModuleIO {
   }
 
   private final DCMotorSim driveSim;
-  private final CurrentLimitedMotorSim steerMotor;
+  private final CurrentLimitedMotorSim steerSim;
   private final DCMotor driveMotor;
   private final double driveGearing;
   private final double wheelRadiusMeters;
@@ -127,7 +127,7 @@ final class ModuleIOSim implements ModuleIO {
     driveMotor = modules.driveMotor().model();
     driveGearing = modules.driveGearing();
     driveSim = motorSim(driveMotor, DRIVE_INERTIA_KG_M2, driveGearing);
-    steerMotor =
+    steerSim =
         new CurrentLimitedMotorSim(
             modules.steerMotor().model(), STEER_INERTIA_KG_M2, modules.steerGearing());
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
@@ -171,7 +171,7 @@ final class ModuleIOSim implements ModuleIO {
   private void steer(double seconds) {
     if (loopsUntilEncoderSends == 0) {
       heardSteerRadians = measuredSteerRadians();
-      heardSteerRadPerSec = steerMotor.velocityRadPerSec();
+      heardSteerRadPerSec = steerSim.velocityRadPerSec();
       loopsUntilEncoderSends = ENCODER_PERIOD_LOOPS;
     }
     loopsUntilEncoderSends--;
@@ -184,7 +184,7 @@ final class ModuleIOSim implements ModuleIO {
                 -MAX_VOLTS,
                 MAX_VOLTS)
             : 0.0;
-    steerPeakAmps = Math.max(steerPeakAmps, steerMotor.run(volts, steerStatorLimitAmps, seconds));
+    steerPeakAmps = Math.max(steerPeakAmps, steerSim.run(volts, steerStatorLimitAmps, seconds));
   }
 
   /**
@@ -228,7 +228,7 @@ final class ModuleIOSim implements ModuleIO {
     // The steering's angle and speed as the robot hears them: what the CANcoder last sent.
     inputs.steerAngle = new Rotation2d(heardSteerRadians);
     inputs.steerVelocityRadPerSec = heardSteerRadPerSec;
-    inputs.steerAppliedVolts = steerMotor.appliedVolts();
+    inputs.steerAppliedVolts = steerSim.appliedVolts();
     // The steering's current is the most it drew since the last loop, not what it draws now. It
     // runs at its limit for a few milliseconds as the module starts and stops a turn, then falls to
     // next to nothing, so a reading at the loop's end would almost never see the peak, and the peak
@@ -246,11 +246,11 @@ final class ModuleIOSim implements ModuleIO {
 
   /** Which way the wheel really points, whatever its encoder reads. */
   Rotation2d trueSteerAngle() {
-    return new Rotation2d(steerMotor.positionRadians());
+    return new Rotation2d(steerSim.positionRadians());
   }
 
   private double measuredSteerRadians() {
-    return steerMotor.positionRadians() - steerOffsetRadians;
+    return steerSim.positionRadians() - steerOffsetRadians;
   }
 
   /** Takes the gains, and both motors' stator current limits. */

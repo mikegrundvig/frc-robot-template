@@ -29,7 +29,12 @@ and last season's becomes a test fixture.
 4. **Test it,** as `RebuiltTest` tests last season's: the symmetry against the tags, the places
    where the manual puts them, the zones where the field's elements are.
 
-5. **Run `./gradlew ci`.**
+5. **Recheck the rules' numbers.** Every row of [docs/values.md](values.md) whose source is
+   "rules" (the frame, its height, the bumpers, the mass) comes from last season's manual. Check
+   each against the new one, and update `Robots.java` and the row. Set the terrain thresholds
+   (`TerrainCrossing.Settings`) from the new field's ramps too.
+
+6. **Run `./gradlew ci`.**
 
 The camera placement study needs only the new field's tag layout, not its class: run it the day the
 field is published, so CAD has camera requirements early ([camera-placement.md](camera-placement.md)).

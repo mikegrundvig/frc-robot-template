@@ -32,16 +32,17 @@ import java.util.Optional;
  * set one (the next season's rules replace them at kickoff). Replace each value with your robot's
  * as you design and measure it: docs/values.md says how to measure each, and where today's number
  * came from. Note a measured value where it's set, as the calibration procedures do: {@code
- * .mass(Pounds.of(131.2)) // measured 2027-02-14: two scales, bumpers and battery on}.
+ * .mass(Pounds.of(131.2)) // measured YYYY-MM-DD: two scales, bumpers and battery on}.
  */
 public final class Robots {
   private Robots() {}
 
   /**
    * Frame 27.5 x 27.5 in, the largest square within 2026's 110 in frame perimeter (R104), with
-   * bumpers 4 in beyond it (R403). Mass 149.5 lb: 135 lb of robot and bumpers (R408) plus a 14.5 lb
-   * battery (R601). The 30 in height and 6.7 kg m^2 yaw inertia are typical values, not
-   * measurements. The center of gravity is centered and low: the best case.
+   * bumpers 4 in beyond it (R403), and 30 in tall, 2026's starting height limit (R104). Mass 149.5
+   * lb: 135 lb of robot and bumpers (R408) plus a 14.5 lb battery (R601). The 6.7 kg m^2 yaw
+   * inertia is an estimate, not a measurement. The center of gravity is centered and low: the best
+   * case.
    */
   private static final Body BODY =
       Body.builder()
@@ -73,15 +74,17 @@ public final class Robots {
    * The modules sit on the corners, where MK4i wheels are 2.625 in in from the frame's edges.
    *
    * <p>Drive stator limit 30 A. Under hard acceleration, weight shifts off the front wheels, and by
-   * a simple weight-transfer estimate they start to slip near 47 A with new tread and this low
-   * center of gravity, or near 31 A with worn tread (friction 1.0) and a center of gravity at 0.3
-   * m. More current than that only spins the wheels and drains the battery. Supply limit 60 A per
-   * drive motor; steering needs little torque, so 40 A.
+   * a simple weight-transfer estimate they start to slip near 47 A with this tread (friction 1.2;
+   * about 50 A at 1.3, new) and this low center of gravity, or near 31 A with worn tread (friction
+   * 1.0) and a center of gravity at 0.3 m. More current than that only spins the wheels and drains
+   * the battery. Supply limit 60 A per drive motor. Steering needs little torque: 40 A, the value
+   * Phoenix Tuner X's swerve generator writes, as the 2026 code kept it.
    *
    * <p>Top speed 4.4 m/s leaves the velocity control headroom under the free speed; spinning is
    * capped at a driver-friendly 1 rotation per second. kV is the ideal value for these motors and
-   * gearing; the other gains are starting values from simulation. Measure and tune them all on the
-   * real robot.
+   * gearing; kS and the drive's kP are starting values from simulation, and the steering's kP and
+   * kD are the 2026 code's (100 V per rotation and 0.5, converted). Measure and tune them all on
+   * the real robot.
    */
   private static final SwerveConfig DRIVETRAIN =
       SwerveConfig.builder()
@@ -125,7 +128,7 @@ public final class Robots {
   /**
    * Four cameras as a 2026 competition robot mounted them: two facing forward and out at 23
    * degrees, two facing backward, all near the frame's sides about 21 in up and tilted up 8 to 12.5
-   * degrees. Positions as that team measured them, from the robot's origin on the floor.
+   * degrees. Positions as that team's 2026 code gives them, from the robot's origin on the floor.
    */
   private static final List<CameraConfig> CAMERAS =
       List.of(

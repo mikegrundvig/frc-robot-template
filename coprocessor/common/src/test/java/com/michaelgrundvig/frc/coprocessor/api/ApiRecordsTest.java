@@ -14,8 +14,8 @@ class ApiRecordsTest {
   static final Stamp STAMP =
       new Stamp(
           "vision-front",
-          2611,
-          "10.26.11.11",
+          1234,
+          "10.12.34.11",
           "orangepi-5",
           List.of("front-left", "front-right"),
           "coprocessors-2027.1",
@@ -145,6 +145,12 @@ class ApiRecordsTest {
     JournalEntry entry = page.entries().get(0);
     assertThat(JournalEntry.parse(Json.compact(entry.toJson()))).isEqualTo(entry);
     assertThat(JournalPage.parse("{}").entries()).isEmpty();
+  }
+
+  @Test
+  void theJournalIsServedForTheKernelPhotonVisionAndTheAgentOnly() {
+    assertThat(AgentApi.JOURNAL_UNITS)
+        .containsExactly("kernel", "photonvision.service", "coprocessor-agent.service");
   }
 
   @Test

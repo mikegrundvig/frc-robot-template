@@ -81,6 +81,11 @@ public final class SettingsFiles {
     return Json.pretty(row.columns());
   }
 
+  /** Writes a row's file's text to {@code out} as it goes: the same as {@link #text}. */
+  public static void write(SettingsRow row, Appendable out) throws IOException {
+    Json.writePretty(row.columns(), out);
+  }
+
   /** Refuses rows' files that differ only in case, which would be one file on Windows and macOS. */
   public static void checkCase(List<String> paths) {
     Map<String, String> folded = new HashMap<>();
@@ -208,14 +213,11 @@ public final class SettingsFiles {
         bytes.writeBytes(String.valueOf(c).getBytes(StandardCharsets.UTF_8));
         continue;
       }
-      if (i + 2 >= encoded.length()) {
+      int value = i + 2 >= encoded.length() ? -1 : Json.hexValue(encoded.substring(i + 1, i + 3));
+      if (value < 0) {
         throw new SettingsException(path + ": a % in a name must be followed by two hex digits");
       }
-      try {
-        bytes.write(Integer.parseInt(encoded.substring(i + 1, i + 3), 16));
-      } catch (NumberFormatException e) {
-        throw new SettingsException(path + ": a % in a name must be followed by two hex digits");
-      }
+      bytes.write(value);
       i += 2;
     }
     return bytes.toString(StandardCharsets.UTF_8);

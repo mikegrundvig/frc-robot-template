@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.IntFunction;
 import org.jspecify.annotations.Nullable;
 
@@ -48,8 +49,11 @@ final class Agent {
   private final SettingsSource settings;
   private final Shutdown shutdown;
   private final IntFunction<String> controller;
-  private @Nullable Health lastHealth;
-  private long lastHealthMicros;
+  private final Executor background;
+  private final Object first = new Object();
+  private final AtomicBoolean refreshing = new AtomicBoolean();
+  private volatile @Nullable Health lastHealth;
+  private volatile long lastHealthMicros;
   // Each part's last problem, so a problem that lasts is logged once, not every second.
   private final Map<String, String> logged = new HashMap<>();
 
@@ -60,7 +64,8 @@ final class Agent {
    * @param database PhotonVision's settings database, as a path on the computer
    * @param unit PhotonVision's systemd unit
    * @param timeout how long any one command may take
-   * @param executor where the shutdown runs, once its request is answered
+   * @param executor where work that outlasts a request runs: reading health afresh, and the
+   *     shutdown once its request is answered
    * @param controller the robot controller's address, from the team number: 10.TE.AM.2
    */
   Agent(
@@ -80,8 +85,9 @@ final class Agent {
     this.service = new ServiceSource(host, unit, timeout);
     this.cameras = new CameraSource(host);
     this.drive = new DriveSource(host);
-    this.settings = new SettingsSource(host, database);
+    this.settings = new SettingsSource(host, database, host.limits());
     this.shutdown = new Shutdown(host, unit, executor);
+    this.background = executor;
   }
 
   /** The stamp, with this boot and the MAC address. */
@@ -94,13 +100,43 @@ final class Agent {
     return stamp.file();
   }
 
-  /** The computer's health; asked again within half a second, the same answer. */
-  synchronized Health health() {
-    long now = host.monotonicMicros();
+  /**
+   * The computer's health, at once. Asked again within half a second, the same answer; older than
+   * that, the last answer still, while a reading afresh starts in the background (which can take
+   * seconds, if a command is slow or the settings changed), so no request waits for a reading. Only
+   * the very first request waits, for the first reading.
+   */
+  Health health() {
     Health last = lastHealth;
-    if (last != null && now - lastHealthMicros < HEALTH_MICROS) {
-      return last;
+    if (last == null) {
+      synchronized (first) {
+        Health read = lastHealth;
+        return read != null ? read : read();
+      }
     }
+    if (host.monotonicMicros() - lastHealthMicros >= HEALTH_MICROS
+        && refreshing.compareAndSet(false, true)) {
+      try {
+        background.execute(
+            () -> {
+              try {
+                read();
+              } finally {
+                refreshing.set(false);
+              }
+            });
+      } catch (RuntimeException e) {
+        refreshing.set(false);
+        throw e;
+      }
+    }
+    // The last answer: the fresh one, if the reading ran here (as in tests).
+    Health latest = lastHealth;
+    return latest != null ? latest : last;
+  }
+
+  private Health read() {
+    long now = host.monotonicMicros();
     List<String> problems = new ArrayList<>();
     Stamp stamped = part("stamp", stamp::stamp, Stamp.NONE, problems);
     Boot booted =
@@ -113,9 +149,9 @@ final class Agent {
     List<ThermalZone> zones = part("thermal", thermal::read, List.of(), problems);
     Service photonvision =
         part("photonvision", service::read, new Service("", "", "", "", 0, 0), problems);
-    Optional<SettingsSource.Snapshot> live =
-        part("settings", settings::read, Optional.empty(), problems);
-    Map<String, String> usbPaths = live.map(SettingsSource.Snapshot::usbPaths).orElse(Map.of());
+    Optional<SettingsSource.Summary> live =
+        part("settings", settings::summary, Optional.empty(), problems);
+    Map<String, String> usbPaths = live.map(SettingsSource.Summary::usbPaths).orElse(Map.of());
     Cameras plugged =
         part("cameras", () -> cameras.read(stamped.cameras(), usbPaths), Cameras.UNKNOWN, problems);
     JournalSummary trouble =
@@ -123,6 +159,8 @@ final class Agent {
     Optional<Drive> nvme = part("drive", drive::read, Optional.empty(), problems);
     if (shutdown.requested()) {
       problems.add(0, "shutting down: asked for by the robot");
+    } else if (!shutdown.failure().isEmpty()) {
+      problems.add(0, "shutdown failed: " + shutdown.failure() + "; ask again to retry");
     }
     Health health =
         new Health(
@@ -135,21 +173,37 @@ final class Agent {
             trouble,
             nvme.orElse(null),
             new SettingsState(
-                stamped.settingsHash(), live.map(SettingsSource.Snapshot::hash).orElse("")),
+                stamped.settingsHash(), live.map(SettingsSource.Summary::hash).orElse("")),
             problems.subList(0, Math.min(problems.size(), MAX_PROBLEMS)));
-    lastHealth = health;
     lastHealthMicros = now;
+    lastHealth = health;
     return health;
   }
 
-  /** A page of the journal. */
-  JournalPage journal(String cursor, int priority, String unit, int limit) throws IOException {
-    return journal.page(cursor, priority, unit, limit);
+  /** A page of the journal, of some of the units it's served for. */
+  JournalPage journal(JournalSource.Position position, int priority, List<String> units, int limit)
+      throws IOException {
+    return journal.page(position, priority, units, limit);
   }
 
-  /** PhotonVision's live settings; empty when it has no database yet. */
-  Optional<SettingsSource.Snapshot> settings() throws IOException {
-    return settings.read();
+  /** Writes a line to the agent's log. */
+  void log(String message) {
+    host.log(message);
+  }
+
+  /** How much the agent reads and sends. */
+  Limits limits() {
+    return host.limits();
+  }
+
+  /**
+   * Reads PhotonVision's live settings and sends them; empty when it has no database yet.
+   *
+   * @throws SettingsSource.Busy when another send is under way
+   */
+  <T> Optional<T> sendSettings(SettingsSource.Sending<T> sending)
+      throws IOException, SettingsSource.Busy {
+    return settings.send(sending);
   }
 
   /**
@@ -160,9 +214,22 @@ final class Agent {
     return shutdown.request(from);
   }
 
-  /** The robot controller's address on this computer's team's network: 10.TE.AM.2. */
-  String controller() throws IOException {
-    return controller.apply(stamp.file().stamp().team());
+  /**
+   * The robot controller's address on this computer's team's network, 10.TE.AM.2; empty when the
+   * computer has no stamp (no name or team), so no robot to take a shutdown from.
+   */
+  Optional<String> controller() throws IOException {
+    Stamp stamped = stamp.file().stamp();
+    if (stamped.name().isEmpty() || stamped.team() <= 0) {
+      return Optional.empty();
+    }
+    return Optional.of(controller.apply(stamped.team()));
+  }
+
+  /** The names this computer answers to: its name, and its name in .local. */
+  List<String> names() throws IOException {
+    String name = stamp.file().stamp().name();
+    return name.isEmpty() ? List.of() : List.of(name, name + ".local");
   }
 
   /** The robot controller's address on a team's network: 10.TE.AM.2. */

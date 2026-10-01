@@ -2,6 +2,8 @@ package com.michaelgrundvig.frc.coprocessor.settings;
 
 import com.michaelgrundvig.frc.coprocessor.json.Json;
 import com.michaelgrundvig.frc.coprocessor.json.JsonValue;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,6 +39,18 @@ public final class SettingsHash {
     UNORDERED
   }
 
+  /** When a rule applies, judged by the object holding the value at the end of its path. */
+  public enum When {
+    /** Always. */
+    ALWAYS,
+    /**
+     * Only for a USB camera that PhotonVision matches by its port: the object's {@code type} is
+     * {@code PVUsbCameraInfo}, and its {@code otherPaths} have a by-path entry. Otherwise (a CSI or
+     * file camera, or a USB camera without one) its path is what identifies it, and counts.
+     */
+    USB_BY_PATH
+  }
+
   /**
    * A rule for values PhotonVision changes by itself.
    *
@@ -44,9 +58,11 @@ public final class SettingsHash {
    * @param column the column whose JSON it applies to
    * @param path the members to follow from the column's value; {@code *} is any member or item
    * @param action what it does to the value at the end of the path
+   * @param when when it applies
    * @param why what changes the value, which is why the hash can't count it
    */
-  public record Rule(String table, String column, List<String> path, Action action, String why) {
+  public record Rule(
+      String table, String column, List<String> path, Action action, When when, String why) {
     public Rule {
       path = List.copyOf(path);
       if (path.isEmpty()) {
@@ -68,6 +84,7 @@ public final class SettingsHash {
               "config_json",
               List.of("currentPipelineIndex"),
               Action.EXCLUDE,
+              When.ALWAYS,
               "the robot program switches pipelines and driver mode as it runs, and PhotonVision"
                   + " saves the choice"),
           new Rule(
@@ -75,25 +92,29 @@ public final class SettingsHash {
               "config_json",
               List.of("streamIndex"),
               Action.EXCLUDE,
+              When.ALWAYS,
               "PhotonVision assigns each camera's stream ports as it starts"),
           new Rule(
               "cameras",
               "config_json",
               List.of("matchedCameraInfo", "dev"),
               Action.EXCLUDE,
-              "the /dev/videoN number the kernel gave the camera this boot"),
+              When.USB_BY_PATH,
+              "the /dev/videoN number the kernel gave a USB camera this boot"),
           new Rule(
               "cameras",
               "config_json",
               List.of("matchedCameraInfo", "path"),
               Action.EXCLUDE,
-              "the /dev/videoN device the camera had this boot; PhotonVision matches cameras by"
-                  + " the by-path entry in otherPaths instead"),
+              When.USB_BY_PATH,
+              "the /dev/videoN device a USB camera had this boot; PhotonVision matches it by the"
+                  + " by-path entry in otherPaths instead"),
           new Rule(
               "cameras",
               "config_json",
               List.of("matchedCameraInfo", "otherPaths"),
               Action.UNORDERED,
+              When.ALWAYS,
               "the camera's other device paths, in an order PhotonVision notes can change at"
                   + " random; which ones they are (the USB port) still counts"));
 
@@ -138,8 +159,14 @@ public final class SettingsHash {
         text.append(Json.hashable(JsonValue.of(row.table()))).append(":{");
       }
       text.append(Json.hashable(JsonValue.of(row.key()))).append(':');
-      text.append(Json.hashable(applyRules(row, RULES)));
       update(text);
+      // Written straight into the hash, a few kilobytes at a time: a calibration's row is
+      // megabytes of text.
+      try {
+        Json.writeHashable(applyRules(row, RULES), utf8);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
       last = row;
     }
 
@@ -157,6 +184,27 @@ public final class SettingsHash {
     private void update(StringBuilder text) {
       sha256.update(text.toString().getBytes(StandardCharsets.UTF_8));
     }
+
+    // Text appended here goes into the hash as UTF-8. The writer never splits a character's two
+    // halves between appends, and never writes half of one alone.
+    private final Appendable utf8 =
+        new Appendable() {
+          @Override
+          public Appendable append(CharSequence text) {
+            sha256.update(text.toString().getBytes(StandardCharsets.UTF_8));
+            return this;
+          }
+
+          @Override
+          public Appendable append(CharSequence text, int start, int end) {
+            return append(text.subSequence(start, end));
+          }
+
+          @Override
+          public Appendable append(char c) {
+            return append(String.valueOf(c));
+          }
+        };
   }
 
   /** What's hashed: the settings with the rules applied, before it's written down. */
@@ -183,16 +231,16 @@ public final class SettingsHash {
         List<String> path = new ArrayList<>();
         path.add(rule.column());
         path.addAll(rule.path());
-        columns = apply(columns, path, rule.action());
+        columns = apply(columns, path, rule.action(), rule.when());
       }
     }
     return columns;
   }
 
-  private static JsonValue apply(JsonValue value, List<String> path, Action action) {
+  private static JsonValue apply(JsonValue value, List<String> path, Action action, When when) {
     String head = path.get(0);
     List<String> rest = path.subList(1, path.size());
-    if (value instanceof JsonValue.Obj object) {
+    if (value instanceof JsonValue.Obj object && (!rest.isEmpty() || applies(when, object))) {
       Map<String, JsonValue> members = new LinkedHashMap<>();
       object
           .members()
@@ -201,7 +249,7 @@ public final class SettingsHash {
                 if (!head.equals("*") && !head.equals(name)) {
                   members.put(name, member);
                 } else if (!rest.isEmpty()) {
-                  members.put(name, apply(member, rest, action));
+                  members.put(name, apply(member, rest, action, when));
                 } else if (action == Action.UNORDERED) {
                   members.put(name, unordered(member));
                 }
@@ -213,9 +261,24 @@ public final class SettingsHash {
         return action == Action.EXCLUDE ? new JsonValue.Arr(List.of()) : array;
       }
       return new JsonValue.Arr(
-          array.items().stream().map(item -> apply(item, rest, action)).toList());
+          array.items().stream().map(item -> apply(item, rest, action, when)).toList());
     }
     return value;
+  }
+
+  private static boolean applies(When when, JsonValue.Obj holder) {
+    return switch (when) {
+      case ALWAYS -> true;
+      case USB_BY_PATH ->
+          holder.get("type") instanceof JsonValue.Str type
+              && type.value().equals("PVUsbCameraInfo")
+              && holder.get("otherPaths") instanceof JsonValue.Arr others
+              && others.items().stream()
+                  .anyMatch(
+                      other ->
+                          other instanceof JsonValue.Str path
+                              && path.value().contains("/by-path/"));
+    };
   }
 
   private static JsonValue unordered(JsonValue value) {

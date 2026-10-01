@@ -10,6 +10,8 @@ import com.michaelgrundvig.frc.coprocessor.api.JournalSummary;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,27 +70,71 @@ class JournalSourceTest {
   @Test
   void aPageIsTheLatestOrWhatComesAfterACursor() throws IOException {
     fixture.commands.answer(List.of("journalctl", "-o"), Fixture.lines("journal-this-boot.json"));
-    JournalPage latest = journal.page("", 3, "photonvision.service", 3);
+    JournalPage latest =
+        journal.page(JournalSource.Position.LATEST, 3, List.of("photonvision.service"), 3);
     assertThat(fixture.commands.ran().get(0))
-        .contains("--priority=3", "--unit=photonvision.service", "--lines=3")
-        .doesNotContain("--after-cursor=");
+        .contains(
+            "--priority=3",
+            "--lines=3",
+            "_SYSTEMD_UNIT=photonvision.service",
+            "+",
+            "UNIT=photonvision.service")
+        .doesNotContain("--after-cursor=", "_TRANSPORT=kernel");
     assertThat(latest.entries()).hasSize(3);
     assertThat(latest.more()).isTrue();
     assertThat(latest.cursor()).isEqualTo("s=a1;i=103");
 
-    JournalPage after = journal.page("s=a1;i=103", -1, "", 100);
-    assertThat(fixture.commands.ran().get(1)).contains("--after-cursor=s=a1;i=103");
+    JournalPage after =
+        journal.page(JournalSource.Position.after("s=a1;i=103"), -1, AgentApi.JOURNAL_UNITS, 100);
+    assertThat(fixture.commands.ran().get(1))
+        .contains(
+            "--after-cursor=s=a1;i=103", "_TRANSPORT=kernel", "UNIT=coprocessor-agent.service");
     assertThat(after.entries()).hasSize(8);
     assertThat(after.more()).isFalse();
 
     fixture.commands.answer(List.of("journalctl", "-o"), List.of());
-    JournalPage none = journal.page("s=a1;i=108", -1, "", 100);
+    JournalPage none =
+        journal.page(JournalSource.Position.after("s=a1;i=108"), -1, List.of("kernel"), 100);
     assertThat(none.entries()).isEmpty();
     assertThat(none.cursor()).isEqualTo("s=a1;i=108");
 
     fixture.commands.answer(
         List.of("journalctl", "-o"), new Commands.Output(-1, List.of(), false, true));
-    assertThatThrownBy(() -> journal.page("", -1, "", 10)).hasMessage("journalctl timed out");
+    assertThatThrownBy(() -> journal.page(JournalSource.Position.LATEST, -1, List.of("kernel"), 10))
+        .hasMessage("journalctl timed out");
+  }
+
+  @Test
+  void olderPagesComeBeforeACursorAndAWholeBootFromItsStart() throws IOException {
+    List<String> lines = Fixture.lines("journal-this-boot.json");
+    // journalctl --reverse prints newest first.
+    List<String> newestFirst = new ArrayList<>(lines.subList(0, 4));
+    Collections.reverse(newestFirst);
+    fixture.commands.answer(List.of("journalctl", "-o"), newestFirst);
+    JournalPage older =
+        journal.page(JournalSource.Position.before("s=a1;i=105"), -1, List.of("kernel"), 3);
+    assertThat(fixture.commands.ran().get(0)).contains("--reverse", "--after-cursor=s=a1;i=105");
+    assertThat(older.entries())
+        .extracting(JournalEntry::cursor)
+        .containsExactly("s=a1;i=102", "s=a1;i=103", "s=a1;i=104");
+    assertThat(older.cursor()).isEqualTo("s=a1;i=102");
+    assertThat(older.more()).isTrue();
+
+    fixture.commands.answer(List.of("journalctl", "-o"), List.of());
+    JournalPage oldest =
+        journal.page(JournalSource.Position.before("s=a1;i=101"), -1, List.of("kernel"), 3);
+    assertThat(oldest.entries()).isEmpty();
+    assertThat(oldest.cursor()).isEqualTo("s=a1;i=101");
+    assertThat(oldest.more()).isFalse();
+
+    fixture.commands.answer(List.of("journalctl", "-o"), lines);
+    JournalPage start = journal.page(JournalSource.Position.BOOT, -1, List.of("kernel"), 2);
+    assertThat(fixture.commands.ran().get(2)).contains("--boot").doesNotContain("--lines=2");
+    assertThat(start.entries())
+        .extracting(JournalEntry::cursor)
+        .containsExactly("s=a1;i=101", "s=a1;i=102");
+    assertThat(start.cursor()).isEqualTo("s=a1;i=102");
+    assertThat(start.more()).isTrue();
   }
 
   @Test
@@ -167,8 +213,29 @@ class JournalSourceTest {
   void requestsAreCheckedBeforeTheyReachJournalctl() {
     assertThat(JournalSource.CURSOR.matcher("s=0f;i=1a2;b=3c;m=4d;t=5e;x=6f").matches()).isTrue();
     assertThat(JournalSource.CURSOR.matcher("s=1 --since=x").matches()).isFalse();
-    assertThat(JournalSource.UNIT.matcher("photonvision.service").matches()).isTrue();
-    assertThat(JournalSource.UNIT.matcher("getty@tty1.service").matches()).isTrue();
-    assertThat(JournalSource.UNIT.matcher("a b").matches()).isFalse();
+    assertThat(JournalSource.matches(List.of("kernel", "photonvision.service")))
+        .containsExactly(
+            "_TRANSPORT=kernel",
+            "+",
+            "_SYSTEMD_UNIT=photonvision.service",
+            "+",
+            "UNIT=photonvision.service");
+    assertThatThrownBy(() -> JournalSource.matches(List.of("sshd.service")))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void aPageReadsNoMoreThanItsLimitAllows() throws IOException {
+    Fixture small =
+        new Fixture(
+            dir.resolve("small"),
+            new Limits(256 * 1024, 700, 4 * 1024 * 1024, 1 << 25, 1 << 24, 1 << 22));
+    small.commands.answer(List.of("journalctl", "-o"), Fixture.lines("journal-this-boot.json"));
+    JournalPage page =
+        new JournalSource(small.host, Duration.ofSeconds(2))
+            .page(JournalSource.Position.LATEST, -1, AgentApi.JOURNAL_UNITS, 100);
+    // Each line is about 300 characters: two fit in 700, and the rest wait for the next page.
+    assertThat(page.entries()).hasSize(2);
+    assertThat(page.more()).isTrue();
   }
 }

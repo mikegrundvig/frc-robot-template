@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,19 +34,14 @@ final class JournalSource {
   /** The most entries one count reads; the rest wait for the next. */
   static final int SCAN_LINES = 2000;
 
-  /** The most a count or a page reads, in characters. */
-  static final int MAX_READ = 4 * 1024 * 1024;
-
   /** How many of the latest counted entries a summary keeps. */
   static final int LATEST = 3;
 
   /** The longest a summary's entry's message is: a page of the journal has them whole. */
   static final int SUMMARY_MESSAGE = 200;
 
-  /** A cursor or a unit a request may give: journald's own characters only. */
+  /** A cursor a request may give: journald's own characters only. */
   static final Pattern CURSOR = Pattern.compile("[A-Za-z0-9=;_+/.:-]{1,512}");
-
-  static final Pattern UNIT = Pattern.compile("[A-Za-z0-9@._:\\\\-]{1,256}");
 
   private final Host host;
   private final Duration timeout;
@@ -75,7 +71,8 @@ final class JournalSource {
     // The kernel's messages, or (+) priorities 0 to 3 from anyone.
     command.addAll(
         List.of("_TRANSPORT=kernel", "+", "PRIORITY=0", "PRIORITY=1", "PRIORITY=2", "PRIORITY=3"));
-    Commands.Output output = host.commands().run(command, timeout, SCAN_LINES, MAX_READ);
+    Commands.Output output =
+        host.commands().run(command, timeout, SCAN_LINES, host.limits().maxRead());
     if (!output.ok()) {
       throw new IOException("journalctl " + (output.timedOut() ? "timed out" : "failed"));
     }
@@ -110,6 +107,28 @@ final class JournalSource {
     return new JournalSummary(all, List.copyOf(latest));
   }
 
+  /**
+   * journalctl's matches for these units, or-ed together ({@code +}): the kernel's transport, and
+   * for a unit both what it logged and what systemd logged about it.
+   */
+  static List<String> matches(List<String> units) {
+    List<String> matches = new ArrayList<>();
+    for (String unit : units) {
+      if (!AgentApi.JOURNAL_UNITS.contains(unit)) {
+        throw new IllegalArgumentException("not a unit the journal is served for: " + unit);
+      }
+      if (!matches.isEmpty()) {
+        matches.add("+");
+      }
+      if (unit.equals("kernel")) {
+        matches.add("_TRANSPORT=kernel");
+      } else {
+        matches.addAll(List.of("_SYSTEMD_UNIT=" + unit, "+", "UNIT=" + unit));
+      }
+    }
+    return matches;
+  }
+
   /** An entry as a summary keeps it: its message cut short, and its boot (this one) left out. */
   private static JournalEntry brief(JournalEntry entry) {
     String message = entry.message();
@@ -125,25 +144,56 @@ final class JournalSource {
         entry.category());
   }
 
+  /** Where a page of the journal is. */
+  record Position(Kind kind, String cursor) {
+    /** Where a page is, against a cursor or none. */
+    enum Kind {
+      /** The latest entries. */
+      LATEST,
+      /** The entries after the cursor. */
+      AFTER,
+      /** The entries before the cursor, the newest of them. */
+      BEFORE,
+      /** The first entries of this boot. */
+      BOOT
+    }
+
+    static final Position LATEST = new Position(Kind.LATEST, "");
+    static final Position BOOT = new Position(Kind.BOOT, "");
+
+    static Position after(String cursor) {
+      return new Position(Kind.AFTER, cursor);
+    }
+
+    static Position before(String cursor) {
+      return new Position(Kind.BEFORE, cursor);
+    }
+  }
+
   /**
-   * A page of the journal, as {@code GET /v1/journal} asks: after a cursor (or the latest), at a
-   * priority or worse, of one unit, at most {@code limit} entries.
+   * A page of the journal, as {@code GET /v1/journal} asks: the latest entries, those after or
+   * before a cursor, or the first of this boot; at a priority or worse, of some of {@link
+   * AgentApi#JOURNAL_UNITS}; at most {@code limit} entries, oldest first. Its cursor is the one to
+   * ask with to go on the same way: the newest entry's for later pages, the oldest's for earlier
+   * ones ({@code before}).
    */
-  JournalPage page(String cursor, int priority, String unit, int limit) throws IOException {
+  JournalPage page(Position position, int priority, List<String> units, int limit)
+      throws IOException {
     List<String> command =
         new ArrayList<>(List.of("journalctl", "-o", "json", "--no-pager", FIELDS));
     if (priority >= 0) {
       command.add("--priority=" + priority);
     }
-    if (!unit.isEmpty()) {
-      command.add("--unit=" + unit);
+    switch (position.kind()) {
+      case LATEST -> command.add("--lines=" + limit);
+      case AFTER -> command.add("--after-cursor=" + position.cursor());
+      // Newest first, from just before the cursor: read limit of them, and turned around below.
+      case BEFORE -> command.addAll(List.of("--reverse", "--after-cursor=" + position.cursor()));
+      case BOOT -> command.add("--boot");
     }
-    if (cursor.isEmpty()) {
-      command.add("--lines=" + limit);
-    } else {
-      command.add("--after-cursor=" + cursor);
-    }
-    Commands.Output output = host.commands().run(command, timeout, limit + 1, MAX_READ);
+    command.addAll(matches(units));
+    Commands.Output output =
+        host.commands().run(command, timeout, limit + 1, host.limits().maxRead());
     if (!output.ok()) {
       throw new IOException("journalctl " + (output.timedOut() ? "timed out" : "failed"));
     }
@@ -160,8 +210,14 @@ final class JournalSource {
       }
       entries.add(entry);
     }
-    more |= output.truncated() && entries.size() == limit;
-    String next = entries.isEmpty() ? cursor : entries.get(entries.size() - 1).cursor();
+    more |= output.truncated();
+    String next;
+    if (position.kind() == Position.Kind.BEFORE) {
+      Collections.reverse(entries);
+      next = entries.isEmpty() ? position.cursor() : entries.get(0).cursor();
+    } else {
+      next = entries.isEmpty() ? position.cursor() : entries.get(entries.size() - 1).cursor();
+    }
     return new JournalPage(entries, next, more);
   }
 
@@ -181,7 +237,7 @@ final class JournalSource {
                 List.of("journalctl", "-b", "-1", "-n", "40", "-o", "json", "--no-pager", FIELDS),
                 timeout,
                 41,
-                MAX_READ);
+                host.limits().maxRead());
     if (output.timedOut()) {
       throw new IOException("journalctl timed out");
     }

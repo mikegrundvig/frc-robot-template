@@ -6,6 +6,7 @@ import frc.robot.lib.calibration.CameraMountCalibration;
 import frc.robot.lib.calibration.HeadingAverage;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.field.Place;
 import frc.robot.lib.localization.AttitudeHistory;
 import frc.robot.lib.localization.CameraLocalizer;
 import frc.robot.lib.localization.CaptureContext;
@@ -23,10 +24,12 @@ import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Quaternion;
@@ -37,6 +40,7 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.TunableBase;
 import org.wpilib.tunable.TunableDouble;
 import org.wpilib.tunable.TunableRegistry;
+import org.wpilib.util.Alert;
 
 /**
  * The robot's cameras: reads each one's results, turns them into measurements through the {@link
@@ -61,7 +65,7 @@ import org.wpilib.tunable.TunableRegistry;
  * blinded by stage lights), and how long to hold the cameras back when autonomous starts.
  *
  * <p>A task lining up on a target can trust only that target's tags while it runs ({@link
- * #trustingOnly}): 254's per-task allowlist.
+ * #trustingOnly}), as 254's auto-align did.
  */
 public final class Vision implements AutoCloseable {
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
@@ -124,8 +128,14 @@ public final class Vision implements AutoCloseable {
   private final List<String> tunablePaths = new ArrayList<>();
   private VisionConfig current;
 
-  /** The tags the running task trusts; null for every tag. */
-  private @Nullable TagAllowlist onlyTags;
+  /** The robot's alliance, once known: a task lining up on a place trusts that alliance's tags. */
+  private final Supplier<Optional<Alliance>> alliance;
+
+  /** The tasks holding the cameras to their tags, oldest first: the latest held is in effect. */
+  private final List<TagLease> leases = new ArrayList<>();
+
+  private final Alert trustingFewerTags =
+      new Alert("Vision", "trustingFewerTags", "The cameras trust only some tags", Alert.Level.LOW);
 
   /**
    * Vision's configuration as the pit tunes it: the main thresholds and uncertainties, each within
@@ -148,13 +158,15 @@ public final class Vision implements AutoCloseable {
    * @param localizer where the robot was when each image was taken, and where measurements go
    * @param field the field, whose tags the cameras see
    * @param settings how far images are trusted, as tuned: read once a loop
+   * @param alliance the robot's alliance, once the Driver Station or the field says
    */
   public Vision(
       List<CameraConfig> cameras,
       CameraIO[] ios,
       CameraLocalizer localizer,
       FieldModel field,
-      Supplier<VisionConfig> settings) {
+      Supplier<VisionConfig> settings,
+      Supplier<Optional<Alliance>> alliance) {
     if (cameras.size() != ios.length) {
       throw new IllegalArgumentException("one IO for each camera");
     }
@@ -167,6 +179,7 @@ public final class Vision implements AutoCloseable {
     this.field = field;
     pipeline = new VisionPipeline(field);
     this.settings = settings;
+    this.alliance = alliance;
     current = settings.get();
     publish("Vision/autoStartHoldSeconds", autoStartHoldSeconds);
   }
@@ -209,36 +222,118 @@ public final class Vision implements AutoCloseable {
   }
 
   /**
-   * A task that trusts only some tags while it runs: lining up on the hub, say, the cameras measure
-   * the robot from the hub's tags alone. They go back to every tag when the task ends, however it
-   * ends. One such task at a time.
+   * A task lining up on a place trusts only the tags the place is found from, while it runs: lining
+   * up on the hub, the cameras measure the robot from the hub's tags alone. Which tags depends on
+   * the alliance, and a binding is made before the alliance is known, so they're found when the
+   * task starts. With no alliance known by then, it trusts every tag, and says so.
    *
-   * @param tags the tags it trusts: {@code TagAllowlist.of(hub.name(), hub.tags(field, alliance))}
+   * @throws IllegalArgumentException if the place is written as a pose: it has no tags to trust
    */
-  public Command trustingOnly(TagAllowlist tags, Command task) {
-    return Command.noRequirements(
-            coroutine -> {
-              trustOnly(tags);
-              coroutine.await(task);
-              trustEveryTag();
-            })
-        // A canceled command never resumes, so nothing after the await runs (not even a finally).
-        .whenCanceled(this::trustEveryTag)
-        .named(task.name());
+  public Command trustingOnly(Place place, Command task) {
+    if (place.tags(field, Alliance.BLUE).isEmpty()) {
+      throw new IllegalArgumentException(
+          place.name() + " is written as a pose, not found from tags: it has no tags to trust");
+    }
+    return trusting(
+        task,
+        () ->
+            alliance
+                .get()
+                .map(ours -> trustOnly(TagAllowlist.of(place.name(), place.tags(field, ours))))
+                .orElseGet(
+                    () ->
+                        hold(
+                            null,
+                            place.name() + ": the alliance isn't known, so every tag is trusted")),
+        task.name() + " (trusting " + place.name() + "'s tags)");
   }
 
   /**
-   * From now on, the cameras measure the robot only from these tags, until {@link #trustEveryTag}.
+   * A task that trusts only some tags while it runs. The cameras go back to what they trusted
+   * before when it ends, however it ends.
+   */
+  public Command trustingOnly(TagAllowlist tags, Command task) {
+    return trusting(
+        task, () -> trustOnly(tags), task.name() + " (trusting " + tags.describe() + ")");
+  }
+
+  /**
+   * The task, holding the cameras to its tags while it runs. It requires what the task requires, at
+   * the task's priority: a task that interrupts it ends it before starting, so the one ending lets
+   * go of its tags before the one starting takes its own, and a task refused never touches them.
+   */
+  private Command trusting(Command task, Supplier<TagLease> take, String name) {
+    Holding holding = new Holding();
+    return Command.requiring(task.requirements())
+        .executing(
+            coroutine -> {
+              holding.lease = take.get();
+              coroutine.await(task);
+              holding.release();
+            })
+        // A canceled command never resumes, so nothing after the await runs (not even a finally).
+        .whenCanceled(holding::release)
+        .withPriority(task.priority())
+        .named(name);
+  }
+
+  /** One run's hold on the cameras' tags. */
+  private static final class Holding {
+    private @Nullable TagLease lease;
+
+    void release() {
+      TagLease held = lease;
+      if (held != null) {
+        held.release();
+        lease = null;
+      }
+    }
+  }
+
+  /**
+   * From now on, the cameras measure the robot only from these tags, until the lease is released.
    * Every tag is still logged, and still checks its camera's mount. {@link #trustingOnly} does both
    * around a task, which is safer: a task canceled partway never reaches its own last line.
    */
-  public void trustOnly(TagAllowlist tags) {
-    onlyTags = tags;
+  public TagLease trustOnly(TagAllowlist tags) {
+    return hold(tags, "The cameras trust only " + tags.describe());
   }
 
-  /** The cameras measure the robot from every tag again. */
-  public void trustEveryTag() {
-    onlyTags = null;
+  private TagLease hold(@Nullable TagAllowlist tags, String says) {
+    TagLease lease = new TagLease(tags, says);
+    leases.add(lease);
+    return lease;
+  }
+
+  /**
+   * One task's hold on which tags the cameras trust. The latest lease still held is in effect;
+   * releasing one gives the cameras back to the one before, or to every tag.
+   */
+  public final class TagLease {
+    private final @Nullable TagAllowlist tags;
+    private final String says;
+
+    private TagLease(@Nullable TagAllowlist tags, String says) {
+      this.tags = tags;
+      this.says = says;
+    }
+
+    /**
+     * Lets go. Releasing it again, or after a later task took the cameras, changes nothing more.
+     */
+    public void release() {
+      leases.remove(this);
+    }
+  }
+
+  /** What the alert about trusting fewer tags says, or nothing while it's down. */
+  String trustingFewerTagsAlertText() {
+    return trustingFewerTags.get() ? trustingFewerTags.getText() : "";
+  }
+
+  /** The tags the cameras trust now; null for every tag. */
+  private @Nullable TagAllowlist onlyTags() {
+    return leases.isEmpty() ? null : leases.getLast().tags;
   }
 
   /**
@@ -279,8 +374,12 @@ public final class Vision implements AutoCloseable {
       recentYawRate = Math.max(recentYawRate, rate);
     }
     current = settings.get();
-    TagAllowlist trusted = onlyTags;
+    TagAllowlist trusted = onlyTags();
     Logger.recordOutput("Vision/OnlyTags", trusted != null ? trusted.describe() : "");
+    if (!leases.isEmpty()) {
+      trustingFewerTags.setText(leases.getLast().says);
+    }
+    trustingFewerTags.set(!leases.isEmpty());
     Motion motion =
         new Motion(
             estimate.fieldVelocity().getNorm(),
@@ -355,7 +454,7 @@ public final class Vision implements AutoCloseable {
                 motion.recentYawRate()),
             current,
             camera.mountDoubtMeters(),
-            onlyTags);
+            onlyTags());
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.outcome(result.outcome());
@@ -561,5 +660,6 @@ public final class Vision implements AutoCloseable {
     for (String path : tunablePaths) {
       TunableRegistry.remove(path);
     }
+    trustingFewerTags.close();
   }
 }

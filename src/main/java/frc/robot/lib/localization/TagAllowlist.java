@@ -13,7 +13,9 @@ import java.util.stream.Collectors;
  * a list per task, and 5000 had a "hub tags only" switch.
  *
  * <p>Name the tags through the field model rather than by number, so the task works on any field
- * and for either alliance: {@code TagAllowlist.of(hub.name(), hub.tags(field, alliance))}.
+ * and for either alliance: a task lining up on a place takes the place's tags with {@code
+ * vision.trustingOnly(hub, task)}, which finds them for the robot's alliance when the task starts
+ * (bindings are made before the alliance is known).
  *
  * @param task what the tags are for, as the log names it: "Hub"
  * @param tagIds the tags it trusts: at least one

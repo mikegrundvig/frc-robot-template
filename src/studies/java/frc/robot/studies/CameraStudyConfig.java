@@ -16,12 +16,20 @@ import frc.robot.lib.config.ConfigRecord;
  * @param frames how many images each camera takes at each pose, each with its own pixel noise
  * @param gyroErrorDegrees how far off the gyro's heading typically is (one standard deviation):
  *     every solve takes its heading from the gyro, so its error moves every position solved
+ * @param mostCameras the most cameras a layout has: the family's, or those made from CAD's places,
+ *     with more are left out
  * @param seed where every random draw starts: the same seed gives the same report
  * @param threads how many threads share the work
  */
 @ConfigRecord
 public record CameraStudyConfig(
-    double gridMeters, int headings, int frames, double gyroErrorDegrees, long seed, int threads) {
+    double gridMeters,
+    int headings,
+    int frames,
+    double gyroErrorDegrees,
+    int mostCameras,
+    long seed,
+    int threads) {
   /**
    * A run of under a minute: every half meter, every 45 degrees, two images per camera. Two
    * threads, since the computer may be shared.
@@ -32,6 +40,7 @@ public record CameraStudyConfig(
           .headings(8)
           .frames(2)
           .gyroErrorDegrees(0.25)
+          .mostCameras(4)
           .seed(1)
           .threads(2)
           .build();
@@ -42,6 +51,7 @@ public record CameraStudyConfig(
         .field("headings", headings, atLeast(1))
         .field("frames", frames, atLeast(1))
         .field("gyroErrorDegrees", gyroErrorDegrees, nonNegative())
+        .field("mostCameras", mostCameras, atLeast(1))
         .field("threads", threads, atLeast(1))
         .orThrow();
   }

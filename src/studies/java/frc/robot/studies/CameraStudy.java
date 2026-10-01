@@ -2,6 +2,8 @@ package frc.robot.studies;
 
 import frc.robot.RobotConfig;
 import frc.robot.Robots;
+import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.ConfigException;
 import frc.robot.lib.field.FieldModel;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -34,6 +36,8 @@ public final class CameraStudy {
         --field=NAME              one of WPILib's fields (default: the season's, Fields.DEFAULT_FIELD)
         --layout=FILE             a tag layout file (JSON), for a field WPILib doesn't have yet
         --weights=FILE            regions of the field that count more, or not at all (CSV)
+        --mounts=FILE             where CAD could put cameras (CSV); without it, a family around the frame
+        --cameras=N               the most cameras in a layout (default 4)
         --grid-meters=M           how far apart the positions are (default 0.5)
         --headings=N              headings at each position (default 8)
         --frames=N                images each camera takes at each pose (default 2)
@@ -49,6 +53,8 @@ public final class CameraStudy {
           "field",
           "layout",
           "weights",
+          "mounts",
+          "cameras",
           "grid-meters",
           "headings",
           "frames",
@@ -62,11 +68,23 @@ public final class CameraStudy {
   public static void main(String[] args) throws IOException {
     try {
       run(args, System.out);
-    } catch (IllegalArgumentException e) {
+    } catch (OptionException e) {
       System.err.println(e.getMessage());
       System.err.println();
       System.err.print(USAGE);
       System.exit(2);
+    } catch (IllegalArgumentException e) {
+      System.err.println(e.getMessage());
+      System.exit(1);
+    }
+  }
+
+  /** An option that isn't one, or a value an option can't take: the usage helps with these. */
+  static final class OptionException extends IllegalArgumentException {
+    private static final long serialVersionUID = 1;
+
+    OptionException(@Nullable String message, @Nullable Throwable cause) {
+      super(message, cause);
     }
   }
 
@@ -74,8 +92,9 @@ public final class CameraStudy {
    * Runs the study as the options say, and writes its report.
    *
    * @param out where progress and the headline go
-   * @throws IllegalArgumentException for an option that isn't one, or a value that doesn't work,
-   *     saying which
+   * @throws OptionException for an option that isn't one, or a value it can't take, saying which
+   * @throws IllegalArgumentException for a file that can't be read as what it's for, or a layout
+   *     that doesn't fit the robot, saying why
    */
   static void run(String[] args, PrintStream out) throws IOException {
     Map<String, String> options = options(args);
@@ -89,14 +108,22 @@ public final class CameraStudy {
     FieldModel field =
         layout != null
             ? TagLayouts.read(Path.of(layout))
-            : TagLayouts.named(options.getOrDefault("field", Fields.DEFAULT_FIELD.name()));
+            : wpilibs(options.getOrDefault("field", Fields.DEFAULT_FIELD.name()));
     String weightsFile = options.get("weights");
     Weights weights = weightsFile == null ? Weights.NONE : Weights.read(Path.of(weightsFile));
     FieldGrid grid =
         new FieldGrid(
             field, robot.body(), config.gridMeters(), config.headings(), weights, config.seed());
     List<Sample> samples = grid.samples();
-    List<Candidate> candidates = Candidates.of(robot);
+    Candidate own = Candidates.own(robot);
+    CameraConfig.Sensor sensor = robot.cameras().get(0).sensor();
+    String mountsFile = options.get("mounts");
+    List<Candidate> candidates = new ArrayList<>(List.of(own));
+    candidates.addAll(
+        mountsFile == null
+            ? Candidates.family(robot.body(), sensor, config.mostCameras())
+            : MountOptions.read(Path.of(mountsFile))
+                .candidates(robot, sensor, config.mostCameras()));
     CameraScoring scoring = new CameraScoring(robot, field, candidates, config);
 
     List<String> setup = new ArrayList<>();
@@ -117,6 +144,14 @@ public final class CameraStudy {
                 weights.regions().stream()
                     .map(region -> region.name() + " " + region.weight())
                     .collect(Collectors.joining(", "))));
+    setup.add(
+        mountsFile == null
+            ? format(
+                "Layouts: the robot's own, and the family around its frame, of up to %d cameras.",
+                config.mostCameras())
+            : format(
+                "Layouts: the robot's own, and every one of up to %d cameras at the places in `%s`.",
+                config.mostCameras(), mountsFile));
     setup.add(
         format(
             "%d poses: %d x %d positions %.2f m apart, at %d headings; %d %s per camera at"
@@ -158,7 +193,7 @@ public final class CameraStudy {
             candidates.size(), scoring.distinctCameras(), seconds, config.threads()));
 
     Path directory = Path.of(options.getOrDefault("out", "build/studies/camera-placement"));
-    Report.write(directory, new Report.Run(setup, candidates.get(0), grid, result));
+    Report.write(directory, new Report.Run(setup, own, grid, result));
     Score best = result.ranking().get(0);
     out.printf(
         Locale.ROOT,
@@ -180,7 +215,7 @@ public final class CameraStudy {
       int equals = arg.indexOf('=');
       String name = arg.startsWith("--") && equals > 2 ? arg.substring(2, equals) : "";
       if (!OPTIONS.contains(name)) {
-        throw new IllegalArgumentException("not an option: " + arg);
+        throw new OptionException("not an option: " + arg, null);
       }
       options.put(name, arg.substring(equals + 1));
     }
@@ -189,14 +224,27 @@ public final class CameraStudy {
 
   static CameraStudyConfig config(Map<String, String> options) {
     CameraStudyConfig d = CameraStudyConfig.DEFAULTS;
-    return CameraStudyConfigBuilder.builder(d)
-        .gridMeters(number(options, "grid-meters", d.gridMeters()))
-        .headings((int) whole(options, "headings", d.headings()))
-        .frames((int) whole(options, "frames", d.frames()))
-        .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
-        .seed(whole(options, "seed", d.seed()))
-        .threads((int) whole(options, "threads", d.threads()))
-        .build();
+    try {
+      return CameraStudyConfigBuilder.builder(d)
+          .gridMeters(number(options, "grid-meters", d.gridMeters()))
+          .headings(count(options, "headings", d.headings()))
+          .frames(count(options, "frames", d.frames()))
+          .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
+          .mostCameras(count(options, "cameras", d.mostCameras()))
+          .seed(seed(options, d.seed()))
+          .threads(count(options, "threads", d.threads()))
+          .build();
+    } catch (ConfigException e) {
+      throw new OptionException(e.getMessage(), e);
+    }
+  }
+
+  private static FieldModel wpilibs(String name) {
+    try {
+      return TagLayouts.named(name);
+    } catch (IllegalArgumentException e) {
+      throw new OptionException(e.getMessage(), e);
+    }
   }
 
   private static RobotConfig robot(@Nullable String name) {
@@ -208,11 +256,12 @@ public final class CameraStudy {
         return robot;
       }
     }
-    throw new IllegalArgumentException(
+    throw new OptionException(
         "no robot named "
             + name
             + " in Robots.all(): "
-            + Robots.all().stream().map(RobotConfig::name).collect(Collectors.joining(", ")));
+            + Robots.all().stream().map(RobotConfig::name).collect(Collectors.joining(", ")),
+        null);
   }
 
   private static double number(Map<String, String> options, String name, double otherwise) {
@@ -220,16 +269,26 @@ public final class CameraStudy {
     try {
       return text == null ? otherwise : Double.parseDouble(text);
     } catch (NumberFormatException e) {
-      throw new IllegalArgumentException("--" + name + " must be a number: " + text, e);
+      throw new OptionException("--" + name + " must be a number: " + text, e);
     }
   }
 
-  private static long whole(Map<String, String> options, String name, long otherwise) {
+  /** A count, such as of headings: a whole number that fits an int. */
+  private static int count(Map<String, String> options, String name, int otherwise) {
     String text = options.get(name);
+    try {
+      return text == null ? otherwise : Integer.parseInt(text);
+    } catch (NumberFormatException e) {
+      throw new OptionException("--" + name + " must be a whole number: " + text, e);
+    }
+  }
+
+  private static long seed(Map<String, String> options, long otherwise) {
+    String text = options.get("seed");
     try {
       return text == null ? otherwise : Long.parseLong(text);
     } catch (NumberFormatException e) {
-      throw new IllegalArgumentException("--" + name + " must be a whole number: " + text, e);
+      throw new OptionException("--seed must be a whole number: " + text, e);
     }
   }
 

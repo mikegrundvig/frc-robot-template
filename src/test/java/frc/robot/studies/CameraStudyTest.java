@@ -3,6 +3,7 @@ package frc.robot.studies;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import frc.robot.Robots;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -34,6 +35,8 @@ class CameraStudyTest {
         Files.writeString(folder.resolve("weights.csv"), "Field element, 7.5, 3.5, 9.0, 4.5, 0\n");
 
     run(
+        // 2026's, pinned, so the test stands when WPILib's default becomes the next season's.
+        "--field=FRC_2026_REBUILT_WELDED",
         "--grid-meters=3",
         "--headings=2",
         "--frames=1",
@@ -42,13 +45,14 @@ class CameraStudyTest {
         "--out=" + folder.resolve("report"));
 
     List<String> candidates = Files.readAllLines(folder.resolve("report/candidates.csv"));
-    assertThat(candidates).hasSize(1 + 157);
+    assertThat(candidates).hasSize(1 + Candidates.of(Robots.SIM).size());
     assertThat(candidates.get(0)).startsWith("rank,layout,cameras,position_p95_m");
     assertThat(candidates).anyMatch(line -> line.contains("\"The robot's own: sim\""));
     String summary = Files.readString(folder.resolve("report/summary.md"));
     assertThat(summary)
         .contains("on 2026 FRC Rebuilt Welded (WPILib's layout): 32 tags, rotated")
         .contains("Weights from `" + weights + "`: Field element 0.0")
+        .contains("the family around its frame, of up to 4 cameras")
         .contains("## The best at each camera count")
         .contains("## The robot's own layout")
         .contains("### The robot's own: sim");
@@ -81,6 +85,34 @@ class CameraStudyTest {
     assertThat(printed()).contains("--grid-meters=M").contains("docs/camera-placement.md");
   }
 
+  /** CAD's places: every layout of up to two cameras at them, and the robot's own. */
+  @Test
+  void aRunOnCadsPlaces() throws IOException {
+    Path mounts =
+        Files.write(
+            folder.resolve("mounts.csv"),
+            List.of(
+                "# name, forward, left, up, yaws, tilts",
+                "front, 12, 0, 20, 0 20, 10",
+                "back, -12, 0, 20, 180, 10 20",
+                "left, 0, 12, 20, 90, 10"));
+
+    run(
+        "--field=FRC_2026_REBUILT_WELDED",
+        "--mounts=" + mounts,
+        "--cameras=2",
+        "--grid-meters=6",
+        "--headings=2",
+        "--frames=1",
+        "--out=" + folder.resolve("report"));
+
+    // Ways of facing: 2, 2, 1. One camera: 5; two: 2 x 2 + 2 x 1 + 2 x 1 = 8; the robot's own.
+    assertThat(Files.readAllLines(folder.resolve("report/candidates.csv"))).hasSize(1 + 14);
+    assertThat(Files.readString(folder.resolve("report/summary.md")))
+        .contains("every one of up to 2 cameras at the places in `" + mounts + "`")
+        .contains("2 cameras: front 0°, up 10°; back 180°, up 20°");
+  }
+
   @Test
   void aWrongOptionSaysWhich() {
     assertThatThrownBy(() -> run("--grid=0.5")).hasMessageContaining("not an option: --grid=0.5");
@@ -95,5 +127,18 @@ class CameraStudyTest {
         .hasMessageContaining("no robot named comp")
         .hasMessageContaining("sim");
     assertThatThrownBy(() -> run("--field=FRC_2027")).hasMessageContaining("no field named");
+    assertThatThrownBy(() -> run("--headings=99999999999"))
+        .as("too big to count")
+        .isInstanceOf(CameraStudy.OptionException.class);
+  }
+
+  /** A file that isn't what it's for says so, without the usage: the options were right. */
+  @Test
+  void aBadFileIsntAnOptionError() throws IOException {
+    Path weights = Files.writeString(folder.resolve("weights.csv"), "Field element, 7.5\n");
+
+    assertThatThrownBy(() -> run("--weights=" + weights))
+        .isNotInstanceOf(CameraStudy.OptionException.class)
+        .hasMessageContaining("weights.csv line 1");
   }
 }

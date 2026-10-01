@@ -1,5 +1,8 @@
 package frc.robot.studies;
 
+import static frc.robot.studies.Candidates.HEIGHTS;
+import static frc.robot.studies.Candidates.SPLAYS;
+import static frc.robot.studies.Candidates.TILTS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.groups.Tuple.tuple;
@@ -18,13 +21,18 @@ import org.junit.jupiter.api.Test;
 
 /** The layouts the study tries. */
 class CandidatesTest {
+  /**
+   * The family's arrangements: one camera ahead; two at the front corners, two ahead and back, two
+   * left and right; three; four at the corners; four on the sides. Those at corners, one per splay.
+   */
+  private static final int ARRANGEMENTS = 1 + SPLAYS.size() + 2 + SPLAYS.size() + SPLAYS.size() + 1;
+
   @Test
   void theRobotsOwnComesFirstThenTheFamily() {
     List<Candidate> candidates = Candidates.of(Robots.SIM);
 
     assertThat(candidates.get(0).cameras()).isEqualTo(Robots.SIM.cameras());
-    // 13 layouts of one to four cameras, at 3 heights and 4 tilts.
-    assertThat(candidates).hasSize(1 + 13 * 3 * 4);
+    assertThat(candidates).hasSize(1 + ARRANGEMENTS * HEIGHTS.size() * TILTS.size());
     Set<String> names = new HashSet<>();
     for (Candidate candidate : candidates) {
       assertThat(names.add(candidate.name())).as(candidate.name()).isTrue();
@@ -73,7 +81,17 @@ class CandidatesTest {
             .cameras(List.of(StudyFixtures.FRONT))
             .build();
 
-    assertThat(Candidates.of(shortRobot)).hasSize(1 + 13 * 2 * 4);
+    // Only the two lower heights fit under 20 in.
+    assertThat(Candidates.of(shortRobot)).hasSize(1 + ARRANGEMENTS * 2 * TILTS.size());
+  }
+
+  @Test
+  void theFamilyLeavesOutLayoutsOfMoreCameras() {
+    List<Candidate> upToTwo = Candidates.family(Robots.SIM.body(), StudyFixtures.SENSOR, 2);
+
+    // Ahead; front corners at each splay; ahead and back; left and right.
+    assertThat(upToTwo).hasSize((1 + SPLAYS.size() + 2) * HEIGHTS.size() * TILTS.size());
+    assertThat(upToTwo).allMatch(candidate -> candidate.cameras().size() <= 2);
   }
 
   @Test

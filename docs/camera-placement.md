@@ -30,8 +30,9 @@ robot can't reach, inside a field element, counts too until a weights file leave
 describes it: position, tilt up, and yaw. Every candidate uses the robot's own camera sensor. The
 study tries:
 
-- the robot's own cameras, as `Robots` configures them;
-- a family built around the robot's frame: one to four cameras at its corners and the middles of
+- the robot's own cameras, as `Robots` configures them, always;
+- every layout CAD's places allow, when CAD has said where cameras could go (`--mounts`, below);
+- otherwise, a family built around the robot's frame: one to four cameras at its corners and the middles of
   its sides, facing out (ahead, back, sideways, or splayed 15°, 30°, or 45° from ahead or back), at
   8, 16, and 24 in off the floor, tilted up 0°, 10°, 20°, or 30°.
 
@@ -107,6 +108,8 @@ on, for 3,840 poses and 157 layouts), and under 1 GB of memory. A finer grid cos
 | `--field=NAME` | the season's, `Fields.DEFAULT_FIELD` | One of WPILib's fields, by its name in `Fields`: `FRC_2026_REBUILT_ANDY_MARK` |
 | `--layout=FILE` | none | A tag layout file (JSON), as WPILib or FIRST publishes it, for a field WPILib doesn't have yet |
 | `--weights=FILE` | none | Regions of the field that count more, or not at all |
+| `--mounts=FILE` | none: the family around the frame | Where CAD could put cameras, and the ways each could face (below) |
+| `--cameras=N` | 4 | The most cameras in a layout |
 | `--grid-meters=M` | 0.5 | Spacing of the positions |
 | `--headings=N` | 8 | Headings at each position |
 | `--frames=N` | 2 | Images each camera takes at each pose, each with its own noise |
@@ -139,6 +142,43 @@ To turn it into requirements for CAD:
    at 30° to 45°, 16 to 24 in up, tilted up 10° to 20°".
 
 Rerun with weights once the strategy says where the robot must know where it is.
+
+## Designing with CAD
+
+Once the robot is taking shape, the family's guesses give way to CAD's own places: where on this
+robot a camera could actually go, clear of the mechanisms, on something rigid. CAD lists them in a
+CSV file, one place a line, with the ways a camera there could face, and the study scores every
+layout of one camera up to `--cameras` (four, unless you say otherwise) at different places, each
+facing any of its place's ways:
+
+```csv
+# name,      forward, left,   up, yaws (left of ahead), tilts (up)
+front-left,  12.25,   12.25,  20, 0 30 45,              10 20
+front-right, 12.25,   -12.25, 20, 0 -30 -45,            10 20
+back-left,   -12.25,  12.25,  20, 180 150 135,          10 20
+back-right,  -12.25,  -12.25, 20, 180 -150 -135,        10 20
+shooter-top, 0,       0,      28, 0 180,                15
+```
+
+Positions are in inches from the robot's origin (the frame's center, on the floor; forward, left,
+and up, as `CameraConfig` measures them), and angles in degrees: a yaw of 0 faces ahead and
+positive turns left; a tilt is how far up from level. Lists of yaws and tilts are separated by
+spaces. Each place must be within the robot, or the study names it and stops.
+
+Every way of facing multiplies the layouts: five places with six ways each make over 9,000 layouts
+of up to four cameras, and the study scores at most 5,000 in one run, saying how many there were
+when there are more. Offer the ways that are really in question, and narrow them run by run.
+
+How CAD uses it while designing:
+
+1. Early: list the places the design leaves room for, with the ways each could face. Run the study
+   and read the top layouts at each camera count.
+2. Settle the count, the places, and roughly the angles; narrow the file to those, with finer
+   steps of angle, and run again.
+3. When the design changes (a mechanism moves into a camera's view, a place goes away), change the
+   file and run again. Each run takes a minute or two.
+4. Commit the chosen layout as the robot's cameras in `Robots`: from then on it's "the robot's own"
+   in every run, the baseline the alternatives are measured against.
 
 ## Weights
 

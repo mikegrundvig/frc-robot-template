@@ -9,6 +9,12 @@ committed settings. One GitHub Release holds every computer's image.
 So to change a coprocessor, change the repository and cut a release; to replace a broken one,
 flash its image from the release onto a drive. A drive knows which computer it is.
 
+It builds on the rest of the coprocessor work (`coprocessor/README.md`): the table
+(`coprocessors/coprocessors.yaml`, with your team's number and computers), the version lock
+(`coprocessor/photonvision.lock`, with real checksums), and the health agent's project
+(`coprocessor/agent`, with its unit). Without any of them, the workflow's first job stops and says
+which.
+
 ## What's on a drive
 
 | Partition | What | While running |
@@ -49,17 +55,38 @@ That's the agent's `Stamp` (`coprocessor/README.md`) less what the agent adds as
 the port it listens on. A computer with no committed settings gets an empty `settingsHash`, and no
 settings database: PhotonVision starts with its defaults.
 
-PhotonVision runs with `-n`, so it never changes the network: the address is the image's. SSH
-takes keys only, as the user `photon` (`ssh photon@10.TE.AM.11`; Windows has the OpenSSH client
-built in). With no `coprocessors/authorized_keys`, nobody can log in over SSH. Put only public keys
-there (it's in every image, and the images are public); the team's password manager records where
-the private key lives. Each drive makes its own SSH host key on `/data` at first boot.
+PhotonVision runs with `-n`, so it never changes the network: the address is the image's.
+
+**Logging in.** The only way in is SSH with one of the team's keys, as the user `photon`
+(`ssh photon@10.TE.AM.11`; Windows has the OpenSSH client built in), who can use `sudo` without a
+password for maintenance. Nothing else logs in:
+- No password works for any account. PhotonVision's image ships public default passwords for
+  `root` and `photon`; the image replaces both with `*`, which matches no password but still lets
+  a key in.
+- No console. PhotonVision's image logs `root` in on the HDMI screen and the serial port with no
+  password at all (Armbian's autologin, which its first-login script would have removed); the image
+  removes that and turns the consoles' login prompts off. Boot messages still show on both.
+- No root login over SSH, and no X11 forwarding.
+
+The build checks itself and fails if any account keeps a usable password or any console logs in
+by itself, and in the chroot it reads `sshd -T`'s effective settings.
+
+The team's public keys go in `coprocessors/authorized_keys`. With none there, nobody can log in at
+all: reflash to recover. Put only public keys there (it's in every image, and the images are
+public); stamping drops each key's comment, which is often a name or an email address. The team's
+password manager records where the private key lives. Each drive makes its own SSH host key on
+`/data` at first boot.
+
+**Soft-off.** The health agent runs unprivileged, never as root, as `coprocessor-agent`. A polkit
+rule (`files/coprocessor-agent.rules`) lets that account do exactly two things, for the agent's
+`POST /v1/shutdown` (accepted only from the robot controller, 10.TE.AM.2): stop
+`photonvision.service`, and power the board off. polkit refuses it everything else.
 
 ## The files here
 
 | File | What it does | Needs |
 |---|---|---|
-| `provision.sh` | Makes PhotonVision's image into the common image, in a chroot of it: installs the pinned jar, the agent, and `nvme-cli`; the read-only root's `/etc/fstab`; the journal; SSH; Armbian's RAM logging, first-boot resize, and first-run tasks off. Ends with PhotonVision's `--smoketest`, which leaves an empty settings database in that version's schema. Safe to rerun | Root, in the image's chroot |
+| `provision.sh` | Makes PhotonVision's image into the common image, in a chroot of it: installs the pinned jar, the agent and its soft-off rule, and `nvme-cli` and `polkitd` at pinned versions; the read-only root's `/etc/fstab`; the journal; the logins and SSH; Armbian's RAM logging, first-boot resize, and first-run tasks off, and rsyslog and fake-hwclock's saving. Runs PhotonVision's `--smoketest`, which leaves an empty settings database in that version's schema and PhotonVision's native libraries extracted in the image, then checks the result. Safe to rerun | Root, in the image's chroot |
 | `layout.sh` | Adds `COPROC` and `coproc-data` to the image file, after the root | sfdisk, mkfs.fat, mkfs.ext4; no root |
 | `stamp.sh` | Writes one computer's identity, stamp, and settings database into the image's three filesystems | bash, yq |
 | `stamp-image.sh` | Mounts an image's partitions and runs `stamp.sh` into them | Root, loop devices |
@@ -75,8 +102,9 @@ the private key lives. Each drive makes its own SSH host key on `/data` at first
 The scripts need [mikefarah's yq](https://github.com/mikefarah/yq), version 4 (GitHub's Ubuntu
 runners have it). Ubuntu's own `yq` package is a different program, and the scripts refuse it.
 
-`./gradlew ci` runs the tests wherever bash and yq are installed, says when it skips them
-(Windows, or no yq), and fails in CI on Linux without them. The image workflow runs every test and
+`./gradlew ci` runs the tests wherever bash and yq are installed, and says when it skips them
+(Windows, or no yq). In CI on Linux every one must run: a missing tool or a skipped test fails it,
+and `ci.yml` installs what the partition tests need. The image workflow runs every test and
 `shellcheck` before it builds anything.
 
 ## How CI builds a release
@@ -95,17 +123,35 @@ git tag coprocessors-2027.1 && git push origin coprocessors-2027.1
 2. **The common image, per board**, on GitHub's arm64 runners, so nothing is emulated: the base
    image and the jar downloaded and checked against the lock's sha256, then `provision.sh` run in
    PhotonVision's own [photon-image-runner](https://github.com/PhotonVision/photon-image-runner).
-   It's cached by the recipe hash, so a change to settings alone re-stamps the cached image
-   (a cache made by one tag's run isn't visible to the next tag's, a GitHub rule: started by hand
-   from the default branch, runs share it).
+   Runs that release nothing cache it by the recipe hash, so trying a settings change only
+   re-stamps. A release never uses a cache, for the common image or for Gradle: everything in it
+   is built by that run, from that commit.
 3. **Stamp, per computer**: `layout.sh`, then `stamp-image.sh`, then `xz`.
 4. **Release**: `SHA256SUMS`, `manifest.json`, and every image,
    `<team>-<computer>-pv<version>-<release>.img.xz`, in one GitHub Release.
 
-A release is cut only in the team's own repository (never a fork), and never replaces one: a
-name already used as a release or a tag stops the build at the first step. Started by hand with no
-release name, it builds every image as a workflow artifact (kept 7 days) and releases nothing, to
-try a change.
+Where a release can come from:
+- only the team's own repository, never a fork;
+- only a name starting `coprocessors-`;
+- from a tag, only if the tag still names the commit the run built;
+- started by hand, only from the default branch, under a new tag the workflow makes at the commit
+  it built (GitHub refuses a tag that exists);
+- never over an existing release or tag: a name already used stops the build at the first step.
+
+Started by hand with no release name, it builds every image as a workflow artifact (kept 7 days)
+and releases nothing, to try a change. `manifest.json` also records the sha256 of the common image
+each computer's was stamped from.
+
+Two repository settings make releases stronger still, and are worth turning on: **immutable
+releases** (Settings, General, Releases), so a published release's files can't be replaced; and
+**build provenance**, by adding GitHub's
+[`actions/attest-build-provenance`](https://github.com/actions/attest-build-provenance) to the
+release job, so anyone can check an image was built by this workflow from this repository
+(`gh attestation verify`).
+
+The recipe hash covers the build files too (`build.gradle`, `settings.gradle`, `gradle/`), since
+they build the agent: a dependency update changes it, and the robot then refuses to deploy until
+the coprocessors run a release built after it.
 
 GitHub's arm64 runners are free for **public** repositories only. A private repository's builds
 need paid arm64 runners, or a mentor's machine (below).
@@ -118,31 +164,41 @@ need paid arm64 runners, or a mentor's machine (below).
 - **A privileged container** (`--privileged`): loop devices and mounts, to open the image's
   partitions, need it. With the host's `/dev` too (`-v /dev:/dev`), or the partitions a loop
   device gets after the container starts never appear in it.
-- **On an x86 machine, ARM emulation registered once per boot.** The chroot runs the image's own
-  ARM programs (`apt-get`, PhotonVision's smoke test). Register qemu with its "F" flag, which keeps
-  working inside a chroot: `docker run --privileged --rm tonistiigi/binfmt --install arm64`. An
-  arm64 Linux machine needs none of it.
+- **On an x86 machine, ARM emulation, from your distribution.** The chroot runs the image's own
+  ARM programs (`apt-get`, PhotonVision's smoke test). Install `qemu-user-static` (Debian and
+  Ubuntu: `sudo apt install qemu-user-static`; Fedora: `sudo dnf install qemu-user-static`), which
+  registers qemu with its "F" flag, so it keeps working inside a chroot. `local-build.sh` checks.
+  An arm64 Linux machine needs none of it.
+- **To run it in that container.** It mounts images and bind-mounts the machine's `/dev`, so it
+  refuses to run anywhere else unless told `--outside-container`.
 - **About 30 GB free**, for downloads, the common image, and one computer's image at a time.
 
 Build the health agent first, on the machine itself (`./gradlew :coprocessor-agent:jar`), then,
 from the repository's root (Docker shown; Podman takes the same options):
 
 ```bash
-docker run --rm --privileged -v /dev:/dev -v "$PWD:/repo" -w /repo eclipse-temurin:25-jdk bash -c '
-  apt-get update -qq &&
-  apt-get install -y -qq curl xz-utils fdisk dosfstools e2fsprogs git >/dev/null &&
-  curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64 &&
-  chmod +x /usr/local/bin/yq &&
-  git config --global --add safe.directory /repo &&
+docker run --rm --privileged -v /dev:/dev -v "$PWD:/repo" -w /repo \
+  eclipse-temurin:25-jdk@sha256:119a3d18f160a3e7655a66034d0f43beee31cd7b3b9142d57a5de29772011de6 bash -c '
+  set -e
+  apt-get update -qq
+  apt-get install -y -qq curl xz-utils fdisk dosfstools e2fsprogs git >/dev/null
+  curl -fsSL -o /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_amd64
+  echo "c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385  /usr/local/bin/yq" | sha256sum -c -
+  chmod +x /usr/local/bin/yq
+  git config --global --add safe.directory /repo
   coprocessor/image/local-build.sh \
     --agent-jar coprocessor/agent/build/libs/coprocessor-agent.jar \
     --agent-unit coprocessor/agent/coprocessor-agent.service \
     --settings-tool "java -jar coprocessor/agent/build/libs/coprocessor-agent.jar settings-db"'
 ```
 
-(`yq_linux_arm64` on an arm64 machine.) The images, `SHA256SUMS`, and `manifest.json` land in
+The container image is pinned by its digest (`eclipse-temurin:25-jdk` on 2026-09-25) and yq by its
+checksum (from its release; on an arm64 machine, `yq_linux_arm64`, whose sha256 is
+`88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09`), so the privileged container
+runs only what was reviewed. To move to newer ones, take the new digest and checksum from their
+publishers, not from a download. The images, `SHA256SUMS`, and `manifest.json` land in
 `build/coprocessor-image/local/release/`. It builds from the commit checked out: the recipe hash
-counts committed files only.
+counts committed files only. If it can't unmount an image, it stops and says what's left mounted.
 
 ## Flashing from Windows
 
@@ -217,8 +273,16 @@ interface the scripts expect (in `lib/common.sh` and the workflow's `env`, one p
 - **The agent**: `coprocessor/agent/build/libs/coprocessor-agent.jar` (built by
   `:coprocessor-agent:jar`), installed at `/opt/coprocessor/coprocessor-agent.jar`; its unit,
   `coprocessor/agent/coprocessor-agent.service`, installed as `coprocessor-agent.service` and
-  enabled. Its `ExecStart` must name that jar path (`provision.sh` checks). A `User=` is created
-  as a system account in the `systemd-journal` group, unless the unit uses `DynamicUser=`.
+  enabled. Its `ExecStart` must name that jar path (`provision.sh` checks). It never runs as root:
+  the unit needs `User=coprocessor-agent`, or `DynamicUser=yes` with no `User=` (the account is
+  then named after the unit), and the build refuses anything else. That name is `IMG_AGENT_USER` in
+  `lib/common.sh`, the one the soft-off rule names. A fixed `User=` is created as a system account
+  in the `systemd-journal` group.
+- **Soft-off**: the agent's account may run `systemctl stop photonvision.service` (polkit's
+  `org.freedesktop.systemd1.manage-units`, unit `photonvision.service`, verb `stop`) and power the
+  board off (`org.freedesktop.login1.power-off`), and nothing else polkit decides. Powering off
+  while someone is logged in over SSH asks for `power-off-multiple-sessions` instead, which the rule
+  refuses.
 - **What root reads for the agent**, every minute, into `/run/coprocessor/`:
   `nvme-smart-log.json` and `nvme-id-ctrl.json` (`nvme-cli`'s JSON) and `spi-uboot-version` (the
   first `U-Boot …` line in SPI flash). A missing file means there was nothing to read.
@@ -236,8 +300,15 @@ interface the scripts expect (in `lib/common.sh` and the workflow's `env`, one p
 ## What's unverified
 
 Nothing here has run on a board yet, and the workflow hasn't run on GitHub. The tests cover what
-runs without one: stamping, the layout, the plan, the manifest, the recipe hash, and
-`provision.sh`'s file changes on a tree shaped like PhotonVision's image. Still to check:
+runs without one: stamping, the layout, the plan, the manifest, the recipe hash, `provision.sh`'s
+file changes and self-checks on a tree shaped like PhotonVision's image (its logins as that image
+ships them), and the soft-off rule, run under Node against the requests it must allow and refuse.
+Still to check:
+- **PhotonVision starting on the read-only root:** its native libraries are extracted during the
+  build's smoke test (`/root/.wpilib/nativecache`), and PhotonVision should load them from there
+  without writing.
+- **The sandboxes:** the drive-health helper writing `/run/coprocessor` with only read access to
+  `/dev/nvme0` and `/dev/mtd0`; polkit applying the soft-off rule to the agent's account.
 
 - **Booting it:** from NVMe with the SPI bootloader, per board (`boards/*.env`, `BOARD_VERIFIED=no`);
   Armbian's boot with the root read-only; `/data` mounted, checked, and bind-mounted before

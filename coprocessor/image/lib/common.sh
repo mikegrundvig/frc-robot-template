@@ -45,6 +45,10 @@ IMG_JOURNAL=/var/log/journal
 IMG_AGENT_JAR=/opt/coprocessor/coprocessor-agent.jar
 IMG_AGENT_UNIT=/etc/systemd/system/coprocessor-agent.service
 IMG_SSH_USER=photon             # PhotonVision's image's login
+# The account the health agent runs as: its unit's User=, or its unit's name with DynamicUser=yes.
+# The soft-off rule (files/coprocessor-agent.rules) lets this account, and no other, stop
+# PhotonVision and power the board off.
+IMG_AGENT_USER=coprocessor-agent
 IMG_CONNECTION=/etc/NetworkManager/system-connections/robot.nmconnection
 # On /data.
 DATA_PV_CONFIG=photonvision_config
@@ -104,7 +108,7 @@ is_hostname() {
 
 # "10.TE.AM" for a team number: TE is all but the last two digits, AM the last two.
 team_prefix() {
-  printf '10.%d.%d' $(($1 / 100)) $(($1 % 100))
+  printf '10.%d.%d' $((10#$1 / 100)) $((10#$1 % 100))
 }
 
 # 32 hex digits derived from text: stable, so stamping the same computer twice writes the same files.
@@ -130,33 +134,50 @@ lock_get() {
   yq -p yaml -r "$1 // \"\"" "$2"
 }
 
-# Checks the whole table (needs yq): the team, and every computer's name, address, and board.
-# Prints nothing; dies on the first problem, naming it.
+# A port number: 1 to 65535, written without leading zeros.
+is_port() {
+  [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] || return 1
+  ((10#$1 <= 65535))
+}
+
+# Checks the whole table (needs yq): the team, and every computer's name, address, board, port,
+# and cameras. Numbers must be written plainly (no leading zeros, which bash would read as
+# octal), and are compared as numbers. Prints nothing; dies on the first problem, naming it.
 check_table() {
-  local table=$1 team count names unique addrs uniq_addrs i name address board
+  local table=$1 team port count i name address board kind cameras
+  local -A names=() addresses=()
   [[ -f $table ]] || die "no table at $table"
   team=$(table_get '.team' "$table")
-  [[ $team =~ ^[0-9]+$ ]] || die "$table: team must be a number, found '$team'"
-  ((team >= 1 && team <= 25599)) || die "$table: team $team isn't a team number (1 to 25599); set your team's"
-  count=$(yq -r '.computers | length' "$table")
-  if ! [[ $count =~ ^[0-9]+$ ]] || ((count == 0)); then
-    die "$table: no computers listed"
+  if ! [[ $team =~ ^[1-9][0-9]{0,4}$ ]] || ((10#$team > 25599)); then
+    die "$table: team '$team' isn't a team number (1 to 25599, no leading zeros); set your team's"
   fi
-  names=$(yq -r '[.computers[].name] | length' "$table")
-  unique=$(yq -r '[.computers[].name] | unique | length' "$table")
-  ((names == unique)) || die "$table: two computers have the same name"
-  addrs=$(yq -r '[.computers[].address] | length' "$table")
-  uniq_addrs=$(yq -r '[.computers[].address] | unique | length' "$table")
-  ((addrs == uniq_addrs)) || die "$table: two computers have the same address"
+  port=$(table_get '.agentPort' "$table")
+  [[ -z $port ]] || is_port "$port" || die "$table: agentPort '$port' isn't a port (1 to 65535)"
+  [[ $(yq -r '.computers | tag' "$table") == '!!seq' ]] || die "$table: computers must be a list"
+  count=$(yq -r '.computers | length' "$table")
+  ((count > 0)) || die "$table: no computers listed"
   for ((i = 0; i < count; i++)); do
     name=$(table_get ".computers[$i].name" "$table")
     address=$(table_get ".computers[$i].address" "$table")
     board=$(table_get ".computers[$i].board" "$table")
+    port=$(table_get ".computers[$i].agentPort" "$table")
     is_hostname "$name" ||
       die "$table: '$name' can't be a computer's name: lowercase letters, digits, and hyphens only"
-    if ! [[ $address =~ ^[0-9]+$ ]] || ((address < ADDRESS_MIN || address > ADDRESS_MAX)); then
-      die "$table: $name's address '$address' is outside FRC's range for on-robot devices, $ADDRESS_MIN to $ADDRESS_MAX"
+    if ! [[ $address =~ ^[1-9][0-9]?$ ]] || ((10#$address < ADDRESS_MIN || 10#$address > ADDRESS_MAX)); then
+      die "$table: $name's address '$address' is outside FRC's range for on-robot devices, $ADDRESS_MIN to $ADDRESS_MAX (no leading zeros)"
     fi
     is_board "$board" || die "$table: $name's board '$board' isn't one of: $BOARDS"
+    [[ -z $port ]] || is_port "$port" || die "$table: $name's agentPort '$port' isn't a port (1 to 65535)"
+    kind=$(yq -r ".computers[$i].cameras | tag" "$table")
+    if [[ $kind != '!!null' ]]; then
+      [[ $kind == '!!seq' ]] || die "$table: $name's cameras must be a list of names"
+      cameras=$(yq -r "[.computers[$i].cameras[] | select(tag == \"!!map\" or tag == \"!!seq\" or tag == \"!!null\" or (tostring | test(\"^\$|/\")) or (tostring | length) > 64)] | length" "$table")
+      ((cameras == 0)) || die "$table: $name's cameras must each be a name: not empty, no '/', at most 64 characters"
+    fi
+    [[ -z ${names[$name]:-} ]] || die "$table: two computers are named $name"
+    names[$name]=1
+    [[ -z ${addresses[$((10#$address))]:-} ]] ||
+      die "$table: two computers have the address $((10#$address)) ($name and ${addresses[$((10#$address))]})"
+    addresses[$((10#$address))]=$name
   done
 }

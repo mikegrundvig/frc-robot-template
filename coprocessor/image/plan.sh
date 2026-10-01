@@ -11,7 +11,8 @@
 #     version in vendordeps/photonlib.json), and the jar and every board's base image in use have
 #     an https URL and a real sha256 (a placeholder fails here, naming what's missing); each base
 #     image is the one PhotonVision publishes for that board;
-#   - the release name.
+#   - the release name: a published one is coprocessors-<something>, as the tags that trigger the
+#     workflow are.
 # Then it prints, as name=value lines (appended to $GITHUB_OUTPUT in Actions):
 #   team, version, recipe-hash, jar-url, jar-sha256, release, publish (whether --release was given:
 #   without one, the images are built under a name made from the commit, and not released),
@@ -84,6 +85,8 @@ computers_json=$(yq -o=json -I=0 '[.computers[] | {"name": .name, "board": .boar
 
 if [[ -n $release ]]; then
   publish=true
+  # A published release has the name a tag would trigger the workflow with.
+  [[ $release == coprocessors-* ]] || die "release name '$release': a release is named coprocessors-<something>"
 else
   publish=false
   [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || die "without --release, --sha COMMIT names the build"

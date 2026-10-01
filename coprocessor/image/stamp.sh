@@ -12,8 +12,8 @@
 # them it writes, from the table (coprocessors/coprocessors.yaml):
 #   root    /etc/hostname, /etc/hosts (every computer in the table), /etc/machine-id, the robot
 #           network's NetworkManager profile (a static address, 10.TE.AM.<address>/24), the
-#           team's SSH public keys (coprocessors/authorized_keys, if the repository has one), and
-#           /etc/coprocessor/stamp.json
+#           team's SSH public keys (coprocessors/authorized_keys, if the repository has one,
+#           without their comments), and /etc/coprocessor/stamp.json
 #   coproc  stamp.json again, and a README.txt, for anyone holding the drive
 #   data    the folders the root's bind mounts need, and PhotonVision's photon.sqlite built from
 #           the computer's committed settings (coprocessors/<computer>/settings/), if it has any
@@ -120,7 +120,9 @@ EOF
     printf '%s.%s\t%s\n' "$prefix" "$last" "$name"
   done
 } | put "$root/etc/hosts" 0644
-# One machine ID per computer, the same in every release, so its journal stays one journal.
+# A fixed machine ID. With the root read-only, systemd would otherwise make a new one at every
+# boot, treat every boot as the first, and start the journal afresh under the new ID, leaving the
+# boot before a power cut out of `journalctl -b -1`. Derived from the computer, so a stamp repeats.
 put "$root/etc/machine-id" 0444 <<<"$(derived_hex "coprocessor machine-id/$team/$computer")"
 put "$root$IMG_CONNECTION" 0600 <<EOF
 # Written at stamping (coprocessor/image/stamp.sh): $computer's address on the robot network.
@@ -147,8 +149,9 @@ may-fail=false
 method=disabled
 EOF
 
-# --- SSH: the team's public keys, if the repository has any. Root-owned and read-only, which
-# sshd accepts; no key means no SSH login. ---
+# --- SSH: the team's public keys, if the repository has any, without their comments (often a
+# name or an email address, and the images are public). Root-owned and read-only, which sshd
+# accepts; no key means no SSH login. ---
 keys="$repo/$COPROC_AUTHORIZED_KEYS"
 ssh_dir="$root/home/$IMG_SSH_USER/.ssh"
 if [[ -f $keys ]]; then
@@ -160,7 +163,7 @@ if [[ -f $keys ]]; then
   fi
   mkdir -p "$ssh_dir"
   chmod 0755 "$ssh_dir"
-  put "$ssh_dir/authorized_keys" 0644 <"$keys"
+  awk '!/^[[:space:]]*(#|$)/ { print $1, $2 }' "$keys" | put "$ssh_dir/authorized_keys" 0644
 else
   rm -f "$ssh_dir/authorized_keys"
   say "no $COPROC_AUTHORIZED_KEYS: $computer takes no SSH logins"
@@ -178,7 +181,7 @@ stamp=$(
         "team": .team,
         "address": strenv(ADDRESS),
         "board": $c.board,
-        "cameras": ($c.cameras // []),
+        "cameras": (($c.cameras // []) | map(tostring)),
         "release": strenv(RELEASE),
         "recipeHash": strenv(RECIPE_HASH),
         "photonvisionVersion": strenv(PV_VERSION),

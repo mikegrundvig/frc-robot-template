@@ -37,6 +37,21 @@ test_manifest_lists_every_computer_and_its_checksum() {
   done
 }
 
+test_manifest_records_the_common_images_checksum() {
+  need_yq
+  make_repo
+  make_settings_tool
+  release_image vision-front
+  release_image vision-back
+  local base="$TMP/release/12345-vision-front-pvdev-v2027.0.0-alpha-2-69-g71416112-coprocessors-1"
+  printf '%064d\n' 7 >"$base.common-sha256"
+  "$IMAGE/manifest.sh" "$TMP/release"
+  local manifest=$TMP/release/manifest.json
+  assert_eq "$(yq -r '.computers[1].commonImageSha256' "$manifest")" "$(printf '%064d' 7)"
+  assert_eq "$(yq -r '.computers[0] | has("commonImageSha256")' "$manifest")" false
+  assert_eq "$(wc -l <"$TMP/release/SHA256SUMS")" 2 "lines in SHA256SUMS"
+}
+
 test_manifest_refuses_images_from_two_releases() {
   need_yq
   make_repo

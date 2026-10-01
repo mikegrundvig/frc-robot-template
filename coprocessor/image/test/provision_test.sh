@@ -143,3 +143,154 @@ test_provision_refuses_an_image_without_networkmanager() {
   rm "$TMP/root/usr/sbin/NetworkManager"
   assert_fails "NetworkManager isn't installed" run_provision
 }
+
+test_provision_closes_the_base_images_logins() {
+  setup_provision
+  run_provision
+  local root=$TMP/root
+  assert_no_file "$root/etc/systemd/system/getty@.service.d/override.conf"
+  assert_no_file "$root/etc/systemd/system/serial-getty@.service.d/override.conf"
+  local unit
+  for unit in getty@.service serial-getty@.service autovt@.service; do
+    assert_masked "$root" "$unit"
+  done
+  assert_contains "$root/etc/systemd/logind.conf.d/70-coprocessor.conf" 'NAutoVTs=0'
+  # No password works for root or photon; everything else in the file is as it was.
+  local f
+  for f in shadow shadow-; do
+    assert_eq "$(cat "$root/etc/$f")" 'root:*:20718:0:99999:7:::
+daemon:*:20697:0:99999:7:::
+sshd:!*:20697::::::
+photon:*:20718:0:99999:7:::' "/etc/$f"
+    assert_mode "$root/etc/$f" 640
+  done
+  # photon's sudo stays: with no password, it's the key holder's way to root.
+  assert_file "$root/etc/sudoers.d/010_photon-nopasswd"
+}
+
+test_provision_fails_if_any_account_keeps_a_password() {
+  setup_provision
+  # shellcheck disable=SC2016 # a stand-in hash, literally
+  echo 'pi:$y$j9T$fixture$NotARealHash:20718:0:99999:7:::' >>"$TMP/root/etc/shadow"
+  assert_fails "usable password (or none) for: pi" run_provision
+}
+
+test_provision_fails_if_an_account_has_no_password_at_all() {
+  setup_provision
+  echo 'guest::20718:0:99999:7:::' >>"$TMP/root/etc/shadow-"
+  assert_fails "for: guest" run_provision
+}
+
+test_provision_fails_if_a_console_still_logs_in_by_itself() {
+  setup_provision
+  mkdir -p "$TMP/root/usr/lib/systemd/system/getty@tty1.service.d"
+  printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin photon %%I\n' \
+    >"$TMP/root/usr/lib/systemd/system/getty@tty1.service.d/autologin.conf"
+  assert_fails "a console logs in by itself" run_provision
+}
+
+test_provision_makes_ssh_refuse_x11_and_root() {
+  setup_provision
+  run_provision
+  local conf=$TMP/root/etc/ssh/sshd_config.d/10-coprocessor.conf
+  assert_contains "$conf" 'PermitRootLogin no'
+  assert_contains "$conf" 'X11Forwarding no'
+  assert_contains "$conf" 'PubkeyAuthentication yes'
+}
+
+test_provision_makes_the_host_key_whole_or_not_at_all() {
+  setup_provision
+  run_provision
+  local unit=$TMP/root/etc/systemd/system/coprocessor-ssh-hostkey.service
+  local keygen move
+  keygen=$(grep -n 'ssh-keygen' "$unit" | cut -d: -f1)
+  move=$(grep -n 'mv -f /data/ssh/ssh_host_ed25519_key.new /data/ssh/ssh_host_ed25519_key$' "$unit" | cut -d: -f1)
+  if [[ -z $keygen || -z $move ]] || ((keygen > move)); then
+    fail "the key isn't made aside and moved into place"
+  fi
+  assert_contains "$unit" '-f /data/ssh/ssh_host_ed25519_key.new'
+}
+
+test_provision_masks_rsyslog_and_the_clock_save() {
+  setup_provision
+  run_provision
+  local unit
+  for unit in rsyslog.service syslog.socket fake-hwclock-save.timer fake-hwclock-save.service; do
+    assert_masked "$TMP/root" "$unit"
+  done
+}
+
+test_provision_sandboxes_the_facts_helper() {
+  setup_provision
+  run_provision
+  local unit=$TMP/root/etc/systemd/system/coprocessor-facts.service line
+  for line in ProtectSystem=strict RuntimeDirectory=coprocessor RuntimeDirectoryPreserve=yes \
+    PrivateNetwork=yes NoNewPrivileges=yes DevicePolicy=closed 'DeviceAllow=/dev/nvme0 r' \
+    'DeviceAllow=/dev/mtd0 r'; do
+    grep -qx "$line" "$unit" || fail "the facts helper's unit lacks $line"
+  done
+}
+
+test_provision_refuses_an_agent_that_would_run_as_root() {
+  setup_provision
+  sed -i '/^DynamicUser=/d' "$TMP/coprocessor-agent.service"
+  assert_fails "would run the agent as root" run_provision
+  printf '[Service]\nUser=root\n' >>"$TMP/coprocessor-agent.service"
+  assert_fails "would run the agent as root" run_provision
+}
+
+test_provision_refuses_an_agent_account_the_soft_off_rule_doesnt_name() {
+  setup_provision
+  sed -i 's/^DynamicUser=yes$/User=someone-else/' "$TMP/coprocessor-agent.service"
+  assert_fails "but the soft-off rule is for 'coprocessor-agent'" run_provision
+}
+
+test_provision_installs_the_soft_off_rule_for_the_agents_account() {
+  setup_provision
+  run_provision
+  local rule=$TMP/root/etc/polkit-1/rules.d/60-coprocessor-agent.rules
+  assert_contains "$rule" 'var agentUser = "coprocessor-agent";'
+  assert_not_contains "$rule" '@AGENT_USER@'
+}
+
+# The rule, run as polkit would run it, against the requests it must allow and refuse.
+test_soft_off_rule_allows_stopping_photonvision_and_powering_off_only() {
+  setup_provision
+  need node
+  run_provision
+  cat >"$TMP/rule-test.js" <<'EOF'
+const fs = require("fs");
+const vm = require("vm");
+let rule = null;
+const polkit = {
+  Result: { YES: "yes", NO: "no", NOT_HANDLED: null },
+  addRule: (f) => { rule = f; },
+};
+vm.runInNewContext(fs.readFileSync(process.argv[2], "utf8"), { polkit });
+const ask = (user, id, details) =>
+  String(rule({ id, lookup: (k) => (details || {})[k] }, { user }));
+const cases = [
+  ["coprocessor-agent", "org.freedesktop.login1.power-off", {}, "yes"],
+  ["coprocessor-agent", "org.freedesktop.systemd1.manage-units", { unit: "photonvision.service", verb: "stop" }, "yes"],
+  ["coprocessor-agent", "org.freedesktop.systemd1.manage-units", { unit: "photonvision.service", verb: "restart" }, "no"],
+  ["coprocessor-agent", "org.freedesktop.systemd1.manage-units", { unit: "photonvision.service", verb: "start" }, "no"],
+  ["coprocessor-agent", "org.freedesktop.systemd1.manage-units", { unit: "ssh.service", verb: "stop" }, "no"],
+  ["coprocessor-agent", "org.freedesktop.systemd1.manage-unit-files", {}, "no"],
+  ["coprocessor-agent", "org.freedesktop.login1.reboot", {}, "no"],
+  ["coprocessor-agent", "org.freedesktop.login1.power-off-ignore-inhibit", {}, "no"],
+  ["photon", "org.freedesktop.login1.power-off", {}, "null"],
+  ["root", "org.freedesktop.systemd1.manage-units", { unit: "photonvision.service", verb: "stop" }, "null"],
+];
+let failed = 0;
+for (const [user, id, details, expected] of cases) {
+  const got = ask(user, id, details);
+  if (got !== expected) {
+    console.log(`${user} ${id} ${JSON.stringify(details)}: expected ${expected}, got ${got}`);
+    failed++;
+  }
+}
+process.exit(failed ? 1 : 0);
+EOF
+  node "$TMP/rule-test.js" "$TMP/root/etc/polkit-1/rules.d/60-coprocessor-agent.rules" ||
+    fail "the soft-off rule decides wrongly"
+}

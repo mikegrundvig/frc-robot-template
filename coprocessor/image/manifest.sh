@@ -9,7 +9,8 @@
 #                  (or PowerShell's Get-FileHash, by eye) checks a download
 #   manifest.json  the release (team, release name, PhotonVision version, recipe hash) and each
 #                  computer: name, address, board, cameras (its role), image file, image sha256,
-#                  PhotonVision version, recipe hash, and settings hash
+#                  PhotonVision version, recipe hash, and settings hash; and the sha256 of the
+#                  common image it was stamped from, when NAME.common-sha256 holds it
 # Fails if the images don't all come from one release, version, and recipe, or an image has no
 # stamp. Needs yq (mikefarah's, version 4).
 set -euo pipefail
@@ -33,8 +34,15 @@ for stamp in "$dir"/*.stamp.json; do
   [[ -f $image ]] || die "${stamp##*/} has no image (${image##*/})"
   sum=$(sha256sum <"$image" | cut -c1-64)
   sums+="$sum  ${image##*/}"$'\n'
-  entries+=("$(IMAGE=${image##*/} SUM=$sum yq -p json -o=json -I=0 \
-    '. + {"image": strenv(IMAGE), "imageSha256": strenv(SUM)}' "$stamp")")
+  # The common image's sha256, when the build left it beside the image (NAME.common-sha256).
+  common=""
+  if [[ -f ${stamp%.stamp.json}.common-sha256 ]]; then
+    common=$(head -c 64 "${stamp%.stamp.json}.common-sha256")
+    is_sha256 "$common" || die "${stamp%.stamp.json}.common-sha256 isn't a sha256"
+  fi
+  entries+=("$(IMAGE=${image##*/} SUM=$sum COMMON=$common yq -p json -o=json -I=0 \
+    '. + {"image": strenv(IMAGE), "imageSha256": strenv(SUM)} |
+      with(select(strenv(COMMON) != ""); .commonImageSha256 = strenv(COMMON))' "$stamp")")
 done
 ((${#entries[@]})) || die "no images in $dir"
 all="[$(IFS=,; echo "${entries[*]}")]"
@@ -60,6 +68,6 @@ yq -p json -o=json -I=2 '{
     "photonvisionVersion": .photonvisionVersion,
     "recipeHash": .recipeHash,
     "settingsHash": .settingsHash
-  }))
+  } + (with_entries(select(.key == "commonImageSha256")))))
 }' <<<"$all" >"$dir/manifest.json"
 say "wrote SHA256SUMS and manifest.json for ${#entries[@]} computers"

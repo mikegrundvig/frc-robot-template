@@ -32,6 +32,12 @@ public interface ModuleIO {
 
     public double steerVelocityRadPerSec = 0.0;
     public double steerAppliedVolts = 0.0;
+
+    /**
+     * The most current through the steering motor since the last loop, either way: a turn draws its
+     * peak for a few milliseconds as it starts and stops, which a reading once a loop would almost
+     * always miss. Read at 250 Hz on a robot, with odometry; every millisecond in the simulator.
+     */
     public double steerStatorCurrentAmps = 0.0;
 
     /**

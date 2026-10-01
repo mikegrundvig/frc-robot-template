@@ -103,7 +103,7 @@ class CameraImageSimTest {
         long seed = random.nextLong();
         photonVision.prop.setRandomSeed(seed);
         PhotonPipelineResult theirs = photonVision.process(0, cameraPose, targets);
-        TagDetections ours = study.image(cameraPose, mount.name(), seed);
+        TagDetections ours = study.image(cameraPose, mount.name(), seed, List.of());
         images++;
 
         Map<Integer, PhotonTrackedTarget> byId = new HashMap<>();
@@ -180,7 +180,7 @@ class CameraImageSimTest {
   void aTagWhoseOwnSolveFailsIsLeftOutButItsCornersStillCount() {
     CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
     Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
-    List<CameraImageSim.Seen> seen = new ArrayList<>(study.seen(cameraPose, 1));
+    List<CameraImageSim.Seen> seen = new ArrayList<>(study.seen(cameraPose, 1, List.of()));
     assertThat(seen).hasSizeGreaterThanOrEqualTo(2);
     TagDetections whole = study.detections(seen, "front");
     int failed = seen.get(0).tag().id();
@@ -206,10 +206,11 @@ class CameraImageSimTest {
     OtherRobots.Blocker between = new OtherRobots.Blocker(3.2, 4.2, 0, 0.45, 0.45, 1.5);
     OtherRobots.Blocker aside = new OtherRobots.Blocker(3.2, 1.0, 0, 0.45, 0.45, 1.5);
 
-    assertThat(study.image(cameraPose, "front", 1).tags()).hasSizeGreaterThanOrEqualTo(2);
+    assertThat(study.image(cameraPose, "front", 1, List.of()).tags())
+        .hasSizeGreaterThanOrEqualTo(2);
     assertThat(study.image(cameraPose, "front", 1, List.of(between)).tags()).isEmpty();
     assertThat(study.image(cameraPose, "front", 1, List.of(aside)).tags())
-        .isEqualTo(study.image(cameraPose, "front", 1).tags());
+        .isEqualTo(study.image(cameraPose, "front", 1, List.of()).tags());
   }
 
   /**
@@ -224,7 +225,7 @@ class CameraImageSimTest {
     // Halfway to the face, where the line to tag 25 (y 4.39) passes y 4.30, and tag 26's, 4.11.
     OtherRobots.Blocker post = new OtherRobots.Blocker(3.2, 4.30, 0, 0.05, 0.03, 2);
 
-    TagDetections clear = study.image(cameraPose, "front", 1);
+    TagDetections clear = study.image(cameraPose, "front", 1, List.of());
     TagDetections hidden = study.image(cameraPose, "front", 1, List.of(post));
 
     assertThat(clear.tags()).extracting(TagDetections.Tag::id).contains(25, 26);
@@ -238,7 +239,7 @@ class CameraImageSimTest {
 
     // The middle of the field, looking straight up.
     TagDetections sky =
-        study.image(new Pose3d(8, 4, 1, new Rotation3d(0, -Math.PI / 2, 0)), "up", 1);
+        study.image(new Pose3d(8, 4, 1, new Rotation3d(0, -Math.PI / 2, 0)), "up", 1, List.of());
 
     assertThat(sky.tags()).isEmpty();
     assertThat(sky.multiTag()).isNull();

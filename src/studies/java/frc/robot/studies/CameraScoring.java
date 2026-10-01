@@ -47,15 +47,15 @@ import org.wpilib.math.geometry.Transform3d;
  * layout's outcome, so thousands of layouts made of a few hundred cameras fit in memory.
  */
 public final class CameraScoring {
+  /** Where the other robots' places come from, apart from the images' noise. */
+  private static final long OTHER_ROBOTS = 0x6f7468657273L; // "others"
+
   private final RobotConfig robot;
   private final FieldModel field;
   private final List<Candidate> candidates;
   private final CameraStudyConfig config;
   private final Weights weights;
   private final VisionPipeline pipeline;
-
-  /** Where the other robots' places come from, apart from the images' noise. */
-  private static final long OTHER_ROBOTS = 0x6f7468657273L; // "others"
 
   /** Every distinct camera, over every layout: where it is, which way it looks, and its sensor. */
   private final List<CameraConfig> cameras = new ArrayList<>();

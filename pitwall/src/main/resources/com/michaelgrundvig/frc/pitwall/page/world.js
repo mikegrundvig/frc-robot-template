@@ -142,13 +142,14 @@ function changed(patch, snapshot, replaced) {
   if (snapshot) {
     chooseScene();
     redraw();
+    if (inspection) showDetails();
     return;
   }
+  // An action's phase can change in any patch, one carrying the scene's state too (a calibration
+  // asks for driving while it runs): the details' button says what it does, so it's kept current.
+  if (inspection && "actions" in patch) showDetails();
   const mine = patch.scenes && sceneId ? patch.scenes[sceneId] : null;
-  if (!mine) {
-    if (inspected && "actions" in patch) showDetails();
-    return;
-  }
+  if (!mine) return;
   if ("layers" in mine || "title" in mine || "focus" in mine) {
     redraw();
     return;
@@ -298,7 +299,8 @@ function showDetails(waiting = "") {
     const locked = !running && now.locked;
     return h("div", { class: "world-action" },
       h("button", { type: "button", class: running ? "danger" : "primary", disabled: Boolean(locked),
-                    "data-action": asked.name, onclick: runAction },
+                    "data-action": asked.name, "data-run": running ? "cancel" : "start",
+                    onclick: runAction },
         running ? "■ Stop" : "▶ Run"),
       h("span", null, asked.name),
       locked ? h("span", { class: "gate locked" }, "🔒 " + locked) : null);
@@ -309,14 +311,17 @@ function showDetails(waiting = "") {
     actions.length ? h("div", { class: "world-actions" }, actions) : null);
 }
 
-/** Runs or stops an action from the panel, as Pit would; the name is on the button. */
+/**
+ * Runs or stops an action from the panel, as Pit would: what the button says, its name and whether
+ * it starts or stops it on the button itself. Never the opposite of what it shows: a Stop pressed
+ * just as the action ended asks to cancel it, which leaves it stopped, rather than start it again.
+ */
 async function runAction(event) {
-  const name = event.currentTarget.dataset.action;
-  const action = robot.doc && robot.doc.actions ? robot.doc.actions[name] : null;
-  const running = action && action.phase === "RUNNING";
-  const result = await send("POST", "/api/actions", running ? { cancel: name } : { start: name });
+  const { action: name, run } = event.currentTarget.dataset;
+  const stopping = run === "cancel";
+  const result = await send("POST", "/api/actions", stopping ? { cancel: name } : { start: name });
   if (!result.ok) say(name + ": " + result.problem.detail, true);
-  else say((running ? "Stopped: " : "Started: ") + name + ".");
+  else say((stopping ? "Stopped: " : "Started: ") + name + ".");
 }
 
 function closeDetails() {

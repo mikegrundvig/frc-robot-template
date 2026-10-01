@@ -24,12 +24,36 @@ import org.wpilib.util.Alert;
  * alerts, the switch that leaves it out, its tallies, and the check that it still sits where its
  * configuration says. What became of this loop's images and which tags it saw are logged under
  * {@code Vision/<name>}.
+ *
+ * <p>A tag it saw is logged two ways, for two questions. {@code SeenTags} is where the camera put
+ * the tag, through the estimate and its configured mount: its gap from the field's tag is the
+ * camera's error, which the mount check judges. {@code AcceptedTags} and {@code RejectedTags} are
+ * the field's own tags, by what became of the images that saw them: what each measurement rested
+ * on, drawn by AdvantageScope as a line from the robot to each. The two can't be one list: an image
+ * seen while the estimate didn't know where the robot was has no placed tag, and is still accepted
+ * or refused.
  */
 final class Camera implements AutoCloseable {
   final CameraConfig config;
   private final CameraIO io;
   final CameraIOInputsAutoLogged inputs = new CameraIOInputsAutoLogged();
   private final String key;
+
+  // Each value's name in the log, made once rather than every loop.
+  private final String outcomesKey;
+  private final String leftOutOfStepKey;
+  private final String latencySecondsKey;
+  private final String seenTagsKey;
+  private final String mountOffsetMetersKey;
+  private final String mountDoubtMetersKey;
+  private final String tagResidualMetersKey;
+  private final String meanTagResidualMetersKey;
+  private final String decisionsKey;
+  private final String acceptedKey;
+  private final String rejectedKey;
+  private final String acceptedTagsKey;
+  private final String rejectedTagsKey;
+  private final String rejectedReasonsKey;
   private final Alert disconnected;
   private final Alert unreadable;
   private final Alert outOfCalibration;
@@ -100,6 +124,20 @@ final class Camera implements AutoCloseable {
     mount = new MountCheck(mountSightings);
     String name = config.name();
     key = "Vision/" + name;
+    outcomesKey = key + "/Outcomes";
+    leftOutOfStepKey = key + "/LeftOutOfStep";
+    latencySecondsKey = key + "/LatencySeconds";
+    seenTagsKey = key + "/SeenTags";
+    mountOffsetMetersKey = key + "/MountOffsetMeters";
+    mountDoubtMetersKey = key + "/MountDoubtMeters";
+    tagResidualMetersKey = key + "/TagResidualMeters";
+    meanTagResidualMetersKey = key + "/MeanTagResidualMeters";
+    decisionsKey = key + "/Decisions";
+    acceptedKey = key + "/Accepted";
+    rejectedKey = key + "/Rejected";
+    acceptedTagsKey = key + "/AcceptedTags";
+    rejectedTagsKey = key + "/RejectedTags";
+    rejectedReasonsKey = key + "/RejectedReasons";
     disconnected =
         new Alert(
             "Vision", name + "Disconnected", "Camera " + name + " disconnected", Alert.Level.HIGH);
@@ -326,18 +364,18 @@ final class Camera implements AutoCloseable {
       outOfStepUntil = Long.MIN_VALUE;
     }
     outOfStep.set(nowNanos < outOfStepUntil);
-    Logger.recordOutput(key + "/Outcomes", outcomes.toArray(String[]::new));
-    Logger.recordOutput(key + "/LeftOutOfStep", leftOutOfStep);
+    Logger.recordOutput(outcomesKey, outcomes.toArray(String[]::new));
+    Logger.recordOutput(leftOutOfStepKey, leftOutOfStep);
     Logger.recordOutput(
-        key + "/LatencySeconds", latencies.stream().mapToDouble(Double::doubleValue).toArray());
-    Logger.recordOutput(key + "/SeenTags", seenTags.toArray(Pose3d[]::new));
-    Logger.recordOutput(key + "/MountOffsetMeters", mount.offsetMeters());
-    Logger.recordOutput(key + "/MountDoubtMeters", mountDoubt);
+        latencySecondsKey, latencies.stream().mapToDouble(Double::doubleValue).toArray());
+    Logger.recordOutput(seenTagsKey, seenTags.toArray(Pose3d[]::new));
+    Logger.recordOutput(mountOffsetMetersKey, mount.offsetMeters());
+    Logger.recordOutput(mountDoubtMetersKey, mountDoubt);
     if (loopResidualCount > 0) {
-      Logger.recordOutput(key + "/TagResidualMeters", loopResidualSum / loopResidualCount);
+      Logger.recordOutput(tagResidualMetersKey, loopResidualSum / loopResidualCount);
       residualSum += loopResidualSum;
       residualCount += loopResidualCount;
-      Logger.recordOutput(key + "/MeanTagResidualMeters", meanTagResidualMeters());
+      Logger.recordOutput(meanTagResidualMetersKey, meanTagResidualMeters());
     }
   }
 
@@ -378,15 +416,15 @@ final class Camera implements AutoCloseable {
         }
       }
     }
-    Logger.recordOutput(key + "/Decisions", reasons.toArray(String[]::new));
-    Logger.recordOutput(key + "/Accepted", accepted);
-    Logger.recordOutput(key + "/Rejected", rejected);
+    Logger.recordOutput(decisionsKey, reasons.toArray(String[]::new));
+    Logger.recordOutput(acceptedKey, accepted);
+    Logger.recordOutput(rejectedKey, rejected);
     acceptedArray = acceptedTags.toArray(sized(acceptedArray, acceptedTags.size()));
     rejectedArray = rejectedTags.toArray(sized(rejectedArray, rejectedTags.size()));
     reasonsArray = rejectedReasons.toArray(sized(reasonsArray, rejectedReasons.size()));
-    Logger.recordOutput(key + "/AcceptedTags", acceptedArray);
-    Logger.recordOutput(key + "/RejectedTags", rejectedArray);
-    Logger.recordOutput(key + "/RejectedReasons", reasonsArray);
+    Logger.recordOutput(acceptedTagsKey, acceptedArray);
+    Logger.recordOutput(rejectedTagsKey, rejectedArray);
+    Logger.recordOutput(rejectedReasonsKey, reasonsArray);
   }
 
   /**

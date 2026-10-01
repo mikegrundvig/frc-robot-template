@@ -96,8 +96,16 @@ public record PoseCovariance(double xx, double xy, double yy, double heading) {
      * from the end of its longer axis.
      */
     public Translation2d pointAt(double around) {
-      double alongMajor = major * Math.cos(around);
-      double alongMinor = minor * Math.sin(around);
+      return pointAt(Math.cos(around), Math.sin(around));
+    }
+
+    /**
+     * The point at an angle along the ellipse given by its cosine and sine: for a caller that keeps
+     * a table of them, to draw the same points loop after loop without the trigonometry.
+     */
+    public Translation2d pointAt(double cosAround, double sinAround) {
+      double alongMajor = major * cosAround;
+      double alongMinor = minor * sinAround;
       double c = Math.cos(angleRadians);
       double s = Math.sin(angleRadians);
       return new Translation2d(c * alongMajor - s * alongMinor, s * alongMajor + c * alongMinor);

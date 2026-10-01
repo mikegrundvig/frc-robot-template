@@ -81,7 +81,7 @@ a log and the simulator connected this way name every value alike.
 | Value | Logged as |
 |---|---|
 | The estimate | `Localization/Pose` (2D); `Localization/Pose3d`, raised to the ground under it and tilted as the IMU says |
-| Its uncertainty | `Localization/Ellipse`: the 99.9% ellipse (3.72 standard deviations, where the consistency study's "outside the ellipse" begins), a closed outline of 37 poses; nothing while it's wider than the field |
+| Its uncertainty | `Localization/Ellipse`: the 99.9% ellipse (3.72 standard deviations, where the consistency study's "outside the ellipse" begins), a closed outline of 17 poses; nothing while it's wider than the field |
 | The truth (simulator only) | `Sim/TruePose`, and `Sim/TruePose3d`, raised and tilted as the robot really is |
 | Each camera's tags | `Vision/<camera>/AcceptedTags` and `RejectedTags`: this loop's tags where the field's layout has them, by what became of their images; `RejectedReasons`, why each refused one was, in the same order |
 | The wheels | `Drive/ModulePoses`: each wheel's center in the robot's frame, turned to its measured angle, which turns the model's wheels |

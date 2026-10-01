@@ -128,8 +128,8 @@ class LocalizationTest {
 
       Pose2d[] outline = localization.ellipse(at, PoseCovariance.fromStdDevs(0.1, 0.1, 0.01));
 
-      assertThat(outline).hasSize(37);
-      assertThat(outline[36]).isEqualTo(outline[0]);
+      assertThat(outline).hasSize(17);
+      assertThat(outline[16]).isEqualTo(outline[0]);
       for (Pose2d point : outline) {
         assertThat(point.getTranslation().getDistance(at.getTranslation()))
             .isCloseTo(0.1 * Math.sqrt(-2 * Math.log(0.001)), within(1e-9));

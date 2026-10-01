@@ -32,6 +32,7 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.util.MathUtil;
 import org.wpilib.system.RobotController;
@@ -90,8 +91,23 @@ public final class Localization implements AutoCloseable {
    */
   private static final double ELLIPSE_PROBABILITY = 0.999;
 
-  /** Points around the logged ellipse; the first is repeated at the end, to close it. */
-  private static final int ELLIPSE_POINTS = 36;
+  /**
+   * Points around the logged ellipse; the first is repeated at the end, to close it. Sixteen draw a
+   * smooth enough outline for 408 bytes a loop, on the robot too, where a match's log carries it.
+   */
+  private static final int ELLIPSE_POINTS = 16;
+
+  /** Where the ellipse's points sit around it, worked out once. */
+  private static final double[] ELLIPSE_COS = new double[ELLIPSE_POINTS];
+
+  private static final double[] ELLIPSE_SIN = new double[ELLIPSE_POINTS];
+
+  static {
+    for (int i = 0; i < ELLIPSE_POINTS; i++) {
+      ELLIPSE_COS[i] = Math.cos(2 * Math.PI * i / ELLIPSE_POINTS);
+      ELLIPSE_SIN[i] = Math.sin(2 * Math.PI * i / ELLIPSE_POINTS);
+    }
+  }
 
   /** An ellipse wider than the field says nothing a view could draw. */
   private static final double MAX_ELLIPSE_METERS = 20;
@@ -648,10 +664,9 @@ public final class Localization implements AutoCloseable {
       return NO_ELLIPSE;
     }
     for (int i = 0; i < ELLIPSE_POINTS; i++) {
+      Translation2d point = shape.pointAt(ELLIPSE_COS[i], ELLIPSE_SIN[i]);
       ellipse[i] =
-          new Pose2d(
-              center.getTranslation().plus(shape.pointAt(2 * Math.PI * i / ELLIPSE_POINTS)),
-              Rotation2d.ZERO);
+          new Pose2d(center.getX() + point.getX(), center.getY() + point.getY(), Rotation2d.ZERO);
     }
     ellipse[ELLIPSE_POINTS] = ellipse[0];
     return ellipse;

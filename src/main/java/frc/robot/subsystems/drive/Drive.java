@@ -82,6 +82,11 @@ public class Drive implements Mechanism, AutoCloseable {
   /** The wheels' poses as last logged, reused loop after loop. */
   private final Pose3d[] modulePoses = new Pose3d[4];
 
+  /** The steer angles and wheel radius the logged poses were made for: NaN before the first. */
+  private final double[] posedAngles = {Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+
+  private double posedRadius = Double.NaN;
+
   private final Supplier<Pose2d> pose;
   private final Lock odometryLock;
 
@@ -270,11 +275,15 @@ public class Drive implements Mechanism, AutoCloseable {
   Pose3d[] modulePoses() {
     double up = applied.modules().wheelRadius().in(Meters);
     for (int i = 0; i < 4; i++) {
-      Translation2d at = moduleTranslations[i];
-      modulePoses[i] =
-          new Pose3d(
-              at.getX(), at.getY(), up, new Rotation3d(0, 0, modules[i].steerAngle().getRadians()));
+      double angle = modules[i].steerAngle().getRadians();
+      // A wheel that hasn't turned keeps its pose: nothing new to make, most loops.
+      if (angle != posedAngles[i] || up != posedRadius) {
+        Translation2d at = moduleTranslations[i];
+        modulePoses[i] = new Pose3d(at.getX(), at.getY(), up, new Rotation3d(0, 0, angle));
+        posedAngles[i] = angle;
+      }
     }
+    posedRadius = up;
     return modulePoses;
   }
 

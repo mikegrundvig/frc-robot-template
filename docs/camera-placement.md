@@ -102,9 +102,9 @@ it.
 ```
 
 The default run takes about a minute on two threads (45 to 60 s on the computer it was written
-on, for 3,840 poses and 157 layouts), and about 1 GB of memory. A robustness run (`--robust`) scores
-the field 13 times: 7.5 minutes there. A finer grid costs the square: `--grid-meters=0.25` takes
-four times as long.
+on, for 3,840 poses and 157 layouts), and about 1 GB of memory. A robustness run (`--robust`)
+scores the field 13 times: 7.5 to 9 minutes there, depending on what else the computer was doing.
+A finer grid costs the square: `--grid-meters=0.25` takes four times as long.
 
 | Option | Default | What |
 |---|---|---|
@@ -255,12 +255,23 @@ are all four cameras, 2.5 to 2.6 cm: cameras on the four sides, or at the corner
 behind them. REBUILT has 32 tags, many in mid-field on the hubs; a field with fewer tags spreads
 the layouts further apart.
 
-With `--robust` (12 trials, 7.5 minutes), the errors grow and the layouts spread apart: the most
-robust, four cameras on the sides, 8 in up, tilted 20°, has 5.9 cm in its worst trial (5.0 cm
-median), and the tenth 6.8 cm. The ranking holds its shape (rank correlation 0.94): the nominal
-best is second, the robust top ten all ranked in the nominal top 17, and the template robot's own
-moves from 19th to 20th (7.3 cm in its worst trial). Three cameras' best is 9.6 cm; one or two
-leave too much of the field unmeasured in every trial.
+With `--robust` (12 trials, 8 to 9 minutes), the errors grow and the layouts spread apart: the
+most robust, four cameras on the sides, 16 in up, tilted 10°, has 5.5 cm in its worst trial (4.5
+cm median), and the tenth 6.8 cm. The ranking keeps its shape (rank correlation 0.94 with the
+nominal one): the robust top ten all ranked in the nominal top 21, the nominal best is 12th, and
+the template robot's own moves from 19th to 25th (7.9 cm in its worst trial). Three cameras' best
+is 9.8 cm; one or two leave too much of the field unmeasured in every trial.
+
+**How far to trust the robust ranking.** Twelve trials are a small sample of the conditions, so
+the robust ranking moves more between seeds than the nominal one. Over seeds 1, 2, and 3, the
+rankings correlate at 0.93 to 0.95, but their top tens share only 5 to 7 layouts, and each seed's
+best ranks between 2nd and 23rd in the others. A layout's worst-trial error moves 8 mm between
+seeds, typically (the nominal 95% error moves 0.4 mm). Ranking by a percentile across trials
+instead of the worst doesn't help: the second worst, the 75th percentile, and the median each move
+7 to 10 mm between seeds too, and their top tens share no more. So read robust differences under a
+centimeter as ties, and the robust ranking for what it agrees on across seeds. In this example:
+four cameras, on the sides or at the corners splayed 30° to 45°, tilted up 10° to 20°, at any of
+the three heights; three cameras about 3 cm behind; one or two blind too often.
 
 ## At kickoff
 

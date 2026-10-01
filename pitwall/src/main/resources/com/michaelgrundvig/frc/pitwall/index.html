@@ -1,50 +1,59 @@
 <!doctype html>
 <!-- Pitwall's page, served by the robot program (com.michaelgrundvig.frc.pitwall.PitwallServer),
-     and a client of its REST API like any other. Plain HTML and JavaScript on purpose: nothing to
-     build, nothing to install. -->
+     and a client of its API like any other. Plain HTML and JavaScript on purpose: nothing to build,
+     nothing to install. It follows the robot through one event stream (/api/events): a snapshot,
+     then only what changed. Plots are drawn by uPlot, bundled with Pitwall, since there's no
+     internet at an event. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pitwall</title>
+<link rel="stylesheet" href="/uPlot.min.css">
 <style>
   :root {
     color-scheme: light dark;
     --bg: #ffffff; --panel: #f5f6f8; --fg: #1b1c1e; --muted: #5f6368; --line: #dcdfe3;
     --accent: #0b62c4; --accent-fg: #ffffff; --changed: #fff3cd; --pending: #dbe9fb; --bad: #b3261e;
-    --ok: #1e7b34;
+    --ok: #1e7b34; --older: #8a94a6; --setpoint: #9aa0a6;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #141517; --panel: #1e2023; --fg: #e8eaed; --muted: #9aa0a6; --line: #34373b;
       --accent: #8ab4f8; --accent-fg: #0b1a2e; --changed: #3b3217; --pending: #1c3350; --bad: #f28b82;
-      --ok: #81c995;
+      --ok: #81c995; --older: #6b7280; --setpoint: #80868b;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
-  main { max-width: 920px; margin: 0 auto; padding: 16px; }
+  main { max-width: 1120px; margin: 0 auto; padding: 16px; }
   header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
   h1 { margin: 0; font-size: 20px; }
   h2 { margin: 28px 0 8px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  h3 { margin: 0 0 8px; font-size: 15px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
   .muted { color: var(--muted); }
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .banner { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--changed); }
   .message { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--panel);
              white-space: pre-line; } /* a refusal gives each reason on its own line */
   .message.bad { color: var(--bad); }
+  #connection { font-size: 13px; }
+  #connection.bad { color: var(--bad); font-weight: 600; }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
   th { font-size: 13px; font-weight: 600; color: var(--muted); }
-  td.number { font-variant-numeric: tabular-nums; }
+  td.number, th.number { font-variant-numeric: tabular-nums; text-align: right; }
   table.status td:first-child { width: 40%; color: var(--muted); }
   td.ok { color: var(--ok); font-weight: 600; }
   td.bad { color: var(--bad); font-weight: 600; }
+  td.best { color: var(--ok); font-weight: 700; }
   tr.group td { padding-top: 16px; font-weight: 600; border-bottom: none; }
   tr.changed td { background: var(--changed); }
   tr.pending td { background: var(--pending); }
-  input { width: 8.5em; padding: 4px 6px; font: inherit; font-variant-numeric: tabular-nums;
-          color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  tr.latest td { font-weight: 600; }
+  input, select { padding: 4px 6px; font: inherit; color: var(--fg); background: var(--bg);
+                  border: 1px solid var(--line); border-radius: 6px; }
+  input { width: 8.5em; font-variant-numeric: tabular-nums; }
   input:disabled { opacity: 0.6; }
   input.invalid { border-color: var(--bad); }
   button { padding: 6px 12px; font: inherit; color: var(--fg); background: var(--panel);
@@ -55,6 +64,16 @@
   button[hidden] { display: none; }
   pre { margin: 0; padding: 12px; overflow-x: auto; background: var(--panel); border-radius: 8px;
         font: 13px/1.5 ui-monospace, monospace; white-space: pre; }
+  .rig { margin-top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
+  .rig-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 20px; }
+  .rig-grid table { margin-top: 0; }
+  .rig-grid input { width: 6.5em; }
+  .plot { min-height: 280px; }
+  .plot .notice { padding: 40px 12px; text-align: center; }
+  .tag { font-size: 12px; padding: 1px 6px; border-radius: 10px; background: var(--changed); color: var(--fg); }
+  .scores td, .scores th { white-space: nowrap; }
+  .scroll { overflow-x: auto; }
+  @media (max-width: 760px) { .rig-grid { grid-template-columns: 1fr; } }
   @media (max-width: 560px) { .committed { display: none; } }
 </style>
 </head>
@@ -62,6 +81,7 @@
 <main>
   <header>
     <h1>Pitwall <span id="name" class="muted"></span></h1>
+    <span id="connection" class="muted">Connecting to the robot…</span>
   </header>
 
   <table class="status"><tbody id="status-items"></tbody></table>
@@ -73,8 +93,17 @@
     <div id="action-message" class="message bad" hidden></div>
   </section>
 
+  <section id="experiments-section" hidden>
+    <h2>Experiments</h2>
+    <p class="muted">Each runs a test motion on its mechanism and scores how it answered. They run
+      only with the robot enabled in utility mode, never on the field, and only while this page
+      stays open and in touch: close it, or lose the link, and the run stops. Change a gain, run
+      again, and compare. Runs stay here until this tab closes.</p>
+    <div id="rigs"></div>
+  </section>
+
   <h2>Tuning
-    <span id="status" class="muted">Connecting to the robot…</span>
+    <span id="status" class="muted"></span>
     <button id="toggle" hidden></button>
   </h2>
   <div id="banner" class="banner" hidden>The field system is connected, so tuning is locked off.</div>
@@ -111,56 +140,281 @@
   </section>
 </main>
 
+<script src="/uPlot.iife.min.js"></script>
 <script>
   const element = (id) => document.getElementById(id);
-  const rows = new Map(); // path -> {row, input, revert}
-  let session = { enabled: false, fieldConnected: false };
-  let current = {};
-  let committed = {};
+  const make = (tag, className, text) => {
+    const made = document.createElement(tag);
+    if (className) made.className = className;
+    if (text !== undefined) made.textContent = text;
+    return made;
+  };
+
+  // The robot's state as it was sent: the snapshot, with every patch since merged in.
+  let doc = null;
+  // This page's event stream, named in every request so the robot knows who's asking.
+  let stream = "";
+  let source = null;
+  let lastEvent = 0;
+  let lastRequest = 0;
+  // Every run this tab has seen, oldest first: they outlive reconnects and restarts of the robot.
+  const runs = [];
+  // Whether this page is starting a run: from the click on Run until the robot answers.
+  let starting = false;
 
   function shown(number) {
+    if (typeof number !== "number") return String(number);
     return Number.isInteger(number) ? number.toFixed(1) : String(Number(number.toPrecision(6)));
   }
 
-  function say(text, bad) {
-    const message = element("message");
-    message.hidden = !text;
-    message.textContent = text || "";
-    message.classList.toggle("bad", Boolean(bad));
+  /** A JSON merge patch (RFC 7396): what changed, with null for what's gone. */
+  function merge(target, patch) {
+    if (patch === null || typeof patch !== "object" || Array.isArray(patch)) return patch;
+    if (target === null || typeof target !== "object" || Array.isArray(target)) target = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete target[key];
+      else target[key] = merge(target[key], value);
+    }
+    return target;
   }
 
-  /** Sends a request to the API, and says what became of it. */
-  async function send(method, path, body) {
-    const options = { method };
+  // ---- The stream ----
+
+  function connect() {
+    // Reconnecting, it names the stream it had, which the robot then closes rather than keep a
+    // place for it until a write to it fails.
+    source = new EventSource(stream ? "/api/events?replaces=" + encodeURIComponent(stream) : "/api/events");
+    lastEvent = Date.now();
+    source.addEventListener("snapshot", (event) => {
+      heard();
+      const snapshot = JSON.parse(event.data);
+      stream = snapshot.stream;
+      doc = snapshot.document;
+      noteRun();
+      if (snapshot.trace) takeSamples(snapshot.trace, true);
+      render();
+    });
+    source.addEventListener("patch", (event) => {
+      heard();
+      if (doc === null) return;
+      doc = merge(doc, JSON.parse(event.data));
+      noteRun();
+      render();
+    });
+    source.addEventListener("samples", (event) => {
+      heard();
+      takeSamples(JSON.parse(event.data), false);
+      drawSoon();
+    });
+    source.addEventListener("heartbeat", heard);
+    source.onerror = () => showConnection(false); // it reconnects on its own
+  }
+
+  function heard() {
+    lastEvent = Date.now();
+    showConnection(true);
+  }
+
+  function showConnection(connected) {
+    const label = element("connection");
+    label.textContent = connected ? "Connected" : "Disconnected: reconnecting…";
+    label.classList.toggle("bad", !connected);
+  }
+
+  // The robot sends something at least every 5 s. Ten seconds of silence is a lost link, even one
+  // the browser hasn't noticed (dropped Wi-Fi): start over with a fresh snapshot.
+  setInterval(() => {
+    if (Date.now() - lastEvent > 10000) {
+      showConnection(false);
+      source.close();
+      connect();
+    }
+  }, 1000);
+
+  /** A request to the API, naming this page's stream. Sent counts for the deadman, not answered. */
+  function api(method, path, body, more = {}) {
+    lastRequest = Date.now();
+    const headers = { "Pitwall-Stream": stream };
+    const options = { method, headers, ...more };
     if (body !== undefined) {
-      options.headers = { "Content-Type": "application/merge-patch+json" };
+      headers["Content-Type"] = "application/merge-patch+json";
       options.body = JSON.stringify(body);
     }
+    return fetch(path, options);
+  }
+
+  /** Whether this page keeps a run going: it's starting one, or one it started is running. */
+  function inCharge() {
+    return starting || Boolean(doc && doc.run && doc.run.phase === "RUNNING"
+        && stream !== "" && doc.run.controller === stream);
+  }
+
+  // The deadman: while this page keeps a run going, the robot must hear from it every 500 ms, so
+  // it sends a heartbeat whenever it has been quiet for 100 ms. One that hangs is dropped.
+  setInterval(() => {
+    if (inCharge() && Date.now() - lastRequest >= 100) {
+      api("POST", "/api/heartbeat", undefined, { signal: AbortSignal.timeout(400) }).catch(() => {});
+    }
+  }, 25);
+
+  // A hidden tab's timers slow to once a second, too slow to keep a run going. So a run this page
+  // keeps going stops as the tab is hidden, saying so, rather than when the deadman runs out.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && inCharge() && doc.run) {
+      api("POST", "/api/experiments",
+          { cancel: doc.run.experiment, run: doc.run.id, reason: "this tab was hidden" },
+          { keepalive: true }).catch(() => {});
+    }
+  });
+
+  /** Sends a request, and says what became of it where the page shows messages. */
+  async function send(method, path, body, say) {
     let response;
     try {
-      response = await fetch(path, options);
+      response = await api(method, path, body);
     } catch (error) {
       say("The robot isn't answering.", true);
-      return false;
+      return null;
     }
     if (response.status === 202) {
       say("Queued: the robot will apply it on its next loop.");
     } else if (!response.ok) {
       const problem = await response.json().catch(() => ({ detail: response.statusText }));
       say(problem.detail || problem.title, true);
+      return null;
     } else {
       say("");
     }
-    await poll();
-    return response.ok;
+    return response;
   }
 
-  /** The edits waiting to be applied: {path: number}, and whether they are all numbers. */
-  function pending() {
+  function sayIn(id) {
+    return (text, bad) => {
+      const message = element(id);
+      message.hidden = !text;
+      message.textContent = text || "";
+      message.classList.toggle("bad", Boolean(bad));
+    };
+  }
+  const say = sayIn("message");
+
+  // ---- Runs ----
+
+  function runKey(program, id) {
+    return program + ":" + id;
+  }
+
+  /** Keeps the run the robot has now, or updates it: where it stands, and its scores. */
+  function noteRun() {
+    const now = doc.run;
+    if (!now || now.id === undefined) return;
+    const key = runKey(doc.robot.program, now.id);
+    let run = runs.find((r) => r.key === key);
+    if (!run) {
+      run = { key, program: doc.robot.program, code: doc.robot.code, robot: doc.robot.name,
+              simulated: doc.robot.simulated, trace: {} };
+      runs.push(run);
+      // Scores for every run, but traces only for a rig's latest few: the plot overlays fewer.
+      runs.filter((r) => r.rig === now.rig && r !== run).slice(0, -(TRACES_KEPT - 1))
+        .forEach((r) => (r.trace = {}));
+    }
+    // A copy: the next run's patches change the document's run in place.
+    Object.assign(run, structuredClone({
+      id: now.id, experiment: now.experiment, rig: now.rig, settings: now.settings,
+      gains: now.gains, signals: now.signals, phase: now.phase, detail: now.detail,
+      scores: now.scores, gainsChanged: now.gainsChanged,
+    }));
+  }
+
+  /** Adds a run's samples to its trace; a snapshot's start it over. */
+  function takeSamples(trace, fromStart) {
+    if (!doc) return;
+    const run = runs.find((r) => r.key === runKey(doc.robot.program, trace.run));
+    if (!run) return;
+    if (fromStart) run.trace = {};
+    for (const [name, { t, v }] of Object.entries(trace.signals)) {
+      const series = run.trace[name] || (run.trace[name] = { t: [], v: [] });
+      for (let i = 0; i < t.length; i++) {
+        series.t.push(t[i]);
+        series.v.push(v[i]);
+      }
+    }
+  }
+
+  // ---- Rendering ----
+
+  function render() {
+    element("name").textContent = "· " + doc.robot.name;
+    renderStatus();
+    renderActions();
+    renderTuning();
+    renderOthers();
+    renderRigs();
+  }
+
+  /** The status items: true and false as a check and a cross, a number with its unit. */
+  function renderStatus() {
+    const body = element("status-items");
+    body.replaceChildren();
+    for (const [name, value] of Object.entries(doc.status)) {
+      const row = body.insertRow();
+      row.insertCell().textContent = name;
+      const cell = row.insertCell();
+      const unit = doc.units[name];
+      if (typeof value === "boolean") {
+        cell.textContent = value ? "✓" : "✗";
+        cell.className = value ? "ok" : "bad";
+        cell.setAttribute("aria-label", value ? "yes" : "no");
+      } else if (unit && typeof value === "number") {
+        const decimals = Math.max(0, Math.ceil(-Math.log10(unit.resolution) - 1e-9));
+        cell.textContent = value.toFixed(decimals) + (unit.unit ? " " + unit.unit : "");
+      } else {
+        cell.textContent = shown(value);
+      }
+    }
+  }
+
+  let shownActions = "";
+
+  /** Each action with where it stands, and a button to run or cancel it. */
+  function renderActions() {
+    const key = JSON.stringify(doc.actions);
+    if (key === shownActions) return; // rebuilding the rows mid-click would lose the click
+    shownActions = key;
+    const actions = Object.entries(doc.actions);
+    element("actions-section").hidden = actions.length === 0;
+    const body = element("action-items");
+    body.replaceChildren();
+    for (const [name, { phase, detail }] of actions) {
+      const row = body.insertRow();
+      row.insertCell().textContent = name;
+      const state = row.insertCell();
+      state.textContent = detail || "Ready";
+      state.className = phase === "RUNNING" ? "ok" : phase === "REFUSED" ? "bad" : "";
+      const running = phase === "RUNNING";
+      const button = make("button", running ? "" : "primary", running ? "Cancel" : "Run");
+      button.addEventListener("click", () =>
+        send("POST", "/api/actions", running ? { cancel: name } : { start: name },
+            sayIn("action-message")));
+      row.insertCell().append(button);
+    }
+  }
+
+  // ---- Tuning ----
+
+  const rows = new Map(); // path -> {row, input, revert}
+  let shownTunables = "";
+
+  /**
+   * Edits waiting in some inputs, [path, input]: {path: number}, and whether all are numbers. Only
+   * what someone typed counts; a value changed elsewhere (another page, a dashboard) just shows.
+   */
+  function pending(inputs) {
     const changes = {};
     let valid = true;
-    for (const [path, { input }] of rows) {
-      if (input.value.trim() === "" || input.value === shown(current[path])) continue;
+    for (const [path, input] of inputs) {
+      if (!input.dataset.edited) continue;
+      if (input.value.trim() === "" || input.value === shown(doc.values[path])) continue;
       const number = Number(input.value);
       const ok = Number.isFinite(number);
       input.classList.toggle("invalid", !ok);
@@ -169,68 +423,85 @@
     return { changes, valid };
   }
 
+  const tuningInputs = () => [...rows].map(([path, { input }]) => [path, input]);
+
   function refreshControls() {
-    const { changes, valid } = pending();
+    const { changes, valid } = pending(tuningInputs());
     const count = Object.keys(changes).length;
     for (const [path, { row }] of rows) row.classList.toggle("pending", path in changes);
-    element("apply").disabled = !session.enabled || count === 0 || !valid;
+    element("apply").disabled = !doc.tuning.enabled || count === 0 || !valid;
     element("apply").textContent = count > 1 ? `Apply ${count} changes` : "Apply";
     element("discard").disabled = count === 0;
   }
 
-  async function apply() {
-    const { changes, valid } = pending();
+  /** Applies edits to configuration values: checked whole on the robot, all or none. */
+  async function applyEdits(inputs, sayHere) {
+    const { changes, valid } = pending(inputs);
     if (!valid) {
-      say("Only numbers can be applied.", true);
+      sayHere("Only numbers can be applied.", true);
       return;
     }
     if (Object.keys(changes).length === 0) return;
-    if (await send("PATCH", "/api/values", changes)) {
-      for (const [path, { input }] of rows) input.value = shown(current[path]);
-      refreshControls();
+    if (await send("PATCH", "/api/values", changes, sayHere)) {
+      // Applied: the robot's next patch says so, and shows the same.
+      for (const [path, input] of inputs) {
+        if (!(path in changes)) continue;
+        delete input.dataset.edited;
+        input.value = shown(changes[path]);
+      }
     }
   }
 
-  function build(tunables) {
+  function buildTuningTable() {
+    const body = element("values");
+    body.replaceChildren();
+    rows.clear();
     let group = null;
-    for (const [path, { config, field, unit, limits }] of Object.entries(tunables)) {
-      committed[path] = tunables[path].committed;
+    for (const [path, { config, field, unit, limits, committed }] of Object.entries(doc.tunables)) {
       const cut = field.lastIndexOf(".");
       const heading = cut < 0 ? config : config + "." + field.slice(0, cut);
       if (heading !== group) {
         group = heading;
-        const row = element("values").insertRow();
+        const row = body.insertRow();
         row.className = "group";
         const cell = row.insertCell();
         cell.colSpan = 5;
         cell.textContent = heading.replaceAll(".", " › ");
       }
-      const row = element("values").insertRow();
+      const row = body.insertRow();
       row.insertCell().textContent = field.slice(cut + 1);
       const committedCell = row.insertCell();
       committedCell.className = "committed number";
-      committedCell.textContent = shown(tunables[path].committed);
-      const input = document.createElement("input");
+      committedCell.textContent = shown(committed);
+      const input = make("input");
       input.inputMode = "decimal";
       input.setAttribute("aria-label", config + " " + field);
       if (limits) input.title = "Limits: " + limits;
-      input.addEventListener("input", refreshControls);
-      input.addEventListener("keydown", (event) => { if (event.key === "Enter") apply(); });
+      input.addEventListener("input", () => {
+        input.dataset.edited = "yes";
+        refreshControls();
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") applyEdits(tuningInputs(), say);
+      });
       row.insertCell().append(input);
       row.insertCell().textContent = unit;
-      const revert = document.createElement("button");
-      revert.className = "small";
-      revert.textContent = "↺";
+      const revert = make("button", "small", "↺");
       revert.title = "Back to the committed value";
       revert.setAttribute("aria-label", "Revert " + config + " " + field);
-      revert.addEventListener("click", () => send("PATCH", "/api/values", { [path]: null }));
+      revert.addEventListener("click", () => send("PATCH", "/api/values", { [path]: null }, say));
       row.insertCell().append(revert);
       rows.set(path, { row, input, revert });
     }
   }
 
-  function render(changes) {
-    element("name").textContent = "· " + session.name;
+  function renderTuning() {
+    const session = doc.tuning;
+    const key = Object.keys(doc.tunables).join("|");
+    if (key !== shownTunables) {
+      shownTunables = key;
+      buildTuningTable();
+    }
     element("status").textContent = session.enabled ? "Tuning is on" : "Tuning is off";
     const toggle = element("toggle");
     toggle.hidden = false;
@@ -243,20 +514,20 @@
     element("refused").textContent = refused.length === 0
       ? "" : "Refused from a dashboard: " + refused[refused.length - 1];
 
-    const { changes: waiting } = pending();
     for (const [path, { row, input, revert }] of rows) {
-      const changed = Math.abs(current[path] - committed[path]) > 1e-9;
+      const changed = path in doc.changes;
       row.classList.toggle("changed", changed);
       revert.hidden = !changed;
       revert.disabled = !session.enabled;
       input.disabled = !session.enabled;
       // Leave alone what someone is typing, or has typed and not yet applied.
-      if (document.activeElement !== input && !(path in waiting)) input.value = shown(current[path]);
+      if (!input.dataset.edited && document.activeElement !== input) {
+        input.value = shown(doc.values[path]);
+      }
     }
     refreshControls();
 
-    const lines = changes.map(
-      (c) => `${c.config} ${c.path}: ${c.committed} -> ${c.tuned}   ${c.builderCall}`);
+    const lines = builderLines(Object.keys(doc.changes));
     element("changes").textContent = lines.join("\n");
     element("changes").hidden = lines.length === 0;
     element("none").hidden = lines.length > 0;
@@ -264,93 +535,37 @@
     element("reset").disabled = lines.length === 0 || !session.enabled;
   }
 
-  /** The status items: true and false as a check and a cross, anything else as text. */
-  function renderStatus(items) {
-    const body = element("status-items");
-    body.replaceChildren();
-    for (const { name, value } of items) {
-      const row = body.insertRow();
-      row.insertCell().textContent = name;
-      const cell = row.insertCell();
-      if (typeof value === "boolean") {
-        cell.textContent = value ? "✓" : "✗";
-        cell.className = value ? "ok" : "bad";
-        cell.setAttribute("aria-label", value ? "yes" : "no");
-      } else {
-        cell.textContent = typeof value === "number" ? shown(value) : value;
-      }
-    }
-  }
-
-  /** Starts or cancels an action, and says why not when it is refused or locked. */
-  async function act(body) {
-    const note = element("action-message");
-    let response;
-    try {
-      response = await fetch("/api/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+  /** The builder calls that commit the tuned values at these paths, in the tuning table's order. */
+  function builderLines(paths) {
+    return Object.keys(doc.tunables)
+      .filter((path) => paths.includes(path) && doc.changes[path])
+      .map((path) => {
+        const change = doc.changes[path];
+        return `${change.config} ${change.field}: ${change.committed} -> ${change.tuned}   `
+            + change.builderCall;
       });
-    } catch (error) {
-      note.textContent = "The robot isn't answering.";
-      note.hidden = false;
-      return;
-    }
-    if (response.ok) {
-      note.hidden = true;
-    } else {
-      const problem = await response.json().catch(() => ({ detail: response.statusText }));
-      note.textContent = problem.detail || problem.title;
-      note.hidden = false;
-    }
-    await poll();
-  }
-
-  let shownActions = "";
-
-  /** Each action with where it stands, and a button to run or cancel it. */
-  function renderActions(actions) {
-    const key = JSON.stringify(actions);
-    if (key === shownActions) return; // rebuilding the rows mid-click would lose the click
-    shownActions = key;
-    element("actions-section").hidden = actions.length === 0;
-    const body = element("action-items");
-    body.replaceChildren();
-    for (const { name, phase, detail } of actions) {
-      const row = body.insertRow();
-      row.insertCell().textContent = name;
-      const state = row.insertCell();
-      state.textContent = detail || "Ready";
-      state.className = phase === "RUNNING" ? "ok" : phase === "REFUSED" ? "bad" : "";
-      const running = phase === "RUNNING";
-      const button = document.createElement("button");
-      button.textContent = running ? "Cancel" : "Run";
-      button.className = running ? "" : "primary";
-      button.addEventListener("click", () => act(running ? { cancel: name } : { start: name }));
-      row.insertCell().append(button);
-    }
   }
 
   let shownOthers = "";
   const others = new Map(); // path -> value cell
 
-  /** Every other WPILib tunable: rows rebuilt only when the set changes, values every poll. */
-  function renderOthers(list) {
-    const key = list.map((t) => t.path + ":" + t.editable + ":" + t.limits).join("|");
+  /** Every other WPILib tunable: rows rebuilt only when the set changes, values on every change. */
+  function renderOthers() {
+    const list = Object.entries(doc.wpilibTunables);
+    const key = list.map(([path, t]) => path + ":" + t.editable + ":" + t.limits).join("|");
     if (key !== shownOthers) {
       shownOthers = key;
       others.clear();
       const body = element("other-items");
       body.replaceChildren();
-      for (const { path, type, editable, limits } of list) {
+      for (const [path, { type, editable, limits }] of list) {
         const row = body.insertRow();
         row.insertCell().textContent = path;
         const valueCell = row.insertCell();
         valueCell.className = "number";
         const inputCell = row.insertCell();
         if (editable) {
-          const input = document.createElement("input");
+          const input = make("input");
           input.setAttribute("aria-label", path);
           input.placeholder = limits ? type + ", " + limits : type;
           input.addEventListener("keydown", async (event) => {
@@ -361,7 +576,7 @@
               say(path + " takes a " + type + " value.", true);
               return;
             }
-            if (await send("PATCH", "/api/wpilib-tunables", { [path]: value })) input.value = "";
+            if (await send("PATCH", "/api/wpilib-tunables", { [path]: value }, say)) input.value = "";
           });
           inputCell.append(input);
         }
@@ -369,42 +584,429 @@
       }
       element("others-section").hidden = list.length === 0;
     }
-    for (const { path, value } of list) {
+    for (const [path, { value }] of list) {
       const cell = others.get(path);
-      if (cell) cell.textContent = typeof value === "number" ? shown(value) : String(value);
+      if (cell) cell.textContent = shown(value);
     }
   }
 
-  async function poll() {
+  // ---- Experiments ----
+
+  const rigViews = new Map(); // rig name -> its panel's parts
+  let shownRigs = "";
+  // How many of a rig's runs its plot lays over each other, the latest in bold.
+  const OVERLAID = 4;
+  // How many of a rig's runs keep their traces, so another signal can be plotted; scores stay.
+  const TRACES_KEPT = 8;
+
+  function renderRigs() {
+    const key = JSON.stringify([doc.rigs, doc.experiments]);
+    if (key !== shownRigs) {
+      shownRigs = key;
+      buildRigs();
+    }
+    element("experiments-section").hidden = rigViews.size === 0;
+    for (const [name, view] of rigViews) updateRig(name, view);
+  }
+
+  function buildRigs() {
+    const container = element("rigs");
+    container.replaceChildren();
+    for (const built of rigViews.values()) if (built.plot) built.plot.destroy();
+    rigViews.clear();
+    for (const [name, rig] of Object.entries(doc.rigs)) {
+      const view = { rig, gains: new Map(), plot: null, plotKey: "", scoresKey: "", runsPlotted: "",
+                     expanded: new Set() };
+      const gainInputs = () => [...view.gains].map(([path, gain]) => [path, gain.input]);
+      const section = make("section", "rig");
+      const title = make("h3", "", name);
+      title.append(make("span", "muted", "limits " + rig.limits));
+      section.append(title);
+      const grid = make("div", "rig-grid");
+      const knobs = make("div");
+
+      // Its gains, beside its plot: the same values as the tuning table, checked the same way.
+      const table = make("table");
+      const head = table.createTHead().insertRow();
+      for (const heading of ["Gain", "Committed", "Now", ""]) head.append(make("th", "", heading));
+      const body = table.createTBody();
+      for (const path of rig.gains) {
+        const row = body.insertRow();
+        const described = doc.tunables[path] || { field: path, unit: "", limits: "" };
+        row.insertCell().textContent = described.field.slice(described.field.lastIndexOf(".") + 1);
+        const committed = row.insertCell();
+        committed.className = "number";
+        const input = make("input");
+        input.inputMode = "decimal";
+        input.setAttribute("aria-label", name + " " + described.field);
+        if (described.limits) input.title = "Limits: " + described.limits;
+        input.addEventListener("input", () => (input.dataset.edited = "yes"));
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") applyEdits(gainInputs(), view.say);
+        });
+        row.insertCell().append(input);
+        row.insertCell().textContent = described.unit;
+        view.gains.set(path, { row, input, committed });
+      }
+      knobs.append(table);
+      const apply = make("button", "primary", "Apply gains");
+      view.apply = apply;
+      apply.addEventListener("click", () => applyEdits(gainInputs(), view.say));
+      const applyRow = make("div", "controls");
+      applyRow.style.marginTop = "8px";
+      applyRow.append(apply);
+      knobs.append(applyRow);
+
+      // Pick an experiment; run it; cancel it.
+      const runRow = make("div", "controls");
+      runRow.style.marginTop = "16px";
+      const choice = make("select");
+      choice.setAttribute("aria-label", name + " experiment");
+      for (const [experiment, described] of Object.entries(doc.experiments)) {
+        if (described.rig !== name) continue;
+        const option = make("option", "", experiment);
+        option.value = experiment;
+        choice.append(option);
+      }
+      const runButton = make("button", "primary", "Run");
+      const cancelButton = make("button", "", "Cancel");
+      runButton.addEventListener("click", () => startRun(choice.value, view));
+      // Cancels the run in progress, whichever experiment is chosen now.
+      cancelButton.addEventListener("click", () => {
+        if (doc.run && doc.run.phase === "RUNNING") {
+          send("POST", "/api/experiments", { cancel: doc.run.experiment, run: doc.run.id }, view.say);
+        }
+      });
+      runRow.append(choice, runButton, cancelButton);
+      const settings = make("div", "muted");
+      choice.addEventListener("change", () => updateRig(name, view));
+      const state = make("div");
+      state.style.marginTop = "8px";
+      const message = make("div", "message bad");
+      message.hidden = true;
+      view.say = (text, bad) => {
+        message.hidden = !text;
+        message.textContent = text || "";
+        message.classList.toggle("bad", Boolean(bad));
+      };
+      knobs.append(runRow, settings, state, message);
+
+      // The builder calls that commit its tuned gains.
+      const commitTitle = make("div", "muted", "To keep the tuned gains, write these into the configuration:");
+      commitTitle.style.marginTop = "16px";
+      const calls = make("pre");
+      knobs.append(commitTitle, calls);
+
+      // Its plot: the chosen signal of its last few runs, the latest in bold, over the setpoint.
+      const plotArea = make("div");
+      const pick = make("select");
+      pick.setAttribute("aria-label", name + " signal to plot");
+      for (const signal of [...rig.measurements, ...rig.signals.map((s) => s.name)]) {
+        const option = make("option", "", signal);
+        option.value = signal;
+        pick.append(option);
+      }
+      pick.addEventListener("change", () => drawRig(name, view, true));
+      const pickRow = make("label", "controls muted", "Plot ");
+      pickRow.append(pick);
+      const plot = make("div", "plot");
+      plotArea.append(pickRow, plot);
+
+      grid.append(knobs, plotArea);
+      section.append(grid);
+
+      // Every run of this rig, the latest first, with the best in each column marked.
+      const scroll = make("div", "scroll");
+      const scores = make("table", "scores");
+      scroll.append(scores);
+      section.append(scroll);
+      container.append(section);
+      Object.assign(view, { choice, runButton, cancelButton, settings, state, calls, commitTitle,
+                            pick, plotElement: plot, scores });
+      rigViews.set(name, view);
+    }
+  }
+
+  /** Starts a run, keeping it going from the click: the robot answers once it has started. */
+  async function startRun(experiment, view) {
+    starting = true;
     try {
-      const paths = ["/api/tuning", "/api/values", "/api/changes", "/api/status", "/api/actions",
-          "/api/wpilib-tunables"];
-      const [s, v, c, st, a, o] = await Promise.all(
-          paths.map((path) =>
-              fetch(path, { cache: "no-store" }).then((response) => response.json())));
-      session = s;
-      current = v;
-      render(c);
-      renderStatus(st);
-      renderActions(a);
-      renderOthers(o);
-    } catch (error) {
-      element("status").textContent = "The robot isn't answering; still trying…";
+      await send("POST", "/api/experiments", { start: experiment }, view.say);
+    } finally {
+      starting = false;
     }
   }
 
-  element("apply").addEventListener("click", apply);
+  function updateRig(name, view) {
+    const session = doc.tuning;
+    // While its run runs, its gains stay put here: a run is scored for the gains it started with.
+    const busy = Boolean(doc.run && doc.run.rig === name && doc.run.phase === "RUNNING");
+    view.apply.disabled = !session.enabled || busy;
+    for (const [path, { row, input, committed }] of view.gains) {
+      const described = doc.tunables[path];
+      committed.textContent = described ? shown(described.committed) : "";
+      row.classList.toggle("changed", path in doc.changes);
+      input.disabled = !session.enabled || busy;
+      if (!input.dataset.edited && document.activeElement !== input) {
+        input.value = shown(doc.values[path]);
+      }
+    }
+    const described = doc.experiments[view.choice.value];
+    view.settings.textContent = described ? described.settings : "";
+    const current = doc.run && doc.run.rig === name ? doc.run : null;
+    const running = Boolean(current) && current.phase === "RUNNING";
+    view.runButton.disabled = running;
+    view.cancelButton.disabled = !running;
+    view.state.textContent = current ? `Run ${current.id}, ${current.experiment}: ${current.detail}` : "";
+    const lines = builderLines(view.rig.gains);
+    view.calls.textContent = lines.join("\n");
+    view.calls.hidden = lines.length === 0;
+    view.commitTitle.hidden = lines.length === 0;
+    // The scores only when a run or the lock changed; the plot only when a run came or went
+    // (samples arriving redraw it too: see drawSoon).
+    const mine = runs.filter((run) => run.rig === name);
+    const scoresKey = JSON.stringify([
+      mine.map((run) => [run.key, run.phase, run.detail, Boolean(run.scores), run.gainsChanged]),
+      session.enabled, busy, doc.robot.program, doc.robot.code, [...view.expanded]]);
+    view.busy = busy;
+    if (scoresKey !== view.scoresKey) {
+      view.scoresKey = scoresKey;
+      renderScores(name, view);
+    }
+    const plotKey = mine.map((run) => run.key).join(",");
+    if (plotKey !== view.runsPlotted) {
+      view.runsPlotted = plotKey;
+      drawRig(name, view, false);
+    }
+  }
+
+  /**
+   * A run's scores, the worst of every jump: rise, overshoot, settling, and steady-state error (by
+   * its size), and each peak. A jump that never got there, or never settled, is worse than any that
+   * did. With {@code only}, a measurement's own jumps and signals (those named after it, such as
+   * "Front left voltage" for "Front left"); without it, the worst measurement in each column.
+   */
+  function summary(run, only) {
+    if (!run.scores) return null;
+    const jumps = Object.entries(run.scores.steps)
+      .filter(([measurement]) => only === undefined || measurement === only)
+      .flatMap(([, steps]) => steps);
+    const worst = (key, size = (x) => x) => jumps.length === 0 ? NaN
+        : Math.max(...jumps.map((jump) => typeof jump[key] === "number" ? size(jump[key]) : Infinity));
+    const peaks = {};
+    for (const signal of run.signals || []) {
+      if (only !== undefined && !signal.name.startsWith(only + " ")) continue;
+      const peak = run.scores.peaks[signal.name];
+      if (typeof peak === "number") peaks[signal.unit] = Math.max(peaks[signal.unit] ?? 0, peak);
+    }
+    return {
+      rise: worst("rise"),
+      overshoot: worst("overshoot"),
+      settling: worst("settling"),
+      error: worst("error", Math.abs),
+      peaks,
+    };
+  }
+
+  /** A score to three figures, as {@link shown} writes numbers; anything under a thousandth so. */
+  function small(x) {
+    return Math.abs(x) < 0.001 ? "< 0.001" : shown(Number(x.toPrecision(3)));
+  }
+
+  function renderScores(name, view) {
+    const mine = runs.filter((run) => run.rig === name).reverse();
+    const table = view.scores;
+    table.replaceChildren();
+    if (mine.length === 0) return;
+    const summaries = mine.map((run) => summary(run));
+    const units = [...new Set(summaries.flatMap((s) => (s ? Object.keys(s.peaks) : [])))];
+    const unit = view.rig.unit;
+    const columns = [
+      { label: "Rise", get: (s) => s.rise, show: (x) => (x * 1000).toFixed(0) + " ms" },
+      { label: "Overshoot", get: (s) => s.overshoot, show: (x) => (x * 100).toFixed(1) + "%" },
+      { label: "Settling", get: (s) => s.settling, show: (x) => (x * 1000).toFixed(0) + " ms" },
+
+      { label: "Error", get: (s) => s.error, show: (x) => small(x) + " " + unit },
+      ...units.map((u) => ({ label: "Peak " + u, get: (s) => s.peaks[u],
+                             show: (x) => small(x) + " " + u })),
+    ];
+    const head = table.createTHead().insertRow();
+    head.append(make("th", "", "Run"), make("th", "", "Gains"));
+    for (const column of columns) {
+      const th = make("th", "number", column.label);
+      th.title = "The worst of every jump of every " + (view.rig.measurements.length > 1
+          ? "measurement (" + view.rig.measurements.join(", ") + "): ▸ shows each" : "jump");
+      head.append(th);
+    }
+    head.append(make("th"));
+    // The best in each column, when there's more than one fair run to compare: a run whose gains
+    // changed while it ran answers for more than one set of them.
+    const best = columns.map((column) => {
+      const values = summaries
+        .map((s, i) => (s && !mine[i].gainsChanged ? column.get(s) : NaN))
+        .filter(Number.isFinite);
+      return values.length > 1 ? Math.min(...values) : NaN;
+    });
+    const body = table.createTBody();
+    mine.forEach((run, index) => {
+      const row = body.insertRow();
+      if (index === 0) row.className = "latest";
+      const label = row.insertCell();
+      if (summaries[index] && view.rig.measurements.length > 1) {
+        const open = view.expanded.has(run.key);
+        const more = make("button", "small", open ? "▾" : "▸");
+        more.setAttribute("aria-label", (open ? "Hide" : "Show") + " each measurement of run " + run.id);
+        more.addEventListener("click", () => {
+          if (open) view.expanded.delete(run.key); else view.expanded.add(run.key);
+          updateRig(name, view);
+        });
+        label.append(more, " ");
+      }
+      label.append(`${run.id} ${run.experiment}`);
+      if (run.gainsChanged) {
+        const tag = make("span", "tag", "gains changed");
+        tag.title = run.detail;
+        label.append(" ", tag);
+      }
+      if (run.program !== doc.robot.program) {
+        const tag = make("span", "tag", run.code !== doc.robot.code ? "other code" : "before a restart");
+        tag.title = "Ran on " + run.robot + (run.simulated ? " (simulator)" : "") + ", code " + run.code;
+        label.append(" ", tag);
+      }
+      row.insertCell().textContent = Object.entries(run.gains)
+        .map(([path, value]) => path.slice(path.lastIndexOf("/") + 1) + " " + shown(value))
+        .join(", ");
+      const s = summaries[index];
+      const show = (values, cells) => columns.forEach((column, c) => {
+        const value = column.get(values);
+        const cell = cells.insertCell();
+        cell.className = "number" + (cells === row && !run.gainsChanged && Number.isFinite(value)
+            && value === best[c] ? " best" : "");
+        cell.textContent = Number.isFinite(value) ? column.show(value)
+            : value === Infinity ? "never" : "—";
+      });
+      if (!s) {
+        const cell = row.insertCell();
+        cell.colSpan = columns.length;
+        cell.className = "muted";
+        cell.textContent = run.phase === "RUNNING" ? "Running…" : run.detail;
+      } else {
+        show(s, row);
+      }
+      const restore = make("button", "small", "Restore");
+      restore.title = "Put this run's gains back";
+      restore.disabled = !doc.tuning.enabled || view.busy;
+      restore.addEventListener("click", () => send("PATCH", "/api/values", run.gains, view.say));
+      row.insertCell().append(restore);
+      if (s && view.expanded.has(run.key)) {
+        for (const measurement of view.rig.measurements) {
+          const wheel = body.insertRow();
+          wheel.className = "muted";
+          wheel.insertCell();
+          wheel.insertCell().textContent = measurement;
+          show(summary(run, measurement), wheel);
+          wheel.insertCell();
+        }
+      }
+    });
+  }
+
+  let drawPending = false;
+
+  /** Redraws the plots once, before the next frame: samples arrive every loop. */
+  function drawSoon() {
+    if (drawPending) return;
+    drawPending = true;
+    requestAnimationFrame(() => {
+      drawPending = false;
+      for (const [name, view] of rigViews) drawRig(name, view, false);
+    });
+  }
+
+  function color(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  /** Lines on one time axis, as uPlot takes them: each line's value where it has one, else null. */
+  function aligned(lines) {
+    const xs = [...new Set(lines.flatMap((line) => line.t))].sort((a, b) => a - b);
+    const at = new Map(xs.map((x, i) => [x, i]));
+    return [xs, ...lines.map((line) => {
+      const ys = new Array(xs.length).fill(null);
+      line.t.forEach((t, i) => (ys[at.get(t)] = line.v[i]));
+      return ys;
+    })];
+  }
+
+  function drawRig(name, view, rebuild) {
+    if (typeof uPlot === "undefined") {
+      if (!view.plotElement.firstChild) {
+        view.plotElement.append(make("div", "notice muted",
+            "Plots need uPlot, which isn't bundled with this build of Pitwall. "
+            + "The scores below are complete without it."));
+      }
+      return;
+    }
+    const signal = view.pick.value;
+    const overlaid = runs.filter((run) => run.rig === name && run.trace[signal]).slice(-OVERLAID);
+    if (overlaid.length === 0) return;
+    const latest = overlaid[overlaid.length - 1];
+    const lines = overlaid.map((run) => ({
+      label: `Run ${run.id}`, t: run.trace[signal].t, v: run.trace[signal].v, latest: run === latest }));
+    const setpoint = view.rig.measurements.includes(signal) && latest.trace.Setpoint;
+    if (setpoint) lines.unshift({ label: "Setpoint", t: setpoint.t, v: setpoint.v, setpoint: true });
+    const data = aligned(lines);
+    const key = signal + "|" + lines.map((line) => line.label).join(",");
+    if (view.plot && view.plotKey === key && !rebuild) {
+      view.plot.setData(data);
+      return;
+    }
+    if (view.plot) view.plot.destroy();
+    view.plotElement.replaceChildren();
+    const unit = (latest.signals || []).find((s) => s.name === signal)?.unit || "";
+    const stepped = uPlot.paths && uPlot.paths.stepped ? uPlot.paths.stepped({ align: 1 }) : undefined;
+    const axis = { stroke: color("--muted"), grid: { stroke: color("--line") },
+                   ticks: { stroke: color("--line") } };
+    view.plot = new uPlot({
+      width: Math.max(280, view.plotElement.clientWidth),
+      height: 280,
+      scales: { x: { time: false } },
+      axes: [{ ...axis, label: "s" }, { ...axis, label: unit }],
+      cursor: { drag: { x: true, y: false } },
+      series: [{ label: "t" }, ...lines.map((line) => ({
+        label: line.label,
+        stroke: line.setpoint ? color("--setpoint") : line.latest ? color("--accent") : color("--older"),
+        width: line.latest ? 2.5 : line.setpoint ? 1.5 : 1,
+        dash: line.setpoint ? [6, 4] : undefined,
+        paths: line.setpoint ? stepped : undefined,
+        spanGaps: true,
+        points: { show: false },
+      }))],
+    }, data, view.plotElement);
+    view.plotKey = key;
+  }
+
+  window.addEventListener("resize", () => {
+    for (const view of rigViews.values()) {
+      if (view.plot) view.plot.setSize({ width: Math.max(280, view.plotElement.clientWidth), height: 280 });
+    }
+  });
+
+  // ---- Controls ----
+
+  element("apply").addEventListener("click", () => applyEdits(tuningInputs(), say));
   element("discard").addEventListener("click", () => {
     for (const [path, { input }] of rows) {
-      input.value = shown(current[path]);
+      delete input.dataset.edited;
+      input.value = shown(doc.values[path]);
       input.classList.remove("invalid");
     }
     refreshControls();
     say("");
   });
   element("toggle").addEventListener("click", () =>
-      send("PATCH", "/api/tuning", { enabled: !session.enabled }));
-  element("reset").addEventListener("click", () => send("DELETE", "/api/changes"));
+      send("PATCH", "/api/tuning", { enabled: !doc.tuning.enabled }, say));
+  element("reset").addEventListener("click", () => send("DELETE", "/api/changes", undefined, say));
   element("copy").addEventListener("click", async () => {
     const report = await fetch("/api/changes", { headers: { Accept: "text/plain" } })
         .then((response) => response.text());
@@ -422,11 +1024,7 @@
     setTimeout(() => (element("copy").textContent = "Copy"), 1500);
   });
 
-  fetch("/api/tunables").then((response) => response.json()).then((tunables) => {
-    build(tunables);
-    poll();
-    setInterval(poll, 500);
-  });
+  connect();
 </script>
 </body>
 </html>

@@ -1,9 +1,15 @@
 package frc.robot;
 
+import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Seconds;
+
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
+import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
+import com.michaelgrundvig.frc.pitwall.experiment.Profile;
+import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
@@ -33,6 +39,7 @@ import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -500,26 +507,40 @@ public final class RobotContainer implements AutoCloseable {
     return drive.driveForward(0.5, 2.0);
   }
 
+  /** The most often a status line that follows the sensors changes on the Pitwall page. */
+  static final Duration STATUS_INTERVAL = Duration.ofSeconds(1);
+
   /** The drive check's name on the Pitwall page. */
   static final String DRIVE_CHECK = "Drive forward slowly (2 s)";
 
+  /** The steering's experiment on the Pitwall page, and its motion. */
+  static final String STEER_STEP = "Steer to 90° and back";
+
+  static final Profile STEER_STEP_PROFILE =
+      Profiles.stepAndBack().from(Degrees.of(0)).to(Degrees.of(90)).hold(Seconds.of(0.8));
+
   /**
    * Puts this robot's pit tools on its Pitwall page: the drive check and the calibrations as
-   * actions, and one status line each for the loop, the alliance, the placement, localization,
-   * scoring, the last calibration, and the cameras.
+   * actions, the steering's experiment for tuning it, and one status line each for the loop, the
+   * alliance, the placement, localization, scoring, the last calibration, and the cameras.
    */
   void addTo(Pitwall pitwall) {
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
+        .experiments()
+        .add(new Experiment(STEER_STEP, drive.steeringRig(drivetrainTuning), STEER_STEP_PROFILE));
+    // Each change goes to every open page: the lines that follow sensors change at most once a
+    // second, and are written to change only when something worth reading does.
+    pitwall
         .status()
-        .add("Loop", this::loopStatus)
+        .add("Loop", this::loopStatus, STATUS_INTERVAL)
         .add("Alliance", this::allianceStation)
-        .add("Placement", () -> placement.describe())
-        .add("Localization", this::localizationStatus)
+        .add("Placement", () -> placement.describe(), STATUS_INTERVAL)
+        .add("Localization", this::localizationStatus, STATUS_INTERVAL)
         .add("Scoring", this::scoring)
         .add("Calibration", calibration::lastResult)
-        .add("Cameras", this::cameras);
+        .add("Cameras", this::cameras, STATUS_INTERVAL);
   }
 
   Drive drive() {

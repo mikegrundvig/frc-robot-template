@@ -111,7 +111,9 @@ Also built in:
   while disabled to start somewhere else. At kickoff, write the new game's the same way.
 - **A pose estimator built to be trusted** (`lib/localization`): 250 Hz odometry, with the gyro
   owning heading and the wheels' disagreement (slip) lowering their trust; camera measurements
-  applied at the moment their image was taken, however late they arrive; every measurement gated
+  applied at the moment their image was taken, even when they arrive late (up to 1.5 s, and
+  within their camera's usual latency plus a margin, or the clocks are out of step and the image
+  is left out); every measurement gated
   against the estimate, so a misread tag can't move it; and recovery when the cameras agree with
   each other that odometry is wrong (a collision). A camera knocked off its mount counts for less
   until it's recalibrated, and says so; a task lining up on a target can trust only that target's

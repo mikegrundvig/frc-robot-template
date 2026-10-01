@@ -404,10 +404,11 @@ class VisionTest {
   /**
    * An image stamped far earlier than its camera's images take to arrive, or after the robot read
    * it, has the wrong capture time: the camera's clock and the robot's are out of step. It's left
-   * out before the estimator sees it, and an alert says so until an image arrives in time again.
+   * out before the estimator sees it, counted, and an alert says so.
    */
   @Test
   void anImageOutsideItsCamerasLatencyBandIsLeftOut() {
+    loop(); // the loop before, which every image read later arrived after
     long now = estimator.estimate().timestampNanos();
     io.see(now - 300_000_000L, camera); // the camera takes 30 ms; 100 ms more is the margin
 
@@ -417,18 +418,69 @@ class VisionTest {
     assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
     assertThat(vision.camera(0).outOfStepAlertText())
         .isEqualTo(
-            "Camera front's images arrive 300 ms after they're taken, outside 0 to 130 ms, and are"
-                + " left out: are its clock and the robot's in step (time sync)? If it's just"
-                + " slower, measure its latency");
+            "Camera front's images are out of step, and left out: one arrived at least 300 ms"
+                + " after it was taken, more than 130 ms. Are its clock and the robot's in step"
+                + " (time sync)? If it's just slower, measure its latency");
     io.see(now + 5_000_000L, camera);
     loop();
-    assertThat(vision.camera(0).outOfStepAlertText()).contains("arrive 5 ms before they're taken");
     assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+    assertThat(vision.summary()).endsWith("no measurements yet, 2 images left out of step");
+  }
 
-    estimator.addOdometry(now + 40_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, true);
-    io.see(now + 20_000_000L, camera);
+  /**
+   * The alert stays up two seconds after the last image out of step, however many arrive in time.
+   */
+  @Test
+  void theOutOfStepAlertStaysUpTwoSecondsAfterTheLast() {
     loop();
-    assertThat(vision.camera(0).accepted()).as("in time again").isEqualTo(1);
+    io.see(estimator.estimate().timestampNanos() - 300_000_000L, camera);
+    loop();
+
+    imagesFrom(camera, 95); // 1.9 s of images in time
+
+    assertThat(vision.camera(0).accepted()).isEqualTo(95);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).as("still held").isTrue();
+    imagesFrom(camera, 10);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+  }
+
+  /**
+   * A loop that ran long (here 400 ms) reads images that arrived just after the loop before: they
+   * waited on the robot, not the camera, and are in time.
+   */
+  @Test
+  void aLoopThatRanLongDoesNotMakeItsImagesLate() {
+    loop();
+    long before = estimator.estimate().timestampNanos();
+    long now = before + 400_000_000L;
+    estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, true);
+    io.see(before + 20_000_000L, camera); // arrived 30 ms later, then waited 350 ms for the loop
+
+    vision.periodic(now, estimator.estimate(), 0, 0);
+    vision.record(estimator.update());
+
+    assertThat(vision.camera(0).accepted()).isEqualTo(1);
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+  }
+
+  /** A camera turned off, or gone, says so itself: its out-of-step alert comes down at once. */
+  @Test
+  void aCameraTurnedOffOrGoneTakesDownItsOutOfStepAlert() {
+    loop();
+    io.see(estimator.estimate().timestampNanos() - 300_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
+
+    vision.camera(0).enabled.set(false);
+    loop();
+
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
+    vision.camera(0).enabled.set(true);
+    io.see(estimator.estimate().timestampNanos() - 299_000_000L, camera);
+    loop();
+    assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
+    io.connected = false;
+    loop();
     assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
   }
 

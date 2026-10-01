@@ -57,7 +57,8 @@ import org.wpilib.util.Alert;
  *
  * <p>Each image's latency, from when it was taken to the loop that reads it, is logged too. One
  * that arrives before it was taken, or much later than its camera's usual latency, has the wrong
- * capture time (the camera's clock and the robot's out of step): it's left out, with an alert.
+ * capture time (the camera's clock and the robot's out of step): it's left out, counted, and an
+ * alert stays up for two seconds after the last.
  *
  * <p>How far images are trusted is the robot's configuration ({@code RobotConfig.vision}), whose
  * main thresholds and uncertainties Pitwall tunes. Two switches are WPILib tunables, for the drive
@@ -132,6 +133,9 @@ public final class Vision implements AutoCloseable {
   private long holdUntilNanos = Long.MIN_VALUE;
   private final List<String> tunablePaths = new ArrayList<>();
   private VisionConfig current;
+
+  /** When the previous loop read the cameras: what each image read now arrived after. */
+  private long previousLoopNanos = Long.MIN_VALUE;
 
   /** The robot's alliance, once known: a task lining up on a place trusts that alliance's tags. */
   private final Supplier<Optional<Alliance>> alliance;
@@ -409,8 +413,9 @@ public final class Vision implements AutoCloseable {
           camera.outcome("unusable data from the camera: " + e.getMessage());
         }
       }
-      camera.logLoop();
+      camera.logLoop(nowNanos);
     }
+    previousLoopNanos = nowNanos;
   }
 
   /**
@@ -449,7 +454,7 @@ public final class Vision implements AutoCloseable {
     // An image that arrived before it was taken, or far later than its camera's images do, has
     // the wrong capture time: solved as of that time, it would put the robot where it wasn't.
     if (!camera.arrivedInTime(
-        Timestamps.toSeconds(nowNanos - frame.timestampNanos()), current.latencyMarginSeconds())) {
+        frame.timestampNanos(), nowNanos, previousLoopNanos, current.latencyMarginSeconds())) {
       return;
     }
     Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);
@@ -577,10 +582,12 @@ public final class Vision implements AutoCloseable {
     int connected = 0;
     int accepts = 0;
     int rejects = 0;
+    int outOfStep = 0;
     for (Camera camera : cameras) {
       connected += camera.isConnected() ? 1 : 0;
       accepts += camera.accepted();
       rejects += camera.rejected();
+      outOfStep += camera.leftOutOfStep();
     }
     String fate =
         accepts + rejects == 0
@@ -590,7 +597,12 @@ public final class Vision implements AutoCloseable {
                 "%.0f%% of %d measurements accepted",
                 100.0 * accepts / (accepts + rejects),
                 accepts + rejects);
-    return connected + " of " + cameras.size() + " cameras connected, " + fate;
+    return connected
+        + " of "
+        + cameras.size()
+        + " cameras connected, "
+        + fate
+        + (outOfStep > 0 ? ", " + outOfStep + " images left out of step" : "");
   }
 
   /**

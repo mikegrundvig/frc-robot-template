@@ -113,7 +113,8 @@ class CameraStudyTest {
     assertThat(Files.readAllLines(folder.resolve("report/candidates.csv"))).hasSize(1 + 14);
     assertThat(Files.readString(folder.resolve("report/summary.md")))
         .contains("all of up to 2 cameras at the places in `" + mounts + "`")
-        .contains("Other robots in the cameras' way: 3 to 5 around each pose")
+        .contains("Other robots in the cameras' way: 3 to 5 around each pose, each a solid box")
+        .contains("0.76 m tall")
         .contains("2 cameras: front 0°, up 10°; back 180°, up 20°");
   }
 
@@ -195,6 +196,7 @@ class CameraStudyTest {
                   "--mount-error-mm=3",
                   "--mount-error-degrees=0.5",
                   "--other-robots=3-5",
+                  "--other-robots-height-meters=1.2",
                   "--robust"
                 }));
 
@@ -206,6 +208,7 @@ class CameraStudyTest {
     assertThat(set.mountErrorDegrees()).isEqualTo(0.5);
     assertThat(set.otherRobotsLeast()).isEqualTo(3);
     assertThat(set.otherRobotsMost()).isEqualTo(5);
+    assertThat(set.otherRobotsHeightMeters()).isEqualTo(1.2);
     assertThat(set.trials()).isEqualTo(CameraStudyConfig.ROBUST_TRIALS);
     CameraStudyConfig four =
         CameraStudy.config(CameraStudy.options(new String[] {"--other-robots=4"}));
@@ -231,6 +234,8 @@ class CameraStudyTest {
     assertThatThrownBy(() -> run("--field=FRC_2027")).hasMessageContaining("no field named");
     assertThatThrownBy(() -> run("--other-robots=3-5-7"))
         .hasMessageContaining("--other-robots must be a whole number, or two with a dash");
+    assertThatThrownBy(() -> run("--other-robots=6"))
+        .hasMessageContaining("6 must be from 0 to 5: an FRC field has five other robots");
     assertThatThrownBy(() -> run("--other-robots=5-3"))
         .hasMessageContaining("otherRobotsMost: 3 must be at least otherRobotsLeast (5)");
     assertThatThrownBy(() -> run("--headings=99999999999"))

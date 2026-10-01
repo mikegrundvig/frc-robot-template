@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -200,6 +201,38 @@ class CameraScoringTest {
         .orElseThrow();
   }
 
+  /**
+   * Facing the wall, with five other robots around, placed anew for each of 16 sets of images: some
+   * stand between the camera and the wall, and the score changes.
+   */
+  @Test
+  void otherRobotsInTheWayChangeTheScoreFacingTheWall() {
+    CameraStudyConfig often = CameraStudyConfigBuilder.builder(ONE_THREAD).frames(16).build();
+    CameraStudyConfig crowded =
+        CameraStudyConfigBuilder.builder(often).otherRobotsLeast(5).otherRobotsMost(5).build();
+
+    Score clear = ranking(often, List.of(FACING_THE_WALL), AHEAD).get(0);
+    Score crowd = ranking(crowded, List.of(FACING_THE_WALL), AHEAD).get(0);
+
+    assertThat(clear.oneTag()).isEqualTo(1.0);
+    assertThat(crowd).isNotEqualTo(clear);
+    assertThat(crowd.twoTags()).isLessThan(clear.twoTags());
+  }
+
+  /** Over the whole field, too: five other robots cost the robot some of its view. */
+  @Test
+  void otherRobotsInTheWayCostTheRobotItsView() {
+    List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
+    CameraStudyConfig crowded =
+        CameraStudyConfigBuilder.builder(ONE_THREAD).otherRobotsLeast(5).otherRobotsMost(5).build();
+
+    Score clear = ranking(ONE_THREAD, samples, AHEAD_AND_BACK).get(0);
+    Score crowd = ranking(crowded, samples, AHEAD_AND_BACK).get(0);
+
+    assertThat(crowd.oneTag()).isLessThan(clear.oneTag());
+    assertThat(crowd.measured()).isLessThan(clear.measured());
+  }
+
   @Test
   void aSpotWeighingNothingDoesntCount() {
     Sample ignored = new Sample(FACING_AWAY.pose(), 0, 1, 0);
@@ -227,13 +260,21 @@ class CameraScoringTest {
     assertThat(scoring.distinctCameras()).isEqualTo(2);
   }
 
-  /** In the nominal conditions, and in a trial's, where every camera is off its mount too. */
-  @ParameterizedTest(name = "in a trial: {0}")
-  @ValueSource(booleans = {false, true})
-  void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads(boolean trial) {
+  /**
+   * In the nominal conditions, and in a trial's, where every camera is off its mount too; with and
+   * without other robots in the way.
+   */
+  @ParameterizedTest(name = "in a trial: {0}, other robots: {1}")
+  @CsvSource({"false, 0", "true, 0", "false, 2", "true, 2"})
+  void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads(boolean trial, int otherRobots) {
     List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig threes =
-        CameraStudyConfigBuilder.builder(ONE_THREAD).threads(3).frames(2).build();
+        CameraStudyConfigBuilder.builder(ONE_THREAD)
+            .threads(3)
+            .frames(2)
+            .otherRobotsLeast(otherRobots)
+            .otherRobotsMost(otherRobots == 0 ? 0 : otherRobots + 2)
+            .build();
     CameraStudyConfig otherSeed = CameraStudyConfigBuilder.builder(threes).seed(2).build();
 
     List<Score> once =

@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.pitwall;
 import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.entry;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.Volts;
@@ -233,6 +234,35 @@ class LiveConfigTest {
         .isEqualTo(Limits.between(0, 100));
     assertThat(dashboard.getTunable("Machine/drive/limits/current").getConfig().getProperties())
         .contains("\"unit\":\"A\"");
+    assertThat(dashboard.getTunable("Machine/drive/gains/kP").getConfig().getProperties())
+        .as("what it means, from its record's Javadoc")
+        .contains("\"description\":\"volts per meter per second of error\"");
+    assertThat(dashboard.getTunable("Machine/travel/min").getConfig().getProperties())
+        .as("undocumented")
+        .doesNotContain("description");
+  }
+
+  /**
+   * The page says what each value means: its {@code @param} in the record that declares it, found
+   * as the value is, through the records that hold it.
+   */
+  @Test
+  void eachValueMeansWhatItsRecordsJavadocSays() {
+    var live = live();
+
+    assertThat(live.recordOf(KP)).isEqualTo(Fixtures.Gains.class);
+    assertThat(live.meaning(KP)).isEqualTo("volts per meter per second of error");
+    assertThat(live.meaning("drive.limits.current"))
+        .isEqualTo("the most current through the motor");
+    assertThat(live.meaning("drive.limits.maxSpeed")).as("no @param").isEmpty();
+    assertThat(live.meaning("travel.min")).as("no Javadoc").isEmpty();
+    assertThatIllegalArgumentException().isThrownBy(() -> live.meaning("drive.motor.kP"));
+    assertThat(live.groups())
+        .containsExactly(
+            entry("drive", Fixtures.Drive.class),
+            entry("drive.gains", Fixtures.Gains.class),
+            entry("drive.limits", Fixtures.DriveLimits.class),
+            entry("travel", Fixtures.Range.class));
   }
 
   /** WPILib's contract: a setter never throws. A refused value is declined, and nothing breaks. */

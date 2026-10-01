@@ -37,33 +37,17 @@ class ParameterDocsTest {
             entry("lookahead", "how far ahead the drive aims"));
   }
 
-  /** The record that declares a value is found through the records that hold it. */
   @Test
-  void aValueIsFoundByItsPathAsLiveConfigNamesIt() {
-    assertThat(ParameterDocs.param(Fixtures.Machine.class, "drive.gains.kP"))
-        .isEqualTo("volts per meter per second of error");
-    assertThat(ParameterDocs.param(Fixtures.Machine.class, "drive.limits.current"))
-        .isEqualTo("the most current through the motor");
-    assertThat(ParameterDocs.param(Fixtures.Gains.class, "lookahead"))
-        .isEqualTo("how far ahead the drive aims");
-  }
-
-  @Test
-  void whatsMissingIsEmptyNeverAnError() {
-    assertThat(ParameterDocs.param(Fixtures.Machine.class, "drive.limits.maxSpeed"))
-        .as("no @param")
-        .isEmpty();
-    assertThat(ParameterDocs.param(Fixtures.Machine.class, "travel.min"))
-        .as("no Javadoc")
-        .isEmpty();
-    assertThat(ParameterDocs.param(Fixtures.Machine.class, "drive.wheels.kP"))
-        .as("no such value")
-        .isEmpty();
-    assertThat(ParameterDocs.param(Fixtures.Machine.class, "name.length"))
-        .as("not a record")
-        .isEmpty();
+  void aRecordWithoutJavadocHasNone() {
     assertThat(ParameterDocs.of(Fixtures.Range.class)).isEqualTo(ParameterDocs.NONE);
     assertThat(ParameterDocs.of(String.class)).as("Java's own").isEqualTo(ParameterDocs.NONE);
+  }
+
+  /** The page names a record this way to say whose Javadoc to write. */
+  @Test
+  void aRecordIsNamedAsCodeInItsPackageWritesIt() {
+    assertThat(ParameterDocs.nameOf(Fixtures.Gains.class)).isEqualTo("Fixtures.Gains");
+    assertThat(ParameterDocs.nameOf(String.class)).isEqualTo("String");
   }
 
   @Test

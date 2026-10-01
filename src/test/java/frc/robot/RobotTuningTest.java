@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.ParameterDocs;
-import frc.robot.lib.config.SwerveConfig;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
 import java.util.List;
@@ -45,16 +44,26 @@ class RobotTuningTest {
   }
 
   /**
-   * The page says what a value means from its record's Javadoc, which the build writes into the
-   * program as it compiles: a value's {@code @param}, and its record's text.
+   * The page says what each tunable value means, from its record's Javadoc, which the build writes
+   * into the program as it compiles: every one needs a {@code @param} saying what it does.
    */
   @Test
-  void aTunedValueSaysWhatItMeans() {
-    assertThat(ParameterDocs.param(SwerveConfig.class, "gains.steerKp"))
-        .isEqualTo("volts per radian of error");
-    assertThat(ParameterDocs.of(SwerveConfig.Gains.class).summary())
-        .isEqualTo(
-            "Drive: velocity control on the motor controller, with feedforward from robot code.");
+  void everyTunableValueSaysWhatItMeans() {
+    for (LiveConfig<?> live :
+        List.of(Drive.tuning(Robots.SIM.drivetrain()), Vision.tuning(Robots.SIM.vision()))) {
+      for (LiveConfig.Knob knob : live.knobs()) {
+        String component = knob.path().substring(knob.path().lastIndexOf('.') + 1);
+        assertThat(live.meaning(knob.path()))
+            .as(
+                "%s %s says nothing: add @param %s to %s's Javadoc, saying what it does and in"
+                    + " what unit",
+                live.name(),
+                knob.path(),
+                component,
+                ParameterDocs.nameOf(live.recordOf(knob.path())))
+            .isNotBlank();
+      }
+    }
   }
 
   /** Within its limits isn't enough: the records' own checks have the last word, and say which. */

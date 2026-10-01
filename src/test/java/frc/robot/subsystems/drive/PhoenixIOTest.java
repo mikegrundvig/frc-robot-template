@@ -2,17 +2,21 @@ package frc.robot.subsystems.drive;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Rotations;
+import static org.wpilib.units.Units.Seconds;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.StatusCode;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.hardware.TalonFX;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.config.SwerveConfig;
+import frc.robot.lib.config.SwerveConfigLimitsBuilder;
 import frc.robot.lib.config.SwerveWiring;
 import java.util.ArrayDeque;
 import java.util.List;
@@ -102,6 +106,116 @@ class PhoenixIOTest {
     assertThat(inputs.steerAngle.getDegrees()).isCloseTo(90, within(0.5));
     assertThat(inputs.odometryTimestampsNanos).hasSameSizeAs(inputs.odometryDrivePositionsRad);
     assertThat(inputs.unconfigured).as("every device took its configuration").isEmpty();
+  }
+
+  /**
+   * What Phoenix does with a motor's supply current when the code doesn't say: a supply limit is on
+   * (70 A), and it steps down to 40 A once the motor has been held at the limit for 1 s. The
+   * comments in {@link ModuleIOTalonFX} and {@code SwerveConfig.Limits} say so; if a Phoenix update
+   * changes these defaults, change those comments.
+   */
+  @Test
+  void phoenixStepsTheSupplyLimitDownTo40AmpsAfterASecondUnlessToldOtherwise() {
+    CurrentLimitsConfigs defaults = new CurrentLimitsConfigs();
+
+    assertThat(defaults.SupplyCurrentLimitEnable).isTrue();
+    assertThat(defaults.SupplyCurrentLimit).isEqualTo(70);
+    assertThat(defaults.SupplyCurrentLowerLimit).isEqualTo(40);
+    assertThat(defaults.SupplyCurrentLowerTime).isEqualTo(1.0);
+  }
+
+  /**
+   * The drive motors' supply limit, and its step-down, come from the configuration: at startup, and
+   * each time tuning changes them. The values differ from Phoenix's defaults (40 A after 1 s), so
+   * this fails if the lines that set them are removed and the defaults silently return.
+   */
+  @Test
+  void theDriveMotorsSupplyLimitStepsDownAsConfiguredAtStartupAndWhenTuned()
+      throws InterruptedException {
+    ModuleIOTalonFX io =
+        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+    TalonFX drive = new TalonFX(11, BUS);
+
+    io.configure(DRIVETRAIN.gains(), stepDown(55, 35, 0.5));
+    assertSupplyLimit(drive, 55, 35, 0.5);
+
+    io.configure(DRIVETRAIN.gains(), stepDown(50, 30, 0.8)); // tuned on the running robot
+    assertSupplyLimit(drive, 50, 30, 0.8);
+
+    io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits()); // back to the template's
+    SwerveConfig.Limits template = DRIVETRAIN.limits();
+    assertSupplyLimit(
+        drive,
+        template.driveSupplyCurrent().in(Amps),
+        template.driveSupplyLowerCurrent().in(Amps),
+        template.driveSupplyLowerTime().in(Seconds));
+  }
+
+  /**
+   * The steering has no supply limit, so no step-down: its stator limit caps what it draws from the
+   * battery. Phoenix would turn one on by default, so this fails if the line turning it off goes.
+   */
+  @Test
+  void theSteeringHasNoSupplyLimitAndSoNoStepDown() throws InterruptedException {
+    ModuleIOTalonFX io =
+        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+    TalonFX steer = new TalonFX(15, BUS);
+    CurrentLimitsConfigs read = new CurrentLimitsConfigs();
+
+    io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits());
+    assertThat(steer.getConfigurator().refresh(read, 1.0).isOK()).as("read back").isTrue();
+    assertThat(read.SupplyCurrentLimitEnable).as("at startup").isFalse();
+    assertThat(read.StatorCurrentLimitEnable).isTrue();
+
+    io.configure(
+        DRIVETRAIN.gains(),
+        SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+            .steerStatorCurrent(Amps.of(35))
+            .build());
+    boolean applied =
+        eventually(
+            () -> steer.getConfigurator().refresh(read, 1.0),
+            () -> Math.abs(read.StatorCurrentLimit - 35) < 0.01);
+    assertThat(applied).as("the tuned limit reached the steering").isTrue();
+    assertThat(read.SupplyCurrentLimitEnable).as("after tuning").isFalse();
+  }
+
+  /** The template's limits, with the drive's supply limit and its step-down changed. */
+  private static SwerveConfig.Limits stepDown(double amps, double lowerAmps, double lowerSeconds) {
+    return SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+        .driveSupplyCurrent(Amps.of(amps))
+        .driveSupplyLowerCurrent(Amps.of(lowerAmps))
+        .driveSupplyLowerTime(Seconds.of(lowerSeconds))
+        .build();
+  }
+
+  /**
+   * Waits for the motor to report this supply limit and step-down (a change while running is sent
+   * without waiting), then checks the limit is on. The motor keeps the time to about 0.02 s: 0.75 s
+   * reads back as 0.76.
+   */
+  private static void assertSupplyLimit(
+      TalonFX motor, double amps, double lowerAmps, double lowerSeconds)
+      throws InterruptedException {
+    CurrentLimitsConfigs read = new CurrentLimitsConfigs();
+    boolean reported =
+        eventually(
+            () -> motor.getConfigurator().refresh(read, 1.0),
+            () ->
+                Math.abs(read.SupplyCurrentLimit - amps) < 0.01
+                    && Math.abs(read.SupplyCurrentLowerLimit - lowerAmps) < 0.01
+                    && Math.abs(read.SupplyCurrentLowerTime - lowerSeconds) < 0.01);
+    assertThat(reported)
+        .as(
+            "wants %s A, then %s A after %s s; the drive motor has %s A, %s A, %s s",
+            amps,
+            lowerAmps,
+            lowerSeconds,
+            read.SupplyCurrentLimit,
+            read.SupplyCurrentLowerLimit,
+            read.SupplyCurrentLowerTime)
+        .isTrue();
+    assertThat(read.SupplyCurrentLimitEnable).as("the supply limit is on").isTrue();
   }
 
   /** A main loop that fell behind gets the newest readings, not stale ones. */

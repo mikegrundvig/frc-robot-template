@@ -26,7 +26,13 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
 - **Physics simulation** (traction, collisions, game pieces): maple-sim. Until then, simulation tests
-  the code, not the robot's traction or power. The simulator keeps the robot's true pose apart from
+  the code, not the robot's traction or power. Power includes the drive motors' supply current
+  limit: the simulator models neither it nor Phoenix's step-down from it
+  (`SwerveConfig.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`), and its battery holds
+  12 V, so the supply current a simulated module reports is what its motor would draw with no supply
+  limit. At the template's 30 A stator limit that changes nothing: a drive motor draws under 30 A
+  from the battery, below both limits. Raise the stator limit past them, and the simulator lets a
+  motor draw more from the battery than its motor controller would. The simulator keeps the robot's true pose apart from
   its sensors (`DriveSimulation`, `SensorErrors`), the drive and steering motors obey their stator
   current limits, the steering's loop runs as a TalonFX's does (every millisecond, on the angle its
   CANcoder sends every 10 ms), the robot rides over the field's bumps (tilted and raised by the

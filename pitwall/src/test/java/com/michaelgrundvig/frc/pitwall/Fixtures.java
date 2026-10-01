@@ -18,6 +18,11 @@ final class Fixtures {
   /** A fact about the hardware: not tunable. */
   record Motor(double freeSpeedMetersPerSecond) {}
 
+  /**
+   * The drive's limits.
+   *
+   * @param current the most current through the motor
+   */
   record DriveLimits(Current current, LinearVelocity maxSpeed) {
     DriveLimits {
       if (!(current.baseUnitMagnitude() > 0)) {
@@ -26,6 +31,14 @@ final class Fixtures {
     }
   }
 
+  /**
+   * How the drive is controlled. Tuned on a running machine, then committed.
+   *
+   * <p>Start {@code kP} low.
+   *
+   * @param kP volts per meter per second of error
+   * @param lookahead how far ahead the drive aims
+   */
   record Gains(double kP, Time lookahead) {
     Gains {
       if (!(kP >= 0)) {

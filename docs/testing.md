@@ -12,11 +12,12 @@ it, fool its sensors, and check what it believes against where it really is.
 | One robot test class, whatever its kind | `./gradlew :test --tests frc.robot.RobotContainerSimTest` |
 | A package's tests | `./gradlew :test --tests 'frc.robot.lib.field.*'` |
 | Pitwall's tests | `./gradlew :pitwall:test` |
+| The tests of Pitwall's documentation processor | `./gradlew :pitwall:docs-processor:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
 
 The colon in `:test` means the robot project's tests only. Without it, `--tests` also applies to
-Pitwall's project, which has no such test and fails the build saying so.
+Pitwall's projects, which have no such test and fail the build saying so.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
 analysis and coverage report that `ci` runs. The coverage report is at

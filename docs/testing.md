@@ -88,14 +88,21 @@ What it offers:
   runs every one on the robot. A new scenario goes in `Scenarios.ALL`, with a test in
   `ScenariosTest` that it does to the simulated world what it says.
 - **What dashboards see:** `sim.telemetry()`; and the Pitwall page, `sim.pitwall()`: its status,
-  its actions, and tuning, as the page uses them.
+  actions, tuning, and experiments, as the page uses them. The page's own requests go over HTTP to
+  `sim.pitwall().port()` (use `127.0.0.1`); `SteeringExperimentSimTest` drives an experiment the
+  way the page does, its event stream and all. Status items are read only when a page watches or
+  asks, so ask first (`sim.pitwall().status().requestRead()`). The experiments' deadman runs on
+  the robot's clock, so it steps with the loops: send the page's heartbeats every so many loops,
+  not on a timer.
 
 ## Rules that keep tests trustworthy
 
 - **The same run every time.** The clock moves only when stepped, and the simulator's wheel and
   gyro noise comes from a fixed seed, so those runs repeat exactly. PhotonVision's simulated
   cameras add noise of their own, unseeded, so a test with cameras checks against a margin, never
-  an exact value. Never `Thread.sleep` to wait for robot time; step the loop.
+  an exact value. Never `Thread.sleep` to wait for robot time; step the loop. To wait for the
+  network (an answer, an event on a stream), wait on it with a timeout, a loop at a time; to show
+  nothing else arrived, send a change and check it's the next thing to.
 - **Recorded behavior stays recorded.** `EstimatorGoldenSimTest` compares the pose estimator's
   estimate, loop by loop through a seeded session, with a recording
   (`estimator-golden.csv`). It fails on any change to what the estimator does, which is the point

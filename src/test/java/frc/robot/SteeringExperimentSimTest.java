@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -19,8 +20,8 @@ import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -38,6 +39,10 @@ import org.wpilib.hardware.hal.RobotMode;
 class SteeringExperimentSimTest {
   private static final String STEER_KP = "/Drive/config/gains/steerKp";
   private static final String STEER_KD = "/Drive/config/gains/steerKd";
+
+  /** The longest the test waits, in real time, for the network. */
+  private static final Duration WAIT = Duration.ofSeconds(10);
+
   private static final JsonType<Object> JSON = Jsonb.builder().build().type(Object.class);
 
   @RegisterExtension final RobotSim sim = new RobotSim();
@@ -61,18 +66,30 @@ class SteeringExperimentSimTest {
     final String stream;
 
     Page() throws Exception {
-      CompletableFuture<HttpResponse<Stream<String>>> connecting =
-          client.sendAsync(
-              HttpRequest.newBuilder(uri("/api/events")).GET().build(),
-              HttpResponse.BodyHandlers.ofLines());
-      loopUntil(connecting::isDone);
-      Stream<String> lines = connecting.get().body();
+      Stream<String> lines =
+          answered(
+                  client.sendAsync(
+                      HttpRequest.newBuilder(uri("/api/events")).GET().build(),
+                      HttpResponse.BodyHandlers.ofLines()))
+              .body();
       open.add(lines::close);
       Thread.ofVirtual().start(() -> read(lines));
-      loopUntil(() -> !events.isEmpty());
-      Sse snapshot = Objects.requireNonNull(events.poll());
+      Sse snapshot = nextEvent();
       assertThat(snapshot.event()).isEqualTo("snapshot");
       stream = (String) Objects.requireNonNull(snapshot.data().get("stream"));
+    }
+
+    /** The next event, running the robot a loop at a time until it comes. */
+    private Sse nextEvent() throws Exception {
+      long deadline = System.nanoTime() + WAIT.toNanos();
+      while (System.nanoTime() < deadline) {
+        sim.loop();
+        Sse event = events.poll(50, TimeUnit.MILLISECONDS);
+        if (event != null) {
+          return event;
+        }
+      }
+      throw new AssertionError("no event within " + WAIT);
     }
 
     private void read(Stream<String> lines) {
@@ -107,54 +124,54 @@ class SteeringExperimentSimTest {
                   .method(method, HttpRequest.BodyPublishers.ofString(json))
                   .build(),
               HttpResponse.BodyHandlers.ofString());
-      loopUntil(answer::isDone);
-      return answer.get();
+      return answered(answer);
+    }
+
+    /** A heartbeat, as the page sends one after 100 ms of quiet: answered at once. */
+    private void heartbeat() throws Exception {
+      var answer =
+          client.send(
+              HttpRequest.newBuilder(uri("/api/heartbeat"))
+                  .header("Pitwall-Stream", stream)
+                  .POST(HttpRequest.BodyPublishers.noBody())
+                  .build(),
+              HttpResponse.BodyHandlers.discarding());
+      assertThat(answer.statusCode()).isEqualTo(204);
     }
 
     /**
      * Runs the steering's experiment to its end, keeping it going as the page does: a heartbeat
-     * whenever it has been quiet for 200 ms (here, every 100 ms of real time). Returns the run as
-     * the stream last described it, with every sample the stream carried.
+     * every ten loops, 200 ms of the robot's time, on whose clock the deadman runs. Returns the run
+     * as the stream described it, with every sample the stream carried.
      */
     Run run() throws Exception {
       var started =
           send("POST", "/api/experiments", "{\"start\": \"" + RobotContainer.STEER_STEP + "\"}");
       assertThat(started.statusCode()).as(started.body()).isEqualTo(200);
-      AtomicBoolean running = new AtomicBoolean(true);
-      Thread heartbeats =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    while (running.get()) {
-                      try {
-                        client.send(
-                            HttpRequest.newBuilder(uri("/api/heartbeat"))
-                                .header("Pitwall-Stream", stream)
-                                .POST(HttpRequest.BodyPublishers.noBody())
-                                .build(),
-                            HttpResponse.BodyHandlers.discarding());
-                        Thread.sleep(100);
-                      } catch (Exception stopped) {
-                        return;
-                      }
-                    }
-                  });
       Run run = new Run();
-      try {
-        loopUntil(
-            () -> {
-              takeEvents(run);
-              return run.ended();
-            });
-      } finally {
-        running.set(false);
-        heartbeats.join();
+      long deadline = System.nanoTime() + WAIT.toNanos();
+      for (int loop = 1; !run.ended(); loop++) {
+        assertThat(System.nanoTime()).as("the run ended within " + WAIT).isLessThan(deadline);
+        if (loop % 10 == 0) {
+          heartbeat();
+        }
+        sim.loop();
+        takeEvents(run);
       }
-      // The last loop's samples come the loop after the run says it has ended.
-      sim.loops(2);
-      Thread.sleep(100);
-      takeEvents(run);
+      // Its last samples follow the patch that says it ended: wait for every one.
+      int recorded = recordedAngles().size();
+      while (run.samples.getOrDefault("Front left", 0) < recorded) {
+        Sse event = events.poll(WAIT.toMillis(), TimeUnit.MILLISECONDS);
+        assertThat(event).as("every sample, within " + WAIT).isNotNull();
+        run.take(Objects.requireNonNull(event));
+      }
       return run;
+    }
+
+    /** The front left wheel's angle readings as the robot recorded them. */
+    List<?> recordedAngles() throws Exception {
+      Map<String, Object> trace = asMap(asMap(JSON.fromJson(get("/api/run").body())).get("trace"));
+      return asList(asMap(asMap(trace.get("signals")).get("Front left")).get("t"));
     }
 
     private void takeEvents(Run run) {
@@ -233,9 +250,7 @@ class SteeringExperimentSimTest {
     }
     assertThat(number(asMap(run.state.get("gains")).get(STEER_KP))).isEqualTo(16.0);
     // Every angle reading the robot recorded reached the page, at 250 Hz: about 2.1 s of them.
-    var recorded = page.get("/api/run");
-    Map<String, Object> trace = asMap(asMap(JSON.fromJson(recorded.body())).get("trace"));
-    List<?> angles = asList(asMap(asMap(trace.get("signals")).get("Front left")).get("t"));
+    List<?> angles = page.recordedAngles();
     assertThat(run.samples.get("Front left")).isEqualTo(angles.size());
     assertThat(angles.size()).isBetween(500, 540);
   }
@@ -297,13 +312,21 @@ class SteeringExperimentSimTest {
         .isBetween(0.005, 0.05);
   }
 
-  /** Runs the robot, a millisecond of real time between loops, until something is true. */
-  private void loopUntil(BooleanSupplier done) throws InterruptedException {
-    for (int i = 0; i < 3000 && !done.getAsBoolean(); i++) {
+  /**
+   * Runs the robot a loop at a time until an answer comes, waiting up to 50 ms of real time for it
+   * after each loop: the time it takes is the network's, not the robot's.
+   */
+  private <T> T answered(CompletableFuture<T> answer) throws Exception {
+    long deadline = System.nanoTime() + WAIT.toNanos();
+    while (System.nanoTime() < deadline) {
       sim.loop();
-      Thread.sleep(1);
+      try {
+        return answer.get(50, TimeUnit.MILLISECONDS);
+      } catch (TimeoutException notYet) {
+        // Another loop, then.
+      }
     }
-    assertThat(done.getAsBoolean()).as("it happened within 3000 loops").isTrue();
+    throw new AssertionError("no answer within " + WAIT);
   }
 
   /** On 127.0.0.1: on Windows, localhost tries IPv6 first and costs about 200 ms each time. */

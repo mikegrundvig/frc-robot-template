@@ -145,6 +145,10 @@ class WorldViewTest {
         .contains("\"speed.front-left\":0.4")
         .contains("\"uncertainty\":[3,4,");
     assertThat(loop(feed)).as("a still robot sends nothing").isEqualTo("{}");
+    modules[0] = new SwerveModuleVelocity(2.0, Rotation2d.fromDegrees(45.6));
+    assertThat(loop(feed)).as("a wheel's jitter at rest is no news").doesNotContain("module.");
+    modules[0] = new SwerveModuleVelocity(2.0, Rotation2d.fromDegrees(46.2));
+    assertThat(loop(feed)).as("a degree's turn is").contains("\"module.front-left\":[");
     assertThat(said).isEmpty();
   }
 

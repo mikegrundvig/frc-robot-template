@@ -53,6 +53,15 @@ final class RobotLayer implements Layer {
 
   static final double DEADBAND_RADIANS = Math.toRadians(0.5);
 
+  /**
+   * How far a wheel must turn before the page hears of it: a wheel at rest reads a few tenths of a
+   * degree either way as its encoder settles, and a degree is less than a pixel of its drawing.
+   */
+  static final double STEER_DEADBAND_RADIANS = Math.toRadians(1);
+
+  /** A wheel's frame only turns: the least deadband for its place, a millimeter. */
+  private static final double WHEEL_DEADBAND_METERS = 0.001;
+
   private final FieldModel field;
   private final Body body;
   private final SwerveConfig drivetrain;
@@ -129,6 +138,7 @@ final class RobotLayer implements Layer {
       String frame = moduleFrames[i];
       scene
           .frame(frame, FRAME, modules[i].getX(), modules[i].getY(), 0, 0, 0, 0)
+          .deadband(frame, WHEEL_DEADBAND_METERS, STEER_DEADBAND_RADIANS)
           .value(moduleSpeeds[i], 0.01);
       scene
           .cylinder("wheel." + module, frame)

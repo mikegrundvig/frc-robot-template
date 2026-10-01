@@ -59,21 +59,29 @@ multi-tag solves, with corners within 0.01 px and solves within a millimeter and
 the last run, 160 images from the template robot's four cameras saw the same 274 tags and made the
 same 75 multi-tag solves, with corners within 0.001 px and solves within 0.03 mm.
 
-**Scores.** For each candidate, each a share of the field (of the poses, weighted):
+**The ranking: the error 95% of the field is within.** For each candidate, the study finds the
+position error that 95% of the field (of the poses, weighted, and every set of images at them) is
+within; a spot with no measurement at all counts as missed by any distance. Smaller is better. It
+puts coverage and accuracy in one number that keeps telling layouts apart: a share within a fixed
+distance stops doing that once every good layout reaches nearly all of a field rich in tags, as
+2026's is. A layout that leaves more than 5% of the field without a measurement has no such number
+("none"); those rank after the rest, by how much of the field they place within 5 cm. Errors within
+a millimeter of each other count as a tie, about the sampling's own noise, and a tie goes to fewer
+cameras.
+
+**The other scores**, each a share of the field:
 
 | Score | The share of poses where | Why it matters |
 |---|---|---|
-| localized | the combined measurement is within 5 cm of where the robot really is | The ranking: seeing tags and placing the robot well, in one number |
+| within 2 cm, within 5 cm | the combined measurement is that close to where the robot really is | How much of the field is placed well, at two standards |
 | one tag | a camera sees at least one tag | Without a tag, the robot runs on its wheels alone |
 | two tags | one camera sees two or more tags at once | A multi-tag solve needs two, and so does correcting the gyro's heading |
 | two cameras | two or more cameras see tags | A blocked or knocked camera doesn't leave the robot blind |
 | measured | the pipeline makes a measurement: tags in range, and the solve checks out | What reaches the estimator |
 | heading | a measurement corrects the gyro's heading | What keeps the gyro honest over a match |
 
-And the accuracy where there's a measurement: the position error (its root mean square, and the 95th
-percentile) and the heading error.
-
-Candidates rank by their localized share, then with fewer cameras first, then by position error.
+And the accuracy where there's a measurement: the position error's root mean square, and the
+heading error's.
 
 **Deterministic.** Every random draw comes from the seed, so the same run gives the same report, to
 the digit, on any computer with any number of threads. A camera's noise depends only on the seed,
@@ -100,7 +108,6 @@ on, for 3,840 poses and 157 layouts), and under 1 GB of memory. A finer grid cos
 | `--grid-meters=M` | 0.5 | Spacing of the positions |
 | `--headings=N` | 8 | Headings at each position |
 | `--frames=N` | 2 | Images each camera takes at each pose, each with its own noise |
-| `--target-meters=M` | 0.05 | How close counts as localized |
 | `--gyro-error-degrees=D` | 0.25 | The gyro heading's typical error |
 | `--seed=N` | 1 | The seed every random draw comes from |
 | `--threads=N` | 2 | How many threads to run on (the computer may be shared) |
@@ -115,16 +122,21 @@ The report is in `build/studies/camera-placement/`, written over on each run:
 - `candidates.csv`: every candidate, ranked, with every score, for a spreadsheet.
 - `poses.csv`: every pose for the robot's layout and the best one, for a closer look.
 
-A map shows, for each spot on the field, the share of headings where the robot is localized: `.`
-for none, `1` to `9` for tenths, `#` for all. Blue's alliance wall is on the left.
+A map shows, for each spot on the field, the share of headings where the robot is placed within
+5 cm: `.` for none, `1` to `9` for tenths, `#` for all. Blue's alliance wall is on the left.
 
-Shares within about a point of each other are a tie: that's the sampling's own noise, so choose
-among them on something else (fewer cameras, easier mounts). To turn it into requirements for CAD:
-take the fewest cameras whose localized share is within a few points of the best, then read off
-what the top layouts at that count share (corners or sides, height, splay, tilt). Those are the
-requirements, in words like these: "four cameras, one at each corner, facing out at
-30° to 45°, 16 to 24 in up, tilted up 10° to 20°". Rerun with weights once the strategy says where
-the robot must know where it is.
+To turn it into requirements for CAD:
+
+1. Take the fewest cameras whose 95% error is within a few millimeters of the best's. Errors a
+   millimeter or two apart, or shares a point apart, are the sampling's own noise: choose among
+   them on something else, such as easier mounts.
+2. Among those, prefer a high "two cameras" share: one camera blocked by a mechanism, a robot, or
+   a knock still leaves the robot seeing tags.
+3. Read off what the top layouts at that count share (corners or sides, height, splay, tilt).
+   Those are the requirements, in words like these: "four cameras, one at each corner, facing out
+   at 30° to 45°, 16 to 24 in up, tilted up 10° to 20°".
+
+Rerun with weights once the strategy says where the robot must know where it is.
 
 ## Weights
 

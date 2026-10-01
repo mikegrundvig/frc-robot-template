@@ -25,14 +25,14 @@ public record Candidate(String name, List<CameraConfig> cameras) {
   }
 
   /**
-   * The robot with these cameras in place of its own, checked as the robot's configuration checks
-   * its cameras: a camera outside the robot, or two with one name, is refused.
+   * Checks these cameras on the robot, as the robot's configuration checks its own: a camera
+   * outside the robot, or two with one name, is refused.
    *
    * @throws IllegalArgumentException naming this layout and every camera that doesn't fit
    */
-  public RobotConfig on(RobotConfig robot) {
+  public void checkOn(RobotConfig robot) {
     try {
-      return RobotConfigBuilder.builder(robot).cameras(cameras).build();
+      RobotConfigBuilder.builder(robot).cameras(cameras).build();
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(name + ": " + e.getMessage(), e);
     }

@@ -37,7 +37,6 @@ public final class CameraStudy {
         --grid-meters=M           how far apart the positions are (default 0.5)
         --headings=N              headings at each position (default 8)
         --frames=N                images each camera takes at each pose (default 2)
-        --target-meters=M         how close counts as localized (default 0.05)
         --gyro-error-degrees=D    the gyro heading's typical error (default 0.25)
         --seed=N                  where every random draw starts (default 1)
         --threads=N               how many threads to run on (default 2)
@@ -53,7 +52,6 @@ public final class CameraStudy {
           "grid-meters",
           "headings",
           "frames",
-          "target-meters",
           "gyro-error-degrees",
           "seed",
           "threads",
@@ -136,7 +134,7 @@ public final class CameraStudy {
         Locale.ROOT,
         "Scoring %d layouts (%d distinct cameras) at %d poses on %d threads...%n",
         candidates.size(),
-        scoring.mounts(),
+        scoring.distinctCameras(),
         samples.size(),
         config.threads());
 
@@ -156,18 +154,17 @@ public final class CameraStudy {
     setup.add(
         format(
             "%d layouts, %d distinct cameras; %.0f s on %d threads.",
-            candidates.size(), scoring.mounts(), seconds, config.threads()));
+            candidates.size(), scoring.distinctCameras(), seconds, config.threads()));
 
-    List<Score> ranking = result.ranking();
     Path directory = Path.of(options.getOrDefault("out", "build/studies/camera-placement"));
-    Report.write(directory, new Report.Run(setup, candidates.get(0), grid, result, ranking));
-    Score best = ranking.get(0);
+    Report.write(directory, new Report.Run(setup, candidates.get(0), grid, result));
+    Score best = result.ranking().get(0);
     out.printf(
         Locale.ROOT,
-        "Done in %.0f s. Best: %s, localized %.1f%% of the field.%n",
+        "Done in %.0f s. Best: %s, 95%% of the field within %.1f cm.%n",
         seconds,
         best.candidate().name(),
-        100 * best.localized());
+        100 * best.positionP95Meters());
     out.println("Report: " + directory.toAbsolutePath().resolve("summary.md"));
   }
 
@@ -195,7 +192,6 @@ public final class CameraStudy {
         .gridMeters(number(options, "grid-meters", d.gridMeters()))
         .headings((int) whole(options, "headings", d.headings()))
         .frames((int) whole(options, "frames", d.frames()))
-        .targetMeters(number(options, "target-meters", d.targetMeters()))
         .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
         .seed(whole(options, "seed", d.seed()))
         .threads((int) whole(options, "threads", d.threads()))

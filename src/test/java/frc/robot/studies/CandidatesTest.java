@@ -28,7 +28,7 @@ class CandidatesTest {
     Set<String> names = new HashSet<>();
     for (Candidate candidate : candidates) {
       assertThat(names.add(candidate.name())).as(candidate.name()).isTrue();
-      candidate.on(Robots.SIM); // within the robot, or it throws
+      candidate.checkOn(Robots.SIM); // within the robot, or it throws
       assertThat(candidate.cameras())
           .extracting(CameraConfig::sensor)
           .containsOnly(Robots.SIM.cameras().get(0).sensor());

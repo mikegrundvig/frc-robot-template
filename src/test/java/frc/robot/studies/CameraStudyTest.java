@@ -43,7 +43,7 @@ class CameraStudyTest {
 
     List<String> candidates = Files.readAllLines(folder.resolve("report/candidates.csv"));
     assertThat(candidates).hasSize(1 + 157);
-    assertThat(candidates.get(0)).startsWith("rank,layout,cameras,localized");
+    assertThat(candidates.get(0)).startsWith("rank,layout,cameras,position_p95_m");
     assertThat(candidates).anyMatch(line -> line.contains("\"The robot's own: sim\""));
     String summary = Files.readString(folder.resolve("report/summary.md"));
     assertThat(summary)

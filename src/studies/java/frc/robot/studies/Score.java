@@ -1,6 +1,6 @@
 package frc.robot.studies;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
@@ -9,8 +9,12 @@ import java.util.List;
  * of every set of images taken at them.
  *
  * @param candidate the layout
- * @param localized the share where the combined measurement is within the target of where the robot
- *     really is: the ranking's score
+ * @param positionP95Meters the position error that 95% of the field is within: the ranking's score.
+ *     A spot with no measurement counts as missed by any distance, so a layout that measures less
+ *     than 95% of the field has none (infinite).
+ * @param withinFiveCentimeters the share where the combined measurement is within 5 cm of where the
+ *     robot really is
+ * @param withinTwoCentimeters the share where it's within 2 cm
  * @param oneTag the share where a camera sees at least one tag
  * @param twoTags the share where one camera sees two or more at once: a multi-tag solve needs two,
  *     and so does correcting the gyro's heading
@@ -18,30 +22,36 @@ import java.util.List;
  *     doesn't leave the robot blind
  * @param measured the share where an image makes a measurement for the estimator
  * @param heading the share where an image corrects the gyro's heading
- * @param positionRmsMeters the position error where measured, root mean square
- * @param positionP95Meters the position error where measured, 95th percentile
+ * @param positionRmsMeters the position error where measured, root mean square; NaN if never
  * @param headingRmsDegrees the heading error where corrected, root mean square; NaN if never
  */
 public record Score(
     Candidate candidate,
-    double localized,
+    double positionP95Meters,
+    double withinFiveCentimeters,
+    double withinTwoCentimeters,
     double oneTag,
     double twoTags,
     double twoCameras,
     double measured,
     double heading,
     double positionRmsMeters,
-    double positionP95Meters,
     double headingRmsDegrees) {
+  static final double FIVE_CENTIMETERS = 0.05;
+  static final double TWO_CENTIMETERS = 0.02;
+
   /**
-   * The ranking: the most of the field localized first; then fewer cameras, which cost less and
-   * weigh less; then the smaller position error; then by name, so ties always fall the same way.
+   * The ranking: the smallest error that 95% of the field is within, to the millimeter, which is
+   * about the sampling's own noise. A tie goes to fewer cameras, which cost less and weigh less,
+   * then to the smaller error, then by name, so ties always fall the same way. A layout that
+   * measures less than 95% of the field has no such error; those rank after the rest, by how much
+   * of the field they place within 5 cm.
    */
   public static final Comparator<Score> RANKING =
-      Comparator.comparingDouble(Score::localized)
-          .reversed()
+      Comparator.comparingDouble((Score score) -> Math.round(score.positionP95Meters() * 1000))
+          .thenComparingDouble(Score::blindByWithin)
           .thenComparingInt(Score::cameras)
-          .thenComparingDouble(Score::positionRmsMeters) // none at all sorts last
+          .thenComparingDouble(Score::positionP95Meters)
           .thenComparing(score -> score.candidate().name());
 
   /** How many cameras the layout has. */
@@ -49,16 +59,26 @@ public record Score(
     return candidate.cameras().size();
   }
 
+  /** For a layout without a 95th percentile, more of the field within 5 cm first; else nothing. */
+  private double blindByWithin() {
+    return Double.isInfinite(positionP95Meters) ? -withinFiveCentimeters : 0;
+  }
+
   /**
    * A layout's score from its outcomes.
    *
    * @param outcomes for each sample, one outcome per set of images taken there
-   * @param targetMeters how close counts as localized
    */
-  public static Score of(
-      Candidate candidate, List<Sample> samples, Outcome[][] outcomes, double targetMeters) {
+  public static Score of(Candidate candidate, List<Sample> samples, Outcome[][] outcomes) {
+    int count = 0;
+    for (Outcome[] here : outcomes) {
+      count += here.length;
+    }
+    double[] errors = new double[count];
+    double[] weights = new double[count];
     double total = 0;
-    double localized = 0;
+    double withinFive = 0;
+    double withinTwo = 0;
     double oneTag = 0;
     double twoTags = 0;
     double twoCameras = 0;
@@ -66,7 +86,7 @@ public record Score(
     double heading = 0;
     double squaredPosition = 0;
     double squaredHeading = 0;
-    List<double[]> errors = new ArrayList<>(); // each measured image set's error, with its weight
+    int next = 0;
     for (int i = 0; i < samples.size(); i++) {
       Outcome[] here = outcomes[i];
       double weight = samples.get(i).weight() / here.length;
@@ -75,17 +95,21 @@ public record Score(
         oneTag += outcome.camerasSeeingTags() >= 1 ? weight : 0;
         twoTags += outcome.mostTagsInOneImage() >= 2 ? weight : 0;
         twoCameras += outcome.camerasSeeingTags() >= 2 ? weight : 0;
+        withinFive += outcome.localized(FIVE_CENTIMETERS) ? weight : 0;
+        withinTwo += outcome.localized(TWO_CENTIMETERS) ? weight : 0;
+        errors[next] = Double.POSITIVE_INFINITY;
+        weights[next] = weight;
         if (outcome.measured()) {
           double error = outcome.positionErrorMeters();
+          errors[next] = error;
           measured += weight;
-          localized += error <= targetMeters ? weight : 0;
           squaredPosition += weight * error * error;
-          errors.add(new double[] {error, weight});
         }
         if (outcome.correctsHeading()) {
           heading += weight;
           squaredHeading += weight * Math.pow(Math.toDegrees(outcome.headingErrorRadians()), 2);
         }
+        next++;
       }
     }
     if (!(total > 0)) {
@@ -93,34 +117,34 @@ public record Score(
     }
     return new Score(
         candidate,
-        localized / total,
+        percentile(errors, weights, 0.95),
+        withinFive / total,
+        withinTwo / total,
         oneTag / total,
         twoTags / total,
         twoCameras / total,
         measured / total,
         heading / total,
         measured > 0 ? Math.sqrt(squaredPosition / measured) : Double.NaN,
-        percentile(errors, 0.95),
         heading > 0 ? Math.sqrt(squaredHeading / heading) : Double.NaN);
   }
 
-  /** The error that this share of the weight falls at or below; NaN with none. */
-  private static double percentile(List<double[]> errors, double share) {
-    if (errors.isEmpty()) {
-      return Double.NaN;
-    }
-    errors.sort(Comparator.comparingDouble(error -> error[0]));
+  /** The error that this share of the weight falls at or below. */
+  static double percentile(double[] errors, double[] weights, double share) {
+    Integer[] order = new Integer[errors.length];
     double total = 0;
-    for (double[] error : errors) {
-      total += error[1];
+    for (int i = 0; i < order.length; i++) {
+      order[i] = i;
+      total += weights[i];
     }
+    Arrays.sort(order, Comparator.comparingDouble(i -> errors[i]));
     double reached = 0;
-    for (double[] error : errors) {
-      reached += error[1];
+    for (int i : order) {
+      reached += weights[i];
       if (reached >= share * total) {
-        return error[0];
+        return errors[i];
       }
     }
-    return errors.get(errors.size() - 1)[0];
+    return errors[order[order.length - 1]];
   }
 }

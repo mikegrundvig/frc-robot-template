@@ -46,7 +46,7 @@ class CameraScoringTest {
     assertThat(score.twoTags()).as("all three tags, 3 m off, fit in the view").isEqualTo(1.0);
     assertThat(score.twoCameras()).isZero();
     assertThat(score.measured()).isEqualTo(1.0);
-    assertThat(score.localized()).isEqualTo(1.0);
+    assertThat(score.withinFiveCentimeters()).isEqualTo(1.0);
     assertThat(score.heading()).as("a multi-tag solve that fits corrects heading").isEqualTo(1.0);
     // A quarter degree of gyro error alone moves a solve 3 m from its tags 1.3 cm.
     assertThat(score.positionRmsMeters()).isLessThan(0.04);
@@ -59,9 +59,9 @@ class CameraScoringTest {
 
     assertThat(score.oneTag()).isZero();
     assertThat(score.measured()).isZero();
-    assertThat(score.localized()).isZero();
+    assertThat(score.withinFiveCentimeters()).isZero();
     assertThat(score.positionRmsMeters()).isNaN();
-    assertThat(score.positionP95Meters()).isNaN();
+    assertThat(score.positionP95Meters()).as("nothing measured").isInfinite();
     assertThat(score.headingRmsDegrees()).isNaN();
   }
 
@@ -76,7 +76,7 @@ class CameraScoringTest {
     assertThat(ranking.get(0).oneTag()).isEqualTo(1.0);
     assertThat(ranking.get(0).twoCameras()).as("never both at once").isZero();
     assertThat(ranking.get(1).oneTag()).isEqualTo(0.5);
-    assertThat(ranking.get(1).localized()).isEqualTo(0.5);
+    assertThat(ranking.get(1).withinFiveCentimeters()).isEqualTo(0.5);
   }
 
   @Test
@@ -89,7 +89,7 @@ class CameraScoringTest {
     Score score = score(pair, FACING_THE_WALL);
 
     assertThat(score.twoCameras()).isEqualTo(1.0);
-    assertThat(score.localized()).isEqualTo(1.0);
+    assertThat(score.withinFiveCentimeters()).isEqualTo(1.0);
   }
 
   @Test
@@ -116,7 +116,7 @@ class CameraScoringTest {
     CameraScoring scoring =
         new CameraScoring(Robots.SIM, WALL, List.of(AHEAD, AHEAD_AND_BACK), ONE_THREAD);
 
-    assertThat(scoring.mounts()).isEqualTo(2);
+    assertThat(scoring.distinctCameras()).isEqualTo(2);
   }
 
   @Test
@@ -184,11 +184,48 @@ class CameraScoringTest {
     assertThat(outcome.camerasSeeingTags()).isEqualTo(2);
   }
 
+  /**
+   * Two measurements whose spreads lean differently: one round, one stretched along the diagonal x
+   * = y. Combined with their whole covariances, as the estimator's filter does, they land where
+   * weighing x and y apart wouldn't.
+   */
+  @Test
+  void measurementsCombineWithTheirWholeCovariance() {
+    Pose2d truth = new Pose2d(3, 4, Rotation2d.ZERO);
+    VisionMeasurement round =
+        new VisionMeasurement(
+            0,
+            new Pose2d(3.02, 4, Rotation2d.ZERO),
+            new PoseCovariance(1e-4, 0, 1e-4, Double.POSITIVE_INFINITY),
+            "round",
+            List.of(1),
+            VisionMeasurement.Solver.HEADING_CONSTRAINED);
+    VisionMeasurement leaning =
+        new VisionMeasurement(
+            0,
+            new Pose2d(3, 4.02, Rotation2d.ZERO),
+            new PoseCovariance(2e-4, 1e-4, 2e-4, Double.POSITIVE_INFINITY),
+            "leaning",
+            List.of(2),
+            VisionMeasurement.Solver.HEADING_CONSTRAINED);
+
+    Outcome outcome =
+        CameraScoring.combine(
+            new int[] {0, 1}, new int[] {1, 1}, new VisionMeasurement[] {round, leaning}, truth);
+
+    // Information: 10^4 [1 0; 0 1] and (10^4 / 3) [2 -1; -1 2], summed (10^4 / 3) [5 -1; -1 5].
+    // Information times miss: 10^4 (0.02, 0) + (10^4 / 3)(-0.02, 0.04) = (10^4 / 3)(0.04, 0.04).
+    // So [5 -1; -1 5] miss = (0.04, 0.04), and the miss is (0.01, 0.01). Weighing x and y apart
+    // would give (0.0133, 0.0067).
+    assertThat(outcome.positionErrorMeters()).isCloseTo(0.01 * Math.sqrt(2), within(1e-12));
+    assertThat(outcome.correctsHeading()).isFalse();
+  }
+
   @Test
   void seedsDependOnEveryNumberMixedIn() {
-    assertThat(CameraScoring.mix(1, 0.5, 2.0))
-        .isEqualTo(CameraScoring.mix(1, 0.5, 2.0))
-        .isNotEqualTo(CameraScoring.mix(1, 2.0, 0.5))
-        .isNotEqualTo(CameraScoring.mix(2, 0.5, 2.0));
+    assertThat(Seeds.mix(1, 0.5, 2.0))
+        .isEqualTo(Seeds.mix(1, 0.5, 2.0))
+        .isNotEqualTo(Seeds.mix(1, 2.0, 0.5))
+        .isNotEqualTo(Seeds.mix(2, 0.5, 2.0));
   }
 }

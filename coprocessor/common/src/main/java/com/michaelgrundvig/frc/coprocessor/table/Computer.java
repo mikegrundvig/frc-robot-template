@@ -13,7 +13,8 @@ import org.jspecify.annotations.Nullable;
  *
  * @param name its hostname, and its name everywhere else: lowercase letters, digits, and hyphens,
  *     starting with a letter, at most 63 characters
- * @param address the last number of its address, 10.TE.AM.x: 11 to 254
+ * @param address the last number of its address, 10.TE.AM.x: 6 to 19, FRC's static range for
+ *     devices on the robot (11 and up by convention)
  * @param board the board it runs on
  * @param cameras the PhotonVision camera names it runs (its role): the names robot code gives
  *     {@code PhotonCamera}
@@ -23,11 +24,15 @@ public record Computer(String name, int address, Board board, List<String> camer
   /** What a computer's name may be: a hostname's single label, lowercase. */
   public static final Pattern NAME = Pattern.compile("[a-z]([a-z0-9-]{0,61}[a-z0-9])?");
 
-  /** The lowest address a computer may have: 10.TE.AM.11. */
-  public static final int FIRST_ADDRESS = 11;
+  /**
+   * The lowest address a computer may have: 10.TE.AM.6. FRC's network gives static addresses .6 to
+   * .19 to devices on the robot (WPILib's "IP Configurations"); .20 to .199 are the field's DHCP
+   * pool, and .200 to .219 the radio's.
+   */
+  public static final int FIRST_ADDRESS = 6;
 
-  /** The highest address a computer may have: 10.TE.AM.254. */
-  public static final int LAST_ADDRESS = 254;
+  /** The highest address a computer may have: 10.TE.AM.19. */
+  public static final int LAST_ADDRESS = 19;
 
   /** The longest a camera's name may be. */
   public static final int MAX_CAMERA_NAME = 64;
@@ -70,7 +75,8 @@ public record Computer(String name, int address, Board board, List<String> camer
         + " is out of range: the last number of 10.TE.AM.x, from "
         + FIRST_ADDRESS
         + " to "
-        + LAST_ADDRESS;
+        + LAST_ADDRESS
+        + ", FRC's static range for devices on the robot (11 and up by convention)";
   }
 
   /** What's wrong with a camera's name, or null if nothing. */

@@ -2,7 +2,6 @@ package com.michaelgrundvig.frc.coprocessor.json;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,7 +123,7 @@ public sealed interface JsonValue
     public static final Obj EMPTY = new Obj(Map.of());
 
     public Obj {
-      members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
+      members = Members.copyOf(members);
     }
 
     /** Starts an object, its members in the order they're added. */

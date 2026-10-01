@@ -1,0 +1,56 @@
+// The vision coprocessors (coprocessor/README.md): the PhotonVision version lock, checked on every
+// build, and the coprocessor table, compiled into the robot program. Both run the code the robot
+// and the agents share (:coprocessor-common), so the build checks exactly what they do.
+
+configurations {
+    coprocessorTools {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    // The robot program reads the compiled table, and the agents' answers, with the shared records.
+    implementation project(":coprocessor-common")
+    coprocessorTools project(":coprocessor-common")
+}
+
+def coprocessorTool = { JavaExec task ->
+    task.classpath = configurations.coprocessorTools
+    task.mainClass = "com.michaelgrundvig.frc.coprocessor.tools.CoprocessorBuild"
+    task.javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    task.maxHeapSize = "256m"
+}
+
+// coprocessor/photonvision.lock's version must be PhotonLib's: the robot checks every
+// coprocessor's PhotonVision against it, so the images must be built with it.
+def checkLock = tasks.register("checkPhotonVisionLock", JavaExec) { task ->
+    group = "verification"
+    description = "Fail if coprocessor/photonvision.lock's version isn't PhotonLib's (vendordeps/photonlib.json)."
+    coprocessorTool(task)
+    inputs.file("coprocessor/photonvision.lock").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("vendordeps/photonlib.json").withPathSensitivity(PathSensitivity.RELATIVE)
+    def marker = layout.buildDirectory.file("coprocessor/lock-checked")
+    outputs.file(marker)
+    args "check-lock", projectDir.absolutePath, marker.get().asFile.absolutePath
+}
+tasks.named("check") {
+    dependsOn checkLock
+}
+
+// coprocessors/coprocessors.yaml, checked and compiled into the robot program as
+// /coprocessor/table.json (CompiledTable), with PhotonLib's version, the image recipe's hash, and
+// each computer's committed settings hash. It runs on every build: the recipe hash is of the
+// commit (git ls-tree HEAD), which Gradle can't watch.
+def coprocessorTable = tasks.register("coprocessorTable", JavaExec) { task ->
+    group = "build"
+    description = "Compile coprocessors/coprocessors.yaml into the robot program."
+    coprocessorTool(task)
+    def out = layout.buildDirectory.dir("generated/coprocessor")
+    outputs.dir(out)
+    outputs.upToDateWhen { false }
+    args "table", projectDir.absolutePath, out.get().file("coprocessor/table.json").asFile.absolutePath
+}
+sourceSets.main.resources.srcDir(coprocessorTable)

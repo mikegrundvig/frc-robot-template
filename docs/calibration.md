@@ -16,10 +16,15 @@ Run them in this order, since each leans on the ones before it:
 Run every procedure in utility mode, enabled, with the robot on the floor. The page refuses to run
 them on the field.
 
+**Safety:** these drive the robot, spinning it in place or moving it between spots. Clear a circle
+around it and keep everyone out of it. One named person at the Driver Station does nothing but
+watch the robot, ready to disable it, and says "enabling" before it moves. Wear safety glasses, as
+at events. ([Characterization's safety rules](characterization.md#safety-first) say more.)
+
 Two more have nothing to run on the page: [the robot's mass, center of gravity, and
 inertia](#the-robots-mass-center-of-gravity-and-inertia), measured by hand, and [a terrain
 crossing](#a-terrain-crossing), read from a log. Put what they find in `Robots.java` the same way,
-with the date: `.mass(Pounds.of(131.2)) // measured 2027-02-14` ([docs/values.md](values.md) says
+with the date: `.mass(Pounds.of(131.2)) // measured YYYY-MM-DD` ([docs/values.md](values.md) says
 how every value is measured, and where each belongs).
 
 ## The IMU reads level
@@ -133,7 +138,11 @@ too: recalibrate the one farthest off first, and the other comes back with it.
 *By hand, with nothing to run.*
 
 These set the robot's body: `Body.mass`, `Body.cgHeight`, and `Body.yawMomentOfInertia`. Measure
-with the bumpers and battery on.
+with the bumpers and battery on, the robot powered off. No Systemcore needed.
+
+**Safety:** a robot weighs as much as a person. Lift it with two people, one at each end, knees
+bent; chock every wheel on the scales and blocks, front and back, so nothing rolls; and keep hands
+and feet out from under the robot, always: lift and lower it by the frame.
 
 **Mass:** two bathroom scales, one under the front wheels and one under the back (a board across
 each pair). The mass is the sum. The two readings also say how far forward the center of gravity
@@ -144,8 +153,10 @@ is.
 1. With the robot level, front wheels on a scale and the back on the floor at the same height (a
    board as thick as the scale), read the scale: `F₀`. Measure `L`, the distance between the front
    and back axles, and weigh the robot, `W`.
-2. Raise the back wheels by a block, about 15 cm, so the robot tilts by `θ`, where `sin θ` is the
-   block's height over `L`. Stop the wheels from rolling. Read the scale again: `F`.
+2. With two people lifting the back by the frame, a third slides a solid block, about 15 cm tall,
+   under the back wheels, and they lower the robot onto it. It tilts by `θ`, where `sin θ` is the
+   block's height over `L`. Chock the wheels again, and read the scale: `F`. Lift it off the same
+   way.
 3. The center of gravity's height above the axles is `L × (F - F₀) / (W × tan θ)`. Add the wheel
    radius for its height above the floor.
 
@@ -154,8 +165,13 @@ tilts. With the tread's friction ([characterization](characterization.md#tread-f
 height sets where the wheels slip as the robot accelerates, and so the drive's current limit.
 
 **The yaw moment of inertia**: from CAD's mass properties, with the bumpers and battery
-modeled; or from SysId's rotation routine, which fits the robot's angular kA. Nothing in the code
-reads it yet; a simulator that models traction will.
+modeled; or from SysId's rotation routine (the wheels pointed around the circle, robot powered and
+driving: [the safety rules](characterization.md#safety-first)), which fits the robot's angular kA
+in volts per rad/s². Then `I = 4 × (stall torque / nominal voltage) × driveGearing × r /
+(wheelRadius × kA)`, in kg m², with the drive motor's stall torque and nominal voltage from its
+datasheet (or `Motor.model()`), and `r` each wheel's distance from the robot's center. Friction
+makes it read a little high. Nothing in the code reads it yet; a simulator that models traction
+will.
 
 When: once the robot is built, and after a big change.
 
@@ -170,8 +186,11 @@ and the tilts at which the estimator trusts the wheels less (`EstimatorConfig.ti
 and `tiltZeroDegrees`), and sets the slope margin and the crest's spread in `Localization` (3° and
 5 cm today).
 
-You need a bump or ramp built to the field's drawings, on field carpet, with tags in the cameras'
-view of it.
+You need the robot running its program on its Systemcore, and a bump or ramp built to the field's
+drawings, on field carpet, with tags in the cameras' view of it.
+
+**Safety:** it drives at match speed over a bump: the driving rules above, with nobody near the
+bump, since a robot crossing at an angle can tip.
 
 1. Drive over it straight across at a crawl, at a medium speed, and at match speed, three times
    each, logging every run.

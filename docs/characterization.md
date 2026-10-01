@@ -9,17 +9,34 @@ different exposure). Every robot with that part then shares the number. The
 differ robot to robot, run from the Pitwall page, are in [calibration](calibration.md).
 
 Record each result the way calibrations do: the builder call that sets the value, with the date
-and what was measured (`.latency(Milliseconds.of(24)) // characterized 2027-01-20: camera
+and what was measured (`.latency(Milliseconds.of(24)) // characterized YYYY-MM-DD: camera
 latency, under full load`). [The values register](values.md#the-register-describes-values-robotsjava-holds-a-robots-numbers)
 says where it goes. Keep the logs, named for the procedure and the date, so the number can be
 worked out again.
 
-Most of these read the robot's own log. Run the robot program (disabled is fine: it logs its
+Most of these read the robot's own log, so they need a Systemcore running the robot program; each
+procedure's equipment says whether it does. Run the program (disabled is fine: it logs its
 sensors), open the log in AdvantageScope, and read the values from its plots, or export them
-(**File > Export Data**) to a spreadsheet for the arithmetic.
+(**File > Export Data**) to a spreadsheet for the arithmetic. AdvantageScope exports a rotation as
+a quaternion (W, X, Y, Z); its yaw, in radians, is `atan2(2(W·Z + X·Y), 1 - 2(Y² + Z²))`.
 
 A robot's own numbers measured by hand (its mass, its center of gravity, how its IMU reads crossing
 a bump) are calibrations, with the rest in [calibration](calibration.md#the-robots-mass-center-of-gravity-and-inertia).
+
+## Safety first
+
+These procedures drive a robot that weighs as much as a person, pull on it, and power electronics
+from a bench supply. Do them with a mentor there. Each procedure says what to watch for; these hold
+for all of them:
+
+- **Driving:** clear the area, and keep everyone out of the robot's path, including its path if it
+  slides or lurches. One named person at the Driver Station does nothing but watch the robot, ready
+  to disable it, and says "enabling" before it moves.
+- **Never hold anything against an enabled robot,** not a scale and not a hand. A scale the robot
+  pushes on is fixed to something solid, and read from the side or on a phone's video.
+- **Wear safety glasses** whenever the robot is powered or a tool is running, as at events.
+- **Batteries** are heavy and can deliver hundreds of amps:
+  [battery safety](#battery-safety) below, and the FIRST Safety Manual.
 
 ## Camera noise
 
@@ -32,32 +49,43 @@ is off, and how both grow with distance. It sets vision's trust in a camera:
 
 - The camera, on the coprocessor the robot runs, with the same PhotonVision version, resolution,
   exposure, and pipeline settings, and its lens calibrated at that resolution.
-- The robot, to log the camera: its program logs every tag a camera sees, with the tag's pose from
-  the camera (`Vision/<camera>`). A camera on a tripod, on the robot's network, works as well.
-- A tag of the field's size and family, printed flat and stiff, on a stand with its center at about
-  the height field tags sit.
-- A tape measure, and tape to mark the floor.
+- A Systemcore running the robot program, to log the camera: it logs every tag a camera sees, with
+  the tag's pose from the camera (`Vision/<camera>`). The robot itself is easiest; a camera on a
+  tripod, on the robot's network, works as well.
+- A tag of the field's size and family, printed flat and stiff, on a stand whose height you can set.
+- A tape measure, a plumb line or a square, and tape to mark the floor.
 - Light like an event's: bright, even, no sunlight on the tag.
+
+**Safety:** the robot stays disabled throughout.
 
 **Steps:**
 
-1. Set the camera square to the tag, 1 m from the lens. Measure the distance with the tape, to the
-   millimeter.
-2. Log 30 s, with nothing moving.
-3. Do the same at 2, 3, 4, 5, and 6 m, then 7 m and on until the camera stops finding the tag in
+1. Raise the tag until its center is at the height of the lens's center, so the tag is straight
+   ahead of the camera and the distance along the floor is the distance the camera measures. (If
+   it can't be, measure the height difference `h`, and use `sqrt(d² + h²)` for every taped
+   distance `d` below: at 1 m, a 0.6 m difference reads 1.17 m.)
+2. Mark the floor straight below the front of the lens, with the plumb line. Set the tag square to
+   the camera, 1 m from that mark, measured along the floor to the tag's face, to the millimeter.
+3. Log 30 s, with nothing moving.
+4. Do the same at 2, 3, 4, 5, and 6 m, then 7 m and on until the camera stops finding the tag in
    most images. Note each distance and the time you logged it.
-4. At 2 m and 4 m, log 30 s more with the tag turned 30° from square, and 60°.
+5. At 2 m and 4 m, log 30 s more with the tag turned 30° from square, and 60°.
 
 **Working out the numbers:** for each spot, take the tag's pose from the camera
 (`bestCameraToTag`) in every image.
 
 - **Spread:** the standard deviation of its position, along the line of sight and across it, and
-  of its rotation about the vertical, across the images.
-- **Error:** how far the average distance is from the taped one. More than about 1% means the lens
-  calibration is off: calibrate it again before going on.
+  of its rotation about the vertical (its yaw), across the images.
+- **Scale and offset:** over the square spots, plot the average distance the camera measured
+  against the taped one, and fit a straight line. Its slope should be within about 1% of 1: more
+  means the lens calibration's focal length is off, which puts far tags off by the same share
+  (recalibrate the lens before going on). Where it crosses zero is how far behind the front of
+  the lens the camera measures from, its optical center, a few millimeters: add it to every taped
+  distance below. A single spot can't tell the two apart: at 1 m, 1% is 1 cm, about what the
+  offset and the tape's own error are.
 - **Error per spot,** for vision's trust: the root mean square, over the images, of each image's
-  position less the taped one, combining both directions (the estimator uses one number for both).
-  It includes the spread and the bias.
+  position less the taped one (corrected as above), combining both directions (the estimator uses
+  one number for both). It includes the spread and what's left of the bias.
 
 Plot the error per spot against distance, square spots only, on a spreadsheet's power trendline
 (`y = b · x^k`). `k` is **`distanceExponent`**. `b`, the error at 1 m, is the least
@@ -69,10 +97,12 @@ tag's rotation; a full solve's position moves sideways by the distance times tha
 At each square spot, with `s` the position's spread, `r` the rotation's spread in radians, and `d`
 the distance, the factor is `s / sqrt(s² + (d · r)²)`. Take the average over the spots.
 
-**Corner noise, for the simulator:** each tag corner's pixel position, in every image at one spot.
-The spread of each corner about its average is the noise; the simulator takes its average and its
-spread over the corners (`VisionSim`, today 0.25 px and 0.08 px). The sight range is the farthest
-spot where the camera found the tag in most images.
+**Corner noise, for the simulator:** PhotonVision's simulation moves each tag corner a distance
+drawn from a normal distribution, in a random direction; `VisionSim`'s two numbers are that
+distance's mean and standard deviation (today 0.25 px and 0.08 px). To measure them at one still
+spot: for each corner in each image, its distance in pixels from that corner's average position
+over all the images. The mean of all those distances, and their standard deviation, are the two
+numbers. The sight range is the farthest spot where the camera found the tag in most images.
 
 **What good looks like:** the exponent near 2, since a tag's distance error grows with the distance
 squared (its sideways error only with the distance). A still camera's error at 1 m is a few
@@ -85,6 +115,8 @@ in clean driving, the gate rejects about 1 in 1000 of a camera's measurements
 ### While moving
 
 `speedStdDevFactor` and `yawRateStdDevFactor` say how much worse an image is while the robot moves.
+It needs the robot program running on the robot. **Safety:** it drives:
+[the driving rules](#safety-first).
 
 1. On a practice field with tags at known places, calibrate the robot's camera mounts.
 2. Stand still where the camera sees tags 2 to 4 m away, and log 20 s. Then drive back and forth
@@ -113,9 +145,11 @@ drives. PhotonVision stamps each image on the coprocessor's clock and converts t
 robot's, with its time sync keeping the two clocks in step over the network. On Systemcore, with
 WPILib 2027's nanosecond clock, check that it does.
 
-**Equipment:** the robot, with its cameras on their coprocessor, on the network it runs at events
-(the radio, or the same switch); tags in view; for the second part, a practice field with tags at
-known places, and room to spin.
+**Equipment:** the robot, running its program on its Systemcore, with its cameras on their
+coprocessor, on the network it runs at events (the radio, or the same switch); tags in view; for
+the second part, a practice field with tags at known places, and room to spin.
+
+**Safety:** the loaded run and the turning drive the robot: [the driving rules](#safety-first).
 
 **Steps, standing still (latency and frame rate):**
 
@@ -126,9 +160,16 @@ known places, and room to spin.
 
 **Working out the numbers:** the robot logs each image's latency, from its capture to the loop
 that read it (`Vision/<camera>/LatencySeconds`). The robot reads its cameras once a loop, so an
-image also waits for the loop, up to 20 ms: take the median latency less 10 ms (half a loop). Use
-the loaded run's for **`latency`**, and its standard deviation for the simulator's spread. The
-**`frameRate`** is the images logged in a minute, over 60; PhotonVision's dashboard shows the same.
+image also waits for the loop, anywhere from 0 to 20 ms: that wait averages 10 ms, and spreads
+with a standard deviation of 20/√12 = 5.8 ms. So from the loaded run:
+
+- **`latency`** is the latencies' mean less 10 ms (`latency` is an average, as the simulator uses
+  it);
+- the camera's own spread, for the simulator, is `sqrt(s² - 5.8²)` in milliseconds, where `s` is
+  the latencies' standard deviation;
+- **`frameRate`** is the images logged in a minute, over 60; PhotonVision's dashboard shows the
+  same.
+
 With `latency` measured, set `VisionConfig.latencyMarginSeconds` a little above the latencies'
 spread: images later than both are left out.
 
@@ -137,7 +178,7 @@ spread: images later than both are left out.
 1. On the practice field, where a camera sees two or more tags 2 to 3 m away, spin the robot in
    place at a steady 1 rad/s one way for 10 s, then the other way for 10 s. Log it.
 2. For each image with a multi-tag solution, the camera's heading on the field comes from the
-   solution (`multiTagFieldToCamera`). The gyro's heading at the image's capture time comes from
+   solution (`multiTagFieldToCamera`'s yaw, from its quaternion as above). The gyro's heading at the image's capture time comes from
    its 250 Hz readings (`Drive/Gyro/OdometryYawsRad`, at `OdometryTimestampsNanos`): interpolate
    between the two readings either side.
 3. Each image's difference: the camera's heading, less the gyro's, less the camera's mounted yaw.
@@ -171,8 +212,11 @@ and add a coprocessor.
 - Three cameras of the robot's model, each with its lens calibrated at the resolution in use, and
   the AprilTag pipeline set as the robot runs it (resolution, exposure, and the rest).
 - Several tags in each camera's view, 2 to 3 m away, so detection does real work.
-- The robot, to log the results ([camera latency](#camera-latency-and-time-sync) says how), or
-  PhotonVision's dashboard on a laptop on the robot's network.
+- A Systemcore running the robot program, to log the results
+  ([camera latency](#camera-latency-and-time-sync) says how); or, with no Systemcore, PhotonVision's
+  dashboard on a laptop on the coprocessor's network.
+
+**Safety:** a coprocessor gets hot over ten minutes of full load: let it cool before handling it.
 
 **Steps:**
 
@@ -187,7 +231,7 @@ second) and its latency, worked out as in [camera latency](#camera-latency-and-t
 them in a table: cameras on the coprocessor, against each camera's frame rate and latency.
 
 **Where it goes:** each camera's `CameraConfig.Sensor` takes the frame rate and latency from the
-step with as many cameras as share its coprocessor on the robot. Cameras whose coprocessors carry
+step with as many cameras as one coprocessor carries on the robot. Cameras whose coprocessors carry
 different numbers of cameras need a `Sensor` each.
 
 **What good looks like:** every camera holding its own frame rate as cameras are added, and its
@@ -202,8 +246,11 @@ far each reading scatters, for the gyro and for the backup IMU. It sets
 `EstimatorConfig.headingDriftDegreesPerMinute`, and `SensorErrors.TYPICAL`'s gyro and backup drift
 and noise; it checks `ImuCrossCheck.Settings.toleranceDegrees`.
 
-**Equipment:** the robot, with the IMUs mounted as they'll run; a floor or a bench nobody will bump;
-half an hour.
+**Equipment:** the robot, running its program on its Systemcore (which logs both IMUs), with the
+IMUs mounted as they'll run; a floor or a bench nobody will bump; half an hour.
+
+**Safety:** the robot stays disabled while it logs; the hard driving before the third run, and the
+spins of the scale's repeatability below, follow [the driving rules](#safety-first).
 
 **Steps:**
 
@@ -215,7 +262,8 @@ half an hour.
 **Working out the numbers:** fit a straight line to each IMU's heading against time
 (`Drive/Gyro/Yaw`, `Drive/BackupGyro/Yaw`). The **drift** is the line's slope, in degrees per
 minute. The **noise** is the standard deviation of the heading about the line: from the gyro's
-250 Hz readings (`Drive/Gyro/OdometryYawsRad`), and the backup's, read once a loop.
+250 Hz readings (`Drive/Gyro/OdometryYawsRad`), and the backup's, read once a loop. Those readings
+are in radians: multiply by 180/π (57.3) for `SensorErrors`' `noiseDegrees`.
 
 **Where it goes:** `headingDriftDegreesPerMinute` takes the largest drift of the runs, rounded up,
 since the estimator should never be surer of the heading than the gyro deserves.
@@ -257,11 +305,16 @@ current limit is chosen to stay under.
 - Carpet like the field's, or the field's own.
 - A force gauge or digital hanging scale that reads to at least 1.5 times the robot's weight, and a
   strap.
+- The robot powered, its program running on its Systemcore, and disabled: its drive and steering
+  motors are then in brake mode, which holds the modules' angles while you pull.
+
+**Safety:** pull from the side, standing clear of where the robot goes when it lets go, with the
+strap's loop on the scale's hook, never around a hand. The robot stays disabled.
 
 **Steps:**
 
 1. Weigh the robot ([as calibration says](calibration.md#the-robots-mass-center-of-gravity-and-inertia)).
-2. Point every wheel straight ahead. Robot disabled.
+2. Point every wheel straight ahead (drive forward a little, then disable).
 3. Strap around the frame, low and on one side. Pull sideways, level with the floor, slowly and
    steadily, watching the scale. Note the highest reading, just before the robot slides.
 4. Five pulls each way, on different spots of carpet.
@@ -278,12 +331,22 @@ weight-transfer estimate in `Robots`) with it and the center of gravity's height
 (pulling up lightens the robot) or the carpet slid. A sideways pull drags the tread across its
 grain; a tread may grip differently rolling. To measure the driving direction, drive the robot
 slowly into a scale fixed to a wall, raising the current until the wheels spin, and divide the
-highest reading by the weight.
+highest reading by the weight. That one drives: [the driving rules](#safety-first), with nobody
+near the scale while the robot is enabled, and the reading taken from the side or on video.
 
 ## Feedforward
 
 **What it measures:** the drive's feedforward: `SwerveConfig.Gains.driveKs`, the volts to overcome
-friction, and `driveKv`, the volts per meter per second. Per drivetrain: modules, gearing, and tread.
+friction, and `driveKv`, the volts per meter per second. These belong to a drivetrain design
+(modules, gearing, tread): robots built alike share them, measured on one. Measure again when any
+of those changes.
+
+**Equipment:** the robot, running its program on its Systemcore, and a long clear floor.
+
+**Safety:** SysId's tests drive the robot on its own, the dynamic ones at full voltage: lots of
+room, and [the driving rules](#safety-first). For a module lifted off the floor, set the robot
+securely on blocks so it can't drive off them, and keep hands, hair, and cords away from the
+spinning wheels.
 
 **WPILib's SysId** measures them: it records the drivetrain under slowly rising voltage and under
 voltage steps, and fits kS, kV, and kA from the log. Follow
@@ -318,12 +381,16 @@ tuned, not characterized: tune them live, watching each module's angle
 ## Odometry error
 
 **What it measures:** how far odometry alone drifts per meter driven and per radian turned, and how
-far the heading the wheels give drifts per turn. Per drivetrain and tread. It sets
+far the heading the wheels give drifts per turn. Like feedforward, these belong to a drivetrain
+design and its tread: robots built alike share them. It sets
 `EstimatorConfig.translationStdDevPerMeter`, `translationStdDevPerRadian`, and
 `wheelHeadingStdDevDegreesPerTurn`.
 
-**Equipment:** the robot, calibrated first (the gyro's scale and the wheel radius); a clear floor
-of field carpet at least 6 m long; tape and a tape measure.
+**Equipment:** the robot, running its program on its Systemcore, calibrated first (the gyro's
+scale and the wheel radius); a clear floor of field carpet at least 6 m long; tape and a tape
+measure.
+
+**Safety:** it drives at match speeds: [the driving rules](#safety-first).
 
 **Steps:**
 
@@ -369,8 +436,11 @@ measure every one, and label each with its own name. It sets how far the voltage
 acceleration, and so how much current the drivetrain may draw before the robot browns out:
 `SwerveConfig.Limits.driveSupplyCurrent` is chosen for the weakest battery the team plays with.
 
-**Equipment:** a battery analyzer that measures internal resistance; or the robot, its log, and a
-clear floor.
+**Equipment:** a battery analyzer that measures internal resistance (no Systemcore needed); or the
+robot, running its program on its Systemcore to log, and a clear floor.
+
+**Safety:** [battery safety](#battery-safety), below; the log method also drives:
+[the driving rules](#safety-first).
 
 **Steps, with an analyzer:** charge the battery fully, let it rest an hour, and measure it as the
 analyzer's instructions say.
@@ -398,6 +468,18 @@ Systemcore's brownout voltage (still to measure on a real Systemcore) and the [v
 well above the rest is aging or damaged: keep it for practice, or retire it. Measure again before
 each event.
 
+### Battery safety
+
+A robot battery is heavy, and if its terminals are shorted it delivers hundreds of amps: enough to
+weld a wrench across them and start a fire. Before you handle one:
+
+- Look it over. A cracked or bulging case, a leak, or a loose terminal: set it aside, labeled, and
+  don't charge or use it.
+- Carry it by its case or handle, never by the cables, and keep its terminals covered: nothing
+  metal across them.
+- Charge only with the team's battery charger, in a ventilated place, with someone nearby.
+- Follow the battery rules in the FIRST Safety Manual, which every team member should read.
+
 ## Coprocessor brownout ride-through
 
 **What it measures:** the lowest input voltage at which a vision coprocessor keeps running, powered
@@ -406,20 +488,35 @@ whole reboot, far longer than the sag that caused it. No configuration value hol
 sets a floor the drive's supply current limit must keep the battery above
 ([battery internal resistance](#battery-internal-resistance)).
 
-**Equipment:** an adjustable bench power supply that can give what the coprocessor and its cameras
-draw, with a current limit; the coprocessor, its cameras, and the regulator or power module it runs
-from on the robot, wired as on the robot; a multimeter on the regulator's input; a laptop on its
-network, to watch PhotonVision.
+**Equipment:** an adjustable bench power supply with a current limit, that can give what the
+coprocessor and its cameras draw at the lowest voltage you'll test (below); the coprocessor, its
+cameras, and the regulator or power module it runs from on the robot, wired as on the robot; a
+multimeter on the regulator's input; a laptop on its network, to watch PhotonVision. No
+Systemcore needed.
+
+**Safety,** with a mentor there:
+
+- Wire everything with the supply's output off.
+- Check the polarity before switching it on: the supply's positive (red) to the regulator's
+  positive input. Reversed, many regulators are destroyed at once.
+- Set the voltage and the current limit before connecting, and never set the voltage above the
+  regulator's maximum input (its datasheet).
+- Keep loose wire ends apart, and touch nothing while the output is on.
 
 **Steps:**
 
-1. Wire the supply to the regulator's input, as the robot's battery would be. Set 12.5 V, and a
-   current limit a little above what the coprocessor draws.
+1. Wire the supply to the regulator's input, as the robot's battery would be. Set 12.5 V. A
+   switching regulator draws constant power, so as its input voltage falls its input current
+   rises: at 6 V it draws about twice what it does at 12.5 V. So set the current limit to about
+   `(12.5 / the lowest voltage you'll test) × the current it draws at 12.5 V` (measure that first,
+   with the coprocessor running), or the supply limits the current instead of the voltage.
 2. Start the coprocessor with every camera running its pipeline as on the robot: a regulator drops
    the most at full load.
 3. Lower the input in half-volt steps, then tenth-volt steps as you near the end, ten seconds at
-   each, watching the cameras' frame rates. The voltage at which the coprocessor resets (its stream
-   stops, and the dashboard loses it) is its ride-through voltage.
+   each, watching the cameras' frame rates and the supply's constant-current (CC) light. The
+   voltage at which the coprocessor resets (its stream stops, and the dashboard loses it) is its
+   ride-through voltage. A reset while the CC light is on doesn't count: the supply, not the
+   coprocessor, gave out (its voltage collapsed). Raise the current limit and run it again.
 4. Do it three times. If the supply can, also drop it suddenly from 12 V to a low voltage for a
    tenth of a second, as a brownout does, and find the lowest dip it survives.
 

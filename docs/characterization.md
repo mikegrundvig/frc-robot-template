@@ -190,10 +190,12 @@ gyro's offset, the mount) is the same both ways. So the capture time's error is
 
 **What good looks like:** latency steady within a few milliseconds, with no long tail; a result
 100 ms late or more means a busy coprocessor or network. The capture time's error under about
-5 ms. More than a loop (20 ms) means the time sync isn't working: check that the coprocessor runs
-the PhotonVision version the robot's PhotonLib expects, and that the robot's clock and
-PhotonVision's agree. Results applied "too late" or "from the future" in
-`Vision/<camera>/Decisions` say the same.
+5 ms, and under about 2 ms if every fix corrects the heading (`EstimatorConfig.headingCorrection`
+`EVERY_FIX`): while the robot turns, each fix then leans on its capture time ([the consistency
+study](testing.md#the-simulators-late-stamps)). More than a loop (20 ms) means the time sync isn't
+working: check that the coprocessor runs the PhotonVision version the robot's PhotonLib expects,
+and that the robot's clock and PhotonVision's agree. Results applied "too late" or "from the
+future" in `Vision/<camera>/Decisions` say the same.
 
 ## Vision coprocessor capacity
 

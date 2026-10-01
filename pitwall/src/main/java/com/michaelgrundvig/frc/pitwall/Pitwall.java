@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.pitwall;
 
 import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,8 +43,8 @@ import org.wpilib.util.Alert;
  * there is no replay, so nothing needs logging.
  *
  * <p>In the simulator, the page also drives the simulation in place of WPILib's simulator GUI: the
- * Driver Station, joysticks, pausing and stepping, and stopping ({@link #simulator()}). On a robot
- * there is no such thing.
+ * Driver Station, joysticks, pausing and stepping, stopping, and failing the simulated robot's
+ * parts live ({@link #simulator()}). On a robot there is no such thing.
  *
  * @param <T> the robot's configuration record
  */
@@ -148,18 +149,32 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
-   * The simulator's controls, on WPILib's simulation: the page's Stop ends AdvantageKit's log, then
-   * the program.
+   * The simulator's controls, on WPILib's simulation: what they do goes to the console, and to the
+   * log with AdvantageKit; the page's Stop ends the log, then the program.
    */
   private static Simulator simulatorControls(boolean advantageKit) {
+    Components components =
+        new Components(
+            said -> {
+              System.out.println("Simulator: " + said);
+              if (advantageKit) {
+                AdvantageKitLog.recordOutput("Pitwall/Simulator/Said", said);
+              }
+            });
     return Simulator.wpilib(
         RobotController::getTime,
+        components,
         () -> {
           System.out.println("Simulator: stopped from Pitwall's page");
           if (advantageKit) {
             AdvantageKitLog.end();
           }
           System.exit(0);
+        },
+        on -> {
+          if (advantageKit) {
+            AdvantageKitLog.recordOutput("Pitwall/Simulator/Faults", on.toArray(String[]::new));
+          }
         });
   }
 
@@ -211,7 +226,8 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
-   * The simulator's controls, in the simulator. Empty on a robot, where nothing may write the
+   * The simulator's controls, in the simulator: the robot's simulation declares the parts that can
+   * fail here ({@code simulator.components()}). Empty on a robot, where nothing may write the
    * Driver Station's state.
    */
   public Optional<Simulator> simulator() {

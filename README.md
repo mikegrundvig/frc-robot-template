@@ -75,8 +75,9 @@ Also built in:
     commit them. A gain changes only the way any value does, through the checks below.
   - **The simulator's controls** (in the simulator only; a robot has none): the Driver Station
     (enable, the mode, the alliance station, the field system, the match time), driving from the
-    keyboard or a gamepad, pausing and stepping, and Stop. See
-    [docs/simulator.md](docs/simulator.md).
+    keyboard or a gamepad, pausing and stepping, Stop, and failing the simulated robot's parts
+    while it runs, which WPILib's simulator GUI can't do: a camera unplugged or knocked, the gyro
+    frozen, a module's encoder gone stale, the robot hit. See [docs/simulator.md](docs/simulator.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
@@ -173,7 +174,7 @@ Also built in:
 | `frc.robot.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `frc.robot.game` | The game: the field the robot plays on, 2026's (`Rebuilt`) until [kickoff](docs/kickoff.md), with its starts, targets, and zones written for the blue alliance. |
 | `frc.robot.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
-| `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, and the named scenarios (`Scenarios`). Only the simulator builds it. |
+| `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, what can fail while it runs (`Faults`, for Pitwall's simulator controls), and the named scenarios (`Scenarios`). Only the simulator builds it. |
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |

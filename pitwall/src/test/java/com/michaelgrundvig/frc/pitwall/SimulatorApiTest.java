@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.experiment.ByHand;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.simulator.Component;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.FakeHal;
+import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.net.URI;
@@ -16,6 +19,7 @@ import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import org.jspecify.annotations.Nullable;
@@ -41,7 +45,27 @@ class SimulatorApiTest {
   private final HttpClient client = HttpClient.newHttpClient();
   private final FakeHal hal = new FakeHal();
   private final AtomicInteger stops = new AtomicInteger();
-  private final Simulator simulator = new Simulator(hal, System::nanoTime, stops::incrementAndGet);
+  private final AtomicBoolean lampOut = new AtomicBoolean();
+  private final Components components =
+      new Components(said -> {})
+          .add(
+              Component.of(
+                  "Lamp",
+                  "light",
+                  Fault.lasting("Out")
+                      .does("Dark.")
+                      .isOn(lampOut::get)
+                      .apply(values -> lampOut.set(true))
+                      .undo("Lit again.", () -> lampOut.set(false))
+                      .build(),
+                  Fault.event("Flickers")
+                      .does("Flickers this many times.")
+                      .parameter("Times", "", Limits.between(1, 10), 3)
+                      .apply(values -> {})
+                      .undoneBy("It's over.")
+                      .build()));
+  private final Simulator simulator =
+      new Simulator(hal, System::nanoTime, components, stops::incrementAndGet, on -> {});
   private final TunableTee tunables =
       new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false);
   private final Tuning tuning =
@@ -81,6 +105,7 @@ class SimulatorApiTest {
   @AfterEach
   void backAsItWas() throws Exception {
     hal.resume();
+    send("DELETE", "/api/simulator/faults", null, null);
     send(
         "PATCH",
         "/api/simulator",
@@ -89,11 +114,13 @@ class SimulatorApiTest {
   }
 
   @Test
-  void thePageReadsTheSimulatorsState() throws Exception {
+  void theSimulatorsStateComesWithWhatCanFail() throws Exception {
     var answer = send("GET", "/api/simulator", null, null);
 
     assertThat(answer.statusCode()).isEqualTo(200);
-    assertThat(answer.body()).contains("\"simulator\":{\"enabled\":false");
+    assertThat(answer.body())
+        .contains("\"simulator\":{\"enabled\":false")
+        .contains("\"components\":{\"Lamp\":{\"kind\":\"light\"");
   }
 
   @Test
@@ -197,6 +224,70 @@ class SimulatorApiTest {
     assertThat(put("{\"0\": {\"hats\": []}}").statusCode()).isEqualTo(400);
     assertThat(put("{\"0\": \"left\"}").statusCode()).isEqualTo(400);
     assertThat(put("{\"0\": {\"axes\": 0.5}}").statusCode()).isEqualTo(400);
+  }
+
+  @Test
+  void thePageAppliesAndUndoesAFault() throws Exception {
+    var applied =
+        send(
+            "POST", "/api/simulator/faults", JSON, "{\"component\": \"Lamp\", \"fault\": \"Out\"}");
+    assertThat(applied.statusCode()).isEqualTo(200);
+    assertThat(lampOut).isTrue();
+    assertThat(applied.body()).contains("\"Out\":{").contains("\"on\":true");
+
+    var undone =
+        send(
+            "POST",
+            "/api/simulator/faults",
+            JSON,
+            "{\"component\": \"Lamp\", \"fault\": \"Out\", \"undo\": true}");
+    assertThat(undone.statusCode()).isEqualTo(200);
+    assertThat(lampOut).isFalse();
+    assertThat(undone.body()).contains("\"on\":false");
+  }
+
+  @Test
+  void aFaultThatCantBeIsRefusedSayingWhy() throws Exception {
+    var unknown =
+        send("POST", "/api/simulator/faults", JSON, "{\"component\": \"Fan\", \"fault\": \"Out\"}");
+    var outOfRange =
+        send(
+            "POST",
+            "/api/simulator/faults",
+            JSON,
+            "{\"component\": \"Lamp\", \"fault\": \"Flickers\", \"values\": {\"Times\": 99}}");
+    var event =
+        send(
+            "POST",
+            "/api/simulator/faults",
+            JSON,
+            "{\"component\": \"Lamp\", \"fault\": \"Flickers\", \"undo\": true}");
+    var malformed = send("POST", "/api/simulator/faults", JSON, "{\"component\": \"Lamp\"}");
+    var notANumber =
+        send(
+            "POST",
+            "/api/simulator/faults",
+            JSON,
+            "{\"component\": \"Lamp\", \"fault\": \"Flickers\", \"values\": {\"Times\": \"3\"}}");
+
+    assertThat(unknown.statusCode()).isEqualTo(422);
+    assertThat(unknown.body()).contains("There is no component named Fan; there are Lamp");
+    assertThat(outOfRange.statusCode()).isEqualTo(422);
+    assertThat(outOfRange.body()).contains("Times: 99 is above its limit of 10");
+    assertThat(event.statusCode()).isEqualTo(422);
+    assertThat(event.body()).contains("happens once, and nothing undoes it");
+    assertThat(malformed.statusCode()).isEqualTo(400);
+    assertThat(notANumber.statusCode()).isEqualTo(400);
+  }
+
+  @Test
+  void undoingEveryFaultPutsTheRobotBackAsBuilt() throws Exception {
+    send("POST", "/api/simulator/faults", JSON, "{\"component\": \"Lamp\", \"fault\": \"Out\"}");
+
+    var undone = send("DELETE", "/api/simulator/faults", null, null);
+
+    assertThat(undone.statusCode()).isEqualTo(200);
+    assertThat(lampOut).isFalse();
   }
 
   private HttpResponse<String> put(String json) throws Exception {

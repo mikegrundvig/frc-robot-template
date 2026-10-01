@@ -616,7 +616,8 @@ class PitwallServerTest {
             "/api/simulator",
             "/api/simulator/step",
             "/api/simulator/stop",
-            "/api/simulator/joysticks")) {
+            "/api/simulator/joysticks",
+            "/api/simulator/faults")) {
       for (String method : List.of("GET", "PATCH", "POST", "PUT", "DELETE")) {
         var answer = send(method, path, "application/json", method.equals("GET") ? null : "{}");
         assertThat(answer.statusCode()).as(method + " " + path).isEqualTo(404);
@@ -631,7 +632,7 @@ class PitwallServerTest {
             tunables,
             new ByHand(System::nanoTime).experiments());
     assertThat(robots.simulator()).isNull();
-    assertThat(robots.sections()).doesNotContainKey("simulator");
+    assertThat(robots.sections()).doesNotContainKeys("simulator", "components", "scenarios");
   }
 
   private String statusLine(String host) throws Exception {

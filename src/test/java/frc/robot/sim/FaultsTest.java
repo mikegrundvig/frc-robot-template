@@ -7,11 +7,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;

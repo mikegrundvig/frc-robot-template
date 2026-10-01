@@ -67,6 +67,11 @@ dependencies {
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
+    // The libraries (lib/, each its own project): the world model (the validation kit, the field,
+    // and the robot's definition), and localization, which reads it.
+    implementation project(":world")
+    implementation project(":localization")
+
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
@@ -130,7 +135,7 @@ tasks.withType(JavaCompile).configureEach {
 // Pitwall's documentation processor documents only the configuration records, which it knows by
 // their annotation's name.
 tasks.named("compileJava") {
-    options.compilerArgs.add "-Apitwall.docs.records=frc.robot.lib.config.ConfigRecord"
+    options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
 }
 
 // Nothing reaches a robot without a team number, or without passing every check.

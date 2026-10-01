@@ -3,10 +3,10 @@ package frc.robot.studies;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Symmetry;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.Robots;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Symmetry;
-import frc.robot.lib.robot.CameraConfig;
 import java.util.List;
 import org.wpilib.fields.Field;
 import org.wpilib.fields.FieldTag;

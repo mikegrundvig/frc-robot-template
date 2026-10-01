@@ -2,8 +2,8 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.localization.YawSource;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
-import frc.robot.lib.localization.YawSource;
 import frc.robot.sim.Faults;
 import java.net.URI;
 import java.net.http.HttpClient;

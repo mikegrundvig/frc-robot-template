@@ -2,12 +2,12 @@ package frc.robot.game;
 
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.field.Bump;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
-import frc.robot.lib.field.Symmetry;
-import frc.robot.lib.field.Zone;
-import frc.robot.lib.robot.Body;
+import com.michaelgrundvig.frc.world.field.Bump;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
+import com.michaelgrundvig.frc.world.field.Symmetry;
+import com.michaelgrundvig.frc.world.field.Zone;
+import com.michaelgrundvig.frc.world.robot.Body;
 import java.util.List;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
@@ -19,10 +19,10 @@ import org.wpilib.math.shape.Rectangle2d;
  * The field the robot plays on: 2026's, REBUILT, until the next game's is written at kickoff.
  *
  * <p>Everything here is written as if the robot were on the blue alliance, in meters in WPILib's
- * field frame (see {@code frc.robot.lib.field}); the field model works out the red alliance's, and
- * the bumps on red's half. Places near AprilTags are derived from them, so a layout measured at an
- * event moves them for both alliances. Numbers come from WPILib's 2026 tag layout and the game
- * manual.
+ * field frame (see {@code com.michaelgrundvig.frc.world.field}); the field model works out the red
+ * alliance's, and the bumps on red's half. Places near AprilTags are derived from them, so a layout
+ * measured at an event moves them for both alliances. Numbers come from WPILib's 2026 tag layout
+ * and the game manual.
  *
  * <p>At kickoff, this class moves to the test tree as a fixture and the new game gets its own, the
  * same way: see docs/kickoff.md.

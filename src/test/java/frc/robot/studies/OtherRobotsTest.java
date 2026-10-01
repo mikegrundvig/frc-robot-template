@@ -4,8 +4,8 @@ import static frc.robot.studies.StudyFixtures.WALL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.world.robot.Body;
 import frc.robot.Robots;
-import frc.robot.lib.robot.Body;
 import java.util.List;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;

@@ -6,12 +6,12 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.world.field.Bump;
+import com.michaelgrundvig.frc.world.field.Terrain;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.field.Bump;
-import frc.robot.lib.field.Terrain;
-import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;

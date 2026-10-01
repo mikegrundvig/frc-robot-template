@@ -3,12 +3,12 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.EstimatorConfigBuilder;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionConfigBuilder;
-import frc.robot.lib.robot.CameraConfig;
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;

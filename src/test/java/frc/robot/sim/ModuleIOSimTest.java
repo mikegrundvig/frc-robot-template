@@ -5,9 +5,9 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Kilograms;
 
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.robot.DrivetrainGeometry;
 import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.DrivetrainControlGainsBuilder;
 import frc.robot.subsystems.drive.DrivetrainControlLimitsBuilder;

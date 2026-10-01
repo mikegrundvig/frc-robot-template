@@ -9,9 +9,9 @@ import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Outcome;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Placement;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Placement;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.lib.wiring.CanBus;
 import frc.robot.lib.wiring.SwerveWiring;

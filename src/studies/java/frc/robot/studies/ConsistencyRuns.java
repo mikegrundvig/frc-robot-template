@@ -1,18 +1,18 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
 import frc.robot.SimulatedRobot;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.EstimatorConfigBuilder;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionConfigBuilder;
-import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Faults;
 import frc.robot.sim.Scenario;

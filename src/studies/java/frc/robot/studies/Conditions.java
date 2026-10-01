@@ -1,9 +1,9 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
 
-import frc.robot.lib.config.Checks;
+import com.michaelgrundvig.frc.world.config.Checks;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.Locale;
 import java.util.SplittableRandom;

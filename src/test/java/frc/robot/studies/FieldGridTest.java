@@ -6,9 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.BodyBuilder;
 import frc.robot.Robots;
-import frc.robot.lib.robot.Body;
-import frc.robot.lib.robot.BodyBuilder;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;

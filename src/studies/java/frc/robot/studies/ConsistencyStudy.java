@@ -1,7 +1,7 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import frc.robot.Robots;
-import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -301,7 +301,7 @@ public final class ConsistencyStudy {
     md.append("| Run | ");
     List<String> cameras =
         Robots.SIM.definition().cameras().stream()
-            .map(frc.robot.lib.robot.CameraConfig::name)
+            .map(com.michaelgrundvig.frc.world.robot.CameraConfig::name)
             .toList();
     md.append(String.join(" | ", cameras)).append(" |\n|---|");
     md.append("---|".repeat(cameras.size())).append('\n');

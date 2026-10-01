@@ -1,12 +1,12 @@
 package frc.robot;
 
-import static frc.robot.lib.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.robot.RobotDefinition;
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.subsystems.drive.DrivetrainControl;
 import java.util.Optional;

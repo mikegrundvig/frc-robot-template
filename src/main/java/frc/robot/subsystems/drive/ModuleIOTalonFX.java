@@ -22,7 +22,7 @@ import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
-import frc.robot.lib.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayList;

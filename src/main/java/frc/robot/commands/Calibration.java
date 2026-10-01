@@ -4,14 +4,14 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.localization.calibration.CameraMountCalibration;
+import com.michaelgrundvig.frc.localization.calibration.GyroScaleCalibration;
+import com.michaelgrundvig.frc.localization.calibration.HeadingAverage;
+import com.michaelgrundvig.frc.localization.calibration.LevelCheck;
+import com.michaelgrundvig.frc.localization.calibration.WheelRadiusCalibration;
 import com.michaelgrundvig.frc.pitwall.Actions;
-import frc.robot.lib.calibration.CameraMountCalibration;
-import frc.robot.lib.calibration.GyroScaleCalibration;
-import frc.robot.lib.calibration.HeadingAverage;
-import frc.robot.lib.calibration.LevelCheck;
-import frc.robot.lib.calibration.WheelRadiusCalibration;
-import frc.robot.lib.robot.CameraConfig;
-import frc.robot.lib.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.subsystems.drive.Drive;
@@ -34,8 +34,8 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  * The calibration procedures, as actions for the Pitwall page: each drives or watches the robot,
  * works out a number its configuration should have, and says where it goes, with the date. The
  * written procedures are in {@code docs/calibration.md}; the math is in {@code
- * frc.robot.lib.calibration}. Nothing is changed on its own: the numbers go into {@code Robots},
- * and the robot is redeployed.
+ * com.michaelgrundvig.frc.localization.calibration}. Nothing is changed on its own: the numbers go
+ * into {@code Robots}, and the robot is redeployed.
  */
 public final class Calibration {
   /** Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (6328). */

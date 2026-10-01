@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.vision.CameraIO;
 import java.util.ArrayList;

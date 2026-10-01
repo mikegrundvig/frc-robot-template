@@ -11,8 +11,8 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.robot.Actuator;
-import frc.robot.lib.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Actuator;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.ModuleIO;

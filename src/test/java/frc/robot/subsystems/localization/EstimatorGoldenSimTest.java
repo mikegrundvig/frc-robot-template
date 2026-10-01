@@ -3,11 +3,11 @@ package frc.robot.subsystems.localization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.VisionDecision;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.VisionDecision;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import frc.robot.sim.SensorErrors;

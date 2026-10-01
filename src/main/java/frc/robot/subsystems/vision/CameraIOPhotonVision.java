@@ -1,6 +1,6 @@
 package frc.robot.subsystems.vision;
 
-import frc.robot.lib.localization.Timestamps;
+import com.michaelgrundvig.frc.localization.Timestamps;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

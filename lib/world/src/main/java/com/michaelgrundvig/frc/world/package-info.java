@@ -1,0 +1,17 @@
+/**
+ * The world model: what the field and the robot are, described once, and read by everything that
+ * needs to know them: the robot program, localization, the simulator, and the views.
+ *
+ * <ul>
+ *   <li>{@code config}: the validation kit every configuration record is built with, by name, and
+ *       checked with.
+ *   <li>{@code field}: the field, its tags, the places and zones code refers to by name, and its
+ *       terrain.
+ *   <li>{@code robot}: the robot's definition, its body, drivetrain, cameras, and IMUs.
+ * </ul>
+ *
+ * <p>The field and the robot don't know about each other, and the kit knows about neither; none of
+ * it reads a clock or holds state, so the robot, the simulator's parallel runs, and a replay all
+ * read the same model ({@code ArchitectureTest}).
+ */
+package com.michaelgrundvig.frc.world;

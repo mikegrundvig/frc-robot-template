@@ -449,7 +449,8 @@ record DocComment(String summary, String text, Map<String, String> params) {
     if (member >= 0) {
       return reference.substring(member + 1);
     }
-    // A type: drop its package, the lowercase names in front (frc.robot.lib.config.SwerveConfig).
+    // A type: drop its package, the lowercase names in front
+    // (com.michaelgrundvig.frc.world.robot.DrivetrainGeometry).
     String[] names = reference.split("\\.");
     int first = 0;
     while (first < names.length - 1

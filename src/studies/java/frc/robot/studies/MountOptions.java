@@ -1,11 +1,11 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.atLeast;
-import static frc.robot.lib.config.Rules.between;
-import static frc.robot.lib.config.Rules.each;
-import static frc.robot.lib.config.Rules.finite;
-import static frc.robot.lib.config.Rules.notBlank;
-import static frc.robot.lib.config.Rules.shown;
+import static com.michaelgrundvig.frc.world.config.Rules.atLeast;
+import static com.michaelgrundvig.frc.world.config.Rules.between;
+import static com.michaelgrundvig.frc.world.config.Rules.each;
+import static com.michaelgrundvig.frc.world.config.Rules.finite;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Centimeters;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
@@ -13,12 +13,12 @@ import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Millimeters;
 import static org.wpilib.units.Units.Radians;
 
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigException;
+import com.michaelgrundvig.frc.world.config.Rule;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotConfig;
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigException;
-import frc.robot.lib.config.Rule;
-import frc.robot.lib.robot.Body;
-import frc.robot.lib.robot.CameraConfig;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.text.DecimalFormat;

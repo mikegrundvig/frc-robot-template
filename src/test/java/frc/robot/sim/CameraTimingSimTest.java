@@ -2,10 +2,10 @@ package frc.robot.sim;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.localization.TagSolver;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.localization.TagSolver;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.vision.CameraIO;
 import java.util.ArrayList;

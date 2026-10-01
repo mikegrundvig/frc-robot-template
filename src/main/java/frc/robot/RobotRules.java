@@ -1,9 +1,9 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.subsystems.drive.DrivetrainControl;
 
 /**

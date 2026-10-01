@@ -1,8 +1,8 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
-import frc.robot.lib.config.ConfigRecord;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;

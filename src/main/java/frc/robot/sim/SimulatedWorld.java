@@ -1,11 +1,11 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.robot.Body;
-import frc.robot.lib.robot.CameraConfig;
-import frc.robot.lib.robot.DrivetrainGeometry;
-import frc.robot.lib.robot.Imus;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Imus;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.vision.CameraIO;

@@ -9,12 +9,12 @@ import static org.assertj.core.groups.Tuple.tuple;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
+import com.michaelgrundvig.frc.world.robot.BodyBuilder;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
-import frc.robot.lib.robot.BodyBuilder;
-import frc.robot.lib.robot.CameraConfig;
-import frc.robot.lib.robot.RobotDefinitionBuilder;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;

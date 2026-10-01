@@ -3,7 +3,7 @@ package frc.robot.subsystems.drive;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.Timestamp;
-import frc.robot.lib.localization.Timestamps;
+import com.michaelgrundvig.frc.localization.Timestamps;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;

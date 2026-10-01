@@ -10,10 +10,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.Robots;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.VisionMeasurement;
-import frc.robot.lib.robot.CameraConfig;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;

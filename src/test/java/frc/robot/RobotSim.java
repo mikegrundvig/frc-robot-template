@@ -4,9 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.robot.RobotDefinitionBuilder;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenario;

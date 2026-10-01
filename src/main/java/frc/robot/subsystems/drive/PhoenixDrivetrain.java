@@ -2,7 +2,7 @@ package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
-import frc.robot.lib.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.wiring.CanBus;
 import frc.robot.lib.wiring.SwerveWiring;
 import java.util.concurrent.locks.Lock;

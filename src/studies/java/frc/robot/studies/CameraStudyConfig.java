@@ -1,12 +1,12 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.atLeast;
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.positive;
-import static frc.robot.lib.config.Rules.shown;
+import static com.michaelgrundvig.frc.world.config.Rules.atLeast;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.shown;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import frc.robot.subsystems.vision.VisionSim;
 
 /**

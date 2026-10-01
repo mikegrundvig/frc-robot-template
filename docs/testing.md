@@ -10,32 +10,39 @@ it, fool its sensors, and check what it believes against where it really is.
 |---|---|
 | Rerun the fast tests on every save while you work | `./gradlew test -Pquick --continuous` |
 | One robot test class, whatever its kind | `./gradlew :test --tests frc.robot.RobotContainerSimTest` |
-| A package's tests | `./gradlew :test --tests 'frc.robot.lib.field.*'` |
+| A package's tests | `./gradlew :test --tests 'frc.robot.subsystems.drive.*'` |
+| The world model's tests (the kit, the field, the robot's definition) | `./gradlew :world:test` |
+| One of its packages, or classes | `./gradlew :world:test --tests 'com.michaelgrundvig.frc.world.field.*'` |
+| Localization's tests | `./gradlew :localization:test` |
 | Pitwall's tests | `./gradlew :pitwall:test` |
 | The tests of Pitwall's documentation processor | `./gradlew :pitwall:docs-processor:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
 
-The colon in `:test` means the robot project's tests only. Without it, `--tests` also applies to
-Pitwall's projects, which have no such test and fail the build saying so.
+The colon in `:test` means the robot project's tests only, and `:world:test` the world model's.
+Without one, `--tests` also applies to every other project (the libraries in `lib/`, and Pitwall's),
+which have no such test and fail the build saying so. `./gradlew test` with no `--tests` runs them
+all.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
-analysis and coverage report that `ci` runs. The coverage report is at
-`build/reports/jacoco/test/html/index.html`.
+analysis and coverage report that `ci` runs. Each project has its own coverage report, the robot
+program's at `build/reports/jacoco/test/html/index.html` and each library's under its folder
+(`lib/world/build/reports/...`), and each its own floor: a library's own tests must cover it.
 
 ## Where a test goes
 
-Test classes mirror the package of what they test: the tests for `lib/field/Zone.java` are in
-`src/test/java/frc/robot/lib/field/ZoneTest.java`. Pick the lowest level that can show the bug; the
+Test classes mirror the package of what they test, in the same project: the tests for the world
+model's `com.michaelgrundvig.frc.world.field.Zone` are in
+`lib/world/src/test/java/com/michaelgrundvig/frc/world/field/ZoneTest.java`. Pick the lowest level that can show the bug; the
 lower the level, the faster the test and the more exactly a failure says what broke.
 
 | Level | What it runs | Example to copy |
 |---|---|---|
-| A component | Plain JUnit on a class in `lib/`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `lib/field/ZoneTest` |
+| A component | Plain JUnit on a class in a library (`lib/world`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world` |
 | A mechanism | A subsystem on simulated hardware, stepped loop by loop. The class carries `@ExtendWith(RobotSim.class)`. | `subsystems/drive/DriveBasicsTest`, with `sim/DriveSimHarness` |
 | The whole robot | The robot program as `Robot` builds and runs it, Pitwall and all, driven from a simulated Driver Station and gamepad. | `RobotContainerSimTest` |
 | The program itself | The robot program started as a program, in its own process: a session recorded, then replayed. | `ReplayEndToEndTest` |
-| The structure | The architecture rules (what may depend on what), checked against the compiled code. | `ArchitectureTest` |
+| The structure | The architecture rules (what may depend on what), checked against the compiled code: one per project, each for what Gradle's boundaries between projects can't see. | `ArchitectureTest` |
 
 Name a test class after what it tests: `ZoneTest`. A test class that runs the simulator for
 seconds of robot time is a `...SimTest` and carries `@SimulationTest`; one that starts the program
@@ -124,8 +131,9 @@ What it offers:
   `build.gradle`, so Gradle knows the tests depend on it. Today the tests run on every build
   anyway (the build's time is compiled in), but if that changes, Gradle would call them up to
   date after a change to an undeclared file, and skip them.
-- **Coverage has a floor.** The build fails below the floors in `coverage-floor.properties`. They
-  catch code with no tests at all; they are not a target to chase.
+- **Coverage has a floor.** The build fails below the floors in each project's
+  `coverage-floor.properties`. They catch code with no tests at all; they are not a target to
+  chase.
 
 ## Is the estimator honest? The consistency study
 

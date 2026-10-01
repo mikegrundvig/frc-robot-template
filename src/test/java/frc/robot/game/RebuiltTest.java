@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
 import frc.robot.Robots;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;

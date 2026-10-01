@@ -1,14 +1,14 @@
 package frc.robot.subsystems.drive;
 
-import static frc.robot.lib.config.Rules.atMost;
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.positive;
-import static frc.robot.lib.config.Rules.shown;
+import static com.michaelgrundvig.frc.world.config.Rules.atMost;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Seconds;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
-import frc.robot.lib.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;

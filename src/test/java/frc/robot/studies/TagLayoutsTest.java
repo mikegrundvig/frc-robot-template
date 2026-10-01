@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Symmetry;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Symmetry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

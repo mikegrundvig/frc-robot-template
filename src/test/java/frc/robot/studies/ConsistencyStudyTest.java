@@ -4,10 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;

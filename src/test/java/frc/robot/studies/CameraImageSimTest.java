@@ -2,11 +2,11 @@ package frc.robot.studies;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.localization.TagDetections;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.localization.TagDetections;
-import frc.robot.lib.robot.CameraConfig;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.HashMap;

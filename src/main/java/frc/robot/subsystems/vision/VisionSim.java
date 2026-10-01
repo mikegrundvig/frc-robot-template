@@ -4,8 +4,8 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Milliseconds;
 
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

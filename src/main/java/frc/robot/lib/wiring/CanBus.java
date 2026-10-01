@@ -1,8 +1,8 @@
 package frc.robot.lib.wiring;
 
-import static frc.robot.lib.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 
-import frc.robot.lib.config.Checks;
+import com.michaelgrundvig.frc.world.config.Checks;
 import org.wpilib.hardware.bus.CANPort;
 
 /** Which CAN bus a device is on: one of Systemcore's own ports, or a CANivore, by its name. */

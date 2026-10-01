@@ -1,11 +1,11 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotConfig;
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.robot.CameraConfig;
-import frc.robot.lib.robot.RobotDefinitionBuilder;
 import java.util.List;
 
 /**

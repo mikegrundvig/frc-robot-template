@@ -39,6 +39,9 @@ import org.wpilib.hardware.hal.RobotMode;
 class SteeringExperimentSimTest {
   private static final String STEER_KP = "/Drive/config/gains/steerKp";
   private static final String STEER_KD = "/Drive/config/gains/steerKd";
+  private static final String STEER_CURRENT_LIMIT = "/Drive/config/limits/steerStatorCurrent";
+  private static final List<String> WHEELS =
+      List.of("Front left", "Front right", "Back left", "Back right");
 
   /** The longest the test waits, in real time, for the network. */
   private static final Duration WAIT = Duration.ofSeconds(10);
@@ -218,7 +221,12 @@ class SteeringExperimentSimTest {
       return jumps;
     }
 
-    /** The worst of a score over every jump of every wheel. */
+    /** The largest a signal (such as "Front left current") was during the run. */
+    double peak(String signal) {
+      return number(asMap(asMap(state.get("scores")).get("peaks")).get(signal));
+    }
+
+    /** The worst of a score over every jump of every wheel: NaN if any jump never settled. */
     double worst(String score) {
       return jumps().stream().mapToDouble(jump -> number(jump.get(score))).max().orElseThrow();
     }
@@ -249,6 +257,12 @@ class SteeringExperimentSimTest {
       assertThat(Math.abs(number(jump.get("error")))).as("error, degrees").isLessThan(1.0);
     }
     assertThat(number(asMap(run.state.get("gains")).get(STEER_KP))).isEqualTo(16.0);
+    // Each turn starts with the loop asking 12 V of a motor standing still, enough to draw its
+    // stall current, 366 A: it draws its limit, 40 A.
+    for (String wheel : WHEELS) {
+      assertThat(run.peak(wheel + " current")).as(wheel + ", amps").isCloseTo(40, within(1e-9));
+      assertThat(run.peak(wheel + " voltage")).as(wheel + ", volts").isCloseTo(12, within(1e-9));
+    }
     // Every angle reading the robot recorded reached the page, at 250 Hz: about 2.1 s of them.
     List<?> angles = page.recordedAngles();
     assertThat(run.samples.get("Front left")).isEqualTo(angles.size());
@@ -280,36 +294,80 @@ class SteeringExperimentSimTest {
   }
 
   /**
-   * Tuning steerKp from the page: a stiffer gain answers faster and settles sooner, and without
-   * steerKd to damp it, overshoots more. (The simulated steering is damped hard by its motor's back
-   * EMF: with the committed steerKd it doesn't overshoot at any steerKp in its range.)
+   * The steering's current limit tuned from the page: the next run's peak current is the new limit.
    */
   @Test
-  void raisingSteerKpRisesFasterAndOvershootsMore() throws Exception {
+  void aLowerSteeringCurrentLimitCapsThePeakCurrent() throws Exception {
+    Page page = ready();
+    var lowered = page.send("PATCH", "/api/values", "{\"" + STEER_CURRENT_LIMIT + "\": 20}");
+    Run run = page.run();
+
+    assertThat(lowered.statusCode()).as(lowered.body()).isEqualTo(200);
+    assertThat(run.state.get("phase")).isEqualTo("ENDED");
+    for (String wheel : WHEELS) {
+      assertThat(run.peak(wheel + " current")).as(wheel + ", amps").isCloseTo(20, within(1e-9));
+    }
+  }
+
+  /**
+   * Tuning steerKp from the page: a stiffer gain answers faster and settles sooner, until it
+   * overshoots. The steering's loop hears its angle from the CANcoder only every 10 ms, and a stiff
+   * gain corrects too far on each angle it hears: at the top of its range the module never settles,
+   * but buzzes about its target.
+   */
+  @Test
+  void raisingSteerKpAnswersFasterUntilItOvershootsAndNeverSettles() throws Exception {
     Page page = ready();
     Run committed = page.run();
+    page.send("PATCH", "/api/values", "{\"" + STEER_KP + "\": 40}");
+    Run stiffer = page.run();
     page.send("PATCH", "/api/values", "{\"" + STEER_KP + "\": 100}");
-    Run stiff = page.run();
+    Run stiffest = page.run();
+
+    assertThat(number(asMap(stiffest.state.get("gains")).get(STEER_KP))).isEqualTo(100.0);
+    assertThat(committed.worst("overshoot")).isZero();
+    assertThat(stiffer.worst("rise")).as("rise, s").isLessThan(committed.worst("rise") * 0.8);
+    assertThat(stiffer.worst("settling"))
+        .as("settling, s")
+        .isLessThan(committed.worst("settling") * 0.7);
+    assertThat(stiffer.worst("overshoot")).isBetween(0.01, 0.05);
+    assertThat(stiffest.worst("overshoot")).isGreaterThan(0.1);
+    assertThat(stiffest.worst("settling")).as("settling: never").isNaN();
+  }
+
+  /**
+   * Damping from the page: at a steerKp that overshoots, steerKd brings the overshoot down. Too
+   * much, and the module never settles: the loop damps on a speed up to 10 ms old, so it pushes
+   * against motion that has already changed. Past about 0.2, at this steerKp, the module already
+   * buzzes about its target between the CANcoder's frames, but the angle the robot hears catches
+   * the buzz at the same point each time, so the page sees it settle a few tenths of a degree
+   * short; by 1 the buzz is plain, on nearly every jump of every wheel.
+   */
+  @Test
+  void raisingSteerKdDampsTheOvershootUntilItNeverSettles() throws Exception {
+    Page page = ready();
     // Both at once, all or none, as the page sends them.
     var undamped =
-        page.send("PATCH", "/api/values", "{\"" + STEER_KP + "\": 60, \"" + STEER_KD + "\": 0}");
-    Run softer = page.run();
-    page.send("PATCH", "/api/values", "{\"" + STEER_KP + "\": 100}");
-    Run harder = page.run();
+        page.send("PATCH", "/api/values", "{\"" + STEER_KP + "\": 50, \"" + STEER_KD + "\": 0}");
+    Run loose = page.run();
+    page.send("PATCH", "/api/values", "{\"" + STEER_KD + "\": 0.15}");
+    Run damped = page.run();
+    page.send("PATCH", "/api/values", "{\"" + STEER_KD + "\": 1}");
+    Run overdamped = page.run();
 
     assertThat(undamped.statusCode()).as(undamped.body()).isEqualTo(200);
-    assertThat(number(asMap(harder.state.get("gains")).get(STEER_KP))).isEqualTo(100.0);
-    assertThat(number(asMap(harder.state.get("gains")).get(STEER_KD))).isEqualTo(0.0);
-    assertThat(stiff.worst("rise")).as("rise, s").isLessThan(committed.worst("rise") * 0.8);
-    assertThat(stiff.worst("settling"))
-        .as("settling, s")
-        .isLessThan(committed.worst("settling") * 0.6);
-    assertThat(committed.worst("overshoot")).isZero();
-    assertThat(stiff.worst("overshoot")).isZero();
-    assertThat(harder.worst("overshoot"))
-        .as("overshoot at 100, against %s at 60", softer.worst("overshoot"))
-        .isGreaterThan(softer.worst("overshoot") * 3)
-        .isBetween(0.005, 0.05);
+    assertThat(number(asMap(loose.state.get("gains")).get(STEER_KP))).isEqualTo(50.0);
+    assertThat(number(asMap(loose.state.get("gains")).get(STEER_KD))).isEqualTo(0.0);
+    assertThat(loose.worst("overshoot")).isBetween(0.05, 0.1);
+    assertThat(damped.worst("overshoot"))
+        .as("overshoot with steerKd 0.15, against %s without", loose.worst("overshoot"))
+        .isLessThan(loose.worst("overshoot") / 2);
+    assertThat(damped.worst("settling")).as("settling, s").isLessThan(loose.worst("settling"));
+    assertThat(overdamped.worst("settling")).as("settling: never").isNaN();
+    assertThat(overdamped.jumps())
+        .as("jumps that never settled, of eight")
+        .filteredOn(jump -> Double.isNaN(number(jump.get("settling"))))
+        .hasSizeGreaterThanOrEqualTo(6);
   }
 
   /**
@@ -334,8 +392,9 @@ class SteeringExperimentSimTest {
     return URI.create("http://127.0.0.1:" + sim.pitwall().port() + path);
   }
 
+  /** A number from the stream. A score that couldn't be had (it never settled) comes as "NaN". */
   private static double number(@Nullable Object json) {
-    return ((Number) Objects.requireNonNull(json)).doubleValue();
+    return "NaN".equals(json) ? Double.NaN : ((Number) Objects.requireNonNull(json)).doubleValue();
   }
 
   private static List<?> asList(@Nullable Object json) {

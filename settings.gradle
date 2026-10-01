@@ -15,3 +15,6 @@ rootProject.name = "frc-robot-template"
 // Pitwall, the robot program's own web page (status, actions, and live tuning): its own project, free of robot
 // code, so it can become a library teams pull in.
 include "pitwall"
+// Pitwall's documentation processor, which reads the configuration records' Javadoc as the robot program
+// compiles, so the page can say what each value means. A compiler plugin, so it's a project of its own.
+include "pitwall:docs-processor"

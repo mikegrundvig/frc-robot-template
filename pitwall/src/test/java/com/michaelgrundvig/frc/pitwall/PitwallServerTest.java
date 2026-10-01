@@ -231,8 +231,31 @@ class PitwallServerTest {
     assertThat(get("/api/tunables").body())
         .contains(
             "\"/Machine/drive/gains/kP\":{\"config\":\"machine\",\"field\":\"drive.gains.kP\",\"unit\":\"\","
-                + "\"limits\":\"0 to 100\",\"committed\":16.0}");
+                + "\"limits\":\"0 to 100\",\"committed\":16.0,\"record\":\"Fixtures.Gains\","
+                + "\"group\":\"drive.gains\",\"meaning\":\"volts per meter per second of error\"}")
+        .as("undocumented")
+        .contains("\"record\":\"Fixtures.Range\",\"group\":\"travel\",\"meaning\":\"\"");
     assertThat(get("/api/values").body()).contains("\"/Machine/drive/gains/kP\":16.0");
+  }
+
+  /** What the configurations' records say, for the page to show beside their values. */
+  @Test
+  void documentsEachConfigurationByItsRecords() throws Exception {
+    assertThat(get("/api/configs").body())
+        .isEqualTo(
+            "{\"machine\":{\"record\":\"Fixtures.Machine\",\"doc\":{\"summary\":\"\",\"text\":\"\"},"
+                + "\"groups\":["
+                + "{\"path\":\"drive\",\"record\":\"Fixtures.Drive\","
+                + "\"doc\":{\"summary\":\"A drive.\",\"text\":\"A drive.\"},\"meaning\":\"\"},"
+                + "{\"path\":\"drive.gains\",\"record\":\"Fixtures.Gains\","
+                + "\"doc\":{\"summary\":\"How the drive is controlled.\",\"text\":\"How the drive"
+                + " is controlled. Tuned on a running machine, then committed.\\n\\nStart `kP`"
+                + " low.\"},\"meaning\":\"how it's controlled\"},"
+                + "{\"path\":\"drive.limits\",\"record\":\"Fixtures.DriveLimits\","
+                + "\"doc\":{\"summary\":\"The drive's limits.\",\"text\":\"The drive's limits.\"},"
+                + "\"meaning\":\"\"},"
+                + "{\"path\":\"travel\",\"record\":\"Fixtures.Range\","
+                + "\"doc\":{\"summary\":\"\",\"text\":\"\"},\"meaning\":\"\"}]}}");
   }
 
   @Test

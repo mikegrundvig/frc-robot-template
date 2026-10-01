@@ -113,6 +113,14 @@ Also built in:
   `Limits` in the mechanism's `tuning`; a check that reads two mechanisms goes in `RobotRules`.
   Each is checked against the committed configuration in the tests and at startup.
 
+  **What a value means is its `@param`:** the page will show a configuration record's Javadoc
+  beside its values, each value's `@param` as what it means (`@param steerKp volts per radian of
+  error`), and dashboards see it as the value's `description` property. So write what the value
+  does and in what unit, not its name again. Every tunable value needs one: `RobotTuningTest`
+  fails without it, naming the record whose Javadoc to write. The build copies the Javadoc into
+  the program as it compiles (Pitwall's documentation processor, in `pitwall/docs-processor`), so
+  the robot needs no source to show it.
+
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver
   Station and NetworkTables, so give the robot's Wi-Fi a strong password (or turn it off at events).
@@ -158,6 +166,12 @@ Also built in:
 - **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
   level, and each camera's mount, each measured on the robot and reported as the number to commit
   and where it goes ([docs/calibration.md](docs/calibration.md)).
+- **Where every value comes from** ([docs/values.md](docs/values.md)): every configuration value,
+  whether it's calibrated, characterized, chosen, or as built, where today's number came from, and
+  how to measure it or why it is what it is. A test keeps the register complete: a new value fails
+  the build until it has a row. What's measured once per kind of part (a camera's noise and
+  latency, a gyro's drift, a tread's grip) has its bench procedure in
+  [docs/characterization.md](docs/characterization.md).
 - **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
   match tab, checked against the code on every build, so no widget sits blank on the field.
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
@@ -181,11 +195,11 @@ Also built in:
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |
-| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
+| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on the first `./gradlew run` with the GUI. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

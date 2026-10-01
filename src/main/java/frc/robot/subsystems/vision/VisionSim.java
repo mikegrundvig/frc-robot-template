@@ -114,8 +114,12 @@ public final class VisionSim implements AutoCloseable {
     return added;
   }
 
-  /** A configured mount, off by an error in the robot's frame. */
-  private static Transform3d mounted(Transform3d configured, Transform3d mountError) {
+  /**
+   * Where a camera really is, mounted off its configuration: the error added to the configured
+   * position, and turning the configured orientation. The camera placement study mounts its cameras
+   * off the same way.
+   */
+  public static Transform3d mounted(Transform3d configured, Transform3d mountError) {
     return new Transform3d(
         configured.getTranslation().plus(mountError.getTranslation()),
         configured.getRotation().rotateBy(mountError.getRotation()));

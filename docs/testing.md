@@ -514,8 +514,14 @@ and then seeing again), and the estimate recovers in each. What's known not to h
 
 - **A slide's first tenth of a second.** The slip check sees a slide only once the wheels and the
   accelerometer are 0.3 m/s apart, so the doubt starts behind it. With the camera's last fix still
-  recent, the scoring gate lets through up to 3 loops while the estimate is 15 to 20 cm off as a
+  recent, the scoring gate lets through up to 2 loops while the estimate is 15 to 18 cm off as a
   push or a launch at half grip gets going.
+- **Worn tread, far without a camera.** Tread worn a little unevenly puts the wheels' reckoning
+  off by a share of every meter, where the estimator allows for an error growing with the root of
+  the distance (`translationStdDevPerMeter`). Three seconds at full stick with no camera, the
+  season-worn simulated robot is 16 cm off claiming 10. Before the slip check, the estimate doubted
+  a quarter of the wheels' travel at the drive motors' current limit, which covered it in a launch
+  (and nowhere else).
 - **The end of a long slide.** What the speed comparison let go of while a slide held (0.15 m/s
   for each second) it under-reads as the slide slows. Pushed at 3 m/s for two seconds, the camera
   seeing, the last 0.6 m/s of the slowdown reads as no slide, and for 4 loops the estimate is 9 to

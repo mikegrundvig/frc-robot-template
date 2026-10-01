@@ -144,7 +144,8 @@ class VisionPipelineTest {
     VisionMeasurement turned =
         measured(process(seen, steady(ROBOT.getRotation().plus(new Rotation2d(angle)))));
 
-    Translation2d toTags = right.robotToTags();
+    Translation2d toTags = right.lever().robotToTags();
+    assertThat(right.lever().heading()).as("solved with the gyro's").isEqualTo(ROBOT.getRotation());
     Translation2d tags =
         FIELD
             .tag(25)
@@ -170,7 +171,7 @@ class VisionPipelineTest {
 
     VisionMeasurement multi = measured(process(seeing(ROBOT, camera, true, 25, 26), lost));
 
-    assertThat(multi.robotToTags()).isEqualTo(Translation2d.ZERO);
+    assertThat(multi.lever()).isEqualTo(VisionMeasurement.Lever.NONE);
   }
 
   /**

@@ -47,8 +47,8 @@
  *       and square radians. An infinite heading variance means the measurement says nothing about
  *       heading, which is how a solve that took its heading from the gyro reports it; such a
  *       measurement also says how far its tags were ({@link
- *       frc.robot.lib.localization.VisionMeasurement#robotToTags}), since the gyro's heading error
- *       moves its position by that distance times the error.
+ *       frc.robot.lib.localization.VisionMeasurement#lever}), since the gyro's heading error moves
+ *       its position by that distance times the error.
  * </ul>
  *
  * <p><b>An honest uncertainty.</b> Gates, χ² tests, and any bound on the robot's error trust the

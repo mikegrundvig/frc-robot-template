@@ -15,7 +15,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /** Localization fed by hand: what it makes of the drivetrain's readings, one loop at a time. */
@@ -104,7 +103,7 @@ class LocalizationTest {
                     11_000_000L,
                     Pose2d.ZERO,
                     PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY),
-                    Translation2d.ZERO,
+                    VisionMeasurement.Lever.NONE,
                     "camera " + camera,
                     List.of(26),
                     VisionMeasurement.Solver.HEADING_CONSTRAINED));

@@ -23,10 +23,10 @@ import org.wpilib.math.util.MathUtil;
  * <ul>
  *   <li><b>The heading, for a position a camera solved with it.</b> Such a position leans on the
  *       gyro's heading: off by an angle, it is off by the angle times the distance to the tags,
- *       square to them ({@link VisionMeasurement#robotToTags}). So each fix measures the position
- *       and the heading's error together (its H is [I | J d], d the robot-to-tags vector and J a
- *       quarter turn), but a fix never corrects the heading: the gyro owns it, and only a
- *       measurement with a heading of its own corrects its drift.
+ *       square to them ({@link VisionMeasurement#lever}). So each fix measures the position and the
+ *       heading's error together (its H is [I | J d], d the robot-to-tags vector and J a quarter
+ *       turn), but a fix never corrects the heading: the gyro owns it, and only a measurement with
+ *       a heading of its own corrects its drift.
  *   <li><b>Each IMU's scale:</b> a gyro that reads 0.3% too much turn is 1.1° off after a turn and
  *       5.4° after five, the same way each time, not a little more at random. The backup IMU's is
  *       its own: three turns one way on the gyro and three back on the backup don't cancel.
@@ -112,7 +112,7 @@ final class PoseFilter {
   // Scratch space for a camera measurement, from its innovation to its correction: two rows for
   // its position, a third for its heading if it has one. Row-major, three columns each.
   private int rows;
-  private int camera;
+  private int measuredBy; // the camera's place among the considered errors, or -1
   private final double[] innovation3 = new double[3];
   private final double[] h3 = new double[9]; // H: what each row measures of x, y, and the offset
   // and of the camera's turn and shift (x, y, heading): rows x PER_CAMERA
@@ -124,9 +124,8 @@ final class PoseFilter {
   private final double[] product = new double[9];
   private final double[] column = new double[3];
 
-  // A landmark's direction, from its innovation to its correction.
-  private double landmarkX;
-  private double landmarkY;
+  /** How many camera innovations the filter has worked out: the latest's stamp. */
+  private long innovations;
 
   PoseFilter(Considered considered) {
     scaleVariance = square(considered.gyroScaleStdDev());
@@ -147,6 +146,8 @@ final class PoseFilter {
    * @param heading the heading's innovation, radians; NaN for a measurement without heading
    * @param chiSquared the innovation's squared distance under its uncertainty, all of it
    * @param positionChiSquared the same for the position alone
+   * @param stamp which of the filter's innovations it is: {@link #correct(Innovation)} applies only
+   *     the latest, whose gain the filter still holds
    */
   record Innovation(
       double x,
@@ -154,7 +155,8 @@ final class PoseFilter {
       boolean withHeading,
       double heading,
       double chiSquared,
-      double positionChiSquared) {
+      double positionChiSquared,
+      long stamp) {
     double meters() {
       return Math.hypot(x, y);
     }
@@ -166,9 +168,21 @@ final class PoseFilter {
    * @param meters the innovation along the axis
    * @param variance its variance, estimate and landmark together
    * @param chiSquared its squared distance under that variance
+   * @param acrossX the direction across the landmark's line, that it measures along, x
+   * @param acrossY and y
+   * @param ph0 how x relates to the measurement: P H^T's first row
+   * @param ph1 how y does
+   * @param ph2 how the heading offset does
    */
   record AxisInnovation(
-      double meters, double variance, double chiSquared, double ph0, double ph1, double ph2) {}
+      double meters,
+      double variance,
+      double chiSquared,
+      double acrossX,
+      double acrossY,
+      double ph0,
+      double ph1,
+      double ph2) {}
 
   double x() {
     return x;
@@ -323,13 +337,13 @@ final class PoseFilter {
   @Nullable Innovation innovation(VisionMeasurement measurement, double yawThen, int camera) {
     PoseCovariance noise = measurement.covariance();
     rows = noise.hasHeading() ? 3 : 2;
-    this.camera = camera;
+    measuredBy = camera;
     // H: each position row sees its own axis, and the heading through the tags' lever: a heading
     // off by dθ moves the fix dθ times the robot-to-tags vector, turned a quarter turn. The
     // camera's own turn moves it the same way, and its heading by the turn itself; its shift moves
     // the position, or the heading.
-    double leverX = measurement.robotToTags().getX();
-    double leverY = measurement.robotToTags().getY();
+    double leverX = measurement.lever().robotToTags().getX();
+    double leverY = measurement.lever().robotToTags().getY();
     h3[0] = 1;
     h3[1] = 0;
     h3[2] = -leverY;
@@ -346,8 +360,13 @@ final class PoseFilter {
     hCamera[PER_CAMERA + 2] = 1;
     hCamera[2 * PER_CAMERA] = 1; // heading: the turn, and the headings' shift
     hCamera[2 * PER_CAMERA + 3] = 1;
-    innovation3[0] = measurement.pose().getX() - x;
-    innovation3[1] = measurement.pose().getY() - y;
+    // The position was solved with the heading of its lever, and the estimate's heading then may
+    // have moved since (a measurement applied late, in the history): what the estimate predicts
+    // for it is its position turned by the difference, through the lever.
+    double solvedOff =
+        MathUtil.angleModulus(measurement.lever().heading().getRadians() - (yawThen + offset));
+    innovation3[0] = measurement.pose().getX() - x - solvedOff * leverY;
+    innovation3[1] = measurement.pose().getY() - y + solvedOff * leverX;
     innovation3[2] =
         rows == 3
             ? MathUtil.angleModulus(
@@ -437,7 +456,13 @@ final class PoseFilter {
       }
     }
     return new Innovation(
-        innovation3[0], innovation3[1], rows == 3, innovation3[2], chiSquared, positionChiSquared);
+        innovation3[0],
+        innovation3[1],
+        rows == 3,
+        innovation3[2],
+        chiSquared,
+        positionChiSquared,
+        ++innovations);
   }
 
   /**
@@ -445,6 +470,12 @@ final class PoseFilter {
    * may correct, considering the rest.
    */
   void correct(Innovation innovation) {
+    if (innovation.stamp() != innovations) {
+      throw new IllegalStateException(
+          "a camera's innovation is applied right after it's worked out: "
+              + (innovations - innovation.stamp())
+              + " more came between");
+    }
     for (int i = 0; i < 3; i++) {
       double move = 0;
       for (int j = 0; j < rows; j++) {
@@ -486,7 +517,7 @@ final class PoseFilter {
     // How the estimate relates to each considered error changes by the gain times how the
     // measurement related to it: C's considered rows, H times P's considered columns.
     for (int k = 0; k < CONSIDERED; k++) {
-      int own = camera >= 0 ? k - turnColumn(camera) : -1;
+      int own = measuredBy >= 0 ? k - turnColumn(measuredBy) : -1;
       boolean ofThisCamera = own >= 0 && own < PER_CAMERA;
       for (int r = 0; r < rows; r++) {
         double sum =
@@ -517,8 +548,6 @@ final class PoseFilter {
   @Nullable AxisInnovation innovationAlong(LandmarkEvent landmark) {
     double nx = landmark.across().getCos();
     double ny = landmark.across().getSin();
-    landmarkX = nx;
-    landmarkY = ny;
     double innovation = -landmark.offset(new Translation2d(x, y));
     // With H = [nx, ny, 0]: P H^T, then S = H P H^T + R.
     double ph0 = covariance[0] * nx + covariance[1] * ny;
@@ -528,7 +557,7 @@ final class PoseFilter {
     if (!(s > 0)) {
       return null;
     }
-    return new AxisInnovation(innovation, s, innovation * innovation / s, ph0, ph1, ph2);
+    return new AxisInnovation(innovation, s, innovation * innovation / s, nx, ny, ph0, ph1, ph2);
   }
 
   /** Applies a landmark, as a Kalman update along its one axis. */
@@ -546,7 +575,8 @@ final class PoseFilter {
     }
     symmetrize();
     for (int c = 0; c < CONSIDERED; c++) {
-      double across = landmarkX * related[c] + landmarkY * related[CONSIDERED + c];
+      double across =
+          innovation.acrossX() * related[c] + innovation.acrossY() * related[CONSIDERED + c];
       for (int row = 0; row < 3; row++) {
         related[row * CONSIDERED + c] -= k[row] * across;
       }

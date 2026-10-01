@@ -14,6 +14,8 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.config.SwerveWiring;
+import java.util.ArrayDeque;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.function.BooleanSupplier;
@@ -128,6 +130,16 @@ class PhoenixIOTest {
     assertThat(failed).isFalse();
     assertThat(attempts[0]).isEqualTo(5);
     assertThat(ok).isTrue();
+  }
+
+  /** The steering's current is the loop's peak, either way, from every reading since the last. */
+  @Test
+  void theSteeringsCurrentIsTheMostAmongTheLoopsReadings() {
+    Queue<Double> readings = new ArrayDeque<>(List.of(3.0, -40.0, 12.0));
+
+    assertThat(ModuleIOTalonFX.mostAmps(readings, 5)).isEqualTo(40);
+    assertThat(readings).as("taken").isEmpty();
+    assertThat(ModuleIOTalonFX.mostAmps(readings, -2)).as("no readings: the latest").isEqualTo(2);
   }
 
   @Test

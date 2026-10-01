@@ -236,8 +236,8 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 | `driveKs` | characterized | 0 V | simulation (the simulator's wheels have no friction) | [Feedforward](characterization.md#feedforward), per drivetrain design: robots built alike share it. |
 | `driveKv` | characterized | 2.54 V/(m/s) | math (ideal: nominal voltage over free speed, `Modules.idealDriveKv()`) | [Feedforward](characterization.md#feedforward), per drivetrain design. A real drivetrain's is a little higher. |
 | `driveKp` | chosen | 2.0 V/(m/s) | simulation | Why: corrects what feedforward misses. Tune it live after kS and kV: raise it until speeds track their setpoints, and back off at the first buzz. |
-| `steerKp` | chosen | 16 V/rad | 2026 code (kP 100 V/rot, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. |
-| `steerKd` | chosen | 0.08 V/(rad/s) | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. |
+| `steerKp` | chosen | 16 V/rad | 2026 code (kP 100 V/rot, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. The steering's loop sees a new angle only when the CANcoder sends one, every 10 ms, so it overshoots from about 40 and buzzes past about 77 (at `steerKd` 0.08, in the simulator). |
+| `steerKd` | chosen | 0.08 V/(rad/s) | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. Too much buzzes too, since it damps on a speed up to 10 ms old: past about 0.2 at `steerKp` 50, in the simulator. |
 | `skewLookahead` | chosen | 0.03 s | guess | Why: while the robot spins, its wheels reach their angles late, so a field-relative drive aims at the heading this far ahead. Drive straight while spinning, and tune until the path stays straight. Change it if the path curves the way the robot spins. |
 
 ### `SwerveWiring`
@@ -488,7 +488,7 @@ test doesn't read them: add a row here when you add a rig or an experiment.
 | Rig or experiment | Numbers | Kind | Source | Why |
 |---|---|---|---|---|
 | The steering rig (`Drive.steeringRig`): where an experiment may point the wheels | -180° to 180° | chosen | guess | A module turns all the way around, so any angle is safe; the limits keep a test motion within one turn, as the wheel's angle is scored. |
-| The steering's experiment (`RobotContainer`): "Steer to 90° and back" | 0° to 90° and back, 0.8 s at each, after a 0.5 s lead-in | chosen | guess | A quarter turn shows rise, overshoot, and settling; 0.8 s is several times the steering's settling (118 ms in the simulator), so each step settles before the next. |
+| The steering's experiment (`RobotContainer`): "Steer to 90° and back" | 0° to 90° and back, 0.8 s at each, after a 0.5 s lead-in | chosen | guess | A quarter turn shows rise, overshoot, and settling; 0.8 s is several times the steering's settling (122 ms in the simulator), so each step settles before the next. |
 
 ## Switches
 
@@ -535,6 +535,8 @@ code's choices, explained beside them.
 | `VisionSim`: the farthest tag a simulated camera detects | 7 m | characterized | guess | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
 | `VisionSim`: tag corner noise | 0.25 px average, 0.08 px spread | characterized | datasheet (PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise): how far the corners scatter, standing still. |
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
+| `PhoenixDrivetrain`: how often each module's CANcoder sends its position and velocity (the simulator's steering hears it as often) | 100 Hz | chosen | datasheet (Phoenix 6's default for a CANcoder's position) | Why: without Phoenix Pro, the steering's loop sees a new angle only this often, which sets how high its gains can go. Faster allows higher gains, for more traffic on the CAN bus: check the bus's load before raising it. Check that a robot's CANcoders send this often: Phoenix Tuner X's plot of a CANcoder's position shows a new sample every 10 ms, and in a log of a module turning, its odometry angles (`Drive/Module<name>/OdometrySteerAnglesRad`) change only every 10 ms, the same angle two or three readings running. |
+| `ModuleIOSim`: how often the steering's motor controller runs its loop | 1 ms | as built | datasheet (CTRE's Phoenix 6 documentation: a TalonFX's closed loop runs at 1 kHz) | A fact of the motor controller. |
 | `ModuleIOSim`: drive and steering inertia | 0.025 and 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's simulation defaults, as AdvantageKit's template uses) | [Feedforward](characterization.md#feedforward): SysId on one module. |
 | `Localization`: a jolt that's a collision | 20 m/s² | chosen | top team (6800) | Why: hard driving stays near 1 g. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
 | `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |

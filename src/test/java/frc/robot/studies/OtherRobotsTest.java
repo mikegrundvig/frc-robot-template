@@ -20,6 +20,14 @@ class OtherRobotsTest {
 
   private static final Body BODY = Robots.SIM.body();
 
+  /** The middle of the field. */
+  private static final double MIDDLE_X = WALL.length() / 2;
+
+  private static final double MIDDLE_Y = WALL.width() / 2;
+
+  /** How far from the robot to place others. */
+  private static final double REACH = 8;
+
   @Test
   void aLineThroughTheBoxIsBlocked() {
     assertThat(BOX.blocks(new Translation3d(0, 0, 0.5), new Translation3d(4, 0, 0.5))).isTrue();
@@ -75,22 +83,23 @@ class OtherRobotsTest {
 
   @Test
   void robotsArePlacedWithinReachClearOfTheRobotEachOtherAndTheWalls() {
-    Pose2d robot = new Pose2d(8, 4, Rotation2d.fromDegrees(30));
+    Pose2d robot = new Pose2d(MIDDLE_X, MIDDLE_Y, Rotation2d.fromDegrees(30));
     OtherRobots.Blocker self =
-        new OtherRobots.Blocker(8, 4, Math.toRadians(30), 0.45085, 0.45085, 1);
+        new OtherRobots.Blocker(MIDDLE_X, MIDDLE_Y, Math.toRadians(30), 0.45085, 0.45085, 1);
 
     for (long seed = 1; seed <= 20; seed++) {
       List<OtherRobots.Blocker> placed =
           OtherRobots.around(
-              robot, WALL, BODY, 1.2, 5, 8, spot -> true, new SplittableRandom(seed));
+              robot, WALL, BODY, 1.2, 5, REACH, spot -> true, new SplittableRandom(seed));
 
       assertThat(placed).hasSize(5);
       assertThat(
               OtherRobots.around(
-                  robot, WALL, BODY, 1.2, 5, 8, spot -> true, new SplittableRandom(seed)))
+                  robot, WALL, BODY, 1.2, 5, REACH, spot -> true, new SplittableRandom(seed)))
           .isEqualTo(placed);
       for (OtherRobots.Blocker other : placed) {
-        assertThat(Math.hypot(other.x() - 8, other.y() - 4)).isLessThanOrEqualTo(8);
+        assertThat(Math.hypot(other.x() - MIDDLE_X, other.y() - MIDDLE_Y))
+            .isLessThanOrEqualTo(REACH);
         assertThat(other.onField(WALL)).isTrue();
         assertThat(other.overlaps(self)).isFalse();
         assertThat(other.height()).isEqualTo(1.2);
@@ -105,15 +114,23 @@ class OtherRobotsTest {
   /** Nowhere the robots may stand, none stands; where only one side is open, all stand there. */
   @Test
   void robotsStandOnlyWhereTheyMay() {
-    Pose2d robot = new Pose2d(8, 4, Rotation2d.ZERO);
+    Pose2d robot = new Pose2d(MIDDLE_X, MIDDLE_Y, Rotation2d.ZERO);
 
     assertThat(
-            OtherRobots.around(robot, WALL, BODY, 1, 5, 8, spot -> false, new SplittableRandom(1)))
+            OtherRobots.around(
+                robot, WALL, BODY, 1, 5, REACH, spot -> false, new SplittableRandom(1)))
         .isEmpty();
     assertThat(
             OtherRobots.around(
-                robot, WALL, BODY, 1, 5, 8, spot -> spot.getX() > 9, new SplittableRandom(1)))
+                robot,
+                WALL,
+                BODY,
+                1,
+                5,
+                REACH,
+                spot -> spot.getX() > MIDDLE_X + 1,
+                new SplittableRandom(1)))
         .hasSize(5)
-        .allMatch(other -> other.x() > 9);
+        .allMatch(other -> other.x() > MIDDLE_X + 1);
   }
 }

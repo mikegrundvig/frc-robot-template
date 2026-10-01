@@ -43,6 +43,12 @@ public final class DriveSimulation {
   private final GyroIOSim gyro;
   private final GyroIOSim backupGyro;
   private final double[] trueRadiusMeters = new double[4];
+
+  /** Each wheel's true radius over the configured one, now and as the robot was built. */
+  private final double[] treadScale = new double[4];
+
+  private final double[] builtTreadScale = new double[4];
+  private final double configuredRadiusMeters;
   private final SwerveKinematicsModel kinematics;
   private OdometrySample lastTrue;
   private Pose2d truePose = Pose2d.ZERO;
@@ -88,13 +94,15 @@ public final class DriveSimulation {
     kinematics = new SwerveKinematicsModel(moduleLocations);
     this.moduleLocations = moduleLocations.clone();
     planeFit(moduleLocations, planeFit);
-    double radius = config.wheelRadius().in(Meters);
+    configuredRadiusMeters = config.wheelRadius().in(Meters);
     for (int i = 0; i < 4; i++) {
       // Each module's CANcoder sends on its own clock: here a quarter period after the last, to the
       // steering loop's millisecond (0, 2, 5 and 7 ms into its cycle, at 100 Hz).
       modules[i] =
           new ModuleIOSim(config, Math.toRadians(errors.steerOffsetDegrees().get(i)), i / 4.0);
-      trueRadiusMeters[i] = radius * errors.wheelRadiusScale().get(i);
+      treadScale[i] = errors.wheelRadiusScale().get(i);
+      builtTreadScale[i] = treadScale[i];
+      trueRadiusMeters[i] = configuredRadiusMeters * treadScale[i];
     }
     gyro = new GyroIOSim(this, errors.gyro(), errors.seed());
     backupGyro = new GyroIOSim(this, errors.backupGyro(), errors.seed() + 1);
@@ -145,6 +153,56 @@ public final class DriveSimulation {
   /** Unplugs the backup IMU, or plugs it back in. */
   public void disconnectBackupGyro(boolean disconnected) {
     backupGyro.setConnected(!disconnected);
+  }
+
+  /** Freezes the backup IMU: it keeps reporting, the same yaw every time. */
+  public void freezeBackupGyro(boolean frozen) {
+    backupGyro.setFrozen(frozen);
+  }
+
+  /**
+   * Wears one wheel's tread from now on: its true radius over the configured one, 0.97 for tread
+   * worn 3%. The robot moves that much less than its encoder counts.
+   *
+   * @param module front left, front right, back left, back right: 0 to 3
+   */
+  public void wearTread(int module, double scale) {
+    if (!(scale > 0)) {
+      throw new IllegalArgumentException("a wheel's radius scale is positive: " + scale);
+    }
+    treadScale[module] = scale;
+    trueRadiusMeters[module] = configuredRadiusMeters * scale;
+    // The wheels' travel so far was at the old radius: start counting again from here.
+    lastTrue = trueWheels();
+  }
+
+  /** A wheel's true radius over the configured one. */
+  double treadScale(int module) {
+    return treadScale[module];
+  }
+
+  /** A wheel's true radius over the configured one, as the robot was built. */
+  double builtTreadScale(int module) {
+    return builtTreadScale[module];
+  }
+
+  /** The simulated gyro, for its faults. */
+  GyroIOSim gyroSim() {
+    return gyro;
+  }
+
+  /** The simulated backup IMU, for its faults. */
+  GyroIOSim backupGyroSim() {
+    return backupGyro;
+  }
+
+  /**
+   * A simulated module, for its faults.
+   *
+   * @param module front left, front right, back left, back right: 0 to 3
+   */
+  ModuleIOSim moduleSim(int module) {
+    return modules[module];
   }
 
   /**
@@ -308,6 +366,16 @@ public final class DriveSimulation {
     tiltedByHand = true;
     this.pitchRadians = pitchRadians;
     this.rollRadians = rollRadians;
+  }
+
+  /** Whether it's tilted by hand, whatever the ground under it says. */
+  boolean isTiltedByHand() {
+    return tiltedByHand;
+  }
+
+  /** How much of its wheels' rolling moves the robot: 1 with full grip. */
+  double grip() {
+    return grip;
   }
 
   /**

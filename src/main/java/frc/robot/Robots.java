@@ -77,8 +77,15 @@ public final class Robots {
    * a simple weight-transfer estimate they start to slip near 47 A with this tread (friction 1.2;
    * about 50 A at 1.3, new) and this low center of gravity, or near 31 A with worn tread (friction
    * 1.0) and a center of gravity at 0.3 m. More current than that only spins the wheels and drains
-   * the battery. Supply limit 60 A per drive motor. Steering needs little torque: 40 A, the value
-   * Phoenix Tuner X's swerve generator writes, as the 2026 code kept it.
+   * the battery. Steering needs little torque: 40 A, the value Phoenix Tuner X's swerve generator
+   * writes, as the 2026 code kept it.
+   *
+   * <p>Supply limit 60 A per drive motor, stepping down to 40 A once a motor has been held at 60 A
+   * for a second, until it draws less than 40 A again. That's Phoenix's own step-down, which it
+   * applies unless told otherwise, written out here so nobody is surprised by it: it keeps a 40 A
+   * breaker from tripping in a long push (one can trip in 3.9 s at 60 A), and no sprint holds 60 A
+   * for anywhere near a second. With the 30 A stator limit, each drive motor draws at most its 30 A
+   * from the battery, so neither comes into play until the stator limit is raised past them.
    *
    * <p>Top speed 4.4 m/s leaves the velocity control headroom under the free speed; spinning is
    * capped at a driver-friendly 1 rotation per second. kV is the ideal value for these motors and
@@ -94,6 +101,8 @@ public final class Robots {
               SwerveConfig.Limits.builder()
                   .driveStatorCurrent(Amps.of(30))
                   .driveSupplyCurrent(Amps.of(60))
+                  .driveSupplyLowerCurrent(Amps.of(40))
+                  .driveSupplyLowerTime(Seconds.of(1))
                   .steerStatorCurrent(Amps.of(40))
                   .maxLinearSpeed(MetersPerSecond.of(4.4))
                   .maxAngularSpeed(RotationsPerSecond.of(1))

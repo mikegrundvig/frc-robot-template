@@ -50,6 +50,8 @@ public final class ConfigFixtures {
     return SwerveConfig.Limits.builder()
         .driveStatorCurrent(Amps.of(40))
         .driveSupplyCurrent(Amps.of(60))
+        .driveSupplyLowerCurrent(Amps.of(35))
+        .driveSupplyLowerTime(Seconds.of(0.5))
         .steerStatorCurrent(Amps.of(30))
         .maxLinearSpeed(MetersPerSecond.of(4))
         .maxAngularSpeed(RotationsPerSecond.of(1))

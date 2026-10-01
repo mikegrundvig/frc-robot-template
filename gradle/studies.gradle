@@ -1,5 +1,5 @@
 // Studies (src/studies/java): simulations that answer a design question, such as where to mount
-// the cameras. Their own source set, so nothing in them ships to the robot; they use the robot's
+// the cameras. Their own source set, so none of their code runs on the robot; they use the robot's
 // code, and the tests check them like it (src/test/java/frc/robot/studies, the coverage floors).
 //
 //   ./gradlew cameraStudy --args="--weights=weights.csv"   see docs/camera-placement.md
@@ -35,8 +35,11 @@ tasks.register("cameraStudy", JavaExec) {
     classpath = sourceSets.studies.runtimeClasspath
     mainClass = "frc.robot.studies.CameraStudy"
     def natives = layout.buildDirectory.dir("jni/release").get().asFile.absolutePath
+    // Where each system looks for native libraries, as GradleRIO sets them for the tests.
     systemProperty "java.library.path", natives
     environment "LD_LIBRARY_PATH", natives
+    environment "DYLD_LIBRARY_PATH", natives
+    environment "DYLD_FALLBACK_LIBRARY_PATH", natives
     environment "PATH", natives + File.pathSeparator + System.getenv("PATH")
     jvmArgs "--enable-native-access=ALL-UNNAMED"
 }

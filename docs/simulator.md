@@ -174,13 +174,16 @@ it finds out from its sensors, as on a robot.
 | | PhotonVision restarts: systemd restarts it, back after a few seconds; the count stays until it reboots | happens | |
 | | Duplicated address: a second board with its image answers too, by turns | lasts | |
 | | Settings changed: its PhotonVision settings differ from those it was stamped with, as tuning in its UI does | lasts | |
+| | Ignores power-down: its image predates powering down from the robot, so its agent refuses (404) and it keeps running | lasts | |
 
 Carrying the robot to a bump is declared only on a field with bumps, and a coprocessor for each
 computer in the table compiled into the program (`coprocessors/coprocessors.yaml`); a computer
 with no cameras in the table has no camera to unplug. A simulated coprocessor answers as a healthy
 board running this build's image would, once a second on the robot's clock, through the same
 records a real agent's answer is read into, so its card and alerts on the robot are the real ones
-([the coprocessors](coprocessors.md)). A world can also be built
+([the coprocessors](coprocessors.md)) Asked to power down (Pit's *Power down coprocessors*), it halts three seconds
+later and stays halted, unreachable on both its ports, until the simulator starts again, as a real
+board stays off until its power is cycled. A world can also be built
 with its tags a little off the layout (`SensorErrors.tagErrors`), as the consistency study builds
 it; undoing a moved tag puts it back there.
 

@@ -81,7 +81,8 @@ class SimulatorApiTest {
           new ByHand(System::nanoTime).experiments(),
           () -> "",
           simulator,
-          new Devices(System::nanoTime));
+          new Devices(System::nanoTime),
+          new Notices());
   private final Broadcaster broadcaster =
       new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, simulator::lost);
   private final PitwallServer server = new PitwallServer(page, broadcaster, 0);

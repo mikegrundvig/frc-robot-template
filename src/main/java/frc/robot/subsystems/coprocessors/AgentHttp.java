@@ -4,6 +4,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -74,6 +76,43 @@ final class AgentHttp {
     } finally {
       connection.disconnect();
     }
+  }
+
+  /**
+   * POSTs to the agent, with no body, and says how it answered.
+   *
+   * @return the answer's status, such as 202
+   * @throws IOException saying why there's no answer: no connection, or none in time
+   */
+  int post(String path) throws IOException {
+    HttpURLConnection connection = open(path);
+    try {
+      connection.setRequestMethod("POST");
+      connection.setDoOutput(true);
+      connection.setFixedLengthStreamingMode(0);
+      connection.getOutputStream().close();
+      return connection.getResponseCode();
+    } finally {
+      connection.disconnect();
+    }
+  }
+
+  /**
+   * Whether anything accepts a connection on a port of the agent's computer, within the connect
+   * timeout: a computer that's gone refuses, or doesn't answer at all.
+   */
+  boolean accepts(int port) {
+    try (Socket socket = new Socket()) {
+      socket.connect(new InetSocketAddress(host, port), connectTimeoutMillis);
+      return true;
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  /** The agent's port. */
+  int port() {
+    return port;
   }
 
   private HttpURLConnection open(String pathAndQuery) throws IOException {

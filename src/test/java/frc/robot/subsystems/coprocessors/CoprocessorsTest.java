@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.coprocessor.table.Board;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.coprocessor.table.Table;
+import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Devices;
 import com.michaelgrundvig.frc.pitwall.Devices.Card;
 import com.michaelgrundvig.frc.pitwall.Devices.Level;
@@ -71,7 +72,7 @@ class CoprocessorsTest {
   private void run(double seconds, boolean enabled) {
     for (long end = now + Math.round(seconds * 1e9); now < end; now += LOOP) {
       agent.step(now);
-      coprocessors.periodic(enabled);
+      coprocessors.periodic(now, enabled);
     }
   }
 
@@ -302,9 +303,14 @@ class CoprocessorsTest {
             Coprocessors.Settings.DEFAULTS);
     built.add(none);
 
-    none.periodic(false);
+    none.periodic(0, false);
+    Actions actions = new Actions(inputs -> {});
+    none.addTo(actions);
+    var powerDown = actions.requestStart(Coprocessors.POWER_DOWN);
+    actions.periodic(new Actions.Gate(false, false, false));
 
     assertThat(none.names()).isEmpty();
+    assertThat(powerDown.getNow(null).detail()).isEqualTo("the table has no coprocessors");
     assertThatIllegalArgumentException().isThrownBy(() -> none.card("vision-front"));
     assertThatIllegalArgumentException()
         .isThrownBy(

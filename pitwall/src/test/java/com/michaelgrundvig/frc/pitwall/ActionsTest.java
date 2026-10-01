@@ -57,7 +57,7 @@ class ActionsTest {
   @Test
   void everyActionIsListedReadyBeforeAnyRuns() {
     assertThat(actions.view())
-        .containsExactly(new Actions.State("Home arm", Actions.Phase.READY, ""));
+        .containsExactly(new Actions.State("Home arm", Actions.Phase.READY, "", NOT_UTILITY));
     assertThat(actions.has("Home arm")).isTrue();
     assertThat(actions.has("Fly")).isFalse();
   }
@@ -71,12 +71,13 @@ class ActionsTest {
     actions.periodic(READY);
 
     assertThat(outcome.getNow(null)).isEqualTo(Outcome.applied());
-    assertThat(state()).isEqualTo(new Actions.State("Home arm", Actions.Phase.RUNNING, "Running"));
+    assertThat(state())
+        .isEqualTo(new Actions.State("Home arm", Actions.Phase.RUNNING, "Running", ""));
 
     home.running = false; // it finishes on its own
     actions.periodic(READY);
 
-    assertThat(state()).isEqualTo(new Actions.State("Home arm", Actions.Phase.ENDED, "Ended"));
+    assertThat(state()).isEqualTo(new Actions.State("Home arm", Actions.Phase.ENDED, "Ended", ""));
   }
 
   @Test
@@ -131,7 +132,8 @@ class ActionsTest {
     assertThat(home.cancels).isEqualTo(1);
     assertThat(state())
         .isEqualTo(
-            new Actions.State("Home arm", Actions.Phase.CANCELED, "Canceled: " + NOT_UTILITY));
+            new Actions.State(
+                "Home arm", Actions.Phase.CANCELED, "Canceled: " + NOT_UTILITY, NOT_UTILITY));
   }
 
   @Test
@@ -145,7 +147,8 @@ class ActionsTest {
     assertThat(outcome.getNow(null)).isEqualTo(Outcome.applied());
     assertThat(home.running).isFalse();
     assertThat(state())
-        .isEqualTo(new Actions.State("Home arm", Actions.Phase.CANCELED, "Canceled from the page"));
+        .isEqualTo(
+            new Actions.State("Home arm", Actions.Phase.CANCELED, "Canceled from the page", ""));
 
     var again = actions.requestCancel("Home arm");
     actions.periodic(READY);
@@ -176,7 +179,7 @@ class ActionsTest {
     assertThat(outcome.getNow(null)).isEqualTo(new Outcome(Outcome.Result.REFUSED, home.refusal));
     assertThat(state())
         .isEqualTo(
-            new Actions.State("Home arm", Actions.Phase.REFUSED, "Refused: " + home.refusal));
+            new Actions.State("Home arm", Actions.Phase.REFUSED, "Refused: " + home.refusal, ""));
   }
 
   @Test
@@ -278,7 +281,10 @@ class ActionsTest {
     assertThat(actions.view().get(1))
         .isEqualTo(
             new Actions.State(
-                "Spin", Actions.Phase.ENDED, "Ended: checking whether it runs failed: lost track"));
+                "Spin",
+                Actions.Phase.ENDED,
+                "Ended: checking whether it runs failed: lost track",
+                ""));
 
     FakeRoutine stubborn =
         new FakeRoutine() {
@@ -299,6 +305,39 @@ class ActionsTest {
             new Actions.State(
                 "Stubborn",
                 Actions.Phase.CANCELED,
-                "Canceled from the page (canceling it failed: can't stop)"));
+                "Canceled from the page (canceling it failed: can't stop)",
+                ""));
+  }
+
+  /** One that powers something down runs only while disabled, and never on the field. */
+  @Test
+  void anActionForADisabledRobotRunsOnlyWhileDisabled() {
+    FakeRoutine powerDown = new FakeRoutine();
+    actions.add("Power down", powerDown, Actions.When.DISABLED);
+    Actions.Gate disabled = new Actions.Gate(false, false, false);
+
+    var whileEnabled = actions.requestStart("Power down");
+    actions.periodic(READY);
+    var onTheField = actions.requestStart("Power down");
+    actions.periodic(new Actions.Gate(false, false, true));
+    var whileDisabled = actions.requestStart("Power down");
+    actions.periodic(disabled);
+
+    assertThat(whileEnabled.getNow(null).detail())
+        .isEqualTo("Power down is locked: Power down runs only with the robot disabled");
+    assertThat(onTheField.getNow(null).detail())
+        .isEqualTo("Power down is locked: the field system is connected");
+    assertThat(whileDisabled.getNow(null)).isEqualTo(Outcome.applied());
+    assertThat(actions.view().get(1))
+        .isEqualTo(new Actions.State("Power down", Actions.Phase.RUNNING, "Running", ""));
+    // The others' lock is their own.
+    assertThat(actions.whyLocked()).isEqualTo(NOT_UTILITY);
+    assertThat(state().locked()).isEqualTo(NOT_UTILITY);
+
+    actions.periodic(READY);
+
+    assertThat(powerDown.cancels).as("enabling cancels it").isEqualTo(1);
+    assertThat(actions.view().get(1).detail())
+        .isEqualTo("Canceled: Power down runs only with the robot disabled");
   }
 }

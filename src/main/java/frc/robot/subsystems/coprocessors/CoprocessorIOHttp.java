@@ -26,6 +26,21 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
 
   private record Answer(Health health, List<String> macsTakingTurns) {}
 
+  /**
+   * Where powering it down stands.
+   *
+   * @param asked whether it was asked
+   * @param answer how its agent answered: "accepted", or why not; empty until it did
+   * @param tried whether its ports have been tried since
+   * @param agentOpen whether its agent's port still accepts a connection
+   * @param photonVisionOpen whether PhotonVision's does
+   */
+  private record PowerDown(
+      boolean asked, String answer, boolean tried, boolean agentOpen, boolean photonVisionOpen) {}
+
+  /** Where its agent takes a request to power down. */
+  static final String SHUTDOWN = "/v1/shutdown";
+
   private final AgentHttp agent;
   private final AgentHttp downloads;
   private final LongSupplier robotClock;
@@ -36,6 +51,11 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
 
   /** The answer the inputs hold, seen only on the loop's thread. */
   private @Nullable Answer filled;
+
+  private final String name;
+  private final long periodMillis;
+  private volatile PowerDown powerDown = new PowerDown(false, "", false, false, false);
+  private @Nullable Thread poweringDown;
 
   /**
    * Starts polling the agent, on a thread of its own.
@@ -65,6 +85,8 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
             settings.downloadTimeoutSeconds(),
             MAX_DOWNLOAD_BYTES);
     this.robotClock = robotClock;
+    this.name = name;
+    periodMillis = Math.round(settings.pollPeriodSeconds() * 1000);
     macs = new MacWatch(settings.turnsWindowSeconds());
     poller = new CoprocessorPoller<>(name, this::ask, settings.pollPeriodSeconds(), robotClock);
     poller.start();
@@ -102,6 +124,50 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
       inputs.macsTakingTurns = answer.macsTakingTurns().toArray(String[]::new);
       filled = answer;
     }
+    PowerDown down = powerDown;
+    inputs.powerDownAsked = down.asked();
+    inputs.powerDownAnswer = down.answer();
+    inputs.portsTried = down.tried();
+    inputs.agentPortOpen = down.agentOpen();
+    inputs.photonVisionPortOpen = down.photonVisionOpen();
+  }
+
+  @Override
+  public void powerDown() {
+    Thread was = poweringDown;
+    if (was != null) {
+      was.interrupt();
+    }
+    powerDown = new PowerDown(true, "", false, true, true);
+    poweringDown =
+        Thread.ofVirtual().name("Coprocessor " + name + " powering down").start(this::powerDownNow);
+  }
+
+  /**
+   * Asks the agent to power down, then tries both ports once a period until neither accepts a
+   * connection, on the powering-down thread.
+   */
+  private void powerDownNow() {
+    String answer;
+    try {
+      int status = agent.post(SHUTDOWN);
+      answer = status == 202 ? "accepted" : "answered " + status;
+    } catch (IOException e) {
+      answer = CoprocessorPoller.why(e);
+    }
+    while (!Thread.currentThread().isInterrupted()) {
+      boolean agentOpen = agent.accepts(agent.port());
+      boolean photonVisionOpen = agent.accepts(Coprocessors.PHOTONVISION_PORT);
+      powerDown = new PowerDown(true, answer, true, agentOpen, photonVisionOpen);
+      if (!agentOpen && !photonVisionOpen) {
+        return;
+      }
+      try {
+        Thread.sleep(periodMillis);
+      } catch (InterruptedException e) {
+        return;
+      }
+    }
   }
 
   @Override
@@ -134,5 +200,9 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
   @Override
   public void close() {
     poller.close();
+    Thread down = poweringDown;
+    if (down != null) {
+      down.interrupt();
+    }
   }
 }

@@ -266,6 +266,23 @@ table { border-collapse: collapse; }
 .setter { display: flex; gap: 6px; align-items: center; }
 .setter input { width: 6em; }
 .sev.warn { color: var(--warn); }
+.alist .adetail.locked { color: var(--lock); }
+
+/* Notices: what the robot has to tell whoever is here, atop Pit and in the state bar. */
+.notices:empty { display: none; }
+.banner.notice { font-size: var(--value); }
+.banner.notice .nmark { font-weight: 700; }
+.banner.notice.ok { color: var(--ok); border-color: var(--ok); border-width: 2px; }
+.banner.notice.ok b { color: var(--text); }
+.banner.notice.note { border-color: var(--line-strong); }
+.banner.notice.warn { background: var(--warn-tint); border-color: var(--warn); }
+.banner.notice.bad { color: var(--bad); background: var(--bad-tint); border-color: var(--bad); }
+.notice-pills { display: inline-flex; flex-wrap: wrap; gap: var(--s2); }
+.notice-pills:empty { display: none; }
+.pill.notice { text-decoration: none; padding-right: 10px; }
+.pill.notice.ok { color: var(--ok); border-color: var(--ok); border-width: 2px; }
+.pill.notice.warning { color: var(--warn); border-color: var(--warn); background: var(--warn-tint); }
+.pill.notice.problem { color: var(--bad); border-color: var(--bad); background: var(--bad-tint); }
 
 /* Pit's devices: a card each, in as many columns as fit; the log viewer's entries, one a line. */
 .devices-title { font-size: var(--value); margin: var(--s2) 0 var(--s1); }

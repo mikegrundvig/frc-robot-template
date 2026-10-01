@@ -39,6 +39,8 @@ import frc.robot.subsystems.coprocessors.CoprocessorIOHttp;
 import frc.robot.subsystems.coprocessors.Coprocessors;
 import frc.robot.subsystems.coprocessors.PhotonVisionIO;
 import frc.robot.subsystems.coprocessors.PhotonVisionIONetworkTables;
+import frc.robot.subsystems.coprocessors.PowerButtonIO;
+import frc.robot.subsystems.coprocessors.PowerButtonIODigitalInput;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
@@ -319,7 +321,13 @@ public final class RobotContainer implements AutoCloseable {
       Arrays.fill(coprocessorIOs, new CoprocessorIO() {});
       photonVision = new PhotonVisionIO() {};
     }
-    coprocessors = new Coprocessors(table, coprocessorIOs, photonVision, coprocessorSettings);
+    // A button that powers the coprocessors down, on a robot whose settings wire one.
+    PowerButtonIO powerButton =
+        mode == Constants.Mode.REAL && coprocessorSettings.powerDownButton() >= 0
+            ? new PowerButtonIODigitalInput(coprocessorSettings.powerDownButton())
+            : new PowerButtonIO() {};
+    coprocessors =
+        new Coprocessors(table, coprocessorIOs, photonVision, powerButton, coprocessorSettings);
     calibration =
         new Calibration(
             drive,
@@ -410,7 +418,7 @@ public final class RobotContainer implements AutoCloseable {
     loop.mark("Vision", System.nanoTime());
     vision.record(localization.update());
     loop.mark("Localization", System.nanoTime());
-    coprocessors.periodic(enabled);
+    coprocessors.periodic(RobotController.getTime(), enabled);
     loop.mark("Coprocessors", System.nanoTime());
     Pose2d pose = localization.pose();
     placement =
@@ -602,7 +610,7 @@ public final class RobotContainer implements AutoCloseable {
               });
     }
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
-    coprocessors.addTo(pitwall.devices());
+    coprocessors.addTo(pitwall);
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .experiments()

@@ -2,10 +2,10 @@ package frc.robot.studies;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.SimulationTest;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -90,15 +90,24 @@ class ConsistencyStudyTest {
   }
 
   @Test
-  void theRobotsSensorsErrAsTheRunAndTheSeedSay() {
-    SensorErrors errors =
-        ConsistencyRuns.errors(
-            ConsistencyRuns.named("camera-low"), 7, ConsistencyRuns.Placement.CALIBRATED);
+  void eachSeedBuildsTheRobotWithItsOwnMountsAndTags() {
+    SensorErrors errors = ConsistencyRuns.errors(7, ConsistencyRuns.Placement.CALIBRATED);
 
     assertThat(errors.seed()).isEqualTo(7);
-    assertThat(errors.tagErrors()).hasSize(32);
-    assertThat(errors.cameraMountError("front-left").getZ()).isCloseTo(-0.1016, within(1e-9));
+    assertThat(errors.tagErrors())
+        .hasSize(32)
+        .containsEntry(26, ConsistencyRuns.Placement.CALIBRATED.tag(7, 26));
     assertThat(errors.cameraMountError("back-right"))
         .isEqualTo(ConsistencyRuns.Placement.CALIBRATED.mount(7, 3));
+  }
+
+  /** A scenario's runs: its sensor faults through the simulator's controls, its events too. */
+  @Test
+  void theScenarioRunsCarryTheirScenarios() {
+    assertThat(ConsistencyRuns.named("camera-low").scenario())
+        .isEqualTo(Scenarios.named("camera-low"));
+    assertThat(ConsistencyRuns.named("collision").scenario())
+        .isEqualTo(Scenarios.named("collision"));
+    assertThat(ConsistencyRuns.named("driving").scenario()).isNull();
   }
 }

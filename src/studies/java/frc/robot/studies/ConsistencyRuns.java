@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Command;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
@@ -72,11 +73,12 @@ final class ConsistencyRuns {
    *
    * @param name how it's asked for
    * @param description what happens in it
-   * @param faults how the robot's sensors err in it, beyond a season's wear and the mounts' own
-   *     small errors
+   * @param scenario the simulator's scenario it runs in, whose sensor faults are applied before the
+   *     robot's first loop, on top of a season's wear and the mounts' and tags' own small errors;
+   *     null for none
    * @param script what the drive team does, and what happens to the robot
    */
-  record Run(String name, String description, Scenario.SensorFaults faults, Script script) {}
+  record Run(String name, String description, @Nullable Scenario scenario, Script script) {}
 
   /** Every run, in the order the report shows them. */
   static final List<Run> ALL =
@@ -84,7 +86,7 @@ final class ConsistencyRuns {
           new Run(
               "driving",
               "The route in view of the tags, there and back, then 3 s standing.",
-              Scenario.NO_FAULTS,
+              null,
               robot -> {
                 robot.route(2);
                 robot.stand(3);
@@ -92,7 +94,7 @@ final class ConsistencyRuns {
           new Run(
               "standing",
               "The route once, then 20 s standing still.",
-              Scenario.NO_FAULTS,
+              null,
               robot -> {
                 robot.route(1);
                 robot.stand(20);
@@ -100,7 +102,7 @@ final class ConsistencyRuns {
           new Run(
               "turning",
               "5 s standing, two turns in place at about 1.2 rad/s, then 5 s standing.",
-              Scenario.NO_FAULTS,
+              null,
               robot -> {
                 robot.stand(5);
                 robot.hold(10, 0, 0, 0.5);
@@ -109,7 +111,7 @@ final class ConsistencyRuns {
           new Run(
               "gyro-scale",
               "The gyro-scale procedure (five turns), then standing: 40 s in all.",
-              Scenario.NO_FAULTS,
+              null,
               robot -> {
                 robot.gyroScaleProcedure();
                 robot.stand(15);
@@ -118,7 +120,7 @@ final class ConsistencyRuns {
               "collision",
               robot -> {
                 robot.route(0, 3);
-                robot.start(Scenarios.named("collision"));
+                robot.start(); // the hit
                 robot.route(3, ROUTE.length);
                 robot.stand(3);
               }),
@@ -137,14 +139,11 @@ final class ConsistencyRuns {
 
   private ConsistencyRuns() {}
 
-  /** A run of one of the simulator's named scenarios: its faults, and this script. */
+  /** A run in one of the simulator's named scenarios, with this script. */
   private static Run named(String scenario, Script script) {
     Scenario named = Scenarios.named(scenario);
     return new Run(
-        scenario,
-        named.description() + " Driving the route, there and back.",
-        named.sensorFaults(),
-        script);
+        scenario, named.description() + " Driving the route, there and back.", named, script);
   }
 
   /**
@@ -230,11 +229,11 @@ final class ConsistencyRuns {
   }
 
   /**
-   * How the robot's sensors err in a run with a seed: a season's wear, each camera's own small
-   * mount error and each tag's own placement, then the run's faults, which replace a knocked
-   * camera's.
+   * How the robot is built for a seed: a season's wear, each camera's own small mount error, and
+   * each tag's own placement. A run's scenario then knocks a camera from there, through the
+   * simulator's controls.
    */
-  static SensorErrors errors(Run run, long seed, Placement placement) {
+  static SensorErrors errors(long seed, Placement placement) {
     List<CameraConfig> cameras = Robots.SIM.cameras();
     SensorErrors errors = SensorErrorsBuilder.builder(SensorErrors.TYPICAL).seed(seed).build();
     for (int i = 0; i < cameras.size(); i++) {
@@ -244,7 +243,7 @@ final class ConsistencyRuns {
     for (int id : FIELD.tags().keySet()) {
       tags.put(id, placement.tag(seed, id));
     }
-    return run.faults().apply(errors.withTagErrors(tags), cameras);
+    return errors.withTagErrors(tags);
   }
 
   /**
@@ -272,13 +271,16 @@ final class ConsistencyRuns {
    * @return every loop once the robot is enabled
    */
   static List<Consistency.Sample> play(Run run, long seed, Placement placement, double noiseScale) {
-    try (SimulatedRobot robot =
-        new SimulatedRobot(robot(noiseScale), errors(run, seed, placement))) {
+    try (SimulatedRobot robot = new SimulatedRobot(robot(noiseScale), errors(seed, placement))) {
+      Scenario scenario = run.scenario();
+      if (scenario != null) {
+        robot.applyFaults(scenario);
+      }
       for (int i = 0; i < RobotLoop.loops(1.0); i++) {
         robot.loop(); // placed on its start, and the cameras find it
       }
       robot.setEnabled(true);
-      Driver driver = new Driver(robot);
+      Driver driver = new Driver(robot, scenario);
       run.script().play(driver);
       return driver.samples;
     }
@@ -287,10 +289,12 @@ final class ConsistencyRuns {
   /** The robot as a script drives it: every loop it runs is sampled. */
   static final class Driver {
     private final SimulatedRobot robot;
+    private final @Nullable Scenario scenario;
     private final List<Consistency.Sample> samples = new ArrayList<>();
 
-    Driver(SimulatedRobot robot) {
+    Driver(SimulatedRobot robot, @Nullable Scenario scenario) {
       this.robot = robot;
+      this.scenario = scenario;
     }
 
     /** Holds the sticks for a while: forward, left, and turn, each from -1 to 1. */
@@ -324,9 +328,17 @@ final class ConsistencyRuns {
       }
     }
 
-    /** Starts a scenario's event, now. */
-    void start(Scenario scenario) {
-      robot.start(scenario);
+    /**
+     * Makes what happens in the run's scenario happen, now: a collision.
+     *
+     * @throws IllegalStateException if the run has no scenario
+     */
+    void start() {
+      Scenario events = scenario;
+      if (events == null) {
+        throw new IllegalStateException("this run has no scenario to start");
+      }
+      robot.start(events);
     }
 
     /**

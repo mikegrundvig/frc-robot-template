@@ -9,7 +9,9 @@ import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.Volts;
 
 import io.avaje.jsonb.Jsonb;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -144,6 +146,110 @@ class LiveConfigTest {
 
     assertThat(live.whyNot(Map.of("a", -1.0, "b", -1.0)))
         .isEqualTo("pair: Pair.a: must be zero or more\npair: Pair.b: must be too");
+  }
+
+  /** The page shows each reason beside the value it names: the reasons say which. */
+  @Test
+  void aRecordsRefusalIsTiedToEachValueItNames() {
+    var live =
+        LiveConfig.of("pair", new Pair(1, 1)).number("a", Limits.NONE).number("b", Limits.NONE);
+    List<LiveConfig.Problem> problems = new ArrayList<>();
+
+    assertThat(live.candidate(Map.of("a", -1.0, "b", -1.0), problems)).isNull();
+
+    assertThat(problems)
+        .containsExactly(
+            new LiveConfig.Problem(
+                Outcome.Layer.RECORD,
+                List.of("a"),
+                "LiveConfigTest.Pair",
+                "",
+                "must be zero or more",
+                "pair: Pair.a: must be zero or more"),
+            new LiveConfig.Problem(
+                Outcome.Layer.RECORD,
+                List.of("b"),
+                "LiveConfigTest.Pair",
+                "",
+                "must be too",
+                "pair: Pair.b: must be too"));
+  }
+
+  /** A pair with a name of its own, as a camera's configuration names itself. */
+  record Named(double a, double b) {
+    Named {
+      if (a > 10) {
+        throw new IllegalArgumentException("Named[left].a: " + a + " is over 10");
+      }
+    }
+  }
+
+  /** Two pairs, and a check across them from the root: one naming a value, one naming none. */
+  record Both(Named left, Pair right) {
+    Both {
+      if (left.a() + right.a() > 15) {
+        throw new IllegalArgumentException(
+            "Both.right.a: too much with left.a\nthe pairs don't fit");
+      }
+    }
+  }
+
+  @Test
+  void aValueIsFoundWhereverTheRecordThatChecksItIs() {
+    var live =
+        LiveConfig.of("both", new Both(new Named(1, 1), new Pair(1, 1)))
+            .number("left.a", Limits.NONE)
+            .number("right.a", Limits.NONE);
+    List<LiveConfig.Problem> named = new ArrayList<>();
+    List<LiveConfig.Problem> across = new ArrayList<>();
+
+    live.candidate(Map.of("left.a", 11.0), named);
+    live.candidate(Map.of("right.a", 15.0), across);
+
+    assertThat(named)
+        .singleElement()
+        .isEqualTo(
+            new LiveConfig.Problem(
+                Outcome.Layer.RECORD,
+                List.of("left.a"),
+                "LiveConfigTest.Named",
+                "",
+                "11.0 is over 10",
+                "both: Named[left].a: 11.0 is over 10"));
+    assertThat(across)
+        .as("a check naming no value concerns the change's values in its record, and the record")
+        .containsExactly(
+            new LiveConfig.Problem(
+                Outcome.Layer.RECORD,
+                List.of("right.a"),
+                "LiveConfigTest.Both",
+                "",
+                "too much with left.a",
+                "both: Both.right.a: too much with left.a"),
+            new LiveConfig.Problem(
+                Outcome.Layer.RECORD,
+                List.of("right.a"),
+                "LiveConfigTest.Both",
+                "",
+                "the pairs don't fit",
+                "both: the pairs don't fit"));
+  }
+
+  @Test
+  void aValuesOwnLimitsAndTypeAreTiedToIt() {
+    var live = live();
+    List<LiveConfig.Problem> problems = new ArrayList<>();
+    Map<String, Double> values = new LinkedHashMap<>();
+    values.put(KP, -1.0);
+    values.put("travel.middle", 3.0);
+
+    live.candidate(values, problems);
+
+    assertThat(problems)
+        .extracting(LiveConfig.Problem::layer, LiveConfig.Problem::fields, LiveConfig.Problem::text)
+        .containsExactly(
+            tuple(Outcome.Layer.LIMIT, List.of(KP), "-1 is below its limit of 0"),
+            tuple(Outcome.Layer.VALUE, List.of("travel.middle"), "travel.middle isn't tunable"));
   }
 
   @Test

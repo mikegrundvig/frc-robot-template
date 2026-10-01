@@ -5,6 +5,11 @@ import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import com.michaelgrundvig.frc.pitwall.push.Event;
 import com.michaelgrundvig.frc.pitwall.push.Stream;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.pitwall.simulator.DriverStationState;
+import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.avaje.json.JsonException;
@@ -27,6 +32,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,7 +40,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
+import org.wpilib.hardware.hal.AllianceStationID;
+import org.wpilib.hardware.hal.RobotMode;
 
 /**
  * Pitwall's page and its REST API, served by the robot program itself: http://localhost:5820 in the
@@ -63,9 +73,10 @@ import org.jspecify.annotations.Nullable;
  *       values are in, with what the record holding it says it is. A {@code record} is a display
  *       name, such as {@code SwerveConfig.Gains}.
  *   <li>{@code GET /api/tunables}: the configurations' tunable values, by the WPILib tunable each
- *       is published as, {@code {path: {"config", "field", "unit", "limits", "committed", "record",
- *       "group", "meaning"}}}, the last three the record that declares the value, its path, and
- *       what its {@code @param} says the value means (empty when there's none).
+ *       is published as, {@code {path: {"config", "field", "unit", "limits", "min", "max",
+ *       "committed", "record", "group", "meaning"}}}: its tuning limits as text and their ends as
+ *       numbers (an open end has none), and the record that declares the value, its path, and what
+ *       its {@code @param} says the value means (empty when there's none).
  *   <li>{@code GET /api/values}: their current values, {@code {path: number}}. {@code PATCH} it
  *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
  *       its configuration first; {@code null} returns a value to its committed one.
@@ -74,9 +85,9 @@ import org.jspecify.annotations.Nullable;
  *       ({@code Accept: text/plain} for the report). {@code DELETE} it to return every value to its
  *       committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
- *       "value", "editable", "limits"}]}, the limits as text ({@code "0 to 30"}, empty for none).
- *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
- *       within its limits.
+ *       "value", "editable", "limits", "min", "max"}]}, the limits as text ({@code "0 to 30"},
+ *       empty for none) and their ends as numbers. {@code PATCH} it with {@code {path: value}} to
+ *       change several at once, all or none, each within its limits.
  *   <li>{@code GET /api/experiments}: the rigs and the experiments that run on them. {@code POST}
  *       it {@code {"start": name}}, naming the page's stream, or {@code {"cancel": name, "run": id,
  *       "reason": why}}; canceling what isn't running is 409.
@@ -86,15 +97,44 @@ import org.jspecify.annotations.Nullable;
  *       event stream in the {@code Pitwall-Stream} header, as it does with every request.
  * </ul>
  *
+ * <p>In the simulator only, the simulator's controls ({@link Simulator}); on a robot every one of
+ * these is 404, so nothing can write the Driver Station's state there. They are exempt from the
+ * field lock: in the simulator, they are the field. See docs/simulator.md for the details.
+ *
+ * <ul>
+ *   <li>{@code GET /api/simulator}: {@code {"simulator", "components", "scenarios"}}, as the event
+ *       stream's sections of those names carry them. {@code PATCH} it with any of {@code
+ *       "enabled"}, {@code "mode"} ({@code "AUTONOMOUS"}, {@code "TELEOPERATED"}, {@code
+ *       "UTILITY"}), {@code "allianceStation"} ({@code "RED_1"} to {@code "BLUE_3"}, or {@code
+ *       "UNKNOWN"}), {@code "fmsAttached"}, {@code "dsAttached"}, {@code "matchTime"} (seconds, or
+ *       null for none), and {@code "paused"}.
+ *   <li>{@code POST /api/simulator/step}: one loop of a paused simulator; 409 while it runs.
+ *   <li>{@code POST /api/simulator/stop}: ends the program, as closing the GUI's window did.
+ *   <li>{@code PUT /api/simulator/joysticks}: {@code {"0": {"axes": [...], "buttons": [...],
+ *       "povs": [...]}, "1": null}}, each joystick's whole input (null lets it go), at most once a
+ *       frame and again every 200 ms while anything is pressed, naming the page's event stream; 204
+ *       at once.
+ *   <li>{@code POST /api/simulator/faults}: {@code {"component", "fault", "values": {name:
+ *       number}}} applies a fault, {@code {"component", "fault", "undo": true}} undoes a lasting
+ *       one. {@code DELETE} it to undo every lasting fault.
+ *   <li>{@code POST /api/simulator/scenarios}: {@code {"apply": name}} applies a scenario's faults.
+ * </ul>
+ *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
  * when applied, 422 when a limit or the configuration's checks (or the action) refuse it, 409 when
  * it is locked out (tuning off, not enabled in utility mode, or the field system connected), and
  * 202 when the loop didn't get to it in time (the next GET shows the result). Errors are problem
- * details (RFC 9457).
+ * details (RFC 9457). A refused change to tunables also lists each reason in {@code errors}, tied
+ * to the tunables it concerns ({@code [{"layer", "by", "path", "paths", "config", "group", "text",
+ * "line"}]}), while {@code detail} keeps every reason as a line, as it always has.
  *
  * <p>The server's threads never change the robot: they read what the robot loop last published
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
  * robot loop to apply. The event stream is written by its own thread from what the loop hands it.
+ *
+ * <p>The page itself is {@code index.html} and the files in {@code page/} beside it ({@code
+ * /page/tune.js}, ...): a script module for its core and one for each view, plain JavaScript served
+ * as written, with nothing to build.
  *
  * <p>Nothing here is bundled: the web server is the one built into Java ({@code
  * com.sun.net.httpserver}), and JSON is avaje-jsonb, which WPILib gives every robot program.
@@ -129,6 +169,13 @@ public final class PitwallServer implements AutoCloseable {
    */
   private static final Map<String, String> BUNDLED =
       Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
+
+  /**
+   * The page's own files besides index.html: a script module for its core and one for each view,
+   * and its styles, in {@code page/} beside it. A short plain name and nothing else, so no request
+   * can reach any other resource.
+   */
+  private static final Pattern PAGE_FILE = Pattern.compile("/page/[a-z][a-z0-9-]{0,31}\\.(js|css)");
 
   /** The header a page names its event stream in, so the deadman knows who's asking. */
   static final String STREAM = "Pitwall-Stream";
@@ -266,6 +313,15 @@ public final class PitwallServer implements AutoCloseable {
     return found;
   }
 
+  /** One of the page's files by name, such as {@code tune.js}; empty if there's none. */
+  private static Optional<byte[]> pageFile(String name) {
+    try (InputStream in = PitwallServer.class.getResourceAsStream("page/" + name)) {
+      return in == null ? Optional.empty() : Optional.of(in.readAllBytes());
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
   private static String page() {
     try (InputStream in = PitwallServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
@@ -284,15 +340,36 @@ public final class PitwallServer implements AutoCloseable {
     private final int status;
     private final String title;
 
+    /** For a refused change to tunables, each reason with the values it concerns. */
+    private final transient List<Outcome.Reason> reasons;
+
     Problem(int status, String title, String detail) {
+      this(status, title, detail, List.of());
+    }
+
+    Problem(int status, String title, String detail, List<Outcome.Reason> reasons) {
       super(detail);
       this.status = status;
       this.title = title;
+      this.reasons = reasons;
     }
   }
 
+  /** The simulator's routes, which a robot doesn't have. */
+  private static final String SIMULATOR = "/api/simulator";
+
   /** The page, and the resources of the API. */
   private static final class Api {
+    /** The modes the page may choose: a Driver Station's, not "no mode". */
+    private static final Set<RobotMode> MODES =
+        Set.of(RobotMode.AUTONOMOUS, RobotMode.TELEOPERATED, RobotMode.UTILITY);
+
+    /**
+     * The longest match time the page may set: ten minutes, room for any match period (a match is 2
+     * min 30 s) and a long practice run.
+     */
+    private static final double MAX_MATCH_SECONDS = 600;
+
     private static final Map<String, List<String>> METHODS =
         Map.ofEntries(
             Map.entry("/", List.of("GET")),
@@ -308,6 +385,12 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/experiments", List.of("GET", "POST")),
             Map.entry("/api/run", List.of("GET")),
             Map.entry("/api/heartbeat", List.of("POST")),
+            Map.entry("/api/simulator", List.of("GET", "PATCH")),
+            Map.entry("/api/simulator/step", List.of("POST")),
+            Map.entry("/api/simulator/stop", List.of("POST")),
+            Map.entry("/api/simulator/joysticks", List.of("PUT")),
+            Map.entry("/api/simulator/faults", List.of("POST", "DELETE")),
+            Map.entry("/api/simulator/scenarios", List.of("POST")),
             Map.entry("/uPlot.iife.min.js", List.of("GET")),
             Map.entry("/uPlot.min.css", List.of("GET")));
 
@@ -320,6 +403,13 @@ public final class PitwallServer implements AutoCloseable {
     private final Broadcaster broadcaster;
     private final String page;
     private final Map<String, byte[]> bundled;
+
+    /**
+     * The page's files, each read once, as first asked for: they never change while it runs. Only
+     * files found are kept, so a stranger asking for names that don't exist fills nothing.
+     */
+    private final Map<String, byte[]> pageFiles = new ConcurrentHashMap<>();
+
     private final Duration wait;
     private final Duration idle;
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
@@ -350,7 +440,14 @@ public final class PitwallServer implements AutoCloseable {
         String method = exchange.getRequestMethod();
         try {
           checkAddressed(exchange, method);
+          if (path.startsWith(SIMULATOR) && state.simulator() == null) {
+            throw new Problem(
+                404, "Not found", "There is no simulator here: a robot has no simulator controls");
+          }
           List<String> allowed = METHODS.get(path);
+          if (allowed == null && PAGE_FILE.matcher(path).matches()) {
+            allowed = List.of("GET");
+          }
           if (allowed == null) {
             throw new Problem(404, "Not found", "There is nothing at " + path);
           }
@@ -381,8 +478,23 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/experiments" -> postExperiment(exchange);
             case "GET /api/run" -> sendJson(exchange, 200, run(true));
             case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
+            case "GET /api/simulator" -> sendJson(exchange, 200, simulatorView());
+            case "PATCH /api/simulator" -> patchSimulator(exchange);
+            case "POST /api/simulator/step" ->
+                answer(exchange, simulator().step(), this::simulatorState);
+            case "POST /api/simulator/stop" -> stopSimulator(exchange);
+            case "PUT /api/simulator/joysticks" -> putJoysticks(exchange);
+            case "POST /api/simulator/faults" -> postFault(exchange);
+            case "DELETE /api/simulator/faults" ->
+                answer(exchange, simulator().requestUndoAll(), this::componentsView);
+            case "POST /api/simulator/scenarios" -> postScenario(exchange);
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
-            default -> throw new IllegalStateException("unrouted: " + method + " " + path);
+            default -> {
+              if (!PAGE_FILE.matcher(path).matches()) {
+                throw new IllegalStateException("unrouted: " + method + " " + path);
+              }
+              sendPageFile(exchange, path);
+            }
           }
         } catch (Problem problem) {
           sendProblem(exchange, problem);
@@ -644,6 +756,339 @@ public final class PitwallServer implements AutoCloseable {
       answer(exchange, tunables.requestChanges(values), this::wpilibTunables);
     }
 
+    /** The simulator's controls: there are none on a robot, and their routes are 404 there. */
+    private Simulator simulator() {
+      Simulator simulator = state.simulator();
+      if (simulator == null) {
+        throw new Problem(404, "Not found", "There is no simulator here");
+      }
+      return simulator;
+    }
+
+    /**
+     * The simulator as the next loop shows it; while paused, when no loop comes, as the last loop
+     * left it.
+     */
+    private Map<String, Map<String, Object>> simulatorView() {
+      Simulator simulator = simulator();
+      if (simulator.isPaused()) {
+        return simulator.lastView(); // no loop is coming to read it
+      }
+      try {
+        return simulator.requestView().get(wait.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (TimeoutException | ExecutionException e) {
+        return simulator.lastView();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new Problem(503, "Interrupted", "The server stopped waiting for the robot loop");
+      }
+    }
+
+    private Object simulatorState() {
+      return simulator().lastView().getOrDefault("simulator", Map.of());
+    }
+
+    private Object componentsView() {
+      return simulator().lastView().getOrDefault("components", Map.of());
+    }
+
+    /**
+     * Changes the Driver Station's state, all in one loop, in the order given; resumes the clock at
+     * once, or pauses it once the rest is applied.
+     */
+    private void patchSimulator(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Map<String, @Nullable Object> patch = readObject(exchange);
+      UnaryOperator<DriverStationState> change = null;
+      Boolean paused = null;
+      for (Map.Entry<String, @Nullable Object> field : patch.entrySet()) {
+        String name = field.getKey();
+        Object value = field.getValue();
+        UnaryOperator<DriverStationState> next =
+            switch (name) {
+              case "enabled" -> {
+                boolean enabled = bool(name, value);
+                yield station -> station.withEnabled(enabled);
+              }
+              case "mode" -> {
+                RobotMode mode = named(name, value, RobotMode.class, MODES);
+                yield station -> station.withMode(mode);
+              }
+              case "allianceStation" -> {
+                AllianceStationID at =
+                    named(name, value, AllianceStationID.class, Set.of(AllianceStationID.values()));
+                yield station -> station.withAllianceStation(at);
+              }
+              case "fmsAttached" -> {
+                boolean attached = bool(name, value);
+                yield station -> station.withFmsAttached(attached);
+              }
+              case "dsAttached" -> {
+                boolean attached = bool(name, value);
+                yield station -> station.withDsAttached(attached);
+              }
+              case "matchTime" -> {
+                double seconds = value == null ? -1 : matchTime(value);
+                yield station -> station.withMatchTime(seconds);
+              }
+              case "paused" -> {
+                paused = bool(name, value);
+                yield null;
+              }
+              default ->
+                  throw new Problem(
+                      422,
+                      "Not changeable",
+                      name
+                          + " isn't the simulator's to change: enabled, mode, allianceStation,"
+                          + " fmsAttached, dsAttached, matchTime, or paused");
+            };
+        if (next != null) {
+          UnaryOperator<DriverStationState> before = change;
+          change = before == null ? next : station -> next.apply(before.apply(station));
+        }
+      }
+      List<CompletableFuture<Outcome>> pending = new ArrayList<>();
+      if (Boolean.FALSE.equals(paused)) {
+        pending.add(simulator.resume()); // now: a paused clock runs no loop to do it
+      }
+      if (change != null) {
+        pending.add(simulator.requestDriverStation(change));
+      }
+      if (Boolean.TRUE.equals(paused)) {
+        pending.add(simulator.requestPause()); // once the rest is applied, in the same loop
+      }
+      if (pending.isEmpty()) {
+        sendJson(exchange, 200, simulatorState()); // an empty patch changes nothing
+        return;
+      }
+      answer(exchange, all(pending), this::simulatorState);
+    }
+
+    /** Done once every one is, with the first that wasn't applied, or applied. */
+    private static CompletableFuture<Outcome> all(List<CompletableFuture<Outcome>> pending) {
+      return CompletableFuture.allOf(pending.toArray(CompletableFuture<?>[]::new))
+          .thenApply(
+              done ->
+                  pending.stream()
+                      .map(CompletableFuture::join)
+                      .filter(outcome -> outcome.result() != Outcome.Result.APPLIED)
+                      .findFirst()
+                      .orElse(Outcome.applied()));
+    }
+
+    /** Says it's stopping, then has the loop stop the program: the answer goes out first. */
+    private void stopSimulator(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      sendJson(exchange, 202, Map.of("detail", "Stopping the simulator"));
+      simulator.stop();
+    }
+
+    /** Hands each joystick's input to the robot loop, which takes the latest. */
+    private void putJoysticks(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Map<String, @Nullable Object> body = readObject(exchange);
+      Map<Integer, @Nullable JoystickInput> inputs = new LinkedHashMap<>();
+      for (Map.Entry<String, @Nullable Object> joystick : body.entrySet()) {
+        int port = port(joystick.getKey());
+        Object value = joystick.getValue();
+        if (value == null) {
+          inputs.put(port, null);
+        } else if (value instanceof Map<?, ?> input) {
+          inputs.put(port, joystickInput(port, input));
+        } else {
+          throw new Problem(
+              400, "Not a joystick's input", "Send {\"axes\", \"buttons\", \"povs\"}, or null");
+        }
+      }
+      String stream = exchange.getRequestHeaders().getFirst(STREAM);
+      if (stream == null || stream.isBlank()) {
+        throw new Problem(
+            400,
+            "No page to drive it",
+            "Drive from Pitwall's page: a joystick's input names the page's event stream ("
+                + STREAM
+                + "), and the joystick is let go when that page goes");
+      }
+      inputs.forEach((port, input) -> simulator.joystick(port, input, stream));
+      send(exchange, 204, "text/plain", "");
+    }
+
+    /** Applies a fault, or undoes a lasting one. */
+    private void postFault(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Components components = simulator.components();
+      Map<String, @Nullable Object> body = readObject(exchange);
+      if (!Set.of("component", "fault", "values", "undo").containsAll(body.keySet())
+          || !(body.get("component") instanceof String component)
+          || !(body.get("fault") instanceof String fault)) {
+        throw new Problem(
+            400,
+            "A fault",
+            "Send {\"component\", \"fault\", \"values\": {name: number}}, or {\"component\","
+                + " \"fault\", \"undo\": true}");
+      }
+      if (Boolean.TRUE.equals(body.get("undo"))) {
+        if (body.containsKey("values")) {
+          throw new Problem(400, "Undo or apply", "Undoing a fault takes no values");
+        }
+        String why = components.whyNotUndo(component, fault);
+        if (why != null) {
+          throw new Problem(422, "Can't be undone", why);
+        }
+        answer(exchange, simulator.requestUndo(component, fault), this::componentsView);
+        return;
+      }
+      if (body.containsKey("undo") && !Boolean.FALSE.equals(body.get("undo"))) {
+        throw new Problem(400, "Not true or false", "undo must be true or false");
+      }
+      Map<String, Double> values = new LinkedHashMap<>();
+      Object given = body.get("values");
+      if (given instanceof Map<?, ?> map) {
+        for (Map.Entry<?, ?> value : map.entrySet()) {
+          if (!(value.getValue() instanceof Number number)) {
+            throw new Problem(400, "Not a number", value.getKey() + " must be a number");
+          }
+          values.put(String.valueOf(value.getKey()), number.doubleValue());
+        }
+      } else if (given != null) {
+        throw new Problem(400, "Not values", "values is an object of numbers, by name");
+      }
+      Setting setting = Setting.of(component, fault, values);
+      String why = components.whyNot(setting);
+      if (why != null) {
+        throw new Problem(422, "Can't be applied", why);
+      }
+      answer(exchange, simulator.requestFault(setting), this::componentsView);
+    }
+
+    /** Applies a scenario's faults. */
+    private void postScenario(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Map<String, @Nullable Object> body = readObject(exchange);
+      if (body.size() != 1 || !(body.get("apply") instanceof String name)) {
+        throw new Problem(400, "Apply a scenario", "Send {\"apply\": name}");
+      }
+      if (!simulator.components().hasScenario(name)) {
+        throw new Problem(422, "Not a scenario", "There is no scenario named " + name);
+      }
+      answer(exchange, simulator.requestScenario(name), this::componentsView);
+    }
+
+    private static boolean bool(String name, @Nullable Object value) {
+      if (!(value instanceof Boolean bool)) {
+        throw new Problem(400, "Not true or false", name + " must be true or false");
+      }
+      return bool;
+    }
+
+    /** One of an enum's names, among those allowed: not text is 400, a name not allowed 422. */
+    private static <E extends Enum<E>> E named(
+        String name, @Nullable Object value, Class<E> type, Set<E> allowed) {
+      if (!(value instanceof String given)) {
+        throw new Problem(400, "Not a name", name + " is a name, such as " + type.getSimpleName());
+      }
+      for (E each : allowed) {
+        if (each.name().equals(given)) {
+          return each;
+        }
+      }
+      throw new Problem(
+          422,
+          "Not a " + name,
+          name
+              + " is one of "
+              + String.join(", ", allowed.stream().map(Enum::name).sorted().toList())
+              + ", not "
+              + value);
+    }
+
+    private static double matchTime(Object value) {
+      if (!(value instanceof Number number)) {
+        throw new Problem(400, "Not a number", "matchTime is a number of seconds, or null");
+      }
+      if (!(number.doubleValue() >= 0 && number.doubleValue() <= MAX_MATCH_SECONDS)) {
+        throw new Problem(
+            422,
+            "Not a match time",
+            "matchTime is seconds from 0 to " + MAX_MATCH_SECONDS + ", or null for none");
+      }
+      return number.doubleValue();
+    }
+
+    private static int port(String name) {
+      for (int port = 0; port < Simulator.JOYSTICKS; port++) {
+        if (name.equals(Integer.toString(port))) {
+          return port;
+        }
+      }
+      throw new Problem(
+          422,
+          "Not a joystick",
+          "The page drives joysticks 0 to " + (Simulator.JOYSTICKS - 1) + ", not " + name);
+    }
+
+    private static JoystickInput joystickInput(int port, Map<?, ?> input) {
+      if (!Set.of("axes", "buttons", "povs").containsAll(input.keySet())) {
+        throw new Problem(
+            400, "Not a joystick's input", "A joystick's input is its axes, buttons, and povs");
+      }
+      List<Double> axes = new ArrayList<>();
+      List<Boolean> buttons = new ArrayList<>();
+      List<Integer> povs = new ArrayList<>();
+      for (Object axis : list(input.get("axes"))) {
+        if (!(axis instanceof Number number)) {
+          throw new Problem(400, "Not a joystick's input", "Each axis is a number");
+        }
+        axes.add(number.doubleValue());
+      }
+      for (Object button : list(input.get("buttons"))) {
+        if (!(button instanceof Boolean pressed)) {
+          throw new Problem(400, "Not a joystick's input", "Each button is true or false");
+        }
+        buttons.add(pressed);
+      }
+      for (Object pov : list(input.get("povs"))) {
+        if (!(pov instanceof Number number)) {
+          throw new Problem(400, "Not a joystick's input", "Each POV is a number of degrees");
+        }
+        if (number.doubleValue() != number.intValue()) {
+          throw new Problem(
+              422, "Not a POV", "Joystick " + port + ": a POV is a whole number of degrees");
+        }
+        povs.add(number.intValue());
+      }
+      if (axes.size() > JoystickInput.MAX_AXES
+          || buttons.size() > JoystickInput.MAX_BUTTONS
+          || povs.size() > JoystickInput.MAX_POVS) {
+        throw new Problem(
+            400,
+            "Not a joystick's input",
+            "A joystick has at most "
+                + JoystickInput.MAX_AXES
+                + " axes, "
+                + JoystickInput.MAX_BUTTONS
+                + " buttons, and "
+                + JoystickInput.MAX_POVS
+                + " POVs");
+      }
+      String why = JoystickInput.whyNot(axes, buttons, povs);
+      if (why != null) {
+        throw new Problem(422, "Out of range", "Joystick " + port + ": " + why);
+      }
+      return new JoystickInput(axes, buttons, povs);
+    }
+
+    private static List<?> list(@Nullable Object value) {
+      if (value == null) {
+        return List.of();
+      }
+      if (!(value instanceof List<?> list)) {
+        throw new Problem(400, "Not a joystick's input", "axes, buttons, and povs are lists");
+      }
+      return list;
+    }
+
     private void getChanges(HttpExchange exchange) throws IOException {
       String accept = exchange.getRequestHeaders().getFirst("Accept");
       if (accept != null && accept.contains("text/plain") && !accept.contains("json")) {
@@ -675,7 +1120,7 @@ public final class PitwallServer implements AutoCloseable {
       }
       switch (outcome.result()) {
         case APPLIED -> sendJson(exchange, 200, state.get());
-        case REFUSED -> throw new Problem(422, "Refused", outcome.detail());
+        case REFUSED -> throw new Problem(422, "Refused", outcome.detail(), outcome.reasons());
         case LOCKED -> throw new Problem(409, "Locked", outcome.detail());
       }
     }
@@ -795,6 +1240,7 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("editable", tunable.editable());
         shown.put(
             "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
+        Page.ends(shown, tunable.limits());
         listed.add(shown);
       }
       return listed;
@@ -830,6 +1276,26 @@ public final class PitwallServer implements AutoCloseable {
       }
     }
 
+    /**
+     * One of the page's files, from {@code page/} beside index.html. Not kept by the browser, so a
+     * page reloaded after a redeploy runs the new program's page.
+     */
+    private void sendPageFile(HttpExchange exchange, String path) throws IOException {
+      String name = path.substring("/page/".length());
+      byte[] file = pageFiles.get(name);
+      if (file == null) {
+        file =
+            pageFile(name)
+                .orElseThrow(() -> new Problem(404, "Not found", "There is nothing at " + path));
+        pageFiles.putIfAbsent(name, file);
+      }
+      headers(exchange, name.endsWith(".css") ? "text/css" : "text/javascript");
+      exchange.sendResponseHeaders(200, file.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(file);
+      }
+    }
+
     private void sendJson(HttpExchange exchange, int status, Object body) throws IOException {
       send(exchange, status, "application/json", json.toJson(body));
     }
@@ -840,7 +1306,33 @@ public final class PitwallServer implements AutoCloseable {
       body.put("title", problem.title);
       body.put("status", problem.status);
       body.put("detail", String.valueOf(problem.getMessage()));
+      if (!problem.reasons.isEmpty()) {
+        // An extension member (RFC 9457 allows them): each reason, tied to its values.
+        body.put("errors", problem.reasons.stream().map(Api::error).toList());
+      }
       send(exchange, problem.status, "application/problem+json", json.toJson(body));
+    }
+
+    /**
+     * A reason a change was refused, as the page reads it: which check ({@code layer}: value,
+     * limit, record, rule, or tunable), who refused it ({@code by}: a record or a rule), the
+     * tunables it concerns ({@code paths}, and {@code path} when it's one), its configuration and,
+     * for a record's check that names no value, where the record is ({@code group}), why ({@code
+     * text}), and its line of {@code detail} ({@code line}).
+     */
+    private static Map<String, Object> error(Outcome.Reason reason) {
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("layer", reason.layer().name().toLowerCase(Locale.ROOT));
+      shown.put("by", reason.by());
+      if (reason.paths().size() == 1) {
+        shown.put("path", reason.paths().getFirst());
+      }
+      shown.put("paths", reason.paths());
+      shown.put("config", reason.config());
+      shown.put("group", reason.group());
+      shown.put("text", reason.text());
+      shown.put("line", reason.line());
+      return shown;
     }
 
     private static void send(HttpExchange exchange, int status, String type, String body)
@@ -859,14 +1351,12 @@ public final class PitwallServer implements AutoCloseable {
       exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
       // The page may not be framed by another site's page (to trick a click on its buttons), and
-      // loads nothing from anywhere else.
+      // loads nothing from anywhere else. It runs no inline script or style: what a robot's text
+      // could slip into the page (it's always set as text) couldn't run.
       exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
       exchange
           .getResponseHeaders()
-          .set(
-              "Content-Security-Policy",
-              "default-src 'self'; script-src 'self' 'unsafe-inline';"
-                  + " style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
+          .set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'");
       exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
       exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
     }

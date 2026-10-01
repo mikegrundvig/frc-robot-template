@@ -1,5 +1,6 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
@@ -8,10 +9,12 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Transform3d;
 
 /**
  * The world the simulated robot drives in: the drivetrain's physics, which knows where the robot
@@ -22,11 +25,16 @@ import org.wpilib.math.geometry.Pose2d;
  * <p>The robot's wheels and sensors differ from its configuration as a real robot's do ({@link
  * SensorErrors}), so its estimate drifts from the truth, and localization is tested against that
  * gap, not against a perfect world.
+ *
+ * <p>Its parts can fail while it runs: {@link Faults} declares each one, and what can go wrong with
+ * it, to Pitwall's simulator controls ({@link #addTo}), where the page and the scenarios apply
+ * them.
  */
 public final class SimulatedWorld implements AutoCloseable {
+  private final FieldModel field;
   private final DriveSimulation drivetrain;
   private final VisionSim vision;
-  private final CameraIO[] cameras;
+  private final CameraIOSim[] cameras;
 
   /**
    * @param field the field, with its tags and terrain
@@ -41,15 +49,27 @@ public final class SimulatedWorld implements AutoCloseable {
       Body body,
       List<CameraConfig> cameras,
       SensorErrors errors) {
+    this.field = field;
     this.drivetrain =
         new DriveSimulation(drivetrain.modules(), drivetrain.moduleTranslations(body), errors);
     this.drivetrain.setTerrain(field.terrain());
     vision = new VisionSim(field, errors.tagErrors(), errors.seed());
-    this.cameras = new CameraIO[cameras.size()];
+    this.cameras = new CameraIOSim[cameras.size()];
     for (int i = 0; i < cameras.size(); i++) {
       CameraConfig camera = cameras.get(i);
-      this.cameras[i] = vision.camera(camera, errors.cameraMountError(camera.name()));
+      Transform3d mountError = errors.cameraMountError(camera.name());
+      this.cameras[i] =
+          new CameraIOSim(camera.name(), vision.camera(camera, mountError), vision, mountError);
     }
+  }
+
+  /**
+   * Declares the world's parts that can fail, and what can go wrong with each, to Pitwall's
+   * simulator controls: the cameras, the gyro and the backup IMU, each module, and the robot itself
+   * ({@link Faults}).
+   */
+  public void addTo(Components components) {
+    Faults.declare(this, components);
   }
 
   /** The drivetrain's simulated modules and IMUs, for the drivetrain to read. */
@@ -65,6 +85,21 @@ public final class SimulatedWorld implements AutoCloseable {
   /** The simulated cameras, in the robot's configured order. */
   public CameraIO[] cameras() {
     return cameras.clone();
+  }
+
+  /** The cameras' names, in the robot's configured order. */
+  public List<String> cameraNames() {
+    return Arrays.stream(cameras).map(CameraIOSim::name).toList();
+  }
+
+  /** A simulated camera, for its faults. */
+  CameraIOSim camera(int index) {
+    return cameras[index];
+  }
+
+  /** The field the robot drives on. */
+  FieldModel field() {
+    return field;
   }
 
   /** The drive team puts the robot here. */
@@ -107,5 +142,10 @@ public final class SimulatedWorld implements AutoCloseable {
   @Override
   public void close() {
     vision.close();
+  }
+
+  /** How many cameras it has. */
+  int cameraCount() {
+    return cameras.length;
   }
 }

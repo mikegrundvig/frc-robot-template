@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
 import com.michaelgrundvig.frc.pitwall.experiment.Trace;
+import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +15,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -31,6 +33,8 @@ public final class Page {
   private final Tuning tuning;
   private final TunableTee tunables;
   private final Experiments experiments;
+  private final Supplier<String> mode;
+  private final @Nullable Simulator simulator;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
   private final String program = UUID.randomUUID().toString();
@@ -55,13 +59,49 @@ public final class Page {
   private Map<String, Object> rigSection = Map.of();
   private Map<String, Object> experimentSection = Map.of();
 
+  /** A page that doesn't know the robot's mode, and has no simulator: a test's, say. */
   public Page(
       Status status, Actions actions, Tuning tuning, TunableTee tunables, Experiments experiments) {
+    this(status, actions, tuning, tunables, experiments, () -> "", null);
+  }
+
+  /**
+   * A robot's page: no simulator.
+   *
+   * @param mode the robot's mode as the Driver Station sets it, such as "Utility, enabled": read in
+   *     the robot loop, only while a page is open
+   */
+  public Page(
+      Status status,
+      Actions actions,
+      Tuning tuning,
+      TunableTee tunables,
+      Experiments experiments,
+      Supplier<String> mode) {
+    this(status, actions, tuning, tunables, experiments, mode, null);
+  }
+
+  /**
+   * @param mode the robot's mode as the Driver Station sets it, such as "Utility, enabled": read in
+   *     the robot loop, only while a page is open
+   * @param simulator the simulator's controls, in the simulator; null on a robot, where the page
+   *     has none
+   */
+  Page(
+      Status status,
+      Actions actions,
+      Tuning tuning,
+      TunableTee tunables,
+      Experiments experiments,
+      Supplier<String> mode,
+      @Nullable Simulator simulator) {
     this.status = status;
     this.actions = actions;
     this.tuning = tuning;
     this.tunables = tunables;
     this.experiments = experiments;
+    this.mode = mode;
+    this.simulator = simulator;
   }
 
   public Status status() {
@@ -84,11 +124,17 @@ public final class Page {
     return experiments;
   }
 
+  /** The simulator's controls; null on a robot. */
+  public @Nullable Simulator simulator() {
+    return simulator;
+  }
+
   /**
    * The page's state now, section by section. Call it from the robot loop.
    *
    * <ul>
-   *   <li>{@code robot}: its name, the code, simulator or real, and this program's id;
+   *   <li>{@code robot}: its name, the code, simulator or real, this program's id, its mode (empty
+   *       when unknown), and why actions and experiments can't start now (empty while they can);
    *   <li>{@code status}, {@code units}: each item's value, and the unit of each number;
    *   <li>{@code actions}: each action's phase and detail;
    *   <li>{@code tuning}: whether it's on, the field, and refused dashboard changes;
@@ -98,7 +144,10 @@ public final class Page {
    *       and {@code /api/changes} give them;
    *   <li>{@code wpilibTunables}: every other WPILib tunable, by path;
    *   <li>{@code rigs}, {@code experiments}: what can be run;
-   *   <li>{@code run}: the run in progress, or the latest to end.
+   *   <li>{@code run}: the run in progress, or the latest to end;
+   *   <li>in the simulator only, {@code simulator} (the Driver Station, the clock, and the
+   *       joysticks the page drives), {@code components} (what can fail, and how), and {@code
+   *       scenarios}: see {@link Simulator#view}.
    * </ul>
    */
   public Map<String, Map<String, Object>> sections() {
@@ -125,6 +174,9 @@ public final class Page {
     sections.put("experiments", experimentSection);
     Run run = experiments.run();
     sections.put("run", run == null ? Map.of() : run(run));
+    if (simulator != null) {
+      sections.putAll(simulator.view());
+    }
     return sections;
   }
 
@@ -135,6 +187,10 @@ public final class Page {
     shown.put("simulated", robot.simulated());
     shown.put("code", robot.code());
     shown.put("program", program);
+    shown.put("mode", mode.get());
+    // Why Run is off, beside it: the gate's own reason, as the robot would refuse with it.
+    shown.put("actionsLocked", Objects.requireNonNullElse(actions.whyLocked(), ""));
+    shown.put("experimentsLocked", Objects.requireNonNullElse(experiments.whyLocked(), ""));
     return shown;
   }
 
@@ -192,6 +248,7 @@ public final class Page {
         description.put("unit", value.unit());
         description.put(
             "limits", value.limits().equals(Limits.NONE) ? "" : value.limits().toString());
+        ends(description, value.limits());
         description.put("committed", value.committed());
         description.put("record", value.record());
         description.put("group", value.group());
@@ -303,6 +360,7 @@ public final class Page {
       described.put("editable", tunable.editable());
       described.put(
           "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
+      ends(described, tunable.limits());
       shown.put(tunable.path(), described);
     }
     return shown;
@@ -354,12 +412,14 @@ public final class Page {
     return shown;
   }
 
+  /** Each experiment's rig, its settings, and how long it runs, for the page to count down. */
   private Map<String, Object> experimentList() {
     Map<String, Object> shown = new LinkedHashMap<>();
     for (Experiment experiment : experiments.experiments()) {
-      shown.put(
-          experiment.name(),
-          pair("rig", experiment.rig().name(), "settings", experiment.settings()));
+      Map<String, Object> described =
+          pair("rig", experiment.rig().name(), "settings", experiment.settings());
+      described.put("seconds", experiment.profile().durationSeconds());
+      shown.put(experiment.name(), described);
     }
     return shown;
   }
@@ -406,6 +466,19 @@ public final class Page {
   /** A record's documentation as the page reads it: its summary and its text. */
   private static Map<String, Object> doc(ParameterDocs doc) {
     return pair("summary", doc.summary(), "text", doc.text());
+  }
+
+  /**
+   * A tuning limit's ends as numbers, {@code "min"} and {@code "max"}, beside its text, so the page
+   * can draw them and check an edit before sending it; an open end has none.
+   */
+  static void ends(Map<String, Object> shown, Limits limits) {
+    if (Double.isFinite(limits.min())) {
+      shown.put("min", limits.min());
+    }
+    if (Double.isFinite(limits.max())) {
+      shown.put("max", limits.max());
+    }
   }
 
   /** Two values by name, in this order, as JSON writes them. */

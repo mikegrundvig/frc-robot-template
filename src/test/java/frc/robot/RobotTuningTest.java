@@ -42,6 +42,29 @@ class RobotTuningTest {
         .isEqualTo("drivetrain: gains.steerKp: 500 is above its limit of 100");
   }
 
+  /**
+   * The page says what each tunable value means, from its record's Javadoc, which the build writes
+   * into the program as it compiles: every one needs a {@code @param} saying what it does.
+   */
+  @Test
+  void everyTunableValueSaysWhatItMeans() {
+    for (LiveConfig<?> live :
+        List.of(Drive.tuning(Robots.SIM.drivetrain()), Vision.tuning(Robots.SIM.vision()))) {
+      for (LiveConfig.Knob knob : live.knobs()) {
+        String component = knob.path().substring(knob.path().lastIndexOf('.') + 1);
+        assertThat(live.meaning(knob.path()))
+            .as(
+                "%s %s says nothing: add @param %s to %s's Javadoc, saying what it does and in"
+                    + " what unit",
+                live.name(),
+                knob.path(),
+                component,
+                live.documentation().value(knob.path()).record())
+            .isNotBlank();
+      }
+    }
+  }
+
   /** Within its limits isn't enough: the records' own checks have the last word, and say which. */
   @Test
   void aValueTheRecordsRejectIsRefusedNamingTheRecordsValue() {

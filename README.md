@@ -107,6 +107,14 @@ Also built in:
   `Limits` in the mechanism's `tuning`; a check that reads two mechanisms goes in `RobotRules`.
   Each is checked against the committed configuration in the tests and at startup.
 
+  **What a value means is its `@param`:** the page will show a configuration record's Javadoc
+  beside its values, each value's `@param` as what it means (`@param steerKp volts per radian of
+  error`), and dashboards see it as the value's `description` property. So write what the value
+  does and in what unit, not its name again. Every tunable value needs one: `RobotTuningTest`
+  fails without it, naming the record whose Javadoc to write. The build copies the Javadoc into
+  the program as it compiles (Pitwall's documentation processor, in `pitwall/docs-processor`), so
+  the robot needs no source to show it.
+
   With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
   in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver
   Station and NetworkTables, so give the robot's Wi-Fi a strong password (or turn it off at events).
@@ -179,7 +187,7 @@ Also built in:
 | `frc.robot.lib` | The component library: reusable, fully unit-tested parts that never depend on robot code (enforced). The typed configuration (`config`), the field model and its frames (`field`), the pose estimator and everything that feeds it (`localization`, whose package documentation is a reading map), the calibration math (`calibration`), and loop timing (`timing`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`). |
-| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. |
+| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |

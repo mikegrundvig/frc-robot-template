@@ -71,10 +71,18 @@ Also built in:
     action's safety, and only while the page that started it stays in touch. Each run is recorded
     at the sensors' own rate (250 Hz for the steering) and scored: rise, overshoot, settling,
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
-    best of each score marked, with Restore to put a run's gains back and the builder calls that
-    commit them. A gain changes only the way any value does, through the checks below.
+    best of each score marked, with Restore to stage a run's gains again and the builder calls
+    that commit them. A gain changes only the way any value does, through the checks below.
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
+  - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim in the
+    simulator), under a state bar that always says which robot (SIM or ROBOT), whether it's
+    heard, its mode, whether tuning is on, and what isn't committed. Edits are staged and applied
+    together; a refusal's reasons show beside the values they concern, an edit outside its limits
+    is caught before it's sent, and a big step (over a quarter of a value's range) is warned of.
+    Nothing is lost silently: the session's changes and runs are kept in the tab, each
+    restorable. Plain JavaScript modules in the jar (`pitwall/src/main/resources/.../page/`),
+    with nothing to build.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
     around WPILib's NetworkTables backend: dashboards such as Elastic see and change them as always,
     but a change applies only while tuning is on, never on the field, and within the tunable's
@@ -86,8 +94,8 @@ Also built in:
       properties any NetworkTables tool can read. Before a change applies, it is checked against
       its limits, then by the configuration's own checks, then by the robot's rules across
       mechanisms that read it (`RobotRules`: two arms that could collide), so a refused value
-      never reaches the robot, and the page gives every reason (a dashboard's snaps back, and the
-      page shows why). Several values change together, all or none, even across mechanisms. Nothing is saved on the robot: the page lists each
+      never reaches the robot, and the page shows every reason beside the value it concerns (a
+      dashboard's snaps back, and the page shows why). Several values change together, all or none, even across mechanisms. Nothing is saved on the robot: the page lists each
       change as the builder call that commits it to `Robots.java`. When the field connects, every
       configuration returns to committed (printed first, so nothing is lost): a match runs the
       committed configuration.
@@ -107,7 +115,7 @@ Also built in:
   `Limits` in the mechanism's `tuning`; a check that reads two mechanisms goes in `RobotRules`.
   Each is checked against the committed configuration in the tests and at startup.
 
-  **What a value means is its `@param`:** the page will show a configuration record's Javadoc
+  **What a value means is its `@param`:** the page shows a configuration record's Javadoc
   beside its values, each value's `@param` as what it means (`@param steerKp volts per radian of
   error`), and dashboards see it as the value's `description` property. So write what the value
   does and in what unit, not its name again. Every tunable value needs one: `RobotTuningTest`

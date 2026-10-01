@@ -11,7 +11,7 @@ it or why it is what it is. A test keeps the list complete ([below](#keeping-it-
 |---|---|---|---|
 | **calibrated** | A number that differs robot to robot: a wheel's radius, a camera's mount, a gyro's scale | On each robot, and again whenever something changes (tread wears, a camera gets bumped) | [docs/calibration.md](calibration.md), from the Pitwall page, or by hand as its row says |
 | **characterized** | A number that belongs to a kind of part: how noisy a camera is at a distance, how late its results arrive, how far a gyro drifts, how a tread grips | Once per model of part, on a bench or a practice floor; again when the part, its software, or its settings change | [docs/characterization.md](characterization.md) |
-| **chosen** | A design decision, not a measurement: a threshold, a margin, a tolerance | Never: it's justified, then checked against logs | Its row says why, and what in a log would make you change it |
+| **chosen** | A design decision, not a measurement: a threshold, a margin, a tolerance | Never: it's justified, then checked against logs | Its row says why, and what in a log would make you change it ([below](#checking-a-chosen-value-against-logs)) |
 | **as built** | A fact of how the robot is built: a frame size, a gear ratio, a CAN ID | Read off the CAD, a datasheet, or Phoenix Tuner X, once per robot | Its row says where |
 
 ## Where today's number came from
@@ -94,6 +94,36 @@ So a new value starts in its record, and the test asks for its row. A section is
 naming the record in backticks (`` ### `SwerveConfig.Limits` ``, a nested record with its outer
 one), followed by a table whose header starts with **Value** and has a **Kind** and a **Source**
 column. The test reads only a row's name, kind, and source; the rest is for people.
+
+## Checking a chosen value against logs
+
+A chosen value makes decisions, and every decision lands in the log:
+
+- **The cameras':** each image's outcome, with the number that decided it (`Vision/<camera>/Outcomes`:
+  "too far: 6.3 m", "ambiguous single tag: 0.25 > 0.20", "turning too fast: 5.4 rad/s"), and the
+  estimator's verdict on each measurement (`Vision/<camera>/Decisions`: "accepted", "gate: 20.1 >
+  13.8", "too late: older than the history kept").
+- **Localization's:** what the estimate rests on and how sure it is (`Localization/Mode`,
+  `PositionStdDevMeters`, `HeadingStdDevDegrees`), how far the cameras disagree with it lately
+  (`RecentDisagreementMeters`), the recoveries, the collisions, the tilt, the terrain, and whether
+  it's good enough to score from (`ReadyToScore`, `NotReadyBecause`).
+- **The drivetrain's:** each module's inputs (`Drive/Module<name>/`: currents, velocity, angle), what
+  it was asked for (`Drive/SetpointsOptimized`), and the IMUs' (`Drive/Gyro/`, `Drive/BackupGyro/`).
+
+Open a log in AdvantageScope, plot the decision beside what it judged, and ask two questions: how
+often did it decide, and was it right when it did? To count, export the log (**File > Export
+Data**) to a spreadsheet. A filter that throws out images the other
+cameras agreed with is too tight; one that lets through images the estimator then rejects is too
+loose. In the simulator, `Sim/PoseErrorMeters` says how far the estimate was from the truth, and a
+scenario (`./gradlew run -Pscenario=collision`) shows what a value does when something goes wrong.
+
+Then try another number on the same log. Change it where it's set (in `Robots.java`, or the
+defaults) and replay the log through the code (`AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run
+-Preplay`): the replay writes a `_sim` log of what the code decides now, from the same inputs
+(the cameras' raw detections included), to compare with the original in AdvantageScope.
+
+Change a chosen value when logs show it deciding wrong, more than once, for a reason you can name;
+never from one run. Each row says what to look for.
 
 ## Where to start
 
@@ -193,7 +223,7 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 | `driveKp` | chosen | 2.0 V per m/s | simulation | Why: corrects what feedforward misses. Tune it live after kS and kV: raise it until speeds track their setpoints, and back off at the first buzz. |
 | `steerKp` | chosen | 16 V per radian | 2026 code (kP 100 V per rotation, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. |
 | `steerKd` | chosen | 0.08 V per rad/s | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. |
-| `skewLookahead` | chosen | 0.03 s | unknown | Why: while the robot spins, its wheels reach their angles late, so a field-relative drive aims at the heading this far ahead. Drive straight while spinning, and tune until the path stays straight. |
+| `skewLookahead` | chosen | 0.03 s | unknown | Why: while the robot spins, its wheels reach their angles late, so a field-relative drive aims at the heading this far ahead. Drive straight while spinning, and tune until the path stays straight. Change it if the path curves the way the robot spins. |
 
 ### `SwerveWiring`
 
@@ -277,7 +307,7 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 | `yawRateStdDevFactor` | characterized | 0.5 per rad/s | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
 | `maxHeadingStdDevToConstrain` | chosen | 5° (0.087 rad) | unknown | Why: a heading-constrained solve is only as good as the heading it's given; until the estimate knows its heading this well (a robot not yet placed), full solves find it. Check how soon after placing the robot its outcomes say "heading-constrained". |
 | `minTagsForHeading` | chosen | 2 | guess (the fewest a multi-tag solve has) | Why: one tag's heading is too noisy and too ambiguous to correct the gyro. Raise it if two-tag solves pull the heading around (`Localization/Pose`'s heading stepping against `Drive/Gyro/Yaw`). |
-| `maxYawRateForHeading` | chosen | 0.5 rad/s | unknown | Why: correct the gyro's heading only when the robot is turning slowly, where a capture time a little off barely moves the heading. |
+| `maxYawRateForHeading` | chosen | 0.5 rad/s | unknown | Why: correct the gyro's heading only when the robot is turning slowly, where a capture time a little off barely moves the heading. Check the heading offset (`Localization/Pose`'s heading less `Drive/Gyro/Yaw`): lower it if the offset steps while the robot turns; raise it if the offset is rarely corrected in a match. |
 | `maxReprojectionErrorForHeadingPixels` | chosen | 1 px | unknown | Why: only a solve that fits its tags well corrects the gyro. Check against [camera noise](characterization.md#camera-noise): a still camera's multi-tag solves should fit well under it. |
 
 ### `EstimatorConfig`
@@ -300,7 +330,7 @@ off by half of it is too unsure, and the cameras pull it around.
 | `tractionLimitedSlipFraction` | chosen | 0.25 | guess | Why: wheels at the edge of their grip slip some of the time. Check how far the cameras correct the estimate after stretches of `Localization/TractionLimited`. |
 | `tiltStartDegrees` | chosen | 5° | guess | Why: a small tilt is carpet and bumpers, not wheels off the floor. Check: `Localization/TiltDegrees` stays under it in flat driving. |
 | `tiltZeroDegrees` | chosen | 25° | top team (6328) | Why: by this tilt, some wheels are off the floor. Check with a [terrain crossing](characterization.md#terrain-crossings). |
-| `slipCorrelationSeconds` | chosen | 0.5 s | guess | Why: a slip (a push, a launch) keeps its direction for a while, so its errors add up rather than average out. |
+| `slipCorrelationSeconds` | chosen | 0.5 s | guess | Why: a slip (a push, a launch) keeps its direction for a while, so its errors add up rather than average out. Check: after a push or a launch, the cameras' correction should fall inside the uncertainty the estimate claimed (`PositionStdDevMeters`). Lengthen it if corrections often land outside; shorten it if they're always far inside. |
 | `collisionStdDevMeters` | chosen | 0.25 m | guess | Why: a hit moves the robot further than its wheels see. Check: after logged hits (`Localization/Collision`), how far the cameras moved the estimate; it should cover the largest. |
 | `collisionWindowSeconds` | chosen | 0.25 s | guess | Why: one hit jolts for several loops; count it once. Check: one hit's jolts span less than it. |
 | `handlingStdDevPerSqrtSecond` | chosen | 0.02 m | guess (the idea: 254's loose trust while disabled) | Why: a disabled robot gets carried, and its wheels can't tell, so the cameras should lead. Check: placed and disabled, the estimate settles on the cameras before the match. |
@@ -310,18 +340,18 @@ off by half of it is too unsure, and the cameras pull it around.
 | `historySeconds` | chosen | 1.5 s | guess (254 kept 1 s) | Why: a camera measurement must arrive within it to be applied; several times any camera's [latency](characterization.md#camera-latency-and-time-sync). Check for "too late" in `Decisions`. |
 | `futureToleranceSeconds` | chosen | 0.05 s | guess | Why: clocks differ a little, but a measurement stamped this far past the newest odometry has a wrong capture time. Check for "from the future" in `Decisions` ([time sync](characterization.md#camera-latency-and-time-sync)). |
 | `visionTimeoutSeconds` | chosen | 1 s | guess | Why: after a second without an accepted measurement, the estimate is dead reckoning, and says so. Check: `Localization/Mode` reads DEAD_RECKONING only where the cameras are really blind. |
-| `disagreementWindowSeconds` | chosen | 0.5 s | guess | Why: how far back "lately" reaches for `RecentDisagreementMeters`, which the scoring gate reads. |
+| `disagreementWindowSeconds` | chosen | 0.5 s | guess | Why: how far back "lately" reaches for `RecentDisagreementMeters`, which the scoring gate reads. Lengthen it if `NotReadyBecause` flickers on one stray measurement; shorten it if the robot stays not ready long after the cameras agree again. |
 | `gateChiSquaredPosition` | chosen | 13.816 | math (chi-squared, 2 degrees of freedom: 99.9% of good measurements pass) | Why: rejects measurements its noise model says are almost certainly wrong. A good noise model rejects about 1 in 1000 good measurements; far more "gate:" rejections in clean driving mean the uncertainties are too small, not that the gate is too tight. |
 | `gateChiSquaredPose` | chosen | 16.266 | math (3 degrees of freedom, 99.9%) | As `gateChiSquaredPosition`, for a measurement with heading. |
 | `gateChiSquaredAxis` | chosen | 10.828 | math (1 degree of freedom, 99.9%) | As `gateChiSquaredPosition`, for a landmark. |
 | `recoveryMeasurements` | chosen | 3 | guess | Why: three rejected measurements that agree with each other outvote odometry; with fewer, one bad camera could. Check: `Localization/Recoveries` counts only real knocks (a hit, a push, a bad placement). |
 | `recoveryWindowSeconds` | chosen | 1 s | guess | Why: those measurements must be recent, so they describe the same moment. As `recoveryMeasurements`. |
 | `recoveryAgreementMeters` | chosen | 0.25 m | guess | Why: measurements this close agree, given camera noise at range. Keep it above the noise at the distances the cameras see tags. |
-| `recoveryStdDevMeters` | chosen | 0.25 m | guess | Why: after a jump, the estimate is that unsure, so the next measurements settle it. |
-| `recoveryAgreementDegrees` | chosen | 5° | guess | Why: rejected measurements whose headings agree within this, and not with the gyro, mean the heading is wrong (a bad reset, a robot placed backwards). |
-| `recoveryHeadingStdDevDegrees` | chosen | 2° | guess | Why: as `recoveryStdDevMeters`, for heading. |
+| `recoveryStdDevMeters` | chosen | 0.25 m | guess | Why: after a jump, the estimate is that unsure, so the next measurements settle it. Change if the measurements right after a recovery are rejected (too small), or the estimate wanders for seconds after one (too large). |
+| `recoveryAgreementDegrees` | chosen | 5° | guess | Why: rejected measurements whose headings agree within this, and not with the gyro, mean the heading is wrong (a bad reset, a robot placed backwards). Check: heading recoveries happen only after a real wrong heading; lower it if one follows a single camera's noise. |
+| `recoveryHeadingStdDevDegrees` | chosen | 2° | guess | Why: as `recoveryStdDevMeters`, for heading. Change as `recoveryStdDevMeters`. |
 | `lostAfterRejections` | chosen | 2 | guess | Why: two rejections in a row with none accepted, and the estimate says it's lost. Check: LOST in `Localization/Mode` away from real knocks means it's too low, or the noise model too sure. |
-| `lostPositionStdDevMeters` | chosen | 1 m | guess | Why: after a heading recovery, the position was worked out with the wrong heading, so it may be far off. |
+| `lostPositionStdDevMeters` | chosen | 1 m | guess | Why: after a heading recovery, the position was worked out with the wrong heading, so it may be far off. Change if, after a heading recovery, the cameras find the position further off than this. |
 
 ### `LocalizationGate`
 
@@ -332,10 +362,10 @@ is off.
 
 | Value | Kind | Today | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `maxVisionAgeSeconds` | chosen | 0.5 s | top team (254) | Why: odometry drifts after the cameras last checked it. |
+| `maxVisionAgeSeconds` | chosen | 0.5 s | top team (254) | Why: odometry drifts after the cameras last checked it. Change if `NotReadyBecause` blames an old measurement while the robot is lined up with tags in view (the cameras are slower than it), or shots taken just under it miss. |
 | `maxDisagreementMeters` | chosen | 0.2 m | top team (254) | Why: cameras that just disagreed by more haven't settled the estimate. Lower it toward the task's tolerance once [camera noise](characterization.md#camera-noise) says the cameras do better. |
 | `maxPositionStdDevMeters` | chosen | 0.15 m | unknown | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
-| `maxTiltDegrees` | chosen | 5° | unknown (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. |
+| `maxTiltDegrees` | chosen | 5° | unknown (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
 
 ### `ImuCrossCheck.Settings`
 
@@ -346,9 +376,9 @@ for a real fault.
 
 | Value | Kind | Today | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `windowSeconds` | chosen | 1 s | guess | Why: long enough to see two IMUs turn apart, short enough to catch a frozen one in a second. |
-| `toleranceDegrees` | chosen | 3° | guess | Why: above what the two drift and scatter apart in the window ([gyro drift and noise](characterization.md#gyro-drift-and-noise), for both). |
-| `scaleTolerance` | chosen | 0.05 | guess | Why: above the two IMUs' difference in scale; the gyro's is calibrated, the backup's isn't ([the backup's scale](characterization.md#repeatability-of-the-gyros-scale), S13). |
+| `windowSeconds` | chosen | 1 s | guess | Why: long enough to see two IMUs turn apart, short enough to catch a frozen one in a second. Change if a frozen gyro (the `gyro-frozen` scenario) takes too long to flag, or hard turns set off the alert. |
+| `toleranceDegrees` | chosen | 3° | guess | Why: above what the two drift and scatter apart in the window ([gyro drift and noise](characterization.md#gyro-drift-and-noise), for both). Change if the alert comes on in normal driving. |
+| `scaleTolerance` | chosen | 0.05 | guess | Why: above the two IMUs' difference in scale; the gyro's is calibrated, the backup's isn't ([the backup's scale](characterization.md#repeatability-of-the-gyros-scale), S13). Change if fast spins set off the alert with both IMUs healthy. |
 
 ### `TerrainCrossing.Settings`
 
@@ -359,10 +389,10 @@ the new field's ramps.
 
 | Value | Kind | Today | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `steepDegrees` | chosen | 10° | top team (1678) | Why: under the ramps' slope (2026's: 15°), over anything flat driving reads. |
-| `levelDegrees` | chosen | 5° | top team (1678) | Why: what a flat floor reads, bumpers and carpet included. |
-| `levelSeconds` | chosen | 0.1 s | unknown | Why: five loops level is off the feature, not a wobble on its top. |
-| `topSeconds` | chosen | 1.5 s | guess | Why: time to cross a feature's flat top; longer is two features, or a stop on top. |
+| `steepDegrees` | chosen | 10° | top team (1678) | Why: under the ramps' slope (2026's: 15°), over anything flat driving reads. Lower it if `TerrainCrossings` misses a crossing; raise it if it counts one in flat driving. |
+| `levelDegrees` | chosen | 5° | top team (1678) | Why: what a flat floor reads, bumpers and carpet included. Raise it if the robot never reads level after a crossing. |
+| `levelSeconds` | chosen | 0.1 s | unknown | Why: five loops level is off the feature, not a wobble on its top. Lengthen it if a wobble on a feature's top ends a crossing early. |
+| `topSeconds` | chosen | 1.5 s | guess | Why: time to cross a feature's flat top; longer is two features, or a stop on top. Lengthen it if a wide feature's crossing isn't counted. |
 
 ## The simulator
 

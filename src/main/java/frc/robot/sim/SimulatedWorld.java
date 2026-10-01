@@ -102,6 +102,11 @@ public final class SimulatedWorld implements AutoCloseable {
     return field;
   }
 
+  /** The cameras' simulation, which places the field's tags: for their faults. */
+  VisionSim vision() {
+    return vision;
+  }
+
   /** The drive team puts the robot here. */
   public void place(Pose2d pose) {
     drivetrain.place(pose);

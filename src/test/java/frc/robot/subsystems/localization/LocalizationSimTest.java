@@ -16,6 +16,7 @@ import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.LocalizationGate;
+import frc.robot.lib.localization.SlipCheck;
 import frc.robot.lib.localization.TerrainCrossing;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
@@ -632,8 +633,9 @@ class LocalizationSimTest {
       double worstError, double secondsBack, int gateOpenWhileOff, double worstWhileOpen) {}
 
   /**
-   * A camera watches the robot standing for half a second, is blind through what {@code blind}
-   * does, and watches again through what {@code seen} does.
+   * A camera watches the robot standing, long enough for the slip check to learn its
+   * accelerometer's bias (as it does before a match), is blind through what {@code blind} does, and
+   * watches again through what {@code seen} does.
    */
   private Recovery seenAgain(Consumer<DriveSimHarness> blind, Consumer<DriveSimHarness> seen) {
     DriveSimHarness robot = robot(SensorErrors.TYPICAL);
@@ -655,7 +657,7 @@ class LocalizationSimTest {
           }
         });
     robot.watchWith(camera);
-    robot.drive(0.5, 0, 0, 0);
+    robot.drive(SlipCheck.Settings.DEFAULTS.steadySeconds() + 0.5, 0, 0, 0);
     robot.stopWatching();
     blind.accept(robot);
     robot.watchWith(camera);

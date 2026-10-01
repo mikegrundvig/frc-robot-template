@@ -228,6 +228,8 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput(
         "Localization/TurnApartDegrees", Math.toDegrees(slipCheck.turnApartRadians()));
     Logger.recordOutput("Localization/SlideMetersPerSecond", slipCheck.slideMetersPerSecond());
+    Logger.recordOutput(
+        "Localization/AccelerometerBiasMetersPerSecSq", slipCheck.biasMetersPerSecSq());
     estimate = estimator.estimate();
   }
 

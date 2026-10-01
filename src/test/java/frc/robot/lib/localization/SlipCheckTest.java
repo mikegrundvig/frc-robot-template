@@ -24,6 +24,9 @@ class SlipCheckTest {
   /** The tread's grip, its friction of 1.2 times g: what the floor can explain. */
   private static final double GRIP = 1.2 * ImuReadings.STANDARD_GRAVITY;
 
+  /** Loops enough to stand still for the accelerometer's bias to be learned. */
+  private static final int STEADY = (int) Math.ceil(SETTINGS.steadySeconds() / LOOP) + 1;
+
   /**
    * A robot moving on the field, and what its wheels and IMU read of it, loop by loop. The truth is
    * its velocity on the field and its heading; its wheels can roll faster than it moves, and turn
@@ -49,6 +52,9 @@ class SlipCheckTest {
 
     /** And its bias along the robot's forward axis. */
     double bias;
+
+    /** And along its left axis. */
+    double biasLeft;
 
     Robot() {
       this(Translation2d.ZERO, true);
@@ -93,7 +99,7 @@ class SlipCheckTest {
               checked,
               new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
               felt.getX() + bias,
-              felt.getY(),
+              felt.getY() + biasLeft,
               0));
       return this;
     }
@@ -103,6 +109,11 @@ class SlipCheckTest {
         loop(speedUpX, speedUpY, rate, wheelsTurnMore);
       }
       return this;
+    }
+
+    /** Stands still long enough for the accelerometer's bias to be learned. */
+    Robot stand() {
+      return loops(STEADY, 0, 0, 0, 0);
     }
 
     Robot slide(double x, double y) {
@@ -263,8 +274,9 @@ class SlipCheckTest {
 
   /**
    * An accelerometer reading 0.3 m/s² too high, twice what the speed comparison lets go of:
-   * standing still for half a minute, it learns its bias, and no slide builds up; then a hard
-   * launch is no slide either.
+   * standing still for half a minute, it learns its bias once the reading has held for {@link
+   * SlipCheck.Settings#steadySeconds}, before the slide it builds meanwhile reaches the tolerance;
+   * then a hard launch is no slide either.
    */
   @Test
   void standingStillTheAccelerometersBiasIsLearned() {
@@ -275,23 +287,50 @@ class SlipCheckTest {
       robot.loop(0, 0, 0, 0);
       most = Math.max(most, robot.check.slideMetersPerSecond());
     }
+    double learned = robot.check.biasMetersPerSecSq();
     robot.loops(50, 4.4 * LOOP, 0, 0, 0);
 
     assertThat(most).as("standing").isLessThan(TOLERANCE);
+    assertThat(learned).isCloseTo(0.3, within(1e-9));
     assertThat(robot.check.slipMetersPerSecond()).as("launching").isZero();
   }
 
   /**
-   * A bias too large to be one (2 m/s²: the robot is taken to be moving, not standing) adds up as a
-   * slide, but none faster than the robot could go.
+   * A bias it never stands still to learn (2 m/s², the robot driving at a steady 1 m/s throughout)
+   * adds up as a slide, but none faster than the robot could go.
    */
   @Test
   void noSlideIsFasterThanTheRobotCouldGo() {
     Robot robot = new Robot();
+    robot.fieldVx = 1;
     robot.bias = 2;
     robot.loops(1500, 0, 0, 0, 0);
 
+    assertThat(robot.check.biasMetersPerSecSq()).as("never learned").isZero();
     assertThat(robot.check.slipMetersPerSecond()).isEqualTo(SETTINGS.maxSlideMetersPerSecond());
+  }
+
+  /**
+   * A push building slowly, at 1 m/s³, the wheels and the gyro still: the accelerometer's reading
+   * never holds, so none of the push is taken for its bias, and the slide is seen in full, less
+   * only what the comparison lets go of.
+   */
+  @Test
+  void aPushBuildingSlowlyIsNoBias() {
+    Robot robot = new Robot().stand();
+    double felt = 0;
+    for (int i = 1; i <= 100; i++) { // two seconds, to 2 m/s² and 2 m/s
+      felt += 1.0 * LOOP;
+      robot.slide(0, -(robot.fieldVy + felt * LOOP)).loop(0, felt * LOOP, 0, 0);
+    }
+
+    double letGo = SETTINGS.speedBiasMetersPerSecSq() * 2;
+    assertThat(robot.check.biasMetersPerSecSq())
+        .as("learned standing, not pushed")
+        .isLessThan(1e-9);
+    assertThat(robot.check.slipMetersPerSecond())
+        .as("the push's %.2f m/s, less what's let go", robot.fieldVy)
+        .isCloseTo(robot.fieldVy - letGo, within(0.02));
   }
 
   /** A slide that turns and one that speeds up, at once: the root of their squares. */

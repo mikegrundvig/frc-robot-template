@@ -6,6 +6,12 @@ the simulator). It's a library of its own (`com.michaelgrundvig.frc.pitwall`), f
 the robot program contributes to it, as data. The template's [README](../README.md) describes each
 part; this file is for contributors, and covers its scenes: the World view.
 
+**Another port:** `Pitwall.start(name)` serves on 5820 unless the `pitwall.port` system property
+names another (`-Dpitwall.port=5920`; 0 picks a free one, and Pitwall prints the one it took). In
+the template, `./gradlew run -Ppitwall.port=5920` passes it to the simulator. Run a second simulator
+beside yours (an agent's, another branch's) on another port: a page left open on 5820 reconnects to
+whatever answers there, and drives it.
+
 ## Scenes: the World view
 
 A **scene** is the world drawn in 3D on the page, from what the robot program says is there: a

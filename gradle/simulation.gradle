@@ -18,6 +18,10 @@
 //
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
+//
+// Pitwall's page is on port 5820. A second simulator beside yours (an agent's, a test of another
+// branch) takes another, so pages already open on 5820 don't reconnect to it:
+// ./gradlew run -Ppitwall.port=5920 (0 picks a free one; Pitwall says which it took).
 
 // The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither.
 def guiByDefault = false
@@ -31,6 +35,10 @@ wpi.sim.addGui().defaultEnabled = gui && !project.hasProperty("replay")
 wpi.sim.addDriverstation()
 
 def scenario = project.findProperty("scenario")?.toString()
+def pitwallPort = project.findProperty("pitwall.port")?.toString()
+if (pitwallPort != null && !(pitwallPort.isInteger() && pitwallPort.toInteger() in 0..65535)) {
+    throw new GradleException("-Ppitwall.port is the port Pitwall's page is served on, 0 to 65535 (0 picks a free one), not ${pitwallPort}")
+}
 
 // Lists the scenarios. With -Pscenario it gives that one's line instead, and a misspelled name
 // stops the build, with the list, before the simulator starts.
@@ -58,6 +66,9 @@ tasks.named("run") {
     if (scenario != null) {
         dependsOn scenarios
         systemProperty "frc.sim.scenario", scenario
+    }
+    if (pitwallPort != null) {
+        systemProperty "pitwall.port", pitwallPort // read by Pitwall.start
     }
     def defaults = fileTree("sim") { include "simgui*.json" }
     def target = projectDir

@@ -182,7 +182,8 @@ public final class PitwallServer implements AutoCloseable {
    * 5803, AdvantageScope Lite on 5808, and NetworkTables on 5810, and Elastic's docs have teams
    * serve layouts from the robot program on 5800. Pitwall is locked while the field is connected,
    * so it doesn't need the range. If something on your robot already uses this port, pass another
-   * to {@link #startOrExplain}.
+   * to {@link #startOrExplain}, or name it in the {@code pitwall.port} system property, which
+   * {@link Pitwall#start(String)} reads.
    */
   public static final int PORT = 5820;
 

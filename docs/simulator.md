@@ -17,6 +17,7 @@ API (http://localhost:5820/api/simulator), below, which anything else that speak
 | Disabled, with no alliance station, like a real robot | `./gradlew run -PstartDisabled` |
 | In a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the scenarios | `./gradlew scenarios` |
+| Beside another simulator, with Pitwall on another port (a page open on 5820 would drive whichever answers there) | `./gradlew run -Ppitwall.port=5920` |
 
 **WPILib's simulator GUI is off unless you ask for it** with `-Pgui` (and `-Pgui=false` is the
 default spelled out). *Sim* does its job. A real Driver Station can connect to the simulator

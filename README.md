@@ -139,7 +139,9 @@ Also built in:
 - **Where every value comes from** ([docs/values.md](docs/values.md)): every configuration value,
   whether it's calibrated, characterized, chosen, or as built, where today's number came from, and
   how to measure it or why it is what it is. A test keeps the register complete: a new value fails
-  the build until it has a row.
+  the build until it has a row. What's measured once per kind of part (a camera's noise and
+  latency, a gyro's drift, a tread's grip) has its bench procedure in
+  [docs/characterization.md](docs/characterization.md).
 - **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
   match tab, checked against the code on every build, so no widget sits blank on the field.
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
@@ -166,7 +168,7 @@ Also built in:
 | `layouts/` | The drive team's dashboard layout, for Elastic. |
 | `sim/` | Default simulator GUI settings, used on first `./gradlew run`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
-| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), and the version catalog. |
 
 ## License

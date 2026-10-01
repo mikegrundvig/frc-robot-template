@@ -99,9 +99,11 @@ column. The test reads only a row's name, kind, and source; the rest is for peop
 
 The values that move the robot most, and are least known today:
 
-1. **Camera latency and time sync** ([procedure](characterization.md#camera-latency-and-time-sync)).
-   Every camera measurement is applied at its capture time. A capture time 10 ms off puts every
-   measurement 3 cm off at 3 m/s, and nothing else in the code can notice.
+1. **Camera latency and time sync** ([procedure](characterization.md#camera-latency-and-time-sync)),
+   and how many cameras a coprocessor carries before they slow
+   ([procedure](characterization.md#vision-coprocessor-capacity)). Every camera measurement is
+   applied at its capture time. A capture time 10 ms off puts every measurement 3 cm off at 3 m/s,
+   and nothing else in the code can notice.
 2. **Camera noise** ([procedure](characterization.md#camera-noise)). The baseline and the distance
    exponent decide how far the estimate trusts every image, and the gate decides from them which
    images are wrong. Today's are the 2026 code's, for a different camera and coprocessor.
@@ -173,7 +175,7 @@ with each other).
 | Value | Kind | Today | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `driveStatorCurrent` | chosen | 30 A | math (weight transfer: slip near 31 A with worn tread and a 0.3 m center of gravity, 47 A at best) | Why: torque past the tread's grip only spins the wheels and drains the battery. Measure friction and the center of gravity first; they set it. Change if the wheels slip at full stick (traction-limited, with the residual rising), or never come near it and the drivers want more push. |
-| `driveSupplyCurrent` | chosen | 60 A | unknown | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. Change if the battery sags toward the brownout voltage in hard driving (S5). |
+| `driveSupplyCurrent` | chosen | 60 A | unknown | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. Set it from the weakest battery's [internal resistance](characterization.md#battery-internal-resistance) (M2): the voltage with four drive motors at the limit, about the rest voltage less 4 × limit × resistance, must stay above Systemcore's brownout (S5) and the vision coprocessor's [ride-through voltage](characterization.md#coprocessor-brownout-ride-through) (Q33). Change if the battery sags toward either in hard driving. |
 | `steerStatorCurrent` | chosen | 40 A | guess (steering needs little torque) | Why: steering needs little torque, and less current is less heat. Change if modules lag their angle setpoints under load (`Drive/Module<name>/SteerAngle` against `Drive/SetpointsOptimized`). |
 | `maxLinearSpeed` | chosen | 4.4 m/s | guess (headroom under the 4.73 m/s free speed) | Why: velocity control needs headroom under the free speed to correct with. Lower it if modules can't reach their setpoints at full stick (`Drive/ModuleVelocities` against `Drive/SetpointsOptimized`). |
 | `maxAngularSpeed` | chosen | 1 rotation/s | guess (driver-friendly) | Why: fast enough to turn around, slow enough to control. Ask the drivers. At full spin (6.3 rad/s) the cameras' images are thrown out: they're over `VisionConfig.maxYawRateRadiansPerSecond`. |
@@ -249,8 +251,8 @@ that use it. The simulator builds its cameras from it.
 | `widthPixels` | as built | 1280 | guess (a typical AprilTag camera) | The resolution the pipeline runs at, in PhotonVision. |
 | `heightPixels` | as built | 800 | guess (a typical AprilTag camera) | As `widthPixels`. |
 | `diagonalFieldOfView` | characterized | 80° | guess (typical) | PhotonVision's lens calibration, at the resolution the robot runs, reports it. |
-| `frameRate` | characterized | 30 per second | guess (conservative) | [Camera latency](characterization.md#camera-latency-and-time-sync): results per second, on the robot's coprocessor and network. |
-| `latency` | characterized | 30 ms | guess (conservative) | [Camera latency](characterization.md#camera-latency-and-time-sync): from the image's capture to its result reaching the robot. |
+| `frameRate` | characterized | 30 per second | guess (conservative) | [Coprocessor capacity](characterization.md#vision-coprocessor-capacity): results per second, with as many cameras on the coprocessor as the robot runs. |
+| `latency` | characterized | 30 ms | guess (conservative) | [Camera latency](characterization.md#camera-latency-and-time-sync): from the image's capture to its result reaching the robot, with as many cameras on the coprocessor as the robot runs ([coprocessor capacity](characterization.md#vision-coprocessor-capacity)). |
 
 ## Localization
 

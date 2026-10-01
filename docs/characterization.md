@@ -1,0 +1,489 @@
+# Characterization
+
+Some numbers belong to a kind of part rather than to one robot: how noisy a camera is at a
+distance, how late its results arrive, how far a gyro drifts, how well a tread grips the carpet.
+Measure each once, on a bench or a practice floor, for each model of part the team uses, and again
+when the part, its software, or its settings change (a new camera, a new PhotonVision version, a
+different exposure). Every robot with that part then shares the number. The
+[values register](values.md) lists which values each procedure sets; the procedures for numbers that
+differ robot to robot, run from the Pitwall page, are in [calibration](calibration.md).
+
+Record each result the way calibrations do: the builder call that sets the value, with the date
+and what was measured (`.latency(Milliseconds.of(24)) // characterized 2027-01-20: camera
+latency, under full load`). [The values register](values.md#the-register-describes-values-robotsjava-holds-a-robots-numbers)
+says where it goes. Keep the logs, named for the procedure and the date, so the number can be
+worked out again.
+
+Most of these read the robot's own log. Run the robot program (disabled is fine: it logs its
+sensors), open the log in AdvantageScope, and read the values from its plots, or export them
+(**File > Export Data**) to a spreadsheet for the arithmetic.
+
+The last two procedures measure a robot itself, by hand, rather than a part. They're calibrations
+with no Pitwall action, so they're here with the other bench work.
+
+## Camera noise
+
+**What it measures:** how far a camera's view of a tag scatters with everything still, how far it
+is off, and how both grow with distance. It sets vision's trust in a camera:
+`VisionConfig.linearStdDevBaseline`, `angularStdDevBaseline`, `distanceExponent`, and
+`headingConstrainedFactor`, and the simulator's corner noise and sight range (`VisionSim`).
+
+**Equipment:**
+
+- The camera, on the coprocessor the robot runs, with the same PhotonVision version, resolution,
+  exposure, and pipeline settings, and its lens calibrated at that resolution.
+- The robot, to log the camera: its program logs every tag a camera sees, with the tag's pose from
+  the camera (`Vision/<camera>`). A camera on a tripod, on the robot's network, works as well.
+- A tag of the field's size and family, printed flat and stiff, on a stand with its center at about
+  the height field tags sit.
+- A tape measure, and tape to mark the floor.
+- Light like an event's: bright, even, no sunlight on the tag.
+
+**Steps:**
+
+1. Set the camera square to the tag, 1 m from the lens. Measure the distance with the tape, to the
+   millimeter.
+2. Log 30 s, with nothing moving.
+3. Do the same at 2, 3, 4, 5, and 6 m, then 7 m and on until the camera stops finding the tag in
+   most images. Note each distance and the time you logged it.
+4. At 2 m and 4 m, log 30 s more with the tag turned 30° from square, and 60°.
+
+**Working out the numbers:** for each spot, take the tag's pose from the camera
+(`bestCameraToTag`) in every image.
+
+- **Spread:** the standard deviation of its position, along the line of sight and across it, and
+  of its rotation about the vertical, across the images.
+- **Error:** how far the average distance is from the taped one. More than about 1% means the lens
+  calibration is off: calibrate it again before going on.
+- **Error per spot,** for vision's trust: the root mean square, over the images, of each image's
+  position less the taped one, combining both directions (the estimator uses one number for both).
+  It includes the spread and the bias.
+
+Plot the error per spot against distance, square spots only, on a spreadsheet's power trendline
+(`y = b · x^k`). `k` is **`distanceExponent`**. `b`, the error at 1 m, is the least
+**`linearStdDevBaseline`** can be (below). Do the same with the rotation's spread for the least
+**`angularStdDevBaseline`** can be.
+
+**`headingConstrainedFactor`:** a solve that takes its heading from the gyro has no error from the
+tag's rotation; a full solve's position moves sideways by the distance times that rotation's error.
+At each square spot, with `s` the position's spread, `r` the rotation's spread in radians, and `d`
+the distance, the factor is `s / sqrt(s² + (d · r)²)`. Take the average over the spots.
+
+**Corner noise, for the simulator:** each tag corner's pixel position, in every image at one spot.
+The spread of each corner about its average is the noise; the simulator takes its average and its
+spread over the corners (`VisionSim`, today 0.25 px and 0.08 px). The sight range is the farthest
+spot where the camera found the tag in most images.
+
+**What good looks like:** the exponent near 2, since a tag's distance error grows with the distance
+squared (its sideways error only with the distance). A still camera's error at 1 m is a few
+millimeters. The configured baseline (0.02 m today) is larger on purpose: on the robot it also
+covers motion, timing, and the mount, which the bench doesn't see. So take the exponent from here,
+and compare cameras with `b`; set the baseline on the robot, starting from `b` and raising it until,
+in clean driving, the gate rejects about 1 in 1000 of a camera's measurements
+(`Vision/<camera>/Decisions`). Far more, and the baseline is too small.
+
+### While moving
+
+`speedStdDevFactor` and `yawRateStdDevFactor` say how much worse an image is while the robot moves.
+
+1. On a practice field with tags at known places, calibrate the robot's camera mounts.
+2. Stand still where the camera sees tags 2 to 4 m away, and log 20 s. Then drive back and forth
+   past the same tags at a steady 1, 2, and 3 m/s, and spin in place at 1, 2, and 3 rad/s, logging
+   each.
+3. Each camera logs how far its tags land from their real places, through the estimate
+   (`Vision/<camera>/TagResidualMeters`). Take its root mean square at each speed, over the
+   still one: the ratio is `1 + factor × speed`, so the factor is `(ratio - 1) / speed`. Average
+   over the speeds.
+
+The estimate's own error grows while moving too, so this is an upper bound. Measure it with the
+cameras the robot will use, at the exposure it will run: a shorter exposure blurs less.
+
+## Camera latency and time sync
+
+**What it measures:** how long a camera's result takes from the image's capture to reaching the
+robot (`CameraConfig.Sensor.latency`), how many results arrive per second (`frameRate`), and
+whether the capture time the robot is given is right. It also checks `EstimatorConfig.historySeconds`
+and `futureToleranceSeconds`, and sets the simulator's latency spread (`VisionSim`).
+
+**Why the capture time matters:** the estimator applies each camera measurement at the moment its
+image was captured, from the history it keeps. Latency itself costs little: a late measurement is
+still applied where the robot was. A wrong capture time costs accuracy: 10 ms off, and every
+measurement lands where the robot was 10 ms earlier or later, 3 cm off at 3 m/s, along the way it
+drives. PhotonVision stamps each image on the coprocessor's clock and converts the stamp to the
+robot's, with its time sync keeping the two clocks in step over the network. On Systemcore, with
+WPILib 2027's nanosecond clock, check that it does.
+
+**Equipment:** the robot, with its cameras on their coprocessor, on the network it runs at events
+(the radio, or the same switch); tags in view; for the second part, a practice field with tags at
+known places, and room to spin.
+
+**Steps, standing still (latency and frame rate):**
+
+1. Robot disabled, a camera facing a tag 2 m away. Log 60 s.
+2. Again with the robot loaded as in a match: every camera running, the robot enabled and driving
+   in a clear space, a dashboard open. Latency grows when the coprocessor or the network is busy
+   ([coprocessor capacity](#vision-coprocessor-capacity) measures how much).
+
+**Working out the numbers:** each loop, the robot logs the results that arrived since the last
+loop (`Vision/<camera>`), each with its capture time (`timestampNanos`, on the robot's clock). A
+result's latency is the loop's time less its capture time. The robot reads its cameras once a loop,
+so a result also waits for the loop, up to 20 ms: take the median latency less 10 ms (half a loop).
+Use the loaded run's for **`latency`**, and its standard deviation for the simulator's spread. The
+**`frameRate`** is the results logged in a minute, over 60; PhotonVision's dashboard shows the same.
+
+**Steps, turning (the capture time):**
+
+1. On the practice field, where a camera sees two or more tags 2 to 3 m away, spin the robot in
+   place at a steady 1 rad/s one way for 10 s, then the other way for 10 s. Log it.
+2. For each image with a multi-tag solution, the camera's heading on the field comes from the
+   solution (`multiTagFieldToCamera`). The gyro's heading at the image's capture time comes from
+   its 250 Hz readings (`Drive/Gyro/OdometryYawsRad`, at `OdometryTimestampsNanos`): interpolate
+   between the two readings either side.
+3. Each image's difference: the camera's heading, less the gyro's, less the camera's mounted yaw.
+
+**Working out the number:** a capture time off by `t` makes a robot turning at `w` rad/s read
+`w × t` off, one way spinning left and the other way spinning right; a constant difference (the
+gyro's offset, the mount) is the same both ways. So the capture time's error is
+`(average difference spinning left - average difference spinning right) / (2 × w)`, in seconds.
+
+**What good looks like:** latency steady within a few milliseconds, with no long tail; a result
+100 ms late or more means a busy coprocessor or network. The capture time's error under about
+5 ms. More than a loop (20 ms) means the time sync isn't working: check that the coprocessor runs
+the PhotonVision version the robot's PhotonLib expects, and that the robot's clock and
+PhotonVision's agree. Results applied "too late" or "from the future" in
+`Vision/<camera>/Decisions` say the same.
+
+## Vision coprocessor capacity
+
+**What it measures:** how many cameras one vision coprocessor can run before their frame rate
+drops or their latency grows. It sets the frame rate and latency each camera gets on the robot
+(`CameraConfig.Sensor.frameRate` and `latency`, for that many cameras on one coprocessor), and how
+many coprocessors the robot needs. The coprocessor's model is still to confirm (Q7).
+
+More images is more measurements, closer together: when it comes to a choice, keep the frame rate
+and add a coprocessor.
+
+**Equipment:**
+
+- One coprocessor as the robot runs it: the same model, cooling, PhotonVision version, and power,
+  through the regulator the robot uses.
+- Three cameras of the robot's model, each with its lens calibrated at the resolution in use, and
+  the AprilTag pipeline set as the robot runs it (resolution, exposure, and the rest).
+- Several tags in each camera's view, 2 to 3 m away, so detection does real work.
+- The robot, to log the results ([camera latency](#camera-latency-and-time-sync) says how), or
+  PhotonVision's dashboard on a laptop on the robot's network.
+
+**Steps:**
+
+1. One camera on the coprocessor. Let it run two minutes to warm up, then log two minutes.
+2. Plug in the second camera, set the same; log two minutes, both cameras.
+3. Plug in the third; log two minutes, all three.
+4. With all three, log ten minutes more. A coprocessor that heats up slows itself, and its frame
+   rate falls with it. Note its temperature and load at the end, if its dashboard shows them.
+
+**Working out the numbers:** for each step and each camera, its frame rate (results logged per
+second) and its latency, worked out as in [camera latency](#camera-latency-and-time-sync). Write
+them in a table: cameras on the coprocessor, against each camera's frame rate and latency.
+
+**Where it goes:** each camera's `CameraConfig.Sensor` takes the frame rate and latency from the
+step with as many cameras as share its coprocessor on the robot. Cameras whose coprocessors carry
+different numbers of cameras need a `Sensor` each.
+
+**What good looks like:** every camera holding its own frame rate as cameras are added, and its
+latency within a few milliseconds of the single camera's. The step where any camera's frame rate
+drops (by more than about a tenth) or its latency climbs is past the coprocessor's capacity: put
+that camera on another coprocessor. So is a rate that sags over the ten minutes.
+
+## Gyro drift and noise
+
+**What it measures:** how far the heading drifts per minute with the robot standing still, and how
+far each reading scatters, for the gyro and for the backup IMU. It sets
+`EstimatorConfig.headingDriftDegreesPerMinute`, and `SensorErrors.TYPICAL`'s gyro and backup drift
+and noise; it checks `ImuCrossCheck.Settings.toleranceDegrees`.
+
+**Equipment:** the robot, with the IMUs mounted as they'll run; a floor or a bench nobody will bump;
+half an hour.
+
+**Steps:**
+
+1. Turn the robot on and leave it still for the first minute, as before a match.
+2. Log 10 minutes, robot disabled, nobody touching it or what it stands on.
+3. Do it twice more, once right after ten minutes of hard driving: drift changes as the electronics
+   warm.
+
+**Working out the numbers:** fit a straight line to each IMU's heading against time
+(`Drive/Gyro/Yaw`, `Drive/BackupGyro/Yaw`). The **drift** is the line's slope, in degrees per
+minute. The **noise** is the standard deviation of the heading about the line: from the gyro's
+250 Hz readings (`Drive/Gyro/OdometryYawsRad`), and the backup's, read once a loop.
+
+**Where it goes:** `headingDriftDegreesPerMinute` takes the largest drift of the runs, rounded up,
+since the estimator should never be surer of the heading than the gyro deserves.
+`SensorErrors.TYPICAL` takes a typical run's drift and noise, for the gyro and the backup.
+`ImuCrossCheck.Settings.toleranceDegrees` should be well above how far the two drift and scatter
+apart in its window.
+
+**What good looks like:** a still gyro drifting well under a degree a minute, about the same every
+run. More, or a drift that changes from run to run, means a loose mount, vibration, or a failing
+gyro. The simulator assumes 0.2° a minute for the gyro and 1° for the backup IMU (S13).
+
+### Repeatability of the gyro's scale
+
+`EstimatorConfig.headingStdDevDegreesPerTurn` is how far the gyro's heading may still be off after a
+full turn, once its scale is calibrated.
+
+1. Run [the gyro's scale](calibration.md#the-gyros-scale) calibration five times in a row, from the
+   same spot. Each reports a scale.
+2. The standard deviation of the five scales, times 360°, is the error per turn. Scales spread by
+   0.0005 give 0.18° per turn.
+
+**The backup IMU's scale:** during those spins, the log has both IMUs. The backup's turn over the
+gyro's, across all five turns, is the backup's scale (`SensorErrors.TYPICAL`'s `backupGyro.scale`).
+How far it is from 1 is what `ImuCrossCheck.Settings.scaleTolerance` must stay above (S13). The
+headings wrap at ±180°: count the whole turns.
+
+## Tread friction
+
+**What it measures:** the tread's grip on carpet, new and worn: the coefficient of friction,
+`SwerveConfig.Modules.wheelCoefficientOfFriction`. The simulator's grip comes from it, and with the
+center of gravity's height it sets where the wheels slip under acceleration, which the drive's
+current limit is chosen to stay under (M1).
+
+**Equipment:**
+
+- The robot, as it runs (bumpers and battery on), or a sled with four of the tread's wheels,
+  weighted to the robot's weight.
+- Carpet like the field's, or the field's own.
+- A force gauge or digital hanging scale that reads to at least 1.5 times the robot's weight, and a
+  strap.
+
+**Steps:**
+
+1. Weigh the robot ([below](#a-robots-mass-center-of-gravity-and-inertia)).
+2. Point every wheel straight ahead. Robot disabled.
+3. Strap around the frame, low and on one side. Pull sideways, level with the floor, slowly and
+   steadily, watching the scale. Note the highest reading, just before the robot slides.
+4. Five pulls each way, on different spots of carpet.
+5. Again with worn tread: the end of a season's, or a worn set kept for this.
+
+**Working out the number:** the coefficient is the pull over the weight, in the same units (pounds
+over pounds). Average the highest readings: the grip before it lets go is what a hard launch uses.
+
+**Where it goes:** `wheelCoefficientOfFriction` takes the worn tread's, the worst the robot will
+play with, unless the team retreads before every event. Then redo the drive's current limit (the
+weight-transfer estimate in `Robots`) with it and the center of gravity's height.
+
+**What good looks like:** 1.0 to 1.3 for common treads on carpet. Over 1.5, the pull wasn't level
+(pulling up lightens the robot) or the carpet slid. A sideways pull drags the tread across its
+grain; a tread may grip differently rolling. To measure the driving direction, drive the robot
+slowly into a scale fixed to a wall, raising the current until the wheels spin, and divide the
+highest reading by the weight.
+
+## Feedforward
+
+**What it measures:** the drive's feedforward: `SwerveConfig.Gains.driveKs`, the volts to overcome
+friction, and `driveKv`, the volts per meter per second. Per drivetrain: modules, gearing, and tread.
+
+**WPILib's SysId** measures them: it records the drivetrain under slowly rising voltage and under
+voltage steps, and fits kS, kV, and kA from the log. Follow
+[WPILib's SysId guide](https://docs.wpilib.org/en/stable/docs/software/advanced-controls/system-identification/index.html);
+the template doesn't have a SysId routine yet. The same tests on one module, lifted off the floor,
+give its inertia, which the simulator assumes today (`ModuleIOSim`, M4).
+
+**Units:** SysId reports in the units the routine logged; the template's gains are in volts per
+meter per second.
+
+- Logged in wheel rotations: divide its kV by the wheel's circumference in meters
+  (`2π × wheelRadius`).
+- Logged in motor rotations: multiply by `driveGearing` first, then divide by the circumference.
+
+A 2026 drivetrain's 0.7237 V per wheel rotation per second, with a 0.049 m wheel radius, is
+`0.7237 / (2π × 0.049)` = 2.35 V per m/s.
+
+**Without SysId,** the template's own tools get close:
+
+- `driveKv` starts at `SwerveConfig.Modules.idealDriveKv()`, the motor and gearing's ideal (what
+  the template's robot uses).
+- Then tune both live on the Pitwall page: with `driveKp` at zero, drive at a steady speed and
+  compare each module's speed with its setpoint in AdvantageScope (`Drive/ModuleVelocities`
+  against `Drive/SetpointsOptimized`). Raise kV until they match at speed; raise kS until slow
+  moves start without lagging. Then put `driveKp` back, and commit what works.
+
+**What good looks like:** kV a few percent above the ideal (2.54 V per m/s on the template's
+robot); kS a few tenths of a volt or less (the 2026 code's was 0.145 V). The steering's gains are
+tuned, not characterized: tune them live, watching each module's angle
+(`Drive/Module<name>/SteerAngle`) against its setpoint.
+
+## Odometry error
+
+**What it measures:** how far odometry alone drifts per meter driven and per radian turned, and how
+far the heading the wheels give drifts per turn. Per drivetrain and tread. It sets
+`EstimatorConfig.translationStdDevPerMeter`, `translationStdDevPerRadian`, and
+`wheelHeadingStdDevDegreesPerTurn`.
+
+**Equipment:** the robot, calibrated first (the gyro's scale and the wheel radius); a clear floor
+of field carpet at least 6 m long; tape and a tape measure.
+
+**Steps:**
+
+1. Turn every camera off (Vision's switch for each, a tunable), so the estimate is odometry and the
+   gyro alone.
+2. Tape a start mark at one front corner of the frame, and a finish mark 5 m straight ahead of it,
+   measured with the tape. Mark the robot's heading at each with a line along its side: the same
+   heading at both.
+3. **Driving:** start on the start mark, drive a route like a match's (straights, curves, strafing,
+   about 30 m in all, at match speeds) and stop exactly on the finish mark. Log it. Do it five
+   times.
+4. **Spinning:** on the start mark, spin in place ten turns one way and ten the other at driving
+   speed, and stop on the mark. Log it. Do it five times.
+
+**Working out the numbers:** the estimator assumes each direction's variance grows by the square of
+the per-meter number with every meter. So for each run, take `d`, the distance driven (how far the
+wheels rolled, either way: the changes in `Drive/Module<name>/DrivePositionRad`, without their
+signs, added up, times the wheel radius, averaged over the modules), and `e`, how far the
+estimate's travel is from the real one. From the estimate at the start
+(`Localization/Pose`: `x₀`, `y₀`, heading `θ₀`) and at the end (`x₁`, `y₁`), its travel ahead is
+`(x₁ - x₀) cos θ₀ + (y₁ - y₀) sin θ₀` and to the left `-(x₁ - x₀) sin θ₀ + (y₁ - y₀) cos θ₀`. The
+robot really traveled 5 m ahead and none to the left (none at all, spinning), and `e` is the
+distance between the two.
+
+- **`translationStdDevPerMeter`** = `sqrt(average of e² / (2 × d))` over the driving runs.
+- **`translationStdDevPerRadian`** = the same over the spinning runs, with `d` replaced by the turn
+  in radians (twenty turns is 126 rad).
+- **`wheelHeadingStdDevDegreesPerTurn`:** spinning in place, each wheel rolls around a circle whose
+  radius is its distance from the robot's center. Over each direction's ten turns, the wheels'
+  average travel over that radius is the turn they report, in radians. Compare it with the gyro's
+  turn: the difference in degrees, over the ten turns, is the error per turn. Take the root mean
+  square over the runs and both directions.
+
+**What good looks like:** a calibrated swerve drivetrain on carpet ends within about 1 to 2% of the
+distance it drove. Much more means a wheel radius or the gyro's scale needs calibrating again, or
+the wheels slip: the log's `Localization/TractionLimited` and `ResidualMeters` show where.
+
+## Battery internal resistance
+
+**What it measures:** how far a battery's voltage drops for each amp drawn: its internal
+resistance, in milliohms. It belongs to each battery, not to a model: batteries age differently, so
+measure every one, and label each with its own name. It sets how far the voltage sags in a hard
+acceleration, and so how much current the drivetrain may draw before the robot browns out:
+`SwerveConfig.Limits.driveSupplyCurrent` is chosen for the weakest battery the team plays with
+(M2).
+
+**Equipment:** a battery analyzer that measures internal resistance; or the robot, its log, and a
+clear floor.
+
+**Steps, with an analyzer:** charge the battery fully, let it rest an hour, and measure it as the
+analyzer's instructions say.
+
+**Steps, from the robot's log:**
+
+1. A fully charged battery in the robot, on carpet with room to drive.
+2. Log: five seconds standing still, then a full-stick launch from rest for two meters. Rest, and
+   launch twice more.
+
+**Working out the number:** in the log, the battery's voltage (AdvantageKit records it under
+`SystemStats`) and the current drawn, which in a launch is nearly all the drive motors': the sum
+of their supply currents (`Drive/Module<name>/DriveSupplyCurrentAmps`). Fit a straight line of the
+voltage against the current over each launch: its slope, without the minus sign, is the resistance
+in ohms, and where it meets zero current is the battery's voltage at rest. This counts the robot's
+wiring, breaker, and connectors too, so it reads higher than an analyzer: it's what the robot
+really sees, and a loose connection shows in it.
+
+**Where it goes:** on the battery's label and in the team's battery log, with the date, not in the
+code. For the drive's supply limit: with four drive motors at their limit, the voltage is about the
+rest voltage less `4 × limit × resistance`. For the weakest battery, that must stay above both
+Systemcore's brownout voltage (S5) and the [vision coprocessor's](#coprocessor-brownout-ride-through).
+
+**What good looks like:** batteries of one model, bought together, reading alike. One that reads
+well above the rest is aging or damaged: keep it for practice, or retire it. Measure again before
+each event.
+
+## Coprocessor brownout ride-through
+
+**What it measures:** the lowest input voltage at which a vision coprocessor keeps running, powered
+the way the robot powers it. Below it, the coprocessor resets, and its cameras are gone for its
+whole reboot, far longer than the sag that caused it (Q33). No configuration value holds it; it
+sets a floor the drive's supply current limit must keep the battery above
+([battery internal resistance](#battery-internal-resistance)).
+
+**Equipment:** an adjustable bench power supply that can give what the coprocessor and its cameras
+draw, with a current limit; the coprocessor, its cameras, and the regulator or power module it runs
+from on the robot, wired as on the robot; a multimeter on the regulator's input; a laptop on its
+network, to watch PhotonVision.
+
+**Steps:**
+
+1. Wire the supply to the regulator's input, as the robot's battery would be. Set 12.5 V, and a
+   current limit a little above what the coprocessor draws.
+2. Start the coprocessor with every camera running its pipeline as on the robot: a regulator drops
+   the most at full load.
+3. Lower the input in half-volt steps, then tenth-volt steps as you near the end, ten seconds at
+   each, watching the cameras' frame rates. The voltage at which the coprocessor resets (its stream
+   stops, and the dashboard loses it) is its ride-through voltage.
+4. Do it three times. If the supply can, also drop it suddenly from 12 V to a low voltage for a
+   tenth of a second, as a brownout does, and find the lowest dip it survives.
+
+**What good looks like:** the coprocessor riding through to below Systemcore's own brownout
+voltage (S5), so a sag costs the robot its motors before it costs its cameras. If it resets higher,
+power it through a regulator that keeps its output up as its input sags (a buck-boost), and measure
+again.
+
+## A robot's mass, center of gravity, and inertia
+
+Per robot, by hand: they set `Body.mass`, `Body.cgHeight`, and `Body.yawMomentOfInertia`. Measure
+once the robot is built, bumpers and battery on, and again after a big change.
+
+**Mass:** two bathroom scales, one under the front wheels and one under the back (a board across
+each pair). The mass is the sum. The two readings also say how far forward the center of gravity
+is.
+
+**Center of gravity's height** (M3), from CAD if the CAD is complete, or by tilting:
+
+1. With the robot level, front wheels on a scale and the back on the floor at the same height (a
+   board as thick as the scale), read the scale: `F₀`. Measure `L`, the distance between the front
+   and back axles, and weigh the robot, `W`.
+2. Raise the back wheels by a block, about 15 cm, so the robot tilts by `θ`, where `sin θ` is the
+   block's height over `L`. Stop the wheels from rolling. Read the scale again: `F`.
+3. The center of gravity's height above the axles is `L × (F - F₀) / (W × tan θ)`. Add the wheel
+   radius for its height above the floor.
+
+A bigger tilt gives a bigger change to read; check that nothing on the robot moves or hangs as it
+tilts.
+
+**Yaw moment of inertia** (M5): from CAD's mass properties, with the bumpers and battery modeled;
+or from SysId's rotation routine, which fits the robot's angular kA. Nothing in the code reads it
+yet; a simulator that models traction will.
+
+## Terrain crossings
+
+Per robot (M7). **What it measures:** how the robot's IMU reads crossing a bump or a ramp: how far
+past the ramp's slope it tilts (bumpers, suspension, the IMU's mount), and how closely the moment
+the IMU says it crossed the crest matches where the robot was. It checks
+`TerrainCrossing.Settings`, `EstimatorConfig.tiltStartDegrees` and `tiltZeroDegrees`, and sets the
+slope margin and the crest's spread in `Localization` (3° and 5 cm today).
+
+**Equipment:** the robot, cameras on; a bump or ramp built to the field's drawings, with tags in
+view of it; field carpet.
+
+**Steps:**
+
+1. Drive over the bump straight across at a crawl, at a medium speed, and at match speed, three
+   times each. Log every run.
+2. Again at 30° and at 60° from straight across, and backward.
+
+**Working out the numbers:**
+
+- **The slope margin:** the most `Localization/TiltDegrees` read on the bump, less the ramp's
+  slope. The margin should be above it.
+- **The thresholds:** in each run, `Localization/ClimbDegrees` should pass `steepDegrees` going up
+  and coming down, `Localization/Terrain` should go from climbing to descending to level, and
+  `Localization/TerrainCrossings` should count each crossing once, and never in flat driving.
+- **The crest's spread:** each crossing logs the crest time (`Localization/CrestSeconds`). Where was
+  the robot's center then, across the crest? To see it from the cameras alone, replay the log with
+  the crest's spread in `Localization` set far larger (a meter), so the cameras place the robot and
+  the crest barely moves it. The standard deviation of the robot's distances from the crest line,
+  at the crest times, is the spread.
+
+**What good looks like:** every crossing counted, none in flat driving; the tilt past the slope
+within a few degrees; the crest within a few centimeters at every speed. If fast crossings read
+differently from slow ones, the robot's bumpers or suspension are moving the IMU more than the
+ground is.

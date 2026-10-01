@@ -1,8 +1,8 @@
 /**
- * The vocabulary for describing a robot, and checking it: its body, drivetrain, cameras, and
- * motors, and the rules their values keep. Robot code assembles these into its own configuration
- * ({@code frc.robot.RobotConfig}), along with the components' own settings records (vision's, the
- * estimator's); components read them.
+ * The validation kit: how a configuration record is built by name and checks its values. Every
+ * configuration record uses it: the robot's definition ({@code frc.robot.lib.robot}), the
+ * components' own settings (vision's, the estimator's), and each mechanism's gains and limits,
+ * which robot code assembles into its own configuration ({@code frc.robot.RobotConfig}).
  *
  * <p>Every value that describes the robot (a dimension, a gain, a limit, a threshold) belongs in
  * that configuration, committed in {@code Robots}. To tune some of it on a running robot, the

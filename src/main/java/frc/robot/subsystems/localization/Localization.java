@@ -1,7 +1,5 @@
 package frc.robot.subsystems.localization;
 
-import frc.robot.lib.config.ImuMount;
-import frc.robot.lib.config.Imus;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
 import frc.robot.lib.localization.CameraLocalizer;
@@ -24,6 +22,8 @@ import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.YawSource;
 import frc.robot.lib.localization.YawTrack;
+import frc.robot.lib.robot.ImuMount;
+import frc.robot.lib.robot.Imus;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

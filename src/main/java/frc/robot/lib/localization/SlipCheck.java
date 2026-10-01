@@ -5,7 +5,7 @@ import static frc.robot.lib.config.Rules.positive;
 
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigRecord;
-import frc.robot.lib.config.ImuMount;
+import frc.robot.lib.robot.ImuMount;
 import java.util.ArrayDeque;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.ChassisVelocities;

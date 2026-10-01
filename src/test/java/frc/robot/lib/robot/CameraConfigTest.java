@@ -1,7 +1,7 @@
-package frc.robot.lib.config;
+package frc.robot.lib.robot;
 
-import static frc.robot.lib.config.ConfigFixtures.camera;
-import static frc.robot.lib.config.ConfigFixtures.sensor;
+import static frc.robot.lib.robot.ConfigFixtures.camera;
+import static frc.robot.lib.robot.ConfigFixtures.sensor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNoException;

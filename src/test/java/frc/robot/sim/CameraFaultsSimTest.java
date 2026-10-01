@@ -7,7 +7,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.vision.CameraIO;
 import java.util.ArrayList;
@@ -49,9 +49,9 @@ class CameraFaultsSimTest {
     SimulatedWorld world =
         new SimulatedWorld(
             RobotSim.FIELD,
-            Robots.SIM.drivetrain(),
-            Robots.SIM.body(),
-            Robots.SIM.cameras(),
+            Robots.SIM.definition().drivetrain(),
+            Robots.SIM.definition().body(),
+            Robots.SIM.definition().cameras(),
             SensorErrors.NONE);
     built = world;
     world.addTo(components);
@@ -70,7 +70,7 @@ class CameraFaultsSimTest {
     }
     assertThat(seen[best]).as("tags seen from where the robot stands").isPositive();
     camera = cameras[best];
-    CameraConfig config = Robots.SIM.cameras().get(best);
+    CameraConfig config = Robots.SIM.definition().cameras().get(best);
     name = Faults.camera(config.name());
   }
 

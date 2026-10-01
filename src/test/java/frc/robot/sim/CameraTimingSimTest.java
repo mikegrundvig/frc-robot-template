@@ -43,9 +43,9 @@ class CameraTimingSimTest {
     try (SimulatedWorld world =
         new SimulatedWorld(
             RobotSim.FIELD,
-            Robots.SIM.drivetrain(),
-            Robots.SIM.body(),
-            Robots.SIM.cameras(),
+            Robots.SIM.definition().drivetrain(),
+            Robots.SIM.definition().body(),
+            Robots.SIM.definition().cameras(),
             SensorErrors.NONE)) {
       world.place(START);
       CameraIO[] cameras = world.cameras();
@@ -60,7 +60,7 @@ class CameraTimingSimTest {
       for (int i = 0; i < RobotLoop.loops(0.5); i++) {
         step(world, carried(RobotController.getTime() + PERIOD_NANOS - setOff));
         for (int c = 0; c < cameras.length; c++) {
-          Transform3d mount = Robots.SIM.cameras().get(c).robotToCamera();
+          Transform3d mount = Robots.SIM.definition().cameras().get(c).robotToCamera();
           for (CameraIO.Frame frame : read(cameras[c]).frames) {
             if (!frame.hasMultiTag() || frame.timestampNanos() < setOff) {
               continue;

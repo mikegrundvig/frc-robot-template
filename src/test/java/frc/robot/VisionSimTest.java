@@ -3,12 +3,12 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
@@ -84,7 +84,7 @@ class VisionSimTest {
           worst = Math.max(worst, error());
           sum += error();
           loops++;
-          for (CameraConfig camera : Robots.SIM.cameras()) {
+          for (CameraConfig camera : Robots.SIM.definition().cameras()) {
             mostDoubted.merge(
                 camera.name(), sim.robot().vision().mountDoubtMeters(camera.name()), Math::max);
           }
@@ -109,7 +109,7 @@ class VisionSimTest {
   /** How far a camera's tags land from their real places, against the worst of the others. */
   private double standsOut(String camera) {
     double others = 0;
-    for (var config : Robots.SIM.cameras()) {
+    for (var config : Robots.SIM.definition().cameras()) {
       if (!config.name().equals(camera)) {
         others = Math.max(others, sim.robot().vision().meanTagResidualMeters(config.name()));
       }
@@ -172,7 +172,7 @@ class VisionSimTest {
 
     double worst = drive(4);
 
-    for (CameraConfig camera : Robots.SIM.cameras()) {
+    for (CameraConfig camera : Robots.SIM.definition().cameras()) {
       assertThat(sim.robot().vision().mountOffsetMeters(camera.name()))
           .as(camera.name() + ": judged, and within the tolerance")
           .isLessThan(Robots.SIM.vision().mountToleranceMeters());

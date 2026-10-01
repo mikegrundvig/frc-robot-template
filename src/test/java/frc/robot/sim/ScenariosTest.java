@@ -9,9 +9,9 @@ import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.Terrain;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
@@ -40,7 +40,7 @@ import org.wpilib.system.RobotController;
  */
 @ExtendWith(RobotSim.class)
 class ScenariosTest {
-  private static final List<CameraConfig> CAMERAS = Robots.SIM.cameras();
+  private static final List<CameraConfig> CAMERAS = Robots.SIM.definition().cameras();
 
   /** Where the robot stands for the events: on blue's side, clear of everything. */
   private static final Pose2d STANDING = new Pose2d(2.0, 4.0, Rotation2d.ZERO);
@@ -64,7 +64,11 @@ class ScenariosTest {
   private SimulatedWorld world(List<CameraConfig> cameras, SensorErrors errors) {
     SimulatedWorld built =
         new SimulatedWorld(
-            RobotSim.FIELD, Robots.SIM.drivetrain(), Robots.SIM.body(), cameras, errors);
+            RobotSim.FIELD,
+            Robots.SIM.definition().drivetrain(),
+            Robots.SIM.definition().body(),
+            cameras,
+            errors);
     worlds.add(built);
     components = new Components(said -> {});
     built.addTo(components);

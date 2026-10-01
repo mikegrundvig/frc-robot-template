@@ -7,9 +7,10 @@ import frc.robot.RobotConfigBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.config.ImuMount;
-import frc.robot.lib.config.ImuMountBuilder;
-import frc.robot.lib.config.ImusBuilder;
+import frc.robot.lib.robot.ImuMount;
+import frc.robot.lib.robot.ImuMountBuilder;
+import frc.robot.lib.robot.ImusBuilder;
+import frc.robot.lib.robot.RobotDefinitionBuilder;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SensorErrorsAccelErrorsBuilder;
@@ -46,7 +47,11 @@ class ImuMountSimTest {
   private static Verdict drive(ImuMount believed, SensorErrors.AccelErrors accelerometer) {
     RobotConfig robot =
         RobotConfigBuilder.builder(Robots.SIM)
-            .imus(ImusBuilder.builder(Robots.SIM.imus()).gyro(believed).build())
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .imus(
+                        ImusBuilder.builder(Robots.SIM.definition().imus()).gyro(believed).build())
+                    .build())
             .build();
     try (DriveSimHarness harness =
         new DriveSimHarness(robot, SensorErrors.TYPICAL.withAccelerometer(accelerometer))) {
@@ -64,7 +69,7 @@ class ImuMountSimTest {
   }
 
   private static ImuMount at(Translation2d place, boolean checked) {
-    return ImuMountBuilder.builder(Robots.SIM.imus().gyro())
+    return ImuMountBuilder.builder(Robots.SIM.definition().imus().gyro())
         .forward(Units.Meters.of(place.getX()))
         .left(Units.Meters.of(place.getY()))
         .accelerometerChecked(checked)

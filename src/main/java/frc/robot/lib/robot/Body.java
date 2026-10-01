@@ -1,9 +1,11 @@
-package frc.robot.lib.config;
+package frc.robot.lib.robot;
 
 import static frc.robot.lib.config.Rules.positive;
 import static frc.robot.lib.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 
+import frc.robot.lib.config.Checks;
+import frc.robot.lib.config.ConfigRecord;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.Mass;

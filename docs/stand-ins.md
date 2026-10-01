@@ -29,7 +29,7 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   maple-sim. Until then, simulation tests the code, not the robot's traction or power. Power
   includes the drive motors' supply current
   limit: the simulator models neither it nor Phoenix's step-down from it
-  (`SwerveConfig.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`), and its battery holds
+  (`DrivetrainControl.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`), and its battery holds
   12 V, so the supply current a simulated module reports is what its motor would draw with no supply
   limit. At the template's 30 A stator limit that changes nothing: a drive motor draws under 30 A
   from the battery, below both limits. Raise the stator limit past them, and the simulator lets a
@@ -50,8 +50,9 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
 
   The drive carries the robot's configured mass. Each drive motor turns its wheel's share of
-  `Body.mass` as inertia at the configured `SwerveConfig.Modules.wheelRadius`, (m / 4) r², plus the
-  wheel's own moving parts (`ModuleIOSim.WHEEL_INERTIA_KG_M2`, an estimate: about 2% more), so the
+  `Body.mass` as inertia at the configured `DrivetrainGeometry.Modules.wheelRadius`, (m / 4) r², plus
+  the wheel's own moving parts (`DrivetrainGeometry.Modules.driveInertia`, an estimate: about 2%
+  more), so the
   robot speeds up as F = m a, and a heavier robot in `Robots.java` is a slower one in the
   simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is within
   10% of full speed in under a second. What that leaves out:

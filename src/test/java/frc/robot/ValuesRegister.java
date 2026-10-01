@@ -86,7 +86,7 @@ final class ValuesRegister {
    * A record marked {@link ConfigRecord}, as the register names it.
    *
    * @param name its simple name, with its outer record's for a nested one: {@code
-   *     SwerveConfig.Limits}
+   *     DrivetrainControl.Limits}
    * @param className its binary name, for a message to point at
    * @param components its values, in order
    */
@@ -1011,7 +1011,10 @@ final class ValuesRegister {
     return records;
   }
 
-  /** {@code frc.robot.lib.config.SwerveConfig$Limits} is {@code SwerveConfig.Limits}. */
+  /**
+   * {@code frc.robot.subsystems.drive.DrivetrainControl$Limits} is {@code
+   * DrivetrainControl.Limits}.
+   */
   static String registerName(String className) {
     return className.substring(className.lastIndexOf('.') + 1).replace('$', '.');
   }

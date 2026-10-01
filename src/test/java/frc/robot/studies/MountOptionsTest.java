@@ -8,7 +8,7 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.robot.CameraConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

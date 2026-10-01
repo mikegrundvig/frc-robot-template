@@ -2,10 +2,10 @@ package frc.robot.subsystems.vision;
 
 import static org.wpilib.units.Units.Seconds;
 
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.localization.MountCheck;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionDecision;
+import frc.robot.lib.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

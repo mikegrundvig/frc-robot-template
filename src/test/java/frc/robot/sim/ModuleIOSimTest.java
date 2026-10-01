@@ -7,9 +7,10 @@ import static org.wpilib.units.Units.Kilograms;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveConfigGainsBuilder;
-import frc.robot.lib.config.SwerveConfigLimitsBuilder;
+import frc.robot.lib.robot.DrivetrainGeometry;
+import frc.robot.subsystems.drive.DrivetrainControl;
+import frc.robot.subsystems.drive.DrivetrainControlGainsBuilder;
+import frc.robot.subsystems.drive.DrivetrainControlLimitsBuilder;
 import frc.robot.subsystems.drive.ModuleIO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,20 +19,22 @@ import org.wpilib.math.geometry.Rotation2d;
 /** A simulated module's steering answers to its configuration, as a motor controller does. */
 @ExtendWith(RobotSim.class)
 class ModuleIOSimTest {
-  private static final SwerveConfig DRIVETRAIN = Robots.SIM.drivetrain();
+  private static final DrivetrainGeometry GEOMETRY = Robots.SIM.definition().drivetrain();
+  private static final DrivetrainControl DRIVETRAIN = Robots.SIM.drivetrain();
 
   /** The simulator's step: a fifth of a 20 ms loop. */
   private static final double STEP_SECONDS = 0.004;
 
   /** A wheel's share of the template's robot. */
-  private static final double CARRIED_KILOGRAMS = Robots.SIM.body().mass().in(Kilograms) / 4;
+  private static final double CARRIED_KILOGRAMS =
+      Robots.SIM.definition().body().mass().in(Kilograms) / 4;
 
   /** A module as configured, with the steering's current limit tuned to this. */
   private static ModuleIOSim module(double steerLimitAmps) {
-    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), CARRIED_KILOGRAMS, 0, 0);
+    ModuleIOSim module = new ModuleIOSim(GEOMETRY.modules(), CARRIED_KILOGRAMS, 0, 0);
     module.configure(
         DRIVETRAIN.gains(),
-        SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+        DrivetrainControlLimitsBuilder.builder(DRIVETRAIN.limits())
             .steerStatorCurrent(Amps.of(steerLimitAmps))
             .build());
     return module;
@@ -74,9 +77,9 @@ class ModuleIOSimTest {
    * last 20 ms over the largest in the first 20. Small enough to stay under the current limit.
    */
   private static double growth(double steerKp) {
-    ModuleIOSim module = new ModuleIOSim(DRIVETRAIN.modules(), CARRIED_KILOGRAMS, 0, 0);
+    ModuleIOSim module = new ModuleIOSim(GEOMETRY.modules(), CARRIED_KILOGRAMS, 0, 0);
     module.configure(
-        SwerveConfigGainsBuilder.builder(DRIVETRAIN.gains()).steerKp(steerKp).build(),
+        DrivetrainControlGainsBuilder.builder(DRIVETRAIN.gains()).steerKp(steerKp).build(),
         DRIVETRAIN.limits());
     module.setSteerAngle(Rotation2d.fromDegrees(0.1));
     double first = 0;

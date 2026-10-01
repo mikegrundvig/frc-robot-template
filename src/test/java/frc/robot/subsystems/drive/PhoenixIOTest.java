@@ -15,8 +15,7 @@ import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.hardware.TalonFX;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveConfigLimitsBuilder;
+import frc.robot.lib.robot.DrivetrainGeometry;
 import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayDeque;
 import java.util.List;
@@ -38,7 +37,8 @@ import org.wpilib.math.geometry.Translation3d;
 @ExtendWith(RobotSim.class)
 class PhoenixIOTest {
   private static final CANBus BUS = new CANBus("drivetrain");
-  private static final SwerveConfig DRIVETRAIN = Robots.SIM.drivetrain();
+  private static final DrivetrainGeometry GEOMETRY = Robots.SIM.definition().drivetrain();
+  private static final DrivetrainControl DRIVETRAIN = Robots.SIM.drivetrain();
   private static final double COUPLING = 3.5;
 
   private final PhoenixOdometryThread odometry = new PhoenixOdometryThread();
@@ -82,10 +82,10 @@ class PhoenixIOTest {
   @Test
   void theWheelTurnsByItsGearingLessWhatTurningTheModulePutThere() throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(1, 2, 3), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(1, 2, 3), BUS, GEOMETRY.modules(), COUPLING, odometry);
     io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits());
     odometry.start();
-    double gearing = DRIVETRAIN.modules().driveGearing();
+    double gearing = GEOMETRY.modules().driveGearing().ratio();
 
     new TalonFX(1, BUS).getSimState().setRawRotorPosition(2 * gearing); // two wheel turns' worth
     new CANcoder(3, BUS).getSimState().setRawPosition(0.25); // the module turned a quarter
@@ -113,8 +113,8 @@ class PhoenixIOTest {
   /**
    * What Phoenix does with a motor's supply current when the code doesn't say: a supply limit is on
    * (70 A), and it steps down to 40 A once the motor has been held at the limit for 1 s. The
-   * comments in {@link ModuleIOTalonFX} and {@code SwerveConfig.Limits} say so; if a Phoenix update
-   * changes these defaults, change those comments.
+   * comments in {@link ModuleIOTalonFX} and {@code DrivetrainControl.Limits} say so; if a Phoenix
+   * update changes these defaults, change those comments.
    */
   @Test
   void phoenixStepsTheSupplyLimitDownTo40AmpsAfterASecondUnlessToldOtherwise() {
@@ -135,7 +135,7 @@ class PhoenixIOTest {
   void theDriveMotorsSupplyLimitStepsDownAsConfiguredAtStartupAndWhenTuned()
       throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, GEOMETRY.modules(), COUPLING, odometry);
     TalonFX drive = new TalonFX(11, BUS);
 
     io.configure(DRIVETRAIN.gains(), stepDown(55, 35, 0.5));
@@ -145,7 +145,7 @@ class PhoenixIOTest {
     assertSupplyLimit(drive, 50, 30, 0.8);
 
     io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits()); // back to the template's
-    SwerveConfig.Limits template = DRIVETRAIN.limits();
+    DrivetrainControl.Limits template = DRIVETRAIN.limits();
     assertSupplyLimit(
         drive,
         template.driveSupplyCurrent().in(Amps),
@@ -160,7 +160,7 @@ class PhoenixIOTest {
   @Test
   void theSteeringHasNoSupplyLimitAndSoNoStepDown() throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, GEOMETRY.modules(), COUPLING, odometry);
     TalonFX steer = new TalonFX(15, BUS);
     CurrentLimitsConfigs read = new CurrentLimitsConfigs();
 
@@ -171,7 +171,7 @@ class PhoenixIOTest {
 
     io.configure(
         DRIVETRAIN.gains(),
-        SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+        DrivetrainControlLimitsBuilder.builder(DRIVETRAIN.limits())
             .steerStatorCurrent(Amps.of(35))
             .build());
     boolean applied =
@@ -183,8 +183,9 @@ class PhoenixIOTest {
   }
 
   /** The template's limits, with the drive's supply limit and its step-down changed. */
-  private static SwerveConfig.Limits stepDown(double amps, double lowerAmps, double lowerSeconds) {
-    return SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+  private static DrivetrainControl.Limits stepDown(
+      double amps, double lowerAmps, double lowerSeconds) {
+    return DrivetrainControlLimitsBuilder.builder(DRIVETRAIN.limits())
         .driveSupplyCurrent(Amps.of(amps))
         .driveSupplyLowerCurrent(Amps.of(lowerAmps))
         .driveSupplyLowerTime(Seconds.of(lowerSeconds))

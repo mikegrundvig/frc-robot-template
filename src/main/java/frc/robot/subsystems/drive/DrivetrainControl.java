@@ -1,100 +1,48 @@
-package frc.robot.lib.config;
+package frc.robot.subsystems.drive;
 
 import static frc.robot.lib.config.Rules.atMost;
 import static frc.robot.lib.config.Rules.nonNegative;
 import static frc.robot.lib.config.Rules.positive;
 import static frc.robot.lib.config.Rules.shown;
-import static org.wpilib.units.Units.Meters;
-import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import frc.robot.lib.config.Checks;
+import frc.robot.lib.config.ConfigRecord;
+import frc.robot.lib.robot.DrivetrainGeometry;
 import org.jspecify.annotations.Nullable;
-import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
-import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.LinearVelocity;
 import org.wpilib.units.measure.Time;
 
 /**
- * A swerve drivetrain: four identical modules, one near each corner of the frame.
+ * How the swerve drivetrain is driven: its current and speed limits, and its control gains, all
+ * tunable on a running robot ({@link Drive#tuning}). What the drivetrain is (its modules, its
+ * motors, where its wheels sit) is its geometry, in the robot's definition; this is what the pit
+ * dials in on top of it.
  *
- * <p>Robot frame (WPILib's): +x forward, +y left, counterclockwise positive. Module order is always
- * front left, front right, back left, back right.
- *
- * @param modules the module hardware, the same at every corner
- * @param wheelInset how far each wheel's center sits in from the outside of the frame, in both
- *     directions. Corner-mounted modules give it in their footprint drawings.
  * @param limits current and speed limits
  * @param gains control gains
  */
 @ConfigRecord
-public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, Gains gains) {
-  public SwerveConfig {
-    Checks.on(SwerveConfig.class)
-        .field("wheelInset", wheelInset, positive())
-        .check(
-            "limits.maxLinearSpeed",
-            () ->
-                limits.maxLinearSpeed().lte(modules.freeSpeed())
-                    ? null
-                    : shown(limits.maxLinearSpeed())
-                        + " is faster than the drivetrain's free speed of "
-                        + shown(modules.freeSpeed()))
-        .orThrow();
-  }
-
-  /** Starts building a swerve drivetrain, one named value at a time. */
-  public static SwerveConfigBuilder.ModulesStage builder() {
-    return SwerveConfigBuilder.builder();
+public record DrivetrainControl(Limits limits, Gains gains) {
+  /** Starts building the drivetrain's control, one named value at a time. */
+  public static DrivetrainControlBuilder.LimitsStage builder() {
+    return DrivetrainControlBuilder.builder();
   }
 
   /**
-   * The module hardware. Wheel radius shrinks as the tread wears; measure it again during the
-   * season.
-   *
-   * @param driveMotor the motor that drives the wheel
-   * @param steerMotor the motor that turns the module
-   * @param wheelRadius measured on the tread
-   * @param driveGearing motor rotations per wheel rotation
-   * @param steerGearing motor rotations per full turn of the module
-   * @param wheelCoefficientOfFriction the tread's grip on carpet: about 1.0 when worn, 1.3 new
+   * Why the top speed asked for is past what this drivetrain can reach, or null when it isn't:
+   * velocity control needs room under the free speed to correct with. The robot's configuration
+   * checks it as committed, and its rules ({@code RobotRules}) as the pit tunes it.
    */
-  @ConfigRecord
-  public record Modules(
-      Motor driveMotor,
-      Motor steerMotor,
-      Distance wheelRadius,
-      double driveGearing,
-      double steerGearing,
-      double wheelCoefficientOfFriction) {
-    public Modules {
-      Checks.on(Modules.class)
-          .field("wheelRadius", wheelRadius, positive())
-          .field("driveGearing", driveGearing, positive())
-          .field("steerGearing", steerGearing, positive())
-          .field("wheelCoefficientOfFriction", wheelCoefficientOfFriction, positive())
-          .orThrow();
-    }
-
-    /** Starts building the module hardware, one named value at a time. */
-    public static SwerveConfigModulesBuilder.DriveMotorStage builder() {
-      return SwerveConfigModulesBuilder.builder();
-    }
-
-    /** Top wheel speed at the motor's nominal voltage, with no load. The real robot is slower. */
-    public LinearVelocity freeSpeed() {
-      return MetersPerSecond.of(
-          driveMotor.model().freeSpeed / driveGearing * wheelRadius.in(Meters));
-    }
-
-    /**
-     * The drive kV (volts per meter per second) a frictionless drivetrain would have: the motor's
-     * nominal voltage over the free speed. A starting point; measure the real one.
-     */
-    public double idealDriveKv() {
-      return driveMotor.model().nominalVoltage / freeSpeed().in(MetersPerSecond);
-    }
+  public @Nullable String whyTooFastFor(DrivetrainGeometry drivetrain) {
+    LinearVelocity freeSpeed = drivetrain.modules().freeSpeed();
+    return limits.maxLinearSpeed().lte(freeSpeed)
+        ? null
+        : shown(limits.maxLinearSpeed())
+            + " is faster than the drivetrain's free speed of "
+            + shown(freeSpeed);
   }
 
   /**
@@ -152,8 +100,8 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
     }
 
     /** Starts building the limits, one named value at a time. */
-    public static SwerveConfigLimitsBuilder.DriveStatorCurrentStage builder() {
-      return SwerveConfigLimitsBuilder.builder();
+    public static DrivetrainControlLimitsBuilder.DriveStatorCurrentStage builder() {
+      return DrivetrainControlLimitsBuilder.builder();
     }
   }
 
@@ -192,39 +140,8 @@ public record SwerveConfig(Modules modules, Distance wheelInset, Limits limits, 
     }
 
     /** Starts building the gains, one named value at a time. */
-    public static SwerveConfigGainsBuilder.DriveKsStage builder() {
-      return SwerveConfigGainsBuilder.builder();
+    public static DrivetrainControlGainsBuilder.DriveKsStage builder() {
+      return DrivetrainControlGainsBuilder.builder();
     }
-  }
-
-  /**
-   * Why the wheels don't fit this body's frame, or null when they do: the inset must leave room
-   * between them.
-   */
-  public @Nullable String whyWheelsDontFit(Body body) {
-    return wheelInset.times(2).lt(body.frameLength()) && wheelInset.times(2).lt(body.frameWidth())
-        ? null
-        : shown(wheelInset) + " puts the wheels at or past the center of the frame";
-  }
-
-  /**
-   * Where each wheel touches the floor, from the robot's center: front left, front right, back
-   * left, back right.
-   *
-   * @throws IllegalArgumentException if the inset leaves no room between the wheels
-   */
-  public Translation2d[] moduleTranslations(Body body) {
-    String doesntFit = whyWheelsDontFit(body);
-    if (doesntFit != null) {
-      throw new IllegalArgumentException("wheelInset " + doesntFit);
-    }
-    double x = body.frameLength().in(Meters) / 2 - wheelInset.in(Meters);
-    double y = body.frameWidth().in(Meters) / 2 - wheelInset.in(Meters);
-    return new Translation2d[] {
-      new Translation2d(x, y),
-      new Translation2d(x, -y),
-      new Translation2d(-x, y),
-      new Translation2d(-x, -y)
-    };
   }
 }

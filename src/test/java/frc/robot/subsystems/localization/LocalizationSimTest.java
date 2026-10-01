@@ -648,7 +648,11 @@ class LocalizationSimTest {
     DriveSimHarness robot = robot(SensorErrors.NONE);
     FakeCamera camera = camera(robot);
     SwerveDriveKinematics kinematics =
-        new SwerveDriveKinematics(Robots.SIM.drivetrain().moduleTranslations(Robots.SIM.body()));
+        new SwerveDriveKinematics(
+            Robots.SIM
+                .definition()
+                .drivetrain()
+                .moduleTranslations(Robots.SIM.definition().body()));
     SwerveDrivePoseEstimator wpilib =
         new SwerveDrivePoseEstimator(
             kinematics, robot.drive.gyroYaw(), robot.drive.modulePositions(), Pose2d.ZERO);

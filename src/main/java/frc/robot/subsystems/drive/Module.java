@@ -2,7 +2,6 @@ package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.config.SwerveConfig;
 import java.util.List;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Rotation2d;
@@ -31,7 +30,7 @@ public class Module {
   }
 
   /** Takes new gains and limits: the feedforward here, the rest on the motor controllers. */
-  void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
+  void configure(DrivetrainControl.Gains gains, DrivetrainControl.Limits limits) {
     driveKs = gains.driveKs();
     driveKv = gains.driveKv();
     io.configure(gains, limits);

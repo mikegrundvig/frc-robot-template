@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.Robots;
-import frc.robot.lib.config.Body;
+import frc.robot.lib.robot.Body;
 import java.util.List;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;
@@ -18,7 +18,7 @@ class OtherRobotsTest {
   /** A meter-square box a meter tall, centered 2 m ahead. */
   private static final OtherRobots.Blocker BOX = new OtherRobots.Blocker(2, 0, 0, 0.5, 0.5, 1);
 
-  private static final Body BODY = Robots.SIM.body();
+  private static final Body BODY = Robots.SIM.definition().body();
 
   /** The middle of the field. */
   private static final double MIDDLE_X = WALL.length() / 2;

@@ -7,8 +7,8 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.Robots;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.BodyBuilder;
+import frc.robot.lib.robot.Body;
+import frc.robot.lib.robot.BodyBuilder;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -17,7 +17,7 @@ import org.wpilib.math.geometry.Rotation2d;
 
 /** The poses the study tries: a grid over the whole field, at several headings. */
 class FieldGridTest {
-  private static final Body BODY = Robots.SIM.body();
+  private static final Body BODY = Robots.SIM.definition().body();
 
   @Test
   void theGridCoversTheFieldEvenlyAndKeepsTheRobotOffTheWalls() {

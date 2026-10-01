@@ -2,8 +2,8 @@ package frc.robot.studies;
 
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.config.Body;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.robot.Body;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;

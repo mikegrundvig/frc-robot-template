@@ -8,8 +8,6 @@ import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Milliseconds;
 
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.CameraConfigBuilder;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Place;
@@ -24,6 +22,8 @@ import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.YawSource;
+import frc.robot.lib.robot.CameraConfig;
+import frc.robot.lib.robot.CameraConfigBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;

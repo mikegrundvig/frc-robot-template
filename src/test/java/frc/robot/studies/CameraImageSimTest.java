@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.TagDetections;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,7 +39,8 @@ import org.wpilib.math.geometry.Transform3d;
 @ExtendWith(RobotSim.class)
 class CameraImageSimTest {
   private static final FieldModel FIELD = TagLayouts.named("FRC_2026_REBUILT_WELDED");
-  private static final CameraConfig.Sensor SENSOR = Robots.SIM.cameras().get(0).sensor();
+  private static final CameraConfig.Sensor SENSOR =
+      Robots.SIM.definition().cameras().get(0).sensor();
   private static final Conditions NOMINAL = Conditions.nominal(CameraStudyConfig.DEFAULTS);
 
   /** The worst difference found, of each kind, for the summary line. */
@@ -98,7 +99,7 @@ class CameraImageSimTest {
                   random.nextDouble(1, FIELD.length() - 1),
                   random.nextDouble(1, FIELD.width() - 1),
                   Rotation2d.fromRadians(random.nextDouble(-Math.PI, Math.PI))));
-      for (CameraConfig mount : Robots.SIM.cameras()) {
+      for (CameraConfig mount : Robots.SIM.definition().cameras()) {
         Pose3d cameraPose = robot.transformBy(mount.robotToCamera());
         long seed = random.nextLong();
         photonVision.prop.setRandomSeed(seed);

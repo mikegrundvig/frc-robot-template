@@ -45,9 +45,9 @@ public final class Checks {
 
   /**
    * Checks for a record, whose violations are named after it: {@code Gains.steerKp}, or for a check
-   * across its values, by the path from it, {@code SwerveConfig.limits.maxLinearSpeed}. Keep that
-   * form: Pitwall reads each line's name back to the value it names, to show the reason beside it
-   * on its page (see its {@code LiveConfig}).
+   * across its values, by the path from it, {@code RobotDefinition.drivetrain.wheelInset}. Keep
+   * that form: Pitwall reads each line's name back to the value it names, to show the reason beside
+   * it on its page (see its {@code LiveConfig}).
    */
   public static Checks on(Class<? extends Record> record) {
     return new Checks(record.getSimpleName());

@@ -5,19 +5,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.assertj.core.api.Assertions.withinPercentage;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.BodyBuilder;
-import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.robot.Body;
+import frc.robot.lib.robot.BodyBuilder;
+import frc.robot.lib.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.ModuleIO;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -218,7 +220,7 @@ class DriveSimulationTest {
     robot.run(robot.drive.driveForward(1.0, 0.8), 1.0);
 
     double moved = robot.simulation.truePose().getX() - start.getX();
-    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
     double rolled = (robot.drive.wheelRotationsRadians()[0] - wheelBefore) * radius;
     assertThat(moved).isGreaterThan(0.5);
     assertThat(rolled).isCloseTo(moved * Math.hypot(1, 0.25), within(0.01));
@@ -237,7 +239,7 @@ class DriveSimulationTest {
    */
   @Test
   void fromRestAtItsStatorLimitTheRobotAcceleratesAsForceOverItsMass() {
-    double template = Robots.SIM.body().mass().in(Kilograms);
+    double template = Robots.SIM.definition().body().mass().in(Kilograms);
     for (double kilograms : new double[] {template, 0.6 * template}) {
       assertThat(accelerationFromRest(kilograms))
           .as("%.1f kg", kilograms)
@@ -247,19 +249,20 @@ class DriveSimulationTest {
 
   /** The four drive motors' push at their stator limit, in newtons. */
   private static double limitForceNewtons() {
-    SwerveConfig drivetrain = Robots.SIM.drivetrain();
-    DCMotor motor = drivetrain.modules().driveMotor().model();
+    DrivetrainGeometry.Modules modules = Robots.SIM.definition().drivetrain().modules();
+    DCMotor motor = modules.driveMotor().model();
     return 4
         * motor.Kt
-        * drivetrain.limits().driveStatorCurrent().in(Amps)
-        * drivetrain.modules().driveGearing()
-        / drivetrain.modules().wheelRadius().in(Meters);
+        * Robots.SIM.drivetrain().limits().driveStatorCurrent().in(Amps)
+        * modules.driveGearing().ratio()
+        / modules.wheelRadius().in(Meters);
   }
 
   /** The robot's mass with its wheels' own inertia as mass at their treads, in kilograms. */
   private static double effectiveKilograms(double kilograms) {
-    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
-    return kilograms + 4 * ModuleIOSim.WHEEL_INERTIA_KG_M2 / (radius * radius);
+    DrivetrainGeometry.Modules modules = Robots.SIM.definition().drivetrain().modules();
+    double radius = modules.wheelRadius().in(Meters);
+    return kilograms + 4 * modules.driveInertia().in(KilogramSquareMeters) / (radius * radius);
   }
 
   /**
@@ -267,9 +270,11 @@ class DriveSimulationTest {
    * average acceleration over 0.3 s, in m/s², while every motor stays at its stator limit.
    */
   private static double accelerationFromRest(double kilograms) {
-    Body body = BodyBuilder.builder(Robots.SIM.body()).mass(Kilograms.of(kilograms)).build();
-    SwerveConfig drivetrain = Robots.SIM.drivetrain();
-    DriveSimulation simulation = new DriveSimulation(body, drivetrain, SensorErrors.NONE);
+    Body body =
+        BodyBuilder.builder(Robots.SIM.definition().body()).mass(Kilograms.of(kilograms)).build();
+    DrivetrainControl drivetrain = Robots.SIM.drivetrain();
+    DriveSimulation simulation =
+        new DriveSimulation(body, Robots.SIM.definition().drivetrain(), SensorErrors.NONE);
     for (ModuleIO module : simulation.modules()) {
       module.configure(drivetrain.gains(), drivetrain.limits());
       module.setDriveVoltage(12);

@@ -2,12 +2,12 @@ package frc.robot.game;
 
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.config.Body;
 import frc.robot.lib.field.Bump;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.field.Place;
 import frc.robot.lib.field.Symmetry;
 import frc.robot.lib.field.Zone;
+import frc.robot.lib.robot.Body;
 import java.util.List;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;

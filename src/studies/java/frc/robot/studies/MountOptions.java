@@ -14,11 +14,11 @@ import static org.wpilib.units.Units.Millimeters;
 import static org.wpilib.units.Units.Radians;
 
 import frc.robot.RobotConfig;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.Checks;
 import frc.robot.lib.config.ConfigException;
 import frc.robot.lib.config.Rule;
+import frc.robot.lib.robot.Body;
+import frc.robot.lib.robot.CameraConfig;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.text.DecimalFormat;
@@ -296,7 +296,7 @@ public final class MountOptions {
   public List<Candidate> candidates(
       RobotConfig robot, CameraConfig.Sensor sensor, int mostCameras) {
     for (Option option : options) {
-      String outside = option.outside(robot.body());
+      String outside = option.outside(robot.definition().body());
       if (outside != null) {
         throw new IllegalArgumentException(outside);
       }

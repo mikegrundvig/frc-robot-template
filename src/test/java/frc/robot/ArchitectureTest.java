@@ -144,7 +144,6 @@ class ArchitectureTest {
         .because(
             "what the robot is doesn't depend on the field it plays on, nor on what reads it:"
                 + " localization, the simulator, and the views all read the definition")
-        .allowEmptyShould(true) // the definition's records move here from the kit
         .check(PRODUCTION_CODE);
   }
 

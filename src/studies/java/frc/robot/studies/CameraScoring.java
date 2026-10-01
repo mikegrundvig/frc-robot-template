@@ -4,13 +4,13 @@ import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Radians;
 
 import frc.robot.RobotConfig;
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.CaptureContext;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.TagDetections;
 import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -349,12 +349,12 @@ public final class CameraScoring {
           OtherRobots.around(
               truth,
               field,
-              robot.body(),
+              robot.definition().body(),
               config.otherRobotsHeightMeters() > 0
                   ? config.otherRobotsHeightMeters()
-                  : robot.body().height().in(Meters),
+                  : robot.definition().body().height().in(Meters),
               others,
-              OtherRobots.reachMeters(conditions.sightMeters(), robot.body()),
+              OtherRobots.reachMeters(conditions.sightMeters(), robot.definition().body()),
               spot -> weights.at(field, spot) > 0,
               placing);
       // One gyro for the whole robot, off by a little, the same for every camera.

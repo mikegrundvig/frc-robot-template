@@ -1,11 +1,11 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.Imus;
-import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.robot.Body;
+import frc.robot.lib.robot.CameraConfig;
+import frc.robot.lib.robot.DrivetrainGeometry;
+import frc.robot.lib.robot.Imus;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.vision.CameraIO;
@@ -39,14 +39,14 @@ public final class SimulatedWorld implements AutoCloseable {
 
   /**
    * @param field the field, with its tags and terrain
-   * @param drivetrain the drivetrain's configuration
+   * @param drivetrain the drivetrain as defined: its modules, and where its wheels sit
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param cameras the robot's cameras, as configured
    * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
    */
   public SimulatedWorld(
       FieldModel field,
-      SwerveConfig drivetrain,
+      DrivetrainGeometry drivetrain,
       Body body,
       List<CameraConfig> cameras,
       SensorErrors errors) {
@@ -55,7 +55,7 @@ public final class SimulatedWorld implements AutoCloseable {
 
   /**
    * @param field the field, with its tags and terrain
-   * @param drivetrain the drivetrain's configuration
+   * @param drivetrain the drivetrain as defined: its modules, and where its wheels sit
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param cameras the robot's cameras, as configured
    * @param imus where the robot's definition mounts its IMUs
@@ -63,7 +63,7 @@ public final class SimulatedWorld implements AutoCloseable {
    */
   public SimulatedWorld(
       FieldModel field,
-      SwerveConfig drivetrain,
+      DrivetrainGeometry drivetrain,
       Body body,
       List<CameraConfig> cameras,
       Imus imus,

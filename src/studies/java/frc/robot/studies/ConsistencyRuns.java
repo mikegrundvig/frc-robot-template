@@ -6,13 +6,13 @@ import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
 import frc.robot.SimulatedRobot;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.localization.VisionConfigBuilder;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Faults;
 import frc.robot.sim.Scenario;
@@ -59,7 +59,7 @@ final class ConsistencyRuns {
   };
 
   /** The field the simulator's robot plays on: its tags, which each seed places a little off. */
-  private static final FieldModel FIELD = Rebuilt.field(Robots.SIM.body());
+  private static final FieldModel FIELD = Rebuilt.field(Robots.SIM.definition().body());
 
   /**
    * How long the gyro-scale procedure's part of its run lasts: the procedure (about 20 s: still,
@@ -347,7 +347,7 @@ final class ConsistencyRuns {
    * there, through the simulator's controls.
    */
   static SensorErrors errors(long seed, Spread spread) {
-    List<CameraConfig> cameras = Robots.SIM.cameras();
+    List<CameraConfig> cameras = Robots.SIM.definition().cameras();
     SensorErrors typical = SensorErrors.TYPICAL;
     SensorErrors errors =
         SensorErrorsBuilder.builder(typical)
@@ -459,7 +459,7 @@ final class ConsistencyRuns {
       Driver driver = new Driver(robot, scenario);
       run.script().play(driver);
       Map<String, Double> offsets = new LinkedHashMap<>();
-      for (CameraConfig camera : Robots.SIM.cameras()) {
+      for (CameraConfig camera : Robots.SIM.definition().cameras()) {
         offsets.put(camera.name(), robot.mountOffsetMeters(camera.name()));
       }
       return new Played(driver.samples, Map.copyOf(driver.mostDoubt), offsets);
@@ -544,7 +544,7 @@ final class ConsistencyRuns {
       robot.loop();
       LocalizationEstimate estimate = robot.estimate();
       samples.add(Consistency.Sample.of(estimate, robot.truePose()));
-      for (CameraConfig camera : Robots.SIM.cameras()) {
+      for (CameraConfig camera : Robots.SIM.definition().cameras()) {
         mostDoubt.merge(camera.name(), robot.mountDoubtMeters(camera.name()), Math::max);
       }
     }

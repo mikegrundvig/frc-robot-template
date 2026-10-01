@@ -1,7 +1,7 @@
 package frc.robot.lib.localization;
 
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
+import frc.robot.lib.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

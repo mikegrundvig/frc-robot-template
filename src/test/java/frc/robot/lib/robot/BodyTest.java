@@ -1,6 +1,6 @@
-package frc.robot.lib.config;
+package frc.robot.lib.robot;
 
-import static frc.robot.lib.config.ConfigFixtures.body;
+import static frc.robot.lib.robot.ConfigFixtures.body;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;

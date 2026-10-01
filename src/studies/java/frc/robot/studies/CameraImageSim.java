@@ -1,8 +1,8 @@
 package frc.robot.studies;
 
-import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.TagDetections;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;

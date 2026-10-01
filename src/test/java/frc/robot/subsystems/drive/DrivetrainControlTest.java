@@ -1,44 +1,27 @@
-package frc.robot.lib.config;
+package frc.robot.subsystems.drive;
 
-import static frc.robot.lib.config.ConfigFixtures.body;
-import static frc.robot.lib.config.ConfigFixtures.gains;
-import static frc.robot.lib.config.ConfigFixtures.limits;
-import static frc.robot.lib.config.ConfigFixtures.modules;
-import static frc.robot.lib.config.ConfigFixtures.swerve;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
-import static org.wpilib.units.Units.Inches;
-import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import frc.robot.Robots;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
-import org.wpilib.math.geometry.Translation2d;
 
-class SwerveConfigTest {
+class DrivetrainControlTest {
   @Test
   void keepsItsSettings() {
-    SwerveConfig swerve = swerve();
+    DrivetrainControl control = control();
 
-    assertThat(swerve.modules()).isEqualTo(modules());
-    assertThat(swerve.wheelInset().in(Inches)).isCloseTo(2.625, within(1e-9));
-    assertThat(swerve.limits()).isEqualTo(limits());
-    assertThat(swerve.gains()).isEqualTo(gains());
+    assertThat(control.limits()).isEqualTo(limits());
+    assertThat(control.gains()).isEqualTo(gains());
 
-    SwerveConfig.Modules modules = swerve.modules();
-    assertThat(modules.driveMotor()).isEqualTo(Motor.KRAKEN_X60);
-    assertThat(modules.steerMotor()).isEqualTo(Motor.KRAKEN_X44);
-    assertThat(modules.wheelRadius().in(Inches)).isCloseTo(2, within(1e-9));
-    assertThat(modules.driveGearing()).isEqualTo(6.75);
-    assertThat(modules.steerGearing()).isEqualTo(12.8);
-    assertThat(modules.wheelCoefficientOfFriction()).isEqualTo(1.2);
-
-    SwerveConfig.Limits limits = swerve.limits();
+    DrivetrainControl.Limits limits = control.limits();
     assertThat(limits.driveStatorCurrent().in(Amps)).isCloseTo(40, within(1e-9));
     assertThat(limits.driveSupplyCurrent().in(Amps)).isCloseTo(60, within(1e-9));
     assertThat(limits.driveSupplyLowerCurrent().in(Amps)).isCloseTo(35, within(1e-9));
@@ -47,7 +30,7 @@ class SwerveConfigTest {
     assertThat(limits.maxLinearSpeed().in(MetersPerSecond)).isCloseTo(4, within(1e-9));
     assertThat(limits.maxAngularSpeed().in(RotationsPerSecond)).isCloseTo(1, within(1e-9));
 
-    SwerveConfig.Gains gains = swerve.gains();
+    DrivetrainControl.Gains gains = control.gains();
     assertThat(gains.driveKs()).isEqualTo(0.1);
     assertThat(gains.driveKv()).isEqualTo(2.5);
     assertThat(gains.driveKp()).isEqualTo(2.0);
@@ -56,65 +39,18 @@ class SwerveConfigTest {
     assertThat(gains.skewLookahead().in(Seconds)).isCloseTo(0.03, within(1e-9));
   }
 
-  @Test
-  void freeSpeedComesFromTheMotorGearingAndWheel() {
-    // A Kraken X60 turns 6000 rpm free: 100 rotations per second, divided by the gearing, times
-    // the wheel's circumference.
-    double expected = 6000.0 / 60 / 6.75 * 2 * Math.PI * Inches.of(2).in(Meters);
-
-    assertThat(modules().freeSpeed().in(MetersPerSecond)).isCloseTo(expected, within(1e-9));
-    assertThat(modules().idealDriveKv()).isCloseTo(12 / expected, within(1e-9));
-  }
-
-  @Test
-  void wheelsSitInFromTheFrameCorners() {
-    // A 28 x 24 in frame with wheels 2.625 in in from its edges.
-    double x = Inches.of(14 - 2.625).in(Meters);
-    double y = Inches.of(12 - 2.625).in(Meters);
-
-    assertThat(swerve().moduleTranslations(body()))
-        .as("front left, front right, back left, back right")
-        .containsExactly(
-            new Translation2d(x, y),
-            new Translation2d(x, -y),
-            new Translation2d(-x, y),
-            new Translation2d(-x, -y));
-  }
-
-  @Test
-  void wheelsMustFitInsideTheFrame() {
-    // The frame is 28 in long and 24 in wide: a 12 in inset meets in the middle side to side,
-    // and a 14 in inset meets in the middle front to back.
-    var wide = SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(12)).build();
-    var deep = SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(14)).build();
-
-    assertRejected("wheelInset", () -> wide.moduleTranslations(body()));
-    assertRejected("wheelInset", () -> deep.moduleTranslations(body()));
-  }
-
+  /** The template's drivetrain reaches 4.73 m/s free: 4 m/s leaves room, 5 m/s doesn't. */
   @Test
   void topSpeedCannotExceedTheFreeSpeed() {
+    var drivetrain = Robots.SIM.definition().drivetrain();
     var tooFast =
-        SwerveConfigLimitsBuilder.builder(limits()).maxLinearSpeed(MetersPerSecond.of(5)).build();
+        DrivetrainControlBuilder.builder(control())
+            .limits(changeLimits().maxLinearSpeed(MetersPerSecond.of(5)).build())
+            .build();
 
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> SwerveConfigBuilder.builder(swerve()).limits(tooFast).build())
-        .withMessage(
-            "SwerveConfig.limits.maxLinearSpeed: 5 m/s is faster than the drivetrain's free speed"
-                + " of 4.729 m/s");
-  }
-
-  @Test
-  void rejectsImpossibleModuleValues() {
-    assertRejected("Modules.wheelRadius", () -> changeModules().wheelRadius(Inches.of(0)).build());
-    assertRejected("Modules.driveGearing", () -> changeModules().driveGearing(-6.75).build());
-    assertRejected("Modules.steerGearing", () -> changeModules().steerGearing(0).build());
-    assertRejected(
-        "Modules.wheelCoefficientOfFriction",
-        () -> changeModules().wheelCoefficientOfFriction(Double.NaN).build());
-    assertRejected(
-        "SwerveConfig.wheelInset",
-        () -> SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(-1)).build());
+    assertThat(control().whyTooFastFor(drivetrain)).isNull();
+    assertThat(tooFast.whyTooFastFor(drivetrain))
+        .isEqualTo("5 m/s is faster than the drivetrain's free speed of 4.729 m/s");
   }
 
   @Test
@@ -165,7 +101,7 @@ class SwerveConfigTest {
     assertThatNoException()
         .isThrownBy(
             () ->
-                SwerveConfig.Gains.builder()
+                DrivetrainControl.Gains.builder()
                     .driveKs(0)
                     .driveKv(0)
                     .driveKp(0)
@@ -184,16 +120,39 @@ class SwerveConfigTest {
         "Gains.skewLookahead", () -> changeGains().skewLookahead(Seconds.of(Double.NaN)).build());
   }
 
-  private static SwerveConfigModulesBuilder changeModules() {
-    return SwerveConfigModulesBuilder.builder(modules());
+  private static DrivetrainControl.Limits limits() {
+    return DrivetrainControl.Limits.builder()
+        .driveStatorCurrent(Amps.of(40))
+        .driveSupplyCurrent(Amps.of(60))
+        .driveSupplyLowerCurrent(Amps.of(35))
+        .driveSupplyLowerTime(Seconds.of(0.5))
+        .steerStatorCurrent(Amps.of(30))
+        .maxLinearSpeed(MetersPerSecond.of(4))
+        .maxAngularSpeed(RotationsPerSecond.of(1))
+        .build();
   }
 
-  private static SwerveConfigLimitsBuilder changeLimits() {
-    return SwerveConfigLimitsBuilder.builder(limits());
+  private static DrivetrainControl.Gains gains() {
+    return DrivetrainControl.Gains.builder()
+        .driveKs(0.1)
+        .driveKv(2.5)
+        .driveKp(2.0)
+        .steerKp(16.0)
+        .steerKd(0.08)
+        .skewLookahead(Seconds.of(0.03))
+        .build();
   }
 
-  private static SwerveConfigGainsBuilder changeGains() {
-    return SwerveConfigGainsBuilder.builder(gains());
+  private static DrivetrainControl control() {
+    return DrivetrainControl.builder().limits(limits()).gains(gains()).build();
+  }
+
+  private static DrivetrainControlLimitsBuilder changeLimits() {
+    return DrivetrainControlLimitsBuilder.builder(limits());
+  }
+
+  private static DrivetrainControlGainsBuilder changeGains() {
+    return DrivetrainControlGainsBuilder.builder(gains());
   }
 
   private static void assertRejected(String field, ThrowingCallable build) {

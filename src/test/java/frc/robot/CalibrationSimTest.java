@@ -3,7 +3,7 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.SensorErrors;
 import java.util.List;
@@ -81,7 +81,7 @@ class CalibrationSimTest {
     // Five turns on a gyro reading 0.3% high leave the heading 5.5° off, and the pose centimeters
     // off while the cameras bring them back: every tag lands off then, and no camera is to blame.
     sim.run(15);
-    for (CameraConfig camera : Robots.SIM.cameras()) {
+    for (CameraConfig camera : Robots.SIM.definition().cameras()) {
       assertThat(sim.robot().vision().mountDoubtMeters(camera.name())).as(camera.name()).isZero();
     }
     for (AlertDataJNI.AlertInfo alert : AlertDataJNI.getAlerts()) {

@@ -1,4 +1,6 @@
-package frc.robot.lib.config;
+package frc.robot.lib.robot;
+
+import frc.robot.lib.config.ConfigRecord;
 
 /**
  * The robot's IMUs, each where it's mounted.

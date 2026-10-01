@@ -1,8 +1,10 @@
-package frc.robot.lib.config;
+package frc.robot.lib.robot;
 
 import static frc.robot.lib.config.Rules.finite;
 import static org.wpilib.units.Units.Meters;
 
+import frc.robot.lib.config.Checks;
+import frc.robot.lib.config.ConfigRecord;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;

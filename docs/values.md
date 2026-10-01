@@ -2,7 +2,7 @@
 
 The robot's code runs on numbers: a frame size, a current limit, how far to trust a camera at 4 m.
 Some were measured, some were chosen, and some are still guesses. This register lists every value
-in the robot's configuration: which kind it is, where today's number came from, and how to measure
+in the robot's configuration: which kind it is, where the template's starting number came from, and how to measure
 it or why it is what it is. A test keeps the list complete ([below](#keeping-it-complete)).
 
 ## Four kinds of value
@@ -10,13 +10,16 @@ it or why it is what it is. A test keeps the list complete ([below](#keeping-it-
 | Kind | What it is | When it's measured | How |
 |---|---|---|---|
 | **calibrated** | A number that differs robot to robot: a wheel's radius, a camera's mount, a gyro's scale | On each robot, and again whenever something changes (tread wears, a camera gets bumped) | [docs/calibration.md](calibration.md), from the Pitwall page, or by hand as its row says |
-| **characterized** | A number that belongs to a kind of part: how noisy a camera is at a distance, how late its results arrive, how far a gyro drifts, how a tread grips | Once per model of part, on a bench or a practice floor; again when the part, its software, or its settings change | [docs/characterization.md](characterization.md) |
+| **characterized** | A number that belongs to a kind of part, or a design: how noisy a camera is at a distance, how late its results arrive, how far a gyro drifts, how a tread grips, a drivetrain design's feedforward | Once per model of part or design, on a bench, a practice floor, or one robot; robots built alike share it; again when the part, its software, or its settings change | [docs/characterization.md](characterization.md) |
 | **chosen** | A design decision, not a measurement: a threshold, a margin, a tolerance | Never: it's justified, then checked against logs | Its row says why, and what in a log would make you change it ([below](#checking-a-chosen-value-against-logs)) |
 | **as built** | A fact of how the robot is built: a frame size, a gear ratio, a CAN ID | Read off the CAD, a datasheet, or Phoenix Tuner X, once per robot | Its row says where |
 
-## Where today's number came from
+## Where the template's numbers came from
 
-Each row's source starts with one of these words, with any detail after it in parentheses.
+A row's **template's starting value** is the number the template ships with: the template's robot
+in `Robots.java`, or a record's defaults. Its **source** says where that number came from, never
+your robot's: once you measure your own, it lives in `Robots.java` with its date (below). Each
+source starts with one of these words, with any detail after it in parentheses.
 
 | Source | Meaning |
 |---|---|
@@ -27,8 +30,8 @@ Each row's source starts with one of these words, with any detail after it in pa
 | rules | The game manual (2026's, until the next season's kickoff replaces it). |
 | math | Worked out from other values, or from statistics. The row says how. |
 | simulation | Set until the template's simulator behaved. A real robot will differ. |
-| guess | The template's own estimate or judgment. The row gives its reason; nobody measured it. |
-| unknown | Nothing records where the number came from. |
+| guess | A number the template chose: an estimate or a judgment. Nobody measured it; the row's Why is its reason. |
+| unknown | A number inherited from elsewhere (another team's code, a template) whose basis is lost. |
 | none | No number to trace: the template's robot doesn't have one (it has no wiring), or it's a name or a seed. |
 
 ## The register describes values; `Robots.java` holds a robot's numbers
@@ -39,13 +42,13 @@ recorded: the builder call that sets the value, with a comment saying when it wa
 The calibration procedures print their results in exactly this form, ready to paste:
 
 ```java
-.wheelRadius(Inches.of(1.974)) // measured 2027-02-14
+.wheelRadius(Inches.of(1.974)) // measured YYYY-MM-DD
 ```
 
 Do the same for what you measure by hand:
 
 ```java
-.mass(Pounds.of(131.2)) // measured 2027-02-14: two scales, bumpers and battery on
+.mass(Pounds.of(131.2)) // measured YYYY-MM-DD: two scales, bumpers and battery on
 ```
 
 A number measured for a part rather than a robot (a camera's latency, a tread's friction) goes where
@@ -55,15 +58,15 @@ with only what you measured changed.
 ```java
 private static final VisionConfig VISION =
     VisionConfigBuilder.builder(VisionConfig.DEFAULTS)
-        .linearStdDevBaseline(0.012) // characterized 2027-01-20: camera noise, our camera at 1280 x 800
-        .distanceExponent(2.1) // characterized 2027-01-20: camera noise
+        .linearStdDevBaseline(0.012) // characterized YYYY-MM-DD: camera noise, our camera at 1280 x 800
+        .distanceExponent(2.1) // characterized YYYY-MM-DD: camera noise
         .build();
 ```
 
 The defaults in the code (`VisionConfig.DEFAULTS`, `EstimatorConfig.DEFAULTS`,
 `LocalizationGate.SCORING`, `SensorErrors.TYPICAL`) are the template's starting points, and this
 register says where each came from. When you change one in the code itself, change its row too:
-today's number and its source.
+the template's starting value and its source.
 
 ## Which records are listed
 
@@ -134,7 +137,7 @@ The values that move the robot most, and are least known today:
    and nothing else in the code can notice.
 2. **Camera noise** ([procedure](characterization.md#camera-noise)). The baseline and the distance
    exponent decide how far the estimate trusts every image, and the gate decides from them which
-   images are wrong. Today's are the 2026 code's, for a different camera and coprocessor.
+   images are wrong. The template's are the 2026 code's, for a different camera and coprocessor.
 3. **Tread friction and the center of gravity's height**
    ([friction](characterization.md#tread-friction), [CG](calibration.md#the-robots-mass-center-of-gravity-and-inertia)).
    Together they set where the wheels slip, so the drive's current limit, and both are guesses.
@@ -150,7 +153,7 @@ The values that move the robot most, and are least known today:
 `frc.robot.RobotConfig`: one robot, in `Robots`. Its other values are records with sections of
 their own.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `name` | chosen | `sim` | none | Which robot this is, as its logs name it. One per robot; keep it. |
 
@@ -159,11 +162,11 @@ their own.
 `frc.robot.lib.config.Body`: the frame, bumpers, and mass. Per robot, in `Robots`. The template's
 robot is the largest and heaviest the 2026 rules allowed, with the best case center of gravity.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `frameLength` | as built | 27.5 in | rules (2026: the largest square within R104's 110 in perimeter) | From CAD; check with a tape across the outside of the frame. |
 | `frameWidth` | as built | 27.5 in | rules (2026, as `frameLength`) | As `frameLength`, side to side. |
-| `height` | as built | 30 in | guess (typical) | From CAD: the tallest point in the starting configuration. |
+| `height` | as built | 30 in | rules (2026: R104's starting height) | From CAD: the tallest point in the starting configuration. |
 | `bumperThickness` | as built | 4 in | rules (2026: R403's most) | From the outside of the frame to the outside of the bumper, cover on. |
 | `mass` | calibrated | 149.5 lb | rules (2026: 135 lb with bumpers, R408, and a 14.5 lb battery, R601) | [Weigh it](calibration.md#the-robots-mass-center-of-gravity-and-inertia), bumpers and battery on; again after big changes. |
 | `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). Nothing reads it yet; a simulator that models traction will. |
@@ -175,7 +178,7 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 
 `frc.robot.lib.config.SwerveConfig`: the swerve drivetrain. Per robot, in `Robots`.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `wheelInset` | as built | 2.625 in | datasheet (SDS MK4i's footprint) | The module's footprint drawing, or CAD: from the outside of the frame to the wheel's center. |
 
@@ -183,7 +186,7 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 
 The module hardware, the same at every corner.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `driveMotor` | as built | Kraken X60 | guess (a typical build) | The motor on the module. An `_FOC` model only with a Phoenix Pro license. |
 | `steerMotor` | as built | Kraken X60 | guess (a typical build) | As `driveMotor`. |
@@ -200,13 +203,13 @@ in a log of hard driving: each drive motor's currents (`Drive/Module<name>/Drive
 (`Localization/TractionLimited`, with `Localization/ResidualMeters`, how far the wheels disagree
 with each other).
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `driveStatorCurrent` | chosen | 30 A | math (weight transfer: slip near 31 A with worn tread and a 0.3 m center of gravity, 47 A at best) | Why: torque past the tread's grip only spins the wheels and drains the battery. Measure friction and the center of gravity first; they set it. Change if the wheels slip at full stick (traction-limited, with the residual rising), or never come near it and the drivers want more push. |
-| `driveSupplyCurrent` | chosen | 60 A | unknown | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. Set it from the weakest battery's [internal resistance](characterization.md#battery-internal-resistance): the voltage with four drive motors at the limit, about the rest voltage less 4 × limit × resistance, must stay above Systemcore's brownout voltage (still to measure on a real Systemcore) and the vision coprocessor's [ride-through voltage](characterization.md#coprocessor-brownout-ride-through). Change if the battery sags toward either in hard driving. |
-| `steerStatorCurrent` | chosen | 40 A | guess (steering needs little torque) | Why: steering needs little torque, and less current is less heat. Change if modules lag their angle setpoints under load (`Drive/Module<name>/SteerAngle` against `Drive/SetpointsOptimized`). |
+| `driveStatorCurrent` | chosen | 30 A | math (weight transfer: the front wheels slip near 47 A with the configured tread, μ 1.2, and the 0.15 m center of gravity, about 50 A at μ 1.3, and near 31 A with worn tread, μ 1.0, and a 0.3 m one) | Why: torque past the tread's grip only spins the wheels and drains the battery. Measure friction and the center of gravity first; they set it. Change if the wheels slip at full stick (traction-limited, with the residual rising), or never come near it and the drivers want more push. |
+| `driveSupplyCurrent` | chosen | 60 A | guess | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. Set it from the weakest battery's [internal resistance](characterization.md#battery-internal-resistance): the voltage with four drive motors at the limit, about the rest voltage less 4 × limit × resistance, must stay above Systemcore's brownout voltage (still to measure on a real Systemcore) and the vision coprocessor's [ride-through voltage](characterization.md#coprocessor-brownout-ride-through). Change if the battery sags toward either in hard driving. |
+| `steerStatorCurrent` | chosen | 40 A | datasheet (Phoenix Tuner X's swerve generator, as the 2026 code kept it) | Why: steering needs little torque, and less current is less heat. Change if modules lag their angle setpoints under load (`Drive/Module<name>/SteerAngle` against `Drive/SetpointsOptimized`). |
 | `maxLinearSpeed` | chosen | 4.4 m/s | guess (headroom under the 4.73 m/s free speed) | Why: velocity control needs headroom under the free speed to correct with. Lower it if modules can't reach their setpoints at full stick (`Drive/ModuleVelocities` against `Drive/SetpointsOptimized`). |
-| `maxAngularSpeed` | chosen | 1 rotation/s | guess (driver-friendly) | Why: fast enough to turn around, slow enough to control. Ask the drivers. At full spin (6.3 rad/s) the cameras' images are thrown out: they're over `VisionConfig.maxYawRateRadiansPerSecond`. |
+| `maxAngularSpeed` | chosen | 1 rot/s | guess (driver-friendly) | Why: fast enough to turn around, slow enough to control. Ask the drivers. At full spin (6.3 rad/s) the cameras' images are thrown out: they're over `VisionConfig.maxYawRateRadiansPerSecond`. |
 
 ### `SwerveConfig.Gains`
 
@@ -214,14 +217,14 @@ Drive feedforward and feedback, and steering feedback, all tunable live. Check t
 each module's speed against its setpoint (`Drive/ModuleVelocities` against
 `Drive/SetpointsOptimized`), and its angle (`Drive/Module<name>/SteerAngle`).
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `driveKs` | characterized | 0 V | simulation (the simulator's wheels have no friction) | [Feedforward](characterization.md#feedforward), per drivetrain. |
-| `driveKv` | characterized | 2.54 V per m/s | math (ideal: nominal voltage over free speed, `Modules.idealDriveKv()`) | [Feedforward](characterization.md#feedforward). A real drivetrain's is a little higher. |
-| `driveKp` | chosen | 2.0 V per m/s | simulation | Why: corrects what feedforward misses. Tune it live after kS and kV: raise it until speeds track their setpoints, and back off at the first buzz. |
-| `steerKp` | chosen | 16 V per radian | 2026 code (kP 100 V per rotation, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. |
-| `steerKd` | chosen | 0.08 V per rad/s | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. |
-| `skewLookahead` | chosen | 0.03 s | unknown | Why: while the robot spins, its wheels reach their angles late, so a field-relative drive aims at the heading this far ahead. Drive straight while spinning, and tune until the path stays straight. Change it if the path curves the way the robot spins. |
+| `driveKs` | characterized | 0 V | simulation (the simulator's wheels have no friction) | [Feedforward](characterization.md#feedforward), per drivetrain design: robots built alike share it. |
+| `driveKv` | characterized | 2.54 V/(m/s) | math (ideal: nominal voltage over free speed, `Modules.idealDriveKv()`) | [Feedforward](characterization.md#feedforward), per drivetrain design. A real drivetrain's is a little higher. |
+| `driveKp` | chosen | 2.0 V/(m/s) | simulation | Why: corrects what feedforward misses. Tune it live after kS and kV: raise it until speeds track their setpoints, and back off at the first buzz. |
+| `steerKp` | chosen | 16 V/rad | 2026 code (kP 100 V/rot, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. |
+| `steerKd` | chosen | 0.08 V/(rad/s) | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. |
+| `skewLookahead` | chosen | 0.03 s | guess | Why: while the robot spins, its wheels reach their angles late, so a field-relative drive aims at the heading this far ahead. Drive straight while spinning, and tune until the path stays straight. Change it if the path curves the way the robot spins. |
 
 ### `SwerveWiring`
 
@@ -229,7 +232,7 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 read. Per robot, in `Robots`. Phoenix Tuner X's swerve generator reports every value here; copy them
 across. The template's robot runs only in simulation and has no wiring, so nothing is set today.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `canBus` | as built | none | none | Tuner X: Systemcore's port, or the CANivore's name. |
 | `gyroId` | as built | none | none | Tuner X: the Pigeon 2's CAN ID. |
@@ -241,7 +244,7 @@ across. The template's robot runs only in simulation and has no wiring, so nothi
 
 One module's devices.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `driveId` | as built | none | none | Tuner X. |
 | `steerId` | as built | none | none | Tuner X. |
@@ -255,18 +258,18 @@ One module's devices.
 
 ### `CameraConfig`
 
-`frc.robot.lib.config.CameraConfig`: one camera on the robot. Per camera, in `Robots`. Today's four
-are a 2026 competition robot's, as that team measured them.
+`frc.robot.lib.config.CameraConfig`: one camera on the robot. Per camera, in `Robots`. The
+template's four are a 2026 competition robot's, as that team's 2026 code gives them.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `name` | chosen | `front-left`, `front-right`, `back-left`, `back-right` | none | The name PhotonVision knows the camera by. |
-| `forward` | calibrated | -7.75 to -11.69 in | measured (a 2026 robot's cameras) | [A camera's mount](calibration.md#a-cameras-mount), starting from CAD; again after mounting, bumping, or remounting it. |
-| `left` | calibrated | ±12 to ±12.25 in | measured (a 2026 robot's cameras) | As `forward`. |
-| `up` | calibrated | 20.7 to 21 in | measured (a 2026 robot's cameras) | As `forward`. |
-| `roll` | calibrated | 0° (one -2°) | measured (a 2026 robot's cameras) | As `forward`. |
-| `tiltUp` | calibrated | 8.2° to 12.5° | measured (a 2026 robot's cameras) | As `forward`. |
-| `yaw` | calibrated | ±23.2° in front, 181° behind | measured (a 2026 robot's cameras) | As `forward`. |
+| `forward` | calibrated | -7.75 to -11.69 in | 2026 code (a 2026 robot's cameras) | [A camera's mount](calibration.md#a-cameras-mount), starting from CAD; again after mounting, bumping, or remounting it. |
+| `left` | calibrated | ±12 to ±12.25 in | 2026 code (a 2026 robot's cameras) | As `forward`. |
+| `up` | calibrated | 20.7 to 21 in | 2026 code (a 2026 robot's cameras) | As `forward`. |
+| `roll` | calibrated | 0° (one -2°) | 2026 code (a 2026 robot's cameras) | As `forward`. |
+| `tiltUp` | calibrated | 8.2° to 12.5° | 2026 code (a 2026 robot's cameras) | As `forward`. |
+| `yaw` | calibrated | ±23.2° in front, 181° behind | 2026 code (a 2026 robot's cameras) | As `forward`. |
 | `noiseScale` | calibrated | 1 | guess (every camera typical) | How much noisier this camera is than the typical one, whose noise [camera noise](characterization.md#camera-noise) measured: its logged tag residual (`Vision/<camera>/MeanTagResidualMeters`) over the other cameras', once every mount is calibrated. |
 
 ### `CameraConfig.Sensor`
@@ -274,13 +277,13 @@ are a 2026 competition robot's, as that team measured them.
 The camera itself: per model of camera, at the settings it runs. In `Robots`, shared by the cameras
 that use it. The simulator builds its cameras from it.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `widthPixels` | as built | 1280 | guess (a typical AprilTag camera) | The resolution the pipeline runs at, in PhotonVision. |
 | `heightPixels` | as built | 800 | guess (a typical AprilTag camera) | As `widthPixels`. |
 | `diagonalFieldOfView` | characterized | 80° | guess (typical) | PhotonVision's lens calibration, at the resolution the robot runs, reports it. |
-| `frameRate` | characterized | 30 per second | guess (conservative) | [Coprocessor capacity](characterization.md#vision-coprocessor-capacity): results per second, with as many cameras on the coprocessor as the robot runs. |
-| `latency` | characterized | 30 ms | guess (conservative) | [Camera latency](characterization.md#camera-latency-and-time-sync): from the image's capture to its result reaching the robot, with as many cameras on the coprocessor as the robot runs ([coprocessor capacity](characterization.md#vision-coprocessor-capacity)). |
+| `frameRate` | characterized | 30 Hz | guess | [Coprocessor capacity](characterization.md#vision-coprocessor-capacity): results per second, with as many cameras as one coprocessor carries on the robot. |
+| `latency` | characterized | 30 ms | guess | [Camera latency](characterization.md#camera-latency-and-time-sync): from the image's capture to its result reaching the robot, with as many cameras as one coprocessor carries on the robot ([coprocessor capacity](characterization.md#vision-coprocessor-capacity)). |
 
 ## Localization
 
@@ -291,7 +294,7 @@ are trusted. Per robot (`RobotConfig.vision`); every robot starts from `VisionCo
 are tunable live. Each image's outcome, with the number that decided it, is in
 `Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `maxAmbiguity` | chosen | 0.2 | 2026 code (254 used 0.19) | Why: a single tag above it fits two poses about equally well, and the wrong one is far off. Change if "ambiguous single tag" throws out results that agreed with the estimate, or single tags under it are then rejected by the gate. |
 | `maxHeightErrorMeters` | chosen | 0.2 m | 2026 code | Why: the robot is on the floor, and tags are where the field says; a solve that misses either by 20 cm is a misread. Check the "off the floor" and "height is off" outcomes against the other cameras. |
@@ -301,12 +304,12 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 | `angularStdDevBaseline` | characterized | 0.03 rad | 2026 code | [Camera noise](characterization.md#camera-noise): heading error for one tag at 1 m. |
 | `distanceExponent` | characterized | 2 | 2026 code (teams used 2 to 4) | [Camera noise](characterization.md#camera-noise): how fast the error grows with distance. |
 | `headingConstrainedFactor` | characterized | 0.5 | top team (6328's factor for the same idea) | [Camera noise](characterization.md#camera-noise): how much less a position solved with the gyro's heading scatters. |
-| `speedStdDevFactor` | characterized | 0.25 per m/s | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
-| `yawRateStdDevFactor` | characterized | 0.5 per rad/s | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
-| `maxHeadingStdDevToConstrain` | chosen | 5° (0.087 rad) | unknown | Why: a heading-constrained solve is only as good as the heading it's given; until the estimate knows its heading this well (a robot not yet placed), full solves find it. Check how soon after placing the robot its outcomes say "heading-constrained". |
+| `speedStdDevFactor` | characterized | 0.25 per m/s of speed | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
+| `yawRateStdDevFactor` | characterized | 0.5 per rad/s of turning | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
+| `maxHeadingStdDevToConstrain` | chosen | 5° (0.087 rad) | unknown (the template credits top teams, none by name) | Why: a heading-constrained solve is only as good as the heading it's given; until the estimate knows its heading this well (a robot not yet placed), full solves find it. Check how soon after placing the robot its outcomes say "heading-constrained". |
 | `minTagsForHeading` | chosen | 2 | guess (the fewest a multi-tag solve has) | Why: one tag's heading is too noisy and too ambiguous to correct the gyro. Raise it if two-tag solves pull the heading around (`Localization/Pose`'s heading stepping against `Drive/Gyro/Yaw`). |
-| `maxYawRateForHeading` | chosen | 0.5 rad/s | unknown | Why: correct the gyro's heading only when the robot is turning slowly, where a capture time a little off barely moves the heading. Check the heading offset (`Localization/Pose`'s heading less `Drive/Gyro/Yaw`): lower it if the offset steps while the robot turns; raise it if the offset is rarely corrected in a match. |
-| `maxReprojectionErrorForHeadingPixels` | chosen | 1 px | unknown | Why: only a solve that fits its tags well corrects the gyro. Check against [camera noise](characterization.md#camera-noise): a still camera's multi-tag solves should fit well under it. |
+| `maxYawRateForHeading` | chosen | 0.5 rad/s | unknown (the template credits top teams, none by name) | Why: correct the gyro's heading only when the robot is turning slowly, where a capture time a little off barely moves the heading. Check the heading offset (`Localization/Pose`'s heading less `Drive/Gyro/Yaw`): lower it if the offset steps while the robot turns; raise it if the offset is rarely corrected in a match. |
+| `maxReprojectionErrorForHeadingPixels` | chosen | 1 px | unknown (the template credits top teams, none by name) | Why: only a solve that fits its tags well corrects the gyro. Check against [camera noise](characterization.md#camera-noise): a still camera's multi-tag solves should fit well under it. |
 | `mountToleranceMeters` | chosen | 0.05 m | simulation (calibrated cameras on a season-worn robot showed 0.7 to 1 cm while driving) | Why: a calibrated camera's tags land a little off from noise and the estimate's own error; past this, the camera has moved on its mount, the alert says to recalibrate it, and the excess makes it count for less ([how the robot notices](calibration.md#how-the-robot-notices-a-camera-that-moved)). Check `Vision/<camera>/MountOffsetMeters` on the real robot: freshly calibrated cameras should sit well under it. Raise it if they don't; lower it if a camera known to be knocked, and placing the robot visibly off, stays under it. |
 | `latencyMarginSeconds` | chosen | 0.1 s | guess | Why: an image arriving more than this after its camera's usual `latency`, or before it was taken, has a wrong capture time or a coprocessor falling behind, so it's left out. It can't catch a clock off by less than it: 0.1 s is 30 cm at 3 m/s. Set it a little above the spread of `Vision/<camera>/LatencySeconds` once [the capture times are checked](characterization.md#camera-latency-and-time-sync). Raise it if images in time are left out (`Vision/<camera>/LeftOutOfStep`); lower it toward that spread if the check finds capture times off by more than a few milliseconds. |
 
@@ -322,9 +325,9 @@ cameras move the estimate when they see tags again after a stretch without. An e
 three times its uncertainty is too sure of itself, and its gate rejects good measurements; one never
 off by half of it is too unsure, and the cameras pull it around.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `translationStdDevPerMeter` | characterized | 0.03 m | guess | [Odometry error](characterization.md#odometry-error), per drivetrain and tread. |
+| `translationStdDevPerMeter` | characterized | 0.03 m | guess | [Odometry error](characterization.md#odometry-error), per drivetrain design and tread: robots built alike share it. |
 | `translationStdDevPerRadian` | characterized | 0.02 m | guess | [Odometry error](characterization.md#odometry-error): spinning in place. |
 | `residualScale` | chosen | 1 | guess (all of it) | Why: wheels that disagree with each other put the robot's travel in doubt by about as much. Lower it if the uncertainty balloons in clean driving (`Localization/ResidualMeters` high, the cameras finding little to correct). |
 | `tractionLimitedSlipFraction` | chosen | 0.25 | guess | Why: wheels at the edge of their grip slip some of the time. Check how far the cameras correct the estimate after stretches of `Localization/TractionLimited`. |
@@ -360,12 +363,12 @@ the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and
 in a match log: ready whenever the robot is lined up with tags in view, and never while the estimate
 is off.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `maxVisionAgeSeconds` | chosen | 0.5 s | top team (254) | Why: odometry drifts after the cameras last checked it. Change if `NotReadyBecause` blames an old measurement while the robot is lined up with tags in view (the cameras are slower than it), or shots taken just under it miss. |
 | `maxDisagreementMeters` | chosen | 0.2 m | top team (254) | Why: cameras that just disagreed by more haven't settled the estimate. Lower it toward the task's tolerance once [camera noise](characterization.md#camera-noise) says the cameras do better. |
-| `maxPositionStdDevMeters` | chosen | 0.15 m | unknown | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
-| `maxTiltDegrees` | chosen | 5° | unknown (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
+| `maxPositionStdDevMeters` | chosen | 0.15 m | guess | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
+| `maxTiltDegrees` | chosen | 5° | guess (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
 
 ### `ImuCrossCheck.Settings`
 
@@ -374,7 +377,7 @@ agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. C
 `Localization/ImuDisagreementDegrees`: well inside the tolerance in normal driving, and over it only
 for a real fault.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `windowSeconds` | chosen | 1 s | guess | Why: long enough to see two IMUs turn apart, short enough to catch a frozen one in a second. Change if a frozen gyro (the `gyro-frozen` scenario) takes too long to flag, or hard turns set off the alert. |
 | `toleranceDegrees` | chosen | 3° | guess | Why: above what the two drift and scatter apart in the window ([gyro drift and noise](characterization.md#gyro-drift-and-noise), for both). Change if the alert comes on in normal driving. |
@@ -387,11 +390,11 @@ feature; the robot uses `Settings.DEFAULTS`. Check them with a
 [terrain crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from
 the new field's ramps.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `steepDegrees` | chosen | 10° | top team (1678) | Why: under the ramps' slope (2026's: 15°), over anything flat driving reads. Lower it if `TerrainCrossings` misses a crossing; raise it if it counts one in flat driving. |
 | `levelDegrees` | chosen | 5° | top team (1678) | Why: what a flat floor reads, bumpers and carpet included. Raise it if the robot never reads level after a crossing. |
-| `levelSeconds` | chosen | 0.1 s | unknown | Why: five loops level is off the feature, not a wobble on its top. Lengthen it if a wobble on a feature's top ends a crossing early. |
+| `levelSeconds` | chosen | 0.1 s | guess | Why: five loops level is off the feature, not a wobble on its top. Lengthen it if a wobble on a feature's top ends a crossing early. |
 | `topSeconds` | chosen | 1.5 s | guess | Why: time to cross a feature's flat top; longer is two features, or a stop on top. Lengthen it if a wide feature's crossing isn't counted. |
 
 ## The simulator
@@ -403,7 +406,7 @@ the new field's ramps.
 `NONE` is exact, for tests of exact numbers. The code calls TYPICAL's values plausible estimates:
 replace them with a real robot's once it's calibrated.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `wheelRadiusScale` | characterized | 0.985, 0.99, 0.98, 0.988 | guess | The spread of each wheel's radius in [the wheel radius](calibration.md#the-wheel-radius)'s report, partway through a season, over the radius configured. |
 | `steerOffsetDegrees` | characterized | 0.5, -0.3, 0, 0.4 | guess | How far modules point off straight after their offsets are set: square the wheels against a straightedge, and read each module's angle (`Drive/Module<name>/SteerAngle`). |
@@ -414,7 +417,7 @@ replace them with a real robot's once it's calibrated.
 
 One gyro's errors. TYPICAL gives the gyro and the backup IMU each their own; EXACT has none.
 
-| Value | Kind | Today | Source | How to measure it, or why |
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `scale` | characterized | 1.003 (backup 1.005) | guess | [The gyro's scale](calibration.md#the-gyros-scale) before it's calibrated (one over its first `gyroYawScale`), and [the backup's](characterization.md#repeatability-of-the-gyros-scale). |
 | `driftDegreesPerMinute` | characterized | 0.2 (backup 1.0) | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise), a typical run. The backup's is unknown until measured. |
@@ -434,16 +437,16 @@ a robot keeps wanting to go past it, after asking why.
 | Knob | Limits | Source | Why |
 |---|---|---|---|
 | `gains.driveKs` | 0 to 1 V | guess | Static friction takes a few tenths of a volt; past a volt, the robot creeps. |
-| `gains.driveKv` | 0 to 5 V per m/s | guess | Twice the ideal 2.54: room for a real drivetrain's losses, not for a unit mistake. |
-| `gains.driveKp` | 0 to 20 | unknown | Ten times today's: room to find where it buzzes. |
-| `gains.steerKp` | 0 to 100 | unknown | About six times today's. |
-| `gains.steerKd` | 0 to 5 | unknown | Far above today's; damping this high only adds noise. |
-| `gains.skewLookahead` | 0 to 0.1 s | unknown | Five loops; past it, the robot steers ahead of itself. |
-| `limits.driveStatorCurrent` | 10 to 120 A | unknown | Up to Phoenix 6's own default stator limit (120 A); under 10 A the robot barely moves. |
-| `limits.driveSupplyCurrent` | 10 to 80 A | unknown | Room above today's 60 A; four motors drawing more brown out a battery. |
-| `limits.steerStatorCurrent` | 5 to 80 A | unknown | Steering needs little; the top is for finding out how little. |
-| `limits.maxLinearSpeed` | 0.5 to 6 m/s | unknown | Slow enough for a first drive; the record refuses anything past the free speed. |
-| `limits.maxAngularSpeed` | 0.1 to 3 rotations/s | unknown | Slow enough for a first drive, and three times today's. |
+| `gains.driveKv` | 0 to 5 V/(m/s) | guess | Twice the ideal 2.54: room for a real drivetrain's losses, not for a unit mistake. |
+| `gains.driveKp` | 0 to 20 | guess | Ten times the template's: room to find where it buzzes. |
+| `gains.steerKp` | 0 to 100 | guess | About six times the template's. |
+| `gains.steerKd` | 0 to 5 | guess | Far above the template's; damping this high only adds noise. |
+| `gains.skewLookahead` | 0 to 0.1 s | guess | Five loops; past it, the robot steers ahead of itself. |
+| `limits.driveStatorCurrent` | 10 to 120 A | datasheet (120 A: Phoenix 6's default stator limit) | Up to Phoenix 6's own default; under 10 A the robot barely moves. |
+| `limits.driveSupplyCurrent` | 10 to 80 A | guess | Room above the template's 60 A; four motors drawing more brown out a battery. |
+| `limits.steerStatorCurrent` | 5 to 80 A | guess | Steering needs little; the top is for finding out how little. |
+| `limits.maxLinearSpeed` | 0.5 to 6 m/s | guess | Slow enough for a first drive; the record refuses anything past the free speed. |
+| `limits.maxAngularSpeed` | 0.1 to 3 rot/s | guess | Slow enough for a first drive, and three times the template's. |
 
 ### `vision` tuning
 
@@ -452,12 +455,12 @@ a robot keeps wanting to go past it, after asking why.
 | Knob | Limits | Source | Why |
 |---|---|---|---|
 | `maxAmbiguity` | 0 to 1 | math (an ambiguity is a ratio from 0 to 1) | Its whole range. |
-| `maxHeightErrorMeters` | 0 to 1 m | unknown | A meter off the floor is no robot. |
-| `linearStdDevBaseline` | 0.001 to 1 m | unknown | Never zero, which would trust a camera completely. |
-| `angularStdDevBaseline` | 0.001 to 1 rad | unknown | As `linearStdDevBaseline`. |
+| `maxHeightErrorMeters` | 0 to 1 m | guess | A meter off the floor is no robot. |
+| `linearStdDevBaseline` | 0.001 to 1 m | guess | Never zero, which would trust a camera completely. |
+| `angularStdDevBaseline` | 0.001 to 1 rad | guess | As `linearStdDevBaseline`. |
 | `distanceExponent` | 0 to 4 | top team (teams used 2 to 4) | The range teams used, and flat. |
-| `mountToleranceMeters` | 0.01 to 0.5 m | unknown | From tighter than a calibrated camera can hold to a camera far off its mount. |
-| `latencyMarginSeconds` | 0.01 to 1 s | unknown | From tighter than a camera's own jitter to a second, still inside the estimator's 1.5 s of history. |
+| `mountToleranceMeters` | 0.01 to 0.5 m | guess | From tighter than a calibrated camera can hold to a camera far off its mount. |
+| `latencyMarginSeconds` | 0.01 to 1 s | guess | From tighter than a camera's own jitter to a second, still inside the estimator's 1.5 s of history. |
 
 ### Experiment rigs
 
@@ -482,10 +485,10 @@ a run's choices; these are the assumptions inside them, and the ranges a robustn
 from. The test doesn't check this list. Measuring the cameras ([camera noise](characterization.md#camera-noise))
 replaces the nominal values, and narrows the ranges.
 
-| Assumption | Today | Kind | Source | How to measure it, or why |
+| Assumption | Template's starting value | Kind | Source | How to measure it, or why |
 |---|---|---|---|---|
 | Tag corner noise, nominal | 0.25 px average, 0.08 px spread | characterized | datasheet (`VisionSim`'s, PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise). |
-| How far tags are seen, nominal | 7 m | characterized | unknown (`VisionSim`'s) | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
+| How far tags are seen, nominal | 7 m | characterized | guess (`VisionSim`'s) | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
 | The gyro's heading error, nominal | 0.25°, one standard deviation | characterized | guess | The estimator's heading uncertainty while cameras correct it (`Localization/HeadingStdDevDegrees`), checked in the simulator against `Sim/HeadingErrorDegrees`. |
 | Each camera off its mount, nominal | none | characterized | guess (calibrated mounts) | [A camera's mount](calibration.md#a-cameras-mount): its result's "how sure" after calibrating. |
 | Corner noise, robustness range | 0.1 to 0.6 px | chosen | guess | A sharp, still global-shutter image locates corners to about a tenth of a pixel; defocus, a softer lens, or blur, half a pixel or more ([the study's reasons](camera-placement.md#robustness)). |
@@ -502,14 +505,14 @@ code's choices, explained beside them.
 
 | Where | Number | Kind | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `VisionSim`: the farthest tag a simulated camera detects | 7 m | characterized | unknown | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
+| `VisionSim`: the farthest tag a simulated camera detects | 7 m | characterized | guess | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
 | `VisionSim`: tag corner noise | 0.25 px average, 0.08 px spread | characterized | datasheet (PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise): how far the corners scatter, standing still. |
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
 | `ModuleIOSim`: drive and steering inertia | 0.025 and 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's simulation defaults, as AdvantageKit's template uses) | [Feedforward](characterization.md#feedforward): SysId on one module. |
 | `Localization`: a jolt that's a collision | 20 m/s² | chosen | top team (6800) | Why: hard driving stays near 1 g. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
 | `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |
 | `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot. |
-| `Drive`: a wheel this far short of its speed is at its grip's edge | 0.5 m/s | chosen | unknown (the idea: 581 and 1678) | Why: a wheel that can't keep up is slipping or stalled. Check: `Localization/TractionLimited` turns on in pushing matches, and not in clean driving. |
+| `Drive`: a wheel this far short of its speed is at its grip's edge | 0.5 m/s | chosen | guess (the idea: 581 and 1678) | Why: a wheel that can't keep up is slipping or stalled. Check: `Localization/TractionLimited` turns on in pushing matches, and not in clean driving. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |
 | `Vision`: how recently another camera must have agreed for a camera's tags to count toward its mount | 2 s | chosen | simulation (half a second left out cameras facing other ways, which see tags at other moments) | Why: the other cameras hold the pose a camera is judged against. |

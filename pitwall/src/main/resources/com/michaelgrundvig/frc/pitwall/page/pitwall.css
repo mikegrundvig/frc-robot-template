@@ -62,7 +62,7 @@
 @media (pointer: coarse) { :root { --row: 44px; } }
 /* On a touch screen, everything pressed is at least 44 px tall: a finger, standing, one hand. */
 @media (pointer: coarse) {
-  button, input, select, .chip, .tab, .mode, .uncommitted { min-height: 44px; }
+  button, input, select, summary, .chip, .tab, .mode, .uncommitted { min-height: 44px; }
   button.link { min-height: 44px; }
   .switch { min-height: 44px; }
 }
@@ -135,9 +135,14 @@ input[readonly] { background: var(--surface-2); }
 .conn { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .conn.up { color: var(--ok); }
 .conn.down { color: var(--bad); }
+.conn.stopped { color: var(--text-2); }
 .mode { font-weight: 600; color: inherit; }
 .mode.gated { color: var(--lock); }
 .mode.gated::before { content: "🔒 "; }
+/* In the simulator, an enabled robot's mode is filled in: unmistakable from across the room. */
+.mode.enabled { background: var(--ok); color: var(--surface); padding: 3px 10px; border-radius: 999px;
+                text-decoration: none; }
+.pill.driving { text-decoration: none; padding-right: 10px; }
 .pill { display: inline-flex; align-items: center; gap: var(--s2); padding: 3px 4px 3px 10px;
         border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface);
         font-weight: 600; min-height: 34px; }
@@ -168,6 +173,8 @@ input[readonly] { background: var(--surface-2); }
 .band.field { color: var(--lock); border-bottom: 2px solid var(--lock); font-size: var(--value);
               background: repeating-linear-gradient(135deg, var(--lock-tint) 0 14px, var(--surface) 14px 28px); }
 @media (max-width: 719px) { .band.field b { font-size: var(--big); } }
+.band.field a { color: inherit; }
+.band.stopped { background: var(--surface-2); border-bottom: 2px solid var(--line-strong); }
 
 .tabs { display: flex; gap: 2px; padding: 0 var(--s3); background: var(--surface);
         border-bottom: 1px solid var(--line); overflow-x: auto; }
@@ -449,6 +456,120 @@ table { border-collapse: collapse; }
   .hist li { grid-template-columns: 4em minmax(0, 1fr); }
   .hist li > button { grid-column: 2; justify-self: start; }
 }
+
+/* ---- Sim ---- */
+
+.sim { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
+@media (max-width: 899px) { .sim { grid-template-columns: minmax(0, 1fr); } }
+
+/* The Driver Station's state, with Enable and Disable, held at the top of the view as it scrolls:
+   Disable is always in reach. Enabled is filled in; disabled is an outline. */
+.dsbar { position: sticky; top: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: stretch;
+         gap: var(--s2) var(--s3); margin: 0 calc(-1 * var(--s4)) 14px; padding: var(--s2) var(--s4);
+         background: var(--bg); border-bottom: 1px solid var(--line); }
+.dsstate { flex: 1 1 280px; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+           min-height: 56px; padding: var(--s1) 14px; border: 2px solid var(--line-strong);
+           border-radius: 10px; background: var(--surface); }
+.dsstate .line { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+.dsstate .word { font: 700 var(--big)/1.15 var(--sans); letter-spacing: .04em; }
+.dsstate .sub { font-size: var(--meta); color: var(--text-2); }
+.dsstate.enabled { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.dsstate.enabled .sub { color: var(--surface); }
+.dsstate.stopped { border-color: var(--bad); color: var(--bad); background: var(--bad-tint); }
+.tag.paused { color: var(--warn); background: var(--warn-tint); font-size: var(--meta); }
+.dsbuttons { display: flex; gap: var(--s2); }
+.dsbuttons button { min-height: 56px; }
+.dsbar .disable { min-width: 10em; font-size: var(--value); font-weight: 700; display: inline-flex;
+                  align-items: center; justify-content: center; gap: var(--s2); }
+.dsbar .disable.armed { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+.dsbar .disable.armed:hover:not(:disabled) { background: var(--bad); filter: brightness(1.08); }
+.dsbar .disable kbd { font-size: 12px; font-weight: 400; border-color: currentColor; }
+.dsbar .gate { flex: 1 1 100%; margin: 0; }
+@media (max-width: 719px) {
+  .dsbar { margin: 0 calc(-1 * var(--s3)) var(--s3); padding: var(--s2) var(--s3); }
+  .dsbuttons { flex: 1 1 100%; }
+  .dsbuttons .enable { flex: 1; }
+  .dsbuttons .disable { flex: 2; }
+}
+.simrow { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: center; margin: 10px 0; }
+.simrow .label { min-width: 8.5em; color: var(--text-2); font-size: 14px; }
+.simrow > .meta { flex: 1 1 240px; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-strong); border-radius: 8px;
+       overflow: hidden; background: var(--surface); }
+.seg button { border: none; border-radius: 0; border-right: 1px solid var(--line-strong); }
+.seg button:last-child { border-right: none; }
+.seg button:focus-visible { outline-offset: -3px; }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--surface); font-weight: 600; }
+.seg button[aria-pressed="true"]::before { content: "✓ "; }
+.stations { display: inline-flex; flex-wrap: wrap; gap: var(--s2); }
+.card .state { margin: var(--s1) 0 var(--s2); font-size: 14px; }
+.card .state.paused { color: var(--warn); font-weight: 600; }
+.stoprow { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--line); }
+.keymap { font-size: 14px; margin: var(--s1) 0; border-collapse: collapse; }
+.keymap td { padding: 3px var(--s3) 3px 0; vertical-align: baseline; }
+.keymap td:first-child { white-space: nowrap; }
+.pads { margin: 0; padding-left: 18px; font-size: 14px; }
+.pads .bad { color: var(--bad); }
+
+/* A joystick the page drives: each axis drawn from the middle, and the buttons held. */
+.joy { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--line); }
+.joy h3 { font-size: var(--body); display: flex; flex-wrap: wrap; gap: var(--s2); align-items: baseline; }
+.joy.idle h3 { color: var(--text-2); }
+.axes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px var(--s4);
+        margin: 6px 0; }
+.axis { display: grid; grid-template-columns: 7.5em minmax(60px, 1fr) 3.5em; gap: var(--s2); align-items: center;
+        font-size: var(--meta); }
+.axis .an { color: var(--text-2); }
+.axis .track { position: relative; height: 10px; border-radius: 5px; background: var(--surface-2);
+               border: 1px solid var(--line-strong); }
+.axis .track::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px;
+                      background: var(--muted); }
+.axis .fill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: 4px;
+              background: var(--accent); }
+.axis .v { text-align: right; font-family: var(--mono); }
+.pressed { font-size: var(--meta); color: var(--text-2); }
+
+/* What fails: what's on, then a card for each part, each fault a row. A fault that's on has an
+   amber bar, a mark, and a word, as a tuned value does: the robot isn't as built. */
+.faults { margin-top: var(--s4); }
+.onbar .acts { justify-content: space-between; }
+.onnow { flex: 1 1 260px; }
+.onword { color: var(--warn); }
+.fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0 14px;
+         align-items: start; }
+@media (max-width: 719px) { .fgrid { grid-template-columns: minmax(0, 1fr); } }
+.fcard > summary { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; align-items: center;
+                   gap: var(--s1) var(--s2); min-height: var(--row); }
+.fcard > summary::-webkit-details-marker { display: none; }
+.fcard > summary::before { content: "▸"; color: var(--muted); width: 1em; }
+.fcard[open] > summary::before { content: "▾"; }
+.fcard[open] > summary { margin-bottom: var(--s1); }
+.fcname { font-weight: 600; font-size: var(--value); }
+.fault { position: relative; padding: 10px 0 10px 14px; border-top: 1px solid var(--line); }
+.fault::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px;
+                 border-radius: 2px; background: transparent; }
+.fault.on::before { background: var(--warn); }
+.fhead { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); align-items: center; }
+.fault .does { font-size: 14px; color: var(--text-2); margin: 2px 0 6px; }
+.fvalues { font-size: 14px; color: var(--warn); font-weight: 600; margin: 0 0 6px; }
+.params { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin: 0 0 var(--s2); }
+.param { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 14px; }
+.pval { width: 5.5em; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.param .unit { min-width: 0; }
+.param .lim { font-size: 12px; color: var(--muted); }
+.fault .acts .meta { flex: 1 1 200px; }
+.tag.on { color: var(--warn); background: var(--warn-tint); }
+/* The scenarios, side by side on a laptop: each its name and Apply, what it does, and its faults,
+   those on marked as a fault on is. */
+.scens { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 var(--s5); }
+.scen { position: relative; padding: 10px 0 10px 14px; border-top: 1px solid var(--line); }
+.scen::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px;
+                border-radius: 2px; background: transparent; }
+.scen.on::before { background: var(--warn); }
+.scen .grow { flex: 1 1 auto; overflow-wrap: anywhere; }
+.scen .does { font-size: 14px; color: var(--text-2); margin: 2px 0; }
+.sfaults { margin: 0; font-size: var(--meta); color: var(--muted); }
+.sfaults .son { color: var(--warn); font-weight: 600; }
 
 dialog { border: 1px solid var(--line-strong); border-radius: 12px; padding: 0; background: var(--surface); color: var(--text);
          box-shadow: var(--shadow); max-width: min(560px, calc(100vw - 32px)); }

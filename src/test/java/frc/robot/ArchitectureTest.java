@@ -13,8 +13,6 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.domain.JavaModifier;
-import com.tngtech.archunit.core.importer.ClassFileImporter;
-import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
@@ -32,10 +30,7 @@ import org.wpilib.hardware.imu.OnboardIMU;
  * otherwise accumulates quietly until it bites at an event.
  */
 class ArchitectureTest {
-  private static final JavaClasses PRODUCTION_CODE =
-      new ClassFileImporter()
-          .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-          .importPackages("frc.robot", "com.michaelgrundvig.frc.pitwall");
+  private static final JavaClasses PRODUCTION_CODE = ProductionCode.CLASSES;
 
   /** Hardware vendors' libraries: each belongs behind an IO interface. */
   private static final String[] VENDOR_LIBRARIES = {

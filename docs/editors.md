@@ -18,6 +18,8 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Run one test class ([more on tests](testing.md)) | `./gradlew :test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, enabled and drivable from the keyboard | `./gradlew run` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
+| Start it in a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
+| List the simulator's scenarios | `./gradlew scenarios` |
 | Start it waiting for a debugger on port 5005 | `./gradlew run --debug-jvm` |
 | Fix formatting (every local build does this too) | `./gradlew spotlessApply` |
 | Store your team number, once, before deploying | `./gradlew setTeamNumber -PteamNumber=NNNN` |
@@ -31,6 +33,10 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 for a debugger before it starts, and takes one from any device on the robot's network. Until a
 debugger attaches, the robot does nothing, and after a brownout or a power cycle it waits again.
 When you're done, deploy again without `-PdebugMode`, and never take a debug deploy onto the field.
+
+Gradle's configuration cache is off until GradleRIO supports it. Turn it on for yourself with
+`--configuration-cache` (`./gradlew ci --configuration-cache`), for anything but GradleRIO's own
+tasks (`run`, `deploy`, `vendordep`), which fail with it.
 
 ## IntelliJ IDEA
 

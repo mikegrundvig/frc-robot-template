@@ -29,5 +29,25 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   the code, not the robot's traction or power. The simulator keeps the robot's true pose apart from
   its sensors (`DriveSimulation`, `SensorErrors`), the drive motors obey their stator current limit,
   the robot rides over the field's bumps (tilted and raised by the ground under its wheels), and
-  faults can be made by hand: a slipping wheel, a push, a hit the IMU feels, a tilt with wheels off
-  the floor. Wheels still never slip on their own.
+  faults can be made by hand or by name (`frc.robot.sim.Scenarios`, `./gradlew run
+  -Pscenario=<name>`): a slipping wheel, a push, a hit the IMU feels, a gyro unplugged or frozen, a
+  camera knocked off its mount. Wheels still never slip on their own, and no one wheel can leave the
+  floor: `wheel-lifted` tilts the robot by hand (which holds over any bump for the rest of the run)
+  and scales every wheel's grip alike, so its wheels never disagree as a lifted one's would, and
+  the robot isn't raised.
+
+## Scenarios the simulator can't make yet
+
+Faults a robot meets that the simulator's named scenarios (`frc.robot.sim.Scenarios`) don't
+cover yet. These wait on nothing but work in the simulator; add each to the catalog when the
+simulator can make it.
+
+- Camera axes swapped in the configuration.
+- Camera latency the code doesn't know of: `VisionSim` takes latency from the camera's
+  configuration.
+- A frozen camera, still reporting its last image.
+- A gyro reset mid-match: the simulated gyro has no offset to reset.
+- A stale module encoder.
+- Ramp crossings: the terrain has bumps only.
+- The wrong field variant, or one camera with the wrong tag layout.
+- One wheel off the floor (see `wheel-lifted` above).

@@ -284,4 +284,26 @@ class DeployCheckTest {
 
     assertThat(asked).isInstanceOf(Asked.Unreachable.class);
   }
+
+  /** An agent busy twice is left unchecked, with a warning, not a failure. */
+  @Test
+  void aBusyAgentIsLeftUncheckedWithAWarning() {
+    List<Long> slept = new ArrayList<>();
+    CompiledTable one =
+        new CompiledTable(
+            new Table(24680, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+
+    List<Finding> findings =
+        DeployCheck.check(
+            one, 24680, (address, port) -> new Asked.Busy("answered 503 to /v1/stamp"), slept::add);
+
+    assertThat(findings)
+        .singleElement()
+        .satisfies(
+            finding -> {
+              assertThat(finding.verdict()).isEqualTo(Verdict.WARN);
+              assertThat(finding.text()).contains("is busy", "not checked");
+            });
+    assertThat(slept).containsExactly(2000L);
+  }
 }

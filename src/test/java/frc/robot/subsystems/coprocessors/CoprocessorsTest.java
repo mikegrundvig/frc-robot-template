@@ -2,6 +2,7 @@ package frc.robot.subsystems.coprocessors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.michaelgrundvig.frc.coprocessor.table.Board;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
@@ -366,7 +367,7 @@ class CoprocessorsTest {
           .isEqualTo("coprocessors/vision-front/settings/README.txt");
     }
     Devices.LogPage errors =
-        device.log().orElseThrow().read(new Devices.LogQuery("", 3, "photonvision.service"));
+        device.log().orElseThrow().read(Devices.LogQuery.latest(3, "photonvision.service"));
     assertThat(errors.entries())
         .singleElement()
         .satisfies(
@@ -376,9 +377,10 @@ class CoprocessorsTest {
               assertThat(entry.time()).isEqualTo("robot 0.000 s");
               assertThat(entry.unit()).isEqualTo("photonvision.service");
             });
-    Devices.LogPage all = device.log().orElseThrow().read(new Devices.LogQuery("", 7, ""));
+    Devices.LogPage all = device.log().orElseThrow().read(Devices.LogQuery.latest(7, ""));
     assertThat(all.entries()).hasSize(5);
-    assertThat(all.next()).as("nothing more waiting").isEmpty();
+    assertThat(all.newer()).as("the newest entry's, for what comes next").isEqualTo("sim-4");
+    assertThat(all.older()).isEqualTo("sim-0");
   }
 
   @Test
@@ -648,5 +650,80 @@ class CoprocessorsTest {
                     .powerDownButton(99)
                     .build())
         .withMessageContaining("powerDownButton");
+  }
+
+  /** Its journal reads older pages, and from the start of its current boot. */
+  @Test
+  void itsJournalReadsBackAndFromItsBoot() throws Exception {
+    build(table(""));
+    run(1);
+    agent.reboot(); // the journal keeps the boot before too
+    run(1);
+    Devices devices = new Devices(() -> now);
+    coprocessors.addTo(devices);
+    Devices.Log log = devices.named("vision-front").orElseThrow().log().orElseThrow();
+
+    Devices.LogPage latest = log.read(Devices.LogQuery.latest(7, ""));
+    Devices.LogPage older =
+        log.read(new Devices.LogQuery(Devices.From.BEFORE, latest.older(), 7, ""));
+    Devices.LogPage boot = log.read(new Devices.LogQuery(Devices.From.START, "", 7, ""));
+    Devices.LogPage kernel = log.read(Devices.LogQuery.latest(7, "kernel"));
+
+    assertThat(latest.entries()).hasSize(6);
+    assertThat(older.entries()).as("nothing before the first").isEmpty();
+    assertThat(boot.entries())
+        .hasSize(3)
+        .allSatisfy(entry -> assertThat(entry.time()).startsWith("robot "));
+    assertThat(boot.older()).isEmpty();
+    assertThat(kernel.entries()).extracting(Devices.LogEntry::unit).containsOnly("kernel");
+    assertThatThrownBy(() -> log.read(Devices.LogQuery.latest(7, "sshd.service")))
+        .hasMessageContaining("only these units");
+  }
+
+  /**
+   * An answer can carry a reading up to a poll old, its clock read then, which places the boot
+   * late: the earliest estimate this boot is kept.
+   */
+  @Test
+  void itsBootIsPlacedByItsEarliestEstimate() {
+    CoprocessorIO.CoprocessorIOInputs[] answers = new CoprocessorIO.CoprocessorIOInputs[1];
+    CoprocessorIO stale =
+        new CoprocessorIO() {
+          @Override
+          public void updateInputs(CoprocessorIOInputs inputs) {
+            CoprocessorIOInputs given = answers[0];
+            inputs.everAnswered = true;
+            inputs.bootId = given.bootId;
+            inputs.answeredNanos = given.answeredNanos;
+            inputs.agentMonotonicNanos = given.agentMonotonicNanos;
+          }
+        };
+    coprocessors =
+        new Coprocessors(
+            table(""),
+            new CoprocessorIO[] {stale},
+            new PhotonVisionIO() {},
+            Coprocessors.Settings.DEFAULTS);
+    built.add(coprocessors);
+
+    answers[0] = answer("boot-1", 10_000_000_000L, 5_000_000_000L); // a fresh reading: 5 s
+    coprocessors.periodic(0, false);
+    answers[0] = answer("boot-1", 11_000_000_000L, 5_200_000_000L); // a stale one: 5.8 s
+    coprocessors.periodic(0, false);
+    long thisBoot = coprocessors.bootedAtRobotNanos("vision-front");
+    answers[0] = answer("boot-2", 20_000_000_000L, 1_000_000_000L);
+    coprocessors.periodic(0, false);
+
+    assertThat(thisBoot).isEqualTo(5_000_000_000L);
+    assertThat(coprocessors.bootedAtRobotNanos("vision-front")).isEqualTo(19_000_000_000L);
+  }
+
+  private static CoprocessorIO.CoprocessorIOInputs answer(
+      String boot, long answeredNanos, long agentNanos) {
+    CoprocessorIO.CoprocessorIOInputs inputs = new CoprocessorIO.CoprocessorIOInputs();
+    inputs.bootId = boot;
+    inputs.answeredNanos = answeredNanos;
+    inputs.agentMonotonicNanos = agentNanos;
+    return inputs;
   }
 }

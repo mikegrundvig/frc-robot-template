@@ -10,6 +10,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import org.jspecify.annotations.Nullable;
 
 /**
  * GETs from a coprocessor's health agent, within a connect timeout and a timeout on the whole
@@ -70,7 +71,7 @@ final class AgentHttp {
     try {
       int status = connection.getResponseCode();
       if (status != HttpURLConnection.HTTP_OK) {
-        throw new Answered(status, pathAndQuery);
+        throw new Answered(status, pathAndQuery, connection.getHeaderField("Retry-After"));
       }
       try (InputStream in = connection.getInputStream()) {
         return readBounded(in, deadline);
@@ -94,7 +95,7 @@ final class AgentHttp {
     try {
       int status = connection.getResponseCode();
       if (status != HttpURLConnection.HTTP_OK) {
-        throw new Answered(status, pathAndQuery);
+        throw new Answered(status, pathAndQuery, connection.getHeaderField("Retry-After"));
       }
       long length = connection.getContentLengthLong();
       if (length > maxBytes) {
@@ -107,16 +108,56 @@ final class AgentHttp {
     }
   }
 
-  /** Something answered, but not 200: the agent refused, or it isn't this agent. */
+  /** Something answered, but not 200: the agent refused, is busy (503), or it isn't this agent. */
   static final class Answered extends IOException {
     private static final long serialVersionUID = 1;
 
     /** The answer's status. */
     final int status;
 
-    Answered(int status, String pathAndQuery) {
+    /** When it said to ask again, in seconds (its {@code Retry-After}): 1 when it didn't say. */
+    final int retryAfterSeconds;
+
+    Answered(int status, String pathAndQuery, @Nullable String retryAfter) {
       super("answered " + status + " to " + pathAndQuery);
       this.status = status;
+      int seconds = 1;
+      if (retryAfter != null && retryAfter.strip().matches("\\d{1,3}")) {
+        seconds = Integer.parseInt(retryAfter.strip());
+      }
+      retryAfterSeconds = seconds;
+    }
+
+    /** Whether the agent was busy with another such request, and would take this one shortly. */
+    boolean busy() {
+      return status == 503;
+    }
+  }
+
+  /** A call to the agent. */
+  @FunctionalInterface
+  interface Call<T> {
+    T call() throws IOException;
+  }
+
+  /**
+   * Makes a call, and when the agent answers it's busy (503), once more after it said to wait (at
+   * most two seconds): a heavy request (the journal, the settings) finds another under way.
+   */
+  static <T> T onceMoreIfBusy(Call<T> call) throws IOException {
+    try {
+      return call.call();
+    } catch (Answered answered) {
+      if (!answered.busy()) {
+        throw answered;
+      }
+      try {
+        Thread.sleep(Math.min(2, Math.max(0, answered.retryAfterSeconds)) * 1000L);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw answered;
+      }
+      return call.call();
     }
   }
 

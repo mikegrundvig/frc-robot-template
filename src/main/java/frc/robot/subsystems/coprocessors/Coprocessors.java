@@ -543,6 +543,11 @@ public final class Coprocessors implements AutoCloseable {
     return coprocessors.stream().map(Coprocessor::name).toList();
   }
 
+  /** The robot's time at a coprocessor's boot, as best known: for tests. */
+  long bootedAtRobotNanos(String name) {
+    return coprocessor(name).bootedAtRobotNanos();
+  }
+
   /** Whether a coprocessor is missing: no answer lately, or none at all. */
   public boolean isMissing(String name) {
     return coprocessor(name).isMissing();

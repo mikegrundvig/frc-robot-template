@@ -125,17 +125,20 @@ function save(blob, name) {
 
 let viewer = null;
 
-/** The log viewer: a dialog with the filters, a page of entries, More, and Download. */
+/**
+ * The log viewer: a dialog with the filters, a page of entries (the latest first), Older and Newer
+ * to read on either side, and Download for the whole of the device's run as text.
+ */
 function openLog(name) {
   if (!viewer) viewer = makeViewer();
   viewer.name = name;
   viewer.title.textContent = name + "'s log";
   viewer.dialog.showModal();
-  load(false);
+  load("latest");
 }
 
 function makeViewer() {
-  const v = { loads: 0, next: "", name: "" };
+  const v = { loads: 0, newer: "", older: "", name: "" };
   v.priority = h("select", { "aria-label": "Least important shown" },
     PRIORITIES.map((word, number) => h("option", { value: String(number) },
       number + " " + word + (number < 7 ? " and worse" : ": everything"))));
@@ -144,77 +147,94 @@ function makeViewer() {
                         autocomplete: "off", "aria-label": "Unit, such as photonvision.service" });
   v.list = h("ol", { class: "logview", "aria-live": "polite" });
   v.status = h("p", { class: "meta" });
-  // The agent pages forward only: from the latest entries, the next page is the newer ones.
-  v.more = h("button", { type: "button", onclick: () => load(true) }, "Newer");
+  v.olderButton = h("button", { type: "button", onclick: () => load("older") }, "Older");
+  v.newerButton = h("button", { type: "button", onclick: () => load("newer") }, "Newer");
   v.download = h("button", { type: "button" }, "Download as text");
   v.download.addEventListener("click", () => fetchFile(v.download,
-    "/api/devices/" + v.name + "/log.txt?" + filters(""), v.name + "'s log"));
+    "/api/devices/" + v.name + "/log.txt?" + filters(), v.name + "'s log"));
   v.title = h("h2");
   v.dialog = h("dialog", { class: "logdialog" },
     h("div", { class: "dlg" }, v.title,
       h("div", { class: "toolbar" },
         h("label", null, "Priority ", v.priority),
         h("label", null, "Unit ", v.unit),
-        h("button", { type: "button", onclick: () => load(false) }, "Show")),
-      v.list, v.status,
-      h("div", { class: "dlg-actions" }, v.more, v.download,
+        h("button", { type: "button", onclick: () => load("latest") }, "Show")),
+      v.olderButton, v.list, v.status,
+      h("div", { class: "dlg-actions" }, v.newerButton, v.download,
         h("button", { type: "button", class: "primary", onclick: () => v.dialog.close() },
           "Close"))));
   v.unit.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") load(false);
+    if (event.key === "Enter") load("latest");
   });
-  v.priority.addEventListener("change", () => load(false));
+  v.priority.addEventListener("change", () => load("latest"));
   document.body.append(v.dialog);
   return v;
 }
 
-function filters(cursor) {
+/** The filters, and where the page is: after a cursor, before one, or the latest. */
+function filters(place, cursor) {
   const query = new URLSearchParams({ priority: viewer.priority.value });
   const unit = viewer.unit.value.trim();
   if (unit) query.set("unit", unit);
-  if (cursor) query.set("cursor", cursor);
+  if (place === "newer" && cursor) query.set("cursor", cursor);
+  if (place === "older" && cursor) query.set("before", cursor);
   return query.toString();
 }
 
 /**
- * Loads the latest page for the filters, or the page of newer entries after what's shown. Only the
- * latest load counts: one asked before it (another filter, another device) is dropped when it
- * answers.
+ * Loads the latest page for the filters, or the page of older entries before what's shown, or of
+ * newer ones after it. Only the latest load counts: one asked before it (another filter, another
+ * device) is dropped when it answers.
  */
-async function load(more) {
+async function load(place) {
   const v = viewer;
   const asked = ++v.loads;
-  const cursor = more ? v.next : "";
-  if (!more) {
-    v.next = "";
+  const cursor = place === "newer" ? v.newer : place === "older" ? v.older : "";
+  if (place === "latest") {
+    v.newer = "";
+    v.older = "";
     v.list.replaceChildren();
   }
-  v.more.disabled = true;
+  v.olderButton.disabled = v.newerButton.disabled = true;
   v.status.textContent = "Asking " + v.name + "…";
-  const response = await api("GET", "/api/devices/" + v.name + "/log?" + filters(cursor))
+  const response = await api("GET", "/api/devices/" + v.name + "/log?" + filters(place, cursor))
     .catch(() => null);
   if (asked !== v.loads) return;
   if (!response) {
     v.status.textContent = "✗ The robot isn't answering.";
+    buttons();
     return;
   }
   const body = await response.json().catch(() => null);
   if (asked !== v.loads) return;
   if (!response.ok || !body) {
     v.status.textContent = "✗ " + (body && body.detail ? body.detail : response.statusText);
+    buttons();
     return;
   }
-  for (const entry of body.entries) {
+  const rows = body.entries.map((entry) => {
     const tone = entry.priority <= 3 ? "bad" : entry.priority === 4 ? "warn" : "";
-    v.list.append(h("li", { class: tone },
+    return h("li", { class: tone },
       h("span", { class: "t" }, entry.time), " ",
       h("span", { class: "p" }, PRIORITIES[entry.priority] || String(entry.priority)), " ",
       h("span", { class: "u" }, entry.unit + ":"), " ",
-      h("span", null, entry.message)));
+      h("span", null, entry.message));
+  });
+  if (place === "older") {
+    v.list.prepend(...rows);
+    v.older = body.older || "";
+  } else {
+    v.list.append(...rows);
+    if (body.newer) v.newer = body.newer;
+    if (place === "latest") v.older = body.older || "";
   }
-  v.next = body.next || "";
-  v.more.disabled = !v.next;
+  buttons();
   const shown = v.list.childElementCount;
-  v.status.textContent = shown === 0 ? "Nothing matches." : shown + " entries, the latest"
-    + (v.next ? "; Newer fetches those since." : ".");
+  v.status.textContent = shown === 0 ? "Nothing matches." : shown + " entries"
+    + (place === "newer" && rows.length === 0 ? "; nothing newer yet." : ".");
+}
+
+function buttons() {
+  viewer.olderButton.disabled = !viewer.older;
+  viewer.newerButton.disabled = !viewer.newer;
 }

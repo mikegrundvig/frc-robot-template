@@ -125,6 +125,18 @@ public final class Devices {
     }
   }
 
+  /**
+   * A device busy with another request of the same kind, asking to be asked again shortly: the page
+   * is answered 503, with {@code Retry-After}.
+   */
+  public static final class Busy extends IOException {
+    private static final long serialVersionUID = 1;
+
+    public Busy(String message) {
+      super(message);
+    }
+  }
+
   /** Fetches a file from a device, on Pitwall's server threads. */
   @FunctionalInterface
   public interface Fetch {
@@ -134,15 +146,28 @@ public final class Devices {
     File fetch() throws IOException;
   }
 
+  /** Where in a log a page is. */
+  public enum From {
+    /** The latest entries. */
+    LATEST,
+    /** The entries just after a cursor: newer. */
+    AFTER,
+    /** The entries just before a cursor: older. */
+    BEFORE,
+    /** The first entries the device keeps of its current run (a computer's boot, say). */
+    START
+  }
+
   /**
    * What the page asks of a device's log: one page of entries.
    *
-   * @param cursor where the last page ended, empty for the latest entries
+   * @param from where the page is
+   * @param cursor the cursor it's after or before; empty for the latest or the start
    * @param priority the least important entry wanted, as syslog numbers them: 0, emergencies only,
    *     to 7, everything down to debugging
    * @param unit only this unit's entries, such as {@code photonvision.service}; empty for all
    */
-  public record LogQuery(String cursor, int priority, String unit) {
+  public record LogQuery(From from, String cursor, int priority, String unit) {
     /** A unit's name, as systemd writes them. */
     public static final Pattern UNIT = Pattern.compile("[A-Za-z0-9@._:-]{0,100}");
 
@@ -159,6 +184,18 @@ public final class Devices {
       if (!CURSOR.matcher(cursor).matches()) {
         throw new IllegalArgumentException("not a cursor");
       }
+      boolean takesCursor = from == From.AFTER || from == From.BEFORE;
+      if (takesCursor == cursor.isEmpty()) {
+        throw new IllegalArgumentException(
+            takesCursor
+                ? "a page " + from + " a cursor needs one"
+                : "a page " + from + " takes none");
+      }
+    }
+
+    /** The latest entries. */
+    public static LogQuery latest(int priority, String unit) {
+      return new LogQuery(From.LATEST, "", priority, unit);
     }
   }
 
@@ -174,12 +211,15 @@ public final class Devices {
   public record LogEntry(String time, int priority, String unit, String message) {}
 
   /**
-   * One page of a device's log, newest last.
+   * One page of a device's log, oldest first.
    *
    * @param entries the entries
-   * @param next the cursor for the page after this one; empty when there's no more
+   * @param newer the cursor to ask for the entries after these with ({@link From#AFTER}): a live
+   *     log grows, so there's one whenever there are entries; empty when there are none
+   * @param older the cursor to ask for the entries before these with ({@link From#BEFORE}); empty
+   *     when none older remain
    */
-  public record LogPage(List<LogEntry> entries, String next) {
+  public record LogPage(List<LogEntry> entries, String newer, String older) {
     public LogPage {
       entries = List.copyOf(entries);
     }

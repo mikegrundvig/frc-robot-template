@@ -1,5 +1,6 @@
 package frc.robot.subsystems.coprocessors;
 
+import com.michaelgrundvig.frc.coprocessor.api.AgentApi;
 import com.michaelgrundvig.frc.coprocessor.api.Boot;
 import com.michaelgrundvig.frc.coprocessor.api.Cameras;
 import com.michaelgrundvig.frc.coprocessor.api.Cpu;
@@ -580,25 +581,70 @@ public final class CoprocessorIOSim implements CoprocessorIO {
     return new Backup(bytes.length, new ByteArrayInputStream(bytes));
   }
 
+  /** The most entries a page of its journal holds: the agent's most. */
+  static final int PAGE = AgentApi.MAX_JOURNAL_PAGE;
+
+  /**
+   * A page of its journal, as its agent would serve it: the latest entries, those after or before a
+   * cursor, or this boot's first; filtered by priority, and by unit (the kernel's entries are unit
+   * {@code kernel}).
+   */
   @Override
-  public JournalPage journal(String cursor, int priority, String unit) throws IOException {
+  public JournalPage journal(JournalPlace place, String cursor, int priority, String unit)
+      throws IOException {
     if (!isAnswering()) {
       throw new IOException("connect timed out");
     }
     // A snapshot: the loop may add to it meanwhile.
-    List<JournalEntry> entries = List.copyOf(journal);
-    int after = -1;
-    if (!cursor.isEmpty()) {
-      after = entries.stream().map(JournalEntry::cursor).toList().indexOf(cursor);
-    }
     List<JournalEntry> matching = new ArrayList<>();
-    for (int i = after + 1; i < entries.size(); i++) {
-      JournalEntry entry = entries.get(i);
-      if (entry.priority() <= priority && (unit.isEmpty() || unit.equals(entry.unit()))) {
+    for (JournalEntry entry : List.copyOf(journal)) {
+      boolean ofUnit =
+          unit.isEmpty()
+              || unit.equals(entry.unit())
+              || (unit.equals("kernel") && entry.identifier().equals("kernel"));
+      if (entry.priority() <= priority && ofUnit) {
         matching.add(entry);
       }
     }
-    String last = matching.isEmpty() ? cursor : matching.get(matching.size() - 1).cursor();
-    return new JournalPage(matching, last, false);
+    int at = -1;
+    for (int i = 0; i < matching.size(); i++) {
+      if (matching.get(i).cursor().equals(cursor)) {
+        at = i;
+      }
+    }
+    String boot = bootId();
+    int from;
+    int to;
+    switch (place) {
+      case AFTER -> {
+        from = at + 1;
+        to = Math.min(matching.size(), from + PAGE);
+      }
+      case BEFORE -> {
+        to = at < 0 ? 0 : at;
+        from = Math.max(0, to - PAGE);
+      }
+      case BOOT -> {
+        int first = 0;
+        while (first < matching.size() && !matching.get(first).bootId().equals(boot)) {
+          first++;
+        }
+        from = first;
+        to = Math.min(matching.size(), from + PAGE);
+      }
+      default -> {
+        to = matching.size();
+        from = Math.max(0, to - PAGE);
+      }
+    }
+    List<JournalEntry> page = matching.subList(from, to);
+    // The cursor goes on the way the page was asked: the oldest entry's going back, else the
+    // newest.
+    String next =
+        page.isEmpty()
+            ? cursor
+            : place == JournalPlace.BEFORE ? page.get(0).cursor() : page.getLast().cursor();
+    boolean more = place == JournalPlace.BEFORE ? from > 0 : to < matching.size();
+    return new JournalPage(List.copyOf(page), next, more);
   }
 }

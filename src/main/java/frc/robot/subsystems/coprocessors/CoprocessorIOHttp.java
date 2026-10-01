@@ -165,30 +165,39 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
 
   @Override
   public Backup settingsBackup() throws IOException {
-    AgentHttp.Streamed answer = backups.stream(AgentApi.SETTINGS_ZIP);
+    AgentHttp.Streamed answer =
+        AgentHttp.onceMoreIfBusy(() -> backups.stream(AgentApi.SETTINGS_ZIP));
     return new Backup(answer.length(), answer.body());
   }
 
   @Override
-  public JournalPage journal(String cursor, int priority, String unit) throws IOException {
+  public JournalPage journal(JournalPlace place, String cursor, int priority, String unit)
+      throws IOException {
     StringBuilder query =
         new StringBuilder(AgentApi.JOURNAL)
             .append("?priority=")
             .append(priority)
             .append("&limit=")
             .append(AgentApi.MAX_JOURNAL_PAGE);
-    if (!cursor.isEmpty()) {
-      query.append("&cursor=").append(URLEncoder.encode(cursor, StandardCharsets.UTF_8));
+    switch (place) {
+      case AFTER -> query.append("&cursor=").append(encoded(cursor));
+      case BEFORE -> query.append("&before=").append(encoded(cursor));
+      case BOOT -> query.append("&from=boot");
+      case LATEST -> {}
     }
     if (!unit.isEmpty()) {
-      query.append("&unit=").append(URLEncoder.encode(unit, StandardCharsets.UTF_8));
+      query.append("&unit=").append(encoded(unit));
     }
-    byte[] body = journals.get(query.toString());
+    byte[] body = AgentHttp.onceMoreIfBusy(() -> journals.get(query.toString()));
     try {
       return JournalPage.parse(new String(body, StandardCharsets.UTF_8));
     } catch (JsonException | IllegalArgumentException e) {
       throw new IOException("its journal can't be read: " + e.getMessage(), e);
     }
+  }
+
+  private static String encoded(String text) {
+    return URLEncoder.encode(text, StandardCharsets.UTF_8);
   }
 
   @Override

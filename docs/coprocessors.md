@@ -12,7 +12,8 @@ Each coprocessor is asked for its health (`/v1/health`, which carries its stamp:
 second, on a thread of its own, within 250 ms to connect and 500 ms to answer (`Coprocessors.Settings`, in
 [the values register](values.md#coprocessorssettings)). The robot loop never waits on the network:
 it reads only each coprocessor's latest answer and how old it is. An answer is placed on the
-robot's clock halfway between asking and hearing.
+robot's clock halfway between asking and hearing. The agent answers at once from its last reading,
+taken in the background, so what an answer says can be up to about a poll older than the answer.
 
 What each answer says is logged under `Coprocessors/<name>` as AdvantageKit inputs (the stamp, load
 per core, the big cores' clock against their most, every thermal zone with its trip point,
@@ -21,7 +22,8 @@ the coprocessors' health sits in the match log and replays with it. A replay jud
 coprocessor from its log exactly as the robot did; the loop judges one in full only when a new
 answer arrives, or it goes missing or comes back. `Coprocessors/<name>/BootedAtRobotNanos` is the
 robot's time when the coprocessor booted: an entry in its journal, which counts from its boot, is
-on the robot's clock at that plus the entry's monotonic time. That places a coprocessor's journal
+on the robot's clock at that plus the entry's monotonic time. A reading older than its answer
+places the boot late, never early, so each boot keeps its earliest estimate. That places a coprocessor's journal
 on the match's timeline, though the boards keep no reliable wall time.
 
 ## Alerts
@@ -69,16 +71,17 @@ journal's errors. Each card ends in what can be done:
   folder for the computer: unzip it into the repository, review the diff, and commit it.
 - **Download logs**: its journal (the kernel's, PhotonVision's, and the agent's entries, as the
   agent serves them), filtered by priority and unit, each entry on the robot's clock when it's from
-  the coprocessor's current boot; or saved as text. The viewer starts at the latest 500 entries,
-  and **Newer** fetches those since; the text is the same, from there on. Older entries aren't
-  reachable from the page yet: the agent can page back now (`before=`, and `from=boot` for a
-  whole boot), which the page doesn't use yet.
+  the coprocessor's current boot. The viewer starts at the latest 500 entries; **Older** pages
+  back, and **Newer** fetches those since. **Download as text** is this boot's whole journal, from
+  its first entry, up to Pitwall's bounds (8 MB, 100 pages, 30 s).
 
 Pitwall asks the agent for these on its own server threads, when the page asks, never in the robot
 loop; the browser never talks to a coprocessor. Only the page can ask (its requests name its event
 stream), two requests at once at most, and downloads wait until the field system disconnects. A
 backup is streamed through as it arrives (up to 64 MB), never held whole; a journal page is at most
-8 MB, and a log's text is cut off after 30 s.
+8 MB, and a log's text is cut off after 30 s. An agent busy with another journal or settings
+request (503) is asked once more after the wait it names (at most 2 s); still busy, the page is told
+so (503), to try again.
 
 ## Powering down before switching off
 

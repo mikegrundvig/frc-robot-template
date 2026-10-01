@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -18,9 +17,7 @@ class RobotTuningTest {
   @Test
   void everyRobotsCommittedValuesCanBeDialedIn() {
     for (RobotConfig robot : Robots.all()) {
-      List<LiveConfig<?>> tuning =
-          List.of(Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()));
-      for (LiveConfig<?> live : tuning) {
+      for (LiveConfig<?> live : RobotContainer.tunings(robot).all()) {
         assertThat(live.knobs()).as(robot.name() + " " + live.name()).isNotEmpty();
         for (LiveConfig.Knob knob : live.knobs()) {
           assertThat(live.set(Map.of(knob.path(), live.committedValue(knob.path()))))
@@ -30,6 +27,18 @@ class RobotTuningTest {
         assertThat(live.changes()).as(robot.name() + " " + live.name()).isEmpty();
       }
     }
+  }
+
+  /** The container's list of tunings is the one every check reads: it misses none of them. */
+  @Test
+  void theListOfTuningsHasEveryOne() {
+    var tunings = RobotContainer.tunings(Robots.SIM);
+
+    assertThat(tunings.all())
+        .hasSize(RobotContainer.Tunings.class.getRecordComponents().length)
+        .doesNotHaveDuplicates()
+        .extracting(LiveConfig::name)
+        .doesNotHaveDuplicates();
   }
 
   @Test
@@ -48,8 +57,7 @@ class RobotTuningTest {
    */
   @Test
   void everyTunableValueSaysWhatItMeans() {
-    for (LiveConfig<?> live :
-        List.of(Drive.tuning(Robots.SIM.drivetrain()), Vision.tuning(Robots.SIM.vision()))) {
+    for (LiveConfig<?> live : RobotContainer.tunings(Robots.SIM).all()) {
       for (LiveConfig.Knob knob : live.knobs()) {
         String component = knob.path().substring(knob.path().lastIndexOf('.') + 1);
         assertThat(live.meaning(knob.path()))

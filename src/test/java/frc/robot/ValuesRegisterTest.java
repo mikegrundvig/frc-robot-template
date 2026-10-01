@@ -7,10 +7,9 @@ import frc.robot.ValuesRegister.CodeRecord;
 import frc.robot.ValuesRegister.Committed;
 import frc.robot.ValuesRegister.Component;
 import frc.robot.ValuesRegister.Knob;
+import frc.robot.ValuesRegister.Switch;
 import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.sim.SensorErrors;
-import frc.robot.subsystems.drive.Drive;
-import frc.robot.subsystems.vision.Vision;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,12 +32,13 @@ class ValuesRegisterTest {
     static final List<CodeRecord> RECORDS = ValuesRegister.scan(ProductionCode.CLASSES);
   }
 
-  /** Each mechanism's live tuning: the values it tunes and their limits, by the tuning's name. */
+  /**
+   * Each mechanism's live tuning, from the container's one list of them: the values it tunes and
+   * their limits, by the tuning's name.
+   */
   private static Map<String, List<Knob>> tuning() {
-    RobotConfig robot = Robots.current();
     Map<String, List<Knob>> tuning = new LinkedHashMap<>();
-    for (LiveConfig<?> live :
-        List.of(Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()))) {
+    for (LiveConfig<?> live : RobotContainer.tunings(Robots.current()).all()) {
       tuning.put(
           live.name(),
           live.knobs().stream()
@@ -423,6 +423,53 @@ class ValuesRegisterTest {
         .containsExactly(
             "docs/values.md line 28: the arm tuning's gains.kP has the limits \"0 to 10\", but"
                 + " it's tuned from 0 to 20: update the cell");
+  }
+
+  private static final String ARM_SWITCHES =
+      """
+
+      ## Switches
+
+      | Switch | Limits | Template's starting value | Source | Why |
+      |---|---|---|---|---|
+      | `Arm/holdSeconds` | 0 to 5 s | 0 s | guess | Holds the arm. |
+      | `Arm/<camera>/enabled` | on or off | on | none | Leaves a camera out. |
+      """;
+
+  private static final Map<String, Switch> ARM_PUBLISHED =
+      Map.of(
+          "Arm/holdSeconds",
+          new Switch("Arm/holdSeconds", 0.0, 0, 5),
+          "Arm/<camera>/enabled",
+          new Switch(
+              "Arm/<camera>/enabled", true, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY));
+
+  @Test
+  void everySwitchTheRobotPublishesHasARowShowingItsLimitsAndStart() {
+    assertThat(ValuesRegister.parse(ARM_REGISTER + ARM_SWITCHES).switchProblems(ARM_PUBLISHED))
+        .isEmpty();
+  }
+
+  @Test
+  void aSwitchMissingStaleOrChangedSaysWhatToDo() {
+    String register =
+        (ARM_REGISTER + ARM_SWITCHES)
+            .replace(
+                "| `Arm/holdSeconds` | 0 to 5 s | 0 s |", "| `Arm/holdSeconds` | 0 to 3 s | 1 s |")
+            .replace(
+                "| `Arm/<camera>/enabled` | on or off | on | none | Leaves a camera out. |",
+                "| `Arm/oldSwitch` | on or off | off | none | Gone. |");
+
+    assertThat(ValuesRegister.parse(register).switchProblems(ARM_PUBLISHED))
+        .containsExactly(
+            "Add the switch Arm/<camera>/enabled to docs/values.md: a row | `Arm/<camera>/enabled`"
+                + " | limits | starting value | source | why | in the table of switches",
+            "docs/values.md line 41: the switch Arm/holdSeconds has the limits \"0 to 3 s\", but it"
+                + " may be set from 0 to 5: update the cell",
+            "docs/values.md line 41: the switch Arm/holdSeconds starts at \"1 s\", but the robot"
+                + " starts it at 0: update the cell",
+            "docs/values.md line 42: remove the switch Arm/oldSwitch: the robot publishes no such"
+                + " switch");
   }
 
   @Test

@@ -41,6 +41,8 @@ class SwerveConfigTest {
     SwerveConfig.Limits limits = swerve.limits();
     assertThat(limits.driveStatorCurrent().in(Amps)).isCloseTo(40, within(1e-9));
     assertThat(limits.driveSupplyCurrent().in(Amps)).isCloseTo(60, within(1e-9));
+    assertThat(limits.driveSupplyLowerCurrent().in(Amps)).isCloseTo(35, within(1e-9));
+    assertThat(limits.driveSupplyLowerTime().in(Seconds)).isCloseTo(0.5, within(1e-9));
     assertThat(limits.steerStatorCurrent().in(Amps)).isCloseTo(30, within(1e-9));
     assertThat(limits.maxLinearSpeed().in(MetersPerSecond)).isCloseTo(4, within(1e-9));
     assertThat(limits.maxAngularSpeed().in(RotationsPerSecond)).isCloseTo(1, within(1e-9));
@@ -122,6 +124,9 @@ class SwerveConfigTest {
     assertRejected(
         "Limits.driveSupplyCurrent", () -> changeLimits().driveSupplyCurrent(Amps.of(-60)).build());
     assertRejected(
+        "Limits.driveSupplyLowerCurrent",
+        () -> changeLimits().driveSupplyLowerCurrent(Amps.of(0)).build());
+    assertRejected(
         "Limits.steerStatorCurrent",
         () -> changeLimits().steerStatorCurrent(Amps.of(Double.NaN)).build());
     assertRejected(
@@ -133,6 +138,26 @@ class SwerveConfigTest {
             changeLimits()
                 .maxAngularSpeed(RotationsPerSecond.of(Double.POSITIVE_INFINITY))
                 .build());
+  }
+
+  /**
+   * Phoenix steps the drive's supply limit down after a time from just over zero to 5 s. At zero it
+   * never steps down, which the template says by setting the lower current to the supply limit
+   * instead, where it shows.
+   */
+  @Test
+  void theStepDownTakesFromJustOverZeroToFiveSeconds() {
+    assertRejected(
+        "Limits.driveSupplyLowerTime",
+        () -> changeLimits().driveSupplyLowerTime(Seconds.of(0)).build());
+    assertRejected(
+        "Limits.driveSupplyLowerTime",
+        () -> changeLimits().driveSupplyLowerTime(Seconds.of(5.1)).build());
+    assertThatNoException()
+        .isThrownBy(() -> changeLimits().driveSupplyLowerTime(Seconds.of(5)).build());
+    assertThatNoException()
+        .as("no step-down, said where it shows")
+        .isThrownBy(() -> changeLimits().driveSupplyLowerCurrent(Amps.of(60)).build());
   }
 
   @Test

@@ -29,8 +29,11 @@ import org.wpilib.simulation.DCMotorSim;
  * go stale: the wheel turns on, and what the robot's code reads stops changing, as signals that
  * stop arriving do. Both motors' stator current limits are modeled: the drive's caps the torque
  * that accelerates the robot and says when a wheel is at the edge of its grip, and the steering's
- * caps how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery is not, so
- * this tests the code rather than the robot's power.
+ * caps how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery is not,
+ * and neither is the drive's supply current limit with Phoenix's step-down from it ({@code
+ * SwerveConfig.Limits.driveSupplyLowerCurrent}): the supply current it reports is what the motor
+ * would draw from a steady 12 V with no supply limit. So this tests the code rather than the
+ * robot's power; docs/stand-ins.md says when that matters.
  *
  * <p>The steering runs as a TalonFX without a Phoenix Pro license runs it: its loop every
  * millisecond, on the angle the CANcoder last sent over CAN. Those, with its current limit, set how
@@ -311,7 +314,10 @@ final class ModuleIOSim implements ModuleIO {
     return steerSim.positionRadians() - steerOffsetRadians;
   }
 
-  /** Takes the gains, and both motors' stator current limits. */
+  /**
+   * Takes the gains, and both motors' stator current limits. The drive's supply limit isn't
+   * modeled.
+   */
   @Override
   public void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
     driveKp = gains.driveKp();

@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.pitwall.push;
 
 import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -31,6 +32,12 @@ public final class Stream {
   /** When it last wrote, or opened if it hasn't: the stream to give up first is the stalest. */
   private volatile long wroteNanos = System.nanoTime();
 
+  /** The views its page shows, which decide the {@link Feed}s it's sent. */
+  private volatile Set<String> views = Set.of();
+
+  /** The views it has been sent everything of, and since follows: the robot loop's alone. */
+  Set<String> following = Set.of();
+
   /**
    * @param capacity how many events may wait before the stream counts as fallen behind
    * @param onClose told once, by whichever thread closes it
@@ -56,6 +63,19 @@ public final class Stream {
   /** Why it closed; empty while open. */
   public String why() {
     return why;
+  }
+
+  /** The views its page shows: a {@link Feed} goes only to the streams that name its view. */
+  public Set<String> views() {
+    return views;
+  }
+
+  /**
+   * Says which views its page shows now, from any thread. The next loop sends it everything of a
+   * view it newly shows, and stops sending a view it no longer does.
+   */
+  public void show(Set<String> shown) {
+    views = Set.copyOf(shown);
   }
 
   /** The stream's own thread takes it: closing the stream interrupts this thread. */

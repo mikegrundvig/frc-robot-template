@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
 import com.michaelgrundvig.frc.pitwall.experiment.Trace;
+import com.michaelgrundvig.frc.pitwall.scene.Scenes;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -37,6 +38,7 @@ public final class Page {
   private final @Nullable Simulator simulator;
   private final Devices devices;
   private final Notices notices;
+  private final Scenes scenes;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
   private final String program = UUID.randomUUID().toString();
@@ -73,7 +75,8 @@ public final class Page {
         () -> "",
         null,
         new Devices(System::nanoTime),
-        new Notices());
+        new Notices(),
+        new Scenes(System::nanoTime, System.out::println));
   }
 
   /**
@@ -98,7 +101,8 @@ public final class Page {
         mode,
         null,
         new Devices(System::nanoTime),
-        new Notices());
+        new Notices(),
+        new Scenes(System::nanoTime, System.out::println));
   }
 
   /**
@@ -108,6 +112,7 @@ public final class Page {
    *     has none
    * @param devices the devices the robot reports on, for the Pit view's cards
    * @param notices what the robot has to tell whoever is at the page, above everything else
+   * @param scenes the scenes the page draws
    */
   Page(
       Status status,
@@ -118,7 +123,8 @@ public final class Page {
       Supplier<String> mode,
       @Nullable Simulator simulator,
       Devices devices,
-      Notices notices) {
+      Notices notices,
+      Scenes scenes) {
     this.status = status;
     this.actions = actions;
     this.tuning = tuning;
@@ -128,6 +134,7 @@ public final class Page {
     this.simulator = simulator;
     this.devices = devices;
     this.notices = notices;
+    this.scenes = scenes;
   }
 
   public Status status() {
@@ -160,6 +167,11 @@ public final class Page {
     return notices;
   }
 
+  /** The scenes the page draws: its World view. */
+  public Scenes scenes() {
+    return scenes;
+  }
+
   /** The simulator's controls; null on a robot. */
   public @Nullable Simulator simulator() {
     return simulator;
@@ -185,6 +197,8 @@ public final class Page {
    *   <li>{@code devices}: each device's card, as of its last read: see {@link Devices#view};
    *   <li>{@code notices}: what the robot has to tell whoever is at the page: see {@link
    *       Notices#view};
+   *   <li>{@code scenes}: each scene's description, by id; what moves in one goes only to the pages
+   *       that show it: see {@link Scenes};
    *   <li>in the simulator only, {@code simulator} (the Driver Station, the clock, and the
    *       joysticks the page drives), {@code components} (what can fail, and how), and {@code
    *       scenarios}: see {@link Simulator#view}.
@@ -216,6 +230,7 @@ public final class Page {
     sections.put("run", run == null ? Map.of() : run(run));
     sections.put("devices", devices.view());
     sections.put("notices", notices.view());
+    sections.put("scenes", scenes.descriptions());
     if (simulator != null) {
       sections.putAll(simulator.view());
     }

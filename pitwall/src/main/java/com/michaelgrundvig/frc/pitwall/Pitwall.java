@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.pitwall;
 
 import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.scene.Scenes;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
@@ -29,8 +30,9 @@ import org.wpilib.util.Alert;
  *
  * <p>That serves the page (http://robot.local:5820, or localhost in the simulator), shows the
  * standard status (which robot and code, the mode, the battery), tunes, runs actions, and runs
- * experiments. Add status items, actions, experiments, and devices through {@link #status()},
- * {@link #actions()}, {@link #experiments()}, and {@link #devices()}.
+ * experiments. Add status items, actions, experiments, devices, and scenes through {@link
+ * #status()}, {@link #actions()}, {@link #experiments()}, {@link #devices()}, and {@link
+ * #scenes()}.
  *
  * <p>Tuning is WPILib's tunables. Every tunable in the program goes through Pitwall's {@link
  * TunableTee}, around WPILib's own NetworkTables backend: dashboards work as before, while changes
@@ -57,6 +59,7 @@ public final class Pitwall implements AutoCloseable {
   private final Experiments experiments;
   private final Devices devices;
   private final Notices notices = new Notices();
+  private final Scenes scenes;
   private final TunableTee tee;
   private final Page page;
   private final Broadcaster broadcaster;
@@ -135,9 +138,20 @@ public final class Pitwall implements AutoCloseable {
     simulator = simulated;
     // Devices' cards are read on the robot's clock, at most once a second while a page watches.
     devices = new Devices(RobotController::getTime);
+    // Scenes' patches are timed on the robot's clock too: at most 20 a second, while a page shows.
+    scenes = new Scenes(RobotController::getTime, System.out::println);
     page =
         new Page(
-            status, actions, tuning, tee, experiments, Pitwall::mode, simulated, devices, notices);
+            status,
+            actions,
+            tuning,
+            tee,
+            experiments,
+            Pitwall::mode,
+            simulated,
+            devices,
+            notices,
+            scenes);
     // A page whose stream closes can't keep an experiment it started going, or drive a joystick.
     broadcaster =
         new Broadcaster(
@@ -270,6 +284,15 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
+   * The scenes the page draws in 3D, each a view of its own: the field, the robot on it, what its
+   * cameras see. Add them here: {@code scenes().add(Scene.named("world", "World").layer(...))}.
+   * With none, the page has no such view.
+   */
+  public Scenes scenes() {
+    return scenes;
+  }
+
+  /**
    * The simulator's controls, in WPILib's simulation: the robot's simulation declares the parts
    * that can fail here ({@code simulator.components()}). Empty on a robot, where nothing may write
    * the Driver Station's state, and while replaying a log.
@@ -336,7 +359,7 @@ public final class Pitwall implements AutoCloseable {
     wasEnabled = enabled;
     wasFieldConnected = fieldConnected;
     // Last, so an open page hears of everything this loop changed. With none open, nothing.
-    broadcaster.periodic(page::sections, experiments.run());
+    broadcaster.periodic(page::sections, experiments.run(), scenes.feeds());
   }
 
   /**

@@ -5,10 +5,14 @@ import com.michaelgrundvig.frc.pitwall.experiment.Series;
 import com.michaelgrundvig.frc.pitwall.experiment.Trace;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -23,6 +27,10 @@ import org.jspecify.annotations.Nullable;
  * {@code samples} event. Nothing changed, nothing sent. A stream that has just opened gets a {@code
  * snapshot} first: the whole state as sent, the run's trace so far, and the stream's own id; the
  * patches after it apply to that.
+ *
+ * <p>Some of the state goes only to the pages that show it: a {@link Feed}, such as a scene's
+ * moving parts. A stream names the views its page shows, and gets each feed's changes in its
+ * patches only while it does, after a {@code replace} event with everything of the feed as sent.
  *
  * <p>The loop never touches a socket and never waits: it drops events into each stream's mailbox,
  * and each stream's own thread writes them (see {@link Stream}). Events are turned into JSON by the
@@ -75,6 +83,18 @@ public final class Broadcaster implements AutoCloseable {
    * @return empty when the broadcaster has closed
    */
   public synchronized Optional<Stream> open(@Nullable String replaces) {
+    return open(replaces, Set.of());
+  }
+
+  /**
+   * Opens a stream whose page shows these views, which decide the {@link Feed}s it's sent. Safe
+   * from any thread.
+   *
+   * @param replaces the stream a page reconnecting had; null for none
+   * @param views the views its page shows: a scene's id, say
+   * @return empty when the broadcaster has closed
+   */
+  public synchronized Optional<Stream> open(@Nullable String replaces, Set<String> views) {
     if (closed) {
       return Optional.empty();
     }
@@ -90,8 +110,25 @@ public final class Broadcaster implements AutoCloseable {
     }
     opened++;
     Stream stream = new Stream(Integer.toString(opened), mailbox, this::closed);
+    stream.show(views);
     waiting.add(stream);
     return Optional.of(stream);
+  }
+
+  /**
+   * Says which views a stream's page shows now. Safe from any thread.
+   *
+   * @param stream the stream's id, as its snapshot named it
+   * @return whether that stream is open
+   */
+  public boolean show(String stream, Set<String> views) {
+    for (Stream open : all()) {
+      if (open.id().equals(stream)) {
+        open.show(views);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Whether any stream is open, so the loop has anyone to tell. Safe from any thread. */
@@ -112,12 +149,58 @@ public final class Broadcaster implements AutoCloseable {
    * @param run the run in progress, or the latest to end; null for none
    */
   public void periodic(Supplier<Map<String, Map<String, Object>>> state, @Nullable Run run) {
+    periodic(state, run, List.of());
+  }
+
+  /**
+   * Sends what changed to every stream, a snapshot to each new one, and each {@link Feed} to the
+   * streams whose page shows its view. Call it once per loop, from the robot loop. With no stream
+   * open it does nothing; a feed no page shows isn't asked anything.
+   *
+   * @param state the state now, section by section: see {@link Delta#patch}
+   * @param run the run in progress, or the latest to end; null for none
+   * @param feeds the parts of the state only some pages are sent
+   */
+  public void periodic(
+      Supplier<Map<String, Map<String, Object>>> state,
+      @Nullable Run run,
+      List<? extends Feed> feeds) {
     if (!watched()) {
       return;
     }
     Map<String, @Nullable Object> patch = delta.patch(state.get());
-    if (!patch.isEmpty()) {
-      send(new Event("patch", () -> patch));
+    // Each feed some page shows says what changed; one no page shows isn't asked.
+    Set<String> shown = new HashSet<>();
+    for (Stream stream : all()) {
+      shown.addAll(stream.views());
+    }
+    Map<Feed, Map<String, @Nullable Object>> fed = new LinkedHashMap<>();
+    for (Feed feed : feeds) {
+      if (shown.contains(feed.view())) {
+        Map<String, @Nullable Object> changed = feed.patch();
+        if (!changed.isEmpty()) {
+          fed.put(feed, changed);
+        }
+      }
+    }
+    // One patch event per stream, holding every change it's sent this loop; streams sent the same
+    // feeds share it, so it's serialized once.
+    Map<List<Feed>, Event> patches = new HashMap<>();
+    for (Stream stream : streams) {
+      Set<String> views = stream.views();
+      List<Feed> carried = new ArrayList<>();
+      for (Feed feed : fed.keySet()) {
+        if (stream.following.contains(feed.view()) && views.contains(feed.view())) {
+          carried.add(feed);
+        }
+      }
+      if (!patch.isEmpty() || !carried.isEmpty()) {
+        stream.offer(
+            patches.computeIfAbsent(
+                carried,
+                feedsCarried -> new Event("patch", () -> withFeeds(patch, feedsCarried, fed))));
+      }
+      catchUp(stream, views, feeds);
     }
     Event samples = samples(run);
     if (samples != null) {
@@ -129,9 +212,59 @@ public final class Broadcaster implements AutoCloseable {
       int[] upTo = sent.clone();
       for (Stream stream : waiting) {
         stream.offer(new Event("snapshot", () -> snapshot(stream.id(), document, tracing, upTo)));
+        catchUp(stream, stream.views(), feeds);
         promote(stream);
       }
     }
+  }
+
+  /**
+   * Sends a stream everything of each feed its page has started showing, and forgets those it no
+   * longer shows, so showing one again starts over.
+   */
+  private static void catchUp(Stream stream, Set<String> views, List<? extends Feed> feeds) {
+    Set<String> following = new HashSet<>();
+    for (Feed feed : feeds) {
+      if (!views.contains(feed.view())) {
+        continue;
+      }
+      following.add(feed.view());
+      if (!stream.following.contains(feed.view())) {
+        Map<String, Object> whole = feed.sent();
+        List<String> at = List.copyOf(feed.at());
+        Map<String, Object> replace = new LinkedHashMap<>();
+        replace.put("at", at);
+        replace.put("value", whole);
+        stream.offer(new Event("replace", () -> replace));
+      }
+    }
+    stream.following = Set.copyOf(following);
+  }
+
+  /** The loop's patch, with each feed's changes nested where it goes in the page's state. */
+  private static Map<String, @Nullable Object> withFeeds(
+      Map<String, @Nullable Object> patch,
+      List<Feed> carried,
+      Map<Feed, Map<String, @Nullable Object>> fed) {
+    Map<String, @Nullable Object> all = new LinkedHashMap<>(patch);
+    for (Feed feed : carried) {
+      nest(all, feed.at(), Objects.requireNonNull(fed.get(feed)));
+    }
+    return all;
+  }
+
+  /** Puts a value at a path in a patch, copying each map on the way so nothing shared changes. */
+  private static void nest(Map<String, @Nullable Object> into, List<String> at, Object value) {
+    Map<String, @Nullable Object> map = into;
+    for (int i = 0; i < at.size() - 1; i++) {
+      Map<String, @Nullable Object> next = new LinkedHashMap<>();
+      if (map.get(at.get(i)) instanceof Map<?, ?> existing) {
+        existing.forEach((key, each) -> next.put(String.valueOf(key), each));
+      }
+      map.put(at.get(i), next);
+      map = next;
+    }
+    map.put(at.getLast(), value);
   }
 
   /** Closes every stream; none opens after. */

@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
@@ -79,6 +80,31 @@ class ArchitectureTest {
         .because(
             "gains change only through the tee's checks, which log them for replay; an experiment"
                 + " reads them")
+        .check(PITWALL);
+  }
+
+  /**
+   * A scene is data the robot program gives: Pitwall draws whatever its layers say, and knows
+   * nothing of fields, robots, or what a robot is made of. An allow-list: the scene package may use
+   * Java, WPILib's geometry (so a layer can hand over a pose as it has one), and Pitwall's push,
+   * and nothing else of WPILib's or anyone's.
+   */
+  @Test
+  void scenesKnowNothingOfFieldsOrRobots() {
+    classes()
+        .that()
+        .resideInAPackage("com.michaelgrundvig.frc.pitwall.scene..")
+        .should()
+        .onlyDependOnClassesThat()
+        .resideInAnyPackage(
+            "java..",
+            "org.jspecify..",
+            "org.wpilib.math.geometry..",
+            "com.michaelgrundvig.frc.pitwall.scene..",
+            "com.michaelgrundvig.frc.pitwall.push..")
+        .because(
+            "Pitwall stays generic: a robot program contributes its world as data, and Pitwall"
+                + " draws every shape itself")
         .check(PITWALL);
   }
 

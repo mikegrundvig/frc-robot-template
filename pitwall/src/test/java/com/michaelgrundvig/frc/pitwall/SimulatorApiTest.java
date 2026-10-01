@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.experiment.ByHand;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.scene.Scenes;
 import com.michaelgrundvig.frc.pitwall.simulator.Component;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.FakeHal;
@@ -82,7 +83,8 @@ class SimulatorApiTest {
           () -> "",
           simulator,
           new Devices(System::nanoTime),
-          new Notices());
+          new Notices(),
+          new Scenes(System::nanoTime, System.out::println));
   private final Broadcaster broadcaster =
       new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, simulator::lost);
   private final PitwallServer server = new PitwallServer(page, broadcaster, 0);

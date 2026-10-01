@@ -197,6 +197,26 @@ export function go(hash) {
   else location.hash = hash;
 }
 
+/**
+ * Replaces an element's children, but only when they differ: a part updated with nothing new keeps
+ * its elements, so a button isn't rebuilt between a press and its release. (Comparing markup reads
+ * it; nothing is ever written as HTML.)
+ */
+export function replace(element, ...children) {
+  const next = children.flat(Infinity).filter((child) => child !== null && child !== undefined
+      && child !== false);
+  const scratch = document.createElement("div");
+  for (const child of next) scratch.append(child instanceof Node ? child : String(child));
+  if (scratch.innerHTML === element.innerHTML) return false;
+  element.replaceChildren(...scratch.childNodes);
+  return true;
+}
+
+/** A number with its value's unit, as the page shows it: "40 A", or "16" for a plain number. */
+export function withUnit(number, value) {
+  return shown(number) + (value.unit ? " " + value.unit : "");
+}
+
 /** The element with this id. */
 export function byId(id) {
   return document.getElementById(id);

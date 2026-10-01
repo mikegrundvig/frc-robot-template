@@ -4,6 +4,8 @@ import static com.michaelgrundvig.frc.pitwall.Fixtures.machine;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.experiment.ByHand;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -52,10 +54,30 @@ class PageTest {
     assertThat(page.sections().get("robot")).containsEntry("mode", "Utility, enabled");
   }
 
+  /** The page draws a value's limits and checks an edit against them before sending it. */
+  @Test
+  void eachValueCarriesItsLimitsAsNumbersAndAnOpenEndHasNone() {
+    Map<String, Object> tunables = Objects.requireNonNull(page.sections().get("tunables"));
+
+    assertThat(entry(tunables, "/Machine/drive/gains/kP"))
+        .containsEntry("limits", "0 to 100")
+        .containsEntry("min", 0.0)
+        .containsEntry("max", 100.0);
+    assertThat(entry(tunables, "/Machine/travel/max"))
+        .containsEntry("limits", "at least 1")
+        .containsEntry("min", 1.0)
+        .doesNotContainKey("max");
+  }
+
   @Test
   void aPageThatDoesntKnowTheModeSaysNothing() {
     Page unknowing = new Page(status, actions, tuning, tunables, byHand.experiments());
 
     assertThat(unknowing.sections().get("robot")).containsEntry("mode", "");
+  }
+
+  @SuppressWarnings("unchecked") // a section's entry is a map, as the page reads it
+  private static Map<String, Object> entry(Map<String, Object> section, String key) {
+    return (Map<String, Object>) Objects.requireNonNull(section.get(key));
   }
 }

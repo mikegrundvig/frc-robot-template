@@ -212,6 +212,7 @@ public final class Page {
         description.put("unit", value.unit());
         description.put(
             "limits", value.limits().equals(Limits.NONE) ? "" : value.limits().toString());
+        ends(description, value.limits());
         description.put("committed", value.committed());
         description.put("record", value.record());
         description.put("group", value.group());
@@ -323,6 +324,7 @@ public final class Page {
       described.put("editable", tunable.editable());
       described.put(
           "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
+      ends(described, tunable.limits());
       shown.put(tunable.path(), described);
     }
     return shown;
@@ -426,6 +428,19 @@ public final class Page {
   /** A record's documentation as the page reads it: its summary and its text. */
   private static Map<String, Object> doc(ParameterDocs doc) {
     return pair("summary", doc.summary(), "text", doc.text());
+  }
+
+  /**
+   * A tuning limit's ends as numbers, {@code "min"} and {@code "max"}, beside its text, so the page
+   * can draw them and check an edit before sending it; an open end has none.
+   */
+  static void ends(Map<String, Object> shown, Limits limits) {
+    if (Double.isFinite(limits.min())) {
+      shown.put("min", limits.min());
+    }
+    if (Double.isFinite(limits.max())) {
+      shown.put("max", limits.max());
+    }
   }
 
   /** Two values by name, in this order, as JSON writes them. */

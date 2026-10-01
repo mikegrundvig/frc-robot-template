@@ -1,8 +1,7 @@
 // Pit: is the robot ready, and the checks to run before a match. The status items, the actions,
 // and the switches: every other WPILib tunable in the robot program, which acts at once.
 
-import { robot, onChange, send, shown, h, say } from "./core.js";
-import { replace } from "./rows.js";
+import { robot, onChange, send, shown, h, say, replace } from "./core.js";
 
 let statusList;
 let actionCard;

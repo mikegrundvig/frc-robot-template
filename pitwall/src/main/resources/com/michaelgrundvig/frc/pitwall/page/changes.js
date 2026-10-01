@@ -2,8 +2,7 @@
 // Nothing tuned is saved on the robot: a restart, or the field connecting, returns every value to
 // committed. Committing is writing the builder calls into the robot's configuration.
 
-import { robot, onChange, send, h, say } from "./core.js";
-import { replace } from "./rows.js";
+import { robot, onChange, send, h, say, replace } from "./core.js";
 
 let reports;
 let none;

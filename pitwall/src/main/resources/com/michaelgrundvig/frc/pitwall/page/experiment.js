@@ -1,9 +1,12 @@
 // Experiment: run a test motion on a rig, see how it answered, change a gain, run again, compare.
 // Runs stay in this tab: they outlive reconnects and restarts of the robot.
 
-import { robot, onChange, onSamples, api, send, lastRequestAt, shown, h, say } from "./core.js";
+import {
+  robot, onChange, onSamples, api, send, lastRequestAt, shown, h, say, replace,
+} from "./core.js";
 import { onEdits } from "./edits.js";
-import { makeRow, updateRow, replace } from "./rows.js";
+import { makeRow, updateRow } from "./rows.js";
+import { valueDocs } from "./docs.js";
 
 // Every run this tab has seen, oldest first.
 const runs = [];
@@ -178,7 +181,7 @@ function buildRigs() {
         unpublished.push(path);
         continue;
       }
-      const row = makeRow(path, "exp");
+      const row = makeRow(path, "exp", { select: openDocs });
       view.rows.push(row);
       gains.append(row.el);
     }
@@ -249,6 +252,20 @@ async function runOrStop(name, view) {
 function updateGain(view, row) {
   updateRow(row);
   if (view.busy) row.input.disabled = true;
+  if (row.docs) replace(row.docs, valueDocs(row.path, true));
+}
+
+/** What a gain means, under its row: its name opens it, and again closes it. */
+function openDocs(row, how) {
+  if (how === "focus") return;
+  if (row.docs) {
+    row.docs.remove();
+    row.docs = null;
+    return;
+  }
+  row.docs = h("div", { class: "docs docs-inline", "aria-label": "What it means" },
+    valueDocs(row.path, true));
+  row.el.append(row.docs);
 }
 
 function updateRig(name, view) {

@@ -21,6 +21,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.hardware.hal.AllianceStationID;
@@ -95,7 +97,19 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code POST /api/heartbeat}: nothing, but it keeps a run going: while an experiment runs,
  *       the page that started it sends a request at least every 500 ms (the deadman), naming its
  *       event stream in the {@code Pitwall-Stream} header, as it does with every request.
+ *   <li>{@code GET /api/devices}: each device's card as of its last read, as the event stream's
+ *       {@code devices} section carries them ({@link Devices}).
+ *   <li>{@code GET /api/devices/<name>/downloads/<id>}: a file from a device, fetched now, as an
+ *       attachment; 502 when the device doesn't give it.
+ *   <li>{@code GET /api/devices/<name>/log?priority=&unit=&cursor=}: a page of a device's log,
+ *       {@code {"entries": [{"time", "priority", "unit", "message"}], "next"}}: priority from 0 to
+ *       7 (7, everything, when left out), only one unit's entries when one is named, and the page
+ *       after a cursor; 502 when the device doesn't answer. {@code /log.txt} with the same query is
+ *       the log as text, to save: every page from the cursor on, up to a bound.
  * </ul>
+ *
+ * <p>The device routes ask the device on the server's thread, never the robot loop's; the page
+ * never talks to a device itself.
  *
  * <p>In the simulator only, the simulator's controls ({@link Simulator}); on a robot every one of
  * these is 404, so nothing can write the Driver Station's state there. They are exempt from the
@@ -358,6 +372,23 @@ public final class PitwallServer implements AutoCloseable {
   /** The simulator's routes, which a robot doesn't have. */
   private static final String SIMULATOR = "/api/simulator";
 
+  /**
+   * A device's routes: a download by its id, and its log as a page or as text. Names as {@link
+   * Devices#NAME} allows them, so no request can name anything else.
+   */
+  private static final Pattern DEVICE_ROUTE =
+      Pattern.compile(
+          "/api/devices/([a-z0-9][a-z0-9-]{0,62})/(downloads/([a-z0-9][a-z0-9-]{0,62})|log|log\\.txt)");
+
+  /** The most pages of a device's log one text download gathers, and the most text. */
+  static final int MAX_LOG_PAGES = 100;
+
+  static final int MAX_LOG_TEXT_BYTES = 8 * 1024 * 1024;
+
+  /** Syslog's priorities, by number, as a log's text names them. */
+  private static final List<String> PRIORITIES =
+      List.of("emerg", "alert", "crit", "err", "warning", "notice", "info", "debug");
+
   /** The page, and the resources of the API. */
   private static final class Api {
     /** The modes the page may choose: a Driver Station's, not "no mode". */
@@ -385,6 +416,7 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/experiments", List.of("GET", "POST")),
             Map.entry("/api/run", List.of("GET")),
             Map.entry("/api/heartbeat", List.of("POST")),
+            Map.entry("/api/devices", List.of("GET")),
             Map.entry("/api/simulator", List.of("GET", "PATCH")),
             Map.entry("/api/simulator/step", List.of("POST")),
             Map.entry("/api/simulator/stop", List.of("POST")),
@@ -445,7 +477,8 @@ public final class PitwallServer implements AutoCloseable {
                 404, "Not found", "There is no simulator here: a robot has no simulator controls");
           }
           List<String> allowed = METHODS.get(path);
-          if (allowed == null && PAGE_FILE.matcher(path).matches()) {
+          if (allowed == null
+              && (PAGE_FILE.matcher(path).matches() || DEVICE_ROUTE.matcher(path).matches())) {
             allowed = List.of("GET");
           }
           if (allowed == null) {
@@ -478,6 +511,7 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/experiments" -> postExperiment(exchange);
             case "GET /api/run" -> sendJson(exchange, 200, run(true));
             case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
+            case "GET /api/devices" -> sendJson(exchange, 200, state.devices().view());
             case "GET /api/simulator" -> sendJson(exchange, 200, simulatorView());
             case "PATCH /api/simulator" -> patchSimulator(exchange);
             case "POST /api/simulator/step" ->
@@ -490,10 +524,14 @@ public final class PitwallServer implements AutoCloseable {
             case "POST /api/simulator/scenarios" -> postScenario(exchange);
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
             default -> {
-              if (!PAGE_FILE.matcher(path).matches()) {
+              Matcher device = DEVICE_ROUTE.matcher(path);
+              if (device.matches()) {
+                device(exchange, device);
+              } else if (PAGE_FILE.matcher(path).matches()) {
+                sendPageFile(exchange, path);
+              } else {
                 throw new IllegalStateException("unrouted: " + method + " " + path);
               }
-              sendPageFile(exchange, path);
             }
           }
         } catch (Problem problem) {
@@ -754,6 +792,159 @@ public final class PitwallServer implements AutoCloseable {
         values.put(field.getKey(), value);
       }
       answer(exchange, tunables.requestChanges(values), this::wpilibTunables);
+    }
+
+    /**
+     * A device's download or log, asked of the device now, on this thread: it may wait on the
+     * network, never the robot loop.
+     */
+    private void device(HttpExchange exchange, Matcher route) throws IOException {
+      String name = route.group(1);
+      Devices.Device device =
+          state
+              .devices()
+              .named(name)
+              .orElseThrow(() -> new Problem(404, "No device", "There is no device named " + name));
+      String what = route.group(2);
+      String id = route.group(3);
+      if (id != null) {
+        Devices.Download download =
+            device
+                .download(id)
+                .orElseThrow(
+                    () -> new Problem(404, "No download", name + " has no download named " + id));
+        Devices.File file = fromDevice(name, download.fetch()::fetch);
+        sendFile(exchange, file.name(), file.contentType(), file.bytes());
+        return;
+      }
+      Devices.Log log =
+          device.log().orElseThrow(() -> new Problem(404, "No log", name + " has no log"));
+      Devices.LogQuery query = logQuery(exchange);
+      if (what.equals("log")) {
+        Devices.LogPage page = fromDevice(name, () -> log.read(query));
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("entries", page.entries().stream().map(Api::entry).toList());
+        shown.put("next", page.next());
+        sendJson(exchange, 200, shown);
+        return;
+      }
+      StringBuilder text = new StringBuilder();
+      Devices.LogQuery next = query;
+      for (int pages = 0; pages < MAX_LOG_PAGES && text.length() < MAX_LOG_TEXT_BYTES; pages++) {
+        Devices.LogQuery asked = next;
+        Devices.LogPage page = fromDevice(name, () -> log.read(asked));
+        for (Devices.LogEntry entry : page.entries()) {
+          text.append(entry.time())
+              .append(' ')
+              .append(PRIORITIES.get(Math.clamp(entry.priority(), 0, 7)))
+              .append(' ')
+              .append(entry.unit())
+              .append(": ")
+              .append(entry.message())
+              .append('\n');
+        }
+        if (page.next().isEmpty() || page.next().equals(asked.cursor())) {
+          break;
+        }
+        next = new Devices.LogQuery(page.next(), query.priority(), query.unit());
+      }
+      sendFile(
+          exchange,
+          name + "-log.txt",
+          "text/plain; charset=utf-8",
+          text.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Something a device gives, or 502 saying why it didn't. */
+    private static <T> T fromDevice(String name, DeviceCall<T> call) {
+      try {
+        return call.call();
+      } catch (IOException | RuntimeException e) {
+        String why = e.getMessage();
+        throw new Problem(
+            502,
+            "No answer from " + name,
+            name + " didn't answer: " + (why != null && !why.isBlank() ? why : e.toString()));
+      }
+    }
+
+    /** A call to a device. */
+    @FunctionalInterface
+    private interface DeviceCall<T> {
+      T call() throws IOException;
+    }
+
+    /** What the page asks of a log: {@code ?priority=&unit=&cursor=}, each optional. */
+    private static Devices.LogQuery logQuery(HttpExchange exchange) {
+      Map<String, String> asked = query(exchange.getRequestURI().getRawQuery());
+      for (String key : asked.keySet()) {
+        if (!Set.of("priority", "unit", "cursor").contains(key)) {
+          throw new Problem(400, "Not a filter", "A log is asked by priority, unit, and cursor");
+        }
+      }
+      int priority = 7;
+      String given = asked.get("priority");
+      if (given != null && !given.isEmpty()) {
+        if (!given.matches("[0-7]")) {
+          throw new Problem(400, "Not a priority", "A priority is a number from 0 to 7");
+        }
+        priority = Integer.parseInt(given);
+      }
+      try {
+        return new Devices.LogQuery(
+            asked.getOrDefault("cursor", ""), priority, asked.getOrDefault("unit", ""));
+      } catch (IllegalArgumentException e) {
+        throw new Problem(400, "Not a log's filter", String.valueOf(e.getMessage()));
+      }
+    }
+
+    /** A query string's parameters, decoded; the last of a name given twice. */
+    private static Map<String, String> query(@Nullable String raw) {
+      Map<String, String> parameters = new LinkedHashMap<>();
+      if (raw == null || raw.isEmpty()) {
+        return parameters;
+      }
+      if (raw.length() > 2048) {
+        throw new Problem(400, "Too long", "A query is at most 2048 characters");
+      }
+      for (String pair : raw.split("&")) {
+        int equals = pair.indexOf('=');
+        String key = equals < 0 ? pair : pair.substring(0, equals);
+        String value = equals < 0 ? "" : pair.substring(equals + 1);
+        try {
+          parameters.put(
+              URLDecoder.decode(key, StandardCharsets.UTF_8),
+              URLDecoder.decode(value, StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException e) {
+          throw new Problem(400, "Not a query", "The query can't be read: " + e.getMessage());
+        }
+      }
+      return parameters;
+    }
+
+    private static Map<String, Object> entry(Devices.LogEntry entry) {
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("time", entry.time());
+      shown.put("priority", entry.priority());
+      shown.put("unit", entry.unit());
+      shown.put("message", entry.message());
+      return shown;
+    }
+
+    /** A file, to save rather than show: never shown in the page, whatever it holds. */
+    private static void sendFile(HttpExchange exchange, String name, String type, byte[] bytes)
+        throws IOException {
+      headers(exchange, type);
+      exchange.getResponseHeaders().set("Content-Type", type);
+      exchange
+          .getResponseHeaders()
+          .set("Content-Disposition", "attachment; filename=\"" + name + "\"");
+      exchange.sendResponseHeaders(200, bytes.length > 0 ? bytes.length : -1);
+      if (bytes.length > 0) {
+        try (OutputStream out = exchange.getResponseBody()) {
+          out.write(bytes);
+        }
+      }
     }
 
     /** The simulator's controls: there are none on a robot, and their routes are 404 there. */

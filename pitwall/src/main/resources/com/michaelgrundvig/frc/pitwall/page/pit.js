@@ -1,8 +1,10 @@
 // Pit: is the robot ready, and the checks to run before a match. The status items, the actions,
-// and the switches: every other WPILib tunable in the robot program, which acts at once.
+// and the switches: every other WPILib tunable in the robot program, which acts at once. Below
+// them, a card for each device the robot reports on (devices.js).
 
 import { robot, onChange, onConnection, send, shown, h, say, replace } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
+import { mountDevices } from "./devices.js";
 
 let statusList;
 let actionCard;
@@ -35,6 +37,7 @@ function mount(view) {
     h("div", { class: "pit" },
       h("section", { class: "card" }, h("h2", null, "Status"), statusList),
       h("div", null, actionCard, switchCard)));
+  mountDevices(view);
   onChange(render);
   onConnection(() => {
     if (!robot.doc) return;

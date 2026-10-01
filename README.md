@@ -74,6 +74,11 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to stage a run's gains again and the builder calls
     that commit them. A gain changes only the way any value does, through the checks below.
+  - **Devices**: a card in Pit for each device the robot program asks after (a vision
+    coprocessor, say), saying whether it's there and how it is, and ending in what can be done
+    about it: its own page, a file to download from it, or its log to read. The robot program asks
+    the device, on Pitwall's server threads; the browser never reaches a device itself:
+    `pitwall.devices().add(Devices.Device.named("vision-front", "Coprocessor", card))`.
   - **The simulator's controls**, in the page's Sim view (in the simulator only; a robot has
     none), in place of WPILib's simulator GUI: the Driver Station (enable, the mode, the alliance
     station, the field system, the match time), driving from the keyboard or a gamepad, pausing

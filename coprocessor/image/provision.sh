@@ -7,7 +7,8 @@
 # block of /etc/fstab) rather than adding to one.
 #
 # In order, it:
-#   - installs nvme-cli, the one package it adds;
+#   - installs the packages it adds, at pinned versions: nvme-cli (the drive's health) and polkitd
+#     (the agent's soft-off);
 #   - installs the pinned PhotonVision jar, and runs PhotonVision with -n, so it leaves the network
 #     alone;
 #   - leaves the network to NetworkManager alone, with one profile, the robot's static address,
@@ -16,10 +17,16 @@
 #     PhotonVision's config folder and at /var/log/journal; tmpfs for /tmp, /var/tmp, /var/log, and
 #     NetworkManager's and systemd's state; the journal kept and synced every 10 s; Armbian's RAM
 #     logging, first-boot resize, and first-run tasks off;
+#   - closes the base image's logins: no console autologin, no console at all, and no password
+#     that works (root's and photon's were public defaults);
 #   - makes SSH take keys only, with a host key made per drive;
 #   - installs the health agent and its unit, and the root helper that reads the drive's health
 #     for it;
-#   - and last, runs PhotonVision's --smoketest, which also makes an empty settings database.
+#   - runs PhotonVision's --smoketest, which also makes an empty settings database, and leaves
+#     its native libraries extracted where PhotonVision looks for them (the root is read-only
+#     after this);
+#   - and last, checks itself: no usable password, no autologin, and (in the chroot) sshd's
+#     effective settings.
 #
 # The partitions themselves are added to the image file afterwards, outside the chroot, by
 # layout.sh: this writes what inside the root refers to them (by label).
@@ -50,6 +57,10 @@ agent_unit="$repo/$COPROC_AGENT_UNIT"
 smoke_dir=""
 target=/
 offline=no
+
+# The packages it adds, pinned to Debian 13 (trixie)'s versions. A new version on the mirror
+# fails the build here, loudly, until the pin is updated: the image changes only by a commit.
+PACKAGES=(nvme-cli=2.13-2 polkitd=126-2)
 
 usage() {
   sed -n '/^# Usage/,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2
@@ -131,11 +142,18 @@ check_base() {
 }
 
 step_packages() {
-  # nvme-cli reads the drive's health for the agent (files/coprocessor-facts.sh).
-  if ! dpkg-query -W -f='${Status}' nvme-cli 2>/dev/null | grep -q 'ok installed'; then
-    say "installing nvme-cli"
+  # nvme-cli reads the drive's health for the agent (files/coprocessor-facts.sh); polkitd applies
+  # the agent's soft-off rule (files/coprocessor-agent.rules).
+  local package missing=()
+  for package in "${PACKAGES[@]}"; do
+    if [[ $(dpkg-query -W -f='${Status} ${Version}' "${package%%=*}" 2>/dev/null) != "install ok installed ${package#*=}" ]]; then
+      missing+=("$package")
+    fi
+  done
+  if ((${#missing[@]})); then
+    say "installing ${missing[*]}"
     apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends nvme-cli
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}"
     apt-get clean
     rm -rf /var/lib/apt/lists/*
   fi
@@ -154,7 +172,7 @@ step_photonvision() {
   # PhotonVision's own command line, from its unit, with -n added (and only once).
   exec_line=$(sed -n 's/^ExecStart=//p' "$pv_unit" | tail -1)
   [[ -n $exec_line ]] || die "no ExecStart in $pv_unit"
-  exec_line=$(printf '%s\n' "$exec_line" | sed -E 's/ (-n|--disable-networking)( |$)/\2/g')
+  exec_line=$(printf '%s\n' "$exec_line" | sed -E 's/ (-n|--disable-networking)( |$)/\2/g; s/[[:space:]]+$//')
   put /etc/systemd/system/photonvision.service.d/10-coprocessor.conf 0644 <<EOF
 # Written by coprocessor/image/provision.sh.
 [Unit]
@@ -245,13 +263,49 @@ step_storage() {
     armbian-led-state.service
   # Timers that only write to the root (package lists, man pages, log rotation, dpkg backups).
   units mask apt-daily.timer apt-daily-upgrade.timer man-db.timer logrotate.timer dpkg-db-backup.timer
+  # The journal is the log: rsyslog would only copy it into /var/log, in RAM. fake-hwclock saves the
+  # clock to the root every hour and at shutdown, which a read-only root refuses; it still loads
+  # the build's time at boot.
+  units mask rsyslog.service syslog.socket fake-hwclock-save.timer fake-hwclock-save.service
   # The machine ID is written at stamping, one per computer; the common image carries none.
-  : >"$(t /etc/machine-id)"
+  put /etc/machine-id 0444 </dev/null
   if [[ -d $(t /var/lib/dbus) ]]; then
     ln -sfn /etc/machine-id "$(t /var/lib/dbus/machine-id)"
   fi
   # With no clock battery, systemd starts the clock no earlier than this file's time: the build's.
   touch "$(t /usr/lib/clock-epoch)"
+}
+
+# The base image's logins: its console logs root in with no password (Armbian's autologin
+# overrides, left behind because PhotonVision's image skips Armbian's first-login script), and
+# root and photon have public default passwords. No console here at all: with no password that
+# works, a login prompt could never be used, and boot messages still reach the screen and the
+# serial port. People log in over SSH, with the team's key, as photon.
+step_logins() {
+  local f
+  rm -f "$(t /etc/systemd/system/getty@.service.d/override.conf)" \
+    "$(t /etc/systemd/system/serial-getty@.service.d/override.conf)"
+  rmdir "$(t /etc/systemd/system/getty@.service.d)" "$(t /etc/systemd/system/serial-getty@.service.d)" \
+    2>/dev/null || true
+  units mask getty@.service serial-getty@.service autovt@.service console-getty.service
+  put /etc/systemd/logind.conf.d/70-coprocessor.conf 0644 <<'LOGIND'
+# Written by coprocessor/image/provision.sh: no logins on the board's own screen or keyboard.
+[Login]
+NAutoVTs=0
+ReserveVT=0
+LOGIND
+  # "*" matches no password, so nothing logs in with one; a key still logs in over SSH ("!" would
+  # lock the account, which sshd's PAM account check refuses even for a key). photon keeps sudo
+  # without a password: with no password left, it's how the team's key holder gets root for
+  # maintenance (bench-procedures.md's checks use it).
+  for f in "$(t /etc/shadow)" "$(t /etc/shadow-)"; do
+    [[ -f $f ]] || continue
+    awk -F: -v OFS=: -v user="$IMG_SSH_USER" '$1 == "root" || $1 == user { $2 = "*" } { print }' \
+      "$f" >"$f.coproc-new"
+    chmod --reference="$f" "$f.coproc-new"
+    chown --reference="$f" "$f.coproc-new"
+    mv -f "$f.coproc-new" "$f"
+  done
 }
 
 step_ssh() {
@@ -271,16 +325,33 @@ step_agent() {
   mkdir -p "$(dirname "$(t "$IMG_AGENT_JAR")")"
   install -m 0644 "$agent_jar" "$(t "$IMG_AGENT_JAR")"
   put "$IMG_AGENT_UNIT" 0644 <"$agent_unit"
-  # The unit's own user, unless systemd makes one (DynamicUser): a system account that can read
-  # the journal.
+  # Never root. Its account is its User=, or with DynamicUser=yes and no User=, the unit's name;
+  # it must be the one the soft-off rule names.
+  local dynamic=no unit_name=${IMG_AGENT_UNIT##*/}
+  if grep -Eiq '^DynamicUser=(yes|true|on|1)[[:space:]]*$' "$agent_unit"; then
+    dynamic=yes
+  fi
   user=$(sed -n 's/^User=//p' "$agent_unit" | tail -1)
-  if [[ -n $user ]] && ! grep -Eiq '^DynamicUser=(yes|true|on|1)' "$agent_unit" && [[ $offline == no ]]; then
+  if [[ -z $user && $dynamic == no ]]; then
+    die "$agent_unit would run the agent as root: give it User= or DynamicUser=yes"
+  fi
+  user=${user:-${unit_name%.service}}
+  if [[ $user == root || $user == 0 ]]; then
+    die "$agent_unit would run the agent as root"
+  fi
+  [[ $user == "$IMG_AGENT_USER" ]] ||
+    die "$agent_unit runs the agent as '$user', but the soft-off rule is for '$IMG_AGENT_USER' (IMG_AGENT_USER, lib/common.sh)"
+  # A fixed account (not DynamicUser) is made here, able to read the journal.
+  if [[ $dynamic == no && $offline == no ]]; then
     if ! getent passwd "$user" >/dev/null; then
       useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$user"
     fi
     usermod -a -G systemd-journal "$user"
   fi
-  units enable "${IMG_AGENT_UNIT##*/}"
+  units enable "$unit_name"
+  # Soft-off: the agent's account may stop PhotonVision and power the board off, nothing else.
+  sed "s/@AGENT_USER@/$IMG_AGENT_USER/" "$here/files/coprocessor-agent.rules" |
+    put /etc/polkit-1/rules.d/60-coprocessor-agent.rules 0644
   # The root helper: the drive's health and the SPI bootloader's version, into /run for the agent.
   put /usr/local/lib/coprocessor/coprocessor-facts.sh 0755 <"$here/files/coprocessor-facts.sh"
   put_file coprocessor-facts.service /etc/systemd/system/coprocessor-facts.service 0644
@@ -298,18 +369,53 @@ step_smoketest() {
     dir=$(mktemp -d /tmp/coproc-smoketest.XXXXXX)
     temporary=yes
   fi
-  # A fresh database every run. PhotonVision writes relative to its working directory, so nothing
-  # lands in the image.
+  # A fresh database every run. PhotonVision writes its settings relative to its working
+  # directory, so they land outside the image. Its native libraries it extracts under the user's
+  # home (WPILib's loader: ~/.wpilib/nativecache), so with root's real home they land in the
+  # image, where PhotonVision, run as root on a read-only root, finds them instead of failing to
+  # write them (to confirm on a board).
   rm -rf "$dir/photonvision_config"
-  mkdir -p "$dir/tmp" "$dir/home"
+  mkdir -p "$dir/tmp"
   say "running PhotonVision's smoke test"
-  (cd "$dir" && java -Djava.io.tmpdir="$dir/tmp" -Duser.home="$dir/home" \
+  (cd "$dir" && java -Djava.io.tmpdir="$dir/tmp" \
     -jar "$IMG_PV_JAR" --smoketest -n --platform="$BOARD_PV_PLATFORM")
   [[ -f $dir/photonvision_config/photon.sqlite ]] ||
     die "the smoke test passed, but made no photonvision_config/photon.sqlite in $dir"
-  rm -rf "${dir:?}/tmp" "${dir:?}/home"
+  [[ -d /root/.wpilib/nativecache ]] ||
+    die "the smoke test left no /root/.wpilib/nativecache: PhotonVision would try to write it on the read-only root"
+  rm -rf "${dir:?}/tmp"
   if [[ $temporary == yes ]]; then
     rm -rf "$dir"
+  fi
+}
+
+# The image checks itself before it's packed: whatever the steps above did or missed, a build
+# with a usable password or a console autologin fails here.
+check_result() {
+  local f names dir found=() key settings setting
+  for f in "$(t /etc/shadow)" "$(t /etc/shadow-)"; do
+    [[ -f $f ]] || continue
+    names=$(awk -F: '$2 !~ /^[*!]/ { print $1 }' "$f" | paste -sd ' ')
+    [[ -z $names ]] || die "${f#"${target%/}"} leaves a usable password (or none) for: $names"
+  done
+  for dir in /etc/systemd/system /usr/lib/systemd/system /lib/systemd/system; do
+    [[ -d $(t "$dir") ]] || continue
+    while IFS= read -r f; do
+      found+=("${f#"${target%/}"}")
+    done < <(find -H "$(t "$dir")" -path '*getty*' -type f -exec grep -l -e '--autologin' {} +)
+  done
+  ((${#found[@]} == 0)) || die "a console logs in by itself: ${found[*]}"
+  # sshd's effective settings, as it will run them: in the image's chroot only.
+  if [[ $offline == no && -x /usr/sbin/sshd ]]; then
+    key=$(mktemp -d /tmp/coproc-sshd.XXXXXX)
+    ssh-keygen -q -t ed25519 -N "" -f "$key/key"
+    mkdir -p /run/sshd
+    settings=$(/usr/sbin/sshd -T -o "HostKey=$key/key")
+    rm -rf "$key"
+    for setting in "passwordauthentication no" "kbdinteractiveauthentication no" \
+      "permitrootlogin no" "pubkeyauthentication yes" "x11forwarding no"; do
+      grep -qx "$setting" <<<"$settings" || die "sshd's effective settings lack '$setting'"
+    done
   fi
 }
 
@@ -320,11 +426,13 @@ fi
 step_photonvision
 step_network
 step_storage
+step_logins
 step_ssh
 step_agent
 if [[ $offline == no ]]; then
   step_smoketest
 fi
+check_result
 say "provisioned for $BOARD_TITLE"
 if [[ -n $smoke_dir && $offline == no ]]; then
   say "the empty settings database is $smoke_dir/photonvision_config/photon.sqlite"

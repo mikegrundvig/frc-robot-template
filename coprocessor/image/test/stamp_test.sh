@@ -145,11 +145,14 @@ test_stamp_makes_the_folders_datas_bind_mounts_need() {
   assert_mode "$TMP/out/data/ssh" 700
 }
 
-test_stamp_installs_the_teams_public_keys() {
+test_stamp_installs_the_teams_public_keys_without_their_comments() {
   setup_stamp
+  printf '# the team laptop\n\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherExampleKey mentor@example.org\n' \
+    >>"$TMP/repo/coprocessors/authorized_keys"
   run_stamp vision-front
   local keys=$TMP/out/root/home/photon/.ssh/authorized_keys
-  cmp -s "$keys" "$TMP/repo/coprocessors/authorized_keys" || fail "authorized_keys differs from the repository's"
+  assert_eq "$(cat "$keys")" "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyForTestsOnly
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherExampleKey" "authorized_keys"
   assert_mode "$keys" 644
   assert_mode "$TMP/out/root/home/photon/.ssh" 755
 }
@@ -164,7 +167,9 @@ test_stamp_without_keys_leaves_ssh_closed() {
 
 test_stamp_refuses_a_private_key() {
   setup_stamp
-  printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n' \
+  # Built here, so the test file itself never looks like a key to a secret scanner.
+  local kind="PRIV""ATE"
+  printf -- '-----BEGIN OPENSSH %s KEY-----\nabc\n-----END OPENSSH %s KEY-----\n' "$kind" "$kind" \
     >"$TMP/repo/coprocessors/authorized_keys"
   assert_fails "private key" run_stamp vision-front
 }
@@ -208,13 +213,64 @@ test_stamp_refuses_addresses_outside_frcs_range() {
 test_stamp_refuses_two_computers_at_one_address() {
   setup_stamp
   yq -i '.computers[1].address = 11' "$TMP/repo/coprocessors/coprocessors.yaml"
-  assert_fails "same address" run_stamp vision-front
+  assert_fails "two computers have the address 11" run_stamp vision-front
 }
 
 test_stamp_refuses_two_computers_with_one_name() {
   setup_stamp
   yq -i '.computers[1].name = "vision-front"' "$TMP/repo/coprocessors/coprocessors.yaml"
-  assert_fails "same name" run_stamp vision-front
+  assert_fails "two computers are named vision-front" run_stamp vision-front
+}
+
+# Numbers are written plainly: bash would read 0254 as octal, and 09 not at all.
+test_stamp_refuses_numbers_with_leading_zeros() {
+  setup_stamp
+  local table=$TMP/repo/coprocessors/coprocessors.yaml
+  sed -i 's/^team: 12345$/team: 0254/' "$table"
+  assert_fails "team '0254' isn't a team number" run_stamp vision-front
+  sed -i 's/^team: 0254$/team: 254/; s/address: 11$/address: 09/' "$table"
+  assert_fails "address '09' is outside" run_stamp vision-front
+  sed -i 's/address: 09$/address: 9/' "$table"
+  run_stamp vision-front
+  assert_eq "$(yq -r '.address' "$TMP/out/root/etc/coprocessor/stamp.json")" 10.2.54.9
+}
+
+test_stamp_refuses_a_team_number_too_big() {
+  setup_stamp
+  yq -i '.team = 25600' "$TMP/repo/coprocessors/coprocessors.yaml"
+  assert_fails "isn't a team number" run_stamp vision-front
+}
+
+test_stamp_refuses_a_port_that_isnt_one() {
+  setup_stamp
+  local table=$TMP/repo/coprocessors/coprocessors.yaml port
+  for port in 0 65536 08080 '"http"'; do
+    yq -i ".agentPort = $port" "$table"
+    assert_fails "agentPort" run_stamp vision-front
+  done
+  yq -i '.agentPort = 5808 | .computers[1].agentPort = 70000' "$table"
+  assert_fails "vision-back's agentPort '70000'" run_stamp vision-front
+}
+
+test_stamp_refuses_cameras_that_arent_a_list_of_names() {
+  setup_stamp
+  local table=$TMP/repo/coprocessors/coprocessors.yaml
+  yq -i '.computers[0].cameras = "front-left"' "$table"
+  assert_fails "cameras must be a list" run_stamp vision-front
+  yq -i '.computers[0].cameras = ["front/left"]' "$table"
+  assert_fails "cameras must each be a name" run_stamp vision-front
+  yq -i '.computers[0].cameras = [{"name": "front"}]' "$table"
+  assert_fails "cameras must each be a name" run_stamp vision-front
+  yq -i '.computers[0].cameras = [""]' "$table"
+  assert_fails "cameras must each be a name" run_stamp vision-front
+}
+
+test_stamp_writes_camera_names_as_text() {
+  setup_stamp
+  sed -i 's/cameras: \[front-left, front-right\]/cameras: [7, front-right]/' \
+    "$TMP/repo/coprocessors/coprocessors.yaml"
+  run_stamp vision-front
+  assert_eq "$(yq -o=json -I=0 '.cameras' "$TMP/out/root/etc/coprocessor/stamp.json")" '["7","front-right"]'
 }
 
 test_stamp_refuses_a_name_that_cant_be_a_hostname() {

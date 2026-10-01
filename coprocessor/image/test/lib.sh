@@ -214,6 +214,28 @@ EOF
   printf '[connection]\nid=Wired connection 1\ntype=ethernet\n' \
     >"$root/etc/NetworkManager/system-connections/old.nmconnection"
   echo 0123456789abcdef0123456789abcdef >"$root/etc/machine-id"
+  # The logins, as PhotonVision's Orange Pi image ships them: the console logs root in with no
+  # password, and root and photon have the public default passwords (stand-in hashes here).
+  local getty
+  for getty in getty serial-getty; do
+    mkdir -p "$root/etc/systemd/system/$getty@.service.d"
+    # shellcheck disable=SC2016 # $TERM is the unit's, as the base image writes it
+    printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --noissue --autologin root %%I $TERM\nType=idle\n' \
+      >"$root/etc/systemd/system/$getty@.service.d/override.conf"
+  done
+  mkdir -p "$root/etc/systemd/system/getty.target.wants" "$root/etc/sudoers.d"
+  ln -s /lib/systemd/system/getty@.service "$root/etc/systemd/system/getty.target.wants/getty@tty1.service"
+  ln -s /lib/systemd/system/serial-getty@.service \
+    "$root/etc/systemd/system/getty.target.wants/serial-getty@ttyFIQ0.service"
+  cat >"$root/etc/shadow" <<'EOF'
+root:$y$j9T$fixture$NotARealHashRoot:20718:0:99999:7:::
+daemon:*:20697:0:99999:7:::
+sshd:!*:20697::::::
+photon:$y$j9T$fixture$NotARealHashPhoton:20718:0:99999:7:::
+EOF
+  cp "$root/etc/shadow" "$root/etc/shadow-"
+  chmod 0640 "$root/etc/shadow" "$root/etc/shadow-"
+  echo 'photon ALL=(ALL) NOPASSWD: ALL' >"$root/etc/sudoers.d/010_photon-nopasswd"
 
   echo 'photonvision jar' >"$TMP/photonvision.jar"
   echo 'agent jar' >"$TMP/coprocessor-agent.jar"

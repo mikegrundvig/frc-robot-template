@@ -40,25 +40,31 @@ test_plan_refuses_a_lock_for_another_photonvision() {
   need_yq
   make_repo
   sed -i 's/alpha-2-69/alpha-2-72/' "$TMP/repo/coprocessor/photonvision.lock"
-  assert_fails "but the robot code uses dev-v2027.0.0-alpha-2-69-g71416112" run_plan --release r1
+  assert_fails "but the robot code uses dev-v2027.0.0-alpha-2-69-g71416112" run_plan --release coprocessors-1
 }
 
 test_plan_refuses_a_placeholder_checksum() {
   need_yq
   make_repo
   yq -i '.images.orangepi-5.sha256 = "TODO: archive the image first"' "$TMP/repo/coprocessor/photonvision.lock"
-  assert_fails "orangepi-5's base image's sha256 is missing or a placeholder" run_plan --release r1
+  assert_fails "orangepi-5's base image's sha256 is missing or a placeholder" run_plan --release coprocessors-1
 }
 
 test_plan_refuses_another_boards_base_image() {
   need_yq
   make_repo
   yq -i '.images.orangepi-5.url |= sub("opi5.img", "opi5plus.img")' "$TMP/repo/coprocessor/photonvision.lock"
-  assert_fails "PhotonVision's for Orange Pi 5 is photonvision_opi5.img.xz" run_plan --release r1
+  assert_fails "PhotonVision's for Orange Pi 5 is photonvision_opi5.img.xz" run_plan --release coprocessors-1
 }
 
 test_plan_refuses_a_bad_release_name() {
   need_yq
   make_repo
-  assert_fails "release name" run_plan --release 'v1; rm -rf /'
+  assert_fails "release name" run_plan --release 'coprocessors-1; rm -rf /'
+}
+
+test_plan_publishes_only_coprocessors_names() {
+  need_yq
+  make_repo
+  assert_fails "a release is named coprocessors-" run_plan --release v2027.1
 }

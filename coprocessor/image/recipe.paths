@@ -7,7 +7,10 @@
 #     git ls-tree -r --full-tree HEAD -- <each path below, in this order>
 #   as lowercase hex. Lines here that are blank or start with # are ignored.
 #
-# Documentation and tests are left out on purpose: changing them changes no image.
+# Documentation and tests are left out on purpose: changing them changes no image. The build files
+# are in, because they build the agent's jar: a change to the root build or the version catalog
+# (a dependency update) changes the recipe too, and the coprocessors need a new release.
+# test/recipe_test.sh checks that everything provision.sh reads from the repository is covered.
 coprocessor/image/provision.sh
 coprocessor/image/layout.sh
 coprocessor/image/stamp.sh
@@ -16,7 +19,11 @@ coprocessor/image/lib
 coprocessor/image/boards
 coprocessor/image/files
 coprocessor/photonvision.lock
+coprocessor/agent/coprocessor-agent.service
 coprocessor/agent/src/main
 coprocessor/agent/build.gradle
 coprocessor/common/src/main
 coprocessor/common/build.gradle
+build.gradle
+settings.gradle
+gradle

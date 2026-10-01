@@ -3,7 +3,10 @@
 # privileged container (README.md, "Building on your own Linux machine").
 #
 #   coprocessor/image/local-build.sh --agent-jar PATH --agent-unit PATH \
-#       --settings-tool COMMAND [--release NAME] [--out DIR]
+#       --settings-tool COMMAND [--release NAME] [--out DIR] [--outside-container]
+#
+# It mounts images and bind-mounts the machine's /dev into a chroot, so it refuses to run outside
+# a container unless told --outside-container.
 #
 # From the repository's root, as root, with: bash, curl, xz, sfdisk, losetup, mount, e2fsck,
 # resize2fs, mkfs.ext4, mkfs.fat, yq (mikefarah's, version 4), git, and the settings tool's Java.
@@ -21,6 +24,7 @@ repo=$(cd "$here/../.." && pwd)
 . "$here/lib/common.sh"
 
 agent_jar="" agent_unit="" settings_tool="" release="" out="$repo/build/coprocessor-image/local"
+outside_container=no
 while (($#)); do
   case $1 in
     --agent-jar) agent_jar=$(realpath "${2:?}"); shift 2 ;;
@@ -28,10 +32,14 @@ while (($#)); do
     --settings-tool) settings_tool=${2:?}; shift 2 ;;
     --release) release=${2:?}; shift 2 ;;
     --out) out=${2:?}; shift 2 ;;
+    --outside-container) outside_container=yes; shift ;;
     *) die "unknown option: $1" ;;
   esac
 done
 ((EUID == 0)) || die "needs root (in a privileged container): it mounts images"
+if [[ $outside_container == no && ! -e /run/.containerenv && ! -e /.dockerenv ]]; then
+  die "not in a container (Docker or Podman): run it in one (README.md), or pass --outside-container"
+fi
 [[ -f $agent_jar && -f $agent_unit ]] || die "--agent-jar and --agent-unit: the built agent and its unit"
 [[ -n $settings_tool ]] || die "--settings-tool is required"
 for tool in curl xz sfdisk losetup mount e2fsck resize2fs mkfs.ext4 git; do
@@ -65,20 +73,33 @@ fetch() {
 }
 
 mnt="" loop=""
+# Unmounts the chroot and detaches the image. Fails, saying what's left, if it can't: the next
+# step would otherwise work on an image that's still mounted.
 cleanup() {
+  local status=0
   if [[ -n $mnt ]]; then
     if [[ -e $mnt/etc/resolv.conf.coproc-saved ]]; then
-      mv -f "$mnt/etc/resolv.conf.coproc-saved" "$mnt/etc/resolv.conf"
+      mv -f "$mnt/etc/resolv.conf.coproc-saved" "$mnt/etc/resolv.conf" || status=1
     fi
-    umount --recursive "$mnt" 2>/dev/null || true
-    rmdir "$mnt" 2>/dev/null || true
+    if mountpoint -q "$mnt"; then
+      umount --recursive "$mnt" || { say "couldn't unmount $mnt"; status=1; }
+    fi
+    if ((status == 0)); then
+      rmdir "$mnt" || status=1
+    fi
   fi
-  if [[ -n $loop ]]; then
-    losetup --detach "$loop" 2>/dev/null || true
+  if [[ -n $loop ]] && ((status == 0)); then
+    losetup --detach "$loop" || { say "couldn't detach $loop"; status=1; }
   fi
-  mnt="" loop=""
+  if ((status == 0)); then
+    mnt="" loop=""
+  fi
+  return "$status"
 }
-trap cleanup EXIT
+on_exit() {
+  cleanup || say "left mounted: ${mnt:-nothing}; attached: ${loop:-nothing}. Unmount by hand before rerunning"
+}
+trap on_exit EXIT
 
 pv_jar=$(fetch "$jar_url" "$jar_sha")
 while IFS= read -r row <&3; do
@@ -105,6 +126,8 @@ while IFS= read -r row <&3; do
   mount -t proc proc "$mnt/proc"
   mount -t sysfs sys "$mnt/sys"
   mount --rbind /dev "$mnt/dev"
+  # So unmounting the chroot's /dev never reaches the machine's own.
+  mount --make-rslave "$mnt/dev"
   mount -t tmpfs tmpfs "$mnt/run"
   mkdir -p "$mnt/tmp/build"
   mount --bind "$repo" "$mnt/tmp/build"
@@ -125,7 +148,7 @@ while IFS= read -r row <&3; do
   # Zeros where nothing is, so the image compresses as CI's does.
   cat /dev/zero >"$mnt/coproc-zeros" 2>/dev/null || true
   rm -f "$mnt/coproc-zeros"
-  cleanup
+  cleanup || die "couldn't unmount $board's common image: stopping"
 done 3< <(yq -p json -o=json -I=0 '.[]' <<<"$boards")
 
 mkdir -p "$out/release"

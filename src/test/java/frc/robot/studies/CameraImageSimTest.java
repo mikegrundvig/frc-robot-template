@@ -1,7 +1,6 @@
 package frc.robot.studies;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -16,33 +15,55 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.SplittableRandom;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.opencv.core.Point;
 import org.photonvision.PhotonCamera;
 import org.photonvision.estimation.TargetModel;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.VisionTargetSim;
+import org.photonvision.targeting.MultiTargetPNPResult;
 import org.photonvision.targeting.PhotonPipelineResult;
 import org.photonvision.targeting.PhotonTrackedTarget;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 
 /**
  * The study's camera against PhotonVision's own simulation ({@code PhotonCameraSim.process}), image
- * for image, over a sample of 2026's field with the template robot's four cameras: the same tags
- * seen, their corners in the same places, and the same solves.
+ * for image with the same seeds, over a sample of 2026's field with the template robot's four
+ * cameras: the same tags seen, their corners in the same places, and the same solves.
  */
 @ExtendWith(RobotSim.class)
 class CameraImageSimTest {
   private static final FieldModel FIELD = TagLayouts.named("FRC_2026_REBUILT_WELDED");
+  private static final CameraConfig.Sensor SENSOR = Robots.SIM.cameras().get(0).sensor();
+
+  /** The worst difference found, of each kind, for the summary line. */
+  private final Map<String, Double> worst = new HashMap<>();
+
+  private void differs(String what, double by) {
+    worst.merge(what, by, Math::max);
+  }
+
+  private static double apart(Transform3d a, Transform3d b) {
+    return a.getTranslation().getDistance(b.getTranslation());
+  }
+
+  private static double turned(Transform3d a, Transform3d b) {
+    return a.getRotation().relativeTo(b.getRotation()).getAngle();
+  }
+
+  /** Ambiguity as {@code Vision} reads PhotonVision's: -1 (none to give) is a coin toss. */
+  private static double ambiguity(double reported) {
+    return !(reported >= 0) ? 1 : Math.min(reported, 1);
+  }
 
   @Test
   void itSeesWhatPhotonVisionsSimulationSees() {
-    CameraConfig.Sensor sensor = Robots.SIM.cameras().get(0).sensor();
-    CameraImageSim study = new CameraImageSim(FIELD, sensor);
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR);
     List<VisionTargetSim> targets = new ArrayList<>();
     FIELD
         .tags()
@@ -50,101 +71,137 @@ class CameraImageSimTest {
             (id, pose) -> targets.add(new VisionTargetSim(pose, TargetModel.kAprilTag36h11, id)));
     try (PhotonCamera camera = new PhotonCamera("camera-study-check")) {
       PhotonCameraSim photonVision =
-          new PhotonCameraSim(camera, VisionSim.properties(sensor, 0), FIELD.toField());
-      photonVision.setMaxSightRange(VisionSim.MAX_SIGHT_METERS);
-      photonVision.enableRawStream(false);
-      photonVision.enableProcessedStream(false);
-
-      // Poses all over the field; each of PhotonVision's images costs a megabyte until collected.
-      SplittableRandom random = new SplittableRandom(1);
-      int images = 0;
-      int tags = 0;
-      int multiTags = 0;
-      double worstCorner = 0;
-      double worstTag = 0;
-      double worstMultiTag = 0;
-      for (int i = 0; i < 40; i++) {
-        Pose3d robot =
-            new Pose3d(
-                new Pose2d(
-                    random.nextDouble(1, FIELD.length() - 1),
-                    random.nextDouble(1, FIELD.width() - 1),
-                    Rotation2d.fromRadians(random.nextDouble(-Math.PI, Math.PI))));
-        for (CameraConfig mount : Robots.SIM.cameras()) {
-          Pose3d cameraPose = robot.transformBy(mount.robotToCamera());
-          long seed = random.nextLong();
-          photonVision.prop.setRandomSeed(seed);
-          PhotonPipelineResult theirs = photonVision.process(0, cameraPose, targets);
-          TagDetections ours = study.image(cameraPose, mount.name(), seed);
-          images++;
-
-          Map<Integer, PhotonTrackedTarget> byId = new HashMap<>();
-          theirs.getTargets().forEach(target -> byId.put(target.getFiducialId(), target));
-          assertThat(ours.tags())
-              .extracting(TagDetections.Tag::id)
-              .containsExactlyInAnyOrderElementsOf(byId.keySet());
-          for (TagDetections.Tag tag : ours.tags()) {
-            PhotonTrackedTarget target = Objects.requireNonNull(byId.get(tag.id()));
-            for (int c = 0; c < 4; c++) {
-              Point corner =
-                  new Point(
-                      target.getDetectedCorners().get(c).x, target.getDetectedCorners().get(c).y);
-              worstCorner =
-                  Math.max(
-                      worstCorner,
-                      Math.hypot(
-                          tag.corners().get(c).getX() - corner.x,
-                          tag.corners().get(c).getY() - corner.y));
-            }
-            worstTag =
-                Math.max(worstTag, apart(tag.bestCameraToTag(), target.getBestCameraToTarget()));
-            tags++;
-          }
-          assertThat(ours.multiTag() != null).isEqualTo(theirs.getMultiTagResult().isPresent());
-          TagDetections.MultiTag multiTag = ours.multiTag();
-          if (multiTag != null) {
-            worstMultiTag =
-                Math.max(
-                    worstMultiTag,
-                    apart(
-                        multiTag.fieldToCamera(),
-                        theirs.getMultiTagResult().get().estimatedPose.best));
-            multiTags++;
-          }
-        }
+          new PhotonCameraSim(camera, VisionSim.properties(SENSOR, 0), FIELD.toField());
+      try {
+        photonVision.setMaxSightRange(VisionSim.MAX_SIGHT_METERS);
+        photonVision.enableRawStream(false);
+        photonVision.enableProcessedStream(false);
+        compare(study, photonVision, targets);
+      } finally {
+        photonVision.close();
       }
-      System.out.printf(
-          Locale.ROOT,
-          "Against PhotonCameraSim: %d images, %d tags and %d multi-tag solves, all seen alike;"
-              + " worst differences: corner %.1e px, tag %.1e m, multi-tag camera %.1e m%n",
-          images,
-          tags,
-          multiTags,
-          worstCorner,
-          worstTag,
-          worstMultiTag);
-      assertThat(tags).isGreaterThan(100);
-      assertThat(multiTags).isGreaterThan(20);
-      // OpenCV projects in single precision for PhotonVision; the study projects in double.
-      assertThat(worstCorner).isLessThan(0.01);
-      assertThat(worstTag).isLessThan(0.001);
-      assertThat(worstMultiTag).isLessThan(0.001);
-      photonVision.close();
     }
   }
 
-  private static double apart(Transform3d a, Transform3d b) {
-    return a.getTranslation().getDistance(b.getTranslation());
+  private void compare(
+      CameraImageSim study, PhotonCameraSim photonVision, List<VisionTargetSim> targets) {
+    // Poses all over the field; each of PhotonVision's images costs a megabyte until collected.
+    SplittableRandom random = new SplittableRandom(1);
+    int images = 0;
+    int tags = 0;
+    int multiTags = 0;
+    for (int i = 0; i < 40; i++) {
+      Pose3d robot =
+          new Pose3d(
+              new Pose2d(
+                  random.nextDouble(1, FIELD.length() - 1),
+                  random.nextDouble(1, FIELD.width() - 1),
+                  Rotation2d.fromRadians(random.nextDouble(-Math.PI, Math.PI))));
+      for (CameraConfig mount : Robots.SIM.cameras()) {
+        Pose3d cameraPose = robot.transformBy(mount.robotToCamera());
+        long seed = random.nextLong();
+        photonVision.prop.setRandomSeed(seed);
+        PhotonPipelineResult theirs = photonVision.process(0, cameraPose, targets);
+        TagDetections ours = study.image(cameraPose, mount.name(), seed);
+        images++;
+
+        Map<Integer, PhotonTrackedTarget> byId = new HashMap<>();
+        theirs.getTargets().forEach(target -> byId.put(target.getFiducialId(), target));
+        assertThat(ours.tags())
+            .extracting(TagDetections.Tag::id)
+            .containsExactlyInAnyOrderElementsOf(byId.keySet());
+        for (TagDetections.Tag tag : ours.tags()) {
+          PhotonTrackedTarget target = Objects.requireNonNull(byId.get(tag.id()));
+          for (int c = 0; c < 4; c++) {
+            differs(
+                "corner px",
+                Math.hypot(
+                    tag.corners().get(c).getX() - target.getDetectedCorners().get(c).x,
+                    tag.corners().get(c).getY() - target.getDetectedCorners().get(c).y));
+          }
+          differs("tag m", apart(tag.bestCameraToTag(), target.getBestCameraToTarget()));
+          differs("tag rad", turned(tag.bestCameraToTag(), target.getBestCameraToTarget()));
+          differs("alternate m", apart(tag.altCameraToTag(), target.getAlternateCameraToTarget()));
+          differs("ambiguity", Math.abs(tag.ambiguity() - ambiguity(target.getPoseAmbiguity())));
+          tags++;
+        }
+
+        MultiTargetPNPResult solved = theirs.getMultiTagResult().orElse(null);
+        TagDetections.MultiTag multiTag = ours.multiTag();
+        assertThat(multiTag != null).isEqualTo(solved != null);
+        if (multiTag != null && solved != null) {
+          assertThat(multiTag.tagIds())
+              .containsExactlyInAnyOrderElementsOf(
+                  solved.fiducialIDsUsed.stream().map(Short::intValue).toList());
+          differs("multi-tag m", apart(multiTag.fieldToCamera(), solved.estimatedPose.best));
+          differs("multi-tag rad", turned(multiTag.fieldToCamera(), solved.estimatedPose.best));
+          differs(
+              "reprojection px",
+              Math.abs(multiTag.reprojectionErrorPixels() - solved.estimatedPose.bestReprojErr));
+          multiTags++;
+        }
+      }
+    }
+    System.out.printf(
+        Locale.ROOT,
+        "Against PhotonCameraSim: %d images, %d tags and %d multi-tag solves seen alike;"
+            + " worst differences: %s%n",
+        images,
+        tags,
+        multiTags,
+        worst.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(entry -> String.format(Locale.ROOT, "%s %.1e", entry.getKey(), entry.getValue()))
+            .collect(Collectors.joining(", ")));
+    assertThat(tags).isGreaterThan(100);
+    assertThat(multiTags).isGreaterThan(20);
+    // OpenCV projects in single precision for PhotonVision; the study projects in double.
+    assertThat(worst.get("corner px")).isLessThan(0.01);
+    assertThat(worst.get("tag m")).isLessThan(0.001);
+    assertThat(worst.get("tag rad")).isLessThan(0.001);
+    assertThat(worst.get("alternate m")).isLessThan(0.001);
+    assertThat(worst.get("ambiguity")).isLessThan(0.01);
+    assertThat(worst.get("multi-tag m")).isLessThan(0.001);
+    assertThat(worst.get("multi-tag rad")).isLessThan(0.001);
+    assertThat(worst.get("reprojection px")).isLessThan(0.01);
+  }
+
+  /**
+   * In front of the blue hub's near face, its two tags in view. When one tag's own solve fails, the
+   * robot reads only the other, as {@code Vision} leaves out a pose that isn't a number; the
+   * multi-tag solve still uses both tags' corners, as PhotonVision's does.
+   */
+  @Test
+  void aTagWhoseOwnSolveFailsIsLeftOutButItsCornersStillCount() {
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR);
+    Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
+    List<CameraImageSim.Seen> seen = new ArrayList<>(study.seen(cameraPose, 1));
+    assertThat(seen).hasSizeGreaterThanOrEqualTo(2);
+    TagDetections whole = study.detections(seen, "front");
+    int failed = seen.get(0).tag().id();
+
+    seen.set(0, seen.get(0).unsolved());
+    TagDetections without = study.detections(seen, "front");
+
+    assertThat(without.tags())
+        .extracting(TagDetections.Tag::id)
+        .doesNotContain(failed)
+        .hasSize(whole.tags().size() - 1);
+    TagDetections.MultiTag solvedWith = Objects.requireNonNull(whole.multiTag());
+    TagDetections.MultiTag solvedWithout = Objects.requireNonNull(without.multiTag());
+    assertThat(solvedWithout.tagIds()).doesNotContain(failed);
+    assertThat(solvedWithout.fieldToCamera()).isEqualTo(solvedWith.fieldToCamera());
   }
 
   @Test
-  void aTagsAreaIsItsConvexHulls() {
-    Point[] square = {new Point(0, 0), new Point(10, 0), new Point(10, 10), new Point(0, 10)};
-    Point[] bowtie = {new Point(0, 0), new Point(10, 10), new Point(10, 0), new Point(0, 10)};
-    Point[] dented = {new Point(0, 0), new Point(10, 0), new Point(5, 2), new Point(5, 10)};
+  void anImageWithNoTagInViewHasNothingInIt() {
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR);
 
-    assertThat(CameraImageSim.area(square)).isCloseTo(100, within(1e-12));
-    assertThat(CameraImageSim.area(bowtie)).as("in any order").isCloseTo(100, within(1e-12));
-    assertThat(CameraImageSim.area(dented)).as("the dent filled").isCloseTo(50, within(1e-12));
+    // The middle of the field, looking straight up.
+    TagDetections sky =
+        study.image(new Pose3d(8, 4, 1, new Rotation3d(0, -Math.PI / 2, 0)), "up", 1);
+
+    assertThat(sky.tags()).isEmpty();
+    assertThat(sky.multiTag()).isNull();
   }
 }

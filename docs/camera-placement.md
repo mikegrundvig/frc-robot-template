@@ -282,7 +282,7 @@ with those cameras, and run with `--robot=<its name>`: its cameras are "the robo
 - **Small and failed tags:** a tag smaller than 100 square pixels in the image isn't detected,
   PhotonVision's default; a real camera's limit depends on its lens, exposure, and settings. A tag
   whose own solve fails is left out, as the robot leaves out a pose that isn't a number
-  (PhotonVision's simulation would report it at the camera itself); none failed in the example run.
+  (PhotonVision's simulation would stop with an exception); none failed in the example run.
 - **The lens:** a perfect lens, with PhotonVision's model of corner noise. Measure a real camera's
   noise before trusting the absolute numbers.
 

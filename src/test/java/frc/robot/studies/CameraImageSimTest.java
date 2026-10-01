@@ -123,6 +123,9 @@ class CameraImageSimTest {
           differs("tag m", apart(tag.bestCameraToTag(), target.getBestCameraToTarget()));
           differs("tag rad", turned(tag.bestCameraToTag(), target.getBestCameraToTarget()));
           differs("alternate m", apart(tag.altCameraToTag(), target.getAlternateCameraToTarget()));
+          // The pipeline picks between the two by the heading each implies: their turns matter.
+          differs(
+              "alternate rad", turned(tag.altCameraToTag(), target.getAlternateCameraToTarget()));
           differs("ambiguity", Math.abs(tag.ambiguity() - ambiguity(target.getPoseAmbiguity())));
           tags++;
         }
@@ -161,6 +164,7 @@ class CameraImageSimTest {
     assertThat(worst.get("tag m")).isLessThan(0.001);
     assertThat(worst.get("tag rad")).isLessThan(0.001);
     assertThat(worst.get("alternate m")).isLessThan(0.001);
+    assertThat(worst.get("alternate rad")).isLessThan(0.001);
     assertThat(worst.get("ambiguity")).isLessThan(0.01);
     assertThat(worst.get("multi-tag m")).isLessThan(0.001);
     assertThat(worst.get("multi-tag rad")).isLessThan(0.001);

@@ -82,6 +82,68 @@ class ConsistencyTest {
     assertThat(summary.worstRatio()).isGreaterThan(1.5 * Consistency.BOUND);
   }
 
+  /**
+   * The ellipse holds a thousandth of an honest estimator's errors outside it, the circle fewer.
+   */
+  @Test
+  void anHonestEstimatorIsOutsideTheEllipseOnceInAThousandLoops() {
+    Consistency.Summary summary = runs(20, 10_000, 1, 4).summary();
+
+    assertThat(summary.ellipseExceedance()).isCloseTo(Consistency.EXCEEDANCE, within(0.0003));
+    assertThat(summary.exceedance()).isLessThan(summary.ellipseExceedance());
+  }
+
+  /**
+   * Too sure only along its short axis: its errors across it twice what it claims. The circle on
+   * the long axis never sees it; the ellipse does.
+   */
+  @Test
+  void theEllipseCatchesAnEstimatorTooSureAlongItsShortAxis() {
+    PoseCovariance claimed = new PoseCovariance(0.04 * 0.04, 0, 0.01 * 0.01, 1e-4);
+    SplittableRandom random = new SplittableRandom(5);
+    Consistency consistency = new Consistency();
+    for (int run = 0; run < 10; run++) {
+      List<Consistency.Sample> samples = new ArrayList<>();
+      for (int loop = 0; loop < 2000; loop++) {
+        samples.add(
+            new Consistency.Sample(
+                0.04 * gaussian(random),
+                0.02 * gaussian(random),
+                0.01 * gaussian(random),
+                claimed));
+      }
+      consistency.add(samples);
+    }
+    Consistency.Summary summary = consistency.summary();
+
+    assertThat(summary.exceedance()).as("past the circle").isLessThan(Consistency.EXCEEDANCE);
+    assertThat(summary.ellipseExceedance()).as("outside the ellipse").isGreaterThan(0.03);
+  }
+
+  /**
+   * What a run draws lasts all of it, so the runs are the sample: six of them allow 4% of loops
+   * past a 1-in-1000 bound, a hundred 1.1%.
+   */
+  @Test
+  void theAllowanceCountsEachRunAsOneDraw() {
+    assertThat(Consistency.allowedShare(6)).isCloseTo(0.041, within(0.001));
+    assertThat(Consistency.allowedShare(100)).isCloseTo(0.0108, within(0.0005));
+    assertThat(Consistency.allowedShare(0)).isEqualTo(Consistency.allowedShare(1));
+    assertThat(runs(6, 100, 1, 6).summary().allowedShare()).isEqualTo(Consistency.allowedShare(6));
+    // Six honest runs' mean NEES, 999 times in 1000.
+    assertThat(Consistency.band(2, 6, 3.29))
+        .containsExactly(new double[] {0.30, 5.84}, within(0.01));
+  }
+
+  @Test
+  void aGatesShareIsHowManyLoopsPassIt() {
+    Consistency consistency = runs(2, 1000, 1, 7);
+
+    assertThat(consistency.share(sample -> true)).isEqualTo(1);
+    assertThat(consistency.share(sample -> sample.errorX() > 0)).isCloseTo(0.5, within(0.05));
+    assertThat(new Consistency().share(sample -> true)).isNaN();
+  }
+
   @Test
   void aTimidEstimatorIsBelowTheBand() {
     Consistency.Summary summary = runs(20, 2000, 0.5, 3).summary();

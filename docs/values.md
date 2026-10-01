@@ -461,7 +461,7 @@ a robot keeps wanting to go past it, after asking why.
 | `limits.driveStatorCurrent` | 10 to 120 A | datasheet (120 A: Phoenix 6's default stator limit) | Up to Phoenix 6's own default; under 10 A the robot barely moves. |
 | `limits.driveSupplyCurrent` | 10 to 80 A | guess | Room above the template's 60 A; four motors drawing more brown out a battery. |
 | `limits.driveSupplyLowerCurrent` | 10 to 40 A | datasheet (40 A: the drive motors' breakers' rating) | Never above what the breaker carries indefinitely. |
-| `limits.driveSupplyLowerTime` | 0.1 to 1.5 s | datasheet (1.5 s: the earliest the fastest 40 A breaker, Snap Action's, trips at 80 A, the top of `limits.driveSupplyCurrent`) | At any supply limit in its range, the step-down comes no later than the fastest breaker can trip. Under 0.1 s it would cut into every hard launch. |
+| `limits.driveSupplyLowerTime` | 0.1 to 1 s | datasheet (the fastest 40 A breaker, Snap Action's, can trip after 1.5 s at 80 A, the top of `limits.driveSupplyCurrent`) | At any supply limit in its range, the step-down comes at least half a second before the fastest breaker can trip (a warm breaker trips sooner than its datasheet's cold figures). Under 0.1 s it would cut into every hard launch. |
 | `limits.steerStatorCurrent` | 5 to 80 A | guess | Steering needs little; the top is for finding out how little. |
 | `limits.maxLinearSpeed` | 0.5 to 6 m/s | guess | Slow enough for a first drive; the record refuses anything past the free speed. |
 | `limits.maxAngularSpeed` | 0.1 to 3 rot/s | guess | Slow enough for a first drive, and three times the template's. |

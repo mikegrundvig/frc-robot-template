@@ -35,6 +35,7 @@ public final class Page {
   private final Experiments experiments;
   private final Supplier<String> mode;
   private final @Nullable Simulator simulator;
+  private final Devices devices;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
   private final String program = UUID.randomUUID().toString();
@@ -62,7 +63,15 @@ public final class Page {
   /** A page that doesn't know the robot's mode, and has no simulator: a test's, say. */
   public Page(
       Status status, Actions actions, Tuning tuning, TunableTee tunables, Experiments experiments) {
-    this(status, actions, tuning, tunables, experiments, () -> "", null);
+    this(
+        status,
+        actions,
+        tuning,
+        tunables,
+        experiments,
+        () -> "",
+        null,
+        new Devices(System::nanoTime));
   }
 
   /**
@@ -78,7 +87,7 @@ public final class Page {
       TunableTee tunables,
       Experiments experiments,
       Supplier<String> mode) {
-    this(status, actions, tuning, tunables, experiments, mode, null);
+    this(status, actions, tuning, tunables, experiments, mode, null, new Devices(System::nanoTime));
   }
 
   /**
@@ -86,6 +95,7 @@ public final class Page {
    *     the robot loop, only while a page is open
    * @param simulator the simulator's controls, in the simulator; null on a robot, where the page
    *     has none
+   * @param devices the devices the robot reports on, for the Pit view's cards
    */
   Page(
       Status status,
@@ -94,7 +104,8 @@ public final class Page {
       TunableTee tunables,
       Experiments experiments,
       Supplier<String> mode,
-      @Nullable Simulator simulator) {
+      @Nullable Simulator simulator,
+      Devices devices) {
     this.status = status;
     this.actions = actions;
     this.tuning = tuning;
@@ -102,6 +113,7 @@ public final class Page {
     this.experiments = experiments;
     this.mode = mode;
     this.simulator = simulator;
+    this.devices = devices;
   }
 
   public Status status() {
@@ -122,6 +134,11 @@ public final class Page {
 
   public Experiments experiments() {
     return experiments;
+  }
+
+  /** The devices the robot reports on: the Pit view's cards. */
+  public Devices devices() {
+    return devices;
   }
 
   /** The simulator's controls; null on a robot. */
@@ -145,6 +162,7 @@ public final class Page {
    *   <li>{@code wpilibTunables}: every other WPILib tunable, by path;
    *   <li>{@code rigs}, {@code experiments}: what can be run;
    *   <li>{@code run}: the run in progress, or the latest to end;
+   *   <li>{@code devices}: each device's card, as of its last read: see {@link Devices#view};
    *   <li>in the simulator only, {@code simulator} (the Driver Station, the clock, and the
    *       joysticks the page drives), {@code components} (what can fail, and how), and {@code
    *       scenarios}: see {@link Simulator#view}.
@@ -174,6 +192,7 @@ public final class Page {
     sections.put("experiments", experimentSection);
     Run run = experiments.run();
     sections.put("run", run == null ? Map.of() : run(run));
+    sections.put("devices", devices.view());
     if (simulator != null) {
       sections.putAll(simulator.view());
     }

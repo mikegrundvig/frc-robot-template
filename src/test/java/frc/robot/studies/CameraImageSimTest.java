@@ -198,6 +198,20 @@ class CameraImageSimTest {
     assertThat(solvedWithout.fieldToCamera()).isEqualTo(solvedWith.fieldToCamera());
   }
 
+  /** Another robot between the camera and the hub's face hides its tags. */
+  @Test
+  void anotherRobotInTheWayHidesTheTags() {
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
+    Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
+    OtherRobots.Blocker between = new OtherRobots.Blocker(3.2, 4.2, 0, 0.45, 0.45, 1.5);
+    OtherRobots.Blocker aside = new OtherRobots.Blocker(3.2, 1.0, 0, 0.45, 0.45, 1.5);
+
+    assertThat(study.image(cameraPose, "front", 1).tags()).hasSizeGreaterThanOrEqualTo(2);
+    assertThat(study.image(cameraPose, "front", 1, List.of(between)).tags()).isEmpty();
+    assertThat(study.image(cameraPose, "front", 1, List.of(aside)).tags())
+        .isEqualTo(study.image(cameraPose, "front", 1).tags());
+  }
+
   @Test
   void anImageWithNoTagInViewHasNothingInIt() {
     CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);

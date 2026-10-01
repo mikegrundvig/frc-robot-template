@@ -114,11 +114,26 @@ final class CameraImageSim {
    * @param seed where this image's noise starts
    */
   TagDetections image(Pose3d cameraPose, String cameraName, long seed) {
-    return detections(seen(cameraPose, seed), cameraName);
+    return image(cameraPose, cameraName, seed, List.of());
+  }
+
+  /**
+   * One image, with other robots in the way: a tag any of whose corners they hide isn't detected.
+   *
+   * @param blockers the other robots on the field
+   */
+  TagDetections image(
+      Pose3d cameraPose, String cameraName, long seed, List<OtherRobots.Blocker> blockers) {
+    return detections(seen(cameraPose, seed, blockers), cameraName);
   }
 
   /** The tags an image has in it, each with its corners and its own solve. */
   List<Seen> seen(Pose3d cameraPose, long seed) {
+    return seen(cameraPose, seed, List.of());
+  }
+
+  /** The tags an image has in it, with other robots in the way. */
+  List<Seen> seen(Pose3d cameraPose, long seed, List<OtherRobots.Blocker> blockers) {
     camera.setRandomSeed(seed);
     RotTrlTransform3d toCamera = RotTrlTransform3d.makeRelativeTo(cameraPose);
     // Farthest first, as PhotonVision takes them, so each tag's noise comes from the same draws.
@@ -132,7 +147,12 @@ final class CameraImageSim {
       if (!inView(cameraPose, tag)) {
         continue;
       }
+      // The noise is drawn for every tag in view, hidden or not, so a tag another robot hides
+      // leaves the others' noise as it would be without it.
       Point[] corners = camera.estPixelNoise(project(toCamera, tag.corners()));
+      if (hidden(cameraPose.getTranslation(), tag, blockers)) {
+        continue;
+      }
       // PhotonVision's own measure of a tag's size; it frees what it takes in native memory.
       if (!inImage(corners) || !(camera.getContourAreaPercent(corners) >= minAreaPercent)) {
         continue;
@@ -165,6 +185,18 @@ final class CameraImageSim {
         && Math.abs(relation.camToTargPitch.getDegrees()) < halfHeightDegrees
         && Math.abs(relation.targToCamAngle.getDegrees()) < 90
         && relation.camToTarg.getTranslation().getNorm() <= sightMeters;
+  }
+
+  /** Whether another robot stands between the camera and any of a tag's corners. */
+  private static boolean hidden(Translation3d lens, Tag tag, List<OtherRobots.Blocker> blockers) {
+    for (OtherRobots.Blocker blocker : blockers) {
+      for (Translation3d corner : tag.corners()) {
+        if (blocker.blocks(lens, corner)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**

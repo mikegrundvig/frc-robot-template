@@ -24,6 +24,8 @@ import frc.robot.subsystems.vision.VisionSim;
  * @param mountErrorMillimeters how far each camera really sits from its configured place, at most,
  *     along each axis: none by default, as in the simulator
  * @param mountErrorDegrees how far each camera is really turned, at most, about each axis
+ * @param otherRobotsLeast the fewest other robots in the way of the cameras, around each pose
+ * @param otherRobotsMost the most: each set of images has a number between, drawn from the seed
  * @param trials how many robustness trials, each drawing all of these errors from plausible ranges;
  *     0 scores the field once, with the errors as set here
  * @param mostCameras the most cameras a layout may have: larger layouts from the family, or from
@@ -42,6 +44,8 @@ public record CameraStudyConfig(
     double gyroErrorDegrees,
     double mountErrorMillimeters,
     double mountErrorDegrees,
+    int otherRobotsLeast,
+    int otherRobotsMost,
     int trials,
     int mostCameras,
     long seed,
@@ -65,6 +69,8 @@ public record CameraStudyConfig(
           .gyroErrorDegrees(0.25)
           .mountErrorMillimeters(0)
           .mountErrorDegrees(0)
+          .otherRobotsLeast(0)
+          .otherRobotsMost(0)
           .trials(0)
           .mostCameras(4)
           .seed(1)
@@ -82,9 +88,20 @@ public record CameraStudyConfig(
         .field("gyroErrorDegrees", gyroErrorDegrees, nonNegative())
         .field("mountErrorMillimeters", mountErrorMillimeters, nonNegative())
         .field("mountErrorDegrees", mountErrorDegrees, nonNegative())
+        .field("otherRobotsLeast", otherRobotsLeast, atLeast(0))
+        .field("otherRobotsMost", otherRobotsMost, atLeast(0))
         .field("trials", trials, atLeast(0))
         .field("mostCameras", mostCameras, atLeast(1))
         .field("threads", threads, atLeast(1))
+        .check(
+            "otherRobotsMost",
+            () ->
+                otherRobotsMost >= otherRobotsLeast
+                    ? null
+                    : otherRobotsMost
+                        + " must be at least otherRobotsLeast ("
+                        + otherRobotsLeast
+                        + ")")
         .orThrow();
   }
 

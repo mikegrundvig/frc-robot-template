@@ -54,6 +54,7 @@ class CameraStudyTest {
         .contains("on 2026 FRC Rebuilt Welded (WPILib's layout): 32 tags, rotated")
         .contains("Weights from `" + weights + "`: Field element 0.0")
         .contains("the family around its frame, of up to 4 cameras")
+        .contains("No other robots in the way.")
         .contains("## The best at each camera count")
         .contains("## The robot's own layout")
         .contains("### The robot's own: sim");
@@ -102,6 +103,7 @@ class CameraStudyTest {
         "--field=FRC_2026_REBUILT_WELDED",
         "--mounts=" + mounts,
         "--cameras=2",
+        "--other-robots=3-5",
         "--grid-meters=6",
         "--headings=2",
         "--frames=1",
@@ -111,6 +113,7 @@ class CameraStudyTest {
     assertThat(Files.readAllLines(folder.resolve("report/candidates.csv"))).hasSize(1 + 14);
     assertThat(Files.readString(folder.resolve("report/summary.md")))
         .contains("all of up to 2 cameras at the places in `" + mounts + "`")
+        .contains("Other robots in the cameras' way: 3 to 5 around each pose")
         .contains("2 cameras: front 0°, up 10°; back 180°, up 20°");
   }
 
@@ -191,6 +194,7 @@ class CameraStudyTest {
                   "--gyro-error-degrees=0.5",
                   "--mount-error-mm=3",
                   "--mount-error-degrees=0.5",
+                  "--other-robots=3-5",
                   "--robust"
                 }));
 
@@ -200,7 +204,13 @@ class CameraStudyTest {
     assertThat(set.gyroErrorDegrees()).isEqualTo(0.5);
     assertThat(set.mountErrorMillimeters()).isEqualTo(3);
     assertThat(set.mountErrorDegrees()).isEqualTo(0.5);
+    assertThat(set.otherRobotsLeast()).isEqualTo(3);
+    assertThat(set.otherRobotsMost()).isEqualTo(5);
     assertThat(set.trials()).isEqualTo(CameraStudyConfig.ROBUST_TRIALS);
+    CameraStudyConfig four =
+        CameraStudy.config(CameraStudy.options(new String[] {"--other-robots=4"}));
+    assertThat(four.otherRobotsLeast()).isEqualTo(4);
+    assertThat(four.otherRobotsMost()).isEqualTo(4);
     assertThat(CameraStudy.config(CameraStudy.options(new String[] {"--trials=3"})).trials())
         .isEqualTo(3);
   }
@@ -219,6 +229,10 @@ class CameraStudyTest {
         .hasMessageContaining("no robot named comp")
         .hasMessageContaining("sim");
     assertThatThrownBy(() -> run("--field=FRC_2027")).hasMessageContaining("no field named");
+    assertThatThrownBy(() -> run("--other-robots=3-5-7"))
+        .hasMessageContaining("--other-robots must be a whole number, or two with a dash");
+    assertThatThrownBy(() -> run("--other-robots=5-3"))
+        .hasMessageContaining("otherRobotsMost: 3 must be at least otherRobotsLeast (5)");
     assertThatThrownBy(() -> run("--headings=99999999999"))
         .as("too big to count")
         .isInstanceOf(CameraStudy.OptionException.class);

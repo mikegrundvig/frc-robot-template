@@ -54,16 +54,33 @@ function shownViews() {
 }
 
 let viewsSent = null; // as the robot last heard them for this page's stream; null for not known
+let viewsSending = false; // a PUT of them is on its way
 
+/**
+ * Tells the robot the views shown, one request at a time: two on their way at once could land in
+ * either order, and a quick World, Pit, World could leave the robot holding none. Whatever changes
+ * while one is on its way goes when it's answered, the latest only.
+ */
 function sendViews() {
+  if (viewsSending) return;
   const now = shownViews().join(",");
   if (!robot.stream || now === viewsSent) return;
   viewsSent = now;
+  viewsSending = true;
+  const stream = robot.stream;
   api("PUT", "/api/views", { views: shownViews() })
     .then((response) => {
-      if (!response.ok) viewsSent = null; // a stream just replaced: the snapshot says it again
+      // Refused: a stream just replaced, whose snapshot says them again.
+      if (!response.ok && robot.stream === stream) viewsSent = null;
     })
-    .catch(() => (viewsSent = null));
+    .catch(() => {
+      if (robot.stream === stream) viewsSent = null;
+    })
+    .finally(() => {
+      viewsSending = false;
+      // Sent, or the stream was replaced meanwhile: the views may have changed since.
+      if (viewsSent !== null || robot.stream !== stream) sendViews();
+    });
 }
 
 document.addEventListener("visibilitychange", sendViews);

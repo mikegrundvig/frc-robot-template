@@ -13,10 +13,12 @@ import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.localization.VisionPipeline;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -174,11 +176,56 @@ public final class CameraScoring {
           };
         });
     Score[] scores = new Score[candidates.size()];
+    // Each layout less one camera, scored once however many layouts share it.
+    Map<List<Integer>, Score> lessOne = new ConcurrentHashMap<>();
     inParallel(
         candidates.size(),
         threads,
-        () -> c -> scores[c] = Score.of(candidates.get(c), samples, outcomes(views, layouts[c])));
+        () ->
+            c -> {
+              Score score = Score.of(candidates.get(c), samples, outcomes(views, layouts[c]));
+              scores[c] = oneCameraLost(score, layouts[c], samples, views, lessOne);
+            });
     return new Result(candidates, layouts, samples, views, List.of(scores));
+  }
+
+  /**
+   * A layout's score, with how it does when it loses any one camera: the worst of its 95% errors
+   * without each camera in turn, and the least of the field it still measures. A lone camera lost
+   * leaves nothing.
+   */
+  private Score oneCameraLost(
+      Score score,
+      int[] layout,
+      List<Sample> samples,
+      Views[] views,
+      Map<List<Integer>, Score> lessOne) {
+    if (layout.length == 1) {
+      return score.withOneCameraLost(Double.POSITIVE_INFINITY, 0);
+    }
+    double worst = 0;
+    double least = 1;
+    for (int lost = 0; lost < layout.length; lost++) {
+      List<Integer> rest = new ArrayList<>();
+      for (int i = 0; i < layout.length; i++) {
+        if (i != lost) {
+          rest.add(layout[i]);
+        }
+      }
+      rest.sort(Comparator.naturalOrder());
+      Score without =
+          lessOne.computeIfAbsent(
+              rest,
+              cameras -> {
+                List<CameraConfig> kept = cameras.stream().map(this.cameras::get).toList();
+                int[] places = cameras.stream().mapToInt(Integer::intValue).toArray();
+                return Score.of(
+                    new Candidate("less one camera", kept), samples, outcomes(views, places));
+              });
+      worst = Math.max(worst, without.positionP95Meters());
+      least = Math.min(least, without.measured());
+    }
+    return score.withOneCameraLost(worst, least);
   }
 
   /**

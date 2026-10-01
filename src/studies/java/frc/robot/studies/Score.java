@@ -24,6 +24,10 @@ import java.util.List;
  * @param heading the share where an image corrects the gyro's heading
  * @param positionRmsMeters the position error where measured, root mean square; NaN if never
  * @param headingRmsDegrees the heading error where corrected, root mean square; NaN if never
+ * @param oneLostP95Meters with any one of its cameras lost (blocked, knocked, or unplugged), the
+ *     worst of the layout's 95% errors: infinite when losing one leaves more than 5% of the field
+ *     unmeasured, as losing a lone camera does; NaN until scored
+ * @param oneLostMeasured and the least share of the field still measured
  */
 public record Score(
     Candidate candidate,
@@ -36,7 +40,9 @@ public record Score(
     double measured,
     double heading,
     double positionRmsMeters,
-    double headingRmsDegrees) {
+    double headingRmsDegrees,
+    double oneLostP95Meters,
+    double oneLostMeasured) {
   static final double FIVE_CENTIMETERS = 0.05;
   static final double TWO_CENTIMETERS = 0.02;
 
@@ -53,6 +59,24 @@ public record Score(
           .thenComparingInt(Score::cameras)
           .thenComparingDouble(Score::positionP95Meters)
           .thenComparing(score -> score.candidate().name());
+
+  /** The same score, with how the layout does when it loses any one camera. */
+  public Score withOneCameraLost(double p95Meters, double measured) {
+    return new Score(
+        candidate,
+        positionP95Meters,
+        withinFiveCentimeters,
+        withinTwoCentimeters,
+        oneTag,
+        twoTags,
+        twoCameras,
+        this.measured,
+        heading,
+        positionRmsMeters,
+        headingRmsDegrees,
+        p95Meters,
+        measured);
+  }
 
   /** How many cameras the layout has. */
   public int cameras() {
@@ -126,25 +150,32 @@ public record Score(
         measured / total,
         heading / total,
         measured > 0 ? Math.sqrt(squaredPosition / measured) : Double.NaN,
-        heading > 0 ? Math.sqrt(squaredHeading / heading) : Double.NaN);
+        heading > 0 ? Math.sqrt(squaredHeading / heading) : Double.NaN,
+        Double.NaN,
+        Double.NaN);
   }
 
   /** The error that this share of the weight falls at or below. */
   static double percentile(double[] errors, double[] weights, double share) {
-    Integer[] order = new Integer[errors.length];
+    // Each error's place, sorted by the error: packed in a long, the error's bits as a float above
+    // (none is negative, so they sort as the errors do) and its place below. Sorting plain numbers
+    // is fast, which matters with thousands of layouts.
+    long[] order = new long[errors.length];
     double total = 0;
     for (int i = 0; i < order.length; i++) {
-      order[i] = i;
+      order[i] = ((long) Float.floatToIntBits((float) errors[i]) << 32) | i;
       total += weights[i];
     }
-    Arrays.sort(order, Comparator.comparingDouble(i -> errors[i]));
+    Arrays.sort(order);
     double reached = 0;
-    for (int i : order) {
-      reached += weights[i];
+    int last = 0;
+    for (long packed : order) {
+      last = (int) packed;
+      reached += weights[last];
       if (reached >= share * total) {
-        return errors[i];
+        return errors[last];
       }
     }
-    return errors[order[order.length - 1]];
+    return errors[last];
   }
 }

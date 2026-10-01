@@ -107,7 +107,8 @@ class ScoreTest {
   }
 
   private static Score scored(Candidate candidate, double p95, double withinFive) {
-    return new Score(candidate, p95, withinFive, 0, 1, 1, 1, 1, 1, 0.01, 0.1);
+    return new Score(
+        candidate, p95, withinFive, 0, 1, 1, 1, 1, 1, 0.01, 0.1, Double.NaN, Double.NaN);
   }
 
   /**

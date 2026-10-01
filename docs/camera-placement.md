@@ -86,6 +86,14 @@ fewer cameras.
 And the accuracy where there's a measurement: the position error's root mean square, and the
 heading error's.
 
+**Losing any one camera.** A camera gets blocked by a mechanism or another robot, knocked out of
+calibration, or unplugged mid-match. For each layout of N cameras, the study scores it again with
+each camera in turn left out, and reports the worst: its 95% error and the share of the field it
+still measures with N - 1 cameras ("one lost"). That's the layout's tolerance of one fault. It's a
+column, not part of the ranking: the ranking says how well a layout does as built, and whether a
+fifth or sixth camera is worth its cost, weight, and wiring as insurance is the team's call, which
+this column informs. Layouts share their N - 1 subsets, so this costs little.
+
 **Deterministic.** Every random draw comes from the seed, so the same run gives the same report, to
 the digit, with any number of threads, on the same kind of computer (the same operating system and
 processor: the native solves may round differently on another). A camera's noise depends only on the
@@ -146,8 +154,9 @@ To turn it into requirements for CAD:
 1. Take the fewest cameras whose 95% error is within a few millimeters of the best's. Errors a
    millimeter or two apart, or shares a point apart, are the sampling's own noise: choose among
    them on something else, such as easier mounts.
-2. Among those, prefer a high "two cameras" share: one camera blocked by a mechanism, a robot, or
-   a knock still leaves the robot seeing tags.
+2. Among those, prefer a high "two cameras" share and a small "one lost" error: one camera
+   blocked by a mechanism, a robot, or a knock still leaves the robot seeing tags. If the best
+   layout at that count falls apart with one camera lost, weigh one more camera.
 3. Read off what the top layouts at that count share (corners or sides, height, splay, tilt).
    Those are the requirements, in words like these: "four cameras, one at each corner, facing out
    at 30° to 45°, 16 to 24 in up, tilted up 10° to 20°".
@@ -272,6 +281,20 @@ instead of the worst doesn't help: the second worst, the 75th percentile, and th
 centimeter as ties, and the robust ranking for what it agrees on across seeds. In this example:
 four cameras, on the sides or at the corners splayed 30° to 45°, tilted up 10° to 20°, at any of
 the three heights; three cameras about 3 cm behind; one or two blind too often.
+
+**More than four cameras.** The family stops at four. To weigh a fifth or sixth, give the study
+places: here, eight places 16 in up, tilted 20°, at the four corners (splayed 30°) and the middles
+of the four sides, every layout of up to six cameras (247 with the robot's own, 3 s):
+
+| Cameras | 95% within | Two cameras | One lost: 95% within | One lost: measured |
+|---:|---:|---:|---:|---:|
+| 3 | 3.3 cm | 83.7% | none | 88.8% |
+| 4 | 2.4 cm | 96.2% | 3.6 cm | 97.5% |
+| 5 | 2.1 cm | 99.2% | 2.9 cm | 98.3% |
+| 6 | 1.8 cm | 100.0% | 2.2 cm | 99.8% |
+
+Each camera past four buys 3 mm as built, but more when one is lost: the fifth brings the worst
+one-lost error from 3.6 to 2.9 cm, and the sixth to 2.2 cm. That's the case for them, if any.
 
 ## At kickoff
 

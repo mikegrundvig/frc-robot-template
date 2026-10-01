@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,36 +38,35 @@ final class SceneFeed implements Feed, SceneState {
 
   /** A frame's pose: as set now, and as last sent, and how far it must move to be sent again. */
   private static final class Pose {
+    final String name;
     final double[] now = new double[6];
     final double[] sent = new double[6];
     SceneBuilder.Deadband deadband = SceneBuilder.Deadband.RESOLUTION;
     boolean set;
     boolean everSent;
+
+    Pose(String name) {
+      this.name = name;
+    }
   }
 
   /** A value: as set now, and as last sent, and the least change worth sending. */
   private static final class Value {
+    final String name;
     double resolution;
     double now;
     double sent;
     boolean set;
     boolean everSent;
 
-    Value(double resolution) {
+    Value(String name, double resolution) {
+      this.name = name;
       this.resolution = resolution;
     }
   }
 
-  /** An inspection a shape of the moment offered, and when the shape was last there. */
-  private static final class Held {
-    final Supplier<Inspection> inspection;
-    long seenNanos;
-
-    Held(Supplier<Inspection> inspection, long seenNanos) {
-      this.inspection = inspection;
-      this.seenNanos = seenNanos;
-    }
-  }
+  /** An inspection a shape of the moment offered, and when the shape went. */
+  private record Held(Supplier<Inspection> inspection, long goneNanos) {}
 
   /** One layer as it runs. */
   private static final class Running {
@@ -96,11 +96,29 @@ final class SceneFeed implements Feed, SceneState {
   private Map<String, Object> description = Map.of();
   private Map<String, Pose> frames = new LinkedHashMap<>();
   private Map<String, Value> values = new LinkedHashMap<>();
+
+  /** The frames and values again, in order, to go through each loop without an iterator. */
+  private List<Pose> poseList = List.of();
+
+  /** Every frame's name, the root's too: what a shape of the moment may be in. */
+  private Set<String> frameNames = Set.of(SceneBuilder.ROOT);
+
+  private List<Value> valueList = List.of();
   private final Map<String, String> styles = new LinkedHashMap<>();
-  private final Map<String, String> stylesSent = new LinkedHashMap<>();
+  private Map<String, String> stylesSent = Map.of();
+
+  /** Whether {@link #styles} may differ from what was sent: only then are they compared. */
+  private boolean restyled;
+
   private long nextNanos = Long.MIN_VALUE;
   private @Nullable Running updating;
-  private final Map<String, Held> recent = new HashMap<>();
+
+  /** Shapes of the moment that have gone, still inspectable for {@link #KEPT_NANOS}. */
+  private final Map<String, Held> gone = new HashMap<>();
+
+  /** When the first of {@link #gone} is to be forgotten. */
+  private long forgetNanos = Long.MAX_VALUE;
+
   private boolean inspectionsChanged;
   private volatile Map<String, Supplier<Inspection>> inspections = Map.of();
 
@@ -170,11 +188,12 @@ final class SceneFeed implements Feed, SceneState {
   @Override
   public Map<String, @Nullable Object> patch() {
     long now = clock.getAsLong();
-    for (Running running : layers) {
+    for (int i = 0; i < layers.size(); i++) {
+      Running running = layers.get(i);
       updating = running;
       try {
         running.layer.update(this);
-        endMoment(running);
+        endMoment(running, now);
       } catch (RuntimeException e) {
         running.moment = null;
         report(running, "couldn't update", e);
@@ -218,7 +237,7 @@ final class SceneFeed implements Feed, SceneState {
     Map<String, Object> sent = new LinkedHashMap<>();
     sent.put("frames", Collections.unmodifiableMap(framesSent));
     sent.put("values", Collections.unmodifiableMap(valuesSent));
-    sent.put("styles", Collections.unmodifiableMap(new LinkedHashMap<>(stylesSent)));
+    sent.put("styles", stylesSent);
     sent.put("shapes", Collections.unmodifiableMap(shapesSent));
     return Collections.unmodifiableMap(sent);
   }
@@ -287,9 +306,10 @@ final class SceneFeed implements Feed, SceneState {
   @Override
   public void style(String shape, @Nullable Style style) {
     if (style == null) {
-      styles.remove(shape);
+      restyled |= styles.remove(shape) != null;
     } else {
-      styles.put(Wire.name("A shape's id", shape), style.wire());
+      String wire = style.wire();
+      restyled |= !wire.equals(styles.put(Wire.name("A shape's id", shape), wire));
     }
   }
 
@@ -470,36 +490,40 @@ final class SceneFeed implements Feed, SceneState {
     Map<String, Pose> poses = new LinkedHashMap<>();
     for (String name : checked.frames()) {
       if (!name.equals(SceneBuilder.ROOT)) {
-        Pose pose = frames.getOrDefault(name, new Pose());
+        Pose pose = frames.getOrDefault(name, new Pose(name));
         pose.deadband = checked.deadbands().getOrDefault(name, SceneBuilder.Deadband.RESOLUTION);
         poses.put(name, pose);
       }
     }
     frames = poses;
+    poseList = List.copyOf(poses.values());
+    frameNames = Set.copyOf(checked.frames());
     Map<String, Value> held = new LinkedHashMap<>();
     checked
         .values()
         .forEach(
             (name, resolution) -> {
-              Value value = values.getOrDefault(name, new Value(resolution));
+              Value value = values.getOrDefault(name, new Value(name, resolution));
               value.resolution = resolution;
               held.put(name, value);
             });
     values = held;
+    valueList = List.copyOf(held.values());
     publishInspections();
   }
 
   // ---- Updating ----
 
-  /** Takes a layer's shapes of the moment, if its update started them over. */
-  private void endMoment(Running running) {
+  /**
+   * Takes a layer's shapes of the moment, if its update started them over. An inspectable shape
+   * that went (or now says something else) stays inspectable, as it was, for {@link #KEPT_NANOS}.
+   */
+  private void endMoment(Running running, long now) {
     ShapeList moment = running.moment;
     if (moment == null) {
       return;
     }
     running.moment = null;
-    Set<String> frameNames = new HashSet<>(frames.keySet());
-    frameNames.add(SceneBuilder.ROOT);
     Map<String, Map<String, Object>> byId = new LinkedHashMap<>();
     Map<String, Supplier<Inspection>> inspected = new LinkedHashMap<>();
     for (Shape<?> shape : moment.shapes()) {
@@ -511,104 +535,140 @@ final class SceneFeed implements Feed, SceneState {
         inspected.remove(shape.id());
       }
     }
+    for (Map.Entry<String, Supplier<Inspection>> before : running.shapeInspections.entrySet()) {
+      if (inspected.get(before.getKey()) != before.getValue()) {
+        gone.put(before.getKey(), new Held(before.getValue(), now));
+        forgetNanos = Math.min(forgetNanos, now + KEPT_NANOS);
+      }
+    }
     running.shapes = List.copyOf(byId.values());
     running.shapeInspections = inspected;
     inspectionsChanged = true;
   }
 
   /**
-   * Keeps each inspectable shape of the moment's inspection for {@link #KEPT_NANOS} after it was
-   * last there, and publishes what can be inspected whenever that changes.
+   * Forgets the shapes of the moment gone for more than {@link #KEPT_NANOS}, and publishes what can
+   * be inspected whenever that changes. Each loop, so it costs nothing while nothing does.
    */
   private void keepInspections(long now) {
-    for (Running running : layers) {
-      running.shapeInspections.forEach(
-          (id, inspection) -> {
-            Held held = recent.get(id);
-            if (held == null || held.inspection != inspection) {
-              recent.put(id, new Held(inspection, now));
-              inspectionsChanged = true;
-            } else {
-              held.seenNanos = now;
-            }
-          });
-    }
-    if (recent.values().removeIf(held -> now - held.seenNanos > KEPT_NANOS)) {
-      inspectionsChanged = true;
+    if (now >= forgetNanos) {
+      forgetNanos = Long.MAX_VALUE;
+      for (Iterator<Held> held = gone.values().iterator(); held.hasNext(); ) {
+        long forget = held.next().goneNanos() + KEPT_NANOS;
+        if (now >= forget) {
+          held.remove();
+          inspectionsChanged = true;
+        } else {
+          forgetNanos = Math.min(forgetNanos, forget);
+        }
+      }
     }
     if (inspectionsChanged) {
       publishInspections();
     }
   }
 
-  /** Publishes what can be inspected now, whole, for the web server's threads to read. */
+  /**
+   * Publishes what can be inspected now, whole, for the web server's threads to read: what's
+   * described, what has gone lately, and what's there of the moment.
+   */
   private void publishInspections() {
     inspectionsChanged = false;
     Map<String, Supplier<Inspection>> all = new HashMap<>();
     for (Running running : layers) {
       all.putAll(running.inspections);
     }
-    recent.forEach((id, held) -> all.put(id, held.inspection));
+    gone.forEach((id, held) -> all.put(id, held.inspection()));
+    for (Running running : layers) {
+      all.putAll(running.shapeInspections);
+    }
     inspections = Map.copyOf(all);
   }
 
-  /** What changed by what the page can show since last sent, remembered as sent. */
+  /**
+   * What changed by what the page can show since last sent, remembered as sent. Nothing changed,
+   * nothing made: it's asked every loop the robot stands still.
+   */
   private Map<String, @Nullable Object> changes() {
-    Map<String, Object> movedFrames = new LinkedHashMap<>();
-    frames.forEach(
-        (name, pose) -> {
-          if (pose.set && (!pose.everSent || moved(pose))) {
-            System.arraycopy(pose.now, 0, pose.sent, 0, 6);
-            pose.everSent = true;
-            movedFrames.put(name, wire(pose.sent));
-          }
-        });
-    Map<String, Object> movedValues = new LinkedHashMap<>();
-    values.forEach(
-        (name, value) -> {
-          if (value.set
-              && (!value.everSent
-                  || Math.abs(value.now - value.sent) >= value.resolution * SLACK)) {
-            value.sent = value.now;
-            value.everSent = true;
-            movedValues.put(name, Wire.toResolution(value.sent, value.resolution));
-          }
-        });
-    Map<String, @Nullable Object> restyled = new LinkedHashMap<>();
+    Map<String, Object> movedFrames = null;
+    for (int i = 0; i < poseList.size(); i++) {
+      Pose pose = poseList.get(i);
+      if (pose.set && (!pose.everSent || moved(pose))) {
+        System.arraycopy(pose.now, 0, pose.sent, 0, 6);
+        pose.everSent = true;
+        if (movedFrames == null) {
+          movedFrames = new LinkedHashMap<>();
+        }
+        movedFrames.put(pose.name, wire(pose.sent));
+      }
+    }
+    Map<String, Object> movedValues = null;
+    for (int i = 0; i < valueList.size(); i++) {
+      Value value = valueList.get(i);
+      if (value.set
+          && (!value.everSent || Math.abs(value.now - value.sent) >= value.resolution * SLACK)) {
+        value.sent = value.now;
+        value.everSent = true;
+        if (movedValues == null) {
+          movedValues = new LinkedHashMap<>();
+        }
+        movedValues.put(value.name, Wire.toResolution(value.sent, value.resolution));
+      }
+    }
+    Map<String, @Nullable Object> restyledShapes = restyle();
+    Map<String, Object> reshaped = null;
+    for (int i = 0; i < layers.size(); i++) {
+      Running running = layers.get(i);
+      if (running.shapes != running.shapesSent && !running.shapes.equals(running.shapesSent)) {
+        if (reshaped == null) {
+          reshaped = new LinkedHashMap<>();
+        }
+        reshaped.put(running.layer.id(), running.shapes);
+      }
+      running.shapesSent = running.shapes;
+    }
+    if (movedFrames == null && movedValues == null && restyledShapes == null && reshaped == null) {
+      return Map.of();
+    }
+    Map<String, @Nullable Object> patch = new LinkedHashMap<>();
+    if (movedFrames != null) {
+      patch.put("frames", Collections.unmodifiableMap(movedFrames));
+    }
+    if (movedValues != null) {
+      patch.put("values", Collections.unmodifiableMap(movedValues));
+    }
+    if (restyledShapes != null) {
+      patch.put("styles", Collections.unmodifiableMap(restyledShapes));
+    }
+    if (reshaped != null) {
+      patch.put("shapes", Collections.unmodifiableMap(reshaped));
+    }
+    return patch;
+  }
+
+  /**
+   * The shapes whose style differs from what was sent (null for one back as described), remembered
+   * as sent; null when none does. Compared only when a layer set a style other than it had.
+   */
+  private @Nullable Map<String, @Nullable Object> restyle() {
+    if (!restyled) {
+      return null;
+    }
+    restyled = false;
+    Map<String, @Nullable Object> changed = new LinkedHashMap<>();
     styles.forEach(
         (shape, style) -> {
           if (!style.equals(stylesSent.get(shape))) {
-            restyled.put(shape, style);
+            changed.put(shape, style);
           }
         });
     for (String shape : stylesSent.keySet()) {
       if (!styles.containsKey(shape)) {
-        restyled.put(shape, null);
+        changed.put(shape, null);
       }
     }
-    stylesSent.clear();
-    stylesSent.putAll(styles);
-    Map<String, Object> reshaped = new LinkedHashMap<>();
-    for (Running running : layers) {
-      if (!running.shapes.equals(running.shapesSent)) {
-        running.shapesSent = running.shapes;
-        reshaped.put(running.layer.id(), running.shapes);
-      }
-    }
-    Map<String, @Nullable Object> patch = new LinkedHashMap<>();
-    if (!movedFrames.isEmpty()) {
-      patch.put("frames", Collections.unmodifiableMap(movedFrames));
-    }
-    if (!movedValues.isEmpty()) {
-      patch.put("values", Collections.unmodifiableMap(movedValues));
-    }
-    if (!restyled.isEmpty()) {
-      patch.put("styles", Collections.unmodifiableMap(restyled));
-    }
-    if (!reshaped.isEmpty()) {
-      patch.put("shapes", Collections.unmodifiableMap(reshaped));
-    }
-    return patch;
+    stylesSent = Collections.unmodifiableMap(new LinkedHashMap<>(styles));
+    return changed.isEmpty() ? null : changed;
   }
 
   /**

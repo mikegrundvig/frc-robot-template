@@ -10,16 +10,16 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.localization.VisionDecision;
 import frc.robot.lib.localization.VisionMeasurement;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 
@@ -35,49 +35,61 @@ final class SightLines implements Layer {
   private static final long HOLD_NANOS = 300_000_000L;
 
   /**
-   * How long a click on a line can still say what it stood for after its measurement: longer than
-   * the line stays and Pitwall keeps a gone line clickable (two seconds) together.
+   * One camera's sight line to one tag, with one verdict, made once: its id, how it's drawn, and
+   * what a click on it says, from its latest measurement. A click reads that on a web server
+   * thread, so it's a record the loop hands over whole.
    */
-  private static final long KEEP_NANOS = 2_500_000_000L;
+  private final class Line {
+    final String id;
+    final String camera;
+    final String cameraFrame;
+    final int tag;
+    final String tagFrame;
+    final Style style;
 
-  /** One camera's latest measurement of one tag, and when it was decided. */
-  private record Seen(
-      String id,
-      String camera,
-      String cameraId,
-      int tag,
-      VisionDecision decision,
-      long decidedNanos) {
-    Seen(String camera, String cameraId, int tag, VisionDecision decision, long decidedNanos) {
-      this(
-          "ray." + cameraId + "." + tag + (decision.accepted() ? ".ok" : ".bad"),
-          camera,
-          cameraId,
-          tag,
-          decision,
-          decidedNanos);
+    /** What a click says: the same supplier while the line stands, so Pitwall keeps it as is. */
+    final Supplier<Inspection> inspection = () -> inspection(this);
+
+    volatile @Nullable VisionDecision decision;
+
+    Line(CameraConfig camera, int tag, boolean accepted) {
+      id = "ray." + camera.id() + "." + tag + (accepted ? ".ok" : ".bad");
+      this.camera = camera.name();
+      cameraFrame = WorldView.cameraFrame(camera.id());
+      this.tag = tag;
+      tagFrame = WorldView.tagFrame(tag);
+      style = accepted ? Style.OK : Style.BAD.dashed();
+    }
+  }
+
+  /**
+   * One camera's sight to one tag: its two lines, which is drawn, and since its last measurement.
+   */
+  private static final class Sight {
+    final Line accepted;
+    final Line rejected;
+    @Nullable Line drawn;
+    long decidedNanos;
+
+    Sight(Line accepted, Line rejected) {
+      this.accepted = accepted;
+      this.rejected = rejected;
     }
   }
 
   private final FieldModel field;
 
-  /** Each camera's id, by its name: what its measurements say. */
-  private final Map<String, String> cameraIds;
+  /** The cameras, by name: what their measurements say. */
+  private final Map<String, CameraConfig> cameras;
 
   private final WorldView.Readings readings;
   private final Function<String, Optional<String>> cameraAction;
 
-  /**
-   * By camera and tag: the lines drawn, each the latest of its camera's measurements of its tag.
-   */
-  private final Map<String, Seen> drawn = new LinkedHashMap<>();
+  /** Each camera's sights, by tag; null for a tag the field doesn't have. Made as first seen. */
+  private final Map<String, Map<Integer, @Nullable Sight>> sights = new HashMap<>();
 
-  /**
-   * By line: what each stood for when last measured, for a click to read from a web server thread.
-   * A line is drawn again only when which lines there are changes, so its click reads this rather
-   * than what it was drawn from.
-   */
-  private final Map<String, Seen> latest = new ConcurrentHashMap<>();
+  /** Every sight, in the order first seen: the order the lines are drawn in. */
+  private final List<Sight> seen = new ArrayList<>();
 
   private List<VisionDecision> lastDecisions = List.of();
 
@@ -87,9 +99,9 @@ final class SightLines implements Layer {
       WorldView.Readings readings,
       Function<String, Optional<String>> cameraAction) {
     this.field = field;
-    this.cameraIds =
+    this.cameras =
         cameras.stream()
-            .collect(Collectors.toUnmodifiableMap(CameraConfig::name, CameraConfig::id));
+            .collect(Collectors.toUnmodifiableMap(CameraConfig::name, camera -> camera));
     this.readings = readings;
     this.cameraAction = cameraAction;
   }
@@ -108,6 +120,11 @@ final class SightLines implements Layer {
   @Override
   public void describe(SceneBuilder scene) {}
 
+  /**
+   * Takes the loop's decisions into the lines they're drawn as, and draws the lines again only when
+   * which there are changes. Every loop while the World is shown, so nothing here is made but a
+   * sight seen for the first time.
+   */
   @Override
   public void update(SceneState state) {
     long now = state.nowNanos();
@@ -115,54 +132,81 @@ final class SightLines implements Layer {
     List<VisionDecision> decisions = readings.decisions();
     if (decisions != lastDecisions) {
       lastDecisions = decisions;
-      for (VisionDecision decision : decisions) {
+      for (int i = 0; i < decisions.size(); i++) {
+        VisionDecision decision = decisions.get(i);
         VisionMeasurement measurement = decision.measurement();
-        String cameraId = cameraIds.get(measurement.camera());
-        if (cameraId == null) {
+        CameraConfig camera = cameras.get(measurement.camera());
+        if (camera == null) {
           continue;
         }
-        for (int tag : measurement.tagIds()) {
-          if (field.tag(tag).isEmpty()) {
+        List<Integer> tags = measurement.tagIds();
+        for (int t = 0; t < tags.size(); t++) {
+          Sight sight = sight(camera, tags.get(t));
+          if (sight == null) {
             continue;
           }
-          Seen line = new Seen(measurement.camera(), cameraId, tag, decision, now);
-          Seen before = drawn.put(measurement.camera() + "/" + tag, line);
-          changed |= before == null || !before.id().equals(line.id());
-          latest.put(line.id(), line);
+          Line line = decision.accepted() ? sight.accepted : sight.rejected;
+          line.decision = decision;
+          changed |= sight.drawn != line;
+          sight.drawn = line;
+          sight.decidedNanos = now;
         }
       }
     }
-    changed |= drawn.values().removeIf(line -> now - line.decidedNanos() > HOLD_NANOS);
-    latest.values().removeIf(line -> now - line.decidedNanos() > KEEP_NANOS);
+    for (int i = 0; i < seen.size(); i++) {
+      Sight sight = seen.get(i);
+      if (sight.drawn != null && now - sight.decidedNanos > HOLD_NANOS) {
+        sight.drawn = null;
+        changed = true;
+      }
+    }
     if (!changed) {
       return;
     }
     Shapes shapes = state.shapes();
-    Set<String> ids = new HashSet<>();
-    for (Seen line : drawn.values()) {
-      if (!ids.add(line.id())) {
-        continue;
+    for (Sight sight : seen) {
+      Line line = sight.drawn;
+      if (line != null) {
+        shapes
+            .line(line.id, SceneBuilder.ROOT)
+            .between(line.cameraFrame, line.tagFrame)
+            .style(line.style)
+            .inspect(line.inspection);
       }
-      String id = line.id();
-      shapes
-          .line(id, SceneBuilder.ROOT)
-          .between(WorldView.cameraFrame(line.cameraId()), WorldView.tagFrame(line.tag()))
-          .style(line.decision().accepted() ? Style.OK : Style.BAD.dashed())
-          .inspect(() -> inspection(latest.getOrDefault(id, line)));
     }
+  }
+
+  /** A camera's sight to a tag, made the first time it's seen; null for a tag not on the field. */
+  private @Nullable Sight sight(CameraConfig camera, Integer tag) {
+    Map<Integer, @Nullable Sight> byTag =
+        sights.computeIfAbsent(camera.name(), name -> new HashMap<>());
+    if (!byTag.containsKey(tag)) {
+      Sight sight =
+          field.tag(tag).isPresent()
+              ? new Sight(new Line(camera, tag, true), new Line(camera, tag, false))
+              : null;
+      byTag.put(tag, sight);
+      if (sight != null) {
+        seen.add(sight);
+      }
+    }
+    return byTag.get(tag);
   }
 
   /**
    * What a click on a line says, from the decision alone (a record the loop no longer touches): the
    * verdict and its numbers, called on a web server thread.
    */
-  private Inspection inspection(Seen line) {
-    VisionDecision decision = line.decision();
+  private Inspection inspection(Line line) {
+    VisionDecision decision = line.decision;
+    if (decision == null) {
+      return Inspection.of(line.camera + " → tag " + line.tag).detail("Verdict", "not measured");
+    }
     VisionMeasurement measurement = decision.measurement();
     Pose2d measured = measurement.pose();
-    Optional<Pose3d> tag = field.tag(line.tag());
+    Optional<Pose3d> tag = field.tag(line.tag);
     Inspection said =
-        Inspection.of(line.camera() + " → tag " + line.tag())
+        Inspection.of(line.camera + " → tag " + line.tag)
             .detail("Verdict", decision.accepted() ? "accepted" : "rejected: " + decision.reason())
             .detail(
                 "Innovation",
@@ -198,7 +242,7 @@ final class SightLines implements Layer {
                     + measurement.tagIds().stream()
                         .map(String::valueOf)
                         .collect(Collectors.joining(", ")));
-    Optional<String> calibrate = cameraAction.apply(line.camera());
+    Optional<String> calibrate = cameraAction.apply(line.camera);
     return calibrate.isPresent() ? said.action(calibrate.get()) : said;
   }
 }

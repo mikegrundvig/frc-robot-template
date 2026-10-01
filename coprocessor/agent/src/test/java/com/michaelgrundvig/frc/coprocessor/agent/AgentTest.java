@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.coprocessor.api.ExpectedCamera;
 import com.michaelgrundvig.frc.coprocessor.api.Health;
 import com.michaelgrundvig.frc.coprocessor.api.ThermalZone;
 import com.michaelgrundvig.frc.coprocessor.api.TripPoint;
+import com.michaelgrundvig.frc.coprocessor.api.UsbCamera;
 import com.michaelgrundvig.frc.coprocessor.json.Json;
 import com.michaelgrundvig.frc.coprocessor.settings.PhotonVisionDatabase;
 import com.michaelgrundvig.frc.coprocessor.settings.SettingsDatabase;
@@ -197,6 +198,35 @@ class AgentTest {
     assertThat(health.drive()).isNull();
     assertThat(health.cameras().present()).isEmpty();
     assertThat(health.cameras().missing()).hasSize(2);
+  }
+
+  @Test
+  void aCameraWhoseDeviceCantBeFollowedIsStillPresent() throws IOException {
+    Fixture.FakeCommands commands = fixture.commands;
+    Host host =
+        new Host(
+            fixture.root,
+            true,
+            commands,
+            path -> {
+              if (path.endsWith("video0/device")) {
+                throw new IOException("unplugged as it was read");
+              }
+              return Fixture.LINKS.getOrDefault(path, path);
+            },
+            fixture.micros::get,
+            message -> {});
+    List<UsbCamera> present = new CameraSource(host).present();
+    assertThat(present).hasSize(2);
+    assertThat(present.get(1))
+        .isEqualTo(
+            new UsbCamera(
+                "/dev/v4l/by-path/platform-xhci-hcd.0.auto-usb-0:1:1.0-video-index0",
+                "",
+                0,
+                "",
+                "",
+                ""));
   }
 
   @Test

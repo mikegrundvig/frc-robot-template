@@ -19,20 +19,20 @@ class NoticesTest {
     notices.periodic(true);
     assertThat(notices.view()).isEmpty();
 
-    said.set(new Notice("Safe to switch off", Devices.Level.OK));
+    said.set(new Notice("Safe to switch off", Notices.Level.OK));
     notices.periodic(true);
 
     assertThat(notices.view())
         .isEqualTo(Map.of("Coprocessors", Map.of("text", "Safe to switch off", "level", "ok")));
 
-    said.set(new Notice(" ", Devices.Level.OK));
+    said.set(new Notice(" ", Notices.Level.OK));
     notices.periodic(true);
     assertThat(notices.view()).isEmpty();
   }
 
   @Test
   void noticesAreReadOnlyWhileWatched() {
-    said.set(new Notice("Safe to switch off", Devices.Level.OK));
+    said.set(new Notice("Safe to switch off", Notices.Level.OK));
 
     notices.periodic(false);
 

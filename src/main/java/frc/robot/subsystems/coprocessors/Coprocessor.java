@@ -5,32 +5,47 @@ import com.michaelgrundvig.frc.coprocessor.api.JournalPage;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.Devices;
-import com.michaelgrundvig.frc.pitwall.Devices.Card;
-import com.michaelgrundvig.frc.pitwall.Devices.Level;
-import com.michaelgrundvig.frc.pitwall.Devices.Line;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.util.Alert;
 
 /**
  * One coprocessor, as {@link Coprocessors} watches it: its IO and what it read this loop, what this
- * build expects of it, its alerts, and its card on the Pitwall page. Its inputs are logged under
- * {@code Coprocessors/<name>}. It's judged from its inputs alone, so a replay judges it as the
- * robot did.
+ * build expects of it, and its alerts. Its inputs are logged under {@code Coprocessors/<name>}.
+ * It's judged from its inputs alone, so a replay judges it as the robot did; in full only when a
+ * new answer arrives, or it goes missing or comes back. Its card is {@link CoprocessorCard}'s.
  */
 final class Coprocessor implements AutoCloseable {
-  private final CompiledTable table;
+  /**
+   * The kinds of journal error alerted as soon as they're seen, however old in the boot: hardware
+   * and the system failing. The rest ({@code error}) are alerted only as they grow.
+   */
+  static final Set<String> AT_ONCE = Set.of("usb", "uvc", "filesystem", "oom", "thermal");
+
+  /**
+   * The coprocessor's boot as the robot last heard it, for placing its journal on the robot's
+   * clock: read on Pitwall's threads, written whole in the loop.
+   *
+   * @param bootId the boot's ID
+   * @param bootedAtRobotNanos the robot's time when it booted
+   */
+  private record Clock(String bootId, long bootedAtRobotNanos) {}
+
+  final CompiledTable table;
   final Computer computer;
   private final String address;
   private final CoprocessorIO io;
   final CoprocessorIOInputsAutoLogged inputs = new CoprocessorIOInputsAutoLogged();
   private final String key;
-  private final Coprocessors.Settings settings;
+  private final String bootedKey;
+  final Coprocessors.Settings settings;
 
   private final Alert missingEnabled;
   private final Alert missingDisabled;
@@ -41,14 +56,33 @@ final class Coprocessor implements AutoCloseable {
   private final Alert restarted;
   private final Alert journalErrors;
   private final Alert settingsDiffer;
+  private final Alert failed;
 
-  // This loop's judgment of it, for its card.
-  private boolean missing = true;
-  private List<String> mismatches = List.of();
-  private List<String> camerasMissing = List.of();
-  private int hottest = -1;
-  private boolean hotNow;
-  private boolean throttled;
+  private volatile Clock clock = new Clock("", 0);
+
+  // This loop's judgment of it, for its alerts and card.
+  boolean missing = true;
+  List<String> mismatches = List.of();
+  List<String> camerasMissing = List.of();
+  int hottest = -1;
+  boolean hotNow;
+  boolean throttled;
+
+  /** The answer last judged in full, and whether it was missing then. */
+  private long judgedAnswer = Long.MIN_VALUE;
+
+  private boolean judgedMissing = true;
+
+  // Hot, with hysteresis: when its last answer near enough its trip point to keep it hot came.
+  private boolean hotAlerted;
+  private long lastWarmNanos;
+
+  // What this boot had when the robot first heard it: restarts and errors since are news.
+  private String baselineBoot = "";
+  private int baselineRestarts;
+  private long baselineErrors;
+  int newRestarts;
+  long errorsToRead;
 
   /**
    * @param table the table compiled into the program, with what this build expects
@@ -63,6 +97,7 @@ final class Coprocessor implements AutoCloseable {
     this.settings = settings;
     String name = computer.name();
     key = "Coprocessors/" + name;
+    bootedKey = key + "/BootedAtRobotNanos";
     missingEnabled = alert(name + "MissingEnabled", Alert.Level.HIGH);
     missingDisabled = alert(name + "MissingDisabled", Alert.Level.MEDIUM);
     wrongImage = alert(name + "WrongImage", Alert.Level.HIGH);
@@ -77,6 +112,7 @@ final class Coprocessor implements AutoCloseable {
             + name
             + "'s PhotonVision settings differ from Git: back them up and commit them, or reflash"
             + " it");
+    failed = alert(name + "Failed", Alert.Level.HIGH);
   }
 
   private Alert alert(String id, Alert.Level level) {
@@ -98,37 +134,56 @@ final class Coprocessor implements AutoCloseable {
     if (inputs.everAnswered) {
       // The robot's time at the coprocessor's boot, by its latest answer: a journal entry's
       // monotonic time after that is its time on the robot's clock.
-      Logger.recordOutput(key + "/BootedAtRobotNanos", bootedAtRobotNanos());
+      Clock now = new Clock(inputs.bootId, inputs.answeredNanos - inputs.agentMonotonicNanos);
+      if (!now.equals(clock)) {
+        clock = now;
+      }
+      Logger.recordOutput(bootedKey, now.bootedAtRobotNanos());
     }
     judge(enabled);
+    failed.set(false);
+  }
+
+  /** Watching it failed this loop: said, so the others are watched on. */
+  void failed(RuntimeException e) {
+    String why = e.getMessage();
+    text(
+        failed,
+        "Watching coprocessor " + name() + " failed: " + (why != null ? why : e.toString()));
+    failed.set(true);
   }
 
   private void judge(boolean enabled) {
-    String name = name();
     missing = !inputs.everAnswered || inputs.ageSeconds > settings.staleAfterSeconds();
     if (missing) {
       // Powered down on purpose, it's missing for a reason: say so, not that it failed.
       text(
           enabled ? missingEnabled : missingDisabled,
-          inputs.powerDownAsked
-              ? "Coprocessor "
-                  + name
-                  + " ("
-                  + address
-                  + ") was powered down from Pitwall: cycle the robot's power to restart it"
-              : "Coprocessor "
-                  + name
-                  + " ("
-                  + address
-                  + ") "
-                  + (inputs.everAnswered
-                      ? "stopped answering"
-                      : "hasn't answered since the robot program started")
-                  + reason());
+          "Coprocessor "
+              + name()
+              + " ("
+              + address
+              + ") "
+              + (inputs.powerDownAccepted
+                  ? "was powered down from Pitwall: cycle the robot's power to restart it"
+                  : (inputs.everAnswered
+                          ? "stopped answering"
+                          : "hasn't answered since the robot program started")
+                      + reason()));
     }
     missingEnabled.set(missing && enabled);
     missingDisabled.set(missing && !enabled);
+    // The rest changes only with a new answer, or with it going missing or coming back.
+    if (inputs.answeredNanos == judgedAnswer && missing == judgedMissing) {
+      return;
+    }
+    judgedAnswer = inputs.answeredNanos;
+    judgedMissing = missing;
+    judgeAnswer();
+  }
 
+  private void judgeAnswer() {
+    String name = name();
     // Which image it runs, from its latest answer however old: a stamp changes only with a
     // reflash. Compared as the build compares it, every value named both ways.
     mismatches =
@@ -173,38 +228,69 @@ final class Coprocessor implements AutoCloseable {
     cameraMissing.set(!camerasMissing.isEmpty());
 
     judgeHeat(answering);
+    judgeNews(answering);
+    settingsDiffer.set(answering && settingsDiffer());
+  }
 
-    boolean restartedSinceBoot = answering && inputs.photonVisionRestarts > 0;
-    if (restartedSinceBoot) {
+  /**
+   * Restarts and errors, against what this boot had when the robot first heard it: a board up all
+   * day has some, and only new ones are news. Errors of the kinds alerted at once ({@link
+   * #AT_ONCE}) are news however old.
+   */
+  private void judgeNews(boolean answering) {
+    if (inputs.everAnswered && !inputs.bootId.equals(baselineBoot)) {
+      baselineBoot = inputs.bootId;
+      baselineRestarts = inputs.photonVisionRestarts;
+      baselineErrors = count("error");
+    }
+    newRestarts = Math.max(0, inputs.photonVisionRestarts - baselineRestarts);
+    long atOnce = 0;
+    for (String kind : AT_ONCE) {
+      atOnce += count(kind);
+    }
+    errorsToRead = atOnce + Math.max(0, count("error") - baselineErrors);
+
+    boolean restartedLately = answering && newRestarts > 0;
+    if (restartedLately) {
       text(
           restarted,
           "PhotonVision on "
-              + name
+              + name()
               + " restarted "
-              + times(inputs.photonVisionRestarts)
-              + " since boot: read its journal (Pit, its card's Download logs)");
+              + times(newRestarts)
+              + " since the robot first heard this boot: read its journal (Pit, its card's"
+              + " Download logs)");
     }
-    restarted.set(restartedSinceBoot);
+    restarted.set(restartedLately);
 
-    boolean errors = answering && inputs.journalErrors > 0;
+    boolean errors = answering && errorsToRead > 0;
     if (errors) {
       text(
           journalErrors,
           "Coprocessor "
-              + name
+              + name()
               + "'s journal has "
-              + count(inputs.journalErrors, "error")
-              + " since boot"
+              + count(errorsToRead, "error")
+              + " to read"
               + (inputs.latestErrors.length > 0
                   ? ", the latest: " + inputs.latestErrors[inputs.latestErrors.length - 1]
                   : ""));
     }
     journalErrors.set(errors);
-
-    settingsDiffer.set(answering && settingsDiffer());
   }
 
-  private String reason() {
+  /** How many errors of one kind its journal has this boot. */
+  private long count(String kind) {
+    int kinds = Math.min(inputs.journalCategories.length, inputs.journalCounts.length);
+    for (int i = 0; i < kinds; i++) {
+      if (inputs.journalCategories[i].equals(kind)) {
+        return inputs.journalCounts[i];
+      }
+    }
+    return 0;
+  }
+
+  String reason() {
     return inputs.error.isEmpty() ? "" : ": " + inputs.error;
   }
 
@@ -214,7 +300,12 @@ final class Coprocessor implements AutoCloseable {
     return computer.cameras().stream().filter(camera -> !present.contains(camera)).toList();
   }
 
-  /** Hot: its hottest zone (nearest its trip point) within the margin, or its big cores capped. */
+  /**
+   * Hot: its hottest zone (nearest its trip point) within the margin, or its big cores capped. Once
+   * hot, it stays hot until its answers come in well clear of the margin (by {@link
+   * Coprocessors.Settings#hotClearMarginCelsius}) for a while ({@link
+   * Coprocessors.Settings#hotHoldSeconds}), so a board hovering at the margin doesn't flicker it.
+   */
   private void judgeHeat(boolean answering) {
     hottest = -1;
     double closest = Double.POSITIVE_INFINITY;
@@ -228,11 +319,22 @@ final class Coprocessor implements AutoCloseable {
     }
     hotNow = answering && hottest >= 0 && closest <= settings.hotMarginCelsius();
     throttled = answering && inputs.bigCoreLimitMhz < inputs.bigCoreMaxMhz;
-    if (hotNow || throttled) {
+    boolean warm =
+        answering
+            && (throttled
+                || (hottest >= 0
+                    && closest <= settings.hotMarginCelsius() + settings.hotClearMarginCelsius()));
+    if (warm) {
+      lastWarmNanos = inputs.answeredNanos;
+    }
+    boolean held =
+        hotAlerted
+            && answering
+            && inputs.answeredNanos - lastWarmNanos < Math.round(settings.hotHoldSeconds() * 1e9);
+    hotAlerted = hotNow || throttled || (hotAlerted && warm) || held;
+    if (hotAlerted) {
       List<String> why = new ArrayList<>();
-      if (hotNow) {
-        why.add(heat());
-      }
+      why.add(heat());
       if (throttled) {
         why.add(capped());
       }
@@ -244,11 +346,11 @@ final class Coprocessor implements AutoCloseable {
               + String.join("; ", why)
               + ". PhotonVision slows as it throttles: cool it");
     }
-    hot.set(hotNow || throttled);
+    hot.set(hotAlerted);
   }
 
   /** Its hottest zone against its trip point: "bigcore0-thermal 81 °C, trips at 85 °C". */
-  private String heat() {
+  String heat() {
     if (hottest < 0) {
       return "no thermal zones with a trip point";
     }
@@ -260,24 +362,7 @@ final class Coprocessor implements AutoCloseable {
         inputs.zoneTripCelsius[hottest]);
   }
 
-  /**
-   * Its hottest zone, to the nearest 5 °C: on the card, which a board's degree-by-degree wobble
-   * would otherwise change every second. Near its trip point, the card says it exactly ({@link
-   * #heat}).
-   */
-  private String roughHeat() {
-    if (hottest < 0) {
-      return heat();
-    }
-    return String.format(
-        Locale.ROOT,
-        "%s about %.0f °C, trips at %.0f °C",
-        hottest < inputs.zones.length ? inputs.zones[hottest] : "zone " + hottest,
-        Math.round(inputs.zoneCelsius[hottest] / 5) * 5.0,
-        inputs.zoneTripCelsius[hottest]);
-  }
-
-  private String capped() {
+  String capped() {
     return String.format(
         Locale.ROOT,
         "big cores held to %.0f of %.0f MHz",
@@ -285,223 +370,70 @@ final class Coprocessor implements AutoCloseable {
         inputs.bigCoreMaxMhz);
   }
 
-  private boolean settingsDiffer() {
+  boolean settingsDiffer() {
     String committed = table.settingsHash(computer);
     return !committed.isEmpty() && !inputs.settingsHash.equals(committed);
   }
+
+  // ---- Powering down ----
 
   /** Asks it to power down, on its IO's own thread. */
   void powerDown() {
     io.powerDown();
   }
 
+  /** Stops asking it, and watching it go. */
+  void stopPowerDown() {
+    io.stopPowerDown();
+  }
+
   /**
-   * Whether it's gone, powered down: asked to, and since then neither its agent's port nor
-   * PhotonVision's accepts a connection.
+   * Whether it's gone, powered down: its agent took the request, and since then neither its agent's
+   * port nor PhotonVision's accepts a connection. One that never got the request isn't, however
+   * quiet: it may be running, its network unplugged.
    */
   boolean isGone() {
-    return inputs.powerDownAsked
+    return inputs.powerDownAccepted
         && inputs.portsTried
         && !inputs.agentPortOpen
         && !inputs.photonVisionPortOpen;
   }
 
-  /** How its agent answered the request to power down: empty until it did. */
-  String powerDownAnswer() {
-    return inputs.powerDownAnswer;
+  /** Whether its agent refused the request: it won't power down from here. */
+  boolean refusedPowerDown() {
+    return inputs.powerDownAnswer.startsWith("refused");
   }
 
-  /** The robot's time when it booted, by its latest answer. */
-  private long bootedAtRobotNanos() {
-    return inputs.answeredNanos - inputs.agentMonotonicNanos;
+  /**
+   * What stands in the way of its powering down, as the page says it: that it couldn't be reached,
+   * refused, or (taken, but not gone) is still answering; empty when nothing does, or it hasn't
+   * answered yet.
+   */
+  String powerDownTrouble() {
+    if (!inputs.powerDownAsked || isGone()) {
+      return "";
+    }
+    if (inputs.powerDownAccepted) {
+      return "still answering";
+    }
+    if (refusedPowerDown()) {
+      return inputs.powerDownAnswer;
+    }
+    return inputs.powerDownAnswer.isEmpty() ? "" : "couldn't be reached: " + inputs.powerDownAnswer;
   }
 
-  // ---- Its card ----
+  // ---- Its card, and downloads on the asker's thread ----
 
   /** Its card on the Pitwall page, from this loop's judgment. */
-  Card card() {
-    List<Line> lines = new ArrayList<>();
-    boolean twoBoards = inputs.macsTakingTurns.length > 1;
-    if (inputs.powerDownAsked) {
-      lines.add(powerLine());
-    }
-    if (missing && !isGone()) {
-      lines.add(
-          new Line(
-              "Answer",
-              (inputs.everAnswered
-                      ? String.format(Locale.ROOT, "none for %.0f s", Math.floor(inputs.ageSeconds))
-                      : "none since the robot program started")
-                  + reason()
-                  + (inputs.everAnswered ? "; the rest is from its last answer" : ""),
-              Level.PROBLEM));
-    }
-    if (twoBoards) {
-      lines.add(
-          new Line(
-              "Address",
-              "two boards answer at " + address + ": " + String.join(", ", inputs.macsTakingTurns),
-              Level.PROBLEM));
-    }
-    if (inputs.everAnswered) {
-      boolean versionRight = inputs.photonVisionVersion.equals(table.photonvisionVersion());
-      lines.add(
-          new Line(
-              "Version",
-              "PhotonVision "
-                  + orNone(inputs.photonVisionVersion)
-                  + (versionRight
-                      ? ", as this build's"
-                      : "; this build's is " + table.photonvisionVersion()),
-              versionRight ? Level.OK : Level.PROBLEM));
-      boolean stampRight =
-          inputs.name.equals(computer.name())
-              && inputs.team == table.table().team()
-              && inputs.address.equals(address)
-              && inputs.recipeHash.equals(table.recipeHash());
-      lines.add(
-          new Line(
-              "Stamp",
-              "release "
-                  + orNone(inputs.release)
-                  + ", recipe "
-                  + shortHash(inputs.recipeHash)
-                  + (stampRight
-                      ? ", as this build's"
-                      : "; stamped as "
-                          + orNone(inputs.name)
-                          + " at "
-                          + orNone(inputs.address)
-                          + ", and this build's is "
-                          + computer.name()
-                          + " at "
-                          + address
-                          + ", recipe "
-                          + shortHash(table.recipeHash())),
-              stampRight ? Level.OK : Level.PROBLEM));
-      lines.add(settingsLine());
-      lines.add(new Line("Heat", hotNow ? heat() : roughHeat(), hotNow ? Level.WARNING : Level.OK));
-      lines.add(
-          new Line(
-              "Load",
-              // To the nearest 10%, so the card changes when the load does, not with every poll.
-              String.format(
-                      Locale.ROOT,
-                      "big cores about %.0f%% busy, ",
-                      Math.round(inputs.bigCoreBusyPercent / 10) * 10.0)
-                  + (throttled
-                      ? capped()
-                      : String.format(
-                          Locale.ROOT, "free to run at %.0f MHz", inputs.bigCoreMaxMhz)),
-              throttled ? Level.WARNING : Level.OK));
-      lines.add(camerasLine());
-      lines.add(sinceBootLine());
-    }
-    Level level = Level.OK;
-    for (Line line : lines) {
-      level = line.level().compareTo(level) > 0 ? line.level() : level;
-    }
-    String state =
-        isGone()
-            ? "Powered down"
-            : inputs.powerDownAsked
-                ? "Powering down"
-                : twoBoards ? "Two answer" : missing ? "Missing" : "Present";
-    // Powered down on purpose, it's as it should be: the rest is its last answer.
-    return new Card(state, isGone() ? Level.NOTE : level, lines);
+  Devices.Card card() {
+    return CoprocessorCard.of(this);
   }
 
-  /** Where powering it down stands: what its agent said, and which ports still answer. */
-  private Line powerLine() {
-    if (isGone()) {
-      return new Line(
-          "Power",
-          "powered down from Pitwall: gone from its agent's port and PhotonVision's; cycle the"
-              + " robot's power to restart it",
-          Level.NOTE);
-    }
-    List<String> open = new ArrayList<>();
-    if (inputs.agentPortOpen) {
-      open.add("its agent");
-    }
-    if (inputs.photonVisionPortOpen) {
-      open.add("PhotonVision");
-    }
-    return new Line(
-        "Power",
-        "asked to power down"
-            + (inputs.powerDownAnswer.isEmpty() ? "" : ", " + inputs.powerDownAnswer)
-            + (inputs.portsTried && !open.isEmpty()
-                ? "; " + String.join(" and ", open) + " still answering"
-                : ""),
-        inputs.powerDownAnswer.isEmpty() || inputs.powerDownAnswer.equals("accepted")
-            ? Level.NOTE
-            : Level.WARNING);
-  }
-
-  private Line settingsLine() {
-    if (table.settingsHash(computer).isEmpty()) {
-      return new Line("Settings", "none in Git yet: download a backup, and commit it", Level.NOTE);
-    }
-    return settingsDiffer()
-        ? new Line(
-            "Settings",
-            "differ from Git ("
-                + shortHash(inputs.settingsHash)
-                + "): back them up and commit them",
-            Level.WARNING)
-        : new Line("Settings", "as in Git (" + shortHash(inputs.settingsHash) + ")", Level.OK);
-  }
-
-  private Line camerasLine() {
-    List<String> expected = computer.cameras();
-    if (expected.isEmpty()) {
-      return new Line(
-          "Cameras",
-          "none in the table; " + count(inputs.usbCameras.length, "USB camera") + " plugged in",
-          Level.NOTE);
-    }
-    int present = expected.size() - camerasMissing.size();
-    return new Line(
-        "Cameras",
-        present
-            + " of "
-            + expected.size()
-            + (camerasMissing.isEmpty()
-                ? ": " + String.join(", ", expected)
-                : ", " + String.join(", ", camerasMissing) + " missing"),
-        camerasMissing.isEmpty() ? Level.OK : Level.PROBLEM);
-  }
-
-  private Line sinceBootLine() {
-    boolean unclean = inputs.lastShutdownKnown && !inputs.lastShutdownClean;
-    boolean trouble = inputs.photonVisionRestarts > 0 || inputs.journalErrors > 0 || unclean;
-    String text =
-        "up "
-            + uptime()
-            + "; PhotonVision restarted "
-            + (inputs.photonVisionRestarts == 0 ? "never" : times(inputs.photonVisionRestarts))
-            + "; last shutdown "
-            + (!inputs.lastShutdownKnown ? "unknown" : unclean ? "unclean (a power cut)" : "clean")
-            + "; "
-            + count(inputs.journalErrors, "error")
-            + " in its journal";
-    return new Line("Since boot", text, trouble ? Level.WARNING : Level.OK);
-  }
-
-  /** How long it's been up, to the minute: the card changes once a minute for it, at most. */
-  private String uptime() {
-    long seconds = (long) inputs.uptimeSeconds;
-    return seconds < 60
-        ? "under a minute"
-        : seconds < 7200 ? seconds / 60 + " min" : seconds / 3600 + " h";
-  }
-
-  // ---- Downloads, on the asker's thread ----
-
-  /** Its settings backup, fetched from its agent now. */
+  /** Its settings backup, streamed from its agent as it arrives. */
   Devices.File settingsBackup() throws IOException {
-    return new Devices.File(name() + "-settings.zip", "application/zip", io.settingsBackup());
+    CoprocessorIO.Backup backup = io.settingsBackup();
+    return new Devices.File(
+        name() + "-settings.zip", "application/zip", backup.length(), backup.body());
   }
 
   /**
@@ -510,14 +442,12 @@ final class Coprocessor implements AutoCloseable {
    */
   Devices.LogPage journal(Devices.LogQuery query) throws IOException {
     JournalPage page = io.journal(query.cursor(), query.priority(), query.unit());
-    // Read once: the loop may move them on meanwhile.
-    String boot = inputs.bootId;
-    long bootedAt = bootedAtRobotNanos();
+    Clock heard = clock; // read once: the loop replaces it whole
     List<Devices.LogEntry> entries = new ArrayList<>();
     for (JournalEntry entry : page.entries()) {
       entries.add(
           new Devices.LogEntry(
-              when(entry, boot, bootedAt),
+              when(entry, heard.bootId(), heard.bootedAtRobotNanos()),
               entry.priority(),
               entry.unit().isEmpty() ? entry.identifier() : entry.unit(),
               entry.message()));
@@ -555,7 +485,8 @@ final class Coprocessor implements AutoCloseable {
             hot,
             restarted,
             journalErrors,
-            settingsDiffer)
+            settingsDiffer,
+            failed)
         .filter(Alert::get)
         .map(Coprocessor::shown)
         .toList();
@@ -567,26 +498,18 @@ final class Coprocessor implements AutoCloseable {
   }
 
   /** Sets an alert's text only when it changes. */
-  private static void text(Alert alert, String text) {
-    if (!text.equals(alert.getText())) {
+  static void text(Alert alert, String text) {
+    if (!Objects.equals(text, alert.getText())) {
       alert.setText(text);
     }
   }
 
-  private static String times(int count) {
+  static String times(long count) {
     return count == 1 ? "once" : count + " times";
   }
 
-  private static String count(int count, String thing) {
+  static String count(long count, String thing) {
     return count + " " + thing + (count == 1 ? "" : "s");
-  }
-
-  private static String orNone(String text) {
-    return text.isEmpty() ? "(none)" : text;
-  }
-
-  private static String shortHash(String hash) {
-    return hash.isEmpty() ? "(none)" : hash.length() > 12 ? hash.substring(0, 12) : hash;
   }
 
   @Override
@@ -602,7 +525,8 @@ final class Coprocessor implements AutoCloseable {
             hot,
             restarted,
             journalErrors,
-            settingsDiffer)) {
+            settingsDiffer,
+            failed)) {
       alert.close();
     }
   }

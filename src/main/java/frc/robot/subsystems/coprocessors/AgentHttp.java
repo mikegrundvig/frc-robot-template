@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URI;
@@ -13,7 +14,8 @@ import java.net.URISyntaxException;
 /**
  * GETs from a coprocessor's health agent, within a connect timeout and a timeout on the whole
  * answer, and reads at most so many bytes: the agent bounds its answers, and this never trusts it
- * to. Plain {@link HttpURLConnection}, which every Java runtime has, the robot's included.
+ * to. Plain {@link HttpURLConnection}, which every Java runtime has, the robot's included, and
+ * never through a proxy: the coprocessors are on the robot's own network.
  */
 final class AgentHttp {
   /** How much to read at a time. */
@@ -68,13 +70,105 @@ final class AgentHttp {
     try {
       int status = connection.getResponseCode();
       if (status != HttpURLConnection.HTTP_OK) {
-        throw new IOException("answered " + status + " to " + pathAndQuery);
+        throw new Answered(status, pathAndQuery);
       }
       try (InputStream in = connection.getInputStream()) {
         return readBounded(in, deadline);
       }
     } finally {
       connection.disconnect();
+    }
+  }
+
+  /**
+   * An answer's body, to read as it arrives, with its length when the agent gave it (-1 when not):
+   * for a download passed on without being held whole. Reading it past the size limit or the
+   * timeout on the whole answer fails; closing it closes the connection.
+   *
+   * @throws IOException saying why there's none: no connection or answer in time, an answer other
+   *     than 200, or one longer than the limit by its own length
+   */
+  Streamed stream(String pathAndQuery) throws IOException {
+    HttpURLConnection connection = open(pathAndQuery);
+    long deadline = System.nanoTime() + answerTimeoutMillis * 1_000_000L;
+    try {
+      int status = connection.getResponseCode();
+      if (status != HttpURLConnection.HTTP_OK) {
+        throw new Answered(status, pathAndQuery);
+      }
+      long length = connection.getContentLengthLong();
+      if (length > maxBytes) {
+        throw new IOException("answered more than " + maxBytes + " bytes");
+      }
+      return new Streamed(length, new Bounded(connection, deadline));
+    } catch (IOException | RuntimeException e) {
+      connection.disconnect();
+      throw e;
+    }
+  }
+
+  /** Something answered, but not 200: the agent refused, or it isn't this agent. */
+  static final class Answered extends IOException {
+    private static final long serialVersionUID = 1;
+
+    /** The answer's status. */
+    final int status;
+
+    Answered(int status, String pathAndQuery) {
+      super("answered " + status + " to " + pathAndQuery);
+      this.status = status;
+    }
+  }
+
+  /**
+   * An answer's body as it arrives.
+   *
+   * @param length its length, or -1 when the agent didn't give it
+   * @param body what it holds
+   */
+  record Streamed(long length, InputStream body) {}
+
+  /** An answer's body that holds to the size limit and the deadline, and disconnects on close. */
+  private final class Bounded extends InputStream {
+    private final HttpURLConnection connection;
+    private final InputStream in;
+    private final long deadline;
+    private long read;
+
+    Bounded(HttpURLConnection connection, long deadline) throws IOException {
+      this.connection = connection;
+      in = connection.getInputStream();
+      this.deadline = deadline;
+    }
+
+    @Override
+    public int read() throws IOException {
+      byte[] one = new byte[1];
+      return read(one, 0, 1) < 0 ? -1 : one[0] & 0xff;
+    }
+
+    @Override
+    public int read(byte[] into, int offset, int length) throws IOException {
+      int got = in.read(into, offset, length);
+      if (got > 0) {
+        read += got;
+        if (read > maxBytes) {
+          throw new IOException("answered more than " + maxBytes + " bytes");
+        }
+      }
+      if (System.nanoTime() > deadline) {
+        throw new SocketTimeoutException("no whole answer within " + answerTimeoutMillis + " ms");
+      }
+      return got;
+    }
+
+    @Override
+    public void close() throws IOException {
+      try {
+        in.close();
+      } finally {
+        connection.disconnect();
+      }
     }
   }
 
@@ -123,7 +217,9 @@ final class AgentHttp {
     try {
       connection =
           (HttpURLConnection)
-              new URI("http://" + authority() + pathAndQuery).toURL().openConnection();
+              new URI("http://" + authority() + pathAndQuery)
+                  .toURL()
+                  .openConnection(Proxy.NO_PROXY);
     } catch (URISyntaxException e) {
       throw new IllegalArgumentException("not a path on the agent: " + pathAndQuery, e);
     }
@@ -154,7 +250,7 @@ final class AgentHttp {
   }
 
   private static int millis(double seconds) {
-    if (!(seconds > 0) || seconds > 3600) {
+    if (!(seconds > 0) || seconds > 600) {
       throw new IllegalArgumentException("a timeout, in seconds: " + seconds);
     }
     return (int) Math.max(1, Math.round(seconds * 1000));

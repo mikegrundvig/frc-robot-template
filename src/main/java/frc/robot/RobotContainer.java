@@ -298,9 +298,12 @@ public final class RobotContainer implements AutoCloseable {
             () -> alliance);
     // The vision coprocessors' health agents: over the network on a robot, simulated in the
     // simulator, the log in a replay. Each is asked on a thread of its own; the loop never waits.
+    // A robot watches none of the template's example table's (team 0): they'd all read missing.
     CompiledTable table = Coprocessors.compiledTable();
     Coprocessors.Settings coprocessorSettings = Coprocessors.Settings.DEFAULTS;
-    CoprocessorIO[] coprocessorIOs = new CoprocessorIO[table.table().computers().size()];
+    boolean watchNone = world == null && Coprocessors.isExample(table);
+    CoprocessorIO[] coprocessorIOs =
+        new CoprocessorIO[watchNone ? 0 : table.table().computers().size()];
     PhotonVisionIO photonVision;
     if (world != null) {
       coprocessorIOs = world.coprocessors(table, coprocessorSettings);

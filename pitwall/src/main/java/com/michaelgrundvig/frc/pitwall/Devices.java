@@ -1,6 +1,8 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
@@ -84,14 +86,18 @@ public final class Devices {
   }
 
   /**
-   * A file a device gives.
+   * A file a device gives, streamed to the page as it arrives: Pitwall never holds a file of known
+   * length whole. Pitwall closes it once sent.
    *
    * @param name the file's name as the browser saves it: letters, digits, dots, hyphens, and
    *     underscores
    * @param contentType its media type, such as {@code application/zip}
-   * @param bytes what it holds
+   * @param length how many bytes it holds, or -1 when the device doesn't say: one that ends short
+   *     of its length reaches the page cut off, as an error, never as a whole file
+   * @param body what it holds
    */
-  public record File(String name, String contentType, byte[] bytes) {
+  public record File(String name, String contentType, long length, InputStream body)
+      implements AutoCloseable {
     private static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9._-]{1,100}");
     private static final Pattern MEDIA_TYPE =
         Pattern.compile("[a-z]+/[a-z0-9.+-]+(; ?charset=[a-z0-9-]+)?");
@@ -103,6 +109,19 @@ public final class Devices {
       if (!MEDIA_TYPE.matcher(contentType).matches()) {
         throw new IllegalArgumentException("not a media type: " + contentType);
       }
+      if (length < -1) {
+        throw new IllegalArgumentException("a file's length is -1 (unknown) or more: " + length);
+      }
+    }
+
+    /** A file held whole. */
+    public static File of(String name, String contentType, byte[] bytes) {
+      return new File(name, contentType, bytes.length, new ByteArrayInputStream(bytes));
+    }
+
+    @Override
+    public void close() throws IOException {
+      body.close();
     }
   }
 
@@ -211,7 +230,10 @@ public final class Devices {
     }
   }
 
-  /** One device: its name, what kind it is, its card, and what can be done from it. */
+  /**
+   * One device: its name, what kind it is, its card, and what can be done from it. Described whole
+   * before it's added: once added, the server's threads read it, so it can't change.
+   */
   public static final class Device {
     private final String name;
     private final String kind;
@@ -219,6 +241,7 @@ public final class Devices {
     private final List<Link> links = new ArrayList<>();
     private final List<Download> downloads = new ArrayList<>();
     private @Nullable Log log;
+    private boolean added;
 
     private Device(String name, String kind, Supplier<Card> card) {
       if (!NAME.matcher(name).matches()) {
@@ -243,12 +266,14 @@ public final class Devices {
 
     /** Adds a link, such as to the device's own page. */
     public Device link(String label, String url) {
+      unchanged();
       links.add(new Link(label, url));
       return this;
     }
 
     /** Adds a file to download from it. */
     public Device download(String id, String label, Fetch fetch) {
+      unchanged();
       Download download = new Download(id, label, fetch);
       if (downloads.stream().anyMatch(d -> d.id().equals(id))) {
         throw new IllegalArgumentException(name + " has two downloads named " + id);
@@ -259,8 +284,17 @@ public final class Devices {
 
     /** Gives it a log the page can read, a page at a time, and download. */
     public Device log(Log log) {
+      unchanged();
       this.log = log;
       return this;
+    }
+
+    /** Refuses a change once it's on the page, where the server's threads read it. */
+    private void unchanged() {
+      if (added) {
+        throw new IllegalStateException(
+            name + " is on the page already: describe a device whole before adding it");
+      }
     }
 
     public String name() {
@@ -319,6 +353,7 @@ public final class Devices {
     if (named(device.name()).isPresent()) {
       throw new IllegalArgumentException("two devices are named " + device.name());
     }
+    device.added = true;
     List<Device> more = new ArrayList<>(devices);
     more.add(device);
     devices = List.copyOf(more);

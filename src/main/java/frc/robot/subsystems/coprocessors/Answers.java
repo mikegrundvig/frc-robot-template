@@ -100,6 +100,9 @@ final class Answers {
 
     inputs.journalErrors =
         health.journal().counts().values().stream().mapToInt(Integer::intValue).sum();
+    inputs.journalCategories = health.journal().counts().keySet().toArray(String[]::new);
+    inputs.journalCounts =
+        health.journal().counts().values().stream().mapToLong(Integer::longValue).toArray();
     inputs.latestErrors =
         health.journal().latest().stream().map(Answers::said).toArray(String[]::new);
     Drive drive = health.drive();

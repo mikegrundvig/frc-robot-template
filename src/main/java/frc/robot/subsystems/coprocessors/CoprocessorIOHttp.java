@@ -18,28 +18,20 @@ import org.jspecify.annotations.Nullable;
  * settings backup, its journal) are asked on the caller's thread, with longer timeouts.
  */
 public final class CoprocessorIOHttp implements CoprocessorIO {
-  /** The most a health answer may hold: the agent's are about 2 KB. */
+  /** The most a health answer may hold: the agent's are 3 to 4 KB. */
   static final int MAX_HEALTH_BYTES = 64 * 1024;
 
-  /** The most a download may hold: a settings backup, calibrations included, or a journal page. */
-  static final int MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+  /** The most a settings backup may hold, calibrations included: it's streamed, never held. */
+  static final int MAX_BACKUP_BYTES = 64 * 1024 * 1024;
+
+  /** The most a page of the journal may hold: twice what the agent sends at most. */
+  static final int MAX_JOURNAL_BYTES = 8 * 1024 * 1024;
 
   private record Answer(Health health, List<String> macsTakingTurns) {}
 
-  /**
-   * Where powering it down stands.
-   *
-   * @param asked whether it was asked
-   * @param answer how its agent answered: "accepted", or why not; empty until it did
-   * @param tried whether its ports have been tried since
-   * @param agentOpen whether its agent's port still accepts a connection
-   * @param photonVisionOpen whether PhotonVision's does
-   */
-  private record PowerDown(
-      boolean asked, String answer, boolean tried, boolean agentOpen, boolean photonVisionOpen) {}
-
   private final AgentHttp agent;
-  private final AgentHttp downloads;
+  private final AgentHttp backups;
+  private final AgentHttp journals;
   private final LongSupplier robotClock;
   private final CoprocessorPoller<Answer> poller;
 
@@ -49,10 +41,8 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
   /** The answer the inputs hold, seen only on the loop's thread. */
   private @Nullable Answer filled;
 
-  private final String name;
-  private final long periodMillis;
-  private volatile PowerDown powerDown = new PowerDown(false, "", false, false, false);
-  private @Nullable Thread poweringDown;
+  /** Asks it to power down, and watches it go, on a thread of its own. */
+  private final PowerDowner powerDowner;
 
   /**
    * Starts polling the agent, on a thread of its own.
@@ -69,6 +59,19 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
       int port,
       Coprocessors.Settings settings,
       LongSupplier robotClock) {
+    this(name, address, port, Coprocessors.PHOTONVISION_PORT, settings, robotClock);
+  }
+
+  /**
+   * @param photonVisionPort where PhotonVision's page answers: 5800, but for a test's stand-in
+   */
+  CoprocessorIOHttp(
+      String name,
+      String address,
+      int port,
+      int photonVisionPort,
+      Coprocessors.Settings settings,
+      LongSupplier robotClock) {
     agent =
         new AgentHttp(
             address,
@@ -76,15 +79,35 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
             settings.connectTimeoutSeconds(),
             settings.answerTimeoutSeconds(),
             MAX_HEALTH_BYTES);
-    downloads =
+    backups =
         agent.with(
-            settings.connectTimeoutSeconds(),
-            settings.downloadTimeoutSeconds(),
-            MAX_DOWNLOAD_BYTES);
+            settings.connectTimeoutSeconds(), settings.downloadTimeoutSeconds(), MAX_BACKUP_BYTES);
+    journals =
+        agent.with(
+            settings.connectTimeoutSeconds(), settings.downloadTimeoutSeconds(), MAX_JOURNAL_BYTES);
     this.robotClock = robotClock;
-    this.name = name;
-    periodMillis = Math.round(settings.pollPeriodSeconds() * 1000);
     macs = new MacWatch(settings.turnsWindowSeconds());
+    powerDowner =
+        new PowerDowner(
+            name,
+            new PowerDowner.Target() {
+              @Override
+              public int ask() throws IOException {
+                return agent.post(AgentApi.SHUTDOWN);
+              }
+
+              @Override
+              public boolean agentAnswers() {
+                return agent.accepts(port);
+              }
+
+              @Override
+              public boolean photonVisionAnswers() {
+                return agent.accepts(photonVisionPort);
+              }
+            },
+            Math.round(settings.pollPeriodSeconds() * 1000),
+            Math.round(settings.powerDownTimeoutSeconds() * 1000));
     poller = new CoprocessorPoller<>(name, this::ask, settings.pollPeriodSeconds(), robotClock);
     poller.start();
   }
@@ -121,8 +144,9 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
       inputs.macsTakingTurns = answer.macsTakingTurns().toArray(String[]::new);
       filled = answer;
     }
-    PowerDown down = powerDown;
+    PowerDowner.State down = powerDowner.state();
     inputs.powerDownAsked = down.asked();
+    inputs.powerDownAccepted = down.accepted();
     inputs.powerDownAnswer = down.answer();
     inputs.portsTried = down.tried();
     inputs.agentPortOpen = down.agentOpen();
@@ -131,45 +155,18 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
 
   @Override
   public void powerDown() {
-    Thread was = poweringDown;
-    if (was != null) {
-      was.interrupt();
-    }
-    powerDown = new PowerDown(true, "", false, true, true);
-    poweringDown =
-        Thread.ofVirtual().name("Coprocessor " + name + " powering down").start(this::powerDownNow);
-  }
-
-  /**
-   * Asks the agent to power down, then tries both ports once a period until neither accepts a
-   * connection, on the powering-down thread.
-   */
-  private void powerDownNow() {
-    String answer;
-    try {
-      int status = agent.post(AgentApi.SHUTDOWN);
-      answer = status == 202 ? "accepted" : "answered " + status;
-    } catch (IOException e) {
-      answer = CoprocessorPoller.why(e);
-    }
-    while (!Thread.currentThread().isInterrupted()) {
-      boolean agentOpen = agent.accepts(agent.port());
-      boolean photonVisionOpen = agent.accepts(Coprocessors.PHOTONVISION_PORT);
-      powerDown = new PowerDown(true, answer, true, agentOpen, photonVisionOpen);
-      if (!agentOpen && !photonVisionOpen) {
-        return;
-      }
-      try {
-        Thread.sleep(periodMillis);
-      } catch (InterruptedException e) {
-        return;
-      }
-    }
+    powerDowner.ask();
   }
 
   @Override
-  public byte[] settingsBackup() throws IOException {
-    return downloads.get(AgentApi.SETTINGS_ZIP);
+  public void stopPowerDown() {
+    powerDowner.stop();
+  }
+
+  @Override
+  public Backup settingsBackup() throws IOException {
+    AgentHttp.Streamed answer = backups.stream(AgentApi.SETTINGS_ZIP);
+    return new Backup(answer.length(), answer.body());
   }
 
   @Override
@@ -186,7 +183,7 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
     if (!unit.isEmpty()) {
       query.append("&unit=").append(URLEncoder.encode(unit, StandardCharsets.UTF_8));
     }
-    byte[] body = downloads.get(query.toString());
+    byte[] body = journals.get(query.toString());
     try {
       return JournalPage.parse(new String(body, StandardCharsets.UTF_8));
     } catch (JsonException | IllegalArgumentException e) {
@@ -197,9 +194,6 @@ public final class CoprocessorIOHttp implements CoprocessorIO {
   @Override
   public void close() {
     poller.close();
-    Thread down = poweringDown;
-    if (down != null) {
-      down.interrupt();
-    }
+    powerDowner.close();
   }
 }

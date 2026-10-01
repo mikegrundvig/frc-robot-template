@@ -19,8 +19,9 @@ import org.wpilib.command3.Scheduler;
  * state shown live. An action runs only while the robot is enabled in utility mode and the field
  * system isn't connected, so the Driver Station's enable stays the safety switch; leaving utility
  * mode or disabling cancels whatever is running. An action that must not run while the robot can
- * move (powering devices down) runs instead only while it's disabled, and never on the field
- * ({@link When#DISABLED}); enabling cancels it.
+ * move (powering devices down) runs instead only while it's disabled, and only until the field
+ * system first connects in this run of the program ({@link When#DISABLED}), so a match can't set it
+ * off even through a dropout that clears "field connected" for a moment; enabling cancels it.
  *
  * <p>Add one with a line: {@code actions.add("Home arm", arm::home)} for a Commands v3 command
  * (made fresh each run), or any {@link Routine}.
@@ -49,7 +50,10 @@ public final class Actions {
   public enum When {
     /** Enabled in utility mode: a routine that moves the robot. The default. */
     ENABLED_IN_UTILITY,
-    /** Disabled: a routine that mustn't run while the robot can move, such as powering down. */
+    /**
+     * Disabled, and only until the field system first connects in this run of the program: a
+     * routine that mustn't run while the robot can move, or in a match, such as powering down.
+     */
     DISABLED
   }
 
@@ -72,8 +76,9 @@ public final class Actions {
    * @param phase where it stands
    * @param detail a sentence about it: why it was refused or canceled
    * @param locked why it can't start now, or empty while it can
+   * @param when when it may run
    */
-  public record State(String name, Phase phase, String detail, String locked) {}
+  public record State(String name, Phase phase, String detail, String locked, When when) {}
 
   /**
    * Whether actions may run this loop.
@@ -81,8 +86,16 @@ public final class Actions {
    * @param enabled whether the robot is enabled
    * @param utility whether the Driver Station is in utility mode
    * @param fieldConnected whether the field system is connected
+   * @param fieldSinceStart whether the field system has connected at all since the robot program
+   *     started: a match's dropout clears {@code fieldConnected} for a moment, never this
    */
-  public record Gate(boolean enabled, boolean utility, boolean fieldConnected) {
+  public record Gate(
+      boolean enabled, boolean utility, boolean fieldConnected, boolean fieldSinceStart) {
+    /** A gate whose field system is connected now, or hasn't been: as tests and simulations set. */
+    public Gate(boolean enabled, boolean utility, boolean fieldConnected) {
+      this(enabled, utility, fieldConnected, fieldConnected);
+    }
+
     /** Why actions can't run now, or null when they can. */
     @Nullable String whyNot() {
       return whyNot("actions");
@@ -111,7 +124,12 @@ public final class Actions {
       return switch (when) {
         case ENABLED_IN_UTILITY ->
             !enabled || !utility ? runs + " only with the robot enabled in utility mode" : null;
-        case DISABLED -> enabled ? runs + " only with the robot disabled" : null;
+        case DISABLED ->
+            fieldSinceStart
+                ? runs
+                    + " only until the field system first connects, and it has since the robot"
+                    + " program started"
+                : enabled ? runs + " only with the robot disabled" : null;
       };
     }
   }
@@ -386,7 +404,8 @@ public final class Actions {
               action.getKey(),
               entry.phase,
               entry.detail,
-              Objects.requireNonNullElse(entry.locked, "")));
+              Objects.requireNonNullElse(entry.locked, ""),
+              entry.when));
     }
     return List.copyOf(states);
   }

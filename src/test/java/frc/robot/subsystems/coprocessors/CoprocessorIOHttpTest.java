@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
@@ -35,7 +36,7 @@ class CoprocessorIOHttpTest {
   private static final Computer FRONT =
       new Computer("vision-front", 11, Board.ORANGEPI_5, List.of("front-left"), 5808);
   private static final CompiledTable TABLE =
-      new CompiledTable(new Table(1234, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+      new CompiledTable(new Table(24680, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
 
   /** Fast polls, for a test: ten a second. */
   private static final Coprocessors.Settings FAST =
@@ -81,7 +82,7 @@ class CoprocessorIOHttpTest {
     server.createContext(
         "/v1/settings.zip",
         exchange -> {
-          byte[] zip = agent.settingsBackup();
+          byte[] zip = agent.settingsBackup().body().readAllBytes();
           exchange.sendResponseHeaders(200, zip.length);
           try (OutputStream out = exchange.getResponseBody()) {
             out.write(zip);
@@ -97,7 +98,19 @@ class CoprocessorIOHttpTest {
     server.start();
     io =
         new CoprocessorIOHttp(
-            "vision-front", "127.0.0.1", server.getAddress().getPort(), FAST, System::nanoTime);
+            "vision-front",
+            "127.0.0.1",
+            server.getAddress().getPort(),
+            closedPort(),
+            FAST,
+            System::nanoTime);
+  }
+
+  /** A port nothing listens on, standing in for PhotonVision's: nothing here depends on 5800. */
+  private static int closedPort() throws IOException {
+    try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      return socket.getLocalPort();
+    }
   }
 
   @AfterEach
@@ -144,7 +157,7 @@ class CoprocessorIOHttpTest {
     assertThat(inputs.answered).isTrue();
     assertThat(inputs.error).isEmpty();
     assertThat(inputs.name).isEqualTo("vision-front");
-    assertThat(inputs.address).isEqualTo("10.12.34.11");
+    assertThat(inputs.address).isEqualTo("10.246.80.11");
     assertThat(inputs.photonVisionVersion).isEqualTo("v2027.1.0");
     assertThat(inputs.recipeHash).isEqualTo("recipe-1");
     assertThat(inputs.role).containsExactly("front-left");
@@ -191,11 +204,16 @@ class CoprocessorIOHttpTest {
   void itsBackupAndJournalAreFetchedOnRequest() throws Exception {
     agent.restartPhotonVision();
 
-    byte[] zip = io.settingsBackup();
+    CoprocessorIO.Backup backup = io.settingsBackup();
+    byte[] zip;
+    try (var body = backup.body()) {
+      zip = body.readAllBytes();
+    }
     JournalPage errors = io.journal("", 3, "photonvision.service");
     JournalPage after = io.journal(errors.cursor(), 7, "");
 
     assertThat(zip).startsWith('P', 'K');
+    assertThat(backup.length()).as("the agent gave its length").isEqualTo(zip.length);
     assertThat(errors.entries())
         .singleElement()
         .satisfies(e -> assertThat(e.priority()).isEqualTo(3));
@@ -230,6 +248,7 @@ class CoprocessorIOHttpTest {
     until(() -> !inputs.agentPortOpen, inputs);
 
     assertThat(inputs.powerDownAsked).isTrue();
+    assertThat(inputs.powerDownAccepted).isTrue();
     assertThat(inputs.powerDownAnswer).isEqualTo("accepted");
     assertThat(asked).contains("POST /v1/shutdown");
     assertThat(openWhileUp).isTrue();

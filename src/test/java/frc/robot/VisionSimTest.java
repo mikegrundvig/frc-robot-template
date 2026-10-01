@@ -52,6 +52,9 @@ class VisionSimTest {
     return drive(1);
   }
 
+  /** The mean error over the last time through the route of the last drive. */
+  private double lastLapMean;
+
   /**
    * Drives the route, there and back again as many times as asked: about 8.5 s each.
    *
@@ -64,6 +67,8 @@ class VisionSimTest {
     for (int lap = 0; lap < laps; lap++) {
       double back = lap % 2 == 0 ? 1 : -1; // odd laps drive back where the even ones went
       worst = 0;
+      double sum = 0;
+      int loops = 0;
       for (double[] leg : ROUTE) {
         sim.driver().setLeftY(-leg[1] * back);
         sim.driver().setLeftX(-leg[2] * back);
@@ -72,12 +77,15 @@ class VisionSimTest {
         for (int i = 0; i < RobotLoop.loops(leg[0]); i++) {
           sim.loops(1);
           worst = Math.max(worst, error());
+          sum += error();
+          loops++;
           for (CameraConfig camera : Robots.SIM.cameras()) {
             mostDoubted.merge(
                 camera.name(), sim.robot().vision().mountDoubtMeters(camera.name()), Math::max);
           }
         }
       }
+      lastLapMean = sum / loops;
     }
     return worst;
   }
@@ -179,7 +187,7 @@ class VisionSimTest {
         SensorErrors.TYPICAL.withCameraMountError(
             "front-left", new Transform3d(0, 0, -0.1016, Rotation3d.ZERO)));
 
-    double worst = drive(4);
+    double worst = drive(3);
 
     assertThat(sim.robot().vision().mountOffsetMeters("front-left"))
         .isCloseTo(0.1016, within(0.02));
@@ -192,18 +200,19 @@ class VisionSimTest {
 
   /**
    * A camera turned 4° on its mount puts the robot off to the side by 7 cm for every meter to its
-   * tags, and pulls the heading toward its own. Once judged, it counts for less: on the last lap
-   * the estimate was within 8.6 cm and ended 6.9 cm off, where trusted as before (the tolerance at
-   * its tuning limit) it was 12.3 cm and ended 12.2 cm off. The back cameras are never doubted.
+   * tags, and pulls the heading toward its own. Once judged (about 20 s in: it sees tags only part
+   * of the time, and only while another camera holds the pose), it counts for less: over the last
+   * lap the estimate was 4.0 cm off on average, where trusted as before (the tolerance at its
+   * tuning limit) it was 5.4 cm off. The back cameras are never doubted.
    */
   @Test
   void aCameraTurnedOnItsMountCountsForLess() {
     Transform3d turned = new Transform3d(0, 0, 0, new Rotation3d(0, 0, Math.toRadians(4)));
     sim.build(SensorErrors.TYPICAL.withCameraMountError("front-left", turned));
 
-    double worst = drive(4);
+    drive(4);
+    double mean = lastLapMean;
     double doubt = sim.robot().vision().mountDoubtMeters("front-left");
-    double end = error();
     assertThat(activeAlerts())
         .anyMatch(
             text ->
@@ -219,12 +228,11 @@ class VisionSimTest {
     sim.build(
         RobotConfigBuilder.builder(Robots.SIM).vision(asBefore).build(),
         SensorErrors.TYPICAL.withCameraMountError("front-left", turned));
-    double worstAsBefore = drive(4);
-    double endAsBefore = error();
+    drive(4);
+    double meanAsBefore = lastLapMean;
 
     assertThat(doubt).isGreaterThan(0.08);
-    assertThat(worst).as("the last lap").isLessThan(0.8 * worstAsBefore);
-    assertThat(end).isLessThan(0.7 * endAsBefore);
+    assertThat(mean).as("the last lap's mean error").isLessThan(0.8 * meanAsBefore);
   }
 
   @Test

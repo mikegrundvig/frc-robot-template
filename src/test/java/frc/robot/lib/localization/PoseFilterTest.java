@@ -1,6 +1,7 @@
 package frc.robot.lib.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 import java.util.List;
@@ -39,13 +40,19 @@ class PoseFilterTest {
     return filter;
   }
 
-  /** A position solved with the gyro's heading, from tags this far off. */
+  /** A position solved with the gyro's heading as the filter had it, from tags this far off. */
   private static VisionMeasurement fix(Translation2d position, Translation2d toTags, double noise) {
+    return fix(position, toTags, noise, Rotation2d.ZERO);
+  }
+
+  /** A position solved with this heading, from tags this far off. */
+  private static VisionMeasurement fix(
+      Translation2d position, Translation2d toTags, double noise, Rotation2d solvedWith) {
     return new VisionMeasurement(
         1,
-        new Pose2d(position, Rotation2d.ZERO),
+        new Pose2d(position, solvedWith),
         PoseCovariance.fromStdDevs(noise, noise, Double.POSITIVE_INFINITY),
-        toTags,
+        new VisionMeasurement.Lever(solvedWith, toTags),
         "front",
         List.of(26),
         VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -57,7 +64,7 @@ class PoseFilterTest {
         1,
         new Pose2d(Translation2d.ZERO, heading),
         PoseCovariance.fromStdDevs(noise, noise, radians),
-        Translation2d.ZERO,
+        VisionMeasurement.Lever.NONE,
         "front",
         List.of(25, 26),
         VisionMeasurement.Solver.MULTI_TAG);
@@ -209,6 +216,45 @@ class PoseFilterTest {
     // A little above it: the images' own noise, 0.05 rad over 2,000 of them, adds in squares.
     double shared = Math.hypot(TURN, HEADING_SHIFT);
     assertThat(filter.covariance().headingStdDev()).isCloseTo(shared, within(0.03 * shared));
+  }
+
+  /**
+   * A position solved with a heading a degree off the estimate's lands 3 m times a degree aside, as
+   * that heading puts it: the filter reads it through its lever and finds the robot where it was,
+   * as it would a late measurement whose heading the estimate has since corrected.
+   */
+  @Test
+  void aPositionSolvedWithAnotherHeadingIsReadThroughItsLever() {
+    PoseFilter filter = placed(TEXTBOOK, 0.1, 1e-6);
+    double off = Math.toRadians(1);
+    // Tags 3 m ahead along x, seen with the heading a degree to the left: the solve put the robot
+    // 3 m times a degree to the right.
+    Translation2d solved = new Translation2d(0, -3 * off);
+
+    apply(filter, fix(solved, new Translation2d(3, 0), 0.05, new Rotation2d(off)), 0);
+
+    assertThat(filter.x()).isCloseTo(0, within(1e-6));
+    assertThat(filter.y())
+        .as("where the robot is, not where the solve put it")
+        .isCloseTo(0, within(1e-6));
+  }
+
+  /** The gain the filter holds is for its latest innovation: an older one can't be applied. */
+  @Test
+  void onlyTheLatestInnovationCanBeApplied() {
+    PoseFilter filter = placed(TEXTBOOK, 0.1, 0.01);
+    PoseFilter.Innovation first =
+        Objects.requireNonNull(
+            filter.innovation(fix(Translation2d.ZERO, Translation2d.ZERO, 0.1), 0, 0));
+    PoseFilter.Innovation second =
+        Objects.requireNonNull(
+            filter.innovation(fix(new Translation2d(0.2, 0), Translation2d.ZERO, 0.1), 0, 0));
+
+    assertThatThrownBy(() -> filter.correct(first))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("1 more came between");
+    filter.correct(second);
+    assertThat(filter.x()).isCloseTo(0.1, within(1e-12));
   }
 
   @Test

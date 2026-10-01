@@ -129,8 +129,8 @@ class PoseFilterReferenceTest {
   private void camera(VisionMeasurement measurement, double yawThen, int camera) {
     PoseCovariance noise = measurement.covariance();
     int rows = noise.hasHeading() ? 3 : 2;
-    double leverX = measurement.robotToTags().getX();
-    double leverY = measurement.robotToTags().getY();
+    double leverX = measurement.lever().robotToTags().getX();
+    double leverY = measurement.lever().robotToTags().getY();
     double[][] h = new double[rows][N];
     h[0][0] = 1;
     h[0][2] = -leverY;
@@ -175,9 +175,13 @@ class PoseFilterReferenceTest {
         }
       }
     }
+    // Predicted: the position, turned through the lever by how far the heading it was solved with
+    // is from the estimate's then.
+    double solvedOff =
+        MathUtil.angleModulus(measurement.lever().heading().getRadians() - (yawThen + mean[2]));
     double[] innovation = new double[rows];
-    innovation[0] = measurement.pose().getX() - mean[0];
-    innovation[1] = measurement.pose().getY() - mean[1];
+    innovation[0] = measurement.pose().getX() - mean[0] - solvedOff * leverY;
+    innovation[1] = measurement.pose().getY() - mean[1] + solvedOff * leverX;
     if (rows == 3) {
       innovation[2] =
           MathUtil.angleModulus(
@@ -427,7 +431,8 @@ class PoseFilterReferenceTest {
               1,
               new Pose2d(x, filter.y(), new Rotation2d(yaw + filter.offset())),
               PoseCovariance.fromStdDevs(1e-6, 1e-6, i % 7 == 0 ? 1e-6 : Double.POSITIVE_INFINITY),
-              new Translation2d(4, 1),
+              new VisionMeasurement.Lever(
+                  new Rotation2d(yaw + filter.offset()), new Translation2d(4, 1)),
               "camera",
               List.of(1),
               VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -454,11 +459,13 @@ class PoseFilterReferenceTest {
     double spread = logUniform(random, 1e-3, 0.3);
     double heading =
         random.nextBoolean() ? Double.POSITIVE_INFINITY : logUniform(random, 1e-3, 0.2);
-    Translation2d lever =
+    VisionMeasurement.Lever lever =
         random.nextBoolean()
-            ? Translation2d.ZERO
-            : new Translation2d(
-                logUniform(random, 0.5, 6), new Rotation2d(6.28 * random.nextDouble()));
+            ? VisionMeasurement.Lever.NONE
+            : new VisionMeasurement.Lever(
+                new Rotation2d(random.nextDouble()),
+                new Translation2d(
+                    logUniform(random, 0.5, 6), new Rotation2d(6.28 * random.nextDouble())));
     double correlation = 0.9 * random.nextDouble() - 0.45;
     return new VisionMeasurement(
         1,

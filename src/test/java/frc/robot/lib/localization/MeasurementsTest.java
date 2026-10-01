@@ -115,7 +115,7 @@ class MeasurementsTest {
             5,
             new Pose2d(3, 4, Rotation2d.ZERO),
             PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY),
-            Translation2d.ZERO,
+            VisionMeasurement.Lever.NONE,
             "front-left",
             tags,
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
@@ -130,7 +130,7 @@ class MeasurementsTest {
                     5,
                     Pose2d.ZERO,
                     PoseCovariance.fromStdDevs(0.05, 0.05, 0.1),
-                    Translation2d.ZERO,
+                    VisionMeasurement.Lever.NONE,
                     "front-left",
                     List.of(),
                     VisionMeasurement.Solver.MULTI_TAG))
@@ -141,7 +141,7 @@ class MeasurementsTest {
                     5,
                     Pose2d.ZERO,
                     PoseCovariance.fromStdDevs(0.05, 0.05, 0.1),
-                    Translation2d.ZERO,
+                    VisionMeasurement.Lever.NONE,
                     "",
                     List.of(1),
                     VisionMeasurement.Solver.SINGLE_TAG))
@@ -152,21 +152,13 @@ class MeasurementsTest {
                     -5,
                     Pose2d.ZERO,
                     PoseCovariance.fromStdDevs(0.05, 0.05, 0.1),
-                    Translation2d.ZERO,
+                    VisionMeasurement.Lever.NONE,
                     "front-left",
                     List.of(1),
                     VisionMeasurement.Solver.EXTERNAL))
         .hasMessageContaining("robot's clock");
     assertThatThrownBy(
-            () ->
-                new VisionMeasurement(
-                    5,
-                    Pose2d.ZERO,
-                    PoseCovariance.fromStdDevs(0.05, 0.05, 0.1),
-                    new Translation2d(Double.NaN, 0),
-                    "front-left",
-                    List.of(1),
-                    VisionMeasurement.Solver.HEADING_CONSTRAINED))
+            () -> new VisionMeasurement.Lever(Rotation2d.ZERO, new Translation2d(Double.NaN, 0)))
         .hasMessageContaining("offset to its tags");
   }
 

@@ -68,7 +68,7 @@ public final class FakeCamera {
               PoseCovariance.fromStdDevs(stdDevMeters, stdDevMeters, Double.POSITIVE_INFINITY),
               // It places the robot without the estimate's heading, so its position doesn't lean
               // on it, as no real camera's heading-constrained solve does.
-              Translation2d.ZERO,
+              VisionMeasurement.Lever.NONE,
               "fake",
               List.of(26),
               VisionMeasurement.Solver.HEADING_CONSTRAINED));

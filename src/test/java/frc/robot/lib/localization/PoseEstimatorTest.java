@@ -80,7 +80,7 @@ class PoseEstimatorTest {
               when,
               pose,
               noise,
-              Translation2d.ZERO,
+              VisionMeasurement.Lever.NONE,
               "front",
               List.of(26),
               VisionMeasurement.Solver.HEADING_CONSTRAINED));
@@ -97,7 +97,7 @@ class PoseEstimatorTest {
               time,
               pose,
               position(stdDev),
-              robotToTags,
+              new VisionMeasurement.Lever(estimator.pose().getRotation(), robotToTags),
               "front",
               List.of(26),
               VisionMeasurement.Solver.HEADING_CONSTRAINED));
@@ -111,7 +111,7 @@ class PoseEstimatorTest {
               time,
               pose,
               PoseCovariance.fromStdDevs(0.05, 0.05, Math.toRadians(2)),
-              Translation2d.ZERO,
+              VisionMeasurement.Lever.NONE,
               "front",
               List.of(25, 26),
               VisionMeasurement.Solver.MULTI_TAG));
@@ -289,7 +289,7 @@ class PoseEstimatorTest {
             5,
             START,
             position(0.05),
-            Translation2d.ZERO,
+            VisionMeasurement.Lever.NONE,
             "front",
             List.of(1),
             VisionMeasurement.Solver.MULTI_TAG));
@@ -430,7 +430,7 @@ class PoseEstimatorTest {
             T0 + STEP,
             START,
             position(0.05),
-            Translation2d.ZERO,
+            VisionMeasurement.Lever.NONE,
             "front",
             List.of(26),
             VisionMeasurement.Solver.MULTI_TAG));

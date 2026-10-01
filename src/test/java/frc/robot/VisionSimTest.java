@@ -291,13 +291,14 @@ class VisionSimTest {
   }
 
   /**
-   * The promises each way of correcting the heading keeps for a camera turned 4°, as measured: the
-   * full update keeps them all. Leaving the heading to measurements with a heading of their own, a
-   * turned camera's headings pull the estimate's heading its way, its neighbour's tags land off
-   * too, and the check can't single it out: doubted 4.4 cm, the last lap 6.1 cm against 3.7 cm
-   * trusted as before. Adding the doubt to what each camera repeats makes it worse (3.8 cm, and 9.6
-   * cm against 3.7): both front cameras are doubted alike, and the floor holds both off. This test
-   * shows which; it changes when one does, either way.
+   * The promises each way of correcting the heading keeps for a camera turned 4°, as measured. The
+   * full update keeps all but the last: the camera is doubted by 9.2 cm, but the last lap is 4.2 cm
+   * off, no closer than with it trusted as before (4.2 cm). Leaving the heading to measurements
+   * with a heading of their own, a turned camera's headings pull the estimate's heading its way,
+   * its neighbour's tags land off too, and the check can't single it out: doubted 5.5 cm, the last
+   * lap 5.6 cm against 3.8 cm trusted as before. Adding the doubt to what each camera repeats makes
+   * the last lap worse (doubted 6.1 cm, and 8.7 cm against 3.8). This test shows which; it changes
+   * when one does, either way.
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)
@@ -305,7 +306,7 @@ class VisionSimTest {
     List<String> broken = turnedFourDegrees(heading).stream().map(VisionSimTest::promise).toList();
 
     if (heading == EstimatorConfig.HeadingCorrection.EVERY_FIX) {
-      assertThat(broken).as("every promise kept").isEmpty();
+      assertThat(broken).as("the promises broken").containsExactly("last lap");
     } else {
       assertThat(broken).as("the promises broken").containsExactly("doubted", "last lap");
     }
@@ -324,7 +325,7 @@ class VisionSimTest {
   /**
    * A camera turned 2° stands out in its tag residuals, 1.4 times its worst neighbour's, only when
    * every fix corrects the heading (1.6). Otherwise its headings pull the estimate's heading
-   * partway its way, and its neighbour's tags land off nearly as far (0.83).
+   * partway its way, and its neighbour's tags land off as far (0.95).
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)

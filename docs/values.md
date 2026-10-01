@@ -92,12 +92,15 @@ configuration: the test refuses to list it as not.
 - a row's kind isn't one of the four, or its source doesn't start with one of the words above, or
   the two legends above list other kinds or sources than the test accepts;
 - a value a mechanism tunes live has no row under [tuning limits](#tuning-limits), or a row there
-  names one it no longer tunes;
+  names one it no longer tunes (the tunings come from `RobotContainer.tunings`, the one list of
+  them);
+- a switch the running robot publishes has no row under [switches](#switches), or a row there names
+  one it doesn't (`ValuesRegisterSimTest`, which builds the robot);
 - a number in the code changed and its row didn't: a starting value that doesn't show what the
   template ships (a record's `DEFAULTS`, `LocalizationGate.SCORING`, `SensorErrors.TYPICAL`, or the
-  template's robot in `Robots`), or a knob's limits that aren't the ones its mechanism declares.
-  A cell shows a number to its own precision (`2.54` shows 2.5376), and only numbers are checked:
-  per-camera values, names, and switches are left to people.
+  template's robot in `Robots`), or a knob's or a switch's limits that aren't the ones declared.
+  A cell shows a number to its own precision (`2.54` shows 2.5376), and only numbers (and a
+  switch's on or off) are checked: per-camera values and names are left to people.
 
 So a new value starts in its record, and the test asks for its row. A section is a `###` heading
 naming the record in backticks (`` ### `SwerveConfig.Limits` ``, a nested record with its outer
@@ -437,7 +440,7 @@ One gyro's errors. TYPICAL gives the gyro and the backup IMU each their own; EXA
 ## Tuning limits
 
 How far the pit may take each value a mechanism tunes live, declared with the value in the
-mechanism's `tuning`. All are chosen: wide enough to tune in, narrow enough that a slip of a finger
+mechanism's `tuning`, and listed together in `RobotContainer.tunings`. All are chosen: wide enough to tune in, narrow enough that a slip of a finger
 can't hurt the robot. The record's own checks still apply inside them. Change a limit when tuning on
 a robot keeps wanting to go past it, after asking why.
 
@@ -486,6 +489,19 @@ test doesn't read them: add a row here when you add a rig or an experiment.
 |---|---|---|---|---|
 | The steering rig (`Drive.steeringRig`): where an experiment may point the wheels | -180° to 180° | chosen | guess | A module turns all the way around, so any angle is safe; the limits keep a test motion within one turn, as the wheel's angle is scored. |
 | The steering's experiment (`RobotContainer`): "Steer to 90° and back" | 0° to 90° and back, 0.8 s at each, after a 0.5 s lead-in | chosen | guess | A quarter turn shows rise, overshoot, and settling; 0.8 s is several times the steering's settling (118 ms in the simulator), so each step settles before the next. |
+
+## Switches
+
+The drive team's switches: WPILib tunables a mechanism publishes for itself, not configuration.
+Each keeps its setting into a match, within its limits, with an alert naming each one changed since
+the robot started. `ValuesRegisterSimTest` builds the robot and checks every switch it publishes has
+a row here, with its limits and its starting value; a switch published for each camera is written
+with `<camera>` in its path.
+
+| Switch | Limits | Template's starting value | Source | Why |
+|---|---|---|---|---|
+| `Vision/autoStartHoldSeconds` | 0 to 30 s | 0 s | guess (6328 held theirs 2 s) | Why: holds the cameras' measurements back as autonomous starts, trusting the placed start while the robot launches. Off, since the estimator gates every measurement against the placed start anyway; 30 s is longer than any autonomous period has been. Turn it on if logs show the cameras pulling the estimate off its start in autonomous's first seconds. |
+| `Vision/<camera>/enabled` | on or off | on | none | Why: leaves one camera out, fogged over, knocked loose, or blinded by lights, while the others carry on. |
 
 ## The camera study's assumptions
 

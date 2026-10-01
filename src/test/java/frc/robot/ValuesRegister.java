@@ -38,6 +38,8 @@ import org.wpilib.units.Measure;
  *   <li><b>Knob</b>: the knobs of the mechanism tuning the heading above names, with a
  *       <b>Source</b> column.
  *   <li><b>Record</b>: the records that aren't configuration.
+ *   <li><b>Switch</b>: the switches the running robot publishes, with <b>Limits</b>, a starting
+ *       value, and a <b>Source</b> column.
  *   <li><b>Kind</b> and <b>Source</b>: the legends, which must list the kinds and sources the test
  *       accepts.
  * </ul>
@@ -106,10 +108,18 @@ final class ValuesRegister {
    * @param name its first cell's name
    * @param kind its Kind cell; empty in a table without one
    * @param source its Source cell; empty in a table without one
-   * @param value its starting value, in a table of values, or its limits, in a table of knobs
+   * @param value its starting value, in a table of values or of switches
+   * @param limits its limits, in a table of knobs or of switches
    * @param line where it is, counting from 1
    */
-  record Row(String subject, String name, String kind, String source, String value, int line) {}
+  record Row(
+      String subject,
+      String name,
+      String kind,
+      String source,
+      String value,
+      String limits,
+      int line) {}
 
   /**
    * A value a mechanism tunes live.
@@ -119,6 +129,17 @@ final class ValuesRegister {
    * @param max the most
    */
   record Knob(String path, double min, double max) {}
+
+  /**
+   * A switch the running robot publishes: a WPILib tunable that isn't a configuration's value, such
+   * as one that turns a camera off.
+   *
+   * @param path where it's published, with each camera's name as {@code <camera>}
+   * @param value its value at startup: a number, or true or false
+   * @param min the least it may be set to: negative infinity for none
+   * @param max the most: infinity for none
+   */
+  record Switch(String path, Object value, double min, double max) {}
 
   /**
    * A record's values as the template ships them, which its rows' starting values must show.
@@ -132,6 +153,7 @@ final class ValuesRegister {
     VALUES,
     KNOBS,
     RECORDS,
+    SWITCHES,
     KINDS_LEGEND,
     SOURCES_LEGEND,
     OTHER
@@ -140,6 +162,7 @@ final class ValuesRegister {
   private final List<Row> values = new ArrayList<>();
   private final List<Row> knobs = new ArrayList<>();
   private final List<Row> notConfiguration = new ArrayList<>();
+  private final List<Row> switches = new ArrayList<>();
   private final List<String> legendKinds = new ArrayList<>();
   private final List<String> legendSources = new ArrayList<>();
 
@@ -158,6 +181,7 @@ final class ValuesRegister {
     int kindColumn = -1;
     int sourceColumn = -1;
     int valueColumn = -1;
+    int limitsColumn = -1;
     boolean inTable = false;
     String fence = "";
     boolean inComment = false;
@@ -208,12 +232,8 @@ final class ValuesRegister {
         table = kindOf(cells.get(0));
         kindColumn = cells.indexOf("Kind");
         sourceColumn = cells.indexOf("Source");
-        valueColumn =
-            switch (table) {
-              case VALUES -> cells.indexOf(STARTING_VALUE);
-              case KNOBS -> cells.indexOf("Limits");
-              default -> -1;
-            };
+        valueColumn = cells.indexOf(STARTING_VALUE);
+        limitsColumn = cells.indexOf("Limits");
         if (!register.readable(table, subject, cells.get(0), kindColumn, sourceColumn, number)) {
           table = Table.OTHER; // its rows can't be read; the problem says why
         }
@@ -245,16 +265,18 @@ final class ValuesRegister {
       }
       Row row =
           new Row(
-              table == Table.RECORDS ? "" : subject,
+              table == Table.VALUES || table == Table.KNOBS ? subject : "",
               name.group(1),
               cell(cells, kindColumn),
               cell(cells, sourceColumn),
               cell(cells, valueColumn),
+              cell(cells, limitsColumn),
               number);
       switch (table) {
         case VALUES -> register.values.add(row);
         case KNOBS -> register.knobs.add(row);
         case RECORDS -> register.notConfiguration.add(row);
+        case SWITCHES -> register.switches.add(row);
         default -> {}
       }
     }
@@ -283,6 +305,7 @@ final class ValuesRegister {
       case "Value" -> Table.VALUES;
       case "Knob" -> Table.KNOBS;
       case "Record" -> Table.RECORDS;
+      case "Switch" -> Table.SWITCHES;
       case "Kind" -> Table.KINDS_LEGEND;
       case "Source" -> Table.SOURCES_LEGEND;
       default -> Table.OTHER;
@@ -304,6 +327,10 @@ final class ValuesRegister {
                 + firstHeaderCell
                 + "\"");
       }
+      return false;
+    }
+    if (table == Table.SWITCHES && source < 0) {
+      formatProblems.add(where + "a table of switches needs a Source column");
       return false;
     }
     if (table != Table.VALUES && table != Table.KNOBS) {
@@ -690,7 +717,7 @@ final class ValuesRegister {
     }
     for (Knob knob : knobs) {
       Row row = named.get(knob.path());
-      if (row != null && !showsLimits(row.value(), knob)) {
+      if (row != null && !showsLimits(row.limits(), knob.min(), knob.max())) {
         problems.add(
             at(row)
                 + "the "
@@ -698,7 +725,7 @@ final class ValuesRegister {
                 + " tuning's "
                 + knob.path()
                 + " has the limits \""
-                + row.value()
+                + row.limits()
                 + "\", but it's tuned from "
                 + shown(knob.min())
                 + " to "
@@ -708,16 +735,88 @@ final class ValuesRegister {
     }
   }
 
-  /** Whether a cell's first two numbers are a knob's limits, to the cell's precision. */
-  private static boolean showsLimits(String cell, Knob knob) {
+  /** Whether a cell's first two numbers are these limits, to the cell's precision. */
+  private static boolean showsLimits(String cell, double min, double max) {
     List<String> numbers = new ArrayList<>();
     Matcher number = NUMBER.matcher(cell);
     while (number.find() && numbers.size() < 2) {
       numbers.add(number.group());
     }
-    return numbers.size() == 2
-        && (Double.isInfinite(knob.min()) || near(numbers.get(0), knob.min()))
-        && (Double.isInfinite(knob.max()) || near(numbers.get(1), knob.max()));
+    return numbers.size() == 2 && near(numbers.get(0), min) && near(numbers.get(1), max);
+  }
+
+  /**
+   * Every switch the running robot publishes has a row, showing its limits (when it has them) and
+   * its starting value, with a source from the list, and no row names one it doesn't publish.
+   *
+   * @param published by path, each switch the robot publishes
+   */
+  List<String> switchProblems(Map<String, Switch> published) {
+    List<String> problems = new ArrayList<>();
+    Map<String, Row> named = grouped(switches, problems).getOrDefault("", Map.of());
+    new TreeMap<>(published)
+        .forEach(
+            (path, running) -> {
+              Row row = named.get(path);
+              if (row == null) {
+                problems.add(
+                    "Add the switch "
+                        + path
+                        + " to "
+                        + FILE
+                        + ": a row | `"
+                        + path
+                        + "` | limits | starting value | source | why | in the table of switches");
+                return;
+              }
+              boolean limited =
+                  !Double.isInfinite(running.min()) && !Double.isInfinite(running.max());
+              if (limited && !showsLimits(row.limits(), running.min(), running.max())) {
+                problems.add(
+                    at(row)
+                        + "the switch "
+                        + path
+                        + " has the limits \""
+                        + row.limits()
+                        + "\", but it may be set from "
+                        + shown(running.min())
+                        + " to "
+                        + shown(running.max())
+                        + ": update the cell");
+              }
+              String startsAt = startsAt(row.value(), running.value());
+              if (startsAt != null) {
+                problems.add(
+                    at(row)
+                        + "the switch "
+                        + path
+                        + " starts at \""
+                        + row.value()
+                        + "\", but the robot starts it at "
+                        + startsAt
+                        + ": update the cell");
+              }
+            });
+    for (Row row : named.values()) {
+      if (!published.containsKey(row.name())) {
+        problems.add(
+            at(row) + "remove the switch " + row.name() + ": the robot publishes no such switch");
+      }
+      checkSource(row, "the switch " + row.name(), problems);
+    }
+    return problems;
+  }
+
+  /** What a switch really starts at, if its cell doesn't show it; null when it does. */
+  private static @Nullable String startsAt(String cell, Object value) {
+    if (value instanceof Boolean on) {
+      String shown = on ? "on" : "off";
+      return cell.startsWith(shown) ? null : shown;
+    }
+    if (value instanceof Number number) {
+      return shows(cell, number.doubleValue()) ? null : shown(number.doubleValue());
+    }
+    return null;
   }
 
   /**

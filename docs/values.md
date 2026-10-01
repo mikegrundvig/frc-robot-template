@@ -92,7 +92,12 @@ configuration: the test refuses to list it as not.
 - a row's kind isn't one of the four, or its source doesn't start with one of the words above, or
   the two legends above list other kinds or sources than the test accepts;
 - a value a mechanism tunes live has no row under [tuning limits](#tuning-limits), or a row there
-  names one it no longer tunes.
+  names one it no longer tunes;
+- a number in the code changed and its row didn't: a starting value that doesn't show what the
+  template ships (a record's `DEFAULTS`, `LocalizationGate.SCORING`, `SensorErrors.TYPICAL`, or the
+  template's robot in `Robots`), or a knob's limits that aren't the ones its mechanism declares.
+  A cell shows a number to its own precision (`2.54` shows 2.5376), and only numbers are checked:
+  per-camera values, names, and switches are left to people.
 
 So a new value starts in its record, and the test asks for its row. A section is a `###` heading
 naming the record in backticks (`` ### `SwerveConfig.Limits` ``, a nested record with its outer
@@ -198,7 +203,7 @@ The module hardware, the same at every corner.
 | `steerMotor` | as built | Kraken X60 | guess (a typical build) | As `driveMotor`. |
 | `wheelRadius` | calibrated | 2 in | datasheet (a 4 in wheel) | [The wheel radius](calibration.md#the-wheel-radius), before each event: tread wears. |
 | `driveGearing` | as built | 6.75 | datasheet (SDS MK4i L2) | The module's datasheet: motor turns per wheel turn. |
-| `steerGearing` | as built | 150/7 | datasheet (SDS MK4i) | The module's datasheet: motor turns per turn of the module. |
+| `steerGearing` | as built | 150/7 (21.43) | datasheet (SDS MK4i) | The module's datasheet: motor turns per turn of the module. |
 | `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread. The simulator's grip; with `cgHeight`, it sets the drive's current limit. |
 
 ### `SwerveConfig.Limits`

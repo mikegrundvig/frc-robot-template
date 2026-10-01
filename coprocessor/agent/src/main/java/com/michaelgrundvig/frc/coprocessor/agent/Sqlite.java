@@ -12,11 +12,18 @@ final class Sqlite {
 
   private Sqlite() {}
 
-  /** A read-only connection: the agent never writes PhotonVision's live database. */
-  static Connection openReadOnly(Path file) throws SQLException {
+  /**
+   * A read-only connection: the agent never writes PhotonVision's live database. SQLite itself
+   * refuses any string or row longer than twice {@code maxValue} bytes (SQLITE_LIMIT_LENGTH), so a
+   * hostile database can't make the agent hold a huge value even once.
+   */
+  static Connection openReadOnly(Path file, int maxValue) throws SQLException {
     SQLiteConfig config = new SQLiteConfig();
     config.setReadOnly(true);
     config.setBusyTimeout(BUSY_TIMEOUT);
+    config.setPragma(
+        SQLiteConfig.Pragma.LIMIT_LENGTH,
+        Long.toString(Math.min(Integer.MAX_VALUE, 2L * maxValue)));
     return config.createConnection("jdbc:sqlite:" + file.toAbsolutePath());
   }
 

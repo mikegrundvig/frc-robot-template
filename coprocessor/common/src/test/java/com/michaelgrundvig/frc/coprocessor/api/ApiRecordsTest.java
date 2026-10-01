@@ -148,6 +148,12 @@ class ApiRecordsTest {
   }
 
   @Test
+  void theJournalIsServedForTheKernelPhotonVisionAndTheAgentOnly() {
+    assertThat(AgentApi.JOURNAL_UNITS)
+        .containsExactly("kernel", "photonvision.service", "coprocessor-agent.service");
+  }
+
+  @Test
   void aShutdownAnswerRoundTrips() {
     ShutdownAnswer answer = new ShutdownAnswer(true);
     assertThat(Json.compact(answer.toJson()))

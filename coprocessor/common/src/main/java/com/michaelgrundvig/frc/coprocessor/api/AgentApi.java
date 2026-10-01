@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.coprocessor.api;
 
+import java.util.List;
+
 /**
  * The coprocessor agent's HTTP API, version 1: JSON, on the computer's {@code agentPort} (5808
  * unless the table says otherwise). Read-only but for one action, {@link #SHUTDOWN}, which only the
@@ -16,10 +18,19 @@ public final class AgentApi {
 
   /**
    * A page of the journal: a {@link JournalPage}. Asks with {@code cursor} (the entries after it;
-   * without one, the latest), {@code priority} (0-7: that and worse), {@code unit} (one systemd
-   * unit), and {@code limit} (at most {@link #MAX_JOURNAL_PAGE}).
+   * without one, the latest), {@code priority} (0-7: that and worse), {@code unit} (one of {@link
+   * #JOURNAL_UNITS}; without one, all of them), and {@code limit} (at most {@link
+   * #MAX_JOURNAL_PAGE}).
    */
   public static final String JOURNAL = "/v1/journal";
+
+  /**
+   * What {@link #JOURNAL} shows, and the units it may be asked for: the kernel's messages, and
+   * PhotonVision's and the agent's (with systemd's about them). The rest of the journal isn't
+   * served.
+   */
+  public static final List<String> JOURNAL_UNITS =
+      List.of("kernel", "photonvision.service", "coprocessor-agent.service");
 
   /** PhotonVision's settings as canonical rows, with their hash. */
   public static final String SETTINGS = "/v1/settings";

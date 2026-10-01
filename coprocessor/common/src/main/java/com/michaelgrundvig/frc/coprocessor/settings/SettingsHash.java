@@ -2,6 +2,8 @@ package com.michaelgrundvig.frc.coprocessor.settings;
 
 import com.michaelgrundvig.frc.coprocessor.json.Json;
 import com.michaelgrundvig.frc.coprocessor.json.JsonValue;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -138,8 +140,14 @@ public final class SettingsHash {
         text.append(Json.hashable(JsonValue.of(row.table()))).append(":{");
       }
       text.append(Json.hashable(JsonValue.of(row.key()))).append(':');
-      text.append(Json.hashable(applyRules(row, RULES)));
       update(text);
+      // Written straight into the hash, a few kilobytes at a time: a calibration's row is
+      // megabytes of text.
+      try {
+        Json.writeHashable(applyRules(row, RULES), utf8);
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
       last = row;
     }
 
@@ -157,6 +165,27 @@ public final class SettingsHash {
     private void update(StringBuilder text) {
       sha256.update(text.toString().getBytes(StandardCharsets.UTF_8));
     }
+
+    // Text appended here goes into the hash as UTF-8. The writer never splits a character's two
+    // halves between appends, and never writes half of one alone.
+    private final Appendable utf8 =
+        new Appendable() {
+          @Override
+          public Appendable append(CharSequence text) {
+            sha256.update(text.toString().getBytes(StandardCharsets.UTF_8));
+            return this;
+          }
+
+          @Override
+          public Appendable append(CharSequence text, int start, int end) {
+            return append(text.subSequence(start, end));
+          }
+
+          @Override
+          public Appendable append(char c) {
+            return append(String.valueOf(c));
+          }
+        };
   }
 
   /** What's hashed: the settings with the rules applied, before it's written down. */

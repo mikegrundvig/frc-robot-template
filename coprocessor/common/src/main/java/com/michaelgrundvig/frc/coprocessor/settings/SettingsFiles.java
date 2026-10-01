@@ -81,6 +81,11 @@ public final class SettingsFiles {
     return Json.pretty(row.columns());
   }
 
+  /** Writes a row's file's text to {@code out} as it goes: the same as {@link #text}. */
+  public static void write(SettingsRow row, Appendable out) throws IOException {
+    Json.writePretty(row.columns(), out);
+  }
+
   /** Refuses rows' files that differ only in case, which would be one file on Windows and macOS. */
   public static void checkCase(List<String> paths) {
     Map<String, String> folded = new HashMap<>();

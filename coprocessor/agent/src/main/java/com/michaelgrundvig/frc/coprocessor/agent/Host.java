@@ -20,10 +20,8 @@ import java.util.stream.Stream;
  * the root, so tests run anywhere, against any tree.
  */
 final class Host {
-  /** The most of any one file the agent reads: sysfs and procfs files are far smaller. */
-  static final int MAX_FILE = 256 * 1024;
-
   private final Path root;
+  private final Limits limits;
   private final boolean escapeColons;
   private final Commands commands;
   private final Links links;
@@ -47,12 +45,14 @@ final class Host {
    */
   Host(
       Path root,
+      Limits limits,
       boolean escapeColons,
       Commands commands,
       Links links,
       LongSupplier monotonicMicros,
       Consumer<String> log) {
     this.root = root;
+    this.limits = limits;
     this.escapeColons = escapeColons;
     this.commands = commands;
     this.links = links;
@@ -65,6 +65,7 @@ final class Host {
     Path root = Path.of("/");
     return new Host(
         root,
+        Limits.DEFAULT,
         false,
         commands,
         path -> root.resolve(path.substring(1)).toRealPath().toString(),
@@ -78,10 +79,18 @@ final class Host {
     return root.resolve(escapeColons ? relative.replace(":", "%3A") : relative);
   }
 
-  /** A file's text, or empty when it doesn't exist; at most {@link #MAX_FILE} characters. */
+  /** How much the agent reads and sends. */
+  Limits limits() {
+    return limits;
+  }
+
+  /**
+   * A file's text, or empty when it doesn't exist; at most {@link Limits#maxFile} bytes of it (a
+   * longer file is cut short, which a JSON file won't survive).
+   */
   Optional<String> read(String absolute) throws IOException {
     try (InputStream in = Files.newInputStream(path(absolute))) {
-      return Optional.of(new String(in.readNBytes(MAX_FILE), StandardCharsets.UTF_8));
+      return Optional.of(new String(in.readNBytes(limits.maxFile()), StandardCharsets.UTF_8));
     } catch (NoSuchFileException e) {
       return Optional.empty();
     }

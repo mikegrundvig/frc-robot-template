@@ -25,8 +25,10 @@ import org.wpilib.math.util.MathUtil;
  *       gyro's heading: off by an angle, it is off by the angle times the distance to the tags,
  *       square to them ({@link VisionMeasurement#lever}). So each fix measures the position and the
  *       heading's error together (its H is [I | J d], d the robot-to-tags vector and J a quarter
- *       turn), but a fix never corrects the heading: the gyro owns it, and only a measurement with
- *       a heading of its own corrects its drift.
+ *       turn), but by default such a fix doesn't correct the heading: the gyro owns it, and a
+ *       measurement with a heading of its own corrects its drift, with all three of its rows (its
+ *       position too, through how the position's error has come to depend on the heading's). With
+ *       {@code fixesTurnHeading}, every fix corrects it: a full update.
  *   <li><b>Each IMU's scale:</b> a gyro that reads 0.3% too much turn is 1.1° off after a turn and
  *       5.4° after five, the same way each time, not a little more at random. The backup IMU's is
  *       its own: three turns one way on the gyro and three back on the backup don't cancel.

@@ -52,9 +52,11 @@ X: it reads along its own case (CTRE's Pigeon 2.0 User's Guide, "Enclosure Orien
 which the drivetrain's code turns into the robot's axes by the orientation the robot's definition
 gives the Pigeon. Systemcore's onboard IMU reads along its board, turned the same way by its own.
 An orientation that's wrong, or an IMU turned on its mount since, makes every change of speed read
-sideways or backwards, and the robot would doubt its wheels whenever it speeds up. So the comparison
-waits for this check: until an IMU's `ImuMount.accelerometerChecked` is true, slip is judged from
-the wheels and that IMU's turn alone, and a jolt by its size alone.
+sideways or backwards, and the robot would doubt its wheels whenever it speeds up. So until an
+IMU's `ImuMount.accelerometerChecked` is true, its accelerometer is compared with the wheels by
+size, not direction: wheels speeding up harder than the accelerometer feels the robot do are still
+seen sliding, whichever way it's turned, but a slide that keeps its speed and only turns is missed,
+and a jolt counts by its size alone.
 
 Mount each IMU in the robot's definition first, `Imus` in `Robots.java`, one `ImuMount` each for
 the gyro and the backup:

@@ -31,9 +31,11 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       past the accelerometer's noise, all of it is how fast the wheels slide: the tolerance tells
  *       a slide from the noise, it isn't a share of every slide. Whenever the wheels and the IMU
  *       say the robot is standing still, what the accelerometer reads is its bias, which is taken
- *       off what it reads after; and no slide is counted faster than the robot could go. Only on a
- *       robot whose accelerometer is known to read along its axes ({@link
- *       ImuMount#accelerometerChecked}).
+ *       off what it reads after; and no slide is counted faster than the robot could go. An
+ *       accelerometer not yet known to read along the robot's axes ({@link
+ *       ImuMount#accelerometerChecked}) is compared by size, not direction: the wheels' change of
+ *       velocity and what it felt, each added up on its own, add up alike whichever way it's
+ *       turned, and what one holds past the other is a slide.
  *   <li><b>A jolt.</b> What the accelerometer feels that the wheels' own change of velocity doesn't
  *       explain (a robot stopping hard is felt by both, a hit only by the IMU) is a collision as
  *       far as it's past the tread's grip, which is the most the floor can explain (the robot
@@ -163,12 +165,15 @@ public final class SlipCheck {
    *     a number if it can't say, and the wheels' turn rate stands in
    * @param imuPosition where the IMU sits, from the robot's origin (its center, on the floor)
    * @param accelerometerChecked whether this IMU's accelerometer is known to read along the robot's
-   *     axes ({@link ImuMount#accelerometerChecked}): without it, the speed isn't compared, and a
-   *     jolt is judged by its size alone
+   *     axes ({@link ImuMount#accelerometerChecked}): without it, speeds are compared by size, not
+   *     direction, and a jolt is judged by its size alone
    * @param wheels the robot's velocity as its wheels measure it, robot-relative, at the loop's end
    * @param forwardAccelerationMetersPerSecSq the acceleration the IMU felt over the loop along the
    *     robot's forward axis, without gravity's share; not a number when it can't say
    * @param leftAccelerationMetersPerSecSq the same, along the robot's left axis
+   * @param tiltRadians how far the robot is tilted from level, by the IMU's attitude: an
+   *     accelerometer not yet checked may have gravity's share as the robot tilts taken off the
+   *     wrong axis. Not a number, it's taken as level.
    */
   public record Sample(
       double seconds,
@@ -180,7 +185,8 @@ public final class SlipCheck {
       boolean accelerometerChecked,
       ChassisVelocities wheels,
       double forwardAccelerationMetersPerSecSq,
-      double leftAccelerationMetersPerSecSq) {
+      double leftAccelerationMetersPerSecSq,
+      double tiltRadians) {
     public Sample {
       if (!(seconds > 0) || Double.isInfinite(seconds)) {
         throw new IllegalArgumentException("a loop takes time: " + seconds);
@@ -220,6 +226,17 @@ public final class SlipCheck {
   private double slideX;
 
   private double slideY;
+
+  /**
+   * Not known to read along the robot's axes: how far the wheels' velocity has changed past what
+   * the accelerometer felt, and how far what it felt has changed past the wheels, on the field. One
+   * of the two is always none.
+   */
+  private double aheadX;
+
+  private double aheadY;
+  private double movedX;
+  private double movedY;
 
   private double turnApart;
   private double turnSlip;
@@ -350,7 +367,7 @@ public final class SlipCheck {
    * meters per second: before the tolerance, for tuning it.
    */
   public double slideMetersPerSecond() {
-    return Math.hypot(slideX, slideY);
+    return Math.hypot(slideX, slideY) + Math.hypot(aheadX, aheadY) + Math.hypot(movedX, movedY);
   }
 
   /** How fast the wheels may be sliding, as the gyro sees them turning, in meters per second. */
@@ -392,6 +409,10 @@ public final class SlipCheck {
   private void forgetSpeeds() {
     slideX = 0;
     slideY = 0;
+    aheadX = 0;
+    aheadY = 0;
+    movedX = 0;
+    movedY = 0;
     speedSlip = 0;
   }
 
@@ -466,28 +487,92 @@ public final class SlipCheck {
       // Past the grip, the floor can't explain it: a share of a collision, up to a whole one.
       collision = Math.clamp((unexplained - grip) / (joltLimit - grip), 0.0, 1.0);
     }
-    if (!checked || collision >= 1 || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
+    if (collision >= 1 || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
       forgetSpeeds();
-    } else if (before) {
+    } else if (before && checked) {
       // How the wheels' velocity changed over the loop, less what the accelerometer felt...
       slideX += velocityX - lastVelocityX - feltX * seconds;
       slideY += velocityY - lastVelocityY - feltY * seconds;
       // ... let go toward none at the most a bias could have added, and no faster.
       double size = Math.hypot(slideX, slideY);
-      double kept = size > speedBias * seconds ? 1 - speedBias * seconds / size : 0;
+      double kept = kept(size, speedBias * seconds);
       slideX *= kept;
       slideY *= kept;
-      // No slide is faster than the robot can go: past that, it's an unlearned bias adding up.
-      double held = size * kept;
-      if (held > maxSlide) {
-        slideX *= maxSlide / held;
-        slideY *= maxSlide / held;
-        held = maxSlide;
-      }
-      // Past the tolerance, all of it: the doubt keeps up with the slide from where it's seen.
-      speedSlip = held > speedTolerance ? held : 0;
+      speedSlip = slip(size * kept);
+    } else if (before) {
+      compareSizes(
+          velocityX - lastVelocityX,
+          velocityY - lastVelocityY,
+          feltX * seconds,
+          feltY * seconds,
+          (speedBias + 2 * ImuReadings.STANDARD_GRAVITY * Math.sin(tilt(sample))) * seconds);
     }
     lastVelocityX = velocityX;
     lastVelocityY = velocityY;
+  }
+
+  /** The robot's tilt, from level, or level if the IMU can't say. */
+  private static double tilt(Sample sample) {
+    return Double.isFinite(sample.tiltRadians()) ? Math.abs(sample.tiltRadians()) : 0;
+  }
+
+  /**
+   * An accelerometer not known to read along the robot's axes compares sizes, not directions: what
+   * it feels, turned on its mount, is the robot's every change of velocity turned the same way, so
+   * the two add up to the same size whichever way it's turned. What both have added up alike is
+   * driving, and is let go; what one holds past the other is a slide: the wheels getting ahead of
+   * the robot, or the robot moved without them. A slide's size is at least that. Its bias, and
+   * gravity's share as the robot tilts, which the robot's attitude may take off the wrong axis of a
+   * mount not yet checked (at most twice the share), are let go of too.
+   *
+   * @param wheelsX how the wheels' velocity changed over the loop, on the field
+   * @param wheelsY and along y
+   * @param feltX what the accelerometer felt over the loop, as a change of velocity on the field
+   * @param feltY and along y
+   * @param letGo how much of a slide to let go of this loop
+   */
+  private void compareSizes(
+      double wheelsX, double wheelsY, double feltX, double feltY, double letGo) {
+    aheadX += wheelsX;
+    aheadY += wheelsY;
+    movedX += feltX;
+    movedY += feltY;
+    double ahead = Math.hypot(aheadX, aheadY);
+    double moved = Math.hypot(movedX, movedY);
+    double alike = Math.min(ahead, moved);
+    double aheadKept = ahead > 0 ? (ahead - alike) / ahead : 0;
+    double movedKept = moved > 0 ? (moved - alike) / moved : 0;
+    aheadX *= aheadKept;
+    aheadY *= aheadKept;
+    movedX *= movedKept;
+    movedY *= movedKept;
+    // One of the two is now none: the other is the slide.
+    double aheadSize = ahead - alike;
+    double movedSize = moved - alike;
+    double aheadLetGo = kept(aheadSize, letGo);
+    double movedLetGo = kept(movedSize, letGo);
+    aheadX *= aheadLetGo;
+    aheadY *= aheadLetGo;
+    movedX *= movedLetGo;
+    movedY *= movedLetGo;
+    speedSlip = slip(Math.max(aheadSize * aheadLetGo, movedSize * movedLetGo));
+  }
+
+  /**
+   * How much of a slide of this size to keep, letting go of up to this much of it toward none, and
+   * counting none faster than the robot can go: past that, what's held is a bias not yet learned,
+   * adding up.
+   */
+  private double kept(double size, double letGo) {
+    double held = Math.min(Math.max(size - letGo, 0), maxSlide);
+    return size > 0 ? held / size : 0;
+  }
+
+  /**
+   * How fast the wheels slide, from the slide held: past the tolerance, all of it, so the doubt
+   * keeps up with the slide from where it's seen; within it, none.
+   */
+  private double slip(double held) {
+    return held > speedTolerance ? held : 0;
   }
 }

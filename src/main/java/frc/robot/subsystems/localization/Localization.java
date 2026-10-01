@@ -394,17 +394,18 @@ public final class Localization implements AutoCloseable {
    */
   private DriveConditions conditions(boolean enabled) {
     ImuReadings imu = attitude;
-    double tilt =
-        imu == null
-            ? 0
-            // The angle between the robot's up and straight up.
-            : Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
+    double tilt = imu == null ? 0 : tilt(imu);
     return new DriveConditions(
         tilt,
         imu == null ? 0 : groundSlope(tilt),
         slipCheck.collisionShare(),
         slipCheck.slipMetersPerSecond(),
         !enabled);
+  }
+
+  /** How far the robot is tilted from level, by an IMU's attitude: its up against straight up. */
+  private static double tilt(ImuReadings imu) {
+    return Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
   }
 
   /**
@@ -441,7 +442,8 @@ public final class Localization implements AutoCloseable {
               mount.accelerometerChecked(),
               wheels,
               felt.forward(),
-              felt.left()));
+              felt.left(),
+              tilt(imu)));
     } else {
       slipCheck.startOver(felt.forward(), felt.left());
     }

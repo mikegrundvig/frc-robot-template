@@ -1,5 +1,7 @@
 package frc.robot.studies;
 
+import static org.wpilib.units.Units.Meters;
+
 import frc.robot.RobotConfig;
 import frc.robot.Robots;
 import frc.robot.lib.config.CameraConfig;
@@ -48,6 +50,8 @@ public final class CameraStudy {
         --gyro-error-degrees=D    the gyro heading's typical error (default 0.25)
         --mount-error-mm=M        cameras off their mounts by up to this (default 0)
         --mount-error-degrees=D   and turned by up to this (default 0)
+        --other-robots=N or N-M   other robots in the cameras' way around each pose, 5 at most
+        --other-robots-height-meters=M  how tall they are (default: as tall as this robot)
         --trials=N                robustness trials, each drawing those errors (default 0)
         --robust                  robustness, with the usual trials (12: under ten minutes)
         --seed=N                  where every random draw starts (default 1)
@@ -72,6 +76,8 @@ public final class CameraStudy {
           "gyro-error-degrees",
           "mount-error-mm",
           "mount-error-degrees",
+          "other-robots",
+          "other-robots-height-meters",
           "trials",
           "seed",
           "threads",
@@ -148,7 +154,7 @@ public final class CameraStudy {
               "Layouts: the robot's own, and all of up to %d cameras at the places in `%s`.",
               Math.min(config.mostCameras(), places.options().size()), mountsFile);
     }
-    CameraScoring scoring = new CameraScoring(robot, field, candidates, config);
+    CameraScoring scoring = new CameraScoring(robot, field, candidates, config, weights);
 
     List<String> setup = new ArrayList<>();
     setup.add(
@@ -181,6 +187,18 @@ public final class CameraStudy {
             config.frames(),
             config.frames() == 1 ? "image" : "images",
             config.seed()));
+    setup.add(
+        config.otherRobotsMost() == 0
+            ? "No other robots in the way."
+            : format(
+                "Other robots in the cameras' way: %s around each pose, each a solid box with this"
+                    + " robot's outline, %.2f m tall, placed anew for each set of images.",
+                config.otherRobotsLeast() == config.otherRobotsMost()
+                    ? Integer.toString(config.otherRobotsMost())
+                    : config.otherRobotsLeast() + " to " + config.otherRobotsMost(),
+                config.otherRobotsHeightMeters() > 0
+                    ? config.otherRobotsHeightMeters()
+                    : robot.body().height().in(Meters)));
     Conditions nominal = Conditions.nominal(config);
     setup.add("Nominal conditions: " + nominal.described() + ".");
     out.println(setup.get(0));
@@ -204,7 +222,7 @@ public final class CameraStudy {
             Locale.ROOT, "Trial %d of %d: %s...%n", t + 1, config.trials(), trial.described());
         trials.add(trial);
         // Only the scores are kept: what the cameras saw in a trial goes with it.
-        trialScores.add(scoring.score(samples, trial, done -> {}).ranking());
+        trialScores.add(scoring.scoreAsBuilt(samples, trial).ranking());
       }
       robustness = new Robustness(result.ranking(), trials, trialScores);
     }
@@ -287,6 +305,10 @@ public final class CameraStudy {
           .gyroErrorDegrees(number(options, "gyro-error-degrees", d.gyroErrorDegrees()))
           .mountErrorMillimeters(number(options, "mount-error-mm", d.mountErrorMillimeters()))
           .mountErrorDegrees(number(options, "mount-error-degrees", d.mountErrorDegrees()))
+          .otherRobotsLeast(otherRobots(options, d)[0])
+          .otherRobotsMost(otherRobots(options, d)[1])
+          .otherRobotsHeightMeters(
+              number(options, "other-robots-height-meters", d.otherRobotsHeightMeters()))
           .trials(
               count(
                   options,
@@ -332,6 +354,26 @@ public final class CameraStudy {
       return text == null ? otherwise : Double.parseDouble(text);
     } catch (NumberFormatException e) {
       throw new OptionException("--" + name + " must be a number: " + text, e);
+    }
+  }
+
+  /** How many other robots: {@code --other-robots=4}, or a range, {@code --other-robots=3-5}. */
+  private static int[] otherRobots(Map<String, String> options, CameraStudyConfig defaults) {
+    String text = options.get("other-robots");
+    if (text == null) {
+      return new int[] {defaults.otherRobotsLeast(), defaults.otherRobotsMost()};
+    }
+    String[] ends = text.split("-", -1);
+    try {
+      if (ends.length > 2) {
+        throw new NumberFormatException("more than two numbers");
+      }
+      int least = Integer.parseInt(ends[0].strip());
+      int most = Integer.parseInt(ends[ends.length - 1].strip());
+      return new int[] {least, most};
+    } catch (NumberFormatException e) {
+      throw new OptionException(
+          "--other-robots must be a whole number, or two with a dash between: " + text, e);
     }
   }
 

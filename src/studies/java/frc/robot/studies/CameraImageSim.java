@@ -56,8 +56,30 @@ final class CameraImageSim {
   private final double halfHeightDegrees;
   private final List<Tag> tags = new ArrayList<>();
 
-  /** A tag on the field, and where its corners are, in PhotonVision's order. */
-  record Tag(int id, Pose3d pose, List<Translation3d> corners) {}
+  /**
+   * A tag on the field.
+   *
+   * @param corners where its corners are, in PhotonVision's order
+   * @param outline the points another robot must leave clear for the tag to be detected: its
+   *     corners, the middles of its edges, and its center
+   */
+  record Tag(int id, Pose3d pose, List<Translation3d> corners, List<Translation3d> outline) {
+    Tag(int id, Pose3d pose, List<Translation3d> corners) {
+      this(id, pose, corners, outline(corners));
+    }
+
+    private static List<Translation3d> outline(List<Translation3d> corners) {
+      List<Translation3d> points = new ArrayList<>(corners);
+      Translation3d center = Translation3d.ZERO;
+      for (int i = 0; i < corners.size(); i++) {
+        Translation3d corner = corners.get(i);
+        points.add(corner.plus(corners.get((i + 1) % corners.size())).div(2));
+        center = center.plus(corner.div(corners.size()));
+      }
+      points.add(center);
+      return List.copyOf(points);
+    }
+  }
 
   /**
    * A tag in an image: where its corners landed, noise and all, and its pose solved from them.
@@ -114,11 +136,26 @@ final class CameraImageSim {
    * @param seed where this image's noise starts
    */
   TagDetections image(Pose3d cameraPose, String cameraName, long seed) {
-    return detections(seen(cameraPose, seed), cameraName);
+    return image(cameraPose, cameraName, seed, List.of());
+  }
+
+  /**
+   * One image, with other robots in the way: a tag they hide, even partly, isn't detected.
+   *
+   * @param blockers the other robots on the field
+   */
+  TagDetections image(
+      Pose3d cameraPose, String cameraName, long seed, List<OtherRobots.Blocker> blockers) {
+    return detections(seen(cameraPose, seed, blockers), cameraName);
   }
 
   /** The tags an image has in it, each with its corners and its own solve. */
   List<Seen> seen(Pose3d cameraPose, long seed) {
+    return seen(cameraPose, seed, List.of());
+  }
+
+  /** The tags an image has in it, with other robots in the way. */
+  List<Seen> seen(Pose3d cameraPose, long seed, List<OtherRobots.Blocker> blockers) {
     camera.setRandomSeed(seed);
     RotTrlTransform3d toCamera = RotTrlTransform3d.makeRelativeTo(cameraPose);
     // Farthest first, as PhotonVision takes them, so each tag's noise comes from the same draws.
@@ -132,7 +169,12 @@ final class CameraImageSim {
       if (!inView(cameraPose, tag)) {
         continue;
       }
+      // The noise is drawn for every tag in view, hidden or not, so a tag another robot hides
+      // leaves the others' noise as it would be without it.
       Point[] corners = camera.estPixelNoise(project(toCamera, tag.corners()));
+      if (hidden(cameraPose.getTranslation(), tag, blockers)) {
+        continue;
+      }
       // PhotonVision's own measure of a tag's size; it frees what it takes in native memory.
       if (!inImage(corners) || !(camera.getContourAreaPercent(corners) >= minAreaPercent)) {
         continue;
@@ -165,6 +207,21 @@ final class CameraImageSim {
         && Math.abs(relation.camToTargPitch.getDegrees()) < halfHeightDegrees
         && Math.abs(relation.targToCamAngle.getDegrees()) < 90
         && relation.camToTarg.getTranslation().getNorm() <= sightMeters;
+  }
+
+  /**
+   * Whether another robot stands between the camera and any of a tag's corners, the middles of its
+   * edges, or its center: a tag partly hidden isn't detected.
+   */
+  private static boolean hidden(Translation3d lens, Tag tag, List<OtherRobots.Blocker> blockers) {
+    for (OtherRobots.Blocker blocker : blockers) {
+      for (Translation3d point : tag.outline()) {
+        if (blocker.blocks(lens, point)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**

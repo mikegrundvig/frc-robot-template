@@ -1,9 +1,11 @@
 package com.michaelgrundvig.frc.coprocessor.api;
 
 /**
- * The coprocessor agent's HTTP API, version 1: read-only, JSON, on the computer's {@code agentPort}
- * (5808 unless the table says otherwise). It executes nothing a request asks for, and bounds every
- * answer.
+ * The coprocessor agent's HTTP API, version 1: JSON, on the computer's {@code agentPort} (5808
+ * unless the table says otherwise). Read-only but for one action, {@link #SHUTDOWN}, which only the
+ * robot controller may ask for. It runs nothing a request says, and bounds every answer. A refusal
+ * or a failure answers {@code {"error": "..."}} with its status: 400 for a bad query, 403, 404,
+ * 405, or 500.
  */
 public final class AgentApi {
   /** Which image this is, and as which computer: a {@link Stamp}. */
@@ -24,6 +26,17 @@ public final class AgentApi {
 
   /** PhotonVision's settings as a zip laid out like the repository's folder for the computer. */
   public static final String SETTINGS_ZIP = "/v1/settings.zip";
+
+  /**
+   * Shuts the computer down (POST): stops PhotonVision, then powers off. Only the robot controller
+   * ({@link #CONTROLLER}) may ask; anyone else gets 403. It answers 202 with a {@link
+   * ShutdownAnswer} at once, then acts; asking again while it's under way answers 202 and does
+   * nothing more.
+   */
+  public static final String SHUTDOWN = "/v1/shutdown";
+
+  /** The last number of the robot controller's address, 10.TE.AM.2: who may ask to shut down. */
+  public static final int CONTROLLER = 2;
 
   /** Where the image keeps its stamp. */
   public static final String STAMP_FILE = "/etc/coprocessor/stamp.json";

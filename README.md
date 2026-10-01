@@ -183,6 +183,12 @@ Also built in:
   [docs/characterization.md](docs/characterization.md).
 - **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
   match tab, checked against the code on every build, so no widget sits blank on the field.
+- **AdvantageScope, set up** (`layouts/advantagescope.json`, `ascope_assets/`): open the layout and
+  see the robot drawn from its configuration (bumpers, wheels turning as measured, each camera's
+  field of view), where it believes it is against where the simulator says it is, each camera's
+  accepted and refused tags, and the estimate's ellipse, with nothing to drag in. The build redraws
+  the robot whenever `Robots.java` changes, and refuses an edit made outside it
+  ([docs/simulator.md](docs/simulator.md#see-it-in-advantagescope)).
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
   where the time went), when logging falls behind, and when the log drive is missing or filling.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
@@ -205,7 +211,9 @@ Also built in:
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`); whether the pose estimator's uncertainty tells the truth ([docs/testing.md](docs/testing.md#is-the-estimator-honest-the-consistency-study), `./gradlew consistencyStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
-| `layouts/` | The drive team's dashboard layout, for Elastic. |
+| `layouts/` | Dashboard layouts: the drive team's, for Elastic, and AdvantageScope's, for the simulator and its logs. |
+| `ascope_assets/` | AdvantageScope's robot models, generated from `Robots.java` by the build: point AdvantageScope's *Use Custom Assets Folder* here. Don't edit them. |
+| `build-logic/` | The build's own Gradle plugins, one per tool whose files it generates from the robot's configuration: AdvantageScope's today (`frc.advantagescope-assets`). |
 | `sim/` | WPILib's simulator GUI's default settings, used on the first `./gradlew run -Pgui`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `docs/` | Guides: [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), and the [stand-ins](docs/stand-ins.md). |

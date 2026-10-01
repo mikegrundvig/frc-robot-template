@@ -99,25 +99,43 @@ public final class DeployCheck {
     String at = table.table().ip(computer);
     return switch (asked) {
       case Asked.Stamped(Stamp stamp) -> {
-        List<String> mismatches = table.mismatches(computer, stamp);
-        yield mismatches.isEmpty()
-            ? new Finding(
-                name,
-                Verdict.OK,
-                "release "
-                    + stamp.release()
-                    + ", PhotonVision "
-                    + stamp.photonvisionVersion()
-                    + ", as this build's")
-            : new Finding(
-                name,
-                Verdict.FAIL,
-                "the wrong image at "
-                    + at
-                    + ": "
-                    + String.join("; ", mismatches)
-                    + ". Flash it with this build's release, or deploy with"
-                    + " -PskipCoprocessorCheck to leave it as it is");
+        // The table's own comparison: the wrong computer or PhotonVision fails the deploy, an
+        // older recipe or one this build can't judge (no recipe hash) only warns.
+        List<CompiledTable.Mismatch> mismatches = table.compare(computer, stamp);
+        List<String> errors = messages(mismatches, CompiledTable.Severity.ERROR);
+        List<String> warnings = messages(mismatches, CompiledTable.Severity.WARNING);
+        List<String> unknown = messages(mismatches, CompiledTable.Severity.UNKNOWN);
+        String release =
+            "release " + stamp.release() + ", PhotonVision " + stamp.photonvisionVersion();
+        if (!errors.isEmpty()) {
+          yield new Finding(
+              name,
+              Verdict.FAIL,
+              "the wrong image at "
+                  + at
+                  + ": "
+                  + String.join("; ", errors)
+                  + ". Flash it with this build's release, or deploy with"
+                  + " -PskipCoprocessorCheck to leave it as it is");
+        }
+        if (!warnings.isEmpty()) {
+          yield new Finding(
+              name,
+              Verdict.WARN,
+              release
+                  + ", built from another recipe: "
+                  + String.join("; ", warnings)
+                  + ". Flash this build's release when convenient");
+        }
+        if (!unknown.isEmpty()) {
+          yield new Finding(
+              name,
+              Verdict.WARN,
+              release
+                  + ", as this build's; its recipe can't be checked: "
+                  + String.join("; ", unknown));
+        }
+        yield new Finding(name, Verdict.OK, release + ", as this build's");
       }
       case Asked.Unreadable(String why) ->
           new Finding(
@@ -148,6 +166,15 @@ public final class DeployCheck {
                   + why
                   + "): deploying anyway, with its cameras off until it answers");
     };
+  }
+
+  /** The comparison's sentences of one severity. */
+  private static List<String> messages(
+      List<CompiledTable.Mismatch> mismatches, CompiledTable.Severity severity) {
+    return mismatches.stream()
+        .filter(mismatch -> mismatch.severity() == severity)
+        .map(CompiledTable.Mismatch::message)
+        .toList();
   }
 
   /** Waits, before asking again: the clock for real, nothing in a test. */

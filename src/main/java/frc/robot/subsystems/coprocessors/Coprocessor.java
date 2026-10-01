@@ -1,5 +1,6 @@
 package frc.robot.subsystems.coprocessors;
 
+import com.michaelgrundvig.frc.coprocessor.api.AgentApi;
 import com.michaelgrundvig.frc.coprocessor.api.JournalEntry;
 import com.michaelgrundvig.frc.coprocessor.api.JournalPage;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
@@ -50,6 +51,7 @@ final class Coprocessor implements AutoCloseable {
   private final Alert missingEnabled;
   private final Alert missingDisabled;
   private final Alert wrongImage;
+  private final Alert otherRecipe;
   private final Alert duplicated;
   private final Alert cameraMissing;
   private final Alert hot;
@@ -62,7 +64,7 @@ final class Coprocessor implements AutoCloseable {
 
   // This loop's judgment of it, for its alerts and card.
   boolean missing = true;
-  List<String> mismatches = List.of();
+  List<CompiledTable.Mismatch> mismatches = List.of();
   List<String> camerasMissing = List.of();
   int hottest = -1;
   boolean hotNow;
@@ -101,6 +103,7 @@ final class Coprocessor implements AutoCloseable {
     missingEnabled = alert(name + "MissingEnabled", Alert.Level.HIGH);
     missingDisabled = alert(name + "MissingDisabled", Alert.Level.MEDIUM);
     wrongImage = alert(name + "WrongImage", Alert.Level.HIGH);
+    otherRecipe = alert(name + "OtherRecipe", Alert.Level.MEDIUM);
     duplicated = alert(name + "Duplicated", Alert.Level.HIGH);
     cameraMissing = alert(name + "CameraMissing", Alert.Level.MEDIUM);
     hot = alert(name + "Hot", Alert.Level.MEDIUM);
@@ -185,19 +188,32 @@ final class Coprocessor implements AutoCloseable {
   private void judgeAnswer() {
     String name = name();
     // Which image it runs, from its latest answer however old: a stamp changes only with a
-    // reflash. Compared as the build compares it, every value named both ways.
-    mismatches =
-        inputs.everAnswered ? table.mismatches(computer, Answers.stamp(inputs)) : List.of();
-    if (!mismatches.isEmpty()) {
+    // reflash. Compared as the build compares it (the table's own comparison), every value named
+    // both ways: the wrong computer or PhotonVision is an error, an older recipe a warning, and a
+    // recipe this build can't judge (no recipe hash) neither.
+    mismatches = inputs.everAnswered ? table.compare(computer, Answers.stamp(inputs)) : List.of();
+    List<String> errors = messages(CompiledTable.Severity.ERROR);
+    if (!errors.isEmpty()) {
       text(
           wrongImage,
           "Coprocessor "
               + name
               + " runs the wrong image: "
-              + String.join("; ", mismatches)
+              + String.join("; ", errors)
               + ". Flash it with this build's release");
     }
-    wrongImage.set(!mismatches.isEmpty());
+    wrongImage.set(!errors.isEmpty());
+    List<String> warnings = messages(CompiledTable.Severity.WARNING);
+    if (!warnings.isEmpty()) {
+      text(
+          otherRecipe,
+          "Coprocessor "
+              + name
+              + "'s image was built from another recipe: "
+              + String.join("; ", warnings)
+              + ". Flash this build's release when convenient");
+    }
+    otherRecipe.set(!warnings.isEmpty());
 
     boolean twoBoards = inputs.macsTakingTurns.length > 1;
     if (twoBoards) {
@@ -230,6 +246,14 @@ final class Coprocessor implements AutoCloseable {
     judgeHeat(answering);
     judgeNews(answering);
     settingsDiffer.set(answering && settingsDiffer());
+  }
+
+  /** The judgment's mismatches of one severity, as sentences naming both values. */
+  List<String> messages(CompiledTable.Severity severity) {
+    return mismatches.stream()
+        .filter(mismatch -> mismatch.severity() == severity)
+        .map(CompiledTable.Mismatch::message)
+        .toList();
   }
 
   /**
@@ -441,6 +465,11 @@ final class Coprocessor implements AutoCloseable {
    * it's from the boot the robot last heard of.
    */
   Devices.LogPage journal(Devices.LogQuery query) throws IOException {
+    if (!query.unit().isEmpty() && !AgentApi.JOURNAL_UNITS.contains(query.unit())) {
+      throw new IOException(
+          "its agent serves only these units' entries: "
+              + String.join(", ", AgentApi.JOURNAL_UNITS));
+    }
     JournalPage page = io.journal(query.cursor(), query.priority(), query.unit());
     Clock heard = clock; // read once: the loop replaces it whole
     List<Devices.LogEntry> entries = new ArrayList<>();
@@ -480,6 +509,7 @@ final class Coprocessor implements AutoCloseable {
             missingEnabled,
             missingDisabled,
             wrongImage,
+            otherRecipe,
             duplicated,
             cameraMissing,
             hot,
@@ -520,6 +550,7 @@ final class Coprocessor implements AutoCloseable {
             missingEnabled,
             missingDisabled,
             wrongImage,
+            otherRecipe,
             duplicated,
             cameraMissing,
             hot,

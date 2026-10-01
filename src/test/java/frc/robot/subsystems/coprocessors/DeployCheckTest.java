@@ -30,13 +30,13 @@ class DeployCheckTest {
       new Computer("vision-back", 12, Board.ORANGEPI_5, List.of("back-left"), 5808);
   private static final CompiledTable TABLE =
       new CompiledTable(
-          new Table(2611, 5808, List.of(FRONT, BACK)), "v2027.1.0", "recipe-1", Map.of());
+          new Table(1234, 5808, List.of(FRONT, BACK)), "v2027.1.0", "recipe-1", Map.of());
 
   /** The stamp this build's image for a computer would carry. */
   private static Stamp stampOf(Computer computer, String version, String recipe) {
     return new Stamp(
         computer.name(),
-        2611,
+        1234,
         TABLE.table().ip(computer),
         computer.board().id(),
         computer.cameras(),
@@ -63,7 +63,7 @@ class DeployCheckTest {
         DeployCheck.judge(TABLE, FRONT, new Asked.Stamped(stampOf(FRONT, "v2026.3.4", "recipe-1")));
 
     assertThat(finding.verdict()).isEqualTo(Verdict.FAIL);
-    assertThat(finding.text()).contains("v2026.3.4", "v2027.1.0", "10.26.11.11");
+    assertThat(finding.text()).contains("v2026.3.4", "v2027.1.0", "10.12.34.11");
   }
 
   @Test
@@ -113,10 +113,10 @@ class DeployCheckTest {
     List<Finding> findings =
         DeployCheck.check(
             TABLE,
-            2611,
+            1234,
             (address, port) -> {
               assertThat(port).isEqualTo(5808);
-              return address.equals("10.26.11.11")
+              return address.equals("10.12.34.11")
                   ? new Asked.Stamped(stampOf(FRONT, "v2027.1.0", "recipe-1"))
                   : new Asked.Unreachable("connect timed out");
             });
@@ -131,10 +131,10 @@ class DeployCheckTest {
   @Test
   void aTableForAnotherTeamWarns() {
     List<Finding> findings =
-        DeployCheck.check(TABLE, 254, (address, port) -> new Asked.Unreachable("no route"));
+        DeployCheck.check(TABLE, 5678, (address, port) -> new Asked.Unreachable("no route"));
 
     assertThat(findings.get(0).verdict()).isEqualTo(Verdict.WARN);
-    assertThat(findings.get(0).text()).contains("team 2611's", "team 254's");
+    assertThat(findings.get(0).text()).contains("team 1234's", "team 5678's");
   }
 
   @Test

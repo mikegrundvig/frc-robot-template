@@ -35,7 +35,7 @@ class CoprocessorIOHttpTest {
   private static final Computer FRONT =
       new Computer("vision-front", 11, Board.ORANGEPI_5, List.of("front-left"), 5808);
   private static final CompiledTable TABLE =
-      new CompiledTable(new Table(2611, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
+      new CompiledTable(new Table(1234, 5808, List.of(FRONT)), "v2027.1.0", "recipe-1", Map.of());
 
   /** Fast polls, for a test: ten a second. */
   private static final Coprocessors.Settings FAST =
@@ -144,7 +144,7 @@ class CoprocessorIOHttpTest {
     assertThat(inputs.answered).isTrue();
     assertThat(inputs.error).isEmpty();
     assertThat(inputs.name).isEqualTo("vision-front");
-    assertThat(inputs.address).isEqualTo("10.26.11.11");
+    assertThat(inputs.address).isEqualTo("10.12.34.11");
     assertThat(inputs.photonVisionVersion).isEqualTo("v2027.1.0");
     assertThat(inputs.recipeHash).isEqualTo("recipe-1");
     assertThat(inputs.role).containsExactly("front-left");

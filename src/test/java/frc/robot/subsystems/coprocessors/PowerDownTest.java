@@ -30,7 +30,7 @@ class PowerDownTest {
       new Computer("vision-back", 12, Board.ORANGEPI_5, List.of("back-left"), 5808);
   private static final CompiledTable TABLE =
       new CompiledTable(
-          new Table(2611, 5808, List.of(FRONT, BACK)),
+          new Table(1234, 5808, List.of(FRONT, BACK)),
           PhotonVersion.versionString,
           "recipe-1",
           Map.of());
@@ -123,7 +123,7 @@ class PowerDownTest {
     run(3);
     assertThat(coprocessors.alerts("vision-front"))
         .containsExactly(
-            "MEDIUM: Coprocessor vision-front (10.26.11.11) was powered down from Pitwall: cycle"
+            "MEDIUM: Coprocessor vision-front (10.12.34.11) was powered down from Pitwall: cycle"
                 + " the robot's power to restart it");
 
     // The robot left on: halted boards stay off until its power is cycled.

@@ -44,7 +44,7 @@ class CoprocessorsTest {
   /** The table as this build would compile it, with or without settings committed. */
   private static CompiledTable table(String settingsHash) {
     return new CompiledTable(
-        new Table(2611, 5808, List.of(FRONT)),
+        new Table(1234, 5808, List.of(FRONT)),
         PhotonVersion.versionString,
         "recipe-1",
         settingsHash.isEmpty() ? Map.of() : Map.of("vision-front", settingsHash));
@@ -128,7 +128,7 @@ class CoprocessorsTest {
 
     assertThat(disabled)
         .containsExactly(
-            "MEDIUM: Coprocessor vision-front (10.26.11.11) hasn't answered since the robot"
+            "MEDIUM: Coprocessor vision-front (10.12.34.11) hasn't answered since the robot"
                 + " program started: connect timed out");
     assertThat(alerts()).hasSize(1).first().asString().startsWith("HIGH: ");
     assertThat(card().state()).isEqualTo("Missing");
@@ -149,7 +149,7 @@ class CoprocessorsTest {
     assertThat(missingSoon).as("its last answer is under 3 s old").isFalse();
     assertThat(alerts())
         .containsExactly(
-            "MEDIUM: Coprocessor vision-front (10.26.11.11) stopped answering: connect timed out");
+            "MEDIUM: Coprocessor vision-front (10.12.34.11) stopped answering: connect timed out");
     assertThat(line("Answer").value()).startsWith("none for 4 s: connect timed out");
     // What it said last stays on its card.
     assertThat(line("Version").value()).contains(PhotonVersion.versionString);
@@ -191,7 +191,7 @@ class CoprocessorsTest {
     coprocessors =
         new Coprocessors(
             new CompiledTable(
-                new Table(2611, 5808, List.of(FRONT)),
+                new Table(1234, 5808, List.of(FRONT)),
                 PhotonVersion.versionString,
                 "recipe-2",
                 Map.of()),
@@ -273,7 +273,7 @@ class CoprocessorsTest {
     assertThat(alerts())
         .singleElement()
         .asString()
-        .startsWith("HIGH: Two boards answer at 10.26.11.11 (vision-front), MACs ");
+        .startsWith("HIGH: Two boards answer at 10.12.34.11 (vision-front), MACs ");
     assertThat(card().state()).isEqualTo("Two answer");
     assertThat(line("Address").level()).isEqualTo(Level.PROBLEM);
   }
@@ -334,7 +334,7 @@ class CoprocessorsTest {
 
     Devices.Device device = devices.named("vision-front").orElseThrow();
     assertThat(device.links())
-        .containsExactly(new Devices.Link("Open PhotonVision", "http://10.26.11.11:5800"));
+        .containsExactly(new Devices.Link("Open PhotonVision", "http://10.12.34.11:5800"));
     Devices.File backup = device.download("settings").orElseThrow().fetch().fetch();
     assertThat(backup.name()).isEqualTo("vision-front-settings.zip");
     try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(backup.bytes()))) {

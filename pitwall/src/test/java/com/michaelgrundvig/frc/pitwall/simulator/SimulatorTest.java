@@ -2,7 +2,9 @@ package com.michaelgrundvig.frc.pitwall.simulator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.Outcome;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -24,7 +26,29 @@ class SimulatorTest {
   private final FakeHal hal = new FakeHal();
   private final AtomicLong clock = new AtomicLong();
   private final AtomicInteger stops = new AtomicInteger();
-  private final Simulator simulator = new Simulator(hal, clock::get, stops::incrementAndGet);
+  private final List<List<String>> logged = new ArrayList<>();
+  private boolean lampOut;
+  private final Components components =
+      new Components(said -> {})
+          .add(
+              Component.of(
+                  "Lamp",
+                  "light",
+                  Fault.lasting("Out")
+                      .does("Dark.")
+                      .isOn(() -> lampOut)
+                      .apply(values -> lampOut = true)
+                      .undo("Lit.", () -> lampOut = false)
+                      .build(),
+                  Fault.lasting("Dim")
+                      .does("Dimmer.")
+                      .parameter("Level", "", Limits.between(0, 1), 0.5)
+                      .isOn(() -> false)
+                      .apply(values -> {})
+                      .undo("Bright.", () -> {})
+                      .build()));
+  private final Simulator simulator =
+      new Simulator(hal, clock::get, components, stops::incrementAndGet, logged::add);
 
   /** One robot loop: the clock moves a loop's time, then the simulator's part of it. */
   private void loop() {
@@ -225,6 +249,26 @@ class SimulatorTest {
   }
 
   @Test
+  void faultsAreAppliedByTheLoopAndLoggedWhenTheyChange() {
+    CompletableFuture<Outcome> out = simulator.requestFault(Setting.of("Lamp", "Out"));
+    CompletableFuture<Outcome> wrong =
+        simulator.requestFault(Setting.of("Lamp", "Dim", Map.of("Level", 3.0)));
+    loop();
+
+    assertThat(out).isCompletedWithValue(Outcome.applied());
+    assertThat(wrong)
+        .isCompletedWithValue(
+            new Outcome(Outcome.Result.REFUSED, "Level: 3 is above its limit of 1"));
+    assertThat(lampOut).isTrue();
+    assertThat(logged).containsExactly(List.of("Lamp: Out"));
+
+    simulator.requestUndoAll();
+    loops(3);
+    assertThat(lampOut).isFalse();
+    assertThat(logged).containsExactly(List.of("Lamp: Out"), List.of());
+  }
+
+  @Test
   void theViewSaysWhatTheRobotProgramSees() {
     simulator.requestDriverStation(
         state -> state.withMode(RobotMode.AUTONOMOUS).withFmsAttached(true).withMatchTime(14.2));
@@ -240,7 +284,7 @@ class SimulatorTest {
         .containsEntry("dsAttached", false)
         .containsEntry("matchTime", 15.0)
         .containsEntry("paused", false);
-    assertThat(simulator.view()).containsOnlyKeys("simulator");
+    assertThat(simulator.view()).containsOnlyKeys("simulator", "components");
   }
 
   @Test
@@ -251,7 +295,7 @@ class SimulatorTest {
     loop();
 
     assertThat(asked).isDone();
-    assertThat(asked.join()).containsKey("simulator");
+    assertThat(asked.join()).containsKey("components");
   }
 
   private static JoystickInput input(double leftX) {

@@ -5,8 +5,10 @@ import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import com.michaelgrundvig.frc.pitwall.push.Event;
 import com.michaelgrundvig.frc.pitwall.push.Stream;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.DriverStationState;
 import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -90,16 +92,20 @@ import org.wpilib.hardware.hal.RobotMode;
  * field lock: in the simulator, they are the field. See docs/simulator.md for the details.
  *
  * <ul>
- *   <li>{@code GET /api/simulator}: {@code {"simulator"}}, as the event stream's sections of those
- *       names carry them. {@code PATCH} it with any of {@code "enabled"}, {@code "mode"} ({@code
- *       "AUTONOMOUS"}, {@code "TELEOPERATED"}, {@code "UTILITY"}), {@code "allianceStation"}
- *       ({@code "RED_1"} to {@code "BLUE_3"}, or {@code "UNKNOWN"}), {@code "fmsAttached"}, {@code
- *       "dsAttached"}, {@code "matchTime"} (seconds, or null for none), and {@code "paused"}.
+ *   <li>{@code GET /api/simulator}: {@code {"simulator", "components"}}, as the event stream's
+ *       sections of those names carry them. {@code PATCH} it with any of {@code "enabled"}, {@code
+ *       "mode"} ({@code "AUTONOMOUS"}, {@code "TELEOPERATED"}, {@code "UTILITY"}), {@code
+ *       "allianceStation"} ({@code "RED_1"} to {@code "BLUE_3"}, or {@code "UNKNOWN"}), {@code
+ *       "fmsAttached"}, {@code "dsAttached"}, {@code "matchTime"} (seconds, or null for none), and
+ *       {@code "paused"}.
  *   <li>{@code POST /api/simulator/step}: one loop of a paused simulator; 409 while it runs.
  *   <li>{@code POST /api/simulator/stop}: ends the program, as closing the GUI's window did.
  *   <li>{@code PUT /api/simulator/joysticks}: {@code {"0": {"axes": [...], "buttons": [...],
  *       "povs": [...]}, "1": null}}, each joystick's whole input (null lets it go), at most once a
  *       frame and again every 200 ms while anything is pressed; 204 at once.
+ *   <li>{@code POST /api/simulator/faults}: {@code {"component", "fault", "values": {name:
+ *       number}}} applies a fault, {@code {"component", "fault", "undo": true}} undoes a lasting
+ *       one. {@code DELETE} it to undo every lasting fault.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
@@ -337,6 +343,7 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/simulator/step", List.of("POST")),
             Map.entry("/api/simulator/stop", List.of("POST")),
             Map.entry("/api/simulator/joysticks", List.of("PUT")),
+            Map.entry("/api/simulator/faults", List.of("POST", "DELETE")),
             Map.entry("/uPlot.iife.min.js", List.of("GET")),
             Map.entry("/uPlot.min.css", List.of("GET")));
 
@@ -419,6 +426,9 @@ public final class PitwallServer implements AutoCloseable {
                 answer(exchange, simulator().step(), this::simulatorState);
             case "POST /api/simulator/stop" -> stopSimulator(exchange);
             case "PUT /api/simulator/joysticks" -> putJoysticks(exchange);
+            case "POST /api/simulator/faults" -> postFault(exchange);
+            case "DELETE /api/simulator/faults" ->
+                answer(exchange, simulator().requestUndoAll(), this::componentsView);
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
             default -> throw new IllegalStateException("unrouted: " + method + " " + path);
           }
@@ -711,6 +721,10 @@ public final class PitwallServer implements AutoCloseable {
       return simulator().lastView().getOrDefault("simulator", Map.of());
     }
 
+    private Object componentsView() {
+      return simulator().lastView().getOrDefault("components", Map.of());
+    }
+
     /**
      * Changes the Driver Station's state, all in one loop, in the order given; resumes the clock at
      * once, or pauses it once the rest is applied.
@@ -811,6 +825,54 @@ public final class PitwallServer implements AutoCloseable {
       String stream = exchange.getRequestHeaders().getFirst(STREAM);
       inputs.forEach((port, input) -> simulator.joystick(port, input, stream));
       send(exchange, 204, "text/plain", "");
+    }
+
+    /** Applies a fault, or undoes a lasting one. */
+    private void postFault(HttpExchange exchange) throws IOException {
+      Simulator simulator = simulator();
+      Components components = simulator.components();
+      Map<String, @Nullable Object> body = readObject(exchange);
+      if (!Set.of("component", "fault", "values", "undo").containsAll(body.keySet())
+          || !(body.get("component") instanceof String component)
+          || !(body.get("fault") instanceof String fault)) {
+        throw new Problem(
+            400,
+            "A fault",
+            "Send {\"component\", \"fault\", \"values\": {name: number}}, or {\"component\","
+                + " \"fault\", \"undo\": true}");
+      }
+      if (Boolean.TRUE.equals(body.get("undo"))) {
+        if (body.containsKey("values")) {
+          throw new Problem(400, "Undo or apply", "Undoing a fault takes no values");
+        }
+        String why = components.whyNotUndo(component, fault);
+        if (why != null) {
+          throw new Problem(422, "Can't be undone", why);
+        }
+        answer(exchange, simulator.requestUndo(component, fault), this::componentsView);
+        return;
+      }
+      if (body.containsKey("undo") && !Boolean.FALSE.equals(body.get("undo"))) {
+        throw new Problem(400, "Not true or false", "undo must be true or false");
+      }
+      Map<String, Double> values = new LinkedHashMap<>();
+      Object given = body.get("values");
+      if (given instanceof Map<?, ?> map) {
+        for (Map.Entry<?, ?> value : map.entrySet()) {
+          if (!(value.getValue() instanceof Number number)) {
+            throw new Problem(400, "Not a number", value.getKey() + " must be a number");
+          }
+          values.put(String.valueOf(value.getKey()), number.doubleValue());
+        }
+      } else if (given != null) {
+        throw new Problem(400, "Not values", "values is an object of numbers, by name");
+      }
+      Setting setting = Setting.of(component, fault, values);
+      String why = components.whyNot(setting);
+      if (why != null) {
+        throw new Problem(422, "Can't be applied", why);
+      }
+      answer(exchange, simulator.requestFault(setting), this::componentsView);
     }
 
     private static boolean bool(String name, @Nullable Object value) {

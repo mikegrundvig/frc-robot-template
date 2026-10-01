@@ -522,9 +522,14 @@ public final class RobotContainer implements AutoCloseable {
   /**
    * Puts this robot's pit tools on its Pitwall page: the drive check and the calibrations as
    * actions, the steering's experiment for tuning it, and one status line each for the loop, the
-   * alliance, the placement, localization, scoring, the last calibration, and the cameras.
+   * alliance, the placement, localization, scoring, the last calibration, and the cameras. In the
+   * simulator, the simulated world's parts that can fail, for the page to apply.
    */
   void addTo(Pitwall pitwall) {
+    SimulatedWorld sim = world;
+    if (sim != null) {
+      pitwall.simulator().ifPresent(simulator -> sim.addTo(simulator.components()));
+    }
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall

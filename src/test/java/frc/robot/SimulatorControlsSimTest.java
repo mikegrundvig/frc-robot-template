@@ -3,6 +3,8 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
+import frc.robot.sim.Faults;
+import frc.robot.subsystems.localization.Localization;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -22,7 +24,8 @@ import org.wpilib.system.RobotController;
 /**
  * The simulator's controls on the template's robot, through Pitwall's page the way the Sim view
  * drives them, in WPILib's own simulation: the Driver Station, driving from the page's keyboard or
- * gamepad, the field lock the panel itself is exempt from, and the clock.
+ * gamepad, the field lock the panel itself is exempt from, faults the robot's code has to find out
+ * about, and the clock.
  */
 @SimulationTest
 class SimulatorControlsSimTest {
@@ -95,6 +98,31 @@ class SimulatorControlsSimTest {
     assertThat(sim.simulation().truePose().getTranslation().getDistance(stopped.getTranslation()))
         .as("stopped")
         .isLessThan(0.01);
+  }
+
+  /** A fault from the page: the robot's code finds out from its sensors, and back again. */
+  @Test
+  void aFaultFromThePageIsFoundByTheRobotsCode() throws Exception {
+    placedAndEnabled();
+
+    var unplugged =
+        send(
+            "POST",
+            "/api/simulator/faults",
+            "{\"component\": \"" + Faults.GYRO + "\", \"fault\": \"" + Faults.UNPLUGGED + "\"}");
+    sim.run(0.5);
+    Localization.YawSource without = sim.robot().localization().yawSource();
+    var pluggedIn =
+        send(
+            "POST",
+            "/api/simulator/faults",
+            "{\"component\": \"Gyro\", \"fault\": \"Unplugged\", \"undo\": true}");
+    sim.run(1.0);
+
+    assertThat(unplugged.statusCode()).isEqualTo(200);
+    assertThat(without).isEqualTo(Localization.YawSource.BACKUP);
+    assertThat(pluggedIn.statusCode()).isEqualTo(200);
+    assertThat(sim.robot().localization().yawSource()).isEqualTo(Localization.YawSource.GYRO);
   }
 
   /** With the clock paused, a step moves it on to the next loop's time, and no further. */

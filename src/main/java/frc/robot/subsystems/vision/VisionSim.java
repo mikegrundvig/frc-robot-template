@@ -7,7 +7,9 @@ import static org.wpilib.units.Units.Milliseconds;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.field.FieldModel;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
@@ -21,6 +23,10 @@ import org.wpilib.math.geometry.Transform3d;
  * from where the robot really is (never from the estimate), with the camera's resolution, field of
  * view, frame rate, latency, and a little lens-calibration error. Its results reach the robot code
  * through the same {@link CameraIOPhotonVision} a real camera uses.
+ *
+ * <p>A camera can be knocked on its mount ({@link #mount}) or made later than its configuration
+ * says ({@link #addLatency}) while the simulation runs; the robot code still believes its
+ * configuration.
  */
 public final class VisionSim implements AutoCloseable {
   /** Tags farther than this are not detected: small in the image, and noisy. */
@@ -37,6 +43,11 @@ public final class VisionSim implements AutoCloseable {
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
+
+  /** A camera as added: PhotonVision's simulation of it, its configured mount and latency. */
+  private record Added(PhotonCameraSim simulated, Transform3d configured, double latencyMillis) {}
+
+  private final Map<String, Added> byName = new LinkedHashMap<>();
 
   public VisionSim(FieldModel field) {
     layout = field.toField();
@@ -62,13 +73,52 @@ public final class VisionSim implements AutoCloseable {
         new PhotonCameraSim(io.camera(), properties(config.sensor(), cameras.size() + 1), layout);
     simulated.setMaxSightRange(MAX_SIGHT_METERS);
     Transform3d configured = config.robotToCamera();
-    world.addCamera(
-        simulated,
-        new Transform3d(
-            configured.getTranslation().plus(mountError.getTranslation()),
-            configured.getRotation().rotateBy(mountError.getRotation())));
+    world.addCamera(simulated, mounted(configured, mountError));
     cameras.add(simulated);
+    byName.put(
+        config.name(),
+        new Added(simulated, configured, config.sensor().latency().in(Milliseconds)));
     return io;
+  }
+
+  /**
+   * Mounts a camera off its configuration from now on, as {@link #camera(CameraConfig,
+   * Transform3d)} does when it's added: images taken from now on see from there.
+   *
+   * @param mountError in the robot's frame, from the configured mount; zero puts it back
+   * @throws IllegalArgumentException if no camera has this name
+   */
+  public void mount(String camera, Transform3d mountError) {
+    Added added = added(camera);
+    world.adjustCamera(added.simulated(), mounted(added.configured(), mountError));
+  }
+
+  /**
+   * Makes a camera this much later than its configuration says, from now on: its images arrive
+   * later, still carrying when they were taken. PhotonVision's simulation then runs it at no more
+   * frames a second than its latency allows.
+   *
+   * @param extraMillis zero for its configured latency
+   * @throws IllegalArgumentException if no camera has this name
+   */
+  public void addLatency(String camera, double extraMillis) {
+    Added added = added(camera);
+    added.simulated().prop.setAvgLatencyMs(added.latencyMillis() + extraMillis);
+  }
+
+  private Added added(String camera) {
+    Added added = byName.get(camera);
+    if (added == null) {
+      throw new IllegalArgumentException("no simulated camera is named " + camera);
+    }
+    return added;
+  }
+
+  /** A configured mount, off by an error in the robot's frame. */
+  private static Transform3d mounted(Transform3d configured, Transform3d mountError) {
+    return new Transform3d(
+        configured.getTranslation().plus(mountError.getTranslation()),
+        configured.getRotation().rotateBy(mountError.getRotation()));
   }
 
   /**

@@ -3,8 +3,8 @@
 `./gradlew run` runs the robot program on your laptop, in WPILib's simulation, with this template's
 simulated world (`frc.robot.sim`): a drivetrain that really moves, cameras that render what they'd
 see, and sensors that err as a season-worn robot's do. Pitwall's page drives it
-(http://localhost:5820): the Driver Station, the keyboard or a gamepad, and pausing and stepping,
-in place of WPILib's simulator GUI. AdvantageScope shows the field.
+(http://localhost:5820): the Driver Station, the keyboard or a gamepad, pausing and stepping, and
+failing the robot's parts live, which WPILib's simulator GUI can't do. AdvantageScope shows the field.
 
 ## Pitwall's simulator controls
 
@@ -17,13 +17,18 @@ panel stays usable to detach it again.
 
 ### In the event stream
 
-A section beside the page's others, sent as JSON merge patches when it changes:
+Two sections, beside the page's others, sent as JSON merge patches when they change:
 
 - **`simulator`**: `enabled`, `mode` (`AUTONOMOUS`, `TELEOPERATED`, `UTILITY`, or `UNKNOWN` before
   a Driver Station set one), `allianceStation` (`RED_1` to `BLUE_3`, or `UNKNOWN`), `fmsAttached`,
   `dsAttached`, `matchTime` (whole seconds left, counting down while enabled; -1 for none),
   `paused`, and `joysticks`: for `"0"` and `"1"`, `fromPage` (the page drives it) and
   `centeredByDeadman` (the page went quiet, and it was centered).
+- **`components`**: each part that can fail, by name: `{"kind", "faults": {name: {"does",
+  "lasting", "undo", "parameters": [{"name", "unit", "min", "max", "initial"}], "on", "values"}}}`.
+  A lasting fault has `on`, and while on, the `values` it was applied with; an event has neither.
+  `undo` says what undoing a lasting fault does, or for an event, how the robot recovers.
+
 ### Requests
 
 Every request names the page's event stream in the `Pitwall-Stream` header, as the page's other
@@ -33,14 +38,17 @@ that can't be done now.
 
 | Request | Body | Answer |
 |---|---|---|
-| `GET /api/simulator` | | `{"simulator"}`, read by the next loop; while paused, as the last loop left it |
+| `GET /api/simulator` | | `{"simulator", "components"}`, read by the next loop; while paused, as the last loop left it |
 | `PATCH /api/simulator` | any of `enabled`, `mode`, `allianceStation`, `fmsAttached`, `dsAttached`, `matchTime` (0 to 600 s, or `null` for none), `paused` | the `simulator` section, once the loop has applied it all; 202 if it didn't within a second |
 | `POST /api/simulator/step` | | one loop of a paused simulator, then the `simulator` section; 409 while it runs |
 | `POST /api/simulator/stop` | | 202, then the program ends: the stream closes |
 | `PUT /api/simulator/joysticks` | `{"0": {"axes": [...], "buttons": [...], "povs": [...]}, "1": null}` | 204 at once |
+| `POST /api/simulator/faults` | `{"component", "fault", "values": {name: number}}` to apply; `{"component", "fault", "undo": true}` to undo | the `components` section |
+| `DELETE /api/simulator/faults` | | every lasting fault undone: the robot as built |
 
 A `PATCH` applies its changes in one loop, in the order given. Enabling also attaches the Driver
-Station, as a real one would be, and detaching it disables the robot.
+Station, as a real one would be, and detaching it disables the robot. A parameter a fault request
+leaves out takes its `initial` value.
 
 **Joysticks.** Each joystick's whole input, by WPILib's indices (for a gamepad,
 `org.wpilib.driverstation.Gamepad`'s): axes from -1 to 1, a stick negative pushed up or left, at
@@ -59,7 +67,9 @@ Pitwall's `periodic()`, first thing in `robotPeriodic()`, applies it through WPI
 simulation (`DriverStationSim`) and announces the new data, so the rest of the loop sees the same
 Driver Station, and AdvantageKit, which captures the Driver Station at the end of the loop, logs
 what the loop saw. Nothing new needs logging: AdvantageKit logs the Driver Station's state and the
-joysticks on every robot and replays them. `ReplayEndToEndTest` sets the Driver Station and drives a joystick through these controls,
+joysticks on every robot and replays them, and a fault changes the simulated hardware, whose
+readings the IO layer logs (Pitwall records which faults are on, under `Pitwall/Simulator`, to say
+why). `ReplayEndToEndTest` sets the Driver Station and drives a joystick through these controls,
 and the replay matches.
 
 Three things can't wait for the loop, because a paused simulator runs no loops: resuming and
@@ -69,13 +79,50 @@ last patch tells every page. A step moves the clock to the next alarm any notifi
 which between loops is the robot loop's own, as the GUI's Step does; it applies whatever was asked
 while paused. Stop ends AdvantageKit's log, so its last loops are kept, then the program.
 
+## What can fail, live
+
+The simulated world declares its parts to Pitwall (`frc.robot.sim.Faults`); Pitwall knows nothing
+of any robot's parts. A fault that lasts says whether it's on by asking the world, and undoing it
+puts the part back as the world was built: a season-worn robot's sensors (`SensorErrors.TYPICAL`),
+not perfect ones. An event happens once, and nothing undoes it. The robot's code is never told:
+it finds out from its sensors, as on a robot.
+
+| Part | Fault | Lasts or happens | Takes |
+|---|---|---|---|
+| Each camera (`Camera front-left`) | Unplugged: no results, and it reads disconnected | lasts | |
+| | Frozen: its last image's tags again and again, stamped as new | lasts | |
+| | Moved on its mount, from where it was mounted | lasts | forward, left, up (in) |
+| | Turned on its mount | lasts | roll, pitch, yaw (°) |
+| | Late: images arrive later than its configuration says, still stamped when taken | lasts | extra latency (ms) |
+| Gyro, and the backup IMU | Unplugged | lasts | |
+| | Frozen: the same yaw every time | lasts | |
+| | Errors: its scale, drift, and noise from now on, carrying on from what it reads | lasts | scale, drift (°/min), noise (°) |
+| | Reset: its yaw jumps to zero, as a gyro that restarts does | happens | |
+| Each module (`Front left module`) | Stale encoder: its encoders' readings stop changing while the wheel turns and steers, then catch up | lasts | |
+| | Zeroed off: its absolute encoder's zero | lasts | offset (°) |
+| | Worn tread: its wheel's true radius over the configured one | lasts | scale |
+| | Slips: spins without moving the robot | happens | turns |
+| Robot | Shoved, without its wheels turning; only its gyro feels a turn | happens | forward, left (m), turn (°) |
+| | Hit, with a 4 g jolt its IMU feels | happens | forward, left (m) |
+| | Tilted by hand, whatever the ground | lasts | pitch, roll (°) |
+| | Slipping: only a share of its wheels' rolling moves it | lasts | grip |
+| | Placed, as the drive team carries it | happens | x, y (m), heading (°) |
+| | Carried to the nearest bump, facing across it | happens | |
+
+**Not yet possible** (each waits on the simulator, not on Pitwall): one wheel off the floor (every
+wheel slips alike, so they never disagree as a lifted one's would); a wheel slipping on its own
+under acceleration (traction isn't modeled: maple-sim, [stand-ins](stand-ins.md)); a CAN device
+dropping off the bus or browning out (the simulated modules have no bus); the battery sagging
+(the simulated world models no battery); a camera's axes swapped in the configuration, or one with
+the wrong tag layout; and ramp crossings (the terrain has bumps only).
+
 ## What the *Sim* view needs
 
 The server side is done; the page builds on it.
 
 - **The minimal panel first:** enabled or disabled; teleop, autonomous, or utility; Driver Station
   attached; the alliance station; FMS attached; keyboard and gamepad driving of joystick 0 (and 1);
-  Stop. Then pause, resume, and step; match time.
+  Stop. Then pause, resume, and step; match time; the faults.
 - **Keyboard driving is switched on explicitly** ("Drive with keyboard"), shows in the state bar
   while on, and pauses whenever focus is in a text field, so typing `w` into a value never drives
   the robot. One fixed layout for this template's driving: W/S and A/D the left stick (W is -1 on

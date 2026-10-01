@@ -11,6 +11,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -18,7 +19,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The simulator's controls, for the page: what the WPILib simulator GUI does for the robot program
- * (the Driver Station, joysticks, pausing and stepping the clock, stopping). It exists only in the
+ * (the Driver Station, joysticks, pausing and stepping the clock, stopping), and what it can't do,
+ * failing the simulated robot's components live ({@link Components}). It exists only in the
  * simulator: on a robot, Pitwall has none, so nothing can ever write the Driver Station's state or
  * a joystick there.
  *
@@ -38,7 +40,8 @@ import org.jspecify.annotations.Nullable;
  * real Driver Station still can.
  *
  * <p>The Driver Station's state and the joysticks need no logging of their own: AdvantageKit logs
- * the Driver Station's data as it does on a robot, and replays it.
+ * the Driver Station's data as it does on a robot, and replays it. A fault changes the simulated
+ * hardware, whose readings the robot's IO layer logs; Pitwall logs which faults are on, to say why.
  */
 public final class Simulator {
   /** How many joysticks the page can drive: the driver's and the operator's, 0 and 1. */
@@ -61,7 +64,9 @@ public final class Simulator {
 
   private final SimulatorHal hal;
   private final LongSupplier clock;
+  private final Components components;
   private final Runnable stop;
+  private final Consumer<List<String>> logFaults;
   private final ConcurrentLinkedQueue<Request> queue = new ConcurrentLinkedQueue<>();
   private final AtomicReferenceArray<@Nullable Heard> heard = new AtomicReferenceArray<>(JOYSTICKS);
   private final AtomicLong versions = new AtomicLong();
@@ -79,24 +84,40 @@ public final class Simulator {
   private boolean countingMatchTime;
   private long lastLoopNanos;
   private boolean pauseAsked;
+  private List<String> loggedFaults = List.of();
   private final Object timing = new Object();
 
   /**
    * @param hal WPILib's simulation, or a test's stand-in
    * @param clock the robot's clock in nanoseconds ({@code RobotController::getTime}): the deadman
    *     and the match time run on it, so they stop while the simulator is paused
+   * @param components the simulated robot's components that can fail
    * @param stop ends the program: the page's Stop
+   * @param logFaults told the lasting faults on, whenever they change, for the log
    */
-  public Simulator(SimulatorHal hal, LongSupplier clock, Runnable stop) {
+  public Simulator(
+      SimulatorHal hal,
+      LongSupplier clock,
+      Components components,
+      Runnable stop,
+      Consumer<List<String>> logFaults) {
     this.hal = hal;
     this.clock = clock;
+    this.components = components;
     this.stop = stop;
+    this.logFaults = logFaults;
     lastLoopNanos = clock.getAsLong();
   }
 
   /** The simulator's controls on WPILib's own simulation. */
-  public static Simulator wpilib(LongSupplier clock, Runnable stop) {
-    return new Simulator(new WpilibHal(), clock, stop);
+  public static Simulator wpilib(
+      LongSupplier clock, Components components, Runnable stop, Consumer<List<String>> logFaults) {
+    return new Simulator(new WpilibHal(), clock, components, stop, logFaults);
+  }
+
+  /** The simulated robot's components that can fail: the robot's simulation declares them here. */
+  public Components components() {
+    return components;
   }
 
   /**
@@ -181,6 +202,26 @@ public final class Simulator {
   }
 
   /**
+   * Asks the robot loop to apply a fault. Safe from any thread.
+   *
+   * @return refused, saying why, when there's no such fault, a value is out of range, or the
+   *     fault's own code refused
+   */
+  public CompletableFuture<Outcome> requestFault(Setting setting) {
+    return enqueue(() -> outcome(components.apply(setting)));
+  }
+
+  /** Asks the robot loop to undo a lasting fault. Safe from any thread. */
+  public CompletableFuture<Outcome> requestUndo(String component, String fault) {
+    return enqueue(() -> outcome(components.undo(component, fault)));
+  }
+
+  /** Asks the robot loop to undo every lasting fault: the robot as built. Safe from any thread. */
+  public CompletableFuture<Outcome> requestUndoAll() {
+    return enqueue(() -> outcome(components.undoAll()));
+  }
+
+  /**
    * The page's input for a joystick: the robot loop takes the latest each loop. Safe from any
    * thread.
    *
@@ -238,6 +279,11 @@ public final class Simulator {
       hal.announce();
     }
     lastLoopNanos = now;
+    List<String> on = components.on();
+    if (!on.equals(loggedFaults)) {
+      loggedFaults = on;
+      logFaults.accept(on);
+    }
     if (pauseAsked) {
       pauseAsked = false;
       synchronized (timing) {
@@ -260,7 +306,8 @@ public final class Simulator {
 
   /**
    * The simulator as the page shows it, section by section: {@code simulator} (the Driver Station,
-   * the clock, and which joysticks the page drives). Call it from the robot loop.
+   * the clock, and which joysticks the page drives), and {@code components}. Call it from the robot
+   * loop.
    */
   public Map<String, Map<String, Object>> view() {
     DriverStationState station = hal.driverStation();
@@ -283,6 +330,7 @@ public final class Simulator {
     state.put("joysticks", joysticks);
     Map<String, Map<String, Object>> view = new LinkedHashMap<>();
     view.put("simulator", state);
+    view.put("components", components.view());
     lastView = view;
     return view;
   }
@@ -379,5 +427,9 @@ public final class Simulator {
     CompletableFuture<Outcome> outcome = new CompletableFuture<>();
     queue.add(new Request(apply, outcome));
     return outcome;
+  }
+
+  private static Outcome outcome(@Nullable String refused) {
+    return refused == null ? Outcome.applied() : new Outcome(Outcome.Result.REFUSED, refused);
   }
 }

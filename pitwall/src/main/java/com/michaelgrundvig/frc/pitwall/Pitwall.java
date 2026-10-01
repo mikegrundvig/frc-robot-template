@@ -58,7 +58,8 @@ public final class Pitwall implements AutoCloseable {
 
   private Pitwall(String name, int port, boolean advantageKit) {
     this.advantageKit = advantageKit;
-    status = new Status().add("Robot", () -> name);
+    // Status items may change at most so often, timed on the robot's clock.
+    status = new Status(RobotController::getTime).add("Robot", () -> name);
     Supplier<String> code = code();
     if (code != null) {
       status.add("Code", code);

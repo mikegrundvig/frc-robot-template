@@ -39,6 +39,7 @@ import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -496,6 +497,9 @@ public final class RobotContainer implements AutoCloseable {
     return drive.driveForward(0.5, 2.0);
   }
 
+  /** The most often a status line that follows the sensors changes on the Pitwall page. */
+  static final Duration STATUS_INTERVAL = Duration.ofSeconds(1);
+
   /** The drive check's name on the Pitwall page. */
   static final String DRIVE_CHECK = "Drive forward slowly (2 s)";
 
@@ -516,15 +520,17 @@ public final class RobotContainer implements AutoCloseable {
     pitwall
         .experiments()
         .add(new Experiment(STEER_STEP, drive.steeringRig(drivetrainTuning), STEER_STEP_PROFILE));
+    // Each change goes to every open page: the lines that follow sensors change at most once a
+    // second, and are written to change only when something worth reading does.
     pitwall
         .status()
-        .add("Loop", this::loopStatus)
+        .add("Loop", this::loopStatus, STATUS_INTERVAL)
         .add("Alliance", this::allianceStation)
-        .add("Placement", () -> placement.describe())
-        .add("Localization", this::localizationStatus)
+        .add("Placement", () -> placement.describe(), STATUS_INTERVAL)
+        .add("Localization", this::localizationStatus, STATUS_INTERVAL)
         .add("Scoring", this::scoring)
         .add("Calibration", calibration::lastResult)
-        .add("Cameras", this::cameras);
+        .add("Cameras", this::cameras, STATUS_INTERVAL);
   }
 
   Drive drive() {

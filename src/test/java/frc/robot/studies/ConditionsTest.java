@@ -50,6 +50,20 @@ class ConditionsTest {
     assertThat(Conditions.trial(otherSeed, 0)).isNotEqualTo(Conditions.trial(DEFAULTS, 0));
   }
 
+  /** Another run's seed gives other trials, not the same ones shifted along. */
+  @Test
+  void runsWithDifferentSeedsShareNoTrial() {
+    Set<Long> seeds = new HashSet<>();
+    for (long seed = 1; seed <= 3; seed++) {
+      CameraStudyConfig run = CameraStudyConfigBuilder.builder(DEFAULTS).seed(seed).build();
+      for (int t = 0; t < CameraStudyConfig.ROBUST_TRIALS; t++) {
+        assertThat(seeds.add(Conditions.trial(run, t).seed()))
+            .as("seed %d trial %d", seed, t)
+            .isTrue();
+      }
+    }
+  }
+
   /** A camera's mount error is its own, the same at every pose, and within the bounds. */
   @Test
   void eachCameraIsOffItsMountItsOwnWay() {

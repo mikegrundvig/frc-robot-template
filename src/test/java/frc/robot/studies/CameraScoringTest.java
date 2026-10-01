@@ -15,6 +15,8 @@ import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.VisionMeasurement;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 
@@ -29,8 +31,18 @@ class CameraScoringTest {
 
   private static List<Score> ranking(
       CameraStudyConfig config, List<Sample> samples, Candidate... candidates) {
+    return ranking(config, false, samples, candidates);
+  }
+
+  /**
+   * @param trial in a robustness trial's conditions (every error drawn, each camera off its mount),
+   *     rather than the nominal ones
+   */
+  private static List<Score> ranking(
+      CameraStudyConfig config, boolean trial, List<Sample> samples, Candidate... candidates) {
+    Conditions conditions = trial ? Conditions.trial(config, 0) : Conditions.nominal(config);
     return new CameraScoring(Robots.SIM, WALL, List.of(candidates), config)
-        .score(samples, Conditions.nominal(config), done -> {})
+        .score(samples, conditions, done -> {})
         .ranking();
   }
 
@@ -137,8 +149,10 @@ class CameraScoringTest {
     assertThat(scoring.distinctCameras()).isEqualTo(2);
   }
 
-  @Test
-  void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads() {
+  /** In the nominal conditions, and in a trial's, where every camera is off its mount too. */
+  @ParameterizedTest(name = "in a trial: {0}")
+  @ValueSource(booleans = {false, true})
+  void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads(boolean trial) {
     List<Sample> samples = new FieldGrid(WALL, Robots.SIM.body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig threes =
         CameraStudyConfigBuilder.builder(ONE_THREAD).threads(3).frames(2).build();
@@ -147,22 +161,31 @@ class CameraScoringTest {
     List<Score> once =
         ranking(
             CameraStudyConfigBuilder.builder(threes).threads(1).build(),
+            trial,
             samples,
             AHEAD,
             AHEAD_AND_BACK);
 
-    assertThat(ranking(threes, samples, AHEAD, AHEAD_AND_BACK)).isEqualTo(once);
-    assertThat(ranking(otherSeed, samples, AHEAD, AHEAD_AND_BACK)).isNotEqualTo(once);
+    assertThat(ranking(threes, trial, samples, AHEAD, AHEAD_AND_BACK)).isEqualTo(once);
+    assertThat(ranking(otherSeed, trial, samples, AHEAD, AHEAD_AND_BACK)).isNotEqualTo(once);
   }
 
-  @Test
-  void aLayoutScoresTheSameWhateverIsTriedBesideIt() {
+  /**
+   * In a trial, too: each camera's mount error is its own, whatever other layouts are tried, so a
+   * layout's score doesn't depend on its neighbors.
+   */
+  @ParameterizedTest(name = "in a trial: {0}")
+  @ValueSource(booleans = {false, true})
+  void aLayoutScoresTheSameWhateverIsTriedBesideIt(boolean trial) {
     List<Sample> samples = List.of(FACING_THE_WALL, FACING_AWAY);
+    Candidate other = new Candidate("other", List.of(StudyFixtures.camera("side", 0.2, 90)));
 
-    Score alone = ranking(ONE_THREAD, samples, AHEAD_AND_BACK).get(0);
-    Score beside = ranking(ONE_THREAD, samples, AHEAD, AHEAD_AND_BACK).get(0);
+    Score alone = ranking(ONE_THREAD, trial, samples, AHEAD_AND_BACK).get(0);
+    List<Score> beside = ranking(ONE_THREAD, trial, samples, other, AHEAD, AHEAD_AND_BACK);
 
-    assertThat(beside).isEqualTo(alone);
+    assertThat(beside)
+        .filteredOn(score -> score.candidate().equals(AHEAD_AND_BACK))
+        .containsExactly(alone);
   }
 
   /** Two cameras' measurements, one twice as sure as the other, combined as the estimator would. */

@@ -142,6 +142,38 @@ class StepResponseTest {
     assertThat(response.overshoot()).isCloseTo(0.10, within(1e-9));
   }
 
+  /**
+   * A mechanism still buzzing about its target at the end of the window hasn't settled, even when
+   * its last sample happens to land inside the band: it must stay in the band through the window's
+   * last tenth.
+   */
+  @Test
+  void aBuzzWhoseLastSampleLandsInsideTheBandHasNotSettled() {
+    Series measured = sampled(t -> 1 + 0.03 * Math.sin(2 * Math.PI * 50 * t), 1, 1000);
+
+    StepResponse response = score(measured, UP, 1);
+
+    assertThat(measured.value(measured.count() - 1))
+        .as("the last sample, inside the band")
+        .isCloseTo(1, within(StepResponse.SETTLING_BAND));
+    assertThat(response.settlingSeconds()).as("buzzing ±3% to the end").isEmpty();
+  }
+
+  /** A mechanism that left the band only before the window's last tenth has settled. */
+  @Test
+  void aLastExcursionBeforeTheWindowsLastTenthStillSettles() {
+    var measured = new Series(10);
+    measured.add(after(0.0), 0.0);
+    measured.add(after(0.85), 1.0);
+    measured.add(after(0.89), 1.05); // out of the band just before the last tenth begins
+    measured.add(after(0.9), 1.0);
+    measured.add(after(1.0), 1.0);
+
+    StepResponse response = score(measured, UP, 1);
+
+    assertThat(response.settlingSeconds().getAsDouble()).isCloseTo(0.896, within(1e-9));
+  }
+
   @Test
   void aWindowWithFewerThanTwoSamplesHasNoScore() {
     var measured = new Series(10);

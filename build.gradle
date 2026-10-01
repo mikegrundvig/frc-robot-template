@@ -69,6 +69,9 @@ dependencies {
 
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
+    // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
+    // can say what each value means. It runs in the compiler only; none of it reaches the robot.
+    annotationProcessor project(":pitwall:docs-processor")
 
     compileOnly libs.recordbuilder.core
     testCompileOnly libs.recordbuilder.core
@@ -97,6 +100,14 @@ tasks.named("test") {
     def work = layout.buildDirectory.dir("test-work")
     workingDir = work
     systemProperty "frc.projectDir", projectDir.absolutePath
+    // Project files the tests check against the code, declared so Gradle knows the tests depend
+    // on them: the values register (ValuesRegisterTest) and the drive team's dashboard
+    // (DashboardLayoutTest). Today the tests rerun on every build anyway, since BuildConstants
+    // compiles in the build's time; an undeclared file would let Gradle skip them once it doesn't.
+    inputs.file("docs/values.md").withPropertyName("valuesRegister")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("layouts/elastic-layout.json").withPropertyName("dashboardLayout")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
     doFirst { work.get().asFile.mkdirs() }
     // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
     // coverage report to count: the program's startup runs nowhere else.
@@ -115,6 +126,11 @@ tasks.named("jar") {
 
 tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add "-XDstringConcat=inline"
+}
+// Pitwall's documentation processor documents only the configuration records, which it knows by
+// their annotation's name.
+tasks.named("compileJava") {
+    options.compilerArgs.add "-Apitwall.docs.records=frc.robot.lib.config.ConfigRecord"
 }
 
 // Nothing reaches a robot without a team number, or without passing every check.

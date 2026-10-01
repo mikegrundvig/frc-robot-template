@@ -103,7 +103,7 @@ class CameraImageSimTest {
         long seed = random.nextLong();
         photonVision.prop.setRandomSeed(seed);
         PhotonPipelineResult theirs = photonVision.process(0, cameraPose, targets);
-        TagDetections ours = study.image(cameraPose, mount.name(), seed);
+        TagDetections ours = study.image(cameraPose, mount.name(), seed, List.of());
         images++;
 
         Map<Integer, PhotonTrackedTarget> byId = new HashMap<>();
@@ -123,6 +123,9 @@ class CameraImageSimTest {
           differs("tag m", apart(tag.bestCameraToTag(), target.getBestCameraToTarget()));
           differs("tag rad", turned(tag.bestCameraToTag(), target.getBestCameraToTarget()));
           differs("alternate m", apart(tag.altCameraToTag(), target.getAlternateCameraToTarget()));
+          // The pipeline picks between the two by the heading each implies: their turns matter.
+          differs(
+              "alternate rad", turned(tag.altCameraToTag(), target.getAlternateCameraToTarget()));
           differs("ambiguity", Math.abs(tag.ambiguity() - ambiguity(target.getPoseAmbiguity())));
           tags++;
         }
@@ -161,6 +164,7 @@ class CameraImageSimTest {
     assertThat(worst.get("tag m")).isLessThan(0.001);
     assertThat(worst.get("tag rad")).isLessThan(0.001);
     assertThat(worst.get("alternate m")).isLessThan(0.001);
+    assertThat(worst.get("alternate rad")).isLessThan(0.001);
     assertThat(worst.get("ambiguity")).isLessThan(0.01);
     assertThat(worst.get("multi-tag m")).isLessThan(0.001);
     assertThat(worst.get("multi-tag rad")).isLessThan(0.001);
@@ -176,7 +180,7 @@ class CameraImageSimTest {
   void aTagWhoseOwnSolveFailsIsLeftOutButItsCornersStillCount() {
     CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
     Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
-    List<CameraImageSim.Seen> seen = new ArrayList<>(study.seen(cameraPose, 1));
+    List<CameraImageSim.Seen> seen = new ArrayList<>(study.seen(cameraPose, 1, List.of()));
     assertThat(seen).hasSizeGreaterThanOrEqualTo(2);
     TagDetections whole = study.detections(seen, "front");
     int failed = seen.get(0).tag().id();
@@ -194,13 +198,48 @@ class CameraImageSimTest {
     assertThat(solvedWithout.fieldToCamera()).isEqualTo(solvedWith.fieldToCamera());
   }
 
+  /** Another robot between the camera and the hub's face hides its tags. */
+  @Test
+  void anotherRobotInTheWayHidesTheTags() {
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
+    Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
+    OtherRobots.Blocker between = new OtherRobots.Blocker(3.2, 4.2, 0, 0.45, 0.45, 1.5);
+    OtherRobots.Blocker aside = new OtherRobots.Blocker(3.2, 1.0, 0, 0.45, 0.45, 1.5);
+
+    assertThat(study.image(cameraPose, "front", 1, List.of()).tags())
+        .hasSizeGreaterThanOrEqualTo(2);
+    assertThat(study.image(cameraPose, "front", 1, List.of(between)).tags()).isEmpty();
+    assertThat(study.image(cameraPose, "front", 1, List.of(aside)).tags())
+        .isEqualTo(study.image(cameraPose, "front", 1, List.of()).tags());
+  }
+
+  /**
+   * A post between the camera and one of the hub face's two tags hides that one alone. The other
+   * tags' corners are exactly as in the clear image: the hidden tag's noise is still drawn, in
+   * PhotonVision's order, so the rest of the image is the same.
+   */
+  @Test
+  void aNarrowPostHidesOneTagAndLeavesTheRestAsTheyWere() {
+    CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
+    Pose3d cameraPose = new Pose3d(2.3, 4.2, 0.5, new Rotation3d(0, Math.toRadians(-10), 0));
+    // Halfway to the face, where the line to tag 25 (y 4.39) passes y 4.30, and tag 26's, 4.11.
+    OtherRobots.Blocker post = new OtherRobots.Blocker(3.2, 4.30, 0, 0.05, 0.03, 2);
+
+    TagDetections clear = study.image(cameraPose, "front", 1, List.of());
+    TagDetections hidden = study.image(cameraPose, "front", 1, List.of(post));
+
+    assertThat(clear.tags()).extracting(TagDetections.Tag::id).contains(25, 26);
+    assertThat(hidden.tags())
+        .containsExactlyElementsOf(clear.tags().stream().filter(tag -> tag.id() != 25).toList());
+  }
+
   @Test
   void anImageWithNoTagInViewHasNothingInIt() {
     CameraImageSim study = new CameraImageSim(FIELD, SENSOR, NOMINAL);
 
     // The middle of the field, looking straight up.
     TagDetections sky =
-        study.image(new Pose3d(8, 4, 1, new Rotation3d(0, -Math.PI / 2, 0)), "up", 1);
+        study.image(new Pose3d(8, 4, 1, new Rotation3d(0, -Math.PI / 2, 0)), "up", 1, List.of());
 
     assertThat(sky.tags()).isEmpty();
     assertThat(sky.multiTag()).isNull();

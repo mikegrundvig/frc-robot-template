@@ -92,6 +92,27 @@ public final class RobotContainer implements AutoCloseable {
 
   private final Scheduler scheduler;
 
+  /**
+   * What the pit can tune on a robot: each mechanism's configuration, with the limits it may be
+   * tuned within. The one list of them: the container publishes these, and the tests check every
+   * one (its committed values within its limits, a meaning for each value, and a row in the values
+   * register, docs/values.md). A mechanism with tuning adds it here.
+   *
+   * @param drivetrain the drivetrain's gains and limits ({@link Drive#tuning})
+   * @param vision how far the cameras are trusted ({@link Vision#tuning})
+   */
+  record Tunings(LiveConfig<SwerveConfig> drivetrain, LiveConfig<VisionConfig> vision) {
+    /** Every one. */
+    List<LiveConfig<?>> all() {
+      return List.of(drivetrain, vision);
+    }
+  }
+
+  /** Each mechanism's tuning, starting from a robot's committed configuration. */
+  static Tunings tunings(RobotConfig robot) {
+    return new Tunings(Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()));
+  }
+
   /** The drivetrain's and vision's configurations as the pit tunes them. */
   private final LiveConfig<SwerveConfig> drivetrainTuning;
 
@@ -168,9 +189,10 @@ public final class RobotContainer implements AutoCloseable {
       LoopHealth loopHealth) {
     // What the pit can tune, published where dashboards and the Pitwall page find it; the
     // mechanisms read it every loop.
-    drivetrainTuning = Drive.tuning(robot.drivetrain());
+    Tunings tunings = tunings(robot);
+    drivetrainTuning = tunings.drivetrain();
     TunableRegistry.publish("Drive/config", drivetrainTuning);
-    visionTuning = Vision.tuning(robot.vision());
+    visionTuning = tunings.vision();
     TunableRegistry.publish("Vision/config", visionTuning);
     // The rules across mechanisms: checked on every change the pit makes, and here, as committed,
     // so a configuration that breaks one stops the program with every rule it breaks.

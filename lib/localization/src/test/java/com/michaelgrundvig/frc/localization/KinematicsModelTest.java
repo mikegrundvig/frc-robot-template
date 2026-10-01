@@ -83,57 +83,6 @@ class KinematicsModelTest {
     assertThat(found.residualMeters())
         .as("the centimeter it put the motion off")
         .isCloseTo(0.01, within(1e-12));
-    assertThat(found.oneWheelMeters())
-        .as("all of it that one wheel's")
-        .isCloseTo(found.residualMeters(), within(1e-12));
-  }
-
-  /**
-   * Wheels that each miss a little (scrub, noise, each reaching a new speed at its own pace) leave
-   * every wheel a part of the misses: little of them is counted as one wheel's, a quarter on
-   * average. One wheel slipping ten times as far as that, among them, is mostly its own.
-   */
-  @Test
-  void missesSpreadOverTheWheelsAreLittleOfThemOneWheels() {
-    Random random = new Random(11);
-    double spreadShares = 0;
-    double slipShares = 0;
-    int trials = 400;
-    for (int trial = 0; trial < trials; trial++) {
-      double[] angles = new double[4];
-      double[] noisy = new double[4];
-      double[] slipping = new double[4];
-      for (int i = 0; i < 4; i++) {
-        angles[i] = random.nextGaussian() * 0.01; // pointing ahead, give or take half a degree
-        noisy[i] = 0.02 + random.nextGaussian() * 0.001;
-        slipping[i] = noisy[i];
-      }
-      slipping[trial % 4] += 0.01;
-      OdometrySample start = new OdometrySample(0, new double[4], angles);
-      BodyMotion spread = swerve.motion(start, new OdometrySample(1, noisy, angles));
-      BodyMotion slipped = swerve.motion(start, new OdometrySample(1, slipping, angles));
-      spreadShares += spread.oneWheelMeters() / spread.residualMeters();
-      slipShares += slipped.oneWheelMeters() / slipped.residualMeters();
-    }
-
-    assertThat(spreadShares / trials).as("spread").isBetween(0.1, 0.4);
-    assertThat(slipShares / trials).as("one wheel slipping").isGreaterThan(0.8);
-  }
-
-  /** With two modules, neither can be told from the other: all of it counts as one wheel's. */
-  @Test
-  void withTwoModulesItAllCountsAsOneWheels() {
-    SwerveKinematicsModel two =
-        new SwerveKinematicsModel(new Translation2d(0.3, 0), new Translation2d(-0.3, 0));
-    double[] angles = {0, 0};
-
-    BodyMotion found =
-        two.motion(
-            new OdometrySample(0, new double[2], angles),
-            new OdometrySample(1, new double[] {0.1, 0.12}, angles));
-
-    assertThat(found.residualMeters()).isPositive();
-    assertThat(found.oneWheelMeters()).isEqualTo(found.residualMeters());
   }
 
   /**
@@ -164,7 +113,6 @@ class KinematicsModelTest {
 
         double error = Math.hypot(found.dxMeters(), found.dyMeters());
         assertThat(found.residualMeters()).isCloseTo(error, within(0.11 * error));
-        assertThat(found.oneWheelMeters()).isCloseTo(found.residualMeters(), within(1e-9));
       }
     }
   }

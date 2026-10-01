@@ -252,6 +252,9 @@ public final class SlipCheck {
   /** How long the robot has been standing still. */
   private double stillSeconds;
 
+  /** How long since the wheels were last seen sliding. */
+  private double sinceSlide = Double.POSITIVE_INFINITY;
+
   /**
    * @param settings how closely the wheels must agree with the IMU
    * @param wheelReachMeters how far the wheels sit from the robot's center: a turn they see and the
@@ -314,6 +317,7 @@ public final class SlipCheck {
     biasForward = 0;
     biasLeft = 0;
     stillSeconds = 0;
+    sinceSlide = Double.POSITIVE_INFINITY;
     collision =
         joltBySize(forwardAccelerationMetersPerSecSq, leftAccelerationMetersPerSecSq) ? 1 : 0;
   }
@@ -477,9 +481,13 @@ public final class SlipCheck {
     if (checked && before && Double.isFinite(feltX) && Double.isFinite(feltY)) {
       double wheelsX = (velocityX - lastVelocityX) / seconds;
       double wheelsY = (velocityY - lastVelocityY) / seconds;
-      // What the IMU felt that the wheels don't explain. Felt by the IMU less than the wheels'
-      // own change, it's the wheels changing faster than the robot can follow: a slide, not a hit.
-      if (Math.hypot(feltX, feltY) >= Math.hypot(wheelsX, wheelsY)) {
+      if (sinceSlide < windowSeconds) {
+        // Sliding, or just done (what the IMU feels of the robot catching up lags a little), the
+        // wheels' change of velocity says nothing of the robot's: all it felt.
+        unexplained = Math.hypot(feltX, feltY);
+      } else if (Math.hypot(feltX, feltY) >= Math.hypot(wheelsX, wheelsY)) {
+        // What the IMU felt that the wheels don't explain. Felt less than the wheels' own change,
+        // it's the wheels changing faster than the robot can follow: a slide, not a hit.
         unexplained = Math.hypot(feltX - wheelsX, feltY - wheelsY);
       }
     }
@@ -509,6 +517,7 @@ public final class SlipCheck {
     }
     lastVelocityX = velocityX;
     lastVelocityY = velocityY;
+    sinceSlide = speedSlip > 0 || turnSlip > 0 ? 0 : sinceSlide + seconds;
   }
 
   /** The robot's tilt, from level, or level if the IMU can't say. */

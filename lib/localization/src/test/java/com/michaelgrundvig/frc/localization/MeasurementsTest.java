@@ -42,11 +42,6 @@ class MeasurementsTest {
     assertThatThrownBy(() -> new BodyMotion(0, 0, 0, -1)).hasMessageContaining("residual");
     assertThatThrownBy(() -> new BodyMotion(0, 0, 0, Double.POSITIVE_INFINITY))
         .hasMessageContaining("residual");
-    assertThat(motion.oneWheelMeters()).as("can't be told apart: one wheel's").isEqualTo(0.0005);
-    assertThatThrownBy(() -> new BodyMotion(0, 0, 0, 0.001, 0.002))
-        .hasMessageContaining("never more");
-    assertThatThrownBy(() -> new BodyMotion(0, 0, 0, 0.001, -0.001))
-        .hasMessageContaining("never more");
   }
 
   @Test

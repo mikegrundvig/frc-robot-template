@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -39,12 +40,33 @@ class WeightsTest {
   }
 
   @Test
+  void aHeaderWithoutAHashSaysToMakeItAComment() throws IOException {
+    assertThatThrownBy(
+            () ->
+                Weights.read(
+                    file("name, x min, y min, x max, y max, weight", "Hub, 4, 3, 5, 4, 0")))
+        .hasMessage(
+            "weights.csv line 1: looks like the columns' names: start it with # to make it a comment");
+  }
+
+  /** A spreadsheet's byte-order mark before the first region's name isn't part of it. */
+  @Test
+  void aSpreadsheetsByteOrderMarkIsIgnored() throws IOException {
+    Files.writeString(
+        folder.resolve("weights.csv"), "\uFEFFHub, 4, 3, 5, 4, 0\n", StandardCharsets.UTF_8);
+
+    assertThat(Weights.read(folder.resolve("weights.csv")).regions())
+        .extracting(Weights.Region::name)
+        .containsExactly("Hub");
+  }
+
+  @Test
   void aBadLineIsNamed() throws IOException {
     assertThatThrownBy(() -> Weights.read(file("Scoring, 2, 3, 4, 5")))
         .hasMessageContaining("weights.csv line 1")
         .hasMessageContaining("6 values");
     assertThatThrownBy(() -> Weights.read(file("# a comment", "Scoring, 2, 3, four, 5, 1")))
-        .hasMessageContaining("line 2");
+        .hasMessage("weights.csv line 2: column x max: \"four\" isn't a number");
     assertThatThrownBy(() -> Weights.read(file("Backwards, 4, 3, 2, 5, -1")))
         .hasMessageContaining("Region[Backwards].weight: -1 must be zero or more")
         .hasMessageNotContaining("xMax");

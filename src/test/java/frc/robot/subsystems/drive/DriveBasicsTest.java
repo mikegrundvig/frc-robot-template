@@ -55,8 +55,8 @@ class DriveBasicsTest {
   @Test
   void drivesStraightDownfieldWhileSpinning() {
     // Field-relative driving: the robot spins, but its path should still run along +x. Broken
-    // field-relative driving spirals off by meters. The simulated steering updates once per loop,
-    // slower than real motor controllers, so allow some drift.
+    // field-relative driving spirals off by meters. The wheels get new angles once a loop and take
+    // time to reach them, so allow some drift.
     harness.drive(3.0, 0.7, 0.0, 0.5);
 
     Pose2d pose = harness.drive.getPose();

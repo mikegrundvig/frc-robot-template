@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
 import frc.robot.lib.field.Bump;
+import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -21,9 +22,10 @@ import org.wpilib.math.geometry.Translation3d;
 
 /**
  * What can go wrong with the simulated world's parts while it runs, declared to Pitwall's simulator
- * controls: each camera, the gyro, the backup IMU, each module, and the robot itself, with its
- * faults. The page lists them, applies them, and undoes them; the scenarios ({@link Scenarios}) are
- * made of them. The robot's code is never told: it has to find out from its sensors.
+ * controls: each camera, the gyro, the backup IMU, each module, the robot itself, and the field's
+ * tags, with their faults. The page lists them, applies them, and undoes them; the scenarios
+ * ({@link Scenarios}) are made of them. The robot's code is never told: it has to find out from its
+ * sensors.
  *
  * <p>A fault that lasts (a camera unplugged) says whether it's on by asking the world, and undoing
  * it puts the part back as the world was built: a season-worn robot's sensors ({@link
@@ -38,6 +40,7 @@ public final class Faults {
   public static final String GYRO = "Gyro";
   public static final String BACKUP_IMU = "Backup IMU";
   public static final String ROBOT = "Robot";
+  public static final String FIELD = "Field";
 
   /** The modules' names, front left first, in the drivetrain's order. */
   static final List<String> MODULES =
@@ -61,6 +64,7 @@ public final class Faults {
   public static final String SLIPPING = "Slipping";
   public static final String PLACED = "Placed";
   public static final String TO_A_BUMP = "Carried to a bump";
+  public static final String TAG_MOVED = "Tag moved";
 
   // Their parameters, as the scenarios give them.
   public static final String FORWARD = "Forward";
@@ -80,6 +84,7 @@ public final class Faults {
   public static final String X = "X";
   public static final String Y = "Y";
   public static final String HEADING = "Heading";
+  public static final String TAG = "Tag";
 
   /** How far short of a bump's ramp the robot is set down, from its center: clear of the ramp. */
   static final double BUMP_CLEARANCE_METERS = 1.0;
@@ -121,6 +126,9 @@ public final class Faults {
       components.add(module(drivetrain, i));
     }
     components.add(robot(world));
+    if (!world.vision().tagIds().isEmpty()) {
+      components.add(field(world.vision()));
+    }
   }
 
   private static Component camera(CameraIOSim camera) {
@@ -374,6 +382,45 @@ public final class Faults {
               .build());
     }
     return new Component(ROBOT, "robot", faults);
+  }
+
+  /** The field's tags: one can be knocked off where the field was built. */
+  private static Component field(VisionSim vision) {
+    List<Integer> ids = vision.tagIds();
+    int lowest = ids.stream().mapToInt(Integer::intValue).min().orElseThrow();
+    int highest = ids.stream().mapToInt(Integer::intValue).max().orElseThrow();
+    return Component.of(
+        FIELD,
+        "field",
+        Fault.lasting(TAG_MOVED)
+            .does(
+                "One tag moved this far from where the field was built, in the field's frame (x"
+                    + " away from the blue wall, y to its left, up), as a tag knocked at an event"
+                    + " is; moving another puts this one back. The robot's code, and the cameras'"
+                    + " multi-tag solves, still believe the field's layout.")
+            .parameter(TAG, "", Limits.between(lowest, highest), ids.get(0))
+            .parameter(X, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 4)
+            .parameter(Y, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 0)
+            .parameter(UP, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 0)
+            .isOn(vision::isTagMoved)
+            .apply(
+                values ->
+                    vision.moveTag(
+                        tagId(values.get(TAG)),
+                        new Translation3d(
+                            Inches.of(values.get(X)),
+                            Inches.of(values.get(Y)),
+                            Inches.of(values.get(UP)))))
+            .undo("Puts it back where the field was built.", vision::putTagsBack)
+            .build());
+  }
+
+  /** A tag's ID, given as a number. */
+  private static int tagId(double id) {
+    if (id != Math.rint(id)) {
+      throw new IllegalArgumentException("a tag's ID is a whole number, not " + id);
+    }
+    return (int) id;
   }
 
   /** Whether the field the world was built on has bumps, to carry the robot to. */

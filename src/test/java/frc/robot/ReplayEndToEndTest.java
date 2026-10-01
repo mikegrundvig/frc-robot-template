@@ -26,9 +26,10 @@ import org.wpilib.datalog.DataLogRecord;
 /**
  * AdvantageKit replay, end to end, with Pitwall in the loop. The real robot program records a
  * session in the simulator ({@link ReplaySessionRobot}): a tuning change from Pitwall's page, a
- * WPILib tunable changed through Pitwall's tee, and an action started from the page, which drives
- * the robot. Then it replays its own log. Every output the session recorded must come out of the
- * replay the same, at the same moments, because every one of those changes was logged as an input.
+ * WPILib tunable changed through Pitwall's tee, an action started from the page, which drives the
+ * robot, and an experiment on the steering, scored from its trace. Then it replays its own log.
+ * Every output the session recorded must come out of the replay the same, at the same moments,
+ * because every one of those changes was logged as an input.
  *
  * <p>Each run is its own process: AdvantageKit's logger starts once per program, and a replay ends
  * the program when the log runs out.
@@ -43,6 +44,8 @@ class ReplayEndToEndTest {
           "Session/Gain",
           "Session/SteerKp",
           "Session/Action",
+          "Session/Experiment",
+          "Session/ExperimentRise",
           "Drive/Pose",
           "Field/Alliance",
           "Field/Placement",
@@ -74,6 +77,10 @@ class ReplayEndToEndTest {
     assertThat(values(original, "Session/Gain")).contains(1.0, 2.5);
     assertThat(values(original, "Session/SteerKp")).contains(16.0, 18.5);
     assertThat(values(original, "Session/Action")).contains("READY", "RUNNING", "ENDED");
+    assertThat(values(original, "Session/Experiment")).contains("NONE", "RUNNING", "ENDED");
+    assertThat(values(original, "Session/ExperimentRise"))
+        .as("the steering's rise, scored from its trace")
+        .anySatisfy(rise -> assertThat((Double) rise).isBetween(0.02, 0.3));
     assertThat(values(original, "Field/Alliance")).contains("Red 1");
     assertThat(values(original, "Field/Placement")).contains("Ready on Left: 0 cm, 0° off");
     assertThat(values(original, "Field/Zones/Trench")).as("drove under it").contains(true);

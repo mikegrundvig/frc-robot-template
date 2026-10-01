@@ -1,6 +1,9 @@
 package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
@@ -9,6 +12,11 @@ import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.Status;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
+import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
+import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
+import com.michaelgrundvig.frc.pitwall.experiment.Rig;
+import com.michaelgrundvig.frc.pitwall.experiment.Run;
+import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.subsystems.drive.Drive;
 import java.io.ByteArrayOutputStream;
@@ -20,12 +28,14 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
+import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.networktables.NetworkTableInstance;
@@ -57,6 +67,7 @@ class PitwallRobotTest {
 
   @Test
   void theStatusShowsTheRobotItsCodeItsModeAndTheBattery() {
+    pitwall.status().requestRead(); // as the page's GET does: nothing is read unless asked
     pitwall.periodic();
 
     assertThat(pitwall.status().view())
@@ -238,6 +249,96 @@ class PitwallRobotTest {
                             + " /Vision/front/enabled: false (was true)"));
   }
 
+  /**
+   * An experiment runs as a Commands v3 command on its rig's own scheduler, through the robot loop,
+   * and is scored. The mechanism is a first-order lag whose time constant is 1/steerKp, so its rise
+   * is known: ln 9 / 16 s.
+   */
+  @Test
+  void anExperimentRunsAsACommandOnItsRigsSchedulerAndIsScored() {
+    Lag lag = new Lag();
+    RobotSim.enable(RobotMode.UTILITY, true);
+    var started = pitwall.experiments().requestStart("Step", null);
+
+    run(lag, 110);
+
+    assertThat(started.getNow(null)).isEqualTo(new Outcome(Outcome.Result.APPLIED, ""));
+    Run run = Objects.requireNonNull(pitwall.experiments().run());
+    assertThat(run.state().phase()).isEqualTo(Run.Phase.ENDED);
+    assertThat(run.gains()).containsEntry("gains.steerKp", 16.0);
+    var steps = Objects.requireNonNull(run.state().scores()).steps();
+    StepResponse up = Objects.requireNonNull(steps.get("Angle")).get(0).orElseThrow();
+    assertThat(up.riseSeconds().getAsDouble()).isCloseTo(Math.log(9) / 16, within(0.003));
+    assertThat(up.overshoot()).isZero();
+  }
+
+  /** Disabling cancels the command, and its cleanup ends the run, saying why. */
+  @Test
+  void disablingCancelsAnExperimentsCommand() {
+    Lag lag = new Lag();
+    RobotSim.enable(RobotMode.UTILITY, true);
+    pitwall.experiments().requestStart("Step", null);
+    run(lag, 20);
+
+    RobotSim.enable(RobotMode.UTILITY, false);
+    run(lag, 1);
+
+    Run run = Objects.requireNonNull(pitwall.experiments().run());
+    assertThat(run.state().phase()).isEqualTo(Run.Phase.CANCELED);
+    assertThat(run.state().detail())
+        .isEqualTo("Canceled: experiments run only with the robot enabled in utility mode");
+    assertThat(lag.scheduler.getRunningCommands()).isEmpty();
+  }
+
+  /** A mechanism on its own scheduler that closes on its setpoint as a first-order lag. */
+  private final class Lag implements Mechanism {
+    final Scheduler scheduler = Scheduler.createIndependentScheduler();
+    double setpoint;
+    double angle;
+
+    Lag() {
+      pitwall
+          .experiments()
+          .add(
+              new Experiment(
+                  "Step",
+                  Rig.builder()
+                      .name("Lag")
+                      .gains(drivetrain, "gains.steerKp")
+                      .setpoint(Radians, radians -> setpoint = radians)
+                      .limits(Degrees.of(-90), Degrees.of(90))
+                      .measurement("Angle", Degrees, () -> Math.toDegrees(angle))
+                      .requires(this)
+                      .build(),
+                  Profiles.stepAndBack()
+                      .from(Degrees.of(0))
+                      .to(Degrees.of(45))
+                      .hold(Seconds.of(0.8))));
+    }
+
+    @Override
+    public Scheduler getRegisteredScheduler() {
+      return scheduler;
+    }
+
+    /** Moves one loop toward the setpoint, exactly as a lag does. */
+    void step() {
+      double kP = drivetrain.get().gains().steerKp();
+      angle = setpoint + (angle - setpoint) * Math.exp(-kP * 0.02);
+    }
+  }
+
+  /** Robot loops with an experiment's page in touch: Pitwall, the mechanism, then its commands. */
+  private void run(Lag lag, int loops) {
+    for (int i = 0; i < loops; i++) {
+      RobotSim.stepClock();
+      pitwall.experiments().heard(null);
+      pitwall.periodic();
+      lag.step();
+      lag.scheduler.run();
+    }
+  }
+
   private static List<String> activeAlerts() {
     List<String> active = new ArrayList<>();
     for (AlertDataJNI.AlertInfo alert : AlertDataJNI.getAlerts()) {
@@ -280,6 +381,7 @@ class PitwallRobotTest {
   }
 
   private String modeAfterALoop() {
+    pitwall.status().requestRead();
     pitwall.periodic();
     return value("Mode");
   }

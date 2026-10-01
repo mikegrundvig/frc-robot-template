@@ -25,6 +25,12 @@ public sealed interface Place {
   Pose2d on(FieldModel field, Alliance alliance);
 
   /**
+   * The tags the place is found from, for an alliance: the ones a task lining up on it should
+   * trust. None for a place written down as a pose.
+   */
+  List<Integer> tags(FieldModel field, Alliance alliance);
+
+  /**
    * A pose written down for blue, from the game manual or CAD. Red's is its image under the field's
    * symmetry.
    */
@@ -71,6 +77,11 @@ public sealed interface Place {
     public Pose2d on(FieldModel field, Alliance alliance) {
       return alliance == Alliance.RED && red != null ? red : field.forAlliance(alliance, blue);
     }
+
+    @Override
+    public List<Integer> tags(FieldModel field, Alliance alliance) {
+      return List.of();
+    }
   }
 
   /** The point midway between tags. */
@@ -91,6 +102,11 @@ public sealed interface Place {
       }
       return new Pose2d(sum.div(blueTags.size()), FieldModel.driverForward(alliance));
     }
+
+    @Override
+    public List<Integer> tags(FieldModel field, Alliance alliance) {
+      return blueTags.stream().map(tag -> field.tagFor(alliance, tag)).toList();
+    }
   }
 
   /** A pose in front of a tag, facing it. */
@@ -108,6 +124,11 @@ public sealed interface Place {
       return field
           .tagPose(alliance, blueTag)
           .transformBy(new Transform2d(distanceMeters, 0, Rotation2d.PI));
+    }
+
+    @Override
+    public List<Integer> tags(FieldModel field, Alliance alliance) {
+      return List.of(field.tagFor(alliance, blueTag));
     }
   }
 

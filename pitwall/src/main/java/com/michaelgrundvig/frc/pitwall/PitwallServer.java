@@ -1,5 +1,10 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
+import com.michaelgrundvig.frc.pitwall.experiment.Run;
+import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
+import com.michaelgrundvig.frc.pitwall.push.Event;
+import com.michaelgrundvig.frc.pitwall.push.Stream;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.avaje.json.JsonException;
@@ -18,7 +23,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -34,10 +41,17 @@ import org.jspecify.annotations.Nullable;
  * simulator, http://robot.local:5820 on the robot. Any browser works, a phone's included, and so
  * does anything else that speaks HTTP. It serves the robot's status ({@link Status}), actions
  * ({@link Actions}), live tuning of the mechanisms' configurations ({@link Tuning}, {@link
- * LiveConfig}), and every WPILib tunable in the program ({@link TunableTee}):
+ * LiveConfig}), every WPILib tunable in the program ({@link TunableTee}), and experiments ({@link
+ * com.michaelgrundvig.frc.pitwall.experiment.Experiments}):
  *
  * <ul>
- *   <li>{@code GET /api/status}: the status items as of the last loop, {@code [{"name", "value"}]}.
+ *   <li>{@code GET /api/events}: the page's state as server-sent events, pushed only when something
+ *       changes: a {@code snapshot} first, then {@code patch} events (JSON merge patches) and the
+ *       run's {@code samples}; a {@code heartbeat} after 5 s with nothing else to say. A page
+ *       reconnecting names the stream it had ({@code ?replaces=id}), which closes; with eight open,
+ *       the one that wrote least lately makes way. See {@link Broadcaster}.
+ *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
+ *       "value"}]}; 503 when the loop doesn't get to it within a second.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
  *       "detail"}]}. {@code POST} it {@code {"start": name}} or {@code {"cancel": name}}.
  *   <li>{@code GET /api/tuning}: the session, {@code {"name", "enabled", "fieldConnected",
@@ -49,13 +63,20 @@ import org.jspecify.annotations.Nullable;
  *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
  *       its configuration first; {@code null} returns a value to its committed one.
  *   <li>{@code GET /api/changes}: what differs from the committed configurations, with the builder
- *       calls that commit it, {@code [{"config", "path", "committed", "tuned", "builderCall"}]}
+ *       calls that commit it, {@code [{"config", "field", "committed", "tuned", "builderCall"}]}
  *       ({@code Accept: text/plain} for the report). {@code DELETE} it to return every value to its
  *       committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
  *       "value", "editable", "limits"}]}, the limits as text ({@code "0 to 30"}, empty for none).
  *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
  *       within its limits.
+ *   <li>{@code GET /api/experiments}: the rigs and the experiments that run on them. {@code POST}
+ *       it {@code {"start": name}}, naming the page's stream, or {@code {"cancel": name, "run": id,
+ *       "reason": why}}; canceling what isn't running is 409.
+ *   <li>{@code GET /api/run}: the run in progress, or the latest to end, with its trace.
+ *   <li>{@code POST /api/heartbeat}: nothing, but it keeps a run going: while an experiment runs,
+ *       the page that started it sends a request at least every 500 ms (the deadman), naming its
+ *       event stream in the {@code Pitwall-Stream} header, as it does with every request.
  * </ul>
  *
  * <p>A change waits for the robot loop and answers with what became of it: 200 and the new state
@@ -66,7 +87,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>The server's threads never change the robot: they read what the robot loop last published
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
- * robot loop to apply.
+ * robot loop to apply. The event stream is written by its own thread from what the loop hands it.
  *
  * <p>Nothing here is bundled: the web server is the one built into Java ({@code
  * com.sun.net.httpserver}), and JSON is avaje-jsonb, which WPILib gives every robot program.
@@ -85,6 +106,26 @@ public final class PitwallServer implements AutoCloseable {
   /** How long a change waits for the robot loop before answering 202 Accepted. */
   static final Duration WAIT = Duration.ofSeconds(1);
 
+  /**
+   * How long a stream stays silent before a heartbeat says it's still there. The heartbeat is an
+   * event, not a comment line: a browser's EventSource never shows the page a comment, and the page
+   * counts 10 s without an event as the link lost.
+   */
+  static final Duration IDLE = Duration.ofSeconds(5);
+
+  /** What a quiet stream sends: an event the page sees, holding nothing. */
+  private static final String HEARTBEAT = "event: heartbeat\ndata: {}\n\n";
+
+  /**
+   * Third-party files the page loads from here, as the robot has no internet at an event: uPlot,
+   * which draws the experiments' plots. Each is served if it's bundled.
+   */
+  private static final Map<String, String> BUNDLED =
+      Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
+
+  /** The header a page names its event stream in, so the deadman knows who's asking. */
+  static final String STREAM = "Pitwall-Stream";
+
   /** The page's requests are a few hundred bytes; anything much bigger isn't from it. */
   private static final int MAX_BODY_BYTES = 64 * 1024;
 
@@ -96,32 +137,31 @@ public final class PitwallServer implements AutoCloseable {
   private final int port;
 
   /**
+   * @param page what the page shows and changes
+   * @param broadcaster pushes the page's state to each event stream
    * @param port the port to serve on; 0 picks a free one
    */
-  public PitwallServer(
-      Status status, Tuning tuning, Actions actions, TunableTee tunables, int port) {
-    this(status, tuning, actions, tunables, port, WAIT);
+  public PitwallServer(Page page, Broadcaster broadcaster, int port) {
+    this(page, broadcaster, port, WAIT, IDLE);
   }
 
-  PitwallServer(
-      Status status, Tuning tuning, Actions actions, TunableTee tunables, int port, Duration wait) {
+  PitwallServer(Page page, Broadcaster broadcaster, int port, Duration wait, Duration idle) {
     this.port = port;
+    // Small events go out at once, not held back to fill a packet (Nagle's algorithm). The server
+    // reads this as it starts, so it's set first; a program that set it already keeps its choice.
+    if (System.getProperty("sun.net.httpserver.nodelay") == null) {
+      System.setProperty("sun.net.httpserver.nodelay", "true");
+    }
     try {
       server = HttpServer.create();
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
-    // A few threads are plenty for one page, and daemon threads never keep the program running.
-    threads =
-        Executors.newFixedThreadPool(
-            4,
-            runnable -> {
-              Thread thread = new Thread(runnable, "pitwall");
-              thread.setDaemon(true);
-              return thread;
-            });
+    // A virtual thread for each request: a stream sleeps on its mailbox between events, so a slow
+    // or vanished page stalls only its own thread. They never keep the program running.
+    threads = Executors.newVirtualThreadPerTaskExecutor();
     server.setExecutor(threads);
-    Api api = new Api(status, tuning, actions, tunables, page(), wait);
+    Api api = new Api(page, broadcaster, page(), bundled(), wait, idle);
     server.createContext("/", api::handle);
   }
 
@@ -133,13 +173,8 @@ public final class PitwallServer implements AutoCloseable {
    * @return the running server, or empty if it couldn't start
    */
   public static Optional<PitwallServer> startOrExplain(
-      Status status,
-      Tuning tuning,
-      Actions actions,
-      TunableTee tunables,
-      int port,
-      Consumer<String> say) {
-    return startOrExplain(status, tuning, actions, tunables, port, false, say);
+      Page page, Broadcaster broadcaster, int port, Consumer<String> say) {
+    return startOrExplain(page, broadcaster, port, false, say);
   }
 
   /**
@@ -149,16 +184,14 @@ public final class PitwallServer implements AutoCloseable {
    *     network may be a school's or an event's), not to the network the robot is on
    */
   public static Optional<PitwallServer> startOrExplain(
-      Status status,
-      Tuning tuning,
-      Actions actions,
-      TunableTee tunables,
+      Page page,
+      Broadcaster broadcaster,
       int port,
       boolean thisComputerOnly,
       Consumer<String> say) {
     PitwallServer server = null;
     try {
-      server = new PitwallServer(status, tuning, actions, tunables, port);
+      server = new PitwallServer(page, broadcaster, port);
       server.start(thisComputerOnly);
       say.accept(
           "Pitwall: http://localhost:"
@@ -211,6 +244,21 @@ public final class PitwallServer implements AutoCloseable {
     threads.shutdownNow();
   }
 
+  /** The bundled files that are here, by path. */
+  private static Map<String, byte[]> bundled() {
+    Map<String, byte[]> found = new LinkedHashMap<>();
+    for (String path : BUNDLED.keySet()) {
+      try (InputStream in = PitwallServer.class.getResourceAsStream(path.substring(1))) {
+        if (in != null) {
+          found.put(path, in.readAllBytes());
+        }
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+    }
+    return found;
+  }
+
   private static String page() {
     try (InputStream in = PitwallServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
@@ -239,37 +287,53 @@ public final class PitwallServer implements AutoCloseable {
   /** The page, and the resources of the API. */
   private static final class Api {
     private static final Map<String, List<String>> METHODS =
-        Map.of(
-            "/", List.of("GET"),
-            "/api/status", List.of("GET"),
-            "/api/actions", List.of("GET", "POST"),
-            "/api/tuning", List.of("GET", "PATCH"),
-            "/api/tunables", List.of("GET"),
-            "/api/values", List.of("GET", "PATCH"),
-            "/api/changes", List.of("GET", "DELETE"),
-            "/api/wpilib-tunables", List.of("GET", "PATCH"));
+        Map.ofEntries(
+            Map.entry("/", List.of("GET")),
+            Map.entry("/api/events", List.of("GET")),
+            Map.entry("/api/status", List.of("GET")),
+            Map.entry("/api/actions", List.of("GET", "POST")),
+            Map.entry("/api/tuning", List.of("GET", "PATCH")),
+            Map.entry("/api/tunables", List.of("GET")),
+            Map.entry("/api/values", List.of("GET", "PATCH")),
+            Map.entry("/api/changes", List.of("GET", "DELETE")),
+            Map.entry("/api/wpilib-tunables", List.of("GET", "PATCH")),
+            Map.entry("/api/experiments", List.of("GET", "POST")),
+            Map.entry("/api/run", List.of("GET")),
+            Map.entry("/api/heartbeat", List.of("POST")),
+            Map.entry("/uPlot.iife.min.js", List.of("GET")),
+            Map.entry("/uPlot.min.css", List.of("GET")));
 
+    private final Page state;
     private final Status status;
     private final Tuning tuning;
     private final Actions actions;
     private final TunableTee tunables;
+    private final Experiments experiments;
+    private final Broadcaster broadcaster;
     private final String page;
+    private final Map<String, byte[]> bundled;
     private final Duration wait;
+    private final Duration idle;
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
 
     Api(
-        Status status,
-        Tuning tuning,
-        Actions actions,
-        TunableTee tunables,
+        Page state,
+        Broadcaster broadcaster,
         String page,
-        Duration wait) {
-      this.status = status;
-      this.tuning = tuning;
-      this.actions = actions;
-      this.tunables = tunables;
+        Map<String, byte[]> bundled,
+        Duration wait,
+        Duration idle) {
+      this.state = state;
+      status = state.status();
+      tuning = state.tuning();
+      actions = state.actions();
+      tunables = state.tunables();
+      experiments = state.experiments();
+      this.broadcaster = broadcaster;
       this.page = page;
+      this.bundled = bundled;
       this.wait = wait;
+      this.idle = idle;
     }
 
     void handle(HttpExchange exchange) throws IOException {
@@ -287,9 +351,12 @@ public final class PitwallServer implements AutoCloseable {
             throw new Problem(
                 405, "Method not allowed", path + " allows " + String.join(", ", allowed));
           }
+          // Any request from the page that started an experiment keeps it going.
+          experiments.heard(exchange.getRequestHeaders().getFirst(STREAM));
           switch (method + " " + path) {
             case "GET /" -> send(exchange, 200, "text/html", page);
-            case "GET /api/status" -> sendJson(exchange, 200, statusItems());
+            case "GET /api/events" -> stream(exchange);
+            case "GET /api/status" -> sendJson(exchange, 200, statusItems(readStatus()));
             case "GET /api/actions" -> sendJson(exchange, 200, actionStates());
             case "POST /api/actions" -> postAction(exchange);
             case "GET /api/tuning" -> sendJson(exchange, 200, session());
@@ -301,6 +368,11 @@ public final class PitwallServer implements AutoCloseable {
             case "DELETE /api/changes" -> answer(exchange, tuning.requestReset(), this::changes);
             case "GET /api/wpilib-tunables" -> sendJson(exchange, 200, wpilibTunables());
             case "PATCH /api/wpilib-tunables" -> patchWpilibTunables(exchange);
+            case "GET /api/experiments" -> sendJson(exchange, 200, state.experimentsView());
+            case "POST /api/experiments" -> postExperiment(exchange);
+            case "GET /api/run" -> sendJson(exchange, 200, run(true));
+            case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
+            case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
             default -> throw new IllegalStateException("unrouted: " + method + " " + path);
           }
         } catch (Problem problem) {
@@ -365,6 +437,137 @@ public final class PitwallServer implements AutoCloseable {
           exchange,
           start != null ? actions.requestStart(action) : actions.requestCancel(action),
           this::actionStates);
+    }
+
+    /**
+     * Starts or cancels an experiment. A start names the page's stream, which the deadman watches:
+     * only a page following the robot can keep a run going. A cancel names the run, so one meant
+     * for a run that has just ended never stops the next, and may say why.
+     */
+    private void postExperiment(HttpExchange exchange) throws IOException {
+      Map<String, @Nullable Object> body = readObject(exchange);
+      Object start = body.get("start");
+      Object cancel = body.get("cancel");
+      Object name = start != null ? start : cancel;
+      Set<String> allowed = start != null ? Set.of("start") : Set.of("cancel", "run", "reason");
+      if (name == null
+          || (start != null && cancel != null)
+          || !allowed.containsAll(body.keySet())) {
+        throw new Problem(
+            400,
+            "Start or cancel",
+            "Send {\"start\": name}, or {\"cancel\": name, \"run\": id, \"reason\": why}");
+      }
+      if (!(name instanceof String experiment)) {
+        throw new Problem(400, "Not a name", "An experiment's name is a string");
+      }
+      if (!experiments.has(experiment)) {
+        throw new Problem(422, "Not an experiment", "There is no experiment named " + experiment);
+      }
+      if (start != null) {
+        String stream = exchange.getRequestHeaders().getFirst(STREAM);
+        if (stream == null || stream.isBlank()) {
+          throw new Problem(
+              400,
+              "No page to keep it going",
+              "Start experiments from Pitwall's page: a start names the page's event stream ("
+                  + STREAM
+                  + "), and the run goes on only while that page keeps in touch");
+        }
+        answer(exchange, experiments.requestStart(experiment, stream), () -> run(false));
+        return;
+      }
+      long runId = 0;
+      if (body.get("run") instanceof Number number) {
+        runId = number.longValue();
+      } else if (body.containsKey("run")) {
+        throw new Problem(400, "Not a run", "A run is named by its number");
+      }
+      Object reason = body.getOrDefault("reason", "");
+      if (!(reason instanceof String why) || why.length() > 200) {
+        throw new Problem(400, "Not a reason", "A reason is a sentence of text");
+      }
+      Run running = experiments.run();
+      if (running == null
+          || running.state().phase() != Run.Phase.RUNNING
+          || !running.experiment().name().equals(experiment)
+          || (runId != 0 && running.id() != runId)) {
+        throw new Problem(409, "Not running", experiment + " isn't running");
+      }
+      answer(exchange, experiments.requestCancel(experiment, runId, why), () -> run(false));
+    }
+
+    /**
+     * Streams the page's state until the page goes away: events as the robot loop sends them, and a
+     * heartbeat whenever it has been quiet for {@link #IDLE}. A write that fails means the page has
+     * gone, and ends the stream.
+     */
+    private void stream(HttpExchange exchange) throws IOException {
+      String query = exchange.getRequestURI().getQuery();
+      String replaces =
+          query != null && query.startsWith("replaces=")
+              ? query.substring("replaces=".length())
+              : null;
+      Stream stream =
+          broadcaster
+              .open(replaces)
+              .orElseThrow(() -> new Problem(503, "Stopping", "Pitwall is stopping"));
+      String why = "the page went away";
+      try {
+        stream.writtenBy(Thread.currentThread());
+        headers(exchange, "text/event-stream");
+        exchange.sendResponseHeaders(200, 0);
+        OutputStream out = exchange.getResponseBody();
+        while (true) {
+          Event event = stream.next(idle);
+          if (!stream.isOpen()) {
+            break;
+          }
+          out.write((event == null ? HEARTBEAT : event.wire()).getBytes(StandardCharsets.UTF_8));
+          out.flush();
+          stream.wrote();
+        }
+      } catch (IOException gone) {
+        // The page closed, or its connection did: nothing more to send.
+      } catch (InterruptedException stopped) {
+        Thread.currentThread().interrupt();
+        why = "Pitwall stopped";
+      } finally {
+        stream.close(why);
+      }
+    }
+
+    /**
+     * The status items, read by the next loop. A loop that doesn't get to it in time (stopped, or
+     * paused in a debugger) is 503: an old reading passed off as now would mislead.
+     */
+    private List<Status.Item> readStatus() {
+      try {
+        return status.requestRead().get(wait.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (TimeoutException | ExecutionException e) {
+        throw new Problem(
+            503,
+            "No reading",
+            "The robot loop didn't read the status within "
+                + wait.toMillis()
+                + " ms: it may be stopped or paused");
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new Problem(503, "Interrupted", "The server stopped waiting for the robot loop");
+      }
+    }
+
+    /** The run in progress, or the latest to end; with its trace so far, if asked. */
+    private Map<String, Object> run(boolean withTrace) {
+      Run run = experiments.run();
+      if (run == null) {
+        throw new Problem(404, "No run", "No experiment has run yet");
+      }
+      Map<String, Object> shown = new LinkedHashMap<>(state.run(run));
+      if (withTrace) {
+        shown.put("trace", Broadcaster.trace(run));
+      }
+      return shown;
     }
 
     private void patchTuning(HttpExchange exchange) throws IOException {
@@ -530,9 +733,9 @@ public final class PitwallServer implements AutoCloseable {
       return deepest;
     }
 
-    private List<Object> statusItems() {
+    private static List<Object> statusItems(List<Status.Item> read) {
       List<Object> items = new ArrayList<>();
-      for (Status.Item item : status.view()) {
+      for (Status.Item item : read) {
         Map<String, Object> shown = new LinkedHashMap<>();
         shown.put("name", item.name());
         shown.put("value", item.value());
@@ -554,38 +757,15 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     private Map<String, Object> session() {
-      Tuning.View view = tuning.view();
-      Map<String, Object> session = new LinkedHashMap<>();
-      session.put("name", view.name());
-      session.put("enabled", view.enabled());
-      session.put("fieldConnected", view.fieldConnected());
-      session.put("refused", tunables.refusals());
-      return session;
+      return state.session();
     }
 
     private Map<String, Object> tunables() {
-      Map<String, Object> described = new LinkedHashMap<>();
-      for (Tuning.ConfigView config : tuning.view().configs()) {
-        for (Tuning.Value value : config.values()) {
-          Map<String, Object> description = new LinkedHashMap<>();
-          description.put("config", config.name());
-          description.put("field", value.field());
-          description.put("unit", value.unit());
-          description.put(
-              "limits", value.limits().equals(Limits.NONE) ? "" : value.limits().toString());
-          description.put("committed", value.committed());
-          described.put(value.path(), description);
-        }
-      }
-      return described;
+      return Page.tunables(tuning.view());
     }
 
     private Map<String, Object> values() {
-      Map<String, Object> values = new LinkedHashMap<>();
-      for (Tuning.Value value : configValues()) {
-        values.put(value.path(), value.current());
-      }
-      return values;
+      return Page.values(tuning.view());
     }
 
     private List<Tuning.Value> configValues() {
@@ -613,7 +793,7 @@ public final class PitwallServer implements AutoCloseable {
         for (LiveConfig.Change change : config.changes()) {
           Map<String, Object> shown = new LinkedHashMap<>();
           shown.put("config", config.name());
-          shown.put("path", change.path());
+          shown.put("field", change.path());
           shown.put("committed", change.committed());
           shown.put("tuned", change.tuned());
           shown.put("builderCall", change.builderCall());
@@ -621,6 +801,20 @@ public final class PitwallServer implements AutoCloseable {
         }
       }
       return changes;
+    }
+
+    private void sendBundled(HttpExchange exchange, String path) throws IOException {
+      byte[] file = bundled.get(path);
+      if (file == null) {
+        throw new Problem(404, "Not bundled", path + " isn't bundled with Pitwall");
+      }
+      headers(exchange, Objects.requireNonNull(BUNDLED.get(path)));
+      // The same for as long as the program runs: the browser may keep it.
+      exchange.getResponseHeaders().set("Cache-Control", "max-age=3600");
+      exchange.sendResponseHeaders(200, file.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(file);
+      }
     }
 
     private void sendJson(HttpExchange exchange, int status, Object body) throws IOException {
@@ -639,6 +833,16 @@ public final class PitwallServer implements AutoCloseable {
     private static void send(HttpExchange exchange, int status, String type, String body)
         throws IOException {
       byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+      headers(exchange, type);
+      exchange.sendResponseHeaders(status, bytes.length > 0 ? bytes.length : -1);
+      if (bytes.length > 0) {
+        try (OutputStream out = exchange.getResponseBody()) {
+          out.write(bytes);
+        }
+      }
+    }
+
+    private static void headers(HttpExchange exchange, String type) {
       exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
       // The page may not be framed by another site's page (to trick a click on its buttons), and
@@ -652,12 +856,6 @@ public final class PitwallServer implements AutoCloseable {
                   + " style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
       exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
       exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
-      exchange.sendResponseHeaders(status, bytes.length > 0 ? bytes.length : -1);
-      if (bytes.length > 0) {
-        try (OutputStream out = exchange.getResponseBody()) {
-          out.write(bytes);
-        }
-      }
     }
   }
 }

@@ -1,8 +1,9 @@
 package com.michaelgrundvig.frc.pitwall;
 
+import com.michaelgrundvig.frc.pitwall.experiment.Experiments;
+import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.backend.NetworkTablesTunableBackend;
@@ -23,8 +24,9 @@ import org.wpilib.util.Alert;
  * }</pre>
  *
  * <p>That serves the page (http://robot.local:5820, or localhost in the simulator), shows the
- * standard status (which robot and code, the mode, the battery), tunes, and runs actions. Add
- * status items and actions through {@link #status()} and {@link #actions()}.
+ * standard status (which robot and code, the mode, the battery), tunes, runs actions, and runs
+ * experiments. Add status items, actions, and experiments through {@link #status()}, {@link
+ * #actions()}, and {@link #experiments()}.
  *
  * <p>Tuning is WPILib's tunables. Every tunable in the program goes through Pitwall's {@link
  * TunableTee}, around WPILib's own NetworkTables backend: dashboards work as before, while changes
@@ -43,7 +45,10 @@ public final class Pitwall implements AutoCloseable {
   private final Tuning tuning;
   private final Status status;
   private final Actions actions;
+  private final Experiments experiments;
   private final TunableTee tee;
+  private final Page page;
+  private final Broadcaster broadcaster;
   private final Alert tuned = new Alert("Pitwall", "", Alert.Level.MEDIUM);
   private final Alert changedSwitches = new Alert("Pitwall", "", Alert.Level.HIGH);
   private final boolean advantageKit;
@@ -53,18 +58,29 @@ public final class Pitwall implements AutoCloseable {
 
   private Pitwall(String name, int port, boolean advantageKit) {
     this.advantageKit = advantageKit;
-    status = new Status().add("Robot", () -> name);
+    // Status items may change at most so often, timed on the robot's clock.
+    status = new Status(RobotController::getTime).add("Robot", () -> name);
     Supplier<String> code = code();
     if (code != null) {
       status.add("Code", code);
     }
-    status
-        .add("Mode", Pitwall::mode)
-        .add(
-            "Battery",
-            () -> String.format(Locale.ROOT, "%.1f V", RobotController.getBatteryVoltage()));
+    status.add("Mode", Pitwall::mode).add("Battery", RobotController::getBatteryVoltage, "V", 0.1);
     actions = new Actions(advantageKit ? AdvantageKitLog.actions() : inputs -> {});
     boolean replaying = advantageKit && AdvantageKitLog.replaying();
+    // Runs are timed on the robot's clock, which a replay reproduces.
+    experiments =
+        new Experiments(
+            new Experiments.Robot(name, RobotBase.isSimulation(), code != null ? code.get() : ""),
+            advantageKit ? AdvantageKitLog.experiments() : inputs -> {},
+            RobotController::getTime,
+            replaying,
+            ended -> {
+              // How a run ended, and why: in the Driver Station's console, and the log.
+              System.out.println("Pitwall: " + ended);
+              if (advantageKit) {
+                AdvantageKitLog.runEnded(ended);
+              }
+            });
     // Every WPILib tunable in the program goes through Pitwall's tee, wrapped around WPILib's own
     // NetworkTables backend: dashboards see what they always did, while changes are locked with
     // tuning and logged for replay, and the page lists every tunable.
@@ -89,18 +105,20 @@ public final class Pitwall implements AutoCloseable {
               tuned.set(view.hasChanges());
             });
     TunableRegistry.registerBackend("", tee);
-    server = replaying ? null : startPage(status, tuning, actions, tee, port);
+    page = new Page(status, actions, tuning, tee, experiments);
+    // A page whose stream closes can't keep an experiment it started going.
+    broadcaster = new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, experiments::lost);
+    server = replaying ? null : startPage(page, broadcaster, port);
   }
 
   /**
    * Serves the page, or says why it can't. The web server is the one built into Java; a runtime
    * trimmed without it (the {@code jdk.httpserver} module) only loses the page.
    */
-  private static @Nullable PitwallServer startPage(
-      Status status, Tuning tuning, Actions actions, TunableTee tee, int port) {
+  private static @Nullable PitwallServer startPage(Page page, Broadcaster broadcaster, int port) {
     try {
       return PitwallServer.startOrExplain(
-              status, tuning, actions, tee, port, thisComputerOnly(), System.out::println)
+              page, broadcaster, port, thisComputerOnly(), System.out::println)
           .orElse(null);
     } catch (LinkageError e) {
       System.out.println(
@@ -150,6 +168,14 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
+   * The experiments the page can run on the robot's rigs. Add them here: {@code
+   * experiments().add(new Experiment("Step to 90° and back", steering, profile))}.
+   */
+  public Experiments experiments() {
+    return experiments;
+  }
+
+  /**
    * The port the page is served on, or -1 when it isn't (while replaying, or it couldn't start).
    */
   public int port() {
@@ -158,9 +184,10 @@ public final class Pitwall implements AutoCloseable {
   }
 
   /**
-   * Applies the page's requests, then reads the status. Call it first thing in {@code
-   * robotPeriodic()}, before anything reads a configuration and before the command scheduler runs.
-   * When the robot disables, it prints (and logs) what tuning changed, so it can be committed.
+   * Applies the page's requests, then reads the status and tells any open page what changed. Call
+   * it first thing in {@code robotPeriodic()}, before anything reads a configuration and before the
+   * command scheduler runs. When the robot disables, it prints (and logs) what tuning changed, so
+   * it can be committed.
    */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
@@ -172,9 +199,11 @@ public final class Pitwall implements AutoCloseable {
           tuning.report());
     }
     tuning.periodic(fieldConnected);
-    actions.periodic(
-        new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected));
-    status.periodic();
+    Actions.Gate gate =
+        new Actions.Gate(enabled, RobotState.getRobotMode() == RobotMode.UTILITY, fieldConnected);
+    actions.periodic(gate);
+    experiments.periodic(gate);
+    status.periodic(broadcaster.watched());
     if (wasEnabled && !enabled) {
       report("", tuning.report());
     }
@@ -190,6 +219,8 @@ public final class Pitwall implements AutoCloseable {
     changedSwitches.set(!switches.isEmpty());
     wasEnabled = enabled;
     wasFieldConnected = fieldConnected;
+    // Last, so an open page hears of everything this loop changed. With none open, nothing.
+    broadcaster.periodic(page::sections, experiments.run());
   }
 
   /** Prints what tuning changed, and logs it, when there's anything to say. */
@@ -216,6 +247,7 @@ public final class Pitwall implements AutoCloseable {
   public void close() {
     TunableRegistry.registerBackend(
         "", new NetworkTablesTunableBackend(NetworkTableInstance.getDefault(), "/Tunables"));
+    broadcaster.close();
     PitwallServer running = server;
     if (running != null) {
       try {

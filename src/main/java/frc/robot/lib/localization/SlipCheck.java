@@ -36,7 +36,8 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       accelerometer not yet known to read along the robot's axes ({@link
  *       ImuMount#accelerometerChecked}) is compared by size, not direction: the wheels' change of
  *       velocity and what it felt, each added up on its own, add up alike whichever way it's
- *       turned, and what one holds past the other is a slide.
+ *       turned, and what one holds past the other is a slide. It's compared only once its bias is
+ *       learned: until then, gravity leaking into one tilted on its mount would add up as a slide.
  *   <li><b>A jolt.</b> What the accelerometer feels that the wheels' own change of velocity doesn't
  *       explain (a robot stopping hard is felt by both, a hit only by the IMU) is a collision as
  *       far as it's past the tread's grip, which is the most the floor can explain (the robot
@@ -267,6 +268,9 @@ public final class SlipCheck {
 
   private double biasLeft;
 
+  /** Whether the bias has been learned since the comparison started over: none is, at first. */
+  private boolean biasLearned;
+
   /** The accelerometer's readings since the robot came to stand still, the last few seconds'. */
   private final ArrayDeque<Reading> standing = new ArrayDeque<>();
 
@@ -336,6 +340,7 @@ public final class SlipCheck {
     // Another IMU may read next, with a bias of its own.
     biasForward = 0;
     biasLeft = 0;
+    biasLearned = false;
     standing.clear();
     standingSeconds = 0;
     sinceSlide = Double.POSITIVE_INFINITY;
@@ -420,6 +425,7 @@ public final class SlipCheck {
     // in the newer.
     biasForward = olderForward / olderSeconds;
     biasLeft = olderLeft / olderSeconds;
+    biasLearned = true;
   }
 
   /**
@@ -593,7 +599,9 @@ public final class SlipCheck {
       slideX *= kept;
       slideY *= kept;
       speedSlip = slip(size * kept);
-    } else if (before) {
+    } else if (before && biasLearned) {
+      // Not before its bias is learned: gravity leaking into one tilted on its mount reads as the
+      // robot speeding up, steadily, and would add up as a slide for as long as it ran.
       compareSizes(
           velocityX - lastVelocityX,
           velocityY - lastVelocityY,

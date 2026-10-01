@@ -311,6 +311,69 @@ class SlipCheckTest {
   }
 
   /**
+   * A robot not yet checked whose IMU's case sits tilted on its mount, its definition left level:
+   * gravity leaks into the accelerometer's level axes, 1.7 m/s² forward at 10°, and a full g to the
+   * left on one mounted on a vertical plate, its y axis up. Standing, the reading holds, so it's
+   * the bias, however large, and the size comparison, waiting for it, adds nothing up meanwhile.
+   * Driving after, with it taken off, the wheels and the accelerometer agree: no slide.
+   */
+  @Test
+  void aSteadyReadingStandingIsTheBiasWhateverItsSize() {
+    for (double[] leak : new double[][] {{1.7, 0}, {0, ImuReadings.STANDARD_GRAVITY}}) {
+      Robot robot = new Robot(Translation2d.ZERO, false);
+      robot.bias = leak[0];
+      robot.biasLeft = leak[1];
+      double most = 0;
+      for (int i = 0; i < 150; i++) { // three seconds standing
+        robot.loop(0, 0, 0, 0);
+        most = Math.max(most, robot.check.slipMetersPerSecond());
+      }
+      double learned = robot.check.biasMetersPerSecSq();
+      // Then a launch at 4.4 m/s², turning a turn a second, and a stop.
+      for (int i = 0; i < 25; i++) {
+        robot.loop(4.4 * LOOP, 0, 2 * Math.PI, 0);
+        most = Math.max(most, robot.check.slipMetersPerSecond());
+      }
+      for (int i = 0; i < 25; i++) {
+        robot.loop(-4.4 * LOOP, 0, 0, 0);
+        most = Math.max(most, robot.check.slipMetersPerSecond());
+      }
+
+      assertThat(learned).as("learned").isCloseTo(Math.hypot(leak[0], leak[1]), within(1e-9));
+      assertThat(most).as("no slide, standing or driving").isZero();
+    }
+  }
+
+  /**
+   * Not yet checked, the accelerometer is compared with the wheels by size only once its bias is
+   * learned, and again only once it's learned anew after the comparison starts over (another IMU,
+   * or this one back): before, a launch with the wheels spinning goes unseen by it.
+   */
+  @Test
+  void anUncheckedAccelerometerIsComparedOnlyOnceItsBiasIsLearned() {
+    Robot robot = new Robot(Translation2d.ZERO, false);
+    for (int i = 1; i <= 30; i++) {
+      robot.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
+    }
+    double unlearned = robot.check.speedSlipMetersPerSecond();
+
+    Robot learned = new Robot(Translation2d.ZERO, false).stand();
+    for (int i = 1; i <= 30; i++) {
+      learned.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
+    }
+    double seen = learned.check.speedSlipMetersPerSecond();
+    learned.check.startOver(Double.NaN, Double.NaN);
+    learned.slide(0, 0).loop(0, 0, 0, 0);
+    for (int i = 1; i <= 30; i++) {
+      learned.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
+    }
+
+    assertThat(unlearned).as("before its bias is learned").isZero();
+    assertThat(seen).as("once it is").isPositive();
+    assertThat(learned.check.speedSlipMetersPerSecond()).as("started over").isZero();
+  }
+
+  /**
    * A push building slowly, at 1 m/s³, the wheels and the gyro still: the accelerometer's reading
    * never holds, so none of the push is taken for its bias, and the slide is seen in full, less
    * only what the comparison lets go of.
@@ -369,6 +432,8 @@ class SlipCheckTest {
     Robot checked = new Robot();
     unchecked.imuTurned = Math.PI / 2;
     checked.imuTurned = Math.PI / 2;
+    unchecked.stand();
+    checked.stand();
 
     unchecked.loops(30, 4.4 * LOOP, 0, 2, 0);
     checked.loops(30, 4.4 * LOOP, 0, 2, 0);
@@ -390,6 +455,9 @@ class SlipCheckTest {
     Robot checked = new Robot();
     Robot pushed = new Robot(Translation2d.ZERO, false);
     pushed.imuTurned = Math.PI / 2;
+    unchecked.stand();
+    checked.stand();
+    pushed.stand();
     for (int i = 1; i <= 30; i++) {
       unchecked.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
       checked.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);

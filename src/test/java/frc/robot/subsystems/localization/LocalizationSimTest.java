@@ -14,6 +14,7 @@ import frc.robot.lib.config.Imus;
 import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.localization.EstimatorConfigBuilder;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.lib.localization.SlipCheck;
@@ -553,23 +554,27 @@ class LocalizationSimTest {
     assertThat(half.error()).as("the slide").isGreaterThan(threeQuarters.error());
   }
 
-  /**
-   * A robot whose accelerometers aren't checked yet, as every robot starts, and the gyro's turned a
-   * quarter turn on its mount besides: wheels spinning in a launch at half grip are doubted about
-   * as a checked robot doubts them, its accelerometer compared with the wheels by size. Launched
-   * 1.5 s, the robot is 2.4 m behind its wheels.
-   */
-  @Test
-  void anUncheckedRobotStillDoubtsWheelsSpinningInALaunch() {
-    Outcome checked = launchingWithGrip(0.5);
+  /** The simulator's robot as every robot starts: its IMUs' accelerometers not yet checked. */
+  private static RobotConfig unchecked() {
     ImuMount gyro =
         ImuMountBuilder.builder(Robots.SIM.imus().gyro()).accelerometerChecked(false).build();
     ImuMount backup =
         ImuMountBuilder.builder(Robots.SIM.imus().backup()).accelerometerChecked(false).build();
-    RobotConfig unchecked =
-        RobotConfigBuilder.builder(Robots.SIM)
-            .imus(Imus.builder().gyro(gyro).backup(backup).build())
-            .build();
+    return RobotConfigBuilder.builder(Robots.SIM)
+        .imus(Imus.builder().gyro(gyro).backup(backup).build())
+        .build();
+  }
+
+  /**
+   * A robot whose accelerometers aren't checked yet, as every robot starts, and the gyro's turned a
+   * quarter turn on its mount besides: wheels spinning in a launch at half grip are doubted about
+   * as a checked robot doubts them, its accelerometer compared with the wheels by size, once it has
+   * stood long enough to learn its bias, as it does on the field before a match. Launched 1.5 s,
+   * the robot is 2.4 m behind its wheels.
+   */
+  @Test
+  void anUncheckedRobotStillDoubtsWheelsSpinningInALaunch() {
+    Outcome checked = launchingWithGrip(0.5);
     SensorErrors turned =
         SensorErrors.TYPICAL.withAccelerometer(
             SensorErrorsAccelErrorsBuilder.builder(SensorErrors.AccelErrors.PIGEON_2)
@@ -578,9 +583,9 @@ class LocalizationSimTest {
     if (harness != null) {
       harness.close();
     }
-    harness = new DriveSimHarness(unchecked, turned);
+    harness = new DriveSimHarness(unchecked(), turned);
     DriveSimHarness robot = harness;
-    robot.idle(0.2);
+    robot.idle(SlipCheck.Settings.DEFAULTS.steadySeconds() + 0.5);
     robot.simulation.grip(0.5);
     robot.drive(1.5, 1.0, 0, 0);
 
@@ -589,6 +594,68 @@ class LocalizationSimTest {
     assertThat(claimed)
         .as("claimed, against the checked robot's %.2f m", checked.stdDev())
         .isGreaterThan(0.8 * checked.stdDev());
+  }
+
+  /**
+   * Stood 3 s and then drove 5 s, turning, unchecked: how sure the estimate was at the end of each,
+   * the most slip each saw, and the slip at the end.
+   */
+  private record StoodThenDrove(
+      double standingStdDev, double standingSlip, double stdDev, double mostSlip, double slip) {}
+
+  /** An unchecked robot whose gyro's accelerometer reads this much more, along its own axes. */
+  private StoodThenDrove standThenDrive(double leakForward, double leakLeft) {
+    SensorErrors.AccelErrors part = SensorErrors.AccelErrors.PIGEON_2;
+    SensorErrors leaking =
+        SensorErrors.TYPICAL.withAccelerometer(
+            SensorErrorsAccelErrorsBuilder.builder(part)
+                .biasForward(part.biasForward() + leakForward)
+                .biasLeft(part.biasLeft() + leakLeft)
+                .build());
+    if (harness != null) {
+      harness.close();
+    }
+    harness = new DriveSimHarness(unchecked(), leaking);
+    DriveSimHarness robot = harness;
+    double[] most = {0};
+    robot.eachLoop(
+        () -> most[0] = Math.max(most[0], robot.localization.conditions().slipMetersPerSecond()));
+    robot.drive(3.0, 0, 0, 0);
+    double standingStdDev = robot.estimator.estimate().covariance().largestPositionStdDev();
+    double standingSlip = most[0];
+    most[0] = 0;
+    robot.drive(5.0, 0.6, 0.3, 0.5);
+    return new StoodThenDrove(
+        standingStdDev,
+        standingSlip,
+        robot.estimator.estimate().covariance().largestPositionStdDev(),
+        most[0],
+        robot.localization.conditions().slipMetersPerSecond());
+  }
+
+  /**
+   * A robot not yet checked whose gyro's case sits tilted on its mount, its definition left level
+   * (the Pigeon's mount pose set in Tuner X, but not the orientation in the definition): gravity
+   * leaks into the accelerometer's level axes, 1.7 m/s² at 10°, and a full g on a Pigeon mounted on
+   * a vertical plate. Standing 3 s, the slip check learns it as the bias, claims no slide
+   * meanwhile; driving after, it claims no more than with a level IMU. Taken for a slide, the 10°
+   * case claimed 4 m standing and 10 m after driving.
+   */
+  @Test
+  void anUncheckedImuTiltedOnItsMountIsLearnedAsItsBias() {
+    StoodThenDrove level = standThenDrive(0, 0);
+    StoodThenDrove tilted = standThenDrive(1.7, 0);
+    StoodThenDrove vertical = standThenDrive(0, ImuReadings.STANDARD_GRAVITY);
+
+    for (StoodThenDrove leaking : List.of(tilted, vertical)) {
+      assertThat(leaking.standingSlip()).as("no slide standing").isZero();
+      assertThat(leaking.standingStdDev()).as("standing").isLessThan(0.05);
+      assertThat(leaking.slip()).as("none held after driving").isZero();
+      assertThat(leaking.mostSlip()).as("driving").isLessThanOrEqualTo(level.mostSlip());
+      assertThat(leaking.stdDev())
+          .as("after driving, against the level IMU's %.3f m", level.stdDev())
+          .isLessThan(1.1 * level.stdDev());
+    }
   }
 
   /** Standing, then pushed sideways at this speed for a second, its wheels skidding. */

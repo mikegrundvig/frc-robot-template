@@ -23,8 +23,8 @@ test_stamp_writes_the_computers_identity() {
   local root=$TMP/out/root
   assert_eq "$(cat "$root/etc/hostname")" vision-front hostname
   # Every computer in the table, by its robot address.
-  assert_contains "$root/etc/hosts" $'10.123.45.11\tvision-front'
-  assert_contains "$root/etc/hosts" $'10.123.45.12\tvision-back'
+  assert_contains "$root/etc/hosts" $'10.12.34.11\tvision-front'
+  assert_contains "$root/etc/hosts" $'10.12.34.12\tvision-back'
   assert_contains "$root/etc/hosts" $'127.0.0.1\tlocalhost'
   assert_not_contains "$root/etc/hosts" 127.0.1.1
   [[ $(cat "$root/etc/machine-id") =~ ^[0-9a-f]{32}$ ]] || fail "machine-id isn't 32 hex digits"
@@ -50,7 +50,7 @@ test_stamp_writes_the_robot_network_profile() {
   assert_contains "$profile" 'type=ethernet'
   assert_contains "$profile" 'method=manual'
   # FRC's documented netmask and gateway for on-robot devices.
-  assert_contains "$profile" 'address1=10.123.45.11/24,10.123.45.4'
+  assert_contains "$profile" 'address1=10.12.34.11/24,10.12.34.4'
   assert_contains "$profile" 'dad-timeout=3000'
   assert_contains "$profile" 'autoconnect-retries=0'
   grep -Eq '^uuid=[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' "$profile" ||
@@ -65,8 +65,8 @@ test_stamp_writes_the_stamp_twice() {
   cmp -s "$stamp" "$TMP/out/coproc/stamp.json" || fail "COPROC's copy differs from the root's"
   cmp -s "$stamp" "$TMP/stamp.json" || fail "--stamp-out differs from the root's"
   assert_eq "$(yq -r '.name' "$stamp")" vision-back
-  assert_eq "$(yq -r '.address' "$stamp")" 10.123.45.12
-  assert_eq "$(yq -r '.team' "$stamp")" 12345
+  assert_eq "$(yq -r '.address' "$stamp")" 10.12.34.12
+  assert_eq "$(yq -r '.team' "$stamp")" 1234
   assert_eq "$(yq -r '.board' "$stamp")" orangepi-5-plus
   assert_eq "$(yq -o=json -I=0 '.cameras' "$stamp")" '["back"]'
   assert_eq "$(yq -r '.agentPort' "$stamp")" 5809 "the computer's own port"
@@ -77,7 +77,7 @@ test_stamp_writes_the_stamp_twice() {
   # The members of the agent's Stamp record, less what the agent adds as it answers.
   assert_eq "$(yq -r 'keys | join(" ")' "$stamp")" \
     "name team address board cameras release recipeHash photonvisionVersion settingsHash agentPort"
-  assert_contains "$TMP/out/coproc/README.txt" "vision-back, 10.123.45.12"
+  assert_contains "$TMP/out/coproc/README.txt" "vision-back, 10.12.34.12"
 }
 
 test_stamp_uses_the_tables_port_unless_the_computer_has_its_own() {
@@ -226,7 +226,7 @@ test_stamp_refuses_two_computers_with_one_name() {
 test_stamp_refuses_numbers_with_leading_zeros() {
   setup_stamp
   local table=$TMP/repo/coprocessors/coprocessors.yaml
-  sed -i 's/^team: 12345$/team: 0254/' "$table"
+  sed -i 's/^team: 1234$/team: 0254/' "$table"
   assert_fails "team '0254' isn't a team number" run_stamp vision-front
   sed -i 's/^team: 0254$/team: 254/; s/address: 11$/address: 09/' "$table"
   assert_fails "address '09' is outside" run_stamp vision-front

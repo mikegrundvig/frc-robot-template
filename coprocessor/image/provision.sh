@@ -184,6 +184,10 @@ RequiresMountsFor=$IMG_PV_CONFIG
 # stamping), never PhotonVision's.
 ExecStart=
 ExecStart=$exec_line -n
+# Soft-off says it's safe to switch the board off once PhotonVision's port has closed, so its stop
+# is bounded: systemd's default would wait 90 s before killing it. 15 s is a proposal, to confirm
+# on the bench (bench-procedures.md, B3).
+TimeoutStopSec=15s
 EOF
 }
 

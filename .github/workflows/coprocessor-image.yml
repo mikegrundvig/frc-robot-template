@@ -77,12 +77,27 @@ jobs:
           shellcheck -x -P SCRIPTDIR coprocessor/image/*.sh coprocessor/image/lib/*.sh \
             coprocessor/image/boards/*.env coprocessor/image/files/*.sh coprocessor/image/test/*.sh
           COPROC_TESTS_STRICT=1 coprocessor/image/test/run.sh
+      # A release (a tag, or a name given by hand) builds with nothing from a cache, so nothing
+      # another run left can reach it.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: ${{ github.ref_type == 'tag' || inputs.release != '' }}
+      # The agent and its settings tool, and the recipe hash: the build's, the same one the robot
+      # program compiles in (coprocessor/README.md).
+      - name: Build the health agent and the recipe hash
+        run: |
+          ./gradlew "$AGENT_TASK" coprocessorRecipeHash
+          mkdir -p "$WORK/tools"
+          cp "$AGENT_JAR" "$WORK/tools/coprocessor-agent.jar"
+          cp "$AGENT_UNIT" "$WORK/tools/coprocessor-agent.service"
       # The table, the lock against the robot code's PhotonVision version, and the release name.
       - name: Check the table and the lock
         id: plan
         env:
           RELEASE: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release }}
-        run: coprocessor/image/plan.sh --release "$RELEASE" --sha "$GITHUB_SHA"
+        run: |
+          coprocessor/image/plan.sh --recipe-hash "$(head -c 64 build/coprocessor/recipe-hash.txt)" \
+            --release "$RELEASE" --sha "$GITHUB_SHA"
       - name: Check where the release would come from
         if: steps.plan.outputs.publish == 'true'
         env:
@@ -121,16 +136,6 @@ jobs:
               exit 1
             fi
           fi
-      # A release builds with nothing from a cache, so nothing another run left can reach it.
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-        with:
-          cache-disabled: ${{ steps.plan.outputs.publish == 'true' }}
-      - name: Build the health agent and the settings tool
-        run: |
-          ./gradlew "$AGENT_TASK"
-          mkdir -p "$WORK/tools"
-          cp "$AGENT_JAR" "$WORK/tools/coprocessor-agent.jar"
-          cp "$AGENT_UNIT" "$WORK/tools/coprocessor-agent.service"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tools

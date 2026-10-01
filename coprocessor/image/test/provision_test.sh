@@ -57,6 +57,8 @@ test_provision_turns_off_photonvisions_network_management() {
   assert_contains "$dropin" 'ExecStart=/usr/bin/java -Xmx512m -jar /opt/photonvision/photonvision.jar -n'
   assert_contains "$dropin" 'RequiresMountsFor=/opt/photonvision/photonvision_config'
   assert_eq "$(grep -c '^ExecStart=$' "$dropin")" 1 "ExecStart resets"
+  # Soft-off waits for PhotonVision to stop, so its stop is bounded.
+  grep -qx 'TimeoutStopSec=15s' "$dropin" || fail "PhotonVision's stop isn't bounded"
   cmp -s "$TMP/root/opt/photonvision/photonvision.jar" "$TMP/photonvision.jar" || fail "the jar wasn't installed"
 }
 

@@ -39,8 +39,8 @@ lock: PhotonVision's "offline update" can't replace its jar.
 ```json
 {
   "name": "vision-front",
-  "team": 12345,
-  "address": "10.123.45.11",
+  "team": 1234,
+  "address": "10.12.34.11",
   "board": "orangepi-5",
   "cameras": ["front-left", "front-right"],
   "release": "coprocessors-2027.1",
@@ -93,7 +93,6 @@ refuses it everything else.
 | `stamp-image.sh` | Mounts an image's partitions and runs `stamp.sh` into them | Root, loop devices |
 | `plan.sh` | Checks the table, the lock, and the release name before anything is downloaded | yq |
 | `manifest.sh` | Writes a release's `SHA256SUMS` and `manifest.json` | yq |
-| `recipe-hash.sh`, `recipe.paths` | The recipe hash: what makes the common image, so a robot refuses to deploy against coprocessors flashed from a different recipe | git |
 | `local-build.sh` | The whole build on a mentor's Linux machine | Root, in a privileged container |
 | `boards/*.env` | What differs per board | |
 | `files/` | The configuration and units `provision.sh` installs | |
@@ -120,7 +119,9 @@ git tag coprocessors-2027.1 && git push origin coprocessors-2027.1
 1. **Check the inputs** (`plan.sh`): the table; the lock's PhotonVision version against
    `vendordeps/photonlib.json`'s, so the coprocessors always run what the robot code was built
    against; a real sha256 for the jar and each base image in use (a placeholder stops the build
-   here); the release name. The scripts' tests run first. It also builds the health agent.
+   here); the release name. The scripts' tests run first. It also builds the health agent, and
+   takes the recipe hash from the build (`./gradlew -q coprocessorRecipeHash`), the same one the
+   robot program compiles in.
 2. **The common image, per board**, on GitHub's arm64 runners, so nothing is emulated: the base
    image and the jar downloaded and checked against the lock's sha256, then `provision.sh` run in
    PhotonVision's own [photon-image-runner](https://github.com/PhotonVision/photon-image-runner).
@@ -150,12 +151,15 @@ releases** (Settings, General, Releases), so a published release's files can't b
 release job, so anyone can check an image was built by this workflow from this repository
 (`gh attestation verify`).
 
-The recipe hash covers the build files that build the agent too (`build.gradle`,
-`settings.gradle`, `gradle/quality.gradle`, the Gradle wrapper): a change to them changes it, and
-the robot then refuses to deploy until the coprocessors run a release built after it. The version
-catalog, `gradle/libs.versions.toml`, is left out on purpose, so the weekly dependency updates don't
-each demand a release: an update to a library the agent uses (its SQLite driver) reaches the boards
-only with the next image built for another reason.
+**The recipe hash** says what a common image is made from, so the robot can tell a coprocessor
+flashed from another recipe (`coprocessor/README.md`). It's computed one way, by the build, for the
+robot and the images alike: `./gradlew -q coprocessorRecipeHash` prints it and writes it to
+`build/coprocessor/recipe-hash.txt`. It covers this folder, the agent and the shared code with
+their build files, the lock, `gradle/quality.gradle`, and the versions of the libraries the agent
+runs with; not documentation or tests. The robot's own build files (`build.gradle`,
+`settings.gradle`, the Gradle wrapper) are left out by design, so a WPILib or Gradle update doesn't
+ask for an image that would be the same. `test/recipe_test.sh` checks that everything the image
+scripts read from the repository is covered.
 
 GitHub's arm64 runners are free for **public** repositories only. A private repository's builds
 need paid arm64 runners, or a mentor's machine (below).
@@ -177,8 +181,8 @@ need paid arm64 runners, or a mentor's machine (below).
   refuses to run anywhere else unless told `--outside-container`.
 - **About 30 GB free**, for downloads, the common image, and one computer's image at a time.
 
-Build the health agent first, on the machine itself (`./gradlew :coprocessor-agent:jar`), then,
-from the repository's root (Docker shown; Podman takes the same options):
+Build the health agent and the recipe hash first, on the machine itself
+(`./gradlew :coprocessor-agent:jar coprocessorRecipeHash`), then, from the repository's root (Docker shown; Podman takes the same options):
 
 ```bash
 docker run --rm --privileged -v /dev:/dev -v "$PWD:/repo" -w /repo \
@@ -202,7 +206,9 @@ checksum (from its release; on an arm64 machine, `yq_linux_arm64`, whose sha256 
 runs only what was reviewed. To move to newer ones, take the new digest and checksum from their
 publishers, not from a download. The images, `SHA256SUMS`, and `manifest.json` land in
 `build/coprocessor-image/local/release/`. It builds from the commit checked out: the recipe hash
-counts committed files only. If it can't unmount an image, it stops and says what's left mounted.
+counts committed files only, and `local-build.sh` reads it from `build/coprocessor/recipe-hash.txt`,
+so make it with the agent: `./gradlew :coprocessor-agent:jar coprocessorRecipeHash`. If it can't
+unmount an image, it stops and says what's left mounted.
 
 ## Flashing from Windows
 
@@ -214,7 +220,7 @@ swap in that computer's pre-flashed spare instead.
 1. **Check the download.** In PowerShell, in the download folder:
 
    ```powershell
-   $image = "12345-vision-front-pv<version>-<release>.img.xz"   # the file's name
+   $image = "1234-vision-front-pv<version>-<release>.img.xz"   # the file's name
    $expected = ((Get-Content SHA256SUMS) -match [regex]::Escape($image)).Split(" ")[0]
    (Get-FileHash $image -Algorithm SHA256).Hash -eq $expected
    ```
@@ -290,21 +296,22 @@ interface the scripts expect (in `lib/common.sh` and the workflow's `env`, one p
 - **What root reads for the agent**, every minute, into `/run/coprocessor/`:
   `nvme-smart-log.json` and `nvme-id-ctrl.json` (`nvme-cli`'s JSON) and `spi-uboot-version` (the
   first `U-Boot …` line in SPI flash). A missing file means there was nothing to read.
-- **The settings tool**: `SETTINGS_TOOL ROWS_DIR EMPTY_DB OUT_DB` builds `OUT_DB` from PhotonVision's
-  empty database and the committed rows in `ROWS_DIR` (`coprocessors/<computer>/settings/`), and
-  prints the settings hash, lowercase hex, as its only output. It's called only for a computer
-  with committed settings.
+- **The settings tool**: `java -jar coprocessor-agent.jar settings-db ROWS_DIR EMPTY_DB OUT_DB`
+  builds `OUT_DB` from PhotonVision's empty database and the committed rows in `ROWS_DIR`
+  (`coprocessors/<computer>/settings/`), and prints the settings hash, lowercase hex, on its last
+  line (anything before it, such as the JVM's own warnings, is passed on). It's called only for a
+  computer with committed settings.
 - **The lock** is read with these yq paths: `.version`, `.jar.url`, `.jar.sha256`,
   `.images.<board>.url`, `.images.<board>.sha256` (YAML, or JSON). Each base image's file name must
   be PhotonVision's for that board (`BOARD_PV_ASSET` in `boards/`).
-- **The recipe hash** is the sha256 of `git ls-tree -r --full-tree HEAD -- <paths>` for the paths in
-  `recipe.paths`, in order (exactly git's output). The robot build computes the same value for its
-  deploy check.
+- **The recipe hash** is the build's (`./gradlew -q coprocessorRecipeHash`, `RecipeHash` in
+  `coprocessor/common`), which the workflow passes to `plan.sh`; the robot compiles the same value
+  in for its checks.
 
 ## What's unverified
 
 Nothing here has run on a board yet, and the workflow hasn't run on GitHub. The tests cover what
-runs without one: stamping, the layout, the plan, the manifest, the recipe hash, `provision.sh`'s
+runs without one: stamping, the layout, the plan, the manifest, the recipe hash's coverage, `provision.sh`'s
 file changes and self-checks on a tree shaped like PhotonVision's image (its logins as that image
 ships them), and the soft-off rule, run under Node against the requests it must allow and refuse.
 Still to check:
@@ -313,6 +320,9 @@ Still to check:
   without writing.
 - **The sandboxes:** the drive-health helper writing `/run/coprocessor` with only read access to
   `/dev/nvme0` and `/dev/mtd0`; polkit applying the soft-off rule to the agent's account.
+- **Soft-off's timing:** PhotonVision's stop is bounded at 15 s (a drop-in for
+  `photonvision.service`), so the agent's "safe to switch off" comes quickly; bench test B3 checks
+  it stops well inside that.
 
 - **Booting it:** from NVMe with the SPI bootloader, per board (`boards/*.env`, `BOARD_VERIFIED=no`);
   Armbian's boot with the root read-only; `/data` mounted, checked, and bind-mounted before

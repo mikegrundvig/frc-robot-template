@@ -81,7 +81,7 @@ tree_digest() {
   )
 }
 
-# A repository with the coprocessor inputs: the table (team 12345, two computers on two boards),
+# A repository with the coprocessor inputs: the table (team 1234, two computers on two boards),
 # a lock in the format the scripts read, the vendordep, settings for one computer, an SSH key, and
 # the recipe's paths, committed. Prints nothing; the repository is $TMP/repo.
 make_repo() {
@@ -89,7 +89,7 @@ make_repo() {
   mkdir -p "$repo/coprocessors/vision-front/settings/cameras" "$repo/coprocessor/image" \
     "$repo/vendordeps"
   cat >"$repo/coprocessors/coprocessors.yaml" <<'EOF'
-team: 12345
+team: 1234
 agentPort: 5808
 computers:
   - name: vision-front
@@ -121,7 +121,6 @@ images:
 EOF
   echo '{"fileName": "photonlib.json", "version": "dev-v2027.0.0-alpha-2-69-g71416112"}' \
     >"$repo/vendordeps/photonlib.json"
-  cp "$IMAGE/recipe.paths" "$repo/coprocessor/image/recipe.paths"
   echo 'echo provision' >"$repo/coprocessor/image/provision.sh"
   echo 'how to build' >"$repo/coprocessor/image/README.md"
   git_commit "$repo" "the fixture"

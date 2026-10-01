@@ -5,7 +5,7 @@
 release_image() {
   local name=$1 base
   shift
-  base="$TMP/release/12345-$name-pvdev-v2027.0.0-alpha-2-69-g71416112-coprocessors-1"
+  base="$TMP/release/1234-$name-pvdev-v2027.0.0-alpha-2-69-g71416112-coprocessors-1"
   mkdir -p "$TMP/release"
   rm -rf "$TMP/out"
   run_stamp "$name" --stamp-out "$base.stamp.json" "$@" 2>/dev/null
@@ -23,11 +23,11 @@ test_manifest_lists_every_computer_and_its_checksum() {
   (cd "$TMP/release" && sha256sum --quiet -c SHA256SUMS) || fail "SHA256SUMS doesn't check"
   assert_eq "$(wc -l <"$TMP/release/SHA256SUMS")" 2 "lines in SHA256SUMS"
   local manifest=$TMP/release/manifest.json
-  assert_eq "$(yq -r '.team' "$manifest")" 12345
+  assert_eq "$(yq -r '.team' "$manifest")" 1234
   assert_eq "$(yq -r '.release' "$manifest")" coprocessors-1
   assert_eq "$(yq -r '.photonvisionVersion' "$manifest")" dev-v2027.0.0-alpha-2-69-g71416112
   assert_eq "$(yq -r '[.computers[].name] | join(" ")' "$manifest")" "vision-back vision-front"
-  assert_eq "$(yq -r '.computers[1].address' "$manifest")" 10.123.45.11
+  assert_eq "$(yq -r '.computers[1].address' "$manifest")" 10.12.34.11
   assert_eq "$(yq -o=json -I=0 '.computers[1].cameras' "$manifest")" '["front-left","front-right"]'
   assert_eq "$(yq -r '.computers[1].imageSha256' "$manifest")" \
     "$(sha256sum <"$TMP/release/$(yq -r '.computers[1].image' "$manifest")" | cut -c1-64)"
@@ -43,7 +43,7 @@ test_manifest_records_the_common_images_checksum() {
   make_settings_tool
   release_image vision-front
   release_image vision-back
-  local base="$TMP/release/12345-vision-front-pvdev-v2027.0.0-alpha-2-69-g71416112-coprocessors-1"
+  local base="$TMP/release/1234-vision-front-pvdev-v2027.0.0-alpha-2-69-g71416112-coprocessors-1"
   printf '%064d\n' 7 >"$base.common-sha256"
   "$IMAGE/manifest.sh" "$TMP/release"
   local manifest=$TMP/release/manifest.json

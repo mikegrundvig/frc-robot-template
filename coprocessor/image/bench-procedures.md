@@ -132,6 +132,11 @@ to land during boot:
 Before the first cut and after the last, read the root partition's write counters over SSH:
 `sudo tune2fs -l "$(findmnt -no SOURCE /)" | grep -E 'Lifetime writes|Last write time'`.
 
+Then the gentle way, **soft-off**, five times with every camera streaming: the robot asks the agent
+to shut down (`POST /v1/shutdown`), and once the agent says it's safe, switch the power off.
+PhotonVision's stop is bounded at 15 s (the image's drop-in for `photonvision.service`), a proposal
+this checks.
+
 **Pass, all of:**
 - [ ] **20 of 20 boots recover unattended**: no one touches the board.
 - [ ] After every boot, the agent's **version, stamp, and settings hash** (calibrations included)
@@ -146,6 +151,10 @@ Before the first cut and after the last, read the root partition's write counter
 - [ ] **The journal keeps entries to within its sync interval (10 s) of each cut:** the previous
       boot's last entry (`journalctl -b -1 -n 1 -o short-monotonic`) is within 10 s of the uptime
       the agent last reported before that cut.
+- [ ] **Soft-off, 5 of 5:** PhotonVision stops by itself well inside 15 s (after the next boot,
+      `journalctl -b -1 -u photonvision` shows it stopped, not killed at the timeout), the agent
+      says it's safe before the power goes, and the next boot counts it as a clean shutdown with
+      no rise in unsafe shutdowns.
 
 ## B4: Recovery
 

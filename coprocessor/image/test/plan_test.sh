@@ -1,8 +1,10 @@
 # shellcheck shell=bash
 # plan.sh: the build's inputs checked before anything is downloaded.
 
+RECIPE=3333333333333333333333333333333333333333333333333333333333333333
+
 run_plan() {
-  "$IMAGE/plan.sh" --repo "$TMP/repo" "$@" 2>&1
+  "$IMAGE/plan.sh" --repo "$TMP/repo" --recipe-hash "$RECIPE" "$@" 2>&1
 }
 
 # A value from plan.sh's name=value output.
@@ -14,11 +16,11 @@ test_plan_lists_the_boards_and_computers_to_build() {
   need_yq
   make_repo
   run_plan --sha 0123456789abcdef0123456789abcdef01234567 >"$TMP/plan.out"
-  assert_eq "$(output team)" 12345
+  assert_eq "$(output team)" 1234
   assert_eq "$(output version)" dev-v2027.0.0-alpha-2-69-g71416112
   assert_eq "$(output release)" build-0123456789ab
   assert_eq "$(output publish)" false
-  assert_eq "$(output recipe-hash)" "$("$IMAGE/recipe-hash.sh" "$TMP/repo" 2>/dev/null)"
+  assert_eq "$(output recipe-hash)" "$RECIPE" "the build's recipe hash, passed on"
   assert_eq "$(output jar-sha256)" 1111111111111111111111111111111111111111111111111111111111111111
   assert_eq "$(output computers)" '[{"name":"vision-front","board":"orangepi-5"},{"name":"vision-back","board":"orangepi-5-plus"}]'
   output boards >"$TMP/boards.json"
@@ -55,6 +57,13 @@ test_plan_refuses_another_boards_base_image() {
   make_repo
   yq -i '.images.orangepi-5.url |= sub("opi5.img", "opi5plus.img")' "$TMP/repo/coprocessor/photonvision.lock"
   assert_fails "PhotonVision's for Orange Pi 5 is photonvision_opi5.img.xz" run_plan --release coprocessors-1
+}
+
+test_plan_needs_the_builds_recipe_hash() {
+  need_yq
+  make_repo
+  assert_fails "--recipe-hash" "$IMAGE/plan.sh" --repo "$TMP/repo" --release coprocessors-1
+  assert_fails "--recipe-hash" "$IMAGE/plan.sh" --repo "$TMP/repo" --recipe-hash abc --release coprocessors-1
 }
 
 test_plan_refuses_a_bad_release_name() {

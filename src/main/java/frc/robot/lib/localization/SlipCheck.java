@@ -477,9 +477,12 @@ public final class SlipCheck {
     if (checked && before && Double.isFinite(feltX) && Double.isFinite(feltY)) {
       double wheelsX = (velocityX - lastVelocityX) / seconds;
       double wheelsY = (velocityY - lastVelocityY) / seconds;
-      // What the IMU felt that the wheels don't explain. Felt by the IMU less than the wheels'
-      // own change, it's the wheels changing faster than the robot can follow: a slide, not a hit.
-      if (Math.hypot(feltX, feltY) >= Math.hypot(wheelsX, wheelsY)) {
+      if (speedSlip > 0 || turnSlip > 0) {
+        // Sliding, the wheels' change of velocity says nothing of the robot's: all it felt.
+        unexplained = Math.hypot(feltX, feltY);
+      } else if (Math.hypot(feltX, feltY) >= Math.hypot(wheelsX, wheelsY)) {
+        // What the IMU felt that the wheels don't explain. Felt less than the wheels' own change,
+        // it's the wheels changing faster than the robot can follow: a slide, not a hit.
         unexplained = Math.hypot(feltX - wheelsX, feltY - wheelsY);
       }
     }

@@ -50,6 +50,7 @@ class MeasurementsTest {
         ImuReadings.builder()
             .reporting(true)
             .yawRadians(0.3)
+            .yawRateRadiansPerSecond(0)
             .pitchRadians(0)
             .rollRadians(0)
             .forwardAccelerationMetersPerSecSq(0)

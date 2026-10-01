@@ -227,7 +227,10 @@ public final class RobotContainer implements AutoCloseable {
           DriveHardware.builder()
               .modules(List.of(phoenix.modules()))
               .gyro(phoenix.gyro())
-              .backupImu(new GyroIOSystemcore(robot.drivetrainWiring().get().systemcoreMount()))
+              .backupImu(
+                  new GyroIOSystemcore(
+                      robot.drivetrainWiring().get().systemcoreMount(),
+                      robot.drivetrainWiring().get().systemcoreYaw()))
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {
@@ -257,7 +260,8 @@ public final class RobotContainer implements AutoCloseable {
                     "not placed yet")),
             new SwerveKinematicsModel(wheels),
             field.terrain(),
-            wheelReach);
+            wheelReach,
+            robot.imus());
     drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (world != null) {

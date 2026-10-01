@@ -295,6 +295,7 @@ public class Drive implements Mechanism, AutoCloseable {
     return ImuReadings.builder()
         .reporting(imu.connected)
         .yawRadians(imu.yaw.getRadians())
+        .yawRateRadiansPerSecond(imu.yawVelocityRadPerSec)
         .pitchRadians(imu.pitchRad)
         .rollRadians(imu.rollRad)
         .forwardAccelerationMetersPerSecSq(imu.accelerationXMetersPerSecSq)

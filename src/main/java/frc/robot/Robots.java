@@ -17,6 +17,8 @@ import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.Motor;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.localization.EstimatorConfig;
+import frc.robot.lib.localization.ImuPlacement;
+import frc.robot.lib.localization.ImuPlacementBuilder;
 import frc.robot.lib.localization.VisionConfig;
 import java.util.List;
 import java.util.Optional;
@@ -199,6 +201,13 @@ public final class Robots {
           .cameras(CAMERAS)
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)
+          // The simulator's IMUs sit at the center and read along the robot's axes by
+          // construction. A real robot starts from ImuPlacement.UNCHECKED, its IMUs where they're
+          // mounted, until it passes the accelerometer check (docs/calibration.md).
+          .imus(
+              ImuPlacementBuilder.builder(ImuPlacement.UNCHECKED)
+                  .accelerometerChecked(true)
+                  .build())
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */

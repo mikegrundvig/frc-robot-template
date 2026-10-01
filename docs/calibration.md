@@ -9,9 +9,11 @@ redeploy.
 Run them in this order, since each leans on the ones before it:
 
 1. **The IMU reads level**, so tilt is measured from true level.
-2. **The gyro's scale**, so every turn is measured right.
-3. **The wheel radius**, measured against the gyro.
-4. **Camera mounts**, measured while the other cameras place the robot.
+2. **The accelerometer reads along the robot's axes**, before localization compares the wheels'
+   speed with it.
+3. **The gyro's scale**, so every turn is measured right.
+4. **The wheel radius**, measured against the gyro.
+5. **Camera mounts**, measured while the other cameras place the robot.
 
 Run every procedure in utility mode, enabled, with the robot on the floor. The page refuses to run
 them on the field.
@@ -38,6 +40,45 @@ and every camera image solved on a tilted robot. Redo the Pigeon 2's mount calib
 Tuner X, with the robot level, then check again.
 
 When: after mounting or moving the IMU, and before each event.
+
+## The accelerometer reads along the robot's axes
+
+*Checked by hand, from a log: three short drives.*
+
+Localization checks the wheels against the gyro's accelerometer: a change of speed the wheels show
+and the accelerometer doesn't feel is the wheels sliding (`SlipCheck`). That needs the accelerometer
+to read along the robot's axes, and a Pigeon 2's doesn't follow the mount pose set in Phoenix Tuner
+X: it reads along its own case, which the drivetrain's code turns into the robot's axes by the mount
+pose it reads from the Pigeon at startup (CTRE's Pigeon 2.0 User's Guide, "Enclosure Orientated
+Signals"). Systemcore's onboard IMU, mounted flat, is turned by its wiring's `systemcoreYaw`. A
+mount pose or yaw that's wrong, or a Pigeon turned on its mount since, makes every change of speed
+read sideways or backwards, and the robot would doubt its wheels whenever it speeds up. So the
+comparison waits for this check: until the robot's `ImuPlacement.accelerometerChecked` is true,
+slip is judged from the wheels and the gyro's turn alone, and a jolt by its size alone.
+
+Place the IMUs first: measure how far each sits ahead of the robot's center and to its left, and put
+them in the robot's `ImuPlacement` (`gyroForward`, `gyroLeft`, `backupForward`, `backupLeft`). An
+IMU off the center is swung around it as the robot turns, and localization takes that out by where
+the configuration says it sits.
+
+Then, recording a log, in utility mode on a flat floor:
+
+1. **Level and still**, for two seconds: `Drive/Gyro/AccelerationXMetersPerSecSq` and
+   `AccelerationYMetersPerSecSq` read near zero, within about 0.2 m/s² (on a level floor the IMU
+   feels gravity straight down, along neither).
+2. **Driving forward**, robot-relative, from standing at half stick: `AccelerationXMetersPerSecSq`
+   reads positive while the robot speeds up, and negative as it stops; `AccelerationY` stays near
+   zero.
+3. **Strafing left**, robot-relative, the same way: `AccelerationYMetersPerSecSq` reads positive
+   while it speeds up, negative as it stops; `AccelerationX` stays near zero.
+
+If forward reads on the y axis, or either reads backwards, the mount pose (or `systemcoreYaw`) is
+wrong: set it again in Phoenix Tuner X with the Pigeon as it's mounted, redeploy, and check again.
+Once all three pass, set `accelerometerChecked(true)` in the robot's `ImuPlacement`, with the date:
+`.accelerometerChecked(true) // checked YYYY-MM-DD`. The simulator's robot is checked: its IMUs
+read along its axes by construction.
+
+When: after mounting or moving an IMU, or changing its mount pose.
 
 ## The gyro's scale
 

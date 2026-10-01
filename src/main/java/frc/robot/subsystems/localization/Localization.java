@@ -8,6 +8,7 @@ import frc.robot.lib.localization.DriveConditions;
 import frc.robot.lib.localization.DriveKinematicsModel;
 import frc.robot.lib.localization.DrivetrainReadings;
 import frc.robot.lib.localization.ImuCrossCheck;
+import frc.robot.lib.localization.ImuPlacement;
 import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.LandmarkDecision;
 import frc.robot.lib.localization.LocalizationEstimate;
@@ -56,13 +57,6 @@ import org.wpilib.util.Alert;
  * DrivetrainReadings}.
  */
 public final class Localization implements AutoCloseable {
-  /**
-   * A jolt beyond this, in m/s², that the wheels' own change of velocity doesn't explain, is a
-   * collision (6800's threshold): hard driving stays near the wheels' grip, about 1 g.
-   */
-  private static final double COLLISION_ACCELERATION = 20.0;
-
-  private static final double GRAVITY_METERS_PER_SECOND_SQUARED = 9.81;
 
   /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
   private static final double MOVING = 0.25;
@@ -111,10 +105,8 @@ public final class Localization implements AutoCloseable {
   private YawSource lastStepSource = YawSource.WHEELS;
   private double lastStepYaw = Double.NaN;
 
-  /** The wheels' velocity last loop, in the IMU's fixed frame: what this loop's change is from. */
-  private double lastVelocityX = Double.NaN;
-
-  private double lastVelocityY = Double.NaN;
+  /** Where the IMUs sit, and whether the gyro's accelerometer reads along the robot's axes. */
+  private final ImuPlacement imus;
 
   private YawSource yawSource = YawSource.GYRO;
 
@@ -170,18 +162,23 @@ public final class Localization implements AutoCloseable {
    * @param terrain the field's raised terrain: a tilt it explains keeps the wheels trusted, and its
    *     crests are landmarks
    * @param wheelReachMeters how far the wheels reach from the robot's center
+   * @param imus where the IMUs sit, and whether the gyro's accelerometer reads along the robot's
+   *     axes
    */
   public Localization(
       PoseEstimator estimator,
       DriveKinematicsModel kinematics,
       Terrain terrain,
-      double wheelReachMeters) {
+      double wheelReachMeters,
+      ImuPlacement imus) {
     this.estimator = estimator;
     this.kinematics = kinematics;
     this.ground = terrain;
     this.wheelReach = wheelReachMeters;
     crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
-    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters);
+    this.imus = imus;
+    slipCheck =
+        new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters, imus.accelerometerChecked());
     estimate = estimator.estimate();
   }
 
@@ -194,9 +191,16 @@ public final class Localization implements AutoCloseable {
   public void periodic(DrivetrainReadings readings, boolean enabled) {
     ImuReadings gyro = readings.gyro();
     ImuReadings backup = readings.backupImu();
-    attitude = gyro.usable() ? gyro : backup.usable() ? backup : null;
     Steps steps = steps(readings.wheels(), gyro, backup);
-    conditions = conditions(steps, readings.velocities(), enabled);
+    // One IMU says everything this loop: the one whose yaw turns odometry.
+    attitude =
+        switch (steps.source()) {
+          case GYRO -> gyro;
+          case BACKUP -> backup;
+          case WHEELS -> null;
+        };
+    compareWithTheImu(steps, attitude, readings.velocities());
+    conditions = conditions(enabled);
     estimator.setConditions(conditions);
     for (Step step : steps.steps()) {
       estimator.addOdometry(step.timestampNanos(), step.motion(), step.yaw(), steps.source());
@@ -378,105 +382,85 @@ public final class Localization implements AutoCloseable {
 
   /**
    * What the IMU says about trusting the wheels: the robot's tilt, a jolt beyond driving, the
-   * wheels sliding over the floor, and whether people might be carrying it. The gyro's IMU says, or
-   * the backup's while the gyro is lost; without either, nothing can.
-   *
-   * @param wheels the robot's velocity as its wheels measure it, robot-relative
+   * wheels sliding over the floor, and whether people might be carrying it. The IMU that turns
+   * odometry says (the gyro, or the backup while the gyro is lost); without one, nothing can.
    */
-  private DriveConditions conditions(Steps steps, ChassisVelocities wheels, boolean enabled) {
+  private DriveConditions conditions(boolean enabled) {
     ImuReadings imu = attitude;
     double tilt =
         imu == null
             ? 0
             // The angle between the robot's up and straight up.
             : Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
-    boolean collision = compareWithTheImu(steps, imu, wheels);
     return new DriveConditions(
         tilt,
         imu == null ? 0 : groundSlope(tilt),
-        collision,
+        slipCheck.jolt(),
         slipCheck.slipMetersPerSecond(),
         !enabled);
   }
 
   /**
-   * Compares the loop's wheel readings with the IMU ({@link SlipCheck}), and says whether the IMU
-   * felt a collision: a jolt beyond {@link #COLLISION_ACCELERATION} that the wheels' own change of
-   * velocity over the loop doesn't explain. A robot stopping hard is felt by both; a hit only by
-   * the IMU. A jolt is left out of the slip check, whose speed comparison starts over: the
-   * collision's own doubt covers it.
+   * Gives the slip check the loop's wheel readings and what the IMU that turns odometry felt
+   * ({@link SlipCheck}): whether the wheels slid, and whether the IMU felt a collision. A loop
+   * without wheel readings, or with another IMU than the last, starts it over.
    *
-   * @param imu the IMU the robot's attitude and acceleration come from, or null without one
+   * @param imu the IMU that turns odometry this loop, or null without one
+   * @param wheels the robot's velocity as its wheels measure it, robot-relative
    */
-  private boolean compareWithTheImu(
-      Steps steps, @Nullable ImuReadings imu, ChassisVelocities wheels) {
-    double[] felt = imu == null ? null : driving(imu);
-    boolean jolt = felt != null && Math.hypot(felt[0], felt[1]) > COLLISION_ACCELERATION;
+  private void compareWithTheImu(Steps steps, @Nullable ImuReadings imu, ChassisVelocities wheels) {
+    Felt felt = imu == null ? Felt.NOTHING : driving(imu);
     List<Step> loop = steps.steps();
-    if (loop.isEmpty()) {
-      return jolt;
+    if (loop.isEmpty() || imu == null) {
+      slipCheck.startOver(felt.forward(), felt.left());
+      return;
     }
     Step last = loop.get(loop.size() - 1);
     YawSource source = steps.source();
-    boolean sameImu =
-        source != YawSource.WHEELS
-            && source == lastStepSource
-            && lastStepNanos < last.timestampNanos();
-    double seconds = sameImu ? Timestamps.toSeconds(last.timestampNanos() - lastStepNanos) : 0;
-    // The wheels' velocity in the IMU's fixed frame, which holds still while the robot turns.
-    double cos = Math.cos(last.yaw());
-    double sin = Math.sin(last.yaw());
-    double velocityX = cos * wheels.vx - sin * wheels.vy;
-    double velocityY = sin * wheels.vx + cos * wheels.vy;
-    if (jolt
-        && felt != null
-        && sameImu
-        && Double.isFinite(lastVelocityX)
-        && Double.isFinite(velocityX)) {
-      double feltX = cos * felt[0] - sin * felt[1];
-      double feltY = sin * felt[0] + cos * felt[1];
-      double wheelsX = (velocityX - lastVelocityX) / seconds;
-      double wheelsY = (velocityY - lastVelocityY) / seconds;
-      jolt = Math.hypot(feltX - wheelsX, feltY - wheelsY) > COLLISION_ACCELERATION;
-    }
-    if (sameImu) {
+    if (source == lastStepSource && lastStepNanos < last.timestampNanos()) {
       double wheelTurn = 0;
       for (Step step : loop) {
         wheelTurn += step.motion().dthetaRadians();
       }
       slipCheck.update(
-          seconds,
-          wheelTurn,
-          MathUtil.angleModulus(last.yaw() - lastStepYaw),
-          last.yaw(),
-          wheels,
-          felt == null || jolt ? Double.NaN : felt[0],
-          felt == null || jolt ? Double.NaN : felt[1]);
+          new SlipCheck.Sample(
+              Timestamps.toSeconds(last.timestampNanos() - lastStepNanos),
+              wheelTurn,
+              MathUtil.angleModulus(last.yaw() - lastStepYaw),
+              last.yaw(),
+              imu.yawRateRadiansPerSecond(),
+              source == YawSource.GYRO ? imus.gyro() : imus.backup(),
+              wheels,
+              felt.forward(),
+              felt.left()));
     } else {
-      slipCheck.reset();
+      slipCheck.startOver(felt.forward(), felt.left());
     }
     lastStepNanos = last.timestampNanos();
     lastStepSource = source;
     lastStepYaw = last.yaw();
-    lastVelocityX = velocityX;
-    lastVelocityY = velocityY;
-    return jolt;
   }
 
   /**
-   * What the IMU felt of the robot's own motion, robot-relative (forward, left): its reading less
-   * gravity's share, which it feels along the robot's axes as the robot tilts (WPILib's attitude: a
-   * positive pitch is nose down, a positive roll the left side up). Not a number where the IMU
-   * can't say.
+   * What an IMU felt of the robot's own motion, along the robot's axes, in m/s²: its reading less
+   * gravity's share. Not a number where the IMU can't say.
    */
-  private static double[] driving(ImuReadings imu) {
+  private record Felt(double forward, double left) {
+    static final Felt NOTHING = new Felt(Double.NaN, Double.NaN);
+  }
+
+  /**
+   * What the IMU felt of the robot's own motion: its reading less gravity's share, which it feels
+   * along the robot's axes as the robot tilts (WPILib's attitude: a positive pitch is nose down, a
+   * positive roll the left side up).
+   */
+  private static Felt driving(ImuReadings imu) {
     double pitch = imu.pitchRadians();
     double roll = imu.rollRadians();
-    return new double[] {
-      imu.forwardAccelerationMetersPerSecSq() + GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(pitch),
-      imu.leftAccelerationMetersPerSecSq()
-          - GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(roll) * Math.cos(pitch)
-    };
+    return new Felt(
+        imu.forwardAccelerationMetersPerSecSq() + ImuReadings.STANDARD_GRAVITY * Math.sin(pitch),
+        imu.leftAccelerationMetersPerSecSq()
+            - ImuReadings.STANDARD_GRAVITY * Math.sin(roll) * Math.cos(pitch));
   }
 
   /**

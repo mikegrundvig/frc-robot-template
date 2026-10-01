@@ -255,6 +255,7 @@ across. The template's robot runs only in simulation and has no wiring, so nothi
 | `gyroYawScale` | calibrated | none (1 until measured) | none | [The gyro's scale](calibration.md#the-gyros-scale), once per gyro, and after replacing or remounting it. |
 | `couplingRatio` | as built | none | none | Tuner X's swerve generator, or the module's datasheet: drive motor turns per turn of the module, wheel held still. |
 | `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
+| `systemcoreYaw` | as built | none | none | Mounted flat, how far Systemcore's board is turned on the robot: zero with its x axis forward, counterclockwise from above. Its accelerometer reads the board's axes; this turns them into the robot's. Check it with [the accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes), on the backup IMU's readings (`Drive/BackupGyro/AccelerationXMetersPerSecSq`). |
 
 ### `SwerveWiring.ModuleWiring`
 
@@ -400,6 +401,22 @@ is off.
 | `maxPositionStdDevMeters` | chosen | 0.15 m | guess | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
 | `maxTiltDegrees` | chosen | 5° | guess (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
 
+### `ImuPlacement`
+
+`frc.robot.lib.localization.ImuPlacement`: where the robot's IMUs sit, and whether the gyro's
+accelerometer has been checked to read along the robot's axes (`RobotConfig.imus`). Localization
+compares the wheels' velocity with what the IMU feels where it sits: an IMU off the center is swung
+around it as the robot turns. In the robot's configuration rather than its wiring, since the
+simulator needs it too.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `gyroForward` | as built | 0 m | none (the simulator's IMU sits at the center) | From CAD, or a tape: how far ahead of the robot's center the Pigeon 2 sits (negative behind). |
+| `gyroLeft` | as built | 0 m | none (as `gyroForward`) | As `gyroForward`, to the left (negative right). |
+| `backupForward` | as built | 0 m | none (as `gyroForward`) | As `gyroForward`, for Systemcore's IMU (where its board sits). |
+| `backupLeft` | as built | 0 m | none (as `gyroForward`) | As `gyroLeft`, for Systemcore's IMU. |
+| `accelerometerChecked` | calibrated | true for the simulator's robot; false for a new one (`ImuPlacement.UNCHECKED`) | none (the simulator's IMUs read along the robot's axes by construction) | [The accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes): three short drives in a log. Until it passes, the slip check doesn't compare the wheels' speed with the accelerometer, and a jolt counts by its size alone. Off by default because a mis-mounted accelerometer is far worse than none: on the simulator's clean driving, one turned a quarter turn on its mount read slip in most loops. |
+
 ### `SlipCheck.Settings`
 
 `frc.robot.lib.localization.SlipCheck.Settings`: how closely the wheels must agree with the IMU
@@ -407,8 +424,9 @@ before the estimate doubts them for sliding over the floor together, which their
 each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be sliding counts as
 suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current limit isn't asked:
 at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the tread's 11.8 m/s²
-(`driveStatorCurrent`), and in the simulator's estimator golden the drive motors sit at their limit
-in 318 of 500 loops with the wheels gripping. Doubting a quarter of the travel there made the
+(`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain read as at its
+grip's edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500 loops with
+the wheels gripping. Doubting a quarter of the travel there made the
 estimate claim up to 65 cm through the hard driving (31 cm on average over those loops), and let a
 tag misread by 1.5 m through its gate. Check in a log of hard driving: `Localization/TurnApartDegrees` and `SlideMetersPerSecond`
 stay under their tolerances through clean launches, turns, and stops, and `TurnSlipMetersPerSecond`
@@ -420,8 +438,9 @@ robot is pushed, with the cameras then finding the estimate off by about as much
 | `windowSeconds` | chosen | 0.25 s | guess | Why: how far back the turn's comparison looks: long enough for the gyro's noise to average out, short enough that a slide shows while it lasts. The turn worn tread puts between the wheels and the gyro grows with it: change `turnToleranceDegrees` with it. |
 | `turnToleranceDegrees` | chosen | 0.5° | simulation (the simulator's season-worn robot, its tread worn 1 to 2% unevenly, turns its wheels' reckoning up to 0.44° from the gyro's in a quarter second, straight ahead at full speed; one wheel spinning 8 cm/s faster than the floor shows past it) | Why: above what worn tread and the gyro's noise put between them. Raise it if `TurnApartDegrees` passes it in clean straight driving; lower it once the wheel radii are calibrated. |
 | `turnScaleTolerance` | chosen | 0.05 | guess (as `ImuCrossCheck.Settings`: worn tread reckons a few percent more turn than the robot makes, a gyro's scale a few tenths of a percent less) | Why: on top, this share of the turn. Raise it if fast spins in clean driving raise `TurnSlipMetersPerSecond`. |
-| `speedMemorySeconds` | chosen | 1 s | guess | Why: what the accelerometer didn't feel fades by e over this, so its bias adds up to no more than the bias times this: 0.1 m/s from 0.1 m/s², about what an accelerometer mounted half a degree off level reads. Long enough to follow a launch's spin; how far a robot slid at a steady speed is beyond it either way (in the simulator, 2 s caught 50% more of a sideways push). Lengthen it once the accelerometer's bias is measured small. |
-| `speedToleranceMetersPerSecond` | chosen | 0.4 m/s | guess (the simulator's sharpest clean driving puts the wheels and its noiseless accelerometer 0.31 m/s apart; a real accelerometer's vibration, guessed at 1 m/s², adds about 0.1 m/s over the memory, and its bias as much) | Why: above how far the two drift apart without a slide. Raise it if `SlideMetersPerSecond` passes it in clean driving; lower it toward the most it reaches there once a robot's logs show it. |
+| `speedMemorySeconds` | chosen | 1 s | guess | Why: what the accelerometer didn't feel fades by e over this, so its bias adds up to no more than the bias times this: 0.1 m/s from 0.1 m/s², about what an accelerometer mounted half a degree off level reads. It fades a slide too: a slide that holds at a steady speed fades from view in a second or two while the robot's error goes on growing, and when it stops, what's left is cancelled against the faded start, so the stop isn't seen either (a 1 m/s push for a second reads no slip by its end). Lengthen it once the accelerometer's bias is measured small. |
+| `speedToleranceMetersPerSecond` | chosen | 0.4 m/s | guess (the simulator's sharpest clean driving puts the wheels and its ideal accelerometer 0.31 m/s apart; a real accelerometer's noise and bias, guessed at 0.1 m/s each over the memory, would take that to 0.51, past it) | Why: above how far the two drift apart without a slide in the simulator, whose IMU has no noise or bias. Not yet above a real accelerometer's: measure `SlideMetersPerSecond` in clean driving on the robot, and raise it if that passes it. |
+| `joltMetersPerSecSq` | chosen | 20 m/s² | top team (6800) | Why: hard driving stays near 1 g; a hit is several. A jolt counts only if the wheels' own change of velocity doesn't explain it as well (a robot stopping hard is felt by both, a hit only by the IMU), or by its size alone before the accelerometer is checked. Above what the template's Pigeon 2 can report: its accelerometer reads at most ±2 g, 19.6 m/s², on each axis (Phoenix 6's `AccelerationX` signal), so a hit along one axis never passes it, and only one coming at an angle can (up to 27.7 diagonally). It belongs under the range. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
 
 ### `ImuCrossCheck.Settings`
 
@@ -598,7 +617,6 @@ code's choices, explained beside them.
 | `ModuleIOSim`: how often the steering's motor controller runs its loop | 1 ms | as built | datasheet (CTRE's Phoenix 6 documentation: a TalonFX's closed loop runs at 1 kHz) | A fact of the motor controller. |
 | `ModuleIOSim`: the drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of `Body.mass` at `wheelRadius` | 0.001 kg m² | characterized | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. About 2% of what the template's robot puts on each wheel, so a rough number costs little. |
 | `ModuleIOSim`: the steering's inertia | 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's generated simulation value, as AdvantageKit's swerve templates use it) | [Feedforward](characterization.md#feedforward): SysId on one module's steering. What it assumes is in [stand-ins](stand-ins.md). |
-| `Localization`: a jolt that's a collision | 20 m/s² | chosen | top team (6800) | Why: hard driving stays near 1 g. A jolt counts only if the wheels' own change of velocity doesn't explain it as well: a robot stopping hard is felt by both, a hit only by the IMU. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
 | `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |
 | `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |

@@ -71,7 +71,8 @@ public final class DriveSimHarness implements AutoCloseable {
     for (Translation2d wheel : wheels) {
       reach = Math.max(reach, wheel.getNorm());
     }
-    return new Localization(estimator, new SwerveKinematicsModel(wheels), terrain, reach);
+    return new Localization(
+        estimator, new SwerveKinematicsModel(wheels), terrain, reach, robot.imus());
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */
@@ -90,6 +91,16 @@ public final class DriveSimHarness implements AutoCloseable {
   /** On this terrain: the simulator rides over it, and localization knows it. */
   public DriveSimHarness(
       RobotConfig robot, SensorErrors errors, EstimatorConfig config, Terrain terrain) {
+    this(robot, errors, config, terrain, FlawedImu.NONE);
+  }
+
+  /** With the gyro's accelerometer reading as this flawed one does. */
+  public DriveSimHarness(
+      RobotConfig robot,
+      SensorErrors errors,
+      EstimatorConfig config,
+      Terrain terrain,
+      FlawedImu gyroFlaws) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     localization = localizationFor(robot, estimator, terrain);
     simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors);
@@ -99,7 +110,7 @@ public final class DriveSimHarness implements AutoCloseable {
             "Drive",
             DriveHardware.builder()
                 .modules(List.of(simulation.modules()))
-                .gyro(simulation.gyro())
+                .gyro(gyroFlaws.wrap(simulation.gyro()))
                 .backupImu(simulation.backupGyro())
                 .odometryLock(new ReentrantLock())
                 .build(),

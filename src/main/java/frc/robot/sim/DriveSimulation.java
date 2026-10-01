@@ -7,6 +7,7 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.Terrain;
 import frc.robot.lib.localization.BodyMotion;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.localization.OdometrySample;
 import frc.robot.lib.localization.SwerveKinematicsModel;
 import frc.robot.subsystems.drive.GyroIO;
@@ -48,15 +49,13 @@ public final class DriveSimulation {
   static final int STEPS_PER_LOOP = 5;
 
   /** A hard hit's jolt, as an IMU feels it: 4 g. */
-  static final double HIT_JOLT_METERS_PER_SECOND_SQUARED = 4 * 9.81;
+  static final double HIT_JOLT_METERS_PER_SECOND_SQUARED = 4 * ImuReadings.STANDARD_GRAVITY;
 
   /**
    * How quickly a push gets the robot sliding, and lets it stop, in m/s²: about a third of g, as
    * one robot driving into another starts it moving.
    */
   static final double PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED = 3.0;
-
-  private static final double GRAVITY_METERS_PER_SECOND_SQUARED = 9.81;
 
   private final ModuleIOSim[] modules = new ModuleIOSim[4];
   private final GyroIOSim gyro;
@@ -494,8 +493,8 @@ public final class DriveSimulation {
     // feels the floor holding it up, tipped along the robot's axes.
     Translation2d gravity =
         new Translation2d(
-            -GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(pitchRadians),
-            GRAVITY_METERS_PER_SECOND_SQUARED * Math.sin(rollRadians) * Math.cos(pitchRadians));
+            -ImuReadings.STANDARD_GRAVITY * Math.sin(pitchRadians),
+            ImuReadings.STANDARD_GRAVITY * Math.sin(rollRadians) * Math.cos(pitchRadians));
     Translation2d felt = driving.plus(gravity).plus(jolt);
     jolt = Translation2d.ZERO;
     return felt;

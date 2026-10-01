@@ -1,11 +1,14 @@
 package frc.robot.subsystems.drive;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Degrees;
 
 import frc.robot.RobotSim;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.hardware.imu.OnboardIMU;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.simulation.SimHooks;
 
 /**
@@ -17,7 +20,7 @@ class GyroIOSystemcoreTest {
   @Test
   void itReportsOneReadingALoopAndCountsAsConnected() {
     RobotSim.setEnabled(false);
-    GyroIOSystemcore flat = new GyroIOSystemcore(OnboardIMU.MountOrientation.FLAT);
+    GyroIOSystemcore flat = new GyroIOSystemcore(OnboardIMU.MountOrientation.FLAT, Degrees.of(0));
     GyroIOInputsAutoLogged inputs = new GyroIOInputsAutoLogged();
 
     flat.updateInputs(inputs);
@@ -37,12 +40,24 @@ class GyroIOSystemcoreTest {
    */
   @Test
   void onEdgeItSaysItCantTellTheAcceleration() {
-    GyroIOSystemcore onEdge = new GyroIOSystemcore(OnboardIMU.MountOrientation.PORTRAIT);
+    GyroIOSystemcore onEdge =
+        new GyroIOSystemcore(OnboardIMU.MountOrientation.PORTRAIT, Degrees.of(0));
     GyroIOInputsAutoLogged inputs = new GyroIOInputsAutoLogged();
 
     onEdge.updateInputs(inputs);
 
     assertThat(inputs.accelerationXMetersPerSecSq).isNaN();
     assertThat(inputs.accelerationYMetersPerSecSq).isNaN();
+  }
+
+  /**
+   * Turned a quarter turn left on the robot, the board reads the robot's forward on its -y axis.
+   */
+  @Test
+  void aTurnedBoardsAccelerationIsTurnedBackToTheRobotsAxes() {
+    Translation2d forward = GyroIOSystemcore.robotAxes(Math.PI / 2, 0, -1);
+
+    assertThat(forward.getX()).isCloseTo(1, within(1e-12));
+    assertThat(forward.getY()).isCloseTo(0, within(1e-12));
   }
 }

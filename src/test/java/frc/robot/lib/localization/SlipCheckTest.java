@@ -5,37 +5,32 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 import org.junit.jupiter.api.Test;
+import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
-/** The wheels against the IMU, loop by loop: do they slide over the floor together? */
+/**
+ * The wheels against the IMU, loop by loop: do they slide over the floor together, and was that a
+ * hit? Each test drives a robot whose truth it knows (how it moves on the field, and how much
+ * faster than that its wheels roll) and checks what the slip check says against that truth.
+ */
 class SlipCheckTest {
   private static final double LOOP = 0.02;
   private static final double REACH = 0.4;
   private static final SlipCheck.Settings SETTINGS = SlipCheck.Settings.DEFAULTS;
-
-  /** The tolerance for turning, in radians. */
-  private static final double TURN_TOLERANCE = Math.toRadians(SETTINGS.turnToleranceDegrees());
-
-  /** What the accelerometer didn't feel fades this much a loop. */
-  private static final double FADE = Math.exp(-LOOP / SETTINGS.speedMemorySeconds());
-
-  /** A difference of this much a loop, for this many loops, as the speed check carries it. */
-  private static double carried(double perLoop, int loops) {
-    double sum = 0;
-    for (int i = 0; i < loops; i++) {
-      sum = sum * FADE + perLoop;
-    }
-    return sum;
-  }
+  private static final double TOLERANCE = SETTINGS.speedToleranceMetersPerSecond();
 
   /**
    * A robot moving on the field, and what its wheels and IMU read of it, loop by loop. The truth is
-   * its velocity on the field and its heading; the wheels can roll faster than it moves, and turn
-   * it further than it turns.
+   * its velocity on the field and its heading; its wheels can roll faster than it moves, and turn
+   * it further than it turns. Its IMU sits where it's placed, and is swung around the center as the
+   * robot turns.
    */
   private static final class Robot {
-    final SlipCheck check = new SlipCheck(SETTINGS, REACH);
+    final SlipCheck check;
+    final Translation2d imu;
     double heading = 0.3;
+    double rate;
     double fieldVx;
     double fieldVy;
 
@@ -44,37 +39,57 @@ class SlipCheckTest {
 
     double slideY;
 
+    /** What the accelerometer reads, turned this far from the robot's axes. */
+    double imuTurned;
+
+    Robot() {
+      this(Translation2d.ZERO, true);
+    }
+
+    Robot(Translation2d imu, boolean checked) {
+      this.imu = imu;
+      check = new SlipCheck(SETTINGS, REACH, checked);
+    }
+
+    /** The IMU's velocity on the field: the robot's, and its swing around the center. */
+    Translation2d imuVelocity() {
+      Translation2d swing = new Translation2d(-rate * imu.getY(), rate * imu.getX());
+      return new Translation2d(fieldVx, fieldVy).plus(swing.rotateBy(new Rotation2d(heading)));
+    }
+
     /**
-     * One loop: the robot speeds up by this much on the field and turns this far; the wheels turn
-     * it further by this much.
+     * One loop: the robot speeds up by this much on the field and turns at this rate by its end;
+     * the wheels turn it further by this much.
      */
-    Robot loop(double speedUpX, double speedUpY, double turn, double wheelsTurnMore) {
-      double before = heading;
+    Robot loop(double speedUpX, double speedUpY, double newRate, double wheelsTurnMore) {
+      Translation2d before = imuVelocity();
+      double turn = (rate + newRate) / 2 * LOOP;
       heading += turn;
+      rate = newRate;
       fieldVx += speedUpX;
       fieldVy += speedUpY;
-      double cos = Math.cos(heading);
-      double sin = Math.sin(heading);
-      double wheelsX = fieldVx + slideX;
-      double wheelsY = fieldVy + slideY;
-      ChassisVelocities wheels =
-          new ChassisVelocities(cos * wheelsX + sin * wheelsY, -sin * wheelsX + cos * wheelsY, 0);
-      double ax = speedUpX / LOOP;
-      double ay = speedUpY / LOOP;
+      // What the IMU felt over the loop, along the robot's axes.
+      Translation2d felt =
+          imuVelocity().minus(before).div(LOOP).rotateBy(new Rotation2d(-heading - imuTurned));
+      Translation2d wheels =
+          new Translation2d(fieldVx + slideX, fieldVy + slideY).rotateBy(new Rotation2d(-heading));
       check.update(
-          LOOP,
-          turn + wheelsTurnMore,
-          heading - before,
-          heading,
-          wheels,
-          cos * ax + sin * ay,
-          -sin * ax + cos * ay);
+          new SlipCheck.Sample(
+              LOOP,
+              turn + wheelsTurnMore,
+              turn,
+              heading,
+              rate,
+              imu,
+              new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
+              felt.getX(),
+              felt.getY()));
       return this;
     }
 
-    Robot loops(int count, double speedUpX, double speedUpY, double turn, double wheelsTurnMore) {
+    Robot loops(int count, double speedUpX, double speedUpY, double rate, double wheelsTurnMore) {
       for (int i = 0; i < count; i++) {
-        loop(speedUpX, speedUpY, turn, wheelsTurnMore);
+        loop(speedUpX, speedUpY, rate, wheelsTurnMore);
       }
       return this;
     }
@@ -89,49 +104,67 @@ class SlipCheckTest {
   @Test
   void wheelsThatAgreeWithTheImuArentSliding() {
     // Speeding up hard down the field while turning: 4.4 m/s², a turn a second.
-    Robot robot = new Robot().loops(50, 4.4 * LOOP, 0, 2 * Math.PI * LOOP, 0);
+    Robot robot = new Robot().loops(50, 4.4 * LOOP, 0, 2 * Math.PI, 0);
 
-    assertThat(robot.check.slipMetersPerSecond()).isCloseTo(0, within(1e-9));
+    assertThat(robot.check.slipMetersPerSecond()).isZero();
+    assertThat(robot.check.slideMetersPerSecond()).isLessThan(1e-9);
+    assertThat(robot.check.jolt()).isFalse();
   }
 
   /**
-   * The wheels turn the robot further than the gyro does: they slid around its center. Beyond the
-   * tolerance, at the wheels' reach, over the window, that's how fast.
+   * An IMU 0.25 m from the center is swung around it as the robot turns, and feels that: the
+   * wheels' velocity is compared where it sits, so a robot spinning up to a turn a second as it
+   * drives is no slide.
    */
   @Test
-  void aTurnTheGyroDoesntSeeIsASlide() {
-    Robot robot = new Robot().loops(20, 0, 0, 0, 0.002); // 0.1 rad/s more than the gyro
+  void anImuOffTheCenterFeelsTheTurnSwingItAndIsNoSlide() {
+    Robot robot = new Robot(new Translation2d(0.2, 0.15), true);
+    for (int i = 1; i <= 50; i++) {
+      robot.loop(2.0 * LOOP, 0, 2 * Math.PI * Math.min(1, i / 25.0), 0);
+    }
 
-    double apart = 0.002 * 13; // the fewest loops that cover a quarter second
-    assertThat(robot.check.turnApartRadians()).isCloseTo(apart, within(1e-12));
-    assertThat(robot.check.turnSlipMetersPerSecond())
-        .isCloseTo((apart - TURN_TOLERANCE) * REACH / 0.25, within(1e-9));
-    assertThat(robot.check.speedSlipMetersPerSecond()).isZero();
-    Robot faster = new Robot().loops(20, 0, 0, 0, 0.004);
-    assertThat(faster.check.slipMetersPerSecond())
-        .as("the doubt grows with the slide")
-        .isGreaterThan(2 * robot.check.slipMetersPerSecond());
+    assertThat(robot.check.slideMetersPerSecond()).isLessThan(1e-9);
+    assertThat(robot.check.slipMetersPerSecond()).isZero();
+  }
+
+  /**
+   * The wheels turn the robot further than the gyro does: they slid around its center. The check
+   * says how fast, at the wheels' reach, less what its tolerance allows.
+   */
+  @Test
+  void aTurnTheGyroDoesntSeeIsASlideAtTheWheels() {
+    double rate = 0.1; // rad/s more than the gyro: 4 cm/s at the wheels
+    Robot slow = new Robot().loops(20, 0, 0, 0, rate * LOOP);
+    Robot fast = new Robot().loops(20, 0, 0, 0, 4 * rate * LOOP);
+
+    double allowed = Math.toRadians(SETTINGS.turnToleranceDegrees()) * REACH / 0.26;
+    assertThat(slow.check.turnSlipMetersPerSecond())
+        .isCloseTo(rate * REACH - allowed, within(1e-9));
+    assertThat(fast.check.turnSlipMetersPerSecond())
+        .as("four times the slide, and its doubt grows with it")
+        .isCloseTo(4 * rate * REACH - allowed, within(1e-9));
+    assertThat(slow.check.speedSlipMetersPerSecond()).isZero();
   }
 
   @Test
   void aTurnWithinTheToleranceIsNoSlide() {
+    double tolerance = Math.toRadians(SETTINGS.turnToleranceDegrees());
     // Wheels worn unevenly: they turn the robot's reckoning a little as it drives straight...
-    Robot straight = new Robot().loops(20, 0, 0, 0, TURN_TOLERANCE / 14);
+    Robot straight = new Robot().loops(20, 0, 0, 0, tolerance / 14);
     // ... and a little more than it turns.
-    Robot turning = new Robot().loops(20, 0, 0, 0.1, 0.004);
+    Robot turning = new Robot().loops(20, 0, 0, 5, 0.004);
 
     assertThat(straight.check.slipMetersPerSecond()).isZero();
     assertThat(turning.check.slipMetersPerSecond()).isZero();
   }
 
   /**
-   * The wheels speed up faster than the accelerometer feels the robot speed up: they spin, and how
-   * much faster they roll than the robot moves builds up as long as they do.
+   * Half the wheels' acceleration takes: the robot speeds up at 2.2 m/s², its spinning wheels at
+   * 4.4. They come to roll ever faster than it moves, and the check follows them.
    */
   @Test
-  void aSpeedUpTheAccelerometerDoesntFeelIsASlide() {
+  void wheelsSpinningInALaunchAreASlide() {
     Robot robot = new Robot();
-    // Half the wheels' acceleration takes: the robot speeds up at 2.2 m/s², the wheels at 4.4.
     double[] slip = new double[3];
     for (int i = 1; i <= 30; i++) {
       robot.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0);
@@ -140,13 +173,11 @@ class SlipCheckTest {
       }
     }
 
-    // The first loop only starts the comparison: 29 loops of 4.4 cm/s each, fading.
-    assertThat(robot.check.slideMetersPerSecond()).isCloseTo(carried(2.2 * LOOP, 29), within(1e-9));
-    assertThat(robot.check.speedSlipMetersPerSecond())
-        .isCloseTo(
-            carried(2.2 * LOOP, 29) - SETTINGS.speedToleranceMetersPerSecond(), within(1e-9));
+    double sliding = robot.slideX; // 1.32 m/s faster than the robot moves
     assertThat(slip).as("growing as the slide does").isSorted();
-    assertThat(slip[2]).isGreaterThan(slip[1] + 0.2);
+    assertThat(robot.check.slideMetersPerSecond()).isBetween(0.7 * sliding, sliding);
+    assertThat(robot.check.speedSlipMetersPerSecond())
+        .isCloseTo(robot.check.slideMetersPerSecond() - TOLERANCE, within(1e-12));
     assertThat(robot.check.turnSlipMetersPerSecond()).isZero();
   }
 
@@ -160,13 +191,11 @@ class SlipCheckTest {
     assertThat(robot.check.speedSlipMetersPerSecond()).isPositive();
 
     // The wheels hold their speed; the robot speeds up to it, at 6 m/s², in a fifth of a second.
-    double behind = robot.slideX;
     for (int i = 1; i <= 11; i++) {
       double catchUp = Math.min(6 * LOOP, robot.slideX);
       robot.slide(robot.slideX - catchUp, 0).loop(catchUp, 0, 0, 0);
     }
 
-    assertThat(behind).isCloseTo(1.32, within(1e-9));
     assertThat(robot.slideX).isCloseTo(0, within(1e-12));
     // What it carried faded while the robot fell behind, and the catching up didn't: a little of
     // it is left over, the other way, until that fades too.
@@ -179,15 +208,15 @@ class SlipCheckTest {
     Robot slow = new Robot().loops(5, 0, 0, 0, 0); // standing
     Robot fast = new Robot().loops(5, 0, 0, 0, 0);
     for (int i = 1; i <= 10; i++) {
-      // 3 m/s² sideways for a fifth of a second; the wheels roll none of it.
+      // 1.5 and 3 m/s² sideways for a fifth of a second; the wheels roll none of it.
       slow.slide(0, -1.5 * LOOP * i).loop(0, 1.5 * LOOP, 0, 0);
       fast.slide(0, -3 * LOOP * i).loop(0, 3 * LOOP, 0, 0);
     }
 
     // 0.3 m/s in all, within the accelerometer's tolerance; 0.6 m/s, past it.
     assertThat(slow.check.speedSlipMetersPerSecond()).isZero();
-    assertThat(fast.check.speedSlipMetersPerSecond())
-        .isCloseTo(carried(0.06, 10) - SETTINGS.speedToleranceMetersPerSecond(), within(1e-9));
+    assertThat(fast.check.slideMetersPerSecond()).isBetween(0.9 * 0.6, 0.6);
+    assertThat(fast.check.speedSlipMetersPerSecond()).isPositive();
   }
 
   /** A slide that turns and one that speeds up, at once: the root of their squares. */
@@ -198,13 +227,13 @@ class SlipCheckTest {
       robot.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0.002);
     }
 
+    assertThat(robot.check.turnSlipMetersPerSecond()).isPositive();
+    assertThat(robot.check.speedSlipMetersPerSecond()).isPositive();
     assertThat(robot.check.slipMetersPerSecond())
         .isCloseTo(
             Math.hypot(
                 robot.check.turnSlipMetersPerSecond(), robot.check.speedSlipMetersPerSecond()),
             within(1e-12));
-    assertThat(robot.check.turnSlipMetersPerSecond()).isPositive();
-    assertThat(robot.check.speedSlipMetersPerSecond()).isPositive();
   }
 
   /** A turn out of the window no longer counts: the doubt it added stays, and no more is added. */
@@ -213,6 +242,53 @@ class SlipCheckTest {
     Robot robot = new Robot().loops(5, 0, 0, 0, 0.01).loops(14, 0, 0, 0, 0);
 
     assertThat(robot.check.slipMetersPerSecond()).isZero();
+  }
+
+  /**
+   * An accelerometer turned a quarter turn from the robot's axes reads every change of speed
+   * sideways. Not yet checked, it isn't compared, and a robot speeding up hard isn't taken for
+   * sliding; checked, the same reading would be.
+   */
+  @Test
+  void anUncheckedAccelerometerIsntComparedWithTheWheels() {
+    Robot unchecked = new Robot(Translation2d.ZERO, false);
+    Robot checked = new Robot();
+    unchecked.imuTurned = Math.PI / 2;
+    checked.imuTurned = Math.PI / 2;
+
+    unchecked.loops(30, 4.4 * LOOP, 0, 0, 0);
+    checked.loops(30, 4.4 * LOOP, 0, 0, 0);
+
+    assertThat(unchecked.check.slipMetersPerSecond()).isZero();
+    assertThat(checked.check.speedSlipMetersPerSecond()).as("as it would be").isPositive();
+  }
+
+  /** A hit: the IMU feels 4 g that the wheels don't. A robot stopping as hard is felt by both. */
+  @Test
+  void aJoltTheWheelsDontExplainIsACollision() {
+    Robot hit = new Robot().loops(10, 0, 0, 0, 0);
+    Robot stopping = new Robot();
+    stopping.fieldVx = 2;
+    stopping.loops(10, 0, 0, 0, 0);
+
+    hit.slide(-0.8, 0).loop(0.8, 0, 0, 0); // shoved to 0.8 m/s in a loop: 40 m/s²
+    stopping.loop(-0.8, 0, 0, 0); // slows as fast, its wheels with it
+
+    assertThat(hit.check.jolt()).isTrue();
+    assertThat(stopping.check.jolt()).isFalse();
+    assertThat(hit.check.speedSlipMetersPerSecond()).as("the collision's doubt covers it").isZero();
+  }
+
+  /** Without a checked accelerometer, a jolt's size alone decides. */
+  @Test
+  void anUncheckedAccelerometersJoltIsJudgedByItsSize() {
+    Robot stopping = new Robot(Translation2d.ZERO, false);
+    stopping.fieldVx = 2;
+    stopping.loops(10, 0, 0, 0, 0);
+
+    stopping.loop(-0.8, 0, 0, 0);
+
+    assertThat(stopping.check.jolt()).isTrue();
   }
 
   @Test
@@ -224,17 +300,16 @@ class SlipCheckTest {
     assertThat(robot.check.turnSlipMetersPerSecond()).isPositive();
     assertThat(robot.check.speedSlipMetersPerSecond()).isPositive();
 
-    // No IMU turn: the turn starts over. No acceleration (a jolt, say): the speed starts over.
-    robot.check.update(LOOP, 0, Double.NaN, 0, new ChassisVelocities(), Double.NaN, 0);
+    robot.check.startOver(Double.NaN, Double.NaN);
     assertThat(robot.check.slipMetersPerSecond()).isZero();
-    robot.check.update(LOOP, 0.1, 0, 0, new ChassisVelocities(1, 0, 0), 0, 0);
-    assertThat(robot.check.speedSlipMetersPerSecond())
-        .as("one loop is only the comparison's start")
-        .isZero();
+    assertThat(robot.check.slideMetersPerSecond()).isZero();
+    assertThat(robot.check.jolt()).isFalse();
 
-    robot.loops(20, 0, 0, 0, 0.004);
-    robot.check.reset();
-    assertThat(robot.check.slipMetersPerSecond()).isZero();
+    // Starting over, one loop is only the comparison's start.
+    robot.loop(2.2 * LOOP, 0, 0, 0.004);
+    assertThat(robot.check.speedSlipMetersPerSecond()).isZero();
+    robot.check.startOver(40, 0);
+    assertThat(robot.check.jolt()).as("a jolt, by its size").isTrue();
   }
 
   @Test
@@ -247,12 +322,11 @@ class SlipCheckTest {
                     .speedToleranceMetersPerSecond(-1)
                     .build())
         .hasMessage("Settings.speedToleranceMetersPerSecond: -1 must be zero or more");
+    assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0, true)).hasMessageContaining("reach");
     assertThatThrownBy(
-            () -> SlipCheckSettingsBuilder.builder(SETTINGS).speedMemorySeconds(0).build())
-        .hasMessage("Settings.speedMemorySeconds: 0 must be positive");
-    assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0)).hasMessageContaining("reach");
-    SlipCheck check = new SlipCheck(SETTINGS, REACH);
-    assertThatThrownBy(() -> check.update(0, 0, 0, 0, new ChassisVelocities(), 0, 0))
+            () ->
+                new SlipCheck.Sample(
+                    0, 0, 0, 0, 0, Translation2d.ZERO, new ChassisVelocities(), 0, 0))
         .hasMessageContaining("takes time");
   }
 }

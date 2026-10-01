@@ -61,7 +61,12 @@ Not built here at all, because the library has no 2027 build yet. Add these when
     one's wheels spin. At the template's 30 A it never gets there; at 120 A it reaches 17 m/s².
     Its wheels slip only when a fault makes them (a wheel spinning past the floor, a launch with
     less grip, a push), and its IMU feels what the simulated robot does, so the wheels and the IMU
-    disagree only then, as localization's slip check expects of a robot whose wheels grip.
+    disagree only then, as localization's slip check expects of a robot whose wheels grip. That
+    IMU is ideal: no noise, no bias, no range (a Pigeon 2 reports up to ±2 g), read as the loop's
+    average acceleration at the robot's center. And what it feels, a real robot never would: the
+    simulated robot follows its wheels through a change of direction at speed, a module turned a
+    quarter turn sending it the new way at once, at up to about 8 g (76 m/s² in the estimator's
+    golden run), where a real robot's grip holds it to about 1.2 g and its wheels scrub.
   - **Weight transfer:** every wheel carries a quarter of the mass however hard the robot speeds
     up, where a real one's front wheels lighten and slip first (`Robots` estimates where).
   - **The battery:** it holds 12 V through a launch, as above.

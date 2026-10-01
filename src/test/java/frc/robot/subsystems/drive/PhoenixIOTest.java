@@ -10,6 +10,7 @@ import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.MountPoseConfigs;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The CTRE IO against Phoenix's own simulated devices: set what a sensor reads, and check what the
@@ -286,5 +288,34 @@ class PhoenixIOTest {
     assertThat(Math.toDegrees(inputs.pitchRad)).isCloseTo(-5, within(0.1));
     assertThat(inputs.odometryYawsRad[inputs.odometryYawsRad.length - 1])
         .isCloseTo(Math.PI / 2, within(0.002));
+  }
+
+  /**
+   * The accelerometer reads along the Pigeon's case, whatever its mount pose: turned a quarter turn
+   * left on the robot, it feels the robot speed up forward on its -y axis; mounted logo down, it
+   * feels a push left on its -y axis and the floor holding it up on its -z axis. Turned by the
+   * mount pose, both read along the robot's axes again.
+   */
+  @Test
+  void theAccelerometerIsTurnedFromThePigeonsCaseToTheRobotsAxes() {
+    MountPoseConfigs turnedLeft = new MountPoseConfigs().withMountPoseYaw(90);
+    MountPoseConfigs logoDown = new MountPoseConfigs().withMountPoseRoll(180);
+
+    Translation3d forward = GyroIOPigeon2.robotAxes(GyroIOPigeon2.mount(turnedLeft), 0, -1, 0);
+    Translation3d left = GyroIOPigeon2.robotAxes(GyroIOPigeon2.mount(logoDown), 0, -1, -9.81);
+
+    assertThat(forward.getDistance(new Translation3d(1, 0, 0))).isLessThan(1e-12);
+    assertThat(left.getDistance(new Translation3d(0, 1, 9.81))).isLessThan(1e-12);
+  }
+
+  @Test
+  void theGyroReadsItsMountPoseAtStartup() {
+    Pigeon2 pigeon = new Pigeon2(21, BUS);
+    StatusCode applied =
+        pigeon.getConfigurator().apply(new MountPoseConfigs().withMountPoseYaw(90));
+    GyroIOPigeon2 io = new GyroIOPigeon2(21, BUS, 1.0, odometry);
+
+    assertThat(applied.isOK()).isTrue();
+    assertThat(Math.toDegrees(io.mount().getZ())).isCloseTo(90, within(1e-3));
   }
 }

@@ -11,6 +11,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
+import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
@@ -432,9 +433,13 @@ class FaultsTest {
 
     // Nose up (a negative pitch): forward. Left side up (a positive roll): left.
     assertThat(tilted.accelerationXMetersPerSecSq)
-        .isCloseTo(9.81 * Math.sin(Math.toRadians(10)), within(1e-9));
+        .isCloseTo(ImuReadings.STANDARD_GRAVITY * Math.sin(Math.toRadians(10)), within(1e-9));
     assertThat(tilted.accelerationYMetersPerSecSq)
-        .isCloseTo(9.81 * Math.sin(Math.toRadians(5)) * Math.cos(Math.toRadians(10)), within(1e-9));
+        .isCloseTo(
+            ImuReadings.STANDARD_GRAVITY
+                * Math.sin(Math.toRadians(5))
+                * Math.cos(Math.toRadians(10)),
+            within(1e-9));
   }
 
   @Test

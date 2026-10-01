@@ -82,6 +82,7 @@ final class ModuleIOTalonFX implements ModuleIO {
   private final Queue<Long> odometryTimes;
   private final Queue<Double> odometryDriveRotations;
   private final Queue<Double> odometrySteerRotations;
+  private final Queue<Double> odometrySteerCurrent;
 
   // A device counts as disconnected once it has been silent for half a second, not at one glitch.
   private final Debouncer driveConnected = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
@@ -157,13 +158,13 @@ final class ModuleIOTalonFX implements ModuleIO {
     steerStatorCurrent = steer.getStatorCurrent();
     encoderAbsolute = encoder.getAbsolutePosition();
 
-    // Odometry's signals as fast as the thread reads them, the rest once a loop, and nothing else
-    // from the motor controllers. The CANcoder's position and velocity, which the steering's loop
-    // runs on, go at their own rate, set explicitly: signals that share a frame go at the fastest
-    // rate any of them asks for, and left at the default, they could go no faster than the
-    // absolute position's once a loop.
+    // Odometry's signals as fast as the thread reads them, with the steering's current (its peaks
+    // last a few milliseconds), the rest once a loop, and nothing else from the motor controllers.
+    // The CANcoder's position and velocity, which the steering's loop runs on, go at their own
+    // rate, set explicitly: signals that share a frame go at the fastest rate any of them asks for,
+    // and left at the default, they could go no faster than the absolute position's once a loop.
     BaseStatusSignal.setUpdateFrequencyForAll(
-        PhoenixOdometryThread.FREQUENCY_HZ, drivePosition, steerPosition);
+        PhoenixOdometryThread.FREQUENCY_HZ, drivePosition, steerPosition, steerStatorCurrent);
     BaseStatusSignal.setUpdateFrequencyForAll(
         PhoenixDrivetrain.ENCODER_FREQUENCY_HZ, encoder.getPosition(), encoder.getVelocity());
     BaseStatusSignal.setUpdateFrequencyForAll(
@@ -175,7 +176,6 @@ final class ModuleIOTalonFX implements ModuleIO {
         driveTorqueLimited,
         steerVelocity,
         steerVolts,
-        steerStatorCurrent,
         encoderAbsolute);
     ParentDevice.optimizeBusUtilizationForAll(drive, steer);
 
@@ -183,6 +183,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     odometryTimes = odometry.timestamps();
     odometryDriveRotations = odometry.register(drivePosition.clone());
     odometrySteerRotations = odometry.register(steerPosition.clone());
+    odometrySteerCurrent = odometry.register(steerStatorCurrent.clone());
   }
 
   private static InvertedValue direction(boolean clockwise) {
@@ -206,6 +207,19 @@ final class ModuleIOTalonFX implements ModuleIO {
   static double wheelRotations(
       double driveReading, double moduleRotations, double couplingRatio, double driveGearing) {
     return driveReading - couplingRatio * moduleRotations / driveGearing;
+  }
+
+  /**
+   * The most current, either way, among a loop's readings and the latest: the steering's peak,
+   * which lasts a few milliseconds as a turn starts and stops, so a reading once a loop would
+   * almost always miss it. Takes the readings.
+   */
+  static double mostAmps(Queue<Double> readings, double latest) {
+    double most = Math.abs(latest);
+    for (Double amps = readings.poll(); amps != null; amps = readings.poll()) {
+      most = Math.max(most, Math.abs(amps));
+    }
+    return most;
   }
 
   @Override
@@ -249,7 +263,8 @@ final class ModuleIOTalonFX implements ModuleIO {
     inputs.steerAngle = Rotation2d.fromRotations(encoderAbsolute.getValueAsDouble());
     inputs.steerVelocityRadPerSec = TWO_PI * steerRotationsPerSecond;
     inputs.steerAppliedVolts = steerVolts.getValueAsDouble();
-    inputs.steerStatorCurrentAmps = steerStatorCurrent.getValueAsDouble();
+    inputs.steerStatorCurrentAmps =
+        mostAmps(odometrySteerCurrent, steerStatorCurrent.getValueAsDouble());
 
     // The drivetrain holds the odometry thread's lock while reading, so these are in step.
     int readings =

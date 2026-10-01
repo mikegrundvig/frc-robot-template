@@ -34,8 +34,9 @@ public interface ModuleIO {
     public double steerAppliedVolts = 0.0;
 
     /**
-     * On a robot, as of the motor controller's last report, which can fall between the short peaks
-     * as the module starts and stops a turn; in the simulator, the most since the last loop.
+     * The most current through the steering motor since the last loop, either way: a turn draws its
+     * peak for a few milliseconds as it starts and stops, which a reading once a loop would almost
+     * always miss. Read at 250 Hz on a robot, with odometry; every millisecond in the simulator.
      */
     public double steerStatorCurrentAmps = 0.0;
 

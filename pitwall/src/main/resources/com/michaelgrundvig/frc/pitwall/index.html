@@ -317,7 +317,7 @@
     Object.assign(run, structuredClone({
       id: now.id, experiment: now.experiment, rig: now.rig, settings: now.settings,
       gains: now.gains, signals: now.signals, phase: now.phase, detail: now.detail,
-      scores: now.scores,
+      scores: now.scores, gainsChanged: now.gainsChanged,
     }));
   }
 
@@ -643,6 +643,7 @@
       }
       knobs.append(table);
       const apply = make("button", "primary", "Apply gains");
+      view.apply = apply;
       apply.addEventListener("click", () => applyEdits(gainInputs(), view.say));
       const applyRow = make("div", "controls");
       applyRow.style.marginTop = "8px";
@@ -731,11 +732,14 @@
 
   function updateRig(name, view) {
     const session = doc.tuning;
+    // While its run runs, its gains stay put here: a run is scored for the gains it started with.
+    const busy = Boolean(doc.run && doc.run.rig === name && doc.run.phase === "RUNNING");
+    view.apply.disabled = !session.enabled || busy;
     for (const [path, { row, input, committed }] of view.gains) {
       const described = doc.tunables[path];
       committed.textContent = described ? shown(described.committed) : "";
       row.classList.toggle("changed", path in doc.changes);
-      input.disabled = !session.enabled;
+      input.disabled = !session.enabled || busy;
       if (!input.dataset.edited && document.activeElement !== input) {
         input.value = shown(doc.values[path]);
       }
@@ -755,8 +759,9 @@
     // (samples arriving redraw it too: see drawSoon).
     const mine = runs.filter((run) => run.rig === name);
     const scoresKey = JSON.stringify([
-      mine.map((run) => [run.key, run.phase, run.detail, Boolean(run.scores)]),
-      session.enabled, doc.robot.program, doc.robot.code, [...view.expanded]]);
+      mine.map((run) => [run.key, run.phase, run.detail, Boolean(run.scores), run.gainsChanged]),
+      session.enabled, busy, doc.robot.program, doc.robot.code, [...view.expanded]]);
+    view.busy = busy;
     if (scoresKey !== view.scoresKey) {
       view.scoresKey = scoresKey;
       renderScores(name, view);
@@ -827,9 +832,12 @@
       head.append(th);
     }
     head.append(make("th"));
-    // The best in each column, when there's more than one run to compare.
+    // The best in each column, when there's more than one fair run to compare: a run whose gains
+    // changed while it ran answers for more than one set of them.
     const best = columns.map((column) => {
-      const values = summaries.map((s) => (s ? column.get(s) : NaN)).filter(Number.isFinite);
+      const values = summaries
+        .map((s, i) => (s && !mine[i].gainsChanged ? column.get(s) : NaN))
+        .filter(Number.isFinite);
       return values.length > 1 ? Math.min(...values) : NaN;
     });
     const body = table.createTBody();
@@ -848,6 +856,11 @@
         label.append(more, " ");
       }
       label.append(`${run.id} ${run.experiment}`);
+      if (run.gainsChanged) {
+        const tag = make("span", "tag", "gains changed");
+        tag.title = run.detail;
+        label.append(" ", tag);
+      }
       if (run.program !== doc.robot.program) {
         const tag = make("span", "tag", run.code !== doc.robot.code ? "other code" : "before a restart");
         tag.title = "Ran on " + run.robot + (run.simulated ? " (simulator)" : "") + ", code " + run.code;
@@ -860,8 +873,8 @@
       const show = (values, cells) => columns.forEach((column, c) => {
         const value = column.get(values);
         const cell = cells.insertCell();
-        cell.className = "number" + (cells === row && Number.isFinite(value) && value === best[c]
-            ? " best" : "");
+        cell.className = "number" + (cells === row && !run.gainsChanged && Number.isFinite(value)
+            && value === best[c] ? " best" : "");
         cell.textContent = Number.isFinite(value) ? column.show(value)
             : value === Infinity ? "never" : "—";
       });
@@ -875,7 +888,7 @@
       }
       const restore = make("button", "small", "Restore");
       restore.title = "Put this run's gains back";
-      restore.disabled = !doc.tuning.enabled;
+      restore.disabled = !doc.tuning.enabled || view.busy;
       restore.addEventListener("click", () => send("PATCH", "/api/values", run.gains, view.say));
       row.insertCell().append(restore);
       if (s && view.expanded.has(run.key)) {

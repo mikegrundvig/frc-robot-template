@@ -199,6 +199,7 @@ public final class Page {
     shown.put("gains", gains);
     shown.put("startNanos", run.startNanos());
     shown.put("controller", run.controller());
+    shown.put("gainsChanged", run.gainsChanged());
     Run.State state = run.state();
     shown.put("phase", state.phase().name());
     shown.put("detail", state.detail());

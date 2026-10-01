@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.pitwall.experiment;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,6 +60,12 @@ public final class Run {
   private int steps;
   private @Nullable String unread;
 
+  /** The configuration its gains were last read from; a new one may hold new gains. */
+  private Record checked;
+
+  /** Its gains as they changed while it ran, by path: empty unless they did. */
+  private volatile Map<String, Double> changedGains = Map.of();
+
   /**
    * A run, before its first loop. Its gains are read now.
    *
@@ -71,6 +78,7 @@ public final class Run {
     this.experiment = experiment;
     this.controller = controller == null ? "" : controller;
     gains = experiment.rig().gainValues();
+    checked = experiment.rig().config().get();
     trace = new Trace(experiment.rig().traced(), capacity);
   }
 
@@ -126,6 +134,7 @@ public final class Run {
       return true;
     }
     Rig rig = experiment.rig();
+    checkGains(rig);
     if (steps == 0) {
       startNanos = nowNanos; // the first loop's samples came before the run began
     } else {
@@ -137,7 +146,14 @@ public final class Run {
     Profile profile = experiment.profile();
     double seconds = (nowNanos - startNanos) / 1e9;
     if (seconds >= profile.durationSeconds()) {
-      end(Phase.ENDED, unread == null ? "Ended" : "Ended, but " + unread, scores());
+      List<String> but = new ArrayList<>();
+      if (!changedGains.isEmpty()) {
+        but.add("its gains changed while it ran (" + changes() + "), so it's no fair comparison");
+      }
+      if (unread != null) {
+        but.add(unread);
+      }
+      end(Phase.ENDED, but.isEmpty() ? "Ended" : "Ended, but " + String.join("; ", but), scores());
       return true;
     }
     double setpoint = rig.clamped(profile.setpoint(seconds));
@@ -174,6 +190,43 @@ public final class Run {
     return built
         .whenCanceled(() -> cancel("Canceled: another command needed " + experiment.rig().name()))
         .named(experiment.name());
+  }
+
+  /**
+   * Whether its gains changed while it ran, from the page's tuning table or a dashboard: then its
+   * scores answer for more than one set of gains, and no fair comparison with other runs.
+   */
+  public boolean gainsChanged() {
+    return !changedGains.isEmpty();
+  }
+
+  /**
+   * Notes any gain that changed since the run started. A changed configuration is a new record, so
+   * comparing one reference each loop is enough; the gains are read only when it has changed.
+   */
+  private void checkGains(Rig rig) {
+    Record now = rig.config().get();
+    if (now == checked) {
+      return;
+    }
+    checked = now;
+    Map<String, Double> changed = new LinkedHashMap<>(changedGains);
+    rig.gainValues()
+        .forEach(
+            (path, value) -> {
+              if (!value.equals(gains.get(path))) {
+                changed.put(path, value);
+              }
+            });
+    changedGains = Map.copyOf(changed);
+  }
+
+  /** The gains that changed, as {@code gains.steerKp 16.0 to 20.0}. */
+  private String changes() {
+    List<String> changes = new ArrayList<>();
+    changedGains.forEach(
+        (path, value) -> changes.add(path + " " + gains.get(path) + " to " + value));
+    return String.join(", ", changes);
   }
 
   /** Ends the run early, if it's still going. */

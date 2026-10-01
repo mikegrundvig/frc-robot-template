@@ -32,6 +32,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -40,6 +41,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
@@ -71,9 +73,10 @@ import org.wpilib.hardware.hal.RobotMode;
  *       values are in, with what the record holding it says it is. A {@code record} is a display
  *       name, such as {@code SwerveConfig.Gains}.
  *   <li>{@code GET /api/tunables}: the configurations' tunable values, by the WPILib tunable each
- *       is published as, {@code {path: {"config", "field", "unit", "limits", "committed", "record",
- *       "group", "meaning"}}}, the last three the record that declares the value, its path, and
- *       what its {@code @param} says the value means (empty when there's none).
+ *       is published as, {@code {path: {"config", "field", "unit", "limits", "min", "max",
+ *       "committed", "record", "group", "meaning"}}}: its tuning limits as text and their ends as
+ *       numbers (an open end has none), and the record that declares the value, its path, and what
+ *       its {@code @param} says the value means (empty when there's none).
  *   <li>{@code GET /api/values}: their current values, {@code {path: number}}. {@code PATCH} it
  *       with a JSON merge patch (RFC 7396) to change several at once, all or none, each checked by
  *       its configuration first; {@code null} returns a value to its committed one.
@@ -82,9 +85,9 @@ import org.wpilib.hardware.hal.RobotMode;
  *       ({@code Accept: text/plain} for the report). {@code DELETE} it to return every value to its
  *       committed one.
  *   <li>{@code GET /api/wpilib-tunables}: every other WPILib tunable, {@code [{"path", "type",
- *       "value", "editable", "limits"}]}, the limits as text ({@code "0 to 30"}, empty for none).
- *       {@code PATCH} it with {@code {path: value}} to change several at once, all or none, each
- *       within its limits.
+ *       "value", "editable", "limits", "min", "max"}]}, the limits as text ({@code "0 to 30"},
+ *       empty for none) and their ends as numbers. {@code PATCH} it with {@code {path: value}} to
+ *       change several at once, all or none, each within its limits.
  *   <li>{@code GET /api/experiments}: the rigs and the experiments that run on them. {@code POST}
  *       it {@code {"start": name}}, naming the page's stream, or {@code {"cancel": name, "run": id,
  *       "reason": why}}; canceling what isn't running is 409.
@@ -121,11 +124,17 @@ import org.wpilib.hardware.hal.RobotMode;
  * when applied, 422 when a limit or the configuration's checks (or the action) refuse it, 409 when
  * it is locked out (tuning off, not enabled in utility mode, or the field system connected), and
  * 202 when the loop didn't get to it in time (the next GET shows the result). Errors are problem
- * details (RFC 9457).
+ * details (RFC 9457). A refused change to tunables also lists each reason in {@code errors}, tied
+ * to the tunables it concerns ({@code [{"layer", "by", "path", "paths", "config", "group", "text",
+ * "line"}]}), while {@code detail} keeps every reason as a line, as it always has.
  *
  * <p>The server's threads never change the robot: they read what the robot loop last published
  * ({@link Status#view()}, {@link Actions#view()}, {@link Tuning#view()}) and queue requests for the
  * robot loop to apply. The event stream is written by its own thread from what the loop hands it.
+ *
+ * <p>The page itself is {@code index.html} and the files in {@code page/} beside it ({@code
+ * /page/tune.js}, ...): a script module for its core and one for each view, plain JavaScript served
+ * as written, with nothing to build.
  *
  * <p>Nothing here is bundled: the web server is the one built into Java ({@code
  * com.sun.net.httpserver}), and JSON is avaje-jsonb, which WPILib gives every robot program.
@@ -160,6 +169,13 @@ public final class PitwallServer implements AutoCloseable {
    */
   private static final Map<String, String> BUNDLED =
       Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
+
+  /**
+   * The page's own files besides index.html: a script module for its core and one for each view,
+   * and its styles, in {@code page/} beside it. A short plain name and nothing else, so no request
+   * can reach any other resource.
+   */
+  private static final Pattern PAGE_FILE = Pattern.compile("/page/[a-z][a-z0-9-]{0,31}\\.(js|css)");
 
   /** The header a page names its event stream in, so the deadman knows who's asking. */
   static final String STREAM = "Pitwall-Stream";
@@ -297,6 +313,15 @@ public final class PitwallServer implements AutoCloseable {
     return found;
   }
 
+  /** One of the page's files by name, such as {@code tune.js}; empty if there's none. */
+  private static Optional<byte[]> pageFile(String name) {
+    try (InputStream in = PitwallServer.class.getResourceAsStream("page/" + name)) {
+      return in == null ? Optional.empty() : Optional.of(in.readAllBytes());
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
   private static String page() {
     try (InputStream in = PitwallServer.class.getResourceAsStream("index.html")) {
       if (in == null) {
@@ -315,10 +340,18 @@ public final class PitwallServer implements AutoCloseable {
     private final int status;
     private final String title;
 
+    /** For a refused change to tunables, each reason with the values it concerns. */
+    private final transient List<Outcome.Reason> reasons;
+
     Problem(int status, String title, String detail) {
+      this(status, title, detail, List.of());
+    }
+
+    Problem(int status, String title, String detail, List<Outcome.Reason> reasons) {
       super(detail);
       this.status = status;
       this.title = title;
+      this.reasons = reasons;
     }
   }
 
@@ -370,6 +403,13 @@ public final class PitwallServer implements AutoCloseable {
     private final Broadcaster broadcaster;
     private final String page;
     private final Map<String, byte[]> bundled;
+
+    /**
+     * The page's files, each read once, as first asked for: they never change while it runs. Only
+     * files found are kept, so a stranger asking for names that don't exist fills nothing.
+     */
+    private final Map<String, byte[]> pageFiles = new ConcurrentHashMap<>();
+
     private final Duration wait;
     private final Duration idle;
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
@@ -405,6 +445,9 @@ public final class PitwallServer implements AutoCloseable {
                 404, "Not found", "There is no simulator here: a robot has no simulator controls");
           }
           List<String> allowed = METHODS.get(path);
+          if (allowed == null && PAGE_FILE.matcher(path).matches()) {
+            allowed = List.of("GET");
+          }
           if (allowed == null) {
             throw new Problem(404, "Not found", "There is nothing at " + path);
           }
@@ -446,7 +489,12 @@ public final class PitwallServer implements AutoCloseable {
                 answer(exchange, simulator().requestUndoAll(), this::componentsView);
             case "POST /api/simulator/scenarios" -> postScenario(exchange);
             case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
-            default -> throw new IllegalStateException("unrouted: " + method + " " + path);
+            default -> {
+              if (!PAGE_FILE.matcher(path).matches()) {
+                throw new IllegalStateException("unrouted: " + method + " " + path);
+              }
+              sendPageFile(exchange, path);
+            }
           }
         } catch (Problem problem) {
           sendProblem(exchange, problem);
@@ -1072,7 +1120,7 @@ public final class PitwallServer implements AutoCloseable {
       }
       switch (outcome.result()) {
         case APPLIED -> sendJson(exchange, 200, state.get());
-        case REFUSED -> throw new Problem(422, "Refused", outcome.detail());
+        case REFUSED -> throw new Problem(422, "Refused", outcome.detail(), outcome.reasons());
         case LOCKED -> throw new Problem(409, "Locked", outcome.detail());
       }
     }
@@ -1192,6 +1240,7 @@ public final class PitwallServer implements AutoCloseable {
         shown.put("editable", tunable.editable());
         shown.put(
             "limits", tunable.limits().equals(Limits.NONE) ? "" : tunable.limits().toString());
+        Page.ends(shown, tunable.limits());
         listed.add(shown);
       }
       return listed;
@@ -1227,6 +1276,26 @@ public final class PitwallServer implements AutoCloseable {
       }
     }
 
+    /**
+     * One of the page's files, from {@code page/} beside index.html. Not kept by the browser, so a
+     * page reloaded after a redeploy runs the new program's page.
+     */
+    private void sendPageFile(HttpExchange exchange, String path) throws IOException {
+      String name = path.substring("/page/".length());
+      byte[] file = pageFiles.get(name);
+      if (file == null) {
+        file =
+            pageFile(name)
+                .orElseThrow(() -> new Problem(404, "Not found", "There is nothing at " + path));
+        pageFiles.putIfAbsent(name, file);
+      }
+      headers(exchange, name.endsWith(".css") ? "text/css" : "text/javascript");
+      exchange.sendResponseHeaders(200, file.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(file);
+      }
+    }
+
     private void sendJson(HttpExchange exchange, int status, Object body) throws IOException {
       send(exchange, status, "application/json", json.toJson(body));
     }
@@ -1237,7 +1306,33 @@ public final class PitwallServer implements AutoCloseable {
       body.put("title", problem.title);
       body.put("status", problem.status);
       body.put("detail", String.valueOf(problem.getMessage()));
+      if (!problem.reasons.isEmpty()) {
+        // An extension member (RFC 9457 allows them): each reason, tied to its values.
+        body.put("errors", problem.reasons.stream().map(Api::error).toList());
+      }
       send(exchange, problem.status, "application/problem+json", json.toJson(body));
+    }
+
+    /**
+     * A reason a change was refused, as the page reads it: which check ({@code layer}: value,
+     * limit, record, rule, or tunable), who refused it ({@code by}: a record or a rule), the
+     * tunables it concerns ({@code paths}, and {@code path} when it's one), its configuration and,
+     * for a record's check that names no value, where the record is ({@code group}), why ({@code
+     * text}), and its line of {@code detail} ({@code line}).
+     */
+    private static Map<String, Object> error(Outcome.Reason reason) {
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("layer", reason.layer().name().toLowerCase(Locale.ROOT));
+      shown.put("by", reason.by());
+      if (reason.paths().size() == 1) {
+        shown.put("path", reason.paths().getFirst());
+      }
+      shown.put("paths", reason.paths());
+      shown.put("config", reason.config());
+      shown.put("group", reason.group());
+      shown.put("text", reason.text());
+      shown.put("line", reason.line());
+      return shown;
     }
 
     private static void send(HttpExchange exchange, int status, String type, String body)
@@ -1256,14 +1351,12 @@ public final class PitwallServer implements AutoCloseable {
       exchange.getResponseHeaders().set("Content-Type", type + "; charset=utf-8");
       exchange.getResponseHeaders().set("Cache-Control", "no-store");
       // The page may not be framed by another site's page (to trick a click on its buttons), and
-      // loads nothing from anywhere else.
+      // loads nothing from anywhere else. It runs no inline script or style: what a robot's text
+      // could slip into the page (it's always set as text) couldn't run.
       exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
       exchange
           .getResponseHeaders()
-          .set(
-              "Content-Security-Policy",
-              "default-src 'self'; script-src 'self' 'unsafe-inline';"
-                  + " style-src 'self' 'unsafe-inline'; frame-ancestors 'none'");
+          .set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'");
       exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
       exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
     }

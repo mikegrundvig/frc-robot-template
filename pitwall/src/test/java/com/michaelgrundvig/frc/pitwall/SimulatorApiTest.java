@@ -79,6 +79,7 @@ class SimulatorApiTest {
           tuning,
           tunables,
           new ByHand(System::nanoTime).experiments(),
+          () -> "",
           simulator);
   private final Broadcaster broadcaster =
       new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, simulator::lost);

@@ -25,6 +25,7 @@ import static frc.robot.sim.Faults.SLIPS;
 import static frc.robot.sim.Faults.STALE;
 import static frc.robot.sim.Faults.TILTED;
 import static frc.robot.sim.Faults.TO_A_BUMP;
+import static frc.robot.sim.Faults.TURN;
 import static frc.robot.sim.Faults.TURNED;
 import static frc.robot.sim.Faults.TURNS;
 import static frc.robot.sim.Faults.UNPLUGGED;
@@ -47,7 +48,7 @@ import java.util.stream.Collectors;
  * a camera names the robot's first, and a bump is the field's nearest.
  *
  * <p>To add one, add it to {@link #ALL}, made of the faults it applies. A fault the simulated world
- * can't make yet starts in {@link Faults}; docs/stand-ins.md lists those.
+ * can't make yet starts in {@link Faults}; docs/simulator.md lists those.
  */
 public final class Scenarios {
   /** How far a collision or a push moves the robot: to its left. */
@@ -138,7 +139,7 @@ public final class Scenarios {
                       Setting.of(
                           ROBOT,
                           SHOVED,
-                          Map.of(FORWARD, 0.0, LEFT, KNOCKED_LEFT_METERS, "Turn", 0.0))))
+                          Map.of(FORWARD, 0.0, LEFT, KNOCKED_LEFT_METERS, TURN, 0.0))))
               .build(),
           Scenario.builder()
               .name("wheel-slip")
@@ -217,7 +218,14 @@ public final class Scenarios {
                       + " over. Its gyro feels the turn but its wheels see no move, so only its"
                       + " cameras can say where it is. Needs a field with bumps.")
               .sensorFaults(Scenario.NO_FAULTS)
-              .events(Scenario.faults(Setting.of(ROBOT, TO_A_BUMP)))
+              .events(
+                  world -> {
+                    if (!Faults.hasBumps(world)) {
+                      throw new IllegalArgumentException(
+                          "this scenario carries the robot to a bump, and the field has none");
+                    }
+                    return List.of(Setting.of(ROBOT, TO_A_BUMP));
+                  })
               .build());
 
   private Scenarios() {}
@@ -266,7 +274,8 @@ public final class Scenarios {
 
   /**
    * Declares every scenario that can happen to this world's robot to Pitwall's simulator controls,
-   * where the page applies them. One that needs a part the robot lacks (a camera) is left out.
+   * where the page applies them. One that needs what the robot or its field lacks (a camera, a
+   * bump) is left out.
    */
   public static void addTo(Components components, SimulatedWorld world) {
     for (Scenario scenario : ALL) {

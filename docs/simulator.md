@@ -2,36 +2,50 @@
 
 `./gradlew run` runs the robot program on your laptop, in WPILib's simulation, with this template's
 simulated world (`frc.robot.sim`): a drivetrain that really moves, cameras that render what they'd
-see, and sensors that err as a season-worn robot's do. Pitwall's page drives it
-(http://localhost:5820): the Driver Station, the keyboard or a gamepad, pausing and stepping, and
-failing the robot's parts live, which WPILib's simulator GUI can't do. AdvantageScope shows the field.
+see, and sensors that err as a season-worn robot's do. AdvantageScope shows the field.
+
+Pitwall serves the simulator's controls (http://localhost:5820/api/simulator): the Driver Station,
+joysticks, pausing and stepping, and failing the robot's parts live, which WPILib's simulator GUI
+can't do. So far that's the server side, the API below; the Pitwall page's *Sim* view, which will
+drive it in place of the GUI, is coming. Until then, drive the simulator from the GUI, and use the
+API by hand (`curl`) for what the GUI can't do.
 
 | Job | Command |
 |---|---|
-| The simulator, enabled on a start and drivable | `./gradlew run` |
-| Without WPILib's simulator GUI: Pitwall's page drives it | `./gradlew run -Pgui=false` |
+| The simulator, enabled on a start and drivable from the GUI's keyboard | `./gradlew run` |
+| Without WPILib's simulator GUI, disabled: drive it through the API | `./gradlew run -Pgui=false` |
 | With the GUI, whatever the default | `./gradlew run -Pgui` |
 | Disabled, with no alliance station, like a real robot | `./gradlew run -PstartDisabled` |
 | In a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the scenarios | `./gradlew scenarios` |
 
-**The GUI is on by default for now**, and turns off by default once Pitwall's *Sim* view replaces
-it; `-Pgui` then brings it back. A real Driver Station can connect to the simulator either way
-(`halsim_ds_socket` stays loaded). Without the GUI you lose its HAL device views, its NetworkTables
-browser and plots, its `Field2d` window (AdvantageScope and Elastic show the same), its notifier
-table, keyboard remapping, and its joystick reading, which works whatever window has focus. With
-the GUI on, its Driver Station panel writes the joysticks it has mapped (the keyboard is joystick
-0 by default), so drive from one or the other; whether it also overwrites the page's input every
-frame is unverified.
+**The GUI is on by default for now**, and turns off by default once the *Sim* view replaces it;
+`-Pgui` then brings it back. A real Driver Station can connect to the simulator either way
+(`halsim_ds_socket` stays loaded). Without the GUI the robot starts disabled, since nothing on
+screen could disable it yet; enable it through the API or a real Driver Station. Without the GUI
+you also lose its HAL device views, its NetworkTables browser and plots, its `Field2d` window
+(AdvantageScope and Elastic show the same), its notifier table, keyboard remapping, and its
+joystick reading, which works whatever window has focus.
+
+**The GUI and the API's joysticks don't mix.** Read in alpha-7's `DriverStationGui.cpp`
+(`DriverStationExecute`): while the Driver Station is attached and not in autonomous, the GUI
+writes all six joysticks every frame, zeros for a slot it has no device for, and announces new
+data every 20 ms. Its *Zero disconnected joysticks* setting doesn't stop that: the check tests the
+setting's pointer, not its value, so it always zeros. The GUI's own match time counts down while
+enabled too. So with the GUI on, the API's joystick input is overwritten within a frame, and its
+match time fights the GUI's. Drive through the API with `-Pgui=false`, or turn the GUI's Driver
+Station off (its *Disable DS* setting), which makes it only read.
 
 ## Pitwall's simulator controls
 
-Everything the page does to the simulator goes through an API it serves only in the simulator. On
-a robot none of it exists: every route answers 404 and the event stream has none of its sections,
-so nothing can write the Driver Station's state there (`PitwallRobotTest` checks this with WPILib
-told it's on a robot). The controls are exempt from the field lock: in the simulator they *are* the
-field, so attaching the field system locks tuning and actions exactly as a real field does, and the
-panel stays usable to detach it again.
+Everything the *Sim* view will do to the simulator goes through an API Pitwall serves only in
+WPILib's simulation, asked of the HAL itself (its runtime type is simulation; anything else counts
+as a robot), and not while replaying a log. On a robot none of it exists: every route answers 404
+and the event stream has none of its sections, so nothing can write the Driver Station's state
+there (`PitwallRobotTest` checks this with WPILib told it's on a Systemcore). The controls are
+exempt from the field lock: in the simulator they *are* the field, so attaching the field system
+locks tuning and actions exactly as a real field does, and the controls stay usable to detach it
+again.
 
 ### In the event stream
 
@@ -51,14 +65,15 @@ Three sections, beside the page's others, sent as JSON merge patches when they c
 ### Requests
 
 Every request names the page's event stream in the `Pitwall-Stream` header, as the page's other
-requests do. Errors are problem details, as elsewhere: 400 for a request that isn't well formed,
-422 for one that names what isn't there or a value out of range (with the reason), 409 for one
-that can't be done now.
+requests do; a joystick's input without one is refused (400), since the joystick is let go when
+that stream closes. Errors are problem details, as elsewhere: 400 for a body of the wrong JSON
+type or shape, 422 for one that names what isn't there or gives a value out of range (with the
+reason), 409 for one that can't be done now.
 
 | Request | Body | Answer |
 |---|---|---|
-| `GET /api/simulator` | | `{"simulator", "components", "scenarios"}`, read by the next loop; while paused, as the last loop left it |
-| `PATCH /api/simulator` | any of `enabled`, `mode`, `allianceStation`, `fmsAttached`, `dsAttached`, `matchTime` (0 to 600 s, or `null` for none), `paused` | the `simulator` section, once the loop has applied it all; 202 if it didn't within a second |
+| `GET /api/simulator` | | `{"simulator", "components", "scenarios"}`, read by the next loop; while paused, at once, as the last loop left it |
+| `PATCH /api/simulator` | any of `enabled`, `mode`, `allianceStation`, `fmsAttached`, `dsAttached`, `matchTime` (0 to 600 s, or `null` for none), `paused` | the `simulator` section, once the loop has applied it all; 202 if it didn't within a second (while paused, it waits for a Step) |
 | `POST /api/simulator/step` | | one loop of a paused simulator, then the `simulator` section; 409 while it runs |
 | `POST /api/simulator/stop` | | 202, then the program ends: the stream closes |
 | `PUT /api/simulator/joysticks` | `{"0": {"axes": [...], "buttons": [...], "povs": [...]}, "1": null}` | 204 at once |
@@ -67,8 +82,10 @@ that can't be done now.
 | `POST /api/simulator/scenarios` | `{"apply": name}` | the `components` section |
 
 A `PATCH` applies its changes in one loop, in the order given. Enabling also attaches the Driver
-Station, as a real one would be, and detaching it disables the robot. A parameter a fault request
-leaves out takes its `initial` value.
+Station, as a real one would be, and detaching it disables the robot. Pausing while paused answers
+at once; a resume drops any pause asked before it, and a Stop any pause at all. A parameter a fault
+request leaves out takes its `initial` value; a lasting fault whose values leave the part as it
+was built changes nothing, and is refused (422, "changes nothing: as built"), never shown as on.
 
 **Joysticks.** Each joystick's whole input, by WPILib's indices (for a gamepad,
 `org.wpilib.driverstation.Gamepad`'s): axes from -1 to 1, a stick negative pushed up or left, at
@@ -84,20 +101,30 @@ robot centers it (`centeredByDeadman`), and when the page's event stream closes 
 
 Like the rest of Pitwall, only the robot loop changes anything. A request waits in a queue, and
 Pitwall's `periodic()`, first thing in `robotPeriodic()`, applies it through WPILib's own
-simulation (`DriverStationSim`) and announces the new data, so the rest of the loop sees the same
-Driver Station, and AdvantageKit, which captures the Driver Station at the end of the loop, logs
-what the loop saw. Nothing new needs logging: AdvantageKit logs the Driver Station's state and the
-joysticks on every robot and replays them, and a fault changes the simulated hardware, whose
-readings the IO layer logs (Pitwall records which faults are on, under `Pitwall/Simulator`, to say
-why). `ReplayEndToEndTest` sets the Driver Station and drives a joystick through these controls,
-and the replay matches.
+simulation (`DriverStationSim`) and announces it at the HAL alone, as a real Driver Station's
+packet arrives. WPILib reads it as the next loop begins, so that loop's mode methods
+(`utilityInit()`), the robot's code, and AdvantageKit's log, which captures the Driver Station as
+it was read, all see it in the same loop, as they do a real Driver Station's. (WPILib's
+`DriverStationSim.notifyNewData()` would refresh WPILib's copy partway through a loop: the rest of
+that loop would see a change its mode methods hadn't, and the replay, which hands each loop its
+logged Driver Station as the loop begins, would see it a loop early.)
+
+Nothing new needs logging: AdvantageKit logs the Driver Station's state and the joysticks on every
+robot and replays them, and a fault changes the simulated hardware, whose readings the IO layer
+logs. `ReplayEndToEndTest` sets the Driver Station and drives a joystick through these controls,
+and the replay matches loop for loop, `utilityInit()` included. A replay has no simulator controls
+(its Driver Station and hardware come from its log), so what they record to say why is never
+replayed: the faults on (`Pitwall/Simulator/Faults`) and every sentence each loop said
+(`Pitwall/Simulator/Said`) are outputs of the simulator's own run alone.
 
 Three things can't wait for the loop, because a paused simulator runs no loops: resuming and
 stepping happen at once on the server's thread (`SimHooks`), and so does asking to stop, which
 resumes a paused clock so a loop runs to end the program. Pausing goes through the loop, so its
-last patch tells every page. A step moves the clock to the next alarm any notifier waits for,
-which between loops is the robot loop's own, as the GUI's Step does; it applies whatever was asked
-while paused. Stop ends AdvantageKit's log, so its last loops are kept, then the program.
+last patch tells every page. A step moves the clock to the next alarm of any notifier, as the GUI's
+Step does: between loops that's the robot loop's own, so one loop runs and applies whatever was
+asked while paused, but a team's own `Notifier` due sooner would fire instead, and Step would need
+pressing again. Stop ends AdvantageKit's log, so its last loops are kept, then the program; it
+refuses anywhere but WPILib's simulation.
 
 ## What can fail, live
 
@@ -129,24 +156,37 @@ it finds out from its sensors, as on a robot.
 | | Placed, as the drive team carries it | happens | x, y (m), heading (°) |
 | | Carried to the nearest bump, facing across it | happens | |
 
-**Not yet possible** (each waits on the simulator, not on Pitwall): one wheel off the floor (every
-wheel slips alike, so they never disagree as a lifted one's would); a wheel slipping on its own
-under acceleration (traction isn't modeled: maple-sim, [stand-ins](stand-ins.md)); a CAN device
-dropping off the bus or browning out (the simulated modules have no bus); the battery sagging
-(the simulated world models no battery); a camera's axes swapped in the configuration, or one with
-the wrong tag layout; and ramp crossings (the terrain has bumps only).
+Carrying the robot to a bump is declared only on a field with bumps.
+
+### What the simulator can't make fail yet
+
+The one list of what's not possible yet; the stand-ins and the code point here. Each waits on the
+simulator, not on Pitwall. Add each to `Faults`, and a scenario for it, when the simulator can
+make it.
+
+- One wheel off the floor: `wheel-lifted` tilts the robot and scales every wheel's grip alike, so
+  its wheels never disagree as a lifted one's would, and the robot isn't raised.
+- A wheel slipping on its own under acceleration: traction isn't modeled (maple-sim,
+  [stand-ins](stand-ins.md)).
+- A CAN device dropping off the bus, or browning out: the simulated modules have no bus.
+- The battery sagging: the simulated world models no battery.
+- A camera's axes swapped in the configuration, the wrong field variant, or one camera with the
+  wrong tag layout.
+- Ramp crossings: the terrain has bumps only.
 
 ## Scenarios
 
 A scenario is a named set of these faults (`frc.robot.sim.Scenarios`). `./gradlew run
 -Pscenario=<name>` applies its sensor faults before the robot's first loop and makes what happens
-in it happen once the robot is enabled; the page applies all of it at once, to a running
+in it happen once the robot is enabled; the API applies all of it at once, to a running
 simulation (`POST /api/simulator/scenarios`), and shows its lasting faults as on, each undone on its
-own or all together. A robot without cameras isn't offered the camera scenarios.
+own or all together. A fault in a scenario that changes nothing (the part is that way as built) is
+passed over. A robot without cameras isn't offered the camera scenarios, nor a field without bumps
+the bump one. `-Pscenario` in a program without the simulator's controls stops it, saying so.
 
 ## What the *Sim* view needs
 
-The server side is done; the page builds on it.
+The server side is done; the page's *Sim* view is built on it next.
 
 - **The minimal panel first:** enabled or disabled; teleop, autonomous, or utility; Driver Station
   attached; the alliance station; FMS attached; keyboard and gamepad driving of joystick 0 (and 1);
@@ -162,7 +202,7 @@ The server side is done; the page builds on it.
   16 to button 5; axes 0-3 to axes 0-3, same sign. A slot picker (joystick 0 or 1) remembered per
   browser.
 - **Send on change, at most once a frame, and every 200 ms while anything is pressed**, naming the
-  page's stream; send the joystick centered (or `null`) on blur, when the tab is hidden, and when
+  page's stream (required); send the joystick centered (or `null`) on blur, when the tab is hidden, and when
   driving is switched off. The robot's deadman covers a page that can't.
 - **An unfocused page.** Keys reach only a focused page, as they reach only a focused GUI window
   today. Whether a gamepad keeps reaching a page that's unfocused or covered by AdvantageScope is
@@ -174,7 +214,11 @@ The server side is done; the page builds on it.
 - **Paused, the stream goes quiet:** a paused simulator runs no loops, so no patches arrive, only
   heartbeats; the page's own pause answer says it's paused. A page that opens while the simulator
   is paused gets no snapshot until a loop runs: when none arrives within a second or two, it asks
-  `GET /api/simulator`, and offers Resume and Step.
+  `GET /api/simulator` (answered at once while paused), and offers Resume and Step.
+- **Changes show a loop later:** the robot program sees a Driver Station change as its next loop
+  begins, as with a real Driver Station; the page's answer already shows it.
+- **Without the GUI the robot starts disabled**; once the *Sim* view is the way to enable it, the
+  build can start it enabled again.
 - **Stop** ends the program, and the stream with it: show "stopped", not "lost connection".
 - The match time arrives in whole seconds; count down between them while enabled, if smoothness
   matters.

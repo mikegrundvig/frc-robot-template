@@ -88,10 +88,13 @@ class SimulatorApiTest {
   @BeforeAll
   void start() throws Exception {
     server.start();
+    // The robot loop: none while the clock is paused, until a step lets one through.
     loop.scheduleAtFixedRate(
         () -> {
-          simulator.periodic();
-          broadcaster.periodic(page::sections, null);
+          if (hal.runsLoop()) {
+            simulator.periodic();
+            broadcaster.periodic(page::sections, null);
+          }
         },
         0,
         5,
@@ -106,7 +109,7 @@ class SimulatorApiTest {
 
   @AfterEach
   void backAsItWas() throws Exception {
-    hal.resume();
+    simulator.resume().get(5, TimeUnit.SECONDS);
     send("DELETE", "/api/simulator/faults", null, null);
     send(
         "PATCH",
@@ -147,19 +150,27 @@ class SimulatorApiTest {
     assertThat(hal.driverStation().allianceStation()).isEqualTo(AllianceStationID.RED_2);
   }
 
+  /**
+   * A body of the wrong type or shape is 400; a name that isn't there or a value out of range 422.
+   */
   @Test
   void whatIsntTheSimulatorsToChangeIsRefused() throws Exception {
     var unknown = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"brownout\": true}");
     var mode = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"mode\": \"TEST\"}");
+    var modeNotText = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"mode\": 3}");
     var notABoolean = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"enabled\": \"yes\"}");
     var matchTime = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"matchTime\": -5}");
+    var matchTimeNotANumber =
+        send("PATCH", "/api/simulator", MERGE_PATCH, "{\"matchTime\": \"soon\"}");
 
     assertThat(unknown.statusCode()).isEqualTo(422);
     assertThat(unknown.body()).contains("brownout isn't the simulator's to change");
-    assertThat(mode.statusCode()).isEqualTo(400);
+    assertThat(mode.statusCode()).isEqualTo(422);
     assertThat(mode.body()).contains("mode is one of AUTONOMOUS, TELEOPERATED, UTILITY, not TEST");
+    assertThat(modeNotText.statusCode()).isEqualTo(400);
     assertThat(notABoolean.statusCode()).isEqualTo(400);
-    assertThat(matchTime.statusCode()).isEqualTo(400);
+    assertThat(matchTime.statusCode()).isEqualTo(422);
+    assertThat(matchTimeNotANumber.statusCode()).isEqualTo(400);
     assertThat(hal.driverStation().enabled()).isFalse();
   }
 
@@ -177,16 +188,36 @@ class SimulatorApiTest {
     assertThat(hal.isPaused()).isFalse();
   }
 
+  /** Paused, no loop runs: a change waits, a read answers at once, and a step runs one loop. */
   @Test
   void aStepIsOneLoopOfAPausedSimulator() throws Exception {
     var running = send("POST", "/api/simulator/step", null, null);
-    hal.pause();
+    send("PATCH", "/api/simulator", MERGE_PATCH, "{\"paused\": true}");
+    var waiting = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"fmsAttached\": true}");
+    var read = send("GET", "/api/simulator", null, null);
     var stepped = send("POST", "/api/simulator/step", null, null);
 
     assertThat(running.statusCode()).isEqualTo(409);
     assertThat(running.body()).contains("Step runs one loop of a paused simulator");
+    assertThat(waiting.statusCode()).as("no loop to apply it").isEqualTo(202);
+    assertThat(read.statusCode()).isEqualTo(200);
+    assertThat(read.body()).contains("\"paused\":true").contains("\"fmsAttached\":false");
     assertThat(stepped.statusCode()).isEqualTo(200);
+    assertThat(stepped.body()).contains("\"fmsAttached\":true").contains("\"paused\":true");
     assertThat(hal.steps()).isEqualTo(1);
+  }
+
+  /** A pause asked while paused is answered at once, and a resume after it holds. */
+  @Test
+  void pausingTwiceThenResumingLeavesItRunning() throws Exception {
+    send("PATCH", "/api/simulator", MERGE_PATCH, "{\"paused\": true}");
+    var again = send("PATCH", "/api/simulator", MERGE_PATCH, "{\"paused\": true}");
+    send("PATCH", "/api/simulator", MERGE_PATCH, "{\"paused\": false}");
+    var read = send("GET", "/api/simulator", null, null);
+
+    assertThat(again.statusCode()).isEqualTo(200);
+    assertThat(hal.isPaused()).isFalse();
+    assertThat(read.body()).contains("\"paused\":false");
   }
 
   @Test
@@ -200,33 +231,46 @@ class SimulatorApiTest {
   /** Input goes to the loop, which hands it to the robot program; the server answers at once. */
   @Test
   void thePageDrivesAJoystick() throws Exception {
-    var driven =
-        send(
-            "PUT",
-            "/api/simulator/joysticks",
-            JSON,
-            "{\"0\": {\"axes\": [0.5, -1], \"buttons\": [false, true], \"povs\": [90]}}");
+    var driven = put("{\"0\": {\"axes\": [0.5, -1], \"buttons\": [false, true], \"povs\": [90]}}");
 
     assertThat(driven.statusCode()).isEqualTo(204);
     JoystickInput expected =
         new JoystickInput(List.of(0.5, -1.0), List.of(false, true), List.of(90));
     waitFor(() -> expected.equals(hal.joystick(0)), "the input to reach the robot");
 
-    var released = send("PUT", "/api/simulator/joysticks", JSON, "{\"0\": null}");
+    var released = put("{\"0\": null}");
     assertThat(released.statusCode()).isEqualTo(204);
     waitFor(() -> JoystickInput.CENTERED.equals(hal.joystick(0)), "the joystick to be let go");
   }
 
+  /** A joystick or value that isn't there is 422; input of the wrong type or shape is 400. */
   @Test
   void joystickInputThatIsntIsRefused() throws Exception {
     assertThat(put("{\"2\": {\"axes\": [0.1]}}").statusCode()).isEqualTo(422);
-    assertThat(put("{\"0\": {\"axes\": [2]}}").body()).contains("An axis is from -1 to 1");
-    assertThat(put("{\"0\": {\"povs\": [10]}}").body()).contains("A POV is an angle");
-    assertThat(put("{\"0\": {\"povs\": [90.5]}}").statusCode()).isEqualTo(400);
+    var axis = put("{\"0\": {\"axes\": [2]}}");
+    assertThat(axis.statusCode()).isEqualTo(422);
+    assertThat(axis.body()).contains("An axis is from -1 to 1");
+    var pov = put("{\"0\": {\"povs\": [10]}}");
+    assertThat(pov.statusCode()).isEqualTo(422);
+    assertThat(pov.body()).contains("A POV is an angle");
+    assertThat(put("{\"0\": {\"povs\": [90.5]}}").statusCode()).isEqualTo(422);
+    assertThat(put("{\"0\": {\"axes\": [0,0,0,0,0,0,0,0,0,0,0,0,0]}}").statusCode())
+        .as("13 axes")
+        .isEqualTo(400);
     assertThat(put("{\"0\": {\"buttons\": [1]}}").statusCode()).isEqualTo(400);
     assertThat(put("{\"0\": {\"hats\": []}}").statusCode()).isEqualTo(400);
     assertThat(put("{\"0\": \"left\"}").statusCode()).isEqualTo(400);
     assertThat(put("{\"0\": {\"axes\": 0.5}}").statusCode()).isEqualTo(400);
+  }
+
+  /** Input from no page is refused: the joystick is let go when its page's stream closes. */
+  @Test
+  void joystickInputNamesItsPagesStream() throws Exception {
+    var anonymous = send("PUT", "/api/simulator/joysticks", JSON, "{\"1\": {\"axes\": [0.3]}}");
+
+    assertThat(anonymous.statusCode()).isEqualTo(400);
+    assertThat(anonymous.body()).contains("Pitwall-Stream");
+    assertThat(hal.joystick(1)).isNull();
   }
 
   @Test
@@ -305,8 +349,16 @@ class SimulatorApiTest {
     assertThat(malformed.statusCode()).isEqualTo(400);
   }
 
+  /** A joystick's input, as the page sends it, naming its stream. */
   private HttpResponse<String> put(String json) throws Exception {
-    return send("PUT", "/api/simulator/joysticks", JSON, json);
+    return client.send(
+        HttpRequest.newBuilder(
+                URI.create("http://localhost:" + server.port() + "/api/simulator/joysticks"))
+            .header("Content-Type", JSON)
+            .header("Pitwall-Stream", "7")
+            .PUT(HttpRequest.BodyPublishers.ofString(json))
+            .build(),
+        HttpResponse.BodyHandlers.ofString());
   }
 
   private void waitFor(BooleanSupplier done, String what) throws InterruptedException {

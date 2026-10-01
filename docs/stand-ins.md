@@ -50,11 +50,5 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 
 ## Scenarios the simulator can't make yet
 
-Faults a robot meets that the simulator's named scenarios (`frc.robot.sim.Scenarios`) don't
-cover yet. These wait on nothing but work in the simulator; add each to the catalog when the
-simulator can make it.
-
-- Camera axes swapped in the configuration.
-- Ramp crossings: the terrain has bumps only.
-- The wrong field variant, or one camera with the wrong tag layout.
-- One wheel off the floor (see `wheel-lifted` above).
+Faults a robot meets that the simulator can't make yet are listed in one place, [the simulator's
+own guide](simulator.md#what-the-simulator-cant-make-fail-yet).

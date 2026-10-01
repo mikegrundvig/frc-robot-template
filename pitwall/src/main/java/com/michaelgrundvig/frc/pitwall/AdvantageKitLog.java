@@ -23,10 +23,6 @@ final class AdvantageKitLog {
     Logger.recordOutput(key, value);
   }
 
-  static void recordOutput(String key, String value) {
-    Logger.recordOutput(key, value);
-  }
-
   /** Ends the log, writing what's left, before the program stops. */
   static void end() {
     Logger.end();

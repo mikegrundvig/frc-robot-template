@@ -148,25 +148,66 @@ public final class Components {
     return declaredScenarios.containsKey(name);
   }
 
+  /** What applying one fault came to. */
+  private enum Result {
+    APPLIED,
+    /** A lasting fault applied with the part's values as built: it isn't on. */
+    UNCHANGED,
+    REFUSED
+  }
+
+  /** What applying one fault came to, and why, when it wasn't applied. */
+  private record Applied(Result result, @Nullable String why) {}
+
   /**
    * Applies a fault: turns a lasting one on, or makes an event happen. Call it from the robot loop.
+   * A lasting fault applied with the values the part was built with changes nothing, and is
+   * refused, saying so: it would be on and off at once.
    *
-   * @return why it couldn't be applied (its name, its values, or its own code refused), or null
-   *     when it was
+   * @return why it couldn't be applied (its name, its values, that it changes nothing, or its own
+   *     code refused), or null when it was
    */
   public @Nullable String apply(Setting setting) {
+    return applying(setting).why();
+  }
+
+  /**
+   * Applies faults in order, as a scenario does: one that changes nothing (the part is that way as
+   * built) is passed over, and one refused doesn't stop the rest. Call it from the robot loop.
+   *
+   * @return why any couldn't be applied, or null when all were
+   */
+  public @Nullable String apply(List<Setting> faults) {
+    List<String> problems = new ArrayList<>();
+    for (Setting setting : faults) {
+      Applied applied = applying(setting);
+      if (applied.result() == Result.REFUSED) {
+        problems.add(applied.why());
+      }
+    }
+    return problems.isEmpty() ? null : String.join("; ", problems);
+  }
+
+  private Applied applying(Setting setting) {
     String why = whyNot(setting);
     if (why != null) {
-      return why;
+      return new Applied(Result.REFUSED, why);
     }
     Fault fault = lookup(setting.component(), setting.fault());
     Values values = fault.values(setting.values());
     try {
       fault.apply(values);
     } catch (RuntimeException e) {
-      return setting.component() + ": " + setting.fault() + " failed: " + describe(e);
+      return new Applied(
+          Result.REFUSED, setting.component() + ": " + setting.fault() + " failed: " + describe(e));
     }
     if (fault.kind() == Fault.Kind.LASTING) {
+      if (!fault.isOn()) {
+        forget(setting.component(), fault.name());
+        return new Applied(
+            Result.UNCHANGED,
+            setting.component() + ": " + fault.name() + " changes nothing: as built");
+      }
       applied
           .computeIfAbsent(setting.component(), name -> new LinkedHashMap<>())
           .put(fault.name(), values);
@@ -177,7 +218,15 @@ public final class Components {
             + fault.name()
             + (fault.kind() == Fault.Kind.LASTING ? ", on" : "")
             + shown(fault, values));
-    return null;
+    return new Applied(Result.APPLIED, null);
+  }
+
+  /** Forgets the values a lasting fault was applied with: it's off. */
+  private void forget(String component, String fault) {
+    Map<String, Values> faults = applied.get(component);
+    if (faults != null) {
+      faults.remove(fault);
+    }
   }
 
   /**
@@ -199,6 +248,7 @@ public final class Components {
     } catch (RuntimeException e) {
       return component + ": undoing " + fault + " failed: " + describe(e);
     }
+    forget(component, fault);
     say.accept(component + ": " + fault + ", undone: " + named.undo());
     return null;
   }
@@ -224,8 +274,8 @@ public final class Components {
   }
 
   /**
-   * Applies a scenario's faults, in order. Call it from the robot loop. One that fails doesn't stop
-   * the rest; the answer names it.
+   * Applies a scenario's faults, in order, as {@link #apply(List)} does. Call it from the robot
+   * loop. One that fails doesn't stop the rest; the answer names it.
    *
    * @return why the scenario, or any of its faults, couldn't be applied; null when all were
    */
@@ -238,14 +288,8 @@ public final class Components {
           + String.join(", ", scenarios.keySet());
     }
     say.accept("scenario " + name + ": " + scenario.description());
-    List<String> problems = new ArrayList<>();
-    for (Setting setting : scenario.faults()) {
-      String why = apply(setting);
-      if (why != null) {
-        problems.add(why);
-      }
-    }
-    return problems.isEmpty() ? null : name + ": " + String.join("; ", problems);
+    String problems = apply(scenario.faults());
+    return problems == null ? null : name + ": " + problems;
   }
 
   /** The lasting faults on now, as "Component: Fault", in the order declared. */

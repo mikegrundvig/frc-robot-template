@@ -97,6 +97,45 @@ class ComponentsTest {
     assertThat(brightness).isEqualTo(0.2);
   }
 
+  /**
+   * A lasting fault applied with the part's values as built changes nothing: refused, never on, and
+   * not said. Among a scenario's faults it's passed over.
+   */
+  @Test
+  void aLastingFaultThatChangesNothingIsRefused() {
+    String refused = components.apply(Setting.of("Lamp", "Dimmed", Map.of("Brightness", 1.0)));
+
+    assertThat(refused).isEqualTo("Lamp: Dimmed changes nothing: as built");
+    assertThat(components.on()).isEmpty();
+    assertThat(said).isEmpty();
+    assertThat(
+            components.apply(
+                List.of(
+                    Setting.of("Lamp", "Dimmed", Map.of("Brightness", 1.0)),
+                    Setting.of("Lamp", "Unplugged"))))
+        .as("passed over among others")
+        .isNull();
+    assertThat(components.on()).containsExactly("Lamp: Unplugged");
+  }
+
+  /** Undone, a fault's values are forgotten: turned on again some other way, it shows none. */
+  @Test
+  void undoingAFaultForgetsTheValuesItWasAppliedWith() {
+    components.apply(Setting.of("Lamp", "Dimmed", Map.of("Brightness", 0.25)));
+    components.undo("Lamp", "Dimmed");
+    brightness = 0.4; // dimmed some other way
+
+    assertThat(dimmed()).containsEntry("on", true).containsEntry("values", Map.of());
+  }
+
+  @SuppressWarnings("unchecked") // the view's shape, as documented
+  private Map<String, Object> dimmed() {
+    Map<String, Object> lamp =
+        (Map<String, Object>) Objects.requireNonNull(components.view().get("Lamp"));
+    Map<String, Object> faults = (Map<String, Object>) Objects.requireNonNull(lamp.get("faults"));
+    return (Map<String, Object>) Objects.requireNonNull(faults.get("Dimmed"));
+  }
+
   @Test
   void anEventHappensOnceAndCantBeUndone() {
     assertThat(components.apply(Setting.of("Lamp", "Flickers", Map.of("Times", 2.0)))).isNull();

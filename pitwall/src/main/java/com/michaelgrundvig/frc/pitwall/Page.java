@@ -67,7 +67,7 @@ public final class Page {
    * @param simulator the simulator's controls, in the simulator; null on a robot, where the page
    *     has none
    */
-  public Page(
+  Page(
       Status status,
       Actions actions,
       Tuning tuning,

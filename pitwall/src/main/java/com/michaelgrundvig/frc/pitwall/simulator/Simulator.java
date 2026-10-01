@@ -26,12 +26,14 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Like the rest of Pitwall, only the robot loop changes anything, with three exceptions the
  * clock forces. Requests from the web server's threads wait in a queue, and {@link #periodic},
- * first thing in the loop, applies them, so the rest of the loop and AdvantageKit's log see the
- * same Driver Station, and a replay sees it as the robot did. A joystick's input is handed over the
- * same way: the server keeps the latest for each joystick, and the loop takes it. But a paused
- * clock runs no loops, so resuming and stepping happen on the server's thread ({@link #resume},
- * {@link #step}), and so does asking to stop ({@link #stop}), which resumes a paused clock so the
- * loop can stop the program.
+ * first thing in the loop, applies them. A Driver Station change is announced as a real Driver
+ * Station's packet is: the robot program sees it from the next loop on, read as that loop begins,
+ * so WPILib's mode changes, the robot's code, and AdvantageKit's log all see it in the same loop,
+ * and a replay sees it there too. A joystick's input is handed over the same way: the server keeps
+ * the latest for each joystick, and the loop takes it. But a paused clock runs no loops, so
+ * resuming and stepping happen on the server's thread ({@link #resume}, {@link #step}), and so does
+ * asking to stop ({@link #stop}), which resumes a paused clock so the loop can stop the program. A
+ * resume undoes any pause asked before it, and a Stop any pause at all.
  *
  * <p>The page drives a joystick only once it sends input for it, and then with a deadman, as an
  * experiment has: when the page goes quiet for {@link #DEADMAN} (it repeats its input every 200 ms
@@ -70,7 +72,15 @@ public final class Simulator {
   private final ConcurrentLinkedQueue<Request> queue = new ConcurrentLinkedQueue<>();
   private final AtomicReferenceArray<@Nullable Heard> heard = new AtomicReferenceArray<>(JOYSTICKS);
   private final AtomicLong versions = new AtomicLong();
-  private volatile boolean stopAsked;
+
+  /** Guards the clock: pausing, resuming, stepping, and asking to stop. */
+  private final Object timing = new Object();
+
+  /** Asked to stop: the next loop ends the program. Set and read under {@link #timing}. */
+  private boolean stopAsked;
+
+  /** How many times the clock was resumed: a pause asked before the latest resume is dropped. */
+  private long resumes;
 
   /** The view a request asked for, shared by every request until the loop builds it. */
   private @Nullable CompletableFuture<Map<String, Map<String, Object>>> viewAsked;
@@ -83,9 +93,11 @@ public final class Simulator {
   private final boolean[] zeroed = new boolean[JOYSTICKS];
   private boolean countingMatchTime;
   private long lastLoopNanos;
-  private boolean pauseAsked;
+
+  /** A pause applied this loop: the resumes counted when it was asked; -1 for none. */
+  private long pauseAsked = -1;
+
   private List<String> loggedFaults = List.of();
-  private final Object timing = new Object();
 
   /**
    * @param hal WPILib's simulation, or a test's stand-in
@@ -109,7 +121,19 @@ public final class Simulator {
     lastLoopNanos = clock.getAsLong();
   }
 
-  /** The simulator's controls on WPILib's own simulation. */
+  /**
+   * Whether this program runs in WPILib's simulation, asked of the HAL itself. Anything else, a
+   * robot or a runtime not yet known, counts as a robot: the controls are never made there.
+   */
+  public static boolean inWpilibSimulation() {
+    return WpilibHal.simulating();
+  }
+
+  /**
+   * The simulator's controls on WPILib's own simulation.
+   *
+   * @throws IllegalStateException anywhere but in WPILib's simulation
+   */
   public static Simulator wpilib(
       LongSupplier clock, Components components, Runnable stop, Consumer<List<String>> logFaults) {
     return new Simulator(new WpilibHal(), clock, components, stop, logFaults);
@@ -143,28 +167,42 @@ public final class Simulator {
 
   /**
    * Asks the robot loop to pause the clock once it has applied everything asked before. The loop
-   * pauses it rather than this thread, so the loop's last patch tells every page. Safe from any
-   * thread.
+   * pauses it rather than this thread, so the loop's last patch tells every page. A resume or a
+   * Stop before the loop gets to it drops it. Safe from any thread.
+   *
+   * @return done at once when the clock is paused already: no loop would come to answer it
    */
   public CompletableFuture<Outcome> requestPause() {
-    return enqueue(
-        () -> {
-          pauseAsked = true;
-          return Outcome.applied();
-        });
+    synchronized (timing) {
+      if (hal.isPaused()) {
+        return CompletableFuture.completedFuture(Outcome.applied());
+      }
+      long asked = resumes;
+      return enqueue(
+          () -> {
+            synchronized (timing) {
+              if (asked != resumes) {
+                return new Outcome(Outcome.Result.LOCKED, "Resumed since it was asked: not paused");
+              }
+            }
+            pauseAsked = asked;
+            return Outcome.applied();
+          });
+    }
   }
 
   /**
-   * Runs the clock again, now, on the calling thread: a paused clock runs no loop to do it. Safe
-   * from any thread.
+   * Runs the clock again, now, on the calling thread: a paused clock runs no loop to do it. Any
+   * pause asked before this is dropped, so the clock stays running. Safe from any thread.
    *
    * @return done once the loop has run again
    */
   public CompletableFuture<Outcome> resume() {
     synchronized (timing) {
+      resumes++;
       hal.resume();
+      return enqueue(Outcome::applied);
     }
-    return enqueue(Outcome::applied);
   }
 
   /**
@@ -192,12 +230,12 @@ public final class Simulator {
   }
 
   /**
-   * Asks the robot loop to end the program, resuming a paused clock so a loop runs to do it. Safe
-   * from any thread.
+   * Asks the robot loop to end the program, resuming a paused clock so a loop runs to do it; no
+   * pause after this takes. Safe from any thread.
    */
   public void stop() {
-    stopAsked = true;
     synchronized (timing) {
+      stopAsked = true;
       if (hal.isPaused()) {
         hal.resume();
       }
@@ -259,56 +297,82 @@ public final class Simulator {
 
   /**
    * Applies what the page asked, in order, then the joysticks' input and their deadman, and counts
-   * the match time down. Call it first thing in the robot loop, before anything reads the Driver
-   * Station, so the whole loop sees the same.
+   * the match time down. Call it first thing in the robot loop. The robot program sees the Driver
+   * Station's changes from the next loop on, as it sees a real Driver Station's.
    */
   public void periodic() {
-    if (stopAsked) {
+    boolean stopping;
+    synchronized (timing) {
+      stopping = stopAsked;
       stopAsked = false;
+    }
+    if (stopping) {
       stop.run();
       return;
     }
     long now = clock.getAsLong();
-    boolean announce = joysticks(now);
     List<Request> requests = new ArrayList<>();
     for (Request request = queue.poll(); request != null; request = queue.poll()) {
       requests.add(request);
     }
+    CompletableFuture<Map<String, Map<String, Object>>> asked = takeViewAsked();
     List<Outcome> outcomes = new ArrayList<>();
-    for (Request request : requests) {
-      try {
-        outcomes.add(request.apply().get());
-      } catch (RuntimeException e) {
-        outcomes.add(new Outcome(Outcome.Result.REFUSED, String.valueOf(e.getMessage())));
+    try {
+      boolean announce = joysticks(now);
+      for (Request request : requests) {
+        try {
+          outcomes.add(request.apply().get());
+        } catch (RuntimeException e) {
+          outcomes.add(new Outcome(Outcome.Result.REFUSED, String.valueOf(e.getMessage())));
+        }
+      }
+      announce |= countMatchTime(now);
+      if (announce) {
+        hal.announce();
+      }
+      lastLoopNanos = now;
+      List<String> on = components.on();
+      if (!on.equals(loggedFaults)) {
+        loggedFaults = on;
+        logFaults.accept(on);
+      }
+      pauseIfAsked();
+      // A request's answer, and a request for the view, see the simulator as this loop left it.
+      if (asked != null || !requests.isEmpty()) {
+        Map<String, Map<String, Object>> view = view();
+        if (asked != null) {
+          asked.complete(view);
+        }
+      }
+    } finally {
+      // Every request is answered, even when the loop failed partway: none waits for nothing.
+      for (int i = 0; i < requests.size(); i++) {
+        requests
+            .get(i)
+            .outcome()
+            .complete(
+                i < outcomes.size()
+                    ? outcomes.get(i)
+                    : new Outcome(
+                        Outcome.Result.REFUSED, "The simulator's loop failed before it got to it"));
+      }
+      if (asked != null && !asked.isDone()) {
+        asked.completeExceptionally(new IllegalStateException("The simulator's loop failed"));
       }
     }
-    announce |= countMatchTime(now);
-    if (announce) {
-      hal.announce();
+  }
+
+  /** Pauses the clock, if asked this loop, unless a resume or a Stop came since. */
+  private void pauseIfAsked() {
+    long pause = pauseAsked;
+    pauseAsked = -1;
+    if (pause < 0) {
+      return;
     }
-    lastLoopNanos = now;
-    List<String> on = components.on();
-    if (!on.equals(loggedFaults)) {
-      loggedFaults = on;
-      logFaults.accept(on);
-    }
-    if (pauseAsked) {
-      pauseAsked = false;
-      synchronized (timing) {
+    synchronized (timing) {
+      if (pause == resumes && !stopAsked) {
         hal.pause();
       }
-    }
-    // A request's answer, and a request for the view, see the simulator as this loop left it.
-    CompletableFuture<Map<String, Map<String, Object>>> asked = takeViewAsked();
-    if (asked != null || !requests.isEmpty()) {
-      Map<String, Map<String, Object>> view = view();
-      if (asked != null) {
-        asked.complete(view);
-      }
-    }
-    // Only now, so whoever waits sees the state their request left.
-    for (int i = 0; i < requests.size(); i++) {
-      requests.get(i).outcome().complete(outcomes.get(i));
     }
   }
 
@@ -427,8 +491,7 @@ public final class Simulator {
     if (!station.enabled() || station.matchTime() <= 0) {
       return false;
     }
-    double left = Math.max(0, station.matchTime() - (now - lastLoopNanos) / 1e9);
-    hal.driverStation(station.withMatchTime(left));
+    hal.matchTime(Math.max(0, station.matchTime() - (now - lastLoopNanos) / 1e9));
     return true;
   }
 

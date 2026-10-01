@@ -38,7 +38,7 @@ import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
 public class Robot extends LoggedRobot {
-  /** Set by {@code ./gradlew run}: start the simulator enabled in teleop. */
+  /** Set by {@code ./gradlew run} with the GUI: start the simulator enabled in teleop. */
   static final String AUTO_ENABLE_PROPERTY = "frc.sim.autoEnable";
 
   /** Set by {@code ./gradlew run -Pscenario=<name>}: the simulator scenario to start in. */
@@ -136,26 +136,50 @@ public class Robot extends LoggedRobot {
             loopHealth);
     // The scenario's sensor faults, through the simulator's controls (where the page shows them,
     // and can undo them) before the first loop; its events once the robot is enabled.
-    SimulatedWorld world = container.world();
-    Components components = pitwall.simulator().map(Simulator::components).orElse(null);
-    if (asked != null && world != null && components != null) {
-      apply(asked.sensorFaultsIn(world), components);
-      pendingEvents = asked.eventsIn(world);
-    }
+    pendingEvents =
+        startScenario(
+            asked, container.world(), pitwall.simulator().map(Simulator::components).orElse(null));
   }
 
   /**
-   * Applies a scenario's faults through the simulator's controls.
+   * Starts the scenario asked for: its sensor faults now, through the simulator's controls.
+   *
+   * @param asked the scenario, or null when none was asked for
+   * @param world the simulated world, or null outside the simulator
+   * @param components the simulator's controls' parts that can fail, or null without them
+   * @return what happens in the scenario, to happen once the robot is enabled; null for nothing
+   * @throws IllegalStateException when a scenario was asked for without a simulated world and the
+   *     simulator's controls to apply it through, or one of its faults can't be applied: it was
+   *     asked for by name, so the program stops rather than run without it
+   */
+  static @Nullable List<Setting> startScenario(
+      @Nullable Scenario asked, @Nullable SimulatedWorld world, @Nullable Components components) {
+    if (asked == null) {
+      return null;
+    }
+    if (world == null || components == null) {
+      throw new IllegalStateException(
+          "Simulator scenario "
+              + asked.name()
+              + ": it needs the simulated world and Pitwall's simulator controls, and this program"
+              + " has "
+              + (world == null ? "no simulated world" : "no simulator controls"));
+    }
+    apply(asked.sensorFaultsIn(world), components);
+    return asked.eventsIn(world);
+  }
+
+  /**
+   * Applies a scenario's faults through the simulator's controls. One that changes nothing (the
+   * part is that way as built) is passed over.
    *
    * @throws IllegalStateException saying why, when one can't be applied: the scenario was asked for
    *     by name, so it stops the program rather than run without it
    */
   static void apply(List<Setting> faults, Components components) {
-    for (Setting fault : faults) {
-      String refused = components.apply(fault);
-      if (refused != null) {
-        throw new IllegalStateException("Simulator scenario: " + refused);
-      }
+    String refused = components.apply(faults);
+    if (refused != null) {
+      throw new IllegalStateException("Simulator scenario: " + refused);
     }
   }
 
@@ -229,11 +253,12 @@ public class Robot extends LoggedRobot {
   }
 
   /**
-   * {@code ./gradlew run} starts the simulated robot enabled in teleop, on the blue alliance's
-   * station 2 unless the simulator GUI already chose one, so a driver can drive right away instead
-   * of hunting through the GUI first. The GUI can still disable it or change the station, and
-   * {@code ./gradlew run -PstartDisabled} starts disabled with no station, like a real robot before
-   * its Driver Station connects. Tests and replay never set the property.
+   * {@code ./gradlew run} with the simulator GUI starts the simulated robot enabled in teleop, on
+   * the blue alliance's station 2 unless the GUI already chose one, so a driver can drive right
+   * away instead of hunting through the GUI first. The GUI can still disable it or change the
+   * station, and {@code ./gradlew run -PstartDisabled} starts disabled with no station, like a real
+   * robot before its Driver Station connects. Without the GUI it starts disabled: nothing on screen
+   * could disable it yet. Tests and replay never set the property.
    */
   @Override
   public void simulationInit() {

@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
 import frc.robot.lib.field.Bump;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import org.wpilib.math.geometry.Pose2d;
@@ -29,7 +30,8 @@ import org.wpilib.math.geometry.Translation3d;
  * SensorErrors}), not perfect ones. An event (a hit) happens once; nothing undoes it, and each says
  * how the robot recovers.
  *
- * <p>Names are the page's, and the scenarios' ({@link #GYRO}, {@link #UNPLUGGED}).
+ * <p>Names are the page's, and the scenarios' ({@link #GYRO}, {@link #UNPLUGGED}). What the world
+ * can't make fail yet is listed in docs/simulator.md.
  */
 public final class Faults {
   // The parts.
@@ -74,6 +76,10 @@ public final class Faults {
   public static final String TURNS = "Turns";
   public static final String GRIP = "Grip";
   public static final String EXTRA = "Extra";
+  public static final String TURN = "Turn";
+  public static final String X = "X";
+  public static final String Y = "Y";
+  public static final String HEADING = "Heading";
 
   /** How far short of a bump's ramp the robot is set down, from its center: clear of the ramp. */
   static final double BUMP_CLEARANCE_METERS = 1.0;
@@ -286,25 +292,25 @@ public final class Faults {
     DriveSimulation drivetrain = world.drivetrain();
     double length = world.field().length();
     double width = world.field().width();
-    return Component.of(
-        ROBOT,
-        "robot",
+    List<Fault> faults = new ArrayList<>();
+    faults.add(
         Fault.event(SHOVED)
             .does(
                 "Pushed this far in its own frame without its wheels turning, as another robot"
                     + " pushes it: its gyro feels a turn, and nothing feels the move.")
             .parameter(FORWARD, "m", Limits.between(-SHOVE_METERS, SHOVE_METERS), 0)
             .parameter(LEFT, "m", Limits.between(-SHOVE_METERS, SHOVE_METERS), 0.6)
-            .parameter("Turn", "°", Limits.between(-180, 180), 0)
+            .parameter(TURN, "°", Limits.between(-180, 180), 0)
             .apply(
                 values ->
                     drivetrain.shove(
                         new Transform2d(
                             values.get(FORWARD),
                             values.get(LEFT),
-                            Rotation2d.fromDegrees(values.get("Turn")))))
+                            Rotation2d.fromDegrees(values.get(TURN)))))
             .undoneBy(RECOVERS)
-            .build(),
+            .build());
+    faults.add(
         Fault.event(HIT)
             .does(
                 "Knocked this far in its own frame, as a collision knocks it, with a 4 g jolt its"
@@ -316,7 +322,8 @@ public final class Faults {
                     drivetrain.hit(
                         new Transform2d(values.get(FORWARD), values.get(LEFT), Rotation2d.ZERO)))
             .undoneBy(RECOVERS)
-            .build(),
+            .build());
+    faults.add(
         Fault.lasting(TILTED)
             .does(
                 "Tilted by hand, whatever the ground under it, as a wheel up on a game piece"
@@ -332,7 +339,8 @@ public final class Faults {
             .undo(
                 "Sets it back on the ground, which tilts it as the terrain does.",
                 () -> drivetrain.setTerrain(drivetrain.terrain()))
-            .build(),
+            .build());
+    faults.add(
         Fault.lasting(SLIPPING)
             .does(
                 "Only this share of its wheels' rolling moves it, as with wheels in the air or on"
@@ -342,30 +350,39 @@ public final class Faults {
             .isOn(() -> drivetrain.grip() < 1)
             .apply(values -> drivetrain.grip(values.get(GRIP)))
             .undo("Full grip again.", () -> drivetrain.grip(1))
-            .build(),
+            .build());
+    faults.add(
         Fault.event(PLACED)
             .does(
                 "Carried here by the drive team, facing this way (from the blue end): its wheels"
                     + " don't turn, and its gyro feels any turn.")
-            .parameter("X", "m", Limits.between(0, length), length / 2)
-            .parameter("Y", "m", Limits.between(0, width), width / 2)
-            .parameter("Heading", "°", Limits.between(-180, 180), 0)
+            .parameter(X, "m", Limits.between(0, length), length / 2)
+            .parameter(Y, "m", Limits.between(0, width), width / 2)
+            .parameter(HEADING, "°", Limits.between(-180, 180), 0)
             .apply(values -> world.place(placed(values)))
             .undoneBy("Place it again.")
-            .build(),
-        Fault.event(TO_A_BUMP)
-            .does(
-                "Carried to 1 m short of the nearest bump's ramp, facing across it, to drive over."
-                    + " Its gyro feels the turn but its wheels see no move, so only its cameras can"
-                    + " say where it is. Needs a field with bumps.")
-            .apply(values -> beforeTheNearestBump(world))
-            .undoneBy("Place it again.")
             .build());
+    if (hasBumps(world)) {
+      faults.add(
+          Fault.event(TO_A_BUMP)
+              .does(
+                  "Carried to 1 m short of the nearest bump's ramp, facing across it, to drive"
+                      + " over. Its gyro feels the turn but its wheels see no move, so only its"
+                      + " cameras can say where it is.")
+              .apply(values -> beforeTheNearestBump(world))
+              .undoneBy("Place it again.")
+              .build());
+    }
+    return new Component(ROBOT, "robot", faults);
+  }
+
+  /** Whether the field the world was built on has bumps, to carry the robot to. */
+  static boolean hasBumps(SimulatedWorld world) {
+    return !world.drivetrain().terrain().bumps().isEmpty();
   }
 
   private static Pose2d placed(Values values) {
-    return new Pose2d(
-        values.get("X"), values.get("Y"), Rotation2d.fromDegrees(values.get("Heading")));
+    return new Pose2d(values.get(X), values.get(Y), Rotation2d.fromDegrees(values.get(HEADING)));
   }
 
   /** A range that holds what the robot was built with, however far out that is. */

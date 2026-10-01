@@ -35,7 +35,10 @@ class SimulatorControlsSimTest {
 
   private final HttpClient client = HttpClient.newHttpClient();
 
-  /** The page enables the robot in teleop: the robot program sees it in the same loop. */
+  /**
+   * The page enables the robot in utility mode: the robot program sees it from the next loop on, as
+   * it sees a real Driver Station's change, all of it at once.
+   */
   @Test
   void thePageEnablesTheRobotAndPicksItsStation() throws Exception {
     sim.robot();
@@ -48,8 +51,11 @@ class SimulatorControlsSimTest {
             "PATCH",
             "/api/simulator",
             "{\"allianceStation\": \"RED_1\", \"mode\": \"UTILITY\", \"enabled\": true}");
+    boolean sameLoop = RobotState.isEnabled();
+    sim.loop();
 
     assertThat(answer.statusCode()).isEqualTo(200);
+    assertThat(sameLoop).as("not partway through the loop that applied it").isFalse();
     assertThat(RobotState.isEnabled()).isTrue();
     assertThat(RobotState.getRobotMode()).isEqualTo(RobotMode.UTILITY);
     assertThat(RobotState.isDSAttached()).isTrue();
@@ -67,8 +73,10 @@ class SimulatorControlsSimTest {
 
     assertThat(send("PATCH", "/api/simulator", "{\"fmsAttached\": true}").statusCode())
         .isEqualTo(200);
+    sim.loop(); // seen as the next loop begins
     var tuned = send("PATCH", "/api/values", "{\"/Drive/config/gains/steerKp\": 18}");
     var detached = send("PATCH", "/api/simulator", "{\"fmsAttached\": false}");
+    sim.loop();
 
     assertThat(tuned.statusCode()).isEqualTo(409);
     assertThat(detached.statusCode()).isEqualTo(200);
@@ -173,6 +181,7 @@ class SimulatorControlsSimTest {
     if (json != null) {
       request.header("Content-Type", JSON);
     }
+    request.header("Pitwall-Stream", "1"); // as the page names its event stream
     var answer =
         client.sendAsync(
             request

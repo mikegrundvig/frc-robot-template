@@ -50,13 +50,14 @@ class FaultsTest {
 
   /** A world with sensors exactly as configured, its parts declared, the robot standing. */
   private SimulatedWorld world() {
+    return world(SensorErrors.NONE);
+  }
+
+  /** A world with sensors that err like this, its parts declared, the robot standing. */
+  private SimulatedWorld world(SensorErrors errors) {
     SimulatedWorld built =
         new SimulatedWorld(
-            RobotSim.FIELD,
-            Robots.SIM.drivetrain(),
-            Robots.SIM.body(),
-            List.of(),
-            SensorErrors.NONE);
+            RobotSim.FIELD, Robots.SIM.drivetrain(), Robots.SIM.body(), List.of(), errors);
     worlds.add(built);
     components = new Components(said::add);
     built.addTo(components);
@@ -211,6 +212,56 @@ class FaultsTest {
     assertThat(caughtUp.steerAngle.getDegrees())
         .as("steered while stale")
         .isCloseTo(30, within(1.0));
+  }
+
+  /** Stale while it steers, a module reads the steering's speed it last heard, and holds it. */
+  @Test
+  void aStaleModuleHoldsTheSteeringSpeedItLastHeard() {
+    SimulatedWorld world = world();
+    ModuleIO module = world.drivetrainHardware().modules().get(0);
+    module.configure(Robots.SIM.drivetrain().gains(), Robots.SIM.drivetrain().limits());
+    module.setSteerAngle(Rotation2d.fromDegrees(90));
+    step(world);
+    step(world); // turning
+
+    apply(Faults.module(0), Faults.STALE);
+    double heard = read(module).steerVelocityRadPerSec;
+    drive(world, 0, 0.5); // the module settles at 90°, unheard
+    double held = read(module).steerVelocityRadPerSec;
+
+    assertThat(heard).as("turning when it went stale").isNotZero();
+    assertThat(held).isEqualTo(heard);
+  }
+
+  /**
+   * Undone, a fault puts a season-worn robot back as it was built, its errors and all: not perfect.
+   */
+  @Test
+  void undoingPutsASeasonWornRobotBackAsBuilt() {
+    SimulatedWorld world = world(SensorErrors.TYPICAL);
+    apply(GYRO, Faults.ERRORS, Map.of(Faults.SCALE, 1.2, Faults.DRIFT, 0.0, Faults.NOISE, 0.0));
+    apply(Faults.module(0), Faults.ZEROED_OFF, Map.of(Faults.OFFSET, 10.0));
+    apply(Faults.module(1), Faults.WORN, Map.of(Faults.SCALE, 0.9));
+    assertThat(components.on()).hasSize(3);
+
+    assertThat(components.undoAll()).isNull();
+
+    DriveSimulation drivetrain = world.drivetrain();
+    assertThat(drivetrain.gyroSim().errors()).isEqualTo(SensorErrors.TYPICAL.gyro());
+    assertThat(Math.toDegrees(drivetrain.moduleSim(0).steerOffsetRadians()))
+        .isCloseTo(SensorErrors.TYPICAL.steerOffsetDegrees().get(0), within(1e-9));
+    assertThat(drivetrain.treadScale(1)).isEqualTo(SensorErrors.TYPICAL.wheelRadiusScale().get(1));
+    assertThat(components.on()).isEmpty();
+  }
+
+  /** Applied with the values the part was built with, a lasting fault changes nothing: refused. */
+  @Test
+  void aFaultAsBuiltChangesNothing() {
+    world(SensorErrors.TYPICAL);
+
+    assertThat(components.apply(Setting.of(Faults.module(2), Faults.ZEROED_OFF)))
+        .isEqualTo("Back left module: Zeroed off changes nothing: as built");
+    assertThat(components.on()).isEmpty();
   }
 
   /** A zero knocked off: the module reads that far from where it points, until undone. */

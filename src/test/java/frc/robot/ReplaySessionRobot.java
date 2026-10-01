@@ -41,6 +41,7 @@ final class ReplaySessionRobot extends Robot {
   private final Joystick operator = new Joystick(1);
 
   private int loop;
+  private int utilityInits;
 
   ReplaySessionRobot() {
     TunableRegistry.publish(GAIN, gain);
@@ -81,6 +82,15 @@ final class ReplaySessionRobot extends Robot {
                 .orElseThrow());
   }
 
+  /**
+   * WPILib calls this on the first loop it sees the robot enabled in utility mode, from the Driver
+   * Station's data as that loop began: the replay must call it on the same loop.
+   */
+  @Override
+  public void utilityInit() {
+    Logger.recordOutput("Session/UtilityInits", (double) ++utilityInits);
+  }
+
   private Simulator simulator() {
     return pitwall().simulator().orElseThrow();
   }
@@ -99,7 +109,6 @@ final class ReplaySessionRobot extends Robot {
                   station -> station.withMode(RobotMode.UTILITY).withEnabled(true));
       case 15 ->
           simulator().joystick(1, new JoystickInput(List.of(0.5), List.of(), List.of()), null);
-      case 25 -> simulator().joystick(1, null, null); // let go
       case 20 ->
           http.sendAsync(
               HttpRequest.newBuilder(
@@ -111,6 +120,7 @@ final class ReplaySessionRobot extends Robot {
                           "{\"/Drive/config/gains/steerKp\": 18.5}"))
                   .build(),
               HttpResponse.BodyHandlers.discarding());
+      case 25 -> simulator().joystick(1, null, null); // let go
       case 30 -> pitwall().tunables().requestChanges(Map.of(GAIN, 2.5));
       case 40 -> pitwall().actions().requestStart(RobotContainer.DRIVE_CHECK);
       case 150 -> pitwall().experiments().requestStart(RobotContainer.STEER_STEP, null);

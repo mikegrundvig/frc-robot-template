@@ -83,15 +83,9 @@ class ScenariosTest {
     assertThat(apply(Scenarios.named(scenario).faultsIn(world))).as(scenario).isNull();
   }
 
-  /** Applies faults to the world built last, stopping at the first refused: why, or null. */
+  /** Applies faults to the world built last, as a scenario does: why any were refused, or null. */
   private @Nullable String apply(List<Setting> faults) {
-    for (Setting fault : faults) {
-      String refused = components.apply(fault);
-      if (refused != null) {
-        return refused;
-      }
-    }
-    return null;
+    return components.apply(faults);
   }
 
   static Stream<String> names() {
@@ -426,12 +420,30 @@ class ScenariosTest {
   @Test
   void aBumpCrossingNeedsABump() {
     SimulatedWorld world = world();
-    world.drivetrain().setTerrain(Terrain.FLAT);
+    world.drivetrain().setTerrain(Terrain.FLAT); // the field's bumps gone since it was declared
 
-    assertThat(apply(Scenarios.named("bump-crossing").faultsIn(world)))
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Scenarios.named("bump-crossing").faultsIn(world))
+        .withMessage("this scenario carries the robot to a bump, and the field has none");
+    assertThat(apply(List.of(Setting.of(Faults.ROBOT, Faults.TO_A_BUMP))))
         .isEqualTo(
             "Robot: Carried to a bump failed: carrying the robot to a bump needs a field with"
                 + " bumps, and this one has none");
+  }
+
+  /** A field without bumps isn't offered the bump scenario, nor carrying the robot to a bump. */
+  @Test
+  void aFieldWithoutBumpsHasNoBumpScenario() {
+    SimulatedWorld world = world();
+    world.drivetrain().setTerrain(Terrain.FLAT);
+    Components flat = new Components(said -> {});
+    world.addTo(flat);
+
+    Scenarios.addTo(flat, world);
+
+    assertThat(flat.scenarioView()).doesNotContainKey("bump-crossing").containsKey("collision");
+    assertThat(flat.whyNot(Setting.of(Faults.ROBOT, Faults.TO_A_BUMP)))
+        .startsWith("Robot has no fault named Carried to a bump");
   }
 
   private static ModuleIOInputs read(ModuleIO module) {

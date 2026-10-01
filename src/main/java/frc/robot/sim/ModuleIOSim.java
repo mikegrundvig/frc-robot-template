@@ -94,6 +94,7 @@ final class ModuleIOSim implements ModuleIO {
   private double stalePositionRadians;
   private double staleVelocityRadPerSec;
   private double staleSteerRadians;
+  private double staleSteerRadPerSec;
 
   /**
    * Rotation the wheel spun without rolling the robot along: its encoder saw it, the floor didn't.
@@ -177,6 +178,7 @@ final class ModuleIOSim implements ModuleIO {
       stalePositionRadians = drivePositionRadians();
       staleVelocityRadPerSec = driveSim.getAngularVelocity();
       staleSteerRadians = heardSteerRadians;
+      staleSteerRadPerSec = heardSteerRadPerSec;
     }
     this.stale = stale;
   }
@@ -276,7 +278,7 @@ final class ModuleIOSim implements ModuleIO {
     inputs.steerConnected = true;
     // The steering's angle and speed as the robot hears them: what the CANcoder last sent.
     inputs.steerAngle = new Rotation2d(steerReadingRadians());
-    inputs.steerVelocityRadPerSec = stale ? 0 : heardSteerRadPerSec;
+    inputs.steerVelocityRadPerSec = stale ? staleSteerRadPerSec : heardSteerRadPerSec;
     inputs.steerAppliedVolts = steerSim.appliedVolts();
     // The steering's current is the most it drew since the last loop, not what it draws now. It
     // runs at its limit for a few milliseconds as the module starts and stops a turn, then falls to

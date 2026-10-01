@@ -100,6 +100,9 @@ final class ModuleIOSim implements ModuleIO {
   /** The steering's loops until the CANcoder next sends. */
   private int loopsUntilEncoderSends;
 
+  /** The most current through the steering motor since the last loop read it. */
+  private double steerPeakAmps;
+
   /**
    * @param modules the modules as configured; the motor controllers convert with this wheel radius
    * @param steerOffsetRadians how far the absolute encoder's zero is off
@@ -167,7 +170,7 @@ final class ModuleIOSim implements ModuleIO {
                 -MAX_VOLTS,
                 MAX_VOLTS)
             : 0.0;
-    steerMotor.run(volts, steerStatorLimitAmps, seconds);
+    steerPeakAmps = Math.max(steerPeakAmps, steerMotor.run(volts, steerStatorLimitAmps, seconds));
   }
 
   /** Takes a reading for odometry, as a motor controller's high-rate signals would. */
@@ -207,7 +210,14 @@ final class ModuleIOSim implements ModuleIO {
     inputs.steerAngle = new Rotation2d(measuredSteerRadians());
     inputs.steerVelocityRadPerSec = steerMotor.velocityRadPerSec();
     inputs.steerAppliedVolts = steerMotor.appliedVolts();
-    inputs.steerStatorCurrentAmps = Math.abs(steerMotor.currentAmps());
+    // The steering's current is the most it drew since the last loop, not what it draws now. It
+    // runs at its limit for a few milliseconds as the module starts and stops a turn, then falls to
+    // next to nothing, so a reading at the loop's end would almost never see the peak, and the peak
+    // is what matters: how close the motor came to its limit. The drive's current changes over many
+    // loops (at its limit for as long as the wheel takes to get up to speed), so a reading now
+    // shows it, and driveTorqueLimited says whether it reached the limit since the last loop.
+    inputs.steerStatorCurrentAmps = steerPeakAmps;
+    steerPeakAmps = 0;
   }
 
   /** The wheel's rotation since the start that rolled the robot along, in radians. */

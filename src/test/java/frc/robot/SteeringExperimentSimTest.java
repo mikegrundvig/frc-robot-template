@@ -39,6 +39,9 @@ import org.wpilib.hardware.hal.RobotMode;
 class SteeringExperimentSimTest {
   private static final String STEER_KP = "/Drive/config/gains/steerKp";
   private static final String STEER_KD = "/Drive/config/gains/steerKd";
+  private static final String STEER_CURRENT_LIMIT = "/Drive/config/limits/steerStatorCurrent";
+  private static final List<String> WHEELS =
+      List.of("Front left", "Front right", "Back left", "Back right");
 
   /** The longest the test waits, in real time, for the network. */
   private static final Duration WAIT = Duration.ofSeconds(10);
@@ -218,6 +221,11 @@ class SteeringExperimentSimTest {
       return jumps;
     }
 
+    /** The largest a signal (such as "Front left current") was during the run. */
+    double peak(String signal) {
+      return number(asMap(asMap(state.get("scores")).get("peaks")).get(signal));
+    }
+
     /** The worst of a score over every jump of every wheel: NaN if any jump never settled. */
     double worst(String score) {
       return jumps().stream().mapToDouble(jump -> number(jump.get(score))).max().orElseThrow();
@@ -249,6 +257,11 @@ class SteeringExperimentSimTest {
       assertThat(Math.abs(number(jump.get("error")))).as("error, degrees").isLessThan(1.0);
     }
     assertThat(number(asMap(run.state.get("gains")).get(STEER_KP))).isEqualTo(16.0);
+    // Each turn starts with 12 V across a motor standing still: it draws its limit, 40 A.
+    for (String wheel : WHEELS) {
+      assertThat(run.peak(wheel + " current")).as(wheel + ", amps").isCloseTo(40, within(1e-9));
+      assertThat(run.peak(wheel + " voltage")).as(wheel + ", volts").isCloseTo(12, within(1e-9));
+    }
     // Every angle reading the robot recorded reached the page, at 250 Hz: about 2.1 s of them.
     List<?> angles = page.recordedAngles();
     assertThat(run.samples.get("Front left")).isEqualTo(angles.size());
@@ -276,6 +289,22 @@ class SteeringExperimentSimTest {
             .as("jump %d's %s", i, score)
             .isCloseTo(number(first.jumps().get(i).get(score)), within(1e-9));
       }
+    }
+  }
+
+  /**
+   * The steering's current limit tuned from the page: the next run's peak current is the new limit.
+   */
+  @Test
+  void aLowerSteeringCurrentLimitCapsThePeakCurrent() throws Exception {
+    Page page = ready();
+    var lowered = page.send("PATCH", "/api/values", "{\"" + STEER_CURRENT_LIMIT + "\": 20}");
+    Run run = page.run();
+
+    assertThat(lowered.statusCode()).as(lowered.body()).isEqualTo(200);
+    assertThat(run.state.get("phase")).isEqualTo("ENDED");
+    for (String wheel : WHEELS) {
+      assertThat(run.peak(wheel + " current")).as(wheel + ", amps").isCloseTo(20, within(1e-9));
     }
   }
 

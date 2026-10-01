@@ -32,6 +32,11 @@ public interface ModuleIO {
 
     public double steerVelocityRadPerSec = 0.0;
     public double steerAppliedVolts = 0.0;
+
+    /**
+     * On a robot, as of the motor controller's last report, which can fall between the short peaks
+     * as the module starts and stops a turn; in the simulator, the most since the last loop.
+     */
     public double steerStatorCurrentAmps = 0.0;
 
     /**

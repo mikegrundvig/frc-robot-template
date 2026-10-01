@@ -89,7 +89,7 @@ public class Module {
     return inputs.steerAppliedVolts;
   }
 
-  /** The steering motor's stator current, as of this loop. */
+  /** The most current through the steering motor since the last loop, either way. */
   double steerCurrentAmps() {
     return inputs.steerStatorCurrentAmps;
   }

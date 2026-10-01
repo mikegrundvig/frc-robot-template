@@ -429,9 +429,9 @@ public class Drive implements Mechanism, AutoCloseable {
   /**
    * The steering as a Pitwall rig, so the page can tune it by experiment: its gains ({@code
    * steerKp} and {@code steerKd}, tuned where they always are), every wheel pointed at one angle as
-   * the setpoint, and for each wheel its angle at every high-rate reading (what's scored), and its
-   * steering motor's voltage and current once a loop. Everything it records is a logged input, so a
-   * replay records the same.
+   * the setpoint, and for each wheel its angle at every high-rate reading (what's scored), and once
+   * a loop its steering motor's voltage and the most current it drew since the last. Everything it
+   * records is a logged input, so a replay records the same.
    *
    * @param tuning the drivetrain's configuration as the pit tunes it
    */

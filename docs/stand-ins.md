@@ -27,14 +27,18 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
 - **Physics simulation** (traction, collisions, game pieces): maple-sim. Until then, simulation tests
   the code, not the robot's traction or power. The simulator keeps the robot's true pose apart from
-  its sensors (`DriveSimulation`, `SensorErrors`), the drive motors obey their stator current limit,
-  the robot rides over the field's bumps (tilted and raised by the ground under its wheels), and
-  faults can be made by hand or by name (`frc.robot.sim.Scenarios`, `./gradlew run
-  -Pscenario=<name>`): a slipping wheel, a push, a hit the IMU feels, a gyro unplugged or frozen, a
-  camera knocked off its mount. Wheels still never slip on their own, and no one wheel can leave the
-  floor: `wheel-lifted` tilts the robot by hand (which holds over any bump for the rest of the run)
-  and scales every wheel's grip alike, so its wheels never disagree as a lifted one's would, and
-  the robot isn't raised.
+  its sensors (`DriveSimulation`, `SensorErrors`), the drive and steering motors obey their stator
+  current limits, the steering's loop runs as a TalonFX's does (every millisecond, on the angle its
+  CANcoder sends every 10 ms), the robot rides over the field's bumps (tilted and raised by the
+  ground under its wheels), and faults can be made by hand or by name (`frc.robot.sim.Scenarios`,
+  `./gradlew run -Pscenario=<name>`): a slipping wheel, a push, a hit the IMU feels, a gyro
+  unplugged or frozen, a camera knocked off its mount. Wheels still never slip on their own, and no
+  one wheel can leave the floor: `wheel-lifted` tilts the robot by hand (which holds over any bump
+  for the rest of the run) and scales every wheel's grip alike, so its wheels never disagree as a
+  lifted one's would, and the robot isn't raised. The steering has no friction: a wheel's scrub on
+  the carpet and its gearbox's drag need measuring on a real module first
+  (`CurrentLimitedMotorSim` says where they go). And it hears its CANcoder at the rate the code
+  asks for (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
 
 ## Scenarios the simulator can't make yet
 

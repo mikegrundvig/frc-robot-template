@@ -54,14 +54,32 @@ class DriveSimulationTest {
             .build());
   }
 
+  /** Without errors, and with the wheels holding their angle, odometry is the truth. */
   @Test
   void withoutErrorsOdometryIsTheTruth() {
+    DriveSimHarness robot = robot(SensorErrors.NONE);
+
+    robot.drive(2.0, 1.0, 0, 0);
+
+    assertThat(robot.simulation.truePose().getTranslation().getNorm()).isGreaterThan(1);
+    assertThat(robot.positionError()).isLessThan(1e-6);
+    assertThat(robot.headingErrorDegrees()).isCloseTo(0.0, within(1e-6));
+  }
+
+  /**
+   * Even without errors, turning wheels cost odometry a little: each wheel's angle comes from its
+   * CANcoder, which sends it every 10 ms, so odometry sees a turning wheel up to 10 ms late. Over
+   * two seconds of curving while spinning, about a centimeter. The gyro still has the heading
+   * exactly.
+   */
+  @Test
+  void turningWheelsReachOdometryAsLateAsTheirCanCodersSendThem() {
     DriveSimHarness robot = robot(SensorErrors.NONE);
 
     robot.drive(2.0, 0.6, 0.3, 0.4); // curving and spinning at once
 
     assertThat(robot.simulation.truePose().getTranslation().getNorm()).isGreaterThan(1);
-    assertThat(robot.positionError()).isLessThan(1e-6);
+    assertThat(robot.positionError()).isBetween(0.005, 0.02);
     assertThat(robot.headingErrorDegrees()).isCloseTo(0.0, within(1e-6));
   }
 

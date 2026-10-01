@@ -4,7 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import frc.robot.ValuesRegister.CodeRecord;
+import frc.robot.ValuesRegister.Committed;
 import frc.robot.ValuesRegister.Component;
+import frc.robot.ValuesRegister.Knob;
+import frc.robot.lib.localization.LocalizationGate;
+import frc.robot.sim.SensorErrors;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.vision.Vision;
 import java.io.IOException;
@@ -29,15 +33,48 @@ class ValuesRegisterTest {
     static final List<CodeRecord> RECORDS = ValuesRegister.scan(ProductionCode.CLASSES);
   }
 
-  /** Each mechanism's live tuning: the paths of the values it tunes, by the tuning's name. */
-  private static Map<String, List<String>> tuning() {
+  /** Each mechanism's live tuning: the values it tunes and their limits, by the tuning's name. */
+  private static Map<String, List<Knob>> tuning() {
     RobotConfig robot = Robots.current();
-    Map<String, List<String>> tuning = new LinkedHashMap<>();
+    Map<String, List<Knob>> tuning = new LinkedHashMap<>();
     for (LiveConfig<?> live :
         List.of(Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()))) {
-      tuning.put(live.name(), live.knobs().stream().map(LiveConfig.Knob::path).toList());
+      tuning.put(
+          live.name(),
+          live.knobs().stream()
+              .map(k -> new Knob(k.path(), k.limits().min(), k.limits().max()))
+              .toList());
     }
     return tuning;
+  }
+
+  /**
+   * The values the template ships, which the register's starting values must show: every record's
+   * DEFAULTS, the scoring gate, the simulator's season-worn sensors, and the template's robot.
+   */
+  private static Map<String, Committed> committed() {
+    Map<String, Committed> committed =
+        new LinkedHashMap<>(ValuesRegister.defaults(Scanned.RECORDS));
+    RobotConfig robot = Robots.SIM;
+    committed.put(
+        "LocalizationGate", new Committed("LocalizationGate.SCORING", LocalizationGate.SCORING));
+    committed.put("SensorErrors", new Committed("SensorErrors.TYPICAL", SensorErrors.TYPICAL));
+    committed.put(
+        "SensorErrors.GyroErrors",
+        new Committed("SensorErrors.TYPICAL's gyro", SensorErrors.TYPICAL.gyro()));
+    committed.put("Body", new Committed("Robots.SIM's body", robot.body()));
+    committed.put("SwerveConfig", new Committed("Robots.SIM's drivetrain", robot.drivetrain()));
+    committed.put(
+        "SwerveConfig.Modules",
+        new Committed("Robots.SIM's modules", robot.drivetrain().modules()));
+    committed.put(
+        "SwerveConfig.Limits", new Committed("Robots.SIM's limits", robot.drivetrain().limits()));
+    committed.put(
+        "SwerveConfig.Gains", new Committed("Robots.SIM's gains", robot.drivetrain().gains()));
+    committed.put(
+        "CameraConfig.Sensor",
+        new Committed("Robots.SIM's camera sensor", robot.cameras().get(0).sensor()));
+    return committed;
   }
 
   private static ValuesRegister register() throws IOException {
@@ -52,6 +89,15 @@ class ValuesRegisterTest {
   @Test
   void theLegendsListTheKindsAndSourcesTheCheckAccepts() throws IOException {
     assertThat(register().legendProblems()).isEmpty();
+  }
+
+  @Test
+  void theStartingValuesAreTheOnesTheTemplateShips() throws IOException {
+    Map<String, Committed> committed = committed();
+
+    assertThat(committed)
+        .containsKeys("VisionConfig", "EstimatorConfig", "TerrainCrossing.Settings");
+    assertThat(register().startingValueProblems(committed)).isEmpty();
   }
 
   @Test
@@ -100,8 +146,11 @@ class ValuesRegisterTest {
           new CodeRecord(
               "ArmReadings", "frc.robot.ArmReadings", List.of(new Component("angle", null))));
 
-  private static final Map<String, List<String>> ARM_TUNING =
-      Map.of("arm", List.of("gains.kP", "gains.kD"));
+  private static final Map<String, List<Knob>> ARM_TUNING =
+      Map.of("arm", List.of(new Knob("gains.kP", 0, 10), new Knob("gains.kD", 0, 1)));
+
+  /** The arm's gains as it ships them. */
+  record ArmGains(double kP, double kD) {}
 
   private static final String ARM_REGISTER =
       """
@@ -327,8 +376,12 @@ class ValuesRegisterTest {
         ARM_REGISTER
             .replace("| `gains.kD` | 0 to 1 | guess | Room to tune. |\n", "")
             .replace("| `gains.kP` |", "| `gains.kI` | 0 to 1 | guess | Gone. |\n| `gains.kP` |");
-    Map<String, List<String>> tuning =
-        Map.of("arm", List.of("gains.kP", "gains.kD"), "wrist", List.of("gains.kP"));
+    Map<String, List<Knob>> tuning =
+        Map.of(
+            "arm",
+            List.of(new Knob("gains.kP", 0, 10), new Knob("gains.kD", 0, 1)),
+            "wrist",
+            List.of(new Knob("gains.kP", 0, 5)));
 
     assertThat(ValuesRegister.parse(register).problems(ARM, tuning))
         .containsExactly(
@@ -338,6 +391,38 @@ class ValuesRegisterTest {
                 + " path",
             "Add a section for the wrist tuning to docs/values.md: a heading ### `wrist` tuning"
                 + " and a table of its knobs with a row for each: gains.kP");
+  }
+
+  @Test
+  void aStaleStartingValueSaysWhatItShouldBe() {
+    Map<String, Committed> shipped =
+        Map.of("Arm.Gains", new Committed("ArmGains.DEFAULTS", new ArmGains(2.5, 0.1)));
+
+    assertThat(ValuesRegister.parse(ARM_REGISTER).startingValueProblems(shipped))
+        .containsExactly(
+            "docs/values.md line 19: Arm.Gains.kP's starting value is \"2\", but"
+                + " ArmGains.DEFAULTS has 2.5: update the cell");
+  }
+
+  @Test
+  void aCellShowsAValueToItsOwnPrecision() {
+    assertThat(ValuesRegister.shows("5° (0.087 rad)", Math.toRadians(5))).isTrue();
+    assertThat(ValuesRegister.shows("2.54 V/(m/s)", 2.5376)).isTrue();
+    assertThat(ValuesRegister.shows("0.985, 0.99", 0.99)).isTrue();
+    assertThat(ValuesRegister.shows("-0.3", -0.3)).isTrue();
+    assertThat(ValuesRegister.shows("2.5", 2.56)).isFalse();
+    assertThat(ValuesRegister.shows("none", 0)).isFalse();
+  }
+
+  @Test
+  void staleKnobLimitsSayWhatTheyShouldBe() {
+    Map<String, List<Knob>> tuning =
+        Map.of("arm", List.of(new Knob("gains.kP", 0, 20), new Knob("gains.kD", 0, 1)));
+
+    assertThat(ValuesRegister.parse(ARM_REGISTER).problems(ARM, tuning))
+        .containsExactly(
+            "docs/values.md line 28: the arm tuning's gains.kP has the limits \"0 to 10\", but"
+                + " it's tuned from 0 to 20: update the cell");
   }
 
   @Test

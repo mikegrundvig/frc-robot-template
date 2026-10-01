@@ -3,9 +3,14 @@ package frc.robot;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import frc.robot.lib.config.ConfigRecord;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -18,6 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
+import org.wpilib.units.Measure;
 
 /**
  * The values register (docs/values.md) as its test reads it, and what it lacks or has too many of
@@ -72,6 +78,7 @@ final class ValuesRegister {
   private static final Pattern NAME_CELL = Pattern.compile("^`([^`]+)`$");
   private static final Pattern SEPARATOR_CELL = Pattern.compile("^:?-+:?$");
   private static final Pattern UNESCAPED_PIPE = Pattern.compile("(?<!\\\\)\\|");
+  private static final Pattern NUMBER = Pattern.compile("-?\\d+(?:\\.\\d+)?");
 
   /**
    * A record marked {@link ConfigRecord}, as the register names it.
@@ -103,6 +110,23 @@ final class ValuesRegister {
    * @param line where it is, counting from 1
    */
   record Row(String subject, String name, String kind, String source, String value, int line) {}
+
+  /**
+   * A value a mechanism tunes live.
+   *
+   * @param path where it is in its configuration, such as {@code gains.steerKp}
+   * @param min the least it may be tuned to, in the unit it's written in
+   * @param max the most
+   */
+  record Knob(String path, double min, double max) {}
+
+  /**
+   * A record's values as the template ships them, which its rows' starting values must show.
+   *
+   * @param label where they come from, for a message: {@code VisionConfig.DEFAULTS}
+   * @param values the record
+   */
+  record Committed(String label, Record values) {}
 
   private enum Table {
     VALUES,
@@ -311,9 +335,9 @@ final class ValuesRegister {
    * apart ({@link #legendProblems}).
    *
    * @param records every record marked {@link ConfigRecord}
-   * @param tuning each mechanism tuning's name, with the paths of the values it tunes
+   * @param tuning each mechanism tuning's name, with the values it tunes
    */
-  List<String> problems(List<CodeRecord> records, Map<String, List<String>> tuning) {
+  List<String> problems(List<CodeRecord> records, Map<String, List<Knob>> tuning) {
     List<String> problems = new ArrayList<>(formatProblems);
     problems.addAll(recordProblems(records));
     problems.addAll(tuningProblems(tuning));
@@ -585,12 +609,12 @@ final class ValuesRegister {
   }
 
   /**
-   * Every value a mechanism tunes has a row under its tuning, with a source from the list, and no
-   * row names one it doesn't tune.
+   * Every value a mechanism tunes has a row under its tuning, showing its limits, with a source
+   * from the list, and no row names one it doesn't tune.
    *
-   * @param tuning each tuning's name, with the paths of the values it tunes
+   * @param tuning each tuning's name, with the values it tunes
    */
-  List<String> tuningProblems(Map<String, List<String>> tuning) {
+  List<String> tuningProblems(Map<String, List<Knob>> tuning) {
     List<String> problems = new ArrayList<>();
     Map<String, Map<String, Row>> knobRows = grouped(knobs, problems);
     knobRows.forEach(
@@ -614,9 +638,10 @@ final class ValuesRegister {
     return problems;
   }
 
-  /** One tuning's rows: one for each knob, and none for anything else. */
+  /** One tuning's rows: one for each knob, showing its limits, and none for anything else. */
   private void tuningRows(
-      String name, List<String> paths, Map<String, Row> named, List<String> problems) {
+      String name, List<Knob> knobs, Map<String, Row> named, List<String> problems) {
+    List<String> paths = knobs.stream().map(Knob::path).toList();
     List<String> missing = paths.stream().filter(p -> !named.containsKey(p)).toList();
     if (named.isEmpty() && !missing.isEmpty()) {
       Integer heading = headings.get(name);
@@ -663,6 +688,157 @@ final class ValuesRegister {
                 + ": it tunes no value by that path");
       }
     }
+    for (Knob knob : knobs) {
+      Row row = named.get(knob.path());
+      if (row != null && !showsLimits(row.value(), knob)) {
+        problems.add(
+            at(row)
+                + "the "
+                + name
+                + " tuning's "
+                + knob.path()
+                + " has the limits \""
+                + row.value()
+                + "\", but it's tuned from "
+                + shown(knob.min())
+                + " to "
+                + shown(knob.max())
+                + ": update the cell");
+      }
+    }
+  }
+
+  /** Whether a cell's first two numbers are a knob's limits, to the cell's precision. */
+  private static boolean showsLimits(String cell, Knob knob) {
+    List<String> numbers = new ArrayList<>();
+    Matcher number = NUMBER.matcher(cell);
+    while (number.find() && numbers.size() < 2) {
+      numbers.add(number.group());
+    }
+    return numbers.size() == 2
+        && (Double.isInfinite(knob.min()) || near(numbers.get(0), knob.min()))
+        && (Double.isInfinite(knob.max()) || near(numbers.get(1), knob.max()));
+  }
+
+  /**
+   * Every row of a record the template ships values for shows its starting value: a number, or each
+   * number of a list, written in the cell to the cell's precision. Measures count in the unit
+   * they're written in; other values (names, switches, maps) aren't checked.
+   *
+   * @param committed by record name, the values the template ships
+   */
+  List<String> startingValueProblems(Map<String, Committed> committed) {
+    List<String> problems = new ArrayList<>();
+    for (Row row : values) {
+      Committed shipped = committed.get(row.subject());
+      if (shipped == null) {
+        continue;
+      }
+      Object value = componentValue(shipped.values(), row.name());
+      List<Double> numbers = numbers(value);
+      if (numbers.isEmpty()) {
+        continue;
+      }
+      if (!numbers.stream().allMatch(n -> shows(row.value(), n))) {
+        problems.add(
+            at(row)
+                + row.subject()
+                + "."
+                + row.name()
+                + "'s starting value is \""
+                + row.value()
+                + "\", but "
+                + shipped.label()
+                + " has "
+                + numbers.stream().map(ValuesRegister::shown).collect(Collectors.joining(", "))
+                + ": update the cell");
+      }
+    }
+    return problems;
+  }
+
+  /** The numbers a value holds: itself, a measure's magnitude, or a list's; none otherwise. */
+  private static List<Double> numbers(@Nullable Object value) {
+    if (value instanceof Number number) {
+      return List.of(number.doubleValue());
+    }
+    if (value instanceof Measure<?> measure) {
+      return List.of(measure.magnitude());
+    }
+    if (value instanceof List<?> list && !list.isEmpty()) {
+      List<Double> numbers = new ArrayList<>();
+      for (Object item : list) {
+        if (!(item instanceof Number number)) {
+          return List.of();
+        }
+        numbers.add(number.doubleValue());
+      }
+      return numbers;
+    }
+    return List.of();
+  }
+
+  private static @Nullable Object componentValue(Record values, String name) {
+    for (RecordComponent component : values.getClass().getRecordComponents()) {
+      if (component.getName().equals(name)) {
+        try {
+          return component.getAccessor().invoke(values);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+          throw new IllegalStateException("can't read " + name + " from " + values, e);
+        }
+      }
+    }
+    return null;
+  }
+
+  /** Whether any number written in a cell is this value, to that number's precision. */
+  static boolean shows(String cell, double value) {
+    Matcher number = NUMBER.matcher(cell);
+    while (number.find()) {
+      if (near(number.group(), value)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Whether a written number is this value, rounded to the decimals it's written with. */
+  private static boolean near(String written, double value) {
+    BigDecimal number = new BigDecimal(written);
+    return BigDecimal.valueOf(value)
+            .setScale(number.scale(), RoundingMode.HALF_UP)
+            .compareTo(number)
+        == 0;
+  }
+
+  private static String shown(double value) {
+    return BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
+  }
+
+  /**
+   * Each record's {@code DEFAULTS}, where it has one: the values the template ships for it.
+   *
+   * @param records the records to look in
+   */
+  static Map<String, Committed> defaults(List<CodeRecord> records) {
+    Map<String, Committed> defaults = new TreeMap<>();
+    for (CodeRecord record : records) {
+      Class<?> type = load(record.className());
+      for (Field field : type.getFields()) {
+        if (field.getName().equals("DEFAULTS")
+            && Modifier.isStatic(field.getModifiers())
+            && field.getType() == type) {
+          try {
+            if (field.get(null) instanceof Record values) {
+              defaults.put(record.name(), new Committed(record.name() + ".DEFAULTS", values));
+            }
+          } catch (IllegalAccessException e) {
+            throw new IllegalStateException("can't read " + record.name() + ".DEFAULTS", e);
+          }
+        }
+      }
+    }
+    return defaults;
   }
 
   /** Rows by subject, then name, in order; a name twice in one subject is a problem. */

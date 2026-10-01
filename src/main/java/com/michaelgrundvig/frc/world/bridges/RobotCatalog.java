@@ -9,11 +9,12 @@ import java.util.List;
  * the robot program. An implementation needs a public constructor that takes nothing.
  */
 public interface RobotCatalog {
-  /** Every robot the team has. */
+  /**
+   * Every robot the team has: what a tool's files carry unless the build names some. Not the robot
+   * this program would run as, which a robot decides by what it reads of itself (a serial number, a
+   * file), and a build on a laptop can't.
+   */
   List<RobotDescription> all();
-
-  /** The robot a tool's files carry unless the build names others: the competition robot. */
-  RobotDescription current();
 
   /**
    * A robot by its name.

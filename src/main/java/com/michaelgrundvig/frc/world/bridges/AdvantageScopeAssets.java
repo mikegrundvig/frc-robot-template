@@ -176,7 +176,7 @@ public final class AdvantageScopeAssets {
 
   /**
    * Writes the robots' folders: {@code --catalog=<class> --out=<folder> [--robot=<name>]...}. With
-   * no robot named, the catalog's current one. The build's AdvantageScope plugin runs this on the
+   * no robot named, every robot the catalog has. The build's AdvantageScope plugin runs this on the
    * compiled program; it only builds the robots' configuration records and writes files.
    *
    * @throws IllegalArgumentException for a missing or unknown argument, or a robot the catalog
@@ -206,7 +206,7 @@ public final class AdvantageScopeAssets {
             .getDeclaredConstructor()
             .newInstance();
     List<RobotDescription> robots =
-        names.isEmpty() ? List.of(catalog.current()) : names.stream().map(catalog::named).toList();
+        names.isEmpty() ? catalog.all() : names.stream().map(catalog::named).toList();
     write(robots, out);
   }
 

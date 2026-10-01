@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.world.bridges.AdvantageScopeAssets;
 import frc.robot.AdvantageScopeLayoutCheck.Source;
+import io.avaje.jsonb.Jsonb;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -24,12 +26,26 @@ class AdvantageScopeLayoutTest {
   static final Path LAYOUT =
       Path.of(System.getProperty("frc.projectDir", "."), "layouts", "advantagescope.json");
 
-  /** The models the build generates for the robots: the schematic, and the one without cones. */
-  static Set<String> models() {
+  /** Where the build writes AdvantageScope's assets. */
+  static final Path ASSETS = Path.of(System.getProperty("frc.projectDir", "."), "ascope_assets");
+
+  /**
+   * The robot models the build generated, by the names AdvantageScope lists them under: each
+   * folder's config.json that the build wrote (it says so beside it, in GENERATED.md). The build
+   * writes them before the tests run.
+   */
+  @SuppressWarnings("unchecked")
+  static Set<String> models() throws IOException {
     Set<String> models = new TreeSet<>();
-    for (RobotConfig robot : Robots.all()) {
-      models.add(AdvantageScopeAssets.modelName(robot.name()));
-      models.add(AdvantageScopeAssets.withoutConesModelName(robot.name()));
+    try (Stream<Path> folders = Files.list(ASSETS)) {
+      for (Path folder : folders.filter(f -> Files.exists(f.resolve("GENERATED.md"))).toList()) {
+        Map<String, Object> config =
+            (Map<String, Object>)
+                Jsonb.instance()
+                    .type(Object.class)
+                    .fromJson(Files.readString(folder.resolve("config.json")));
+        models.add(String.valueOf(config.get("name")));
+      }
     }
     return models;
   }
@@ -53,6 +69,7 @@ class AdvantageScopeLayoutTest {
     assertThat(sources)
         .extracting(Source::tabType)
         .contains("3D Field", "2D Field", "Swerve", "Line Graph");
+    assertThat(models()).as("the models the build generated").isNotEmpty();
     assertThat(AdvantageScopeLayoutCheck.problems(sources, logged, models())).isEmpty();
   }
 

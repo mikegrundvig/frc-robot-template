@@ -20,11 +20,6 @@ public final class ToolRobots implements RobotCatalog {
     return Robots.all().stream().map(ToolRobots::describe).toList();
   }
 
-  @Override
-  public RobotDescription current() {
-    return describe(Robots.current());
-  }
-
   /**
    * A robot as the writers read it. The IMUs' mounts are known only along the floor (their forward
    * and left offsets) until a mount gives their height too, so none is drawn yet.

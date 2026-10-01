@@ -20,7 +20,7 @@ import org.gradle.api.tasks.TaskProvider;
  * <pre>{@code
  * plugins { id "frc.advantagescope-assets" }
  * advantageScope {
- *     robots = ["competition", "practice"] // which robots; by default the competition robot
+ *     robots = ["competition", "practice"] // which robots; by default every one in Robots.all()
  * }
  * }</pre>
  *
@@ -48,7 +48,8 @@ public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
   public abstract static class Extension {
     /**
      * The robots whose assets are written, by name, as {@code Robots.all()} names them: one folder
-     * each. Empty, the default, is the competition robot ({@code Robots.current()}).
+     * each. Empty, the default, is every robot in {@code Robots.all()}. (Not {@code
+     * Robots.current()}, which a robot decides by what it reads of itself, and a laptop can't.)
      */
     public abstract ListProperty<String> getRobots();
 

@@ -97,7 +97,7 @@ ghost. Commit the folder with the change to `Robots.java` that made it.
   `build.gradle`'s `plugins`, and nothing of it runs. A path tool's plugin, once one is chosen,
   will be another line, and work the same way.
 - **Which robots:** `advantageScope { robots = ["competition", "practice"] }` in `build.gradle`,
-  one folder each; by default the robot `Robots.current()` returns.
+  one folder each; by default every robot in `Robots.all()`.
 - **Part of the build, never of `run` or `test`.** The simulator never waits for it, and it never
   starts the robot program to draw it: it builds only the robots' configuration records, in a Java
   process of its own with a 32 MB heap. It took 0.3 s on the template's robot, and with

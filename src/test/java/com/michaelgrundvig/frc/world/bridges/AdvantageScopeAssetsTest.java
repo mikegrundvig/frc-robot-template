@@ -352,17 +352,17 @@ class AdvantageScopeAssetsTest {
         .contains("Robots.java");
   }
 
-  /** The build's plugin runs main: the catalog's current robot, or the robots it names. */
+  /** The build's plugin runs main: every robot the catalog has, or the robots it names. */
   @Test
-  void mainWritesTheCurrentRobotOrTheNamedOnes(@TempDir Path out) throws Exception {
-    AdvantageScopeAssets.main("--catalog=" + TwoRobots.class.getName(), "--out=" + out);
-    assertThat(names(out)).containsExactly("Robot_first", "Robot_first_NoCones");
+  void mainWritesEveryRobotOrTheNamedOnes(@TempDir Path every, @TempDir Path out) throws Exception {
+    AdvantageScopeAssets.main("--catalog=" + TwoRobots.class.getName(), "--out=" + every);
+    assertThat(names(every))
+        .containsExactly(
+            "Robot_first", "Robot_first_NoCones", "Robot_second", "Robot_second_NoCones");
 
     AdvantageScopeAssets.main(
         "--catalog=" + TwoRobots.class.getName(), "--out=" + out, "--robot=second");
-    assertThat(names(out))
-        .containsExactly(
-            "Robot_first", "Robot_first_NoCones", "Robot_second", "Robot_second_NoCones");
+    assertThat(names(out)).containsExactly("Robot_second", "Robot_second_NoCones");
     assertThat(Files.readAllBytes(out.resolve("Robot_second/model.glb")))
         .isEqualTo(
             AdvantageScopeAssets.files(TwoRobots.robot("second")).get("Robot_second/model.glb"));
@@ -404,11 +404,6 @@ class AdvantageScopeAssetsTest {
     @Override
     public List<RobotDescription> all() {
       return List.of(robot("first"), robot("second"));
-    }
-
-    @Override
-    public RobotDescription current() {
-      return robot("first");
     }
   }
 

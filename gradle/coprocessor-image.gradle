@@ -1,9 +1,10 @@
 // The coprocessor image's scripts (coprocessor/image/) are shell, so their tests are too
 // (coprocessor/image/test/run.sh). They need bash and yq (mikefarah's, version 4): Linux CI has both,
 // and a Windows laptop rarely does. So ci runs them wherever bash and yq are found, says so when it
-// skips them, and in CI on Linux (CI=true) fails without them rather than skipping. The image
-// workflow (.github/workflows/coprocessor-image.yml) runs every one, with shellcheck, before it
-// builds anything.
+// skips them, and in CI on Linux (CI=true) runs every one or fails: no test may skip there, so
+// .github/workflows/ci.yml installs what the partition tests need. The image workflow
+// (.github/workflows/coprocessor-image.yml) runs them all too, with shellcheck, before it builds
+// anything.
 
 def imageTests = tasks.register("coprocessorImageTest") {
     group = "verification"
@@ -44,7 +45,12 @@ def imageTests = tasks.register("coprocessorImageTest") {
             logger.lifecycle("Coprocessor image tests skipped: ${why} (https://github.com/mikefarah/yq). CI runs them.")
             return
         }
-        def run = new ProcessBuilder("bash", "coprocessor/image/test/run.sh").directory(root).redirectErrorStream(true).start()
+        def builder = new ProcessBuilder("bash", "coprocessor/image/test/run.sh").directory(root).redirectErrorStream(true)
+        if (requireTools) {
+            // In CI on Linux, a test skipped for a missing tool fails the run: all of them run there.
+            builder.environment().put("COPROC_TESTS_STRICT", "1")
+        }
+        def run = builder.start()
         def output = run.inputStream.text
         if (run.waitFor() != 0) {
             throw new GradleException("Coprocessor image tests failed:\n" + output)

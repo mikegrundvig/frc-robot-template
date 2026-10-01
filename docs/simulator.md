@@ -94,14 +94,17 @@ cameras' fields of view, and `Robot_<name>_NoCones/`, the same without them, for
 ghost. Commit the folder with the change to `Robots.java` that made it.
 
 - **One plugin per tool.** A team that doesn't use AdvantageScope removes its line from
-  `build.gradle`'s `plugins`, and nothing of it runs. A path tool's plugin, once one is chosen,
-  will be another line, and work the same way.
+  `build.gradle`'s `plugins`, and nothing of it runs: not the plugin, and not its own tests in
+  `ci` (`build-logic/`'s, which run only while one of its plugins is applied). A path tool's
+  plugin, once one is chosen, will be another line, and work the same way.
 - **Which robots:** `advantageScope { robots = ["competition", "practice"] }` in `build.gradle`,
   one folder each; by default every robot in `Robots.all()`.
 - **Part of the build, never of `run` or `test`.** The simulator never waits for it, and it never
   starts the robot program to draw it: it builds only the robots' configuration records, in a Java
-  process of its own with a 32 MB heap. It took 0.3 s on the template's robot, and with
-  `Robots.java` unchanged it's skipped as up to date (0.025 s).
+  process of its own on the project's Java, with a 32 MB heap. It can't tell `Robots.java` from
+  the rest of the program, so it runs again whenever the compiled program or its libraries change
+  (any change to the main code, or a vendordep): 0.3 s on the template's robot. With the code
+  unchanged it's skipped as up to date (0.025 s).
 - **Don't edit the folder:** the next build writes over an edit, from `Robots.java`. Nobody edits
   these files with a tool, so the build simply keeps them in step: after a pull, a `clean`, or a
   merge alike. **A merge conflict in `ascope_assets/`:** take either side
@@ -111,6 +114,10 @@ ghost. Commit the folder with the change to `Robots.java` that made it.
 - **What the model leaves out:** everything it doesn't draw, such as the mass, the motors, the
   gains, and each camera's noise and latency (the writer's Javadoc lists them, and a test keeps
   the list whole).
+- **Your own assets go in `ascope_assets/` too:** a CAD robot, a joystick, a field.
+  AdvantageScope takes one custom assets folder, and the build leaves alone every folder it didn't
+  write: it removes only a folder it wrote itself whose robot is gone (renamed, or dropped from
+  `advantageScope { robots }`).
 
 **Known limits.**
 

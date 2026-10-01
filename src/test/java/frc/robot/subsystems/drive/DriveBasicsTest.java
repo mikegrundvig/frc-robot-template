@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.wpilib.units.Units.Meters;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -15,7 +16,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 
 /** Does the drivetrain go where the driver points it? */
 @ExtendWith(RobotSim.class)
@@ -72,6 +75,25 @@ class DriveBasicsTest {
     assertEquals(0.5, pose.getX(), 0.05, "half a meter at 0.5 m/s for a second");
     assertEquals(0.0, pose.getY(), 0.02, "straight");
     assertEquals(0.0, harness.drive.getRobotRelativeVelocities().vx, 0.05, "stopped");
+  }
+
+  /** AdvantageScope turns the schematic robot's wheels by these: where each is, as it points. */
+  @Test
+  void eachWheelsPoseIsWhereItIsTurnedAsItsModuleMeasures() {
+    harness.drive(1.0, 0.0, 0.5, 0.0); // sideways, to the left
+
+    Pose3d[] wheels = harness.drive.modulePoses();
+
+    Translation2d[] corners = Robots.SIM.moduleTranslations();
+    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    assertEquals(4, wheels.length);
+    for (int i = 0; i < 4; i++) {
+      assertEquals(corners[i].getX(), wheels[i].getX(), 1e-9, "module " + i + " forward");
+      assertEquals(corners[i].getY(), wheels[i].getY(), 1e-9, "module " + i + " left");
+      assertEquals(radius, wheels[i].getZ(), 1e-9, "the wheel's center, a radius up");
+      // Pointing left, or right with the wheel rolling backward.
+      assertEquals(1.0, Math.abs(Math.sin(wheels[i].getRotation().getZ())), 0.01, "sideways");
+    }
   }
 
   @Test

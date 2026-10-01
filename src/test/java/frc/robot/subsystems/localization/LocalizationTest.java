@@ -1,6 +1,7 @@
 package frc.robot.subsystems.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -15,6 +16,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
+import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /** Localization fed by hand: what it makes of the drivetrain's readings, one loop at a time. */
@@ -112,6 +116,30 @@ class LocalizationTest {
       localization.update();
 
       assertThat(localization.isCamerasWithoutPlacesAlertActive()).isTrue();
+    }
+  }
+
+  /** The 99.9% ellipse AdvantageScope draws: closed, and 3.72 standard deviations out. */
+  @Test
+  void theEllipseIsAClosedOutlineAroundThePosition() {
+    try (Localization localization =
+        DriveSimHarness.localizationFor(Robots.SIM, DriveSimHarness.estimatorAt(Pose2d.ZERO))) {
+      Pose2d at = new Pose2d(3, 2, Rotation2d.fromDegrees(40));
+
+      Pose2d[] outline = localization.ellipse(at, PoseCovariance.fromStdDevs(0.1, 0.1, 0.01));
+
+      assertThat(outline).hasSize(37);
+      assertThat(outline[36]).isEqualTo(outline[0]);
+      for (Pose2d point : outline) {
+        assertThat(point.getTranslation().getDistance(at.getTranslation()))
+            .isCloseTo(0.1 * Math.sqrt(-2 * Math.log(0.001)), within(1e-9));
+      }
+      assertThat(localization.ellipse(at, PoseCovariance.fromStdDevs(10, 10, 1)))
+          .as("wider than the field: nothing to draw")
+          .isEmpty();
+      assertThat(localization.pose3d(at))
+          .as("on flat ground, level")
+          .isEqualTo(new Pose3d(3, 2, 0, new Rotation3d(0, 0, at.getRotation().getRadians())));
     }
   }
 }

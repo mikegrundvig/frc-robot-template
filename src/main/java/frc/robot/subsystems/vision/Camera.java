@@ -7,8 +7,11 @@ import frc.robot.lib.localization.MountCheck;
 import frc.robot.lib.localization.Timestamps;
 import frc.robot.lib.localization.VisionDecision;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
+import java.util.function.IntFunction;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose3d;
@@ -77,6 +80,17 @@ final class Camera implements AutoCloseable {
   private double loopResidualSum;
   private int loopResidualCount;
 
+  // This loop's tags where the field's layout has them, by what became of the images that saw
+  // them, and why each refused one was: AdvantageScope draws a line from the robot to each.
+  private final List<Pose3d> acceptedTags = new ArrayList<>();
+  private final List<Pose3d> rejectedTags = new ArrayList<>();
+  private final List<String> rejectedReasons = new ArrayList<>();
+
+  // The arrays they were last logged in, reused while their lengths hold.
+  private Pose3d[] acceptedArray = {};
+  private Pose3d[] rejectedArray = {};
+  private String[] reasonsArray = {};
+
   /**
    * @param mountSightings how many of its latest tags the camera's mount is judged by
    */
@@ -140,6 +154,9 @@ final class Camera implements AutoCloseable {
     outcomes.clear();
     latencies.clear();
     seenTags.clear();
+    acceptedTags.clear();
+    rejectedTags.clear();
+    rejectedReasons.clear();
     loopResidualSum = 0;
     loopResidualCount = 0;
     if (inputs.skippedFrames > 0) {
@@ -168,9 +185,14 @@ final class Camera implements AutoCloseable {
    * @param nowNanos this loop's time
    * @param previousLoopNanos the previous loop's time; the minimum on the first loop
    * @param marginSeconds how much later than the camera's usual latency is still in time
+   * @param tags the image's tags, on the field: refused with it
    */
   boolean arrivedInTime(
-      long takenNanos, long nowNanos, long previousLoopNanos, double marginSeconds) {
+      long takenNanos,
+      long nowNanos,
+      long previousLoopNanos,
+      double marginSeconds,
+      List<Pose3d> tags) {
     latencies.add(Timestamps.toSeconds(nowNanos - takenNanos));
     double latest = config.sensor().latency().in(Seconds) + marginSeconds;
     String why = null;
@@ -192,7 +214,7 @@ final class Camera implements AutoCloseable {
     if (why == null) {
       return true;
     }
-    outcome(why);
+    leftOut(tags, why);
     leftOutOfStep++;
     if (!(nowNanos < outOfStepUntil)) {
       // Said once as the alert goes up, not changed with every image while it's up.
@@ -211,6 +233,24 @@ final class Camera implements AutoCloseable {
   /** What became of one of this loop's images. */
   void outcome(String outcome) {
     outcomes.add(outcome);
+  }
+
+  /**
+   * One of this loop's images left out before the estimator saw it, and why: its outcome, and its
+   * tags refused for that reason.
+   *
+   * @param tags the image's tags, where the field's layout has them
+   */
+  void leftOut(List<Pose3d> tags, String why) {
+    outcome(why);
+    refuse(tags, why);
+  }
+
+  private void refuse(List<Pose3d> tags, String why) {
+    for (Pose3d tag : tags) {
+      rejectedTags.add(tag);
+      rejectedReasons.add(why);
+    }
   }
 
   /**
@@ -302,15 +342,32 @@ final class Camera implements AutoCloseable {
   }
 
   /**
-   * Counts and logs what the estimator decided about this camera's measurements.
+   * Counts and logs what the estimator decided about this camera's measurements, and this loop's
+   * tags by what became of them: {@code AcceptedTags} and {@code RejectedTags}, where the field's
+   * layout has them, and beside each refused one why ({@code RejectedReasons}, in the same order).
    *
    * @param agreeMeters an accepted measurement this close to the estimate agrees with it
+   * @param field where the field's layout has each tag, by its ID
    */
-  void record(List<VisionDecision> decisions, double agreeMeters) {
+  void record(
+      List<VisionDecision> decisions, double agreeMeters, IntFunction<Optional<Pose3d>> field) {
     List<String> reasons = new ArrayList<>();
     for (VisionDecision decision : decisions) {
       if (decision.measurement().camera().equals(name())) {
         reasons.add(decision.reason());
+        for (int id : decision.measurement().tagIds()) {
+          field
+              .apply(id)
+              .ifPresent(
+                  tag -> {
+                    if (decision.accepted()) {
+                      acceptedTags.add(tag);
+                    } else {
+                      rejectedTags.add(tag);
+                      rejectedReasons.add(decision.reason());
+                    }
+                  });
+        }
         if (decision.accepted()) {
           accepted++;
           if (decision.innovationMeters() <= agreeMeters) {
@@ -324,6 +381,35 @@ final class Camera implements AutoCloseable {
     Logger.recordOutput(key + "/Decisions", reasons.toArray(String[]::new));
     Logger.recordOutput(key + "/Accepted", accepted);
     Logger.recordOutput(key + "/Rejected", rejected);
+    acceptedArray = acceptedTags.toArray(sized(acceptedArray, acceptedTags.size()));
+    rejectedArray = rejectedTags.toArray(sized(rejectedArray, rejectedTags.size()));
+    reasonsArray = rejectedReasons.toArray(sized(reasonsArray, rejectedReasons.size()));
+    Logger.recordOutput(key + "/AcceptedTags", acceptedArray);
+    Logger.recordOutput(key + "/RejectedTags", rejectedArray);
+    Logger.recordOutput(key + "/RejectedReasons", reasonsArray);
+  }
+
+  /**
+   * The array to fill with this many elements: the one given while it has the length, else a new
+   * one. AdvantageKit copies what it logs, so an array can be filled again next loop.
+   */
+  private static <T> T[] sized(T[] array, int length) {
+    return array.length == length ? array : Arrays.copyOf(array, length);
+  }
+
+  /** This loop's tags that went into accepted measurements, where the field's layout has them. */
+  List<Pose3d> acceptedTags() {
+    return acceptedTags;
+  }
+
+  /** This loop's refused tags, where the field's layout has them. */
+  List<Pose3d> rejectedTags() {
+    return rejectedTags;
+  }
+
+  /** Why each of this loop's refused tags was, in the same order. */
+  List<String> rejectedReasons() {
+    return rejectedReasons;
   }
 
   /**

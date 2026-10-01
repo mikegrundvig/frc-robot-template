@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 
 class PoseCovarianceTest {
   @Test
@@ -89,5 +90,49 @@ class PoseCovarianceTest {
     assertThatThrownBy(() -> new PoseCovariance(0.1, 0, 0.1, Double.NaN))
         .hasMessageContaining("heading");
     assertThatThrownBy(() -> new PoseCovariance(0.1, 0, 0.1, -1)).hasMessageContaining("heading");
+  }
+
+  /** 99.9% of a two-dimensional normal error lies within 3.72 of its standard deviations. */
+  @Test
+  void theEllipseReachesTheSpreadsTimesTheChiSquaredRadius() {
+    PoseCovariance.Ellipse ellipse = PoseCovariance.fromStdDevs(0.2, 0.1, 0.01).ellipse(0.999);
+
+    double k = Math.sqrt(-2 * Math.log(0.001));
+    assertThat(k).isCloseTo(3.717, within(0.001));
+    assertThat(ellipse.major()).isCloseTo(0.2 * k, within(1e-12));
+    assertThat(ellipse.minor()).isCloseTo(0.1 * k, within(1e-12));
+    assertThat(ellipse.angleRadians()).isCloseTo(0, within(1e-12));
+    assertThat(ellipse.pointAt(0).getX()).isCloseTo(0.2 * k, within(1e-12));
+    assertThat(ellipse.pointAt(Math.PI / 2).getY()).isCloseTo(0.1 * k, within(1e-12));
+  }
+
+  /** Every point on a turned ellipse is the same number of standard deviations out. */
+  @Test
+  void aCorrelatedSpreadTurnsTheEllipse() {
+    PoseCovariance turned =
+        PoseCovariance.fromStdDevs(0.3, 0.1, 0.01).rotatedBy(Rotation2d.fromDegrees(30));
+
+    PoseCovariance.Ellipse ellipse = turned.ellipse(0.95);
+
+    double k2 = -2 * Math.log(0.05);
+    assertThat(Math.toDegrees(ellipse.angleRadians())).isCloseTo(30, within(1e-9));
+    double determinant = turned.xx() * turned.yy() - turned.xy() * turned.xy();
+    for (int i = 0; i < 12; i++) {
+      Translation2d point = ellipse.pointAt(i * Math.PI / 6);
+      double x = point.getX();
+      double y = point.getY();
+      double squared =
+          (turned.yy() * x * x - 2 * turned.xy() * x * y + turned.xx() * y * y) / determinant;
+      assertThat(squared).as("point " + i).isCloseTo(k2, within(1e-9));
+    }
+  }
+
+  @Test
+  void anEllipseNeedsAProbability() {
+    PoseCovariance covariance = PoseCovariance.fromStdDevs(0.1, 0.1, 0.01);
+
+    assertThatThrownBy(() -> covariance.ellipse(1)).isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> covariance.ellipse(0)).isInstanceOf(IllegalArgumentException.class);
+    assertThat(PoseCovariance.fromStdDevs(0, 0, 0).ellipse(0.5).major()).isZero();
   }
 }

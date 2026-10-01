@@ -2,6 +2,7 @@ package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.RadiansPerSecond;
@@ -28,7 +29,9 @@ import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveDriveKinematics;
@@ -72,6 +75,13 @@ public class Drive implements Mechanism, AutoCloseable {
   private final GyroIOInputsAutoLogged backupInputs = new GyroIOInputsAutoLogged();
   private final Module[] modules = new Module[4];
   private final SwerveDriveKinematics kinematics;
+
+  /** Where each wheel touches the floor, from the robot's center. */
+  private final Translation2d[] moduleTranslations;
+
+  /** The wheels' poses as last logged, reused loop after loop. */
+  private final Pose3d[] modulePoses = new Pose3d[4];
+
   private final Supplier<Pose2d> pose;
   private final Lock odometryLock;
 
@@ -146,7 +156,8 @@ public class Drive implements Mechanism, AutoCloseable {
     }
     applied = initial;
     apply(initial);
-    kinematics = new SwerveDriveKinematics(initial.moduleTranslations(body));
+    moduleTranslations = initial.moduleTranslations(body);
+    kinematics = new SwerveDriveKinematics(moduleTranslations);
     readings =
         DrivetrainReadings.builder()
             .wheels(List.of())
@@ -248,6 +259,23 @@ public class Drive implements Mechanism, AutoCloseable {
     }
     Logger.recordOutput("Drive/Pose", getPose());
     Logger.recordOutput("Drive/ModuleVelocities", moduleVelocities());
+    Logger.recordOutput("Drive/ModulePoses", modulePoses());
+  }
+
+  /**
+   * Each wheel's center in the robot's frame, turned to the angle its module measures: front left,
+   * front right, back left, back right. AdvantageScope turns the schematic robot's wheels by these
+   * (its components 0 to 3, generated into ascope_assets/ from the robot's configuration).
+   */
+  Pose3d[] modulePoses() {
+    double up = applied.modules().wheelRadius().in(Meters);
+    for (int i = 0; i < 4; i++) {
+      Translation2d at = moduleTranslations[i];
+      modulePoses[i] =
+          new Pose3d(
+              at.getX(), at.getY(), up, new Rotation3d(0, 0, modules[i].steerAngle().getRadians()));
+    }
+    return modulePoses;
   }
 
   /** What the sensors read this loop: the wheels at every high-rate reading, and the IMUs. */

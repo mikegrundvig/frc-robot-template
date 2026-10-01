@@ -146,11 +146,12 @@ public final class SimulatedWorld implements AutoCloseable {
 
   /**
    * Logs where the robot really is, and how far the estimate is from it: what localization has to
-   * close.
+   * close. In 3D too, raised and tilted as the robot really is, for AdvantageScope's ghost.
    */
   public void log(Pose2d estimated) {
     Pose2d truth = drivetrain.truePose();
     Logger.recordOutput("Sim/TruePose", truth);
+    Logger.recordOutput("Sim/TruePose3d", drivetrain.truePose3d());
     Logger.recordOutput(
         "Sim/PoseErrorMeters", truth.getTranslation().getDistance(estimated.getTranslation()));
     Logger.recordOutput(

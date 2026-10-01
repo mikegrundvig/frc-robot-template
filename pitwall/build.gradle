@@ -119,9 +119,31 @@ def vendorThree = tasks.register("vendorThree", Sync) {
             throw new GradleException("three.js ${threeVersion}'s WebJar has no ${missing}")
         }
         def controls = new File(dir, "OrbitControls.js").text
-        if (controls =~ /from\s+['"]three['"]/ || !controls.contains("from './three.module.min.js'")) {
+        if (!controls.contains("from './three.module.min.js'")) {
             throw new GradleException(
             "three.js ${threeVersion}'s OrbitControls.js no longer imports 'three' as pitwall/build.gradle rewrites it")
+        }
+        // A bare specifier ('three', 'three/addons/...') resolves only through an import map, which is
+        // inline script the page's Content-Security-Policy refuses: every import must name a file. The
+        // docs in comments show bare ones, so comments are left out.
+        def statics = ~/\b(?:import|export)\s*(?:[\w$*{}\s,]+?\s*from\s*)?(['"])([^'"\n]+)\1/
+        def dynamics = ~/\bimport\s*\(\s*(['"])([^'"\n]+)\1/
+        dir.listFiles().findAll { it.name.endsWith(".js") }.each { file ->
+            def code = file.text.replaceAll(/(?s)\/\*.*?\*\//, "").replaceAll(/(?m)^\s*\/\/.*$/, "")
+            def bare = [] as Set
+            [statics, dynamics].each { pattern ->
+                def found = pattern.matcher(code)
+                while (found.find()) {
+                    def specifier = found.group(2)
+                    if (!(specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("/"))) {
+                        bare << specifier
+                    }
+                }
+            }
+            if (bare) {
+                throw new GradleException(
+                "three.js ${threeVersion}'s ${file.name} imports ${bare}, which a browser finds only through an import map, and the page's CSP refuses one: rewrite it to a file in pitwall/build.gradle's vendorThree")
+            }
         }
         if (!new File(dir, "three.module.min.js").text.contains('from"./three.core.min.js"')) {
             throw new GradleException(

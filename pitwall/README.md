@@ -139,7 +139,8 @@ page works.
 orbit controls, into the jar, served at `/three/`. The orbit controls import three.js by the bare
 name `'three'`, which a browser resolves only through an import map, and an import map is inline
 script, which the page's Content-Security-Policy (`default-src 'self'`) refuses: so the copy
-imports `./three.module.min.js` instead, and the build fails if that line stops matching. Nothing
+imports `./three.module.min.js` instead, and the build fails if that line stops matching, or if
+any file it copies imports anything by a bare name (an update adding `'three/addons/...'`, say). Nothing
 here writes a `style` attribute: the stylesheet sizes the canvas, and labels are textures drawn on
 a canvas. three.js's license is in [`licenses/`](../licenses/three.js-License.md).
 

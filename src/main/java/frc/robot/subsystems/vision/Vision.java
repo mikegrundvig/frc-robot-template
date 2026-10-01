@@ -88,8 +88,9 @@ public final class Vision implements AutoCloseable {
 
   /**
    * A camera's mount is judged by the latest 500 tags it saw: eight seconds of seeing two tags in
-   * every image at 30 images a second, and long enough for the estimate's own errors to average out
-   * (over 200, a calibrated camera's tags in simulation landed up to 5 cm off; over 500, 3.5 cm).
+   * every image at 30 images a second, and enough for noise and the estimate's own errors to
+   * average out. A knock shows in proportion: one that puts tags 10 cm off is past a 5 cm tolerance
+   * after 250 tags.
    */
   private static final int MOUNT_SIGHTINGS = 500;
 

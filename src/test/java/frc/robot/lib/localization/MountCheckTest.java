@@ -116,19 +116,58 @@ class MountCheckTest {
     assertThat(check.outOfCalibration(TOLERANCE)).isTrue();
   }
 
+  /**
+   * A camera judged good, then knocked 12 cm aside: each tag since counts as one of its latest 500,
+   * so it's out of calibration once 5/12 of them are new (the 209th), not later.
+   */
+  @Test
+  void aCameraKnockedMidwayIsOutOfCalibrationOnceEnoughOfItsLatestTagsAre() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, Translation3d.ZERO);
+    }
+    Translation3d knocked = new Translation3d(0, -0.12, 0);
+    for (int k = 0; k < 208; k++) {
+      see(check, k, knocked);
+    }
+
+    assertThat(check.outOfCalibration(TOLERANCE)).as("208 tags since").isFalse();
+    see(check, 208, knocked);
+    assertThat(check.outOfCalibration(TOLERANCE)).as("209").isTrue();
+    for (int k = 209; k < SIGHTINGS; k++) {
+      see(check, k, knocked);
+    }
+    assertThat(check.offsetMeters()).as("all of them").isCloseTo(0.12, within(1e-9));
+  }
+
   /** A camera put back where it belongs is trusted again once its latest tags land right. */
   @Test
-  void theOldestSightingsFade() {
+  void theOldestSightingsGiveWayToTheNewest() {
     MountCheck check = new MountCheck(SIGHTINGS);
     for (int k = 0; k < SIGHTINGS; k++) {
       see(check, k, new Translation3d(0, -0.1, 0));
     }
-    for (int k = 0; k < 3 * SIGHTINGS; k++) {
+    for (int k = 0; k < SIGHTINGS; k++) {
       see(check, k, Translation3d.ZERO);
     }
 
-    assertThat(check.offsetMeters()).isLessThan(0.1 * Math.exp(-2.9));
+    assertThat(check.offsetMeters()).isCloseTo(0, within(1e-12));
     assertThat(check.outOfCalibration(TOLERANCE)).isFalse();
+  }
+
+  /** A match's worth of tags, a hundred times around the ring, leaves no rounding behind. */
+  @Test
+  void manyTimesAroundTheRingTheAverageStaysExact() {
+    MountCheck check = new MountCheck(SIGHTINGS);
+    Random random = new Random(3);
+    for (int k = 0; k < 100 * SIGHTINGS; k++) {
+      see(check, k, new Translation3d(random.nextGaussian(), random.nextGaussian(), 0));
+    }
+    for (int k = 0; k < SIGHTINGS; k++) {
+      see(check, k, new Translation3d(0, 0.03, 0));
+    }
+
+    assertThat(check.offsetMeters()).isCloseTo(0.03, within(1e-12));
   }
 
   @Test

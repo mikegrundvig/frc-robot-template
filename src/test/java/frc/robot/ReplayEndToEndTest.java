@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.CleanupMode;
@@ -32,8 +33,11 @@ import org.wpilib.datalog.DataLogRecord;
  * Every output the session recorded must come out of the replay the same, at the same moments,
  * because every one of those changes was logged as an input.
  *
+ * <p>The recorded log is also what the robot logs, by name and type, for the AdvantageScope layout
+ * (layouts/advantagescope.json): every value it reads must be there.
+ *
  * <p>Each run is its own process: AdvantageKit's logger starts once per program, and a replay ends
- * the program when the log runs out.
+ * the program when the log runs out. The session is recorded once, for both.
  */
 @EndToEndTest
 class ReplayEndToEndTest {
@@ -55,7 +59,17 @@ class ReplayEndToEndTest {
           "Field/Zones/Trench");
 
   @TempDir(cleanup = CleanupMode.ON_SUCCESS) // a failed run keeps its logs to look at
-  Path dir;
+  static Path dir;
+
+  /** The session's log, as the robot recorded it. */
+  private static Path recorded = Path.of("");
+
+  @BeforeAll
+  @Timeout(value = 2, unit = TimeUnit.MINUTES) // one run of the program, allowed 90 s
+  static void recordTheSession() throws Exception {
+    run("record", Map.of("frc.simMode", "SIM", "pitwall.port", "0"), Map.of());
+    recorded = onlyLog();
+  }
 
   /** An output in a log: its name without the table, and its type. */
   record Entry(String name, String type) {}
@@ -64,10 +78,8 @@ class ReplayEndToEndTest {
   record Sample(long timestamp, Object value) {}
 
   @Test
-  @Timeout(value = 4, unit = TimeUnit.MINUTES) // two runs of the program, each allowed 90 s
+  @Timeout(value = 2, unit = TimeUnit.MINUTES) // one run of the program, allowed 90 s
   void aReplayReproducesTheSessionIncludingEveryChangeMadeThroughPitwall() throws Exception {
-    run("record", Map.of("frc.simMode", "SIM", "pitwall.port", "0"), Map.of());
-    Path recorded = onlyLog();
     run("replay", Map.of("frc.simMode", "REPLAY"), Map.of("AKIT_LOG_PATH", recorded.toString()));
     Path replayed =
         recorded.resolveSibling(
@@ -120,8 +132,27 @@ class ReplayEndToEndTest {
     }
   }
 
+  /**
+   * The AdvantageScope layout reads only what the robot logs, as the types it says: a source that
+   * reads a value the robot doesn't log sits empty, and looks like "nothing happened". The failure
+   * names the tab and the source; point it at a value the robot logs, or log the value it needs.
+   */
+  @Test
+  void theAdvantageScopeLayoutReadsOnlyWhatTheRobotLogs() throws IOException {
+    List<AdvantageScopeLayoutCheck.Source> sources =
+        AdvantageScopeLayoutCheck.sources(Files.readString(AdvantageScopeLayoutTest.LAYOUT));
+
+    List<String> problems =
+        AdvantageScopeLayoutCheck.problems(
+            sources, AdvantageScopeLayoutCheck.logged(recorded), AdvantageScopeLayoutTest.models());
+
+    assertThat(sources).hasSizeGreaterThan(20);
+    assertThat(problems).isEmpty();
+  }
+
   /** Runs the session robot in its own process, in the test's temporary directory. */
-  private void run(String name, Map<String, String> properties, Map<String, String> environment)
+  private static void run(
+      String name, Map<String, String> properties, Map<String, String> environment)
       throws IOException, InterruptedException {
     List<String> command = new ArrayList<>();
     command.add(ProcessHandle.current().info().command().orElseThrow());
@@ -166,7 +197,7 @@ class ReplayEndToEndTest {
     return destination.replaceFirst(Matcher.quoteReplacement("destfile=" + own));
   }
 
-  private Path onlyLog() throws IOException {
+  private static Path onlyLog() throws IOException {
     try (Stream<Path> logs = Files.list(dir.resolve("logs"))) {
       List<Path> found = logs.filter(p -> p.toString().endsWith(".wpilog")).toList();
       assertThat(found).as("the recorded log").hasSize(1);

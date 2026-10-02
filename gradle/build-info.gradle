@@ -43,17 +43,36 @@ def buildConstants = tasks.register("generateBuildConstants") {
         file.text = """\
 package frc.robot;
 
-/** Generated from the git state at build time. Do not edit. */
+/**
+ * Generated from the git state at build time. Do not edit.
+ *
+ * <p>Each value passes through stamp(), so none is a compile-time constant: the classes that read
+ * them don't copy them in, and a new build changes this class alone. So what's compiled from the
+ * code stays the same from build to build, and the tool-config plugins (build-logic/) can tell
+ * that nothing they generate from it has changed.
+ */
 public final class BuildConstants {
-  public static final String MAVEN_NAME = "${name}";
-  public static final String GIT_SHA = "${git(["rev-parse", "HEAD"]) ?: "UNKNOWN"}";
-  public static final String GIT_DATE = "${gitDateText}";
-  public static final String GIT_BRANCH = "${git(["rev-parse", "--abbrev-ref", "HEAD"]) ?: "UNKNOWN"}";
-  public static final String BUILD_DATE = "${now.format(fmt)}";
-  public static final long BUILD_UNIX_TIME = ${now.toInstant().toEpochMilli()}L;
-  public static final int DIRTY = ${dirty};
+  public static final String MAVEN_NAME = stamp("${name}");
+  public static final String GIT_SHA = stamp("${git(["rev-parse", "HEAD"]) ?: "UNKNOWN"}");
+  public static final String GIT_DATE = stamp("${gitDateText}");
+  public static final String GIT_BRANCH = stamp("${git(["rev-parse", "--abbrev-ref", "HEAD"]) ?: "UNKNOWN"}");
+  public static final String BUILD_DATE = stamp("${now.format(fmt)}");
+  public static final long BUILD_UNIX_TIME = stamp(${now.toInstant().toEpochMilli()}L);
+  public static final int DIRTY = stamp(${dirty});
 
   private BuildConstants() {}
+
+  private static String stamp(String value) {
+    return value;
+  }
+
+  private static long stamp(long value) {
+    return value;
+  }
+
+  private static int stamp(int value) {
+    return value;
+  }
 }
 """
     }

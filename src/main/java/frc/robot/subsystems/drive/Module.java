@@ -101,6 +101,11 @@ public class Module {
         inputs.driveVelocityRadPerSec * wheelRadiusMeters, inputs.steerAngle);
   }
 
+  /** Which way the wheel points, as its module measures it. */
+  Rotation2d steerAngle() {
+    return inputs.steerAngle;
+  }
+
   /** How far the wheel has turned, in radians. */
   double wheelRotationRadians() {
     return inputs.drivePositionRad;

@@ -30,7 +30,10 @@ import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.util.MathUtil;
 import org.wpilib.system.RobotController;
@@ -82,6 +85,38 @@ public final class Localization implements AutoCloseable {
 
   /** A reset to "exactly here": a millimeter and a milliradian. */
   private static final PoseCovariance EXACTLY = PoseCovariance.fromStdDevs(0.001, 0.001, 0.001);
+
+  /**
+   * The logged uncertainty ellipse holds the true position this often, if the estimate is honest:
+   * where the consistency study's "outside the ellipse" begins (3.72 standard deviations).
+   */
+  private static final double ELLIPSE_PROBABILITY = 0.999;
+
+  /**
+   * Points around the logged ellipse; the first is repeated at the end, to close it. Sixteen draw a
+   * smooth enough outline for 408 bytes a loop, on the robot too, where a match's log carries it.
+   */
+  private static final int ELLIPSE_POINTS = 16;
+
+  /** Where the ellipse's points sit around it, worked out once. */
+  private static final double[] ELLIPSE_COS = new double[ELLIPSE_POINTS];
+
+  private static final double[] ELLIPSE_SIN = new double[ELLIPSE_POINTS];
+
+  static {
+    for (int i = 0; i < ELLIPSE_POINTS; i++) {
+      ELLIPSE_COS[i] = Math.cos(2 * Math.PI * i / ELLIPSE_POINTS);
+      ELLIPSE_SIN[i] = Math.sin(2 * Math.PI * i / ELLIPSE_POINTS);
+    }
+  }
+
+  /** An ellipse wider than the field says nothing a view could draw. */
+  private static final double MAX_ELLIPSE_METERS = 20;
+
+  private static final Pose2d[] NO_ELLIPSE = {};
+
+  /** The logged ellipse's points, reused loop after loop. */
+  private final Pose2d[] ellipse = new Pose2d[ELLIPSE_POINTS + 1];
 
   private final PoseEstimator estimator;
   private final DriveKinematicsModel kinematics;
@@ -627,11 +662,18 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput("Localization/YawSource", yawSource.name());
   }
 
-  /** Logs the estimate and what it rests on. */
+  /**
+   * Logs the estimate and what it rests on. For AdvantageScope (layouts/advantagescope.json): the
+   * estimate in 3D, raised to the ground under it and tilted as the IMU says, and its 99.9% ellipse
+   * as a closed outline on the field.
+   */
   private void log() {
     PoseCovariance uncertainty = estimate.covariance();
     LocalizationEstimate.Health health = estimate.health();
-    Logger.recordOutput("Localization/Pose", estimate.pose());
+    Pose2d pose = estimate.pose();
+    Logger.recordOutput("Localization/Pose", pose);
+    Logger.recordOutput("Localization/Pose3d", pose3d(pose));
+    Logger.recordOutput("Localization/Ellipse", ellipse(pose, uncertainty));
     Logger.recordOutput("Localization/Mode", estimate.mode().name());
     Logger.recordOutput("Localization/PositionStdDevMeters", uncertainty.largestPositionStdDev());
     Logger.recordOutput(
@@ -643,6 +685,33 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput("Localization/ReadyToScore", notReadyToScore == null);
     Logger.recordOutput(
         "Localization/NotReadyBecause", notReadyToScore == null ? "" : notReadyToScore);
+  }
+
+  /** A pose on the field in 3D: as high as the ground under it, tilted as the IMU says. */
+  Pose3d pose3d(Pose2d pose) {
+    return new Pose3d(
+        pose.getX(),
+        pose.getY(),
+        ground.heightAt(pose.getTranslation()),
+        new Rotation3d(rollRadians(), pitchRadians(), pose.getRotation().getRadians()));
+  }
+
+  /**
+   * The estimate's ellipse as a closed outline around its position, in the array kept for it; none
+   * while the uncertainty is too large to draw (before the robot is placed).
+   */
+  Pose2d[] ellipse(Pose2d center, PoseCovariance uncertainty) {
+    PoseCovariance.Ellipse shape = uncertainty.ellipse(ELLIPSE_PROBABILITY);
+    if (!(shape.major() < MAX_ELLIPSE_METERS)) {
+      return NO_ELLIPSE;
+    }
+    for (int i = 0; i < ELLIPSE_POINTS; i++) {
+      Translation2d point = shape.pointAt(ELLIPSE_COS[i], ELLIPSE_SIN[i]);
+      ellipse[i] =
+          new Pose2d(center.getX() + point.getX(), center.getY() + point.getY(), Rotation2d.ZERO);
+    }
+    ellipse[ELLIPSE_POINTS] = ellipse[0];
+    return ellipse;
   }
 
   boolean isGyroDisconnectedAlertActive() {

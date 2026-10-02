@@ -89,6 +89,9 @@ public record CameraConfig(
    *     that take much longer are thrown out, so measure it: the Vision log's {@code
    *     LatencySeconds} for the camera, less the wait for the robot's loop. The simulator's cameras
    *     take this long too.
+   * @param sightRange the farthest a tag is found in most images: farther tags are too small in the
+   *     image to read. The simulator's cameras detect tags no farther than this, and AdvantageScope
+   *     draws each camera's field of view out to it.
    */
   @ConfigRecord
   public record Sensor(
@@ -96,7 +99,8 @@ public record CameraConfig(
       int heightPixels,
       Angle diagonalFieldOfView,
       Frequency frameRate,
-      Time latency) {
+      Time latency,
+      Distance sightRange) {
     public Sensor {
       Checks.on(Sensor.class)
           .field("widthPixels", widthPixels, positive())
@@ -105,6 +109,7 @@ public record CameraConfig(
           .field("diagonalFieldOfView", diagonalFieldOfView, below(Degrees.of(180)))
           .field("frameRate", frameRate, positive())
           .field("latency", latency, nonNegative())
+          .field("sightRange", sightRange, positive())
           .orThrow();
     }
 

@@ -2,6 +2,9 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
     }
+    // The build's own plugins (build-logic/): one per tool whose files the build generates from
+    // the robot's configuration, such as AdvantageScope's robot assets.
+    includeBuild("build-logic")
 }
 
 plugins {

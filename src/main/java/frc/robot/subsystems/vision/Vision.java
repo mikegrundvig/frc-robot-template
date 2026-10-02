@@ -451,8 +451,9 @@ public final class Vision implements AutoCloseable {
   private void processFrame(
       Camera camera, CameraIO.Frame frame, int first, Motion motion, long nowNanos) {
     TagDetections detections = detections(frame, camera.inputs.tags, first, camera.name());
+    List<Pose3d> seen = onTheField(detections);
     if (!camera.enabled.get()) {
-      camera.outcome("camera turned off");
+      camera.leftOut(seen, "camera turned off");
       return;
     }
     if (!camera.isNew(frame.timestampNanos())) {
@@ -462,7 +463,11 @@ public final class Vision implements AutoCloseable {
     // An image that arrived before it was taken, or far later than its camera's images do, has
     // the wrong capture time: solved as of that time, it would put the robot where it wasn't.
     if (!camera.arrivedInTime(
-        frame.timestampNanos(), nowNanos, previousLoopNanos, current.latencyMarginSeconds())) {
+        frame.timestampNanos(),
+        nowNanos,
+        previousLoopNanos,
+        current.latencyMarginSeconds(),
+        seen)) {
       return;
     }
     Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);
@@ -483,11 +488,11 @@ public final class Vision implements AutoCloseable {
             new VisionPipeline.Trust(camera.mountDoubtMeters(), onlyTags()));
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
-      camera.outcome(result.outcome());
+      camera.leftOut(seen, result.outcome());
     } else if (camera == calibrating) {
-      camera.outcome("withheld while calibrating this camera: " + result.outcome());
+      camera.leftOut(seen, "withheld while calibrating this camera: " + result.outcome());
     } else if (frame.timestampNanos() < holdUntilNanos) {
-      camera.outcome("held, autonomous just started: " + result.outcome());
+      camera.leftOut(seen, "held, autonomous just started: " + result.outcome());
     } else {
       localizer.addVision(measurement);
       camera.outcome(result.outcome());
@@ -580,8 +585,19 @@ public final class Vision implements AutoCloseable {
   /** Counts and logs what the estimator decided about each camera's measurements. */
   public void record(List<VisionDecision> decisions) {
     for (Camera camera : cameras) {
-      camera.record(decisions, current.mountToleranceMeters());
+      camera.record(decisions, current.mountToleranceMeters(), field::tag);
     }
+  }
+
+  /**
+   * An image's tags where the field's layout has them; a tag the field doesn't have is left out.
+   */
+  private List<Pose3d> onTheField(TagDetections detections) {
+    List<Pose3d> tags = new ArrayList<>(detections.tags().size());
+    for (TagDetections.Tag tag : detections.tags()) {
+      field.tag(tag.id()).ifPresent(tags::add);
+    }
+    return tags;
   }
 
   /**

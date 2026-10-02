@@ -1,6 +1,7 @@
 package frc.robot.studies;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.world.field.FieldModel;
@@ -75,7 +76,7 @@ class CameraImageSimTest {
       PhotonCameraSim photonVision =
           new PhotonCameraSim(camera, VisionSim.properties(SENSOR, 0), FIELD.toField());
       try {
-        photonVision.setMaxSightRange(VisionSim.MAX_SIGHT_METERS);
+        photonVision.setMaxSightRange(SENSOR.sightRange().in(Meters));
         photonVision.enableRawStream(false);
         photonVision.enableProcessedStream(false);
         compare(study, photonVision, targets);

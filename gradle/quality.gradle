@@ -231,7 +231,7 @@ if (System.getenv("CI") == null && !quick) {
 spotless {
     lineEndings = "UNIX"
     java {
-        target "src/**/*.java"
+        target "src/**/*.java", "build-logic/src/**/*.java"
         toggleOffOn()
         googleJavaFormat()
         removeUnusedImports()
@@ -239,7 +239,7 @@ spotless {
         endWithNewline()
     }
     groovyGradle {
-        target "*.gradle", "gradle/*.gradle"
+        target "*.gradle", "gradle/*.gradle", "build-logic/*.gradle"
         greclipse()
         leadingTabsToSpaces(4)
         trimTrailingWhitespace()
@@ -256,6 +256,12 @@ tasks.register("ci") {
     group = "verification"
     description = "Run every check CI runs: formatting, the gated build and tests, coverage."
     dependsOn "spotlessCheck", "build"
-    // From the top of the build, every project's checks.
+    // From the top of the build, every project's checks, and the build's own plugins' (build-logic/)
+    // while the build uses one of them: removing a plugin's line drops its tests too.
     dependsOn project.subprojects.collect { it.path + ":ci" }
+    // The plugins build-logic/ holds: add each new tool's as it's added.
+    def toolConfigPlugins = ["frc.advantagescope-assets"]
+    if (project == rootProject && toolConfigPlugins.any { pluginManager.hasPlugin(it) }) {
+        dependsOn gradle.includedBuild("build-logic").task(":ci")
+    }
 }

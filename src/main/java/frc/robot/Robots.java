@@ -135,6 +135,8 @@ public final class Robots {
    * LatencySeconds} for each camera). The latency matters on the robot, not only in the simulator,
    * which runs its cameras with it: an image arriving more than {@code
    * VisionConfig.latencyMarginSeconds} later than it is left out, so a guess too low drops images.
+   * The 7 m sight range is a guess too, the simulator's all along: measure where yours stops
+   * finding a tag (docs/characterization.md, camera noise).
    */
   private static final CameraConfig.Sensor APRILTAG_CAMERA =
       CameraConfig.Sensor.builder()
@@ -143,6 +145,7 @@ public final class Robots {
           .diagonalFieldOfView(Degrees.of(80))
           .frameRate(Hertz.of(30))
           .latency(Milliseconds.of(30))
+          .sightRange(Meters.of(7))
           .build();
 
   /**

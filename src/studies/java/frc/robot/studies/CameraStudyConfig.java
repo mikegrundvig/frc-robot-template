@@ -4,9 +4,11 @@ import static com.michaelgrundvig.frc.world.config.Rules.atLeast;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
+import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import frc.robot.Robots;
 import frc.robot.subsystems.vision.VisionSim;
 
 /**
@@ -19,7 +21,8 @@ import frc.robot.subsystems.vision.VisionSim;
  * @param cornerNoiseMeanPixels how far each tag corner lands from where a perfect camera would put
  *     it, on average, in pixels: the simulator's own by default
  * @param cornerNoiseStdDevPixels and that distance's spread: the simulator's own by default
- * @param sightMeters tags farther than this aren't detected: the simulator's own by default
+ * @param sightMeters tags farther than this aren't detected: by default the sight range of the
+ *     robot's cameras ({@code CameraConfig.Sensor.sightRange}), which the simulator's use too
  * @param gyroErrorDegrees how far off the gyro's heading typically is (one standard deviation):
  *     every solve takes its heading from the gyro, so its error moves every position solved
  * @param mountErrorMillimeters how far each camera really sits from its configured place, at most,
@@ -70,7 +73,8 @@ public record CameraStudyConfig(
           .frames(2)
           .cornerNoiseMeanPixels(VisionSim.CORNER_NOISE_MEAN_PIXELS)
           .cornerNoiseStdDevPixels(VisionSim.CORNER_NOISE_STD_DEV_PIXELS)
-          .sightMeters(VisionSim.MAX_SIGHT_METERS)
+          .sightMeters(
+              Robots.current().definition().cameras().get(0).sensor().sightRange().in(Meters))
           .gyroErrorDegrees(0.25)
           .mountErrorMillimeters(0)
           .mountErrorDegrees(0)

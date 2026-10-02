@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
 import com.michaelgrundvig.frc.localization.BodyMotion;
@@ -40,6 +41,7 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.MockTunableBackend;
@@ -73,6 +75,7 @@ class VisionTest {
                   .diagonalFieldOfView(Degrees.of(80))
                   .frameRate(Hertz.of(30))
                   .latency(Milliseconds.of(30))
+                  .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
           .build();
@@ -163,6 +166,31 @@ class VisionTest {
     assertThat(vision.summary())
         .isEqualTo("1 of 1 cameras connected, 100% of measurements accepted");
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
+    assertThat(vision.camera(0).acceptedTags())
+        .as("where the field has the tags it saw, for AdvantageScope's lines")
+        .containsExactly(FIELD.tag(25).orElseThrow(), FIELD.tag(26).orElseThrow());
+    assertThat(vision.camera(0).rejectedTags()).isEmpty();
+  }
+
+  /** A measurement the estimator refuses has its tags drawn refused, each with the reason. */
+  @Test
+  void anImageTheEstimatorRefusesShowsItsTagsRefusedAndWhy() {
+    io.see(
+        T0 + 200_000_000L, camera, new Pose3d(ROBOT.plus(new Transform2d(3, 0, Rotation2d.ZERO))));
+
+    loop();
+
+    Camera front = vision.camera(0);
+    assertThat(front.rejected()).isEqualTo(1);
+    assertThat(front.acceptedTags()).isEmpty();
+    assertThat(front.rejectedTags())
+        .containsExactly(FIELD.tag(25).orElseThrow(), FIELD.tag(26).orElseThrow());
+    assertThat(front.rejectedReasons()).hasSize(2).allMatch(why -> !why.isBlank());
+    assertThat(front.rejectedReasons().get(0)).isEqualTo(front.rejectedReasons().get(1));
+
+    loop();
+
+    assertThat(front.rejectedTags()).as("only this loop's").isEmpty();
   }
 
   /** A tuned setting applies from the next loop's images. */
@@ -199,6 +227,8 @@ class VisionTest {
 
     assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
     assertThat(vision.summary()).endsWith("no measurements yet");
+    assertThat(vision.camera(0).rejectedTags()).hasSize(2);
+    assertThat(vision.camera(0).rejectedReasons()).containsOnly("camera turned off");
   }
 
   @Test
@@ -416,6 +446,8 @@ class VisionTest {
     loop();
 
     assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+    assertThat(vision.camera(0).rejectedReasons())
+        .containsOnly("arrived at least 300 ms after it was taken, more than 130 ms");
     assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
     assertThat(vision.camera(0).outOfStepAlertText())
         .isEqualTo(

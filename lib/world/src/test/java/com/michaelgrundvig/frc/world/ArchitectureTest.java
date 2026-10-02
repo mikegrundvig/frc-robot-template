@@ -32,9 +32,9 @@ import org.wpilib.math.util.MathSharedStore;
 /**
  * The world model's boundaries, checked on every build. Gradle keeps the robot program, the
  * simulator, localization, and Pitwall out of reach, since this project doesn't depend on them;
- * these rules keep what Gradle can't see: its three packages apart, and the model free of clocks
- * and shared state, so everything that reads it, on the robot, in the simulator, and in a replay,
- * reads the same thing.
+ * these rules keep what Gradle can't see: its packages apart, and the model free of clocks and
+ * shared state, so everything that reads it, on the robot, in the simulator, and in a replay, reads
+ * the same thing.
  */
 class ArchitectureTest {
   private static final JavaClasses WORLD =
@@ -61,10 +61,14 @@ class ArchitectureTest {
   /** The robot's definition: what the robot is, from its frame to its sensors' mounts. */
   private static final String DEFINITION = "com.michaelgrundvig.frc.world.robot..";
 
+  /** The writers that give other tools what the model says, such as AdvantageScope's assets. */
+  private static final String BRIDGES = "com.michaelgrundvig.frc.world.bridges..";
+
   /**
-   * The whole model, whatever package it gains (the writers for other tools come next): Gradle
-   * keeps the robot program and the other libraries out of reach, and WPILib's main library isn't
-   * on its classpath, but the math brings WPILib's utilities along (their logs, their own clock).
+   * The whole model, whatever package it gains (the writers for other tools, in bridges, too):
+   * Gradle keeps the robot program and the other libraries out of reach, and WPILib's main library
+   * isn't on its classpath, but the math brings WPILib's utilities along (their logs, their own
+   * clock).
    */
   @Test
   void theModelSeesOnlyWpilibsMathAndFieldLayouts() {
@@ -119,6 +123,25 @@ class ArchitectureTest {
         .because(
             "what the robot is doesn't depend on the field it plays on, nor on what reads it:"
                 + " localization, the simulator, and the views all read the definition")
+        .check(WORLD);
+  }
+
+  /**
+   * The writers read the model; the model never reads them. Each writer is one tool's view of the
+   * field and the robot, so the field, the definition, and the kit they're built with depend on
+   * none.
+   */
+  @Test
+  void theFieldAndTheDefinitionNeverSeeTheWriters() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(KIT, FIELD, DEFINITION)
+        .should()
+        .dependOnClassesThat()
+        .resideInAPackage(BRIDGES)
+        .because(
+            "a writer is one tool's view of the field and the robot, which mean the same without"
+                + " any tool; the views read the model, and the model reads none of them")
         .check(WORLD);
   }
 

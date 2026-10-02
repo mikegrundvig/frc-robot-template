@@ -42,8 +42,9 @@ for all of them:
 
 **What it measures:** how far a camera's view of a tag scatters with everything still, how far it
 is off, and how both grow with distance. It sets vision's trust in a camera:
-`VisionConfig.linearStdDevBaseline`, `angularStdDevBaseline`, `distanceExponent`, and
-`headingConstrainedFactor`, and the simulator's corner noise and sight range (`VisionSim`).
+`VisionConfig.linearStdDevBaseline`, `angularStdDevBaseline`, `distanceExponent`,
+`headingConstrainedFactor`, the simulator's corner noise (`VisionSim`), and the camera's sight
+range (`CameraConfig.Sensor.sightRange`).
 
 **Equipment:**
 
@@ -102,7 +103,8 @@ drawn from a normal distribution, in a random direction; `VisionSim`'s two numbe
 distance's mean and standard deviation (today 0.25 px and 0.08 px). To measure them at one still
 spot: for each corner in each image, its distance in pixels from that corner's average position
 over all the images. The mean of all those distances, and their standard deviation, are the two
-numbers. The sight range is the farthest spot where the camera found the tag in most images.
+numbers. The sight range (`sightRange`) is the farthest spot where the camera found the tag in
+most images.
 
 **What good looks like:** the exponent near 2, since a tag's distance error grows with the distance
 squared (its sideways error only with the distance). A still camera's error at 1 m is a few

@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.gradlerio)
     alias(libs.plugins.spotless)
     alias(libs.plugins.errorprone)
+    // AdvantageScope's robot assets (ascope_assets/), generated from Robots.java by every build and
+    // checked against what's committed (build-logic/). A team that doesn't use AdvantageScope
+    // removes this line, and nothing of it runs.
+    id "frc.advantagescope-assets"
 }
 
 // Java 25, downloaded automatically when missing (settings.gradle). Nothing to install by hand.
@@ -106,13 +110,21 @@ tasks.named("test") {
     workingDir = work
     systemProperty "frc.projectDir", projectDir.absolutePath
     // Project files the tests check against the code, declared so Gradle knows the tests depend
-    // on them: the values register (ValuesRegisterTest) and the drive team's dashboard
-    // (DashboardLayoutTest). Today the tests rerun on every build anyway, since BuildConstants
-    // compiles in the build's time; an undeclared file would let Gradle skip them once it doesn't.
+    // on them: the values register (ValuesRegisterTest), the drive team's dashboard
+    // (DashboardLayoutTest), and AdvantageScope's layout (AdvantageScopeLayoutTest). Today the
+    // tests rerun on every build anyway, since BuildConstants compiles in the build's time; an
+    // undeclared file would let Gradle skip them once it doesn't.
     inputs.file("docs/values.md").withPropertyName("valuesRegister")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file("layouts/elastic-layout.json").withPropertyName("dashboardLayout")
             .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file("layouts/advantagescope.json").withPropertyName("advantageScopeLayout")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    // The models the layout names are those the build generates, before the tests (when the
+    // AdvantageScope plugin is applied).
+    inputs.files(fileTree("ascope_assets")).withPropertyName("advantageScopeAssets")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    mustRunAfter tasks.matching { it.name == "advantageScopeAssets" }
     doFirst { work.get().asFile.mkdirs() }
     // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
     // coverage report to count: the program's startup runs nowhere else.

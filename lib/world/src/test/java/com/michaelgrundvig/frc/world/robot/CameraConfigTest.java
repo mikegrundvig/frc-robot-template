@@ -38,6 +38,7 @@ class CameraConfigTest {
     assertThat(sensor.diagonalFieldOfView().in(Degrees)).isCloseTo(80, within(1e-9));
     assertThat(sensor.frameRate().in(Hertz)).isCloseTo(30, within(1e-9));
     assertThat(sensor.latency().in(Milliseconds)).isCloseTo(30, within(1e-9));
+    assertThat(sensor.sightRange().in(Meters)).isCloseTo(7, within(1e-9));
   }
 
   @Test
@@ -89,6 +90,7 @@ class CameraConfigTest {
         () -> changeSensor().diagonalFieldOfView(Degrees.of(180)).build());
     assertRejected("Sensor.frameRate", () -> changeSensor().frameRate(Hertz.of(0)).build());
     assertRejected("Sensor.latency", () -> changeSensor().latency(Milliseconds.of(-1)).build());
+    assertRejected("Sensor.sightRange", () -> changeSensor().sightRange(Meters.of(0)).build());
   }
 
   /** A copy of a valid camera named "front", to change one value. */

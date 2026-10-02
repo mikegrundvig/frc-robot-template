@@ -27,6 +27,18 @@ public interface WheelTruth {
   double driveCurrentAmps();
 
   /**
+   * The voltage across its drive motor as the last sub-step ended: what its controller asked
+   * ({@link WheelDrive}), held to its current limit and the battery.
+   */
+  double driveVolts();
+
+  /**
+   * Whether the drive's current limit held its motor back in the last sub-step: the controller
+   * asked for more than the limit lets through, as a motor controller's stator-limit flag says.
+   */
+  boolean driveCurrentLimited();
+
+  /**
    * What the floor pushes back on its steering with, about its steering axis, in N m: the scrub of
    * its tread turning on the carpet, for the steering's closed form to feel. Zero where the engine
    * models no scrub.

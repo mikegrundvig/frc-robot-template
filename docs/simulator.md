@@ -468,12 +468,13 @@ the same interface: the robot's mass, center of gravity, and yaw inertia in one 
 a joint at each module, and Coulomb friction where each tread meets the carpet
 ([stand-ins](stand-ins.md#the-simulators-physics)). The interface is shaped for it:
 
-- **The drive as a motor's line.** Each wheel's controller gives its motor's voltage, its current
-  limit, and its velocity loop's gain (`WheelDrive`): the motor's torque against the wheel's speed,
-  capped at the limit's torque. An engine that integrates implicitly applies that as a joint motor
-  through the whole sub-step, where a torque held from the sub-step's start would ring as a light
-  wheel slips. Today's engine holds the voltage through each 4 ms step, which is the F = m a gap
-  below.
+- **The drive as a motor's line.** Each wheel's controller gives the voltage it asks of its
+  motor, its velocity loop's gain, and its current limit (`WheelDrive`), and the engine applies the
+  limit: the motor's torque against the wheel's speed, capped at the limit's torque. An engine that
+  integrates implicitly applies that as a joint motor through the whole sub-step, where a torque
+  held from the sub-step's start would ring as a light wheel slips. Today's engine applies the
+  limit at each 4 ms step's start and holds the voltage that gives through the step, which is the
+  F = m a gap below.
 - **The steering in closed form.** The steering settles in under a millisecond, so its controller
   turns it (`CurrentLimitedMotorSim`) and gives the angle; the engine follows it, and hands back the
   carpet's scrub as a torque on the steering (`WheelTruth.steerLoadNewtonMeters`, none today) for

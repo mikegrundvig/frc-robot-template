@@ -63,14 +63,14 @@ final class TestRobot {
   }
 
   /**
-   * Motor controllers for the tests: every drive motor asked for one voltage, held within one
-   * stator current limit as a TalonFX holds it (no more than the limit's worth of voltage past the
-   * motor's back EMF, at the wheel's speed as each sub-step starts), within a 12 V battery; each
-   * wheel steered where told, at once.
+   * Motor controllers for the tests: every drive motor asked for one voltage, within the battery's
+   * (12 V unless sagged), under one stator current limit, which the physics holds; each wheel
+   * steered where told, at once.
    */
   static final class Controllers implements Actuators {
     double volts;
     double limitAmps = 30;
+    double batteryVolts = 12;
     final double[] steer = new double[4];
 
     /** Every wheel steered this way. */
@@ -81,11 +81,9 @@ final class TestRobot {
 
     @Override
     public void actuate(double seconds, Physics physics, WheelDrive[] drives) {
+      double asked = Math.clamp(volts, -batteryVolts, batteryVolts);
       for (int i = 0; i < drives.length; i++) {
-        double backEmf = physics.wheel(i).spinRadPerSec() * GEARING / MOTOR.Kv;
-        double headroom = limitAmps * MOTOR.R;
-        double applied = Math.clamp(volts, backEmf - headroom, backEmf + headroom);
-        drives[i].drive(applied * Math.min(1.0, 12 / Math.abs(applied)), 0, limitAmps);
+        drives[i].drive(asked, 0, limitAmps, batteryVolts);
         drives[i].steer(steer[i]);
       }
     }

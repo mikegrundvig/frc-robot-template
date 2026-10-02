@@ -52,6 +52,8 @@ class KinematicPhysicsTest {
     double push = 4 * TestRobot.MOTOR.Kt * 30 * TestRobot.GEARING / TestRobot.RADIUS;
     double wheels = 4 * 0.001 / (TestRobot.RADIUS * TestRobot.RADIUS);
     assertThat(acceleration).isCloseTo(push / (mass() + wheels), within(0.03 * push / mass()));
+    assertThat(physics.wheel(2).driveCurrentLimited()).as("held to its limit").isTrue();
+    assertThat(physics.wheel(2).driveVolts()).as("cut back from 12 V").isBetween(0.0, 11.0);
     assertThat(physics.chassis().velocity().getY()).isCloseTo(0, within(1e-12));
     assertThat(physics.chassis().seconds()).isCloseTo(0.3, within(1e-9));
     assertThat(physics.wheels()).isEqualTo(4);
@@ -82,6 +84,25 @@ class KinematicPhysicsTest {
     assertThat(wheel.contactPoint()).isEqualTo(new Translation3d(under.getX(), under.getY(), 0));
     assertThat(physics.chassis().velocity().getAngle().orElseThrow().getRadians())
         .isCloseTo(0.3, within(1e-9));
+  }
+
+  /**
+   * A motor turning faster than its battery's voltage would turn it, the battery sagged to 6 V:
+   * holding its current to the limit would take more than 6 V across it, so its controller gives
+   * the battery's 6 V, and the limit can't hold the current back.
+   */
+  @Test
+  void aMotorOverrunGetsTheBatterysVoltageNotTheLimits() {
+    controllers.volts = 12;
+    controllers.limitAmps = Double.POSITIVE_INFINITY;
+    run(2); // near its free speed at 12 V
+    controllers.volts = 6;
+    controllers.batteryVolts = 6;
+    controllers.limitAmps = 1;
+    run(0.004);
+
+    assertThat(physics.wheel(0).driveVolts()).isCloseTo(6, within(1e-12));
+    assertThat(physics.wheel(0).driveCurrentLimited()).isTrue();
   }
 
   /**
@@ -216,12 +237,13 @@ class KinematicPhysicsTest {
     WheelDrive drive = new WheelDrive();
     assertThat(drive.currentLimitAmps()).isInfinite();
 
-    drive.drive(6, -0.1, 40);
+    drive.drive(6, -0.1, 40, 12);
     drive.steer(1.2);
 
     assertThat(drive.volts()).isEqualTo(6);
     assertThat(drive.voltsPerRadPerSec()).isEqualTo(-0.1);
     assertThat(drive.currentLimitAmps()).isEqualTo(40);
+    assertThat(drive.batteryVolts()).isEqualTo(12);
     assertThat(drive.steerRadians()).isEqualTo(1.2);
   }
 

@@ -23,25 +23,25 @@ import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import java.util.Arrays;
 import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.system.DCMotor;
 import org.wpilib.math.util.MathUtil;
 
 /**
  * A simulated swerve module's motor controllers and encoders: the actuators that drive one wheel of
  * the {@link Physics}, and the sensors that read it. Each sub-step the physics asks ({@link
- * #actuate}), the drive's controller works out the voltage across its motor from its loop and its
- * stator current limit, at the wheel's true speed, and the steering's runs its loop and turns the
- * module in closed form ({@link CurrentLimitedMotorSim}); the physics turns the wheel and moves the
- * robot. The motors and their gearing are the robot's definition's ({@code
- * DrivetrainGeometry.Modules}). Its absolute encoder can read off true ({@link SensorErrors}), and
- * its zero can be knocked further off while it runs. Its encoders' readings can go stale: the wheel
- * turns on, and what the robot's code reads stops changing, as signals that stop arriving do. Both
- * motors' stator current limits are modeled: the drive's caps the torque that accelerates the robot
- * and says when a wheel is at the edge of its grip, and the steering's caps how hard the module
- * turns and stops. The battery holds 12 V, and the drive's supply current limit, with Phoenix's
- * step-down from it ({@code DrivetrainControl.Limits.driveSupplyLowerCurrent}), isn't modeled: the
- * supply current it reports is what the motor would draw from a steady 12 V with no supply limit.
- * So this tests the code rather than the robot's power; docs/stand-ins.md says when that matters.
+ * #actuate}), the drive's controller works out the voltage it asks for from its loop, at the
+ * wheel's true speed, and hands it on with its stator current limit, which the physics holds the
+ * motor to; the steering's runs its loop and turns the module in closed form ({@link
+ * CurrentLimitedMotorSim}); the physics turns the wheel and moves the robot. The motors and their
+ * gearing are the robot's definition's ({@code DrivetrainGeometry.Modules}). Its absolute encoder
+ * can read off true ({@link SensorErrors}), and its zero can be knocked further off while it runs.
+ * Its encoders' readings can go stale: the wheel turns on, and what the robot's code reads stops
+ * changing, as signals that stop arriving do. Both motors' stator current limits are modeled: the
+ * drive's caps the torque that accelerates the robot and says when a wheel is at the edge of its
+ * grip, and the steering's caps how hard the module turns and stops. The battery holds 12 V, and
+ * the drive's supply current limit, with Phoenix's step-down from it ({@code
+ * DrivetrainControl.Limits.driveSupplyLowerCurrent}), isn't modeled: the supply current it reports
+ * is what the motor would draw from a steady 12 V with no supply limit. So this tests the code
+ * rather than the robot's power; docs/stand-ins.md says when that matters.
  *
  * <p>The steering runs as a TalonFX without a Phoenix Pro license runs it: its loop every
  * millisecond, on the angle the CANcoder last sent over CAN. Those, with its current limit, set how
@@ -89,8 +89,6 @@ final class ModuleIOSim implements ModuleIO {
 
   private final WheelTruth wheel;
   private final CurrentLimitedMotorSim steerSim;
-  private final DCMotor driveMotor;
-  private final double driveGearing;
   private final double wheelRadiusMeters;
 
   /** How far the absolute encoder's zero is off: it reads the true angle minus this. */
@@ -129,9 +127,14 @@ final class ModuleIOSim implements ModuleIO {
   private double driveSetpointRadPerSec;
   private double driveFeedforwardVolts;
   private double driveVolts;
-  private double driveAppliedVolts;
   private double driveStatorLimitAmps = Double.POSITIVE_INFINITY;
+
+  /** Whether the drive's current limit held its motor back since the last loop read it. */
   private boolean driveLimited;
+
+  /** Whether the physics has run a sub-step on this module's drive that hasn't been looked at. */
+  private boolean subStepUnread;
+
   private boolean steering;
   private double steerSetpointRad;
   private double steerStatorLimitAmps = Double.POSITIVE_INFINITY;
@@ -161,11 +164,8 @@ final class ModuleIOSim implements ModuleIO {
       WheelTruth wheel,
       double steerOffsetRadians,
       double encoderPhase) {
-    Actuator.Motors drive = modules.drive();
     Actuator.Motors steer = modules.steer();
     this.wheel = wheel;
-    driveMotor = drive.model();
-    driveGearing = drive.gearing().ratio();
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     steerSim =
         new CurrentLimitedMotorSim(
@@ -216,36 +216,44 @@ final class ModuleIOSim implements ModuleIO {
    * Runs the motor controllers through a physics sub-step: the drive's loop once, at the wheel's
    * speed as the sub-step starts, and the steering's every millisecond, turning the module. The
    * drive's motor is about sixty times slower than the steering's, and reads its own sensor, so its
-   * loop running once a sub-step changes nothing that matters.
+   * loop running once a sub-step changes nothing that matters. Its stator current limit goes to the
+   * physics with what the loop asks for: the physics holds the motor to it through the sub-step, as
+   * the motor controller would ({@link WheelDrive}).
    *
    * @param drive what this wheel's drive and steering do over the sub-step, for the physics
    */
   void actuate(double seconds, WheelDrive drive) {
+    readLastSubStep();
     double speed = wheel.spinRadPerSec();
     if (driveClosedLoop) {
       double error = driveSetpointRadPerSec - speed;
       driveVolts = driveFeedforwardVolts + driveKp * error * wheelRadiusMeters;
     }
     driveVolts = Math.clamp(driveVolts, -MAX_VOLTS, MAX_VOLTS);
-    // The motor controller caps the current through the motor, and with it the torque: it applies
-    // no more than the motor's back EMF plus the limit's worth of voltage across the windings.
-    double backEmf = speed * driveGearing / driveMotor.Kv;
-    double headroom = driveStatorLimitAmps * driveMotor.R;
-    driveAppliedVolts = Math.clamp(driveVolts, backEmf - headroom, backEmf + headroom);
-    driveLimited |= driveAppliedVolts != driveVolts;
     drive.drive(
-        driveAppliedVolts * Math.min(1.0, BATTERY_VOLTS / Math.abs(driveAppliedVolts)),
-        // A velocity loop's gain, while nothing clamps what it asks for.
-        driveClosedLoop && driveAppliedVolts == driveVolts && Math.abs(driveVolts) < MAX_VOLTS
-            ? -driveKp * wheelRadiusMeters
-            : 0,
-        driveStatorLimitAmps);
+        driveVolts,
+        // A velocity loop's gain, while the battery doesn't cap what it asks for.
+        driveClosedLoop && Math.abs(driveVolts) < MAX_VOLTS ? -driveKp * wheelRadiusMeters : 0,
+        driveStatorLimitAmps,
+        BATTERY_VOLTS);
+    subStepUnread = true;
     spinRadians += spinRadPerSec * seconds;
     int loops = Math.max(1, (int) Math.round(seconds / STEER_LOOP_SECONDS));
     for (int i = 0; i < loops; i++) {
       steer(seconds / loops);
     }
     drive.steer(trueSteerAngle().getRadians());
+  }
+
+  /**
+   * Notes whether the drive's current limit held in the physics' last sub-step, once: the flag
+   * holds until a loop reads it, as a motor controller's does.
+   */
+  private void readLastSubStep() {
+    if (subStepUnread) {
+      driveLimited |= wheel.driveCurrentLimited();
+      subStepUnread = false;
+    }
   }
 
   /** One pass of the steering's loop, on what the CANcoder last sent, then its motor that long. */
@@ -313,10 +321,11 @@ final class ModuleIOSim implements ModuleIO {
     inputs.drivePositionRad = drivePositionRadians();
     inputs.driveVelocityRadPerSec =
         stale ? staleVelocityRadPerSec : wheel.spinRadPerSec() + spinRadPerSec;
-    inputs.driveAppliedVolts = driveAppliedVolts;
+    inputs.driveAppliedVolts = wheel.driveVolts();
     inputs.driveStatorCurrentAmps = Math.abs(wheel.driveCurrentAmps());
     inputs.driveSupplyCurrentAmps =
-        Math.abs(driveAppliedVolts * wheel.driveCurrentAmps()) / MAX_VOLTS;
+        Math.abs(wheel.driveVolts() * wheel.driveCurrentAmps()) / MAX_VOLTS;
+    readLastSubStep();
     inputs.driveTorqueLimited = driveLimited;
     driveLimited = false;
     inputs.steerConnected = true;

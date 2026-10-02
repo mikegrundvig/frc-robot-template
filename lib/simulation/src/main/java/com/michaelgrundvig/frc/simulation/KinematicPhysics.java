@@ -34,9 +34,10 @@ import org.wpilib.math.util.Nat;
  * <ul>
  *   <li>Each drive motor turns its wheel's share of the robot's configured mass ({@code
  *       Body.mass}), (m / N) r² at the configured radius, plus the wheel's own moving parts ({@code
- *       DrivetrainGeometry.Modules.driveInertia}), at the voltage its controller gives, held
- *       through the step, as WPILib's {@code DCMotorSim} does. So the robot speeds up as F = m a,
- *       short of it by the current falling within each step at the controller's limit.
+ *       DrivetrainGeometry.Modules.driveInertia}), at the voltage its controller asks for, held to
+ *       its current limit at the wheel's speed as the step starts and held through the step, as
+ *       WPILib's {@code DCMotorSim} holds a voltage. So the robot speeds up as F = m a, short of it
+ *       by the current falling within each step at the controller's limit.
  *   <li>The robot moves by the one rigid motion that best fits every wheel's travel (each wheel's
  *       turn at its true radius, at its true angle), scaled by the share of grip ({@link
  *       Disturbance.Grip}) and the slope it rolls along, and changes its velocity no faster than
@@ -406,6 +407,9 @@ public final class KinematicPhysics implements Physics {
     private final DCMotor motor;
     private final LinearSystem<N2, N1, N2> plant;
 
+    /** The gearing as configured: motor turns per turn of the wheel. */
+    private final double ratio;
+
     /** The gearing as {@code DCMotorSim} works it back out of its model. */
     private final double gearing;
 
@@ -414,19 +418,31 @@ public final class KinematicPhysics implements Physics {
     private Matrix<N2, N1> output = new Matrix<>(Nat.N2(), Nat.N1());
     private double radiusMeters;
     private double steerRadians;
+    private boolean currentLimited;
 
-    Wheel(int index, DCMotor motor, double inertiaKgM2, double gearing, double radiusMeters) {
+    Wheel(int index, DCMotor motor, double inertiaKgM2, double ratio, double radiusMeters) {
       this.index = index;
       this.motor = motor;
+      this.ratio = ratio;
       // WPILib 2027 names this model for an arm; without gravity it's a motor turning a load.
-      plant = Models.singleJointedArmFromPhysicalConstants(motor, inertiaKgM2, gearing);
-      this.gearing = -motor.Kv * plant.getA(1, 1) / plant.getB(1, 0);
+      plant = Models.singleJointedArmFromPhysicalConstants(motor, inertiaKgM2, ratio);
+      gearing = -motor.Kv * plant.getA(1, 1) / plant.getB(1, 0);
       this.radiusMeters = radiusMeters;
     }
 
-    /** Turns the wheel through a step, its motor at the drive's voltage. */
+    /**
+     * Turns the wheel through a step, its motor at what its controller asks, held to the
+     * controller's current limit as a TalonFX holds it at the step's start: no more than the
+     * limit's worth of voltage past the motor's back EMF, and within the battery. Held through the
+     * step, the current then falls as the wheel speeds up, short of the limit (the truth suite's F
+     * = m a gap). The velocity loop's gain goes unused: the voltage is held.
+     */
     void turn(WheelDrive drive, double seconds) {
-      input = VecBuilder.fill(drive.volts());
+      double backEmf = spinRadPerSec() * ratio / motor.Kv;
+      double headroom = drive.currentLimitAmps() * motor.R;
+      double limited = Math.clamp(drive.volts(), backEmf - headroom, backEmf + headroom);
+      currentLimited = limited != drive.volts();
+      input = VecBuilder.fill(limited * Math.min(1.0, drive.batteryVolts() / Math.abs(limited)));
       steerRadians = drive.steerRadians();
       state = plant.calculateX(state, input, seconds);
       output = plant.calculateY(state, input);
@@ -460,6 +476,17 @@ public final class KinematicPhysics implements Physics {
     public double driveCurrentAmps() {
       double volts = input.get(0, 0);
       return motor.getCurrent(state.get(1, 0) * gearing, volts) * Math.signum(volts);
+    }
+
+    /** The voltage held through the last step. */
+    @Override
+    public double driveVolts() {
+      return input.get(0, 0);
+    }
+
+    @Override
+    public boolean driveCurrentLimited() {
+      return currentLimited;
     }
 
     /** No scrub: the steering turns freely on the carpet. */

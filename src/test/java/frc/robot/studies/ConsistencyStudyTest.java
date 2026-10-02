@@ -176,8 +176,11 @@ class ConsistencyStudyTest {
 
     double turn = Math.toRadians(config.cameraTurnStdDevDegrees());
     assertThat(Math.sqrt(yaws / draws)).isCloseTo(turn, within(0.05 * turn));
-    double shift = config.cameraShiftStdDevMeters();
-    assertThat(Math.sqrt(tags / draws)).isCloseTo(shift, within(0.05 * shift));
+    double placement = config.tagPlacementStdDevMeters();
+    assertThat(Math.sqrt(tags / draws)).isCloseTo(placement, within(0.05 * placement));
+    assertThat(spread.mountMillimeters() / 1000)
+        .as("a mount's shift, within what the estimator considers of a camera's")
+        .isLessThanOrEqualTo(config.cameraShiftStdDevMeters());
     double scale = config.headingStdDevDegreesPerTurn() / 360;
     assertThat(Math.sqrt(scales / draws)).isCloseTo(scale, within(0.05 * scale));
   }

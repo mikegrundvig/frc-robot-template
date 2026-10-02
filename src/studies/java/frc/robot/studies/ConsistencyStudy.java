@@ -39,7 +39,7 @@ public final class ConsistencyStudy {
       what the estimator's configuration claims, so an honest estimator reads a NEES near 2.
         --mount-error-mm=M        each camera off its mount along each axis (default 3)
         --mount-error-degrees=D   and turned about each axis (default: cameraTurnStdDevDegrees)
-        --tag-error-mm=M          each tag off the field's layout along each axis (default: cameraShiftStdDevMeters)
+        --tag-error-mm=M          each tag off the field's layout along each axis (default: tagPlacementStdDevMeters)
         --gyro-scale-error=F      the gyro's scale off by this share (default: headingStdDevDegreesPerTurn / 360)
         --backup-scale-error=F    the backup IMU's (default: backupHeadingStdDevDegreesPerTurn / 360)
         --noise-scale=F           the vision noise model scaled by this (default 0.5, a little wider than the simulated cameras)

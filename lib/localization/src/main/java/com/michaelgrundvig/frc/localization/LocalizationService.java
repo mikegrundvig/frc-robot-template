@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -188,7 +189,7 @@ public final class LocalizationService {
       EstimatorConfig config,
       double loopSeconds) {
     this(
-        new PoseEstimator(config, field::contains, notPlacedYet(field)),
+        new PoseEstimator(config, field::contains, field.tags().keySet(), notPlacedYet(field)),
         kinematics,
         field,
         field.terrain(),
@@ -603,7 +604,11 @@ public final class LocalizationService {
     for (String camera : mountDoubts.keySet()) {
       trust.putIfAbsent(camera, trust(camera, true));
     }
-    return Integrity.builder().cameras(trust).wheels(wheels()).build();
+    return Integrity.builder()
+        .cameras(trust)
+        .wheels(wheels())
+        .tagsWithoutPlaces(new LinkedHashSet<>(estimator.tagsWithoutPlaces()))
+        .build();
   }
 
   private CameraTrust trust(String camera, boolean keptApart) {

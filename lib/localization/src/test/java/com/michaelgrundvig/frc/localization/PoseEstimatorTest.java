@@ -6,6 +6,9 @@ import static org.assertj.core.api.Assertions.within;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -22,6 +25,9 @@ class PoseEstimatorTest {
   private static final Pose2d START = new Pose2d(1, 1, Rotation2d.ZERO);
   private static final PoseCovariance PLACED = PoseCovariance.fromStdDevs(0.05, 0.05, 0.02);
 
+  /** The field's tags, as 2026's numbers them. */
+  private static final Set<Integer> TAGS = tags(32);
+
   /**
    * Cameras whose images' errors are each new, nothing repeating: the textbook filter, so a test
    * can work its numbers out by hand. (PoseFilterTest covers what repeats.)
@@ -31,6 +37,7 @@ class PoseEstimatorTest {
           .cameraTurnStdDevDegrees(0)
           .cameraShiftStdDevMeters(0)
           .cameraShiftStdDevDegrees(0)
+          .tagPlacementStdDevMeters(0)
           .build();
 
   /** A robot driven by hand: a clock, a gyro, and wheels that report steady motion. */
@@ -40,7 +47,7 @@ class PoseEstimatorTest {
     double gyroYaw = 0.7; // the gyro started somewhere arbitrary
 
     Robot(EstimatorConfig config, PoseReset start) {
-      estimator = new PoseEstimator(config, point -> field(point), start);
+      estimator = new PoseEstimator(config, point -> field(point), TAGS, start);
       estimator.addOdometry(time, new BodyMotion(0, 0, 0, 0), gyroYaw, YawSource.GYRO);
     }
 
@@ -285,7 +292,10 @@ class PoseEstimatorTest {
   void aMeasurementBeforeOdometryStartsIsRejected() {
     PoseEstimator estimator =
         new PoseEstimator(
-            EstimatorConfig.DEFAULTS, point -> true, new PoseReset(0, START, PLACED, "start"));
+            EstimatorConfig.DEFAULTS,
+            point -> true,
+            TAGS,
+            new PoseReset(0, START, PLACED, "start"));
 
     estimator.addVision(
         new VisionMeasurement(
@@ -422,9 +432,13 @@ class PoseEstimatorTest {
       alongTheTags[way] = robot.estimate().covariance().xStdDev();
     }
 
-    double shift = EstimatorConfig.DEFAULTS.cameraShiftStdDevMeters();
-    assertThat(alongTheTags[0]).as("the doubt ignored").isCloseTo(shift, within(0.1 * shift));
-    double doubted = Math.hypot(shift, 0.05);
+    // Along its tag: its shift and the tag's placement, and the doubt with them.
+    double repeated =
+        Math.hypot(
+            EstimatorConfig.DEFAULTS.cameraShiftStdDevMeters(),
+            EstimatorConfig.DEFAULTS.tagPlacementStdDevMeters());
+    assertThat(alongTheTags[0]).as("the doubt ignored").isCloseTo(repeated, within(0.1 * repeated));
+    double doubted = Math.hypot(repeated, 0.05);
     assertThat(alongTheTags[1]).as("the doubt added").isCloseTo(doubted, within(0.1 * doubted));
   }
 
@@ -452,6 +466,7 @@ class PoseEstimatorTest {
         new PoseEstimator(
             EstimatorConfig.DEFAULTS,
             point -> true,
+            TAGS,
             new PoseReset(0, START, PoseCovariance.fromStdDevs(10, 10, 3), "unknown"));
     estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0, YawSource.GYRO);
     assertThat(estimator.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.INITIALIZING);
@@ -528,7 +543,7 @@ class PoseEstimatorTest {
   void theBackupImuTurnsWithItsOwnScalesDoubt() {
     Robot gyro = new Robot().drive(1, 0, 0, 0);
     PoseEstimator backup =
-        new PoseEstimator(TEXTBOOK, point -> true, new PoseReset(0, START, PLACED, "start"));
+        new PoseEstimator(TEXTBOOK, point -> true, TAGS, new PoseReset(0, START, PLACED, "start"));
     backup.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0.7, YawSource.BACKUP);
     backup.reset(new PoseReset(T0, START, PLACED, "placed"));
     double yaw = 0.7;
@@ -748,7 +763,10 @@ class PoseEstimatorTest {
   void aHeadingResetBeforeOdometryStartsIsKept() {
     PoseEstimator estimator =
         new PoseEstimator(
-            EstimatorConfig.DEFAULTS, point -> true, new PoseReset(0, START, PLACED, "start"));
+            EstimatorConfig.DEFAULTS,
+            point -> true,
+            TAGS,
+            new PoseReset(0, START, PLACED, "start"));
 
     estimator.resetHeading(Rotation2d.PI, 0.1);
     estimator.addOdometry(T0, new BodyMotion(0, 0, 0, 0), 0.4, YawSource.GYRO);
@@ -982,5 +1000,56 @@ class PoseEstimatorTest {
         .isEqualTo(LocalizationEstimate.Mode.TRACKING);
     assertThat(PoseEstimator.mode(true, true, false, false))
         .isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
+  }
+
+  /**
+   * A field of more tags than 2026's 32: every one of them gets its place, so two cameras seeing
+   * tag 40 share its placement, and can't place the robot along it better than it. A tag the field
+   * doesn't have can't get one: each image's placement is taken as new, the cameras average it
+   * down, and the estimator says which tag it was.
+   */
+  @Test
+  void everyTagOfALargerFieldIsKeptApart() {
+    Set<Integer> forty = tags(40);
+    double[] alongTheTag = new double[2];
+    List<List<Integer>> withoutPlaces = new ArrayList<>();
+    int[] seen = {40, 41};
+    for (int which = 0; which < 2; which++) {
+      PoseEstimator estimator =
+          new PoseEstimator(
+              EstimatorConfig.DEFAULTS, point -> true, forty, new PoseReset(0, START, PLACED, "x"));
+      long time = T0;
+      estimator.addOdometry(time, new BodyMotion(0, 0, 0, 0), 0, YawSource.GYRO);
+      estimator.reset(new PoseReset(time, START, PLACED, "placed"));
+      for (int i = 0; i < 1000; i++) {
+        time += STEP;
+        estimator.addOdometry(time, new BodyMotion(0, 0, 0, 0), 0, YawSource.GYRO);
+        estimator.addVision(
+            new VisionMeasurement(
+                time,
+                START,
+                position(0.05),
+                new VisionMeasurement.Lever(START.getRotation(), new Translation2d(3, 0)),
+                i % 2 == 0 ? "left" : "right",
+                List.of(seen[which]),
+                VisionMeasurement.Solver.HEADING_CONSTRAINED));
+        estimator.update();
+      }
+      alongTheTag[which] = estimator.estimate().covariance().xStdDev();
+      withoutPlaces.add(estimator.tagsWithoutPlaces());
+    }
+
+    double tag = EstimatorConfig.DEFAULTS.tagPlacementStdDevMeters();
+    double shift = EstimatorConfig.DEFAULTS.cameraShiftStdDevMeters();
+    double shared = Math.hypot(tag, shift / Math.sqrt(2));
+    assertThat(alongTheTag[0]).as("tag 40, kept apart").isCloseTo(shared, within(0.05 * shared));
+    assertThat(withoutPlaces.get(0)).isEmpty();
+    assertThat(alongTheTag[1]).as("tag 41, off the field").isLessThan(0.5 * shared);
+    assertThat(withoutPlaces.get(1)).containsExactly(41);
+  }
+
+  /** A field's tags, numbered from 1. */
+  private static Set<Integer> tags(int count) {
+    return IntStream.rangeClosed(1, count).boxed().collect(Collectors.toSet());
   }
 }

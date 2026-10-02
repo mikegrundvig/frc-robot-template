@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
@@ -117,6 +118,12 @@ public final class Localization implements AutoCloseable {
           "camerasWithoutPlaces",
           "More cameras than the estimator keeps apart",
           Alert.Level.MEDIUM);
+  private final Alert tagsWithoutPlaces =
+      new Alert(
+          "Localization",
+          "tagsWithoutPlaces",
+          "Measurements from tags the field's layout doesn't have",
+          Alert.Level.MEDIUM);
   private final Alert imuOrientation =
       new Alert(
           "Localization",
@@ -206,6 +213,15 @@ public final class Localization implements AutoCloseable {
               + " more than they know");
     }
     camerasWithoutPlaces.set(!beyond.isEmpty());
+    Set<Integer> offTheLayout = output.integrity().tagsWithoutPlaces();
+    if (!offTheLayout.isEmpty()) {
+      tagsWithoutPlaces.setText(
+          "Measurements from tags the field's layout doesn't have: "
+              + offTheLayout
+              + " count each image's placement error as new, so their images together claim more"
+              + " than they know");
+    }
+    tagsWithoutPlaces.set(!offTheLayout.isEmpty());
     log(output.estimate());
     return output;
   }
@@ -443,6 +459,7 @@ public final class Localization implements AutoCloseable {
     usingBackup.close();
     imusDisagree.close();
     camerasWithoutPlaces.close();
+    tagsWithoutPlaces.close();
     imuOrientation.close();
   }
 }

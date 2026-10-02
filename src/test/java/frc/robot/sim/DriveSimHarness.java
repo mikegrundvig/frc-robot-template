@@ -61,7 +61,8 @@ public final class DriveSimHarness implements AutoCloseable {
   private @Nullable Runnable eachLoop;
 
   /**
-   * An estimator that starts with the robot exactly here, and accepts any point as on the field.
+   * An estimator that starts with the robot exactly here, and accepts any point as on the field. It
+   * keeps apart the simulator's field's tags.
    */
   public static PoseEstimator estimatorAt(Pose2d start) {
     return estimatorAt(start, EstimatorConfig.DEFAULTS);
@@ -71,6 +72,7 @@ public final class DriveSimHarness implements AutoCloseable {
     return new PoseEstimator(
         config,
         point -> true,
+        RobotSim.FIELD.tags().keySet(),
         new PoseReset(0, start, PoseCovariance.fromStdDevs(0.001, 0.001, 0.001), "test start"));
   }
 

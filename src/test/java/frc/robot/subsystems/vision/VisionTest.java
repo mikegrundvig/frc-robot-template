@@ -136,6 +136,7 @@ class VisionTest {
       new PoseEstimator(
           EstimatorConfig.DEFAULTS,
           FIELD::contains,
+          FIELD.tags().keySet(),
           new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed"));
 
   /** The template's robot, with this test's cameras: the front one, and a second beside it. */

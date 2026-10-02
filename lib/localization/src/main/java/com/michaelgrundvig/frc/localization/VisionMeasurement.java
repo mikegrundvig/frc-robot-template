@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.localization;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -22,6 +24,9 @@ import org.wpilib.math.geometry.Translation2d;
  *     Lever#NONE} for a solve that found its own heading (multi-tag, single tag, external).
  * @param camera which camera
  * @param tagIds the tags it used
+ * @param tagShares how much each of them counts in its position, in the same order, together 1: a
+ *     tag off the field's layout puts the position off by its share of how far it's off, the same
+ *     in every image any camera takes of it, and the estimator keeps that apart for each tag
  * @param solver how it was solved
  */
 public record VisionMeasurement(
@@ -31,6 +36,7 @@ public record VisionMeasurement(
     Lever lever,
     String camera,
     List<Integer> tagIds,
+    List<Double> tagShares,
     Solver solver) {
   /** How a pose was solved from the tags. */
   public enum Solver {
@@ -75,7 +81,46 @@ public record VisionMeasurement(
     if (tagIds.isEmpty()) {
       throw new IllegalArgumentException("a vision measurement comes from at least one tag");
     }
+    if (tagShares.size() != tagIds.size()) {
+      throw new IllegalArgumentException(
+          "a share for each of a measurement's tags: " + tagShares + " for " + tagIds);
+    }
+    double total = 0;
+    for (double share : tagShares) {
+      if (!(share >= 0) || Double.isInfinite(share)) {
+        throw new IllegalArgumentException("a tag's share is zero or more: " + tagShares);
+      }
+      total += share;
+    }
+    if (!(total > 0)) {
+      throw new IllegalArgumentException("a measurement's tags share its position: " + tagShares);
+    }
 
     tagIds = List.copyOf(tagIds);
+    List<Double> shares = new ArrayList<>(tagShares.size());
+    for (double share : tagShares) {
+      shares.add(share / total);
+    }
+    tagShares = List.copyOf(shares);
+  }
+
+  /** A measurement whose tags count equally in its position. */
+  public VisionMeasurement(
+      long timestampNanos,
+      Pose2d pose,
+      PoseCovariance covariance,
+      Lever lever,
+      String camera,
+      List<Integer> tagIds,
+      Solver solver) {
+    this(
+        timestampNanos,
+        pose,
+        covariance,
+        lever,
+        camera,
+        tagIds,
+        Collections.nCopies(tagIds.size(), 1.0),
+        solver);
   }
 }

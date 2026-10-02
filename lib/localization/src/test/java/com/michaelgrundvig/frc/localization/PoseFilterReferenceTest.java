@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;
 import org.junit.jupiter.api.Test;
@@ -21,15 +22,23 @@ import org.wpilib.math.util.MathUtil;
  * covariance must stay positive semidefinite.
  */
 class PoseFilterReferenceTest {
-  private static final int C = PoseFilter.CONSIDERED;
-  private static final int N = 3 + C;
   private static final int PER_CAMERA = 4;
+  private static final int PER_TAG = 2;
+
+  /** The field's tags, each of whose placement the filter keeps apart. */
+  private static final int TAGS = 4;
+
+  /** The considered errors: the IMUs' scales, every camera's, and every tag's. */
+  private static final int C = 2 + PER_CAMERA * PoseFilter.MAX_CAMERAS + PER_TAG * TAGS;
+
+  private static final int N = 3 + C;
 
   private static final double SCALE = Math.toRadians(1) / (2 * Math.PI);
   private static final double BACKUP_SCALE = Math.toRadians(2) / (2 * Math.PI);
   private static final double TURN = Math.toRadians(0.25);
   private static final double SHIFT = 0.01;
   private static final double HEADING_SHIFT = Math.toRadians(2);
+  private static final double TAG = 0.01;
   private static final double SHIFT_METERS = 1.0;
   private static final double SHIFT_RADIANS = Math.toRadians(45);
 
@@ -50,8 +59,16 @@ class PoseFilterReferenceTest {
     return 3 + 2 + PER_CAMERA * camera + which;
   }
 
+  /** A tag's placement's index in the augmented state, along x (0) or y (1). */
+  private static int tagColumn(int tag, int which) {
+    return 3 + 2 + PER_CAMERA * PoseFilter.MAX_CAMERAS + PER_TAG * tag + which;
+  }
+
   /** A considered error's own variance as configured, by its index among them. */
   private static double considered(int k) {
+    if (k >= 2 + PER_CAMERA * PoseFilter.MAX_CAMERAS) {
+      return TAG * TAG;
+    }
     return k == 0
         ? SCALE * SCALE
         : k == 1 ? BACKUP_SCALE * BACKUP_SCALE : ownVariance((k - 2) % PER_CAMERA);
@@ -112,17 +129,16 @@ class PoseFilterReferenceTest {
     } else if (turnedBy == YawSource.BACKUP) {
       g[2][4] = turn; // and the backup IMU's, its own
     }
-    // Each camera's shift fades as the robot moves and turns, to a fresh one of the same variance.
+    // Each camera's headings' shift fades as the robot moves and turns, to a fresh one of the same
+    // variance; its mount's shift and the tags' placement stay.
     double remains =
         Math.exp(-Math.hypot(moveX, moveY) / SHIFT_METERS - Math.abs(turn) / SHIFT_RADIANS);
     double[][] fade = identity(N);
     double[][] q = new double[N][N];
     for (int camera = 0; camera < PoseFilter.MAX_CAMERAS; camera++) {
-      for (int which = 1; which < PER_CAMERA; which++) {
-        int k = column(camera, which);
-        fade[k][k] = remains;
-        q[k][k] = (1 - remains * remains) * p[k][k]; // back to the camera's own variance
-      }
+      int k = column(camera, 3);
+      fade[k][k] = remains;
+      q[k][k] = (1 - remains * remains) * p[k][k]; // back to the camera's own variance
     }
     double[][] phi = multiply(fade, multiply(g, f));
     p = add(multiply(multiply(phi, p), transpose(phi)), q);
@@ -131,11 +147,14 @@ class PoseFilterReferenceTest {
     p[2][2] += headingNoise;
   }
 
-  private void camera(VisionMeasurement measurement, double yawThen, int camera) {
+  private void camera(VisionMeasurement measurement, double yawThen, int camera, int[] tags) {
     PoseCovariance noise = measurement.covariance();
     int rows = noise.hasHeading() ? 3 : 2;
     double leverX = measurement.lever().robotToTags().getX();
     double leverY = measurement.lever().robotToTags().getY();
+    // The mount's shift, forward and left, turns with the robot: as the estimate has it then.
+    double cos = Math.cos(yawThen + mean[2]);
+    double sin = Math.sin(yawThen + mean[2]);
     double[][] h = new double[rows][N];
     h[0][0] = 1;
     h[0][2] = -leverY;
@@ -143,9 +162,23 @@ class PoseFilterReferenceTest {
     h[1][2] = leverX;
     if (camera >= 0) {
       h[0][column(camera, 0)] = -leverY;
-      h[0][column(camera, 1)] = 1;
+      h[0][column(camera, 1)] = cos;
+      h[0][column(camera, 2)] = -sin;
       h[1][column(camera, 0)] = leverX;
-      h[1][column(camera, 2)] = 1;
+      h[1][column(camera, 1)] = sin;
+      h[1][column(camera, 2)] = cos;
+    }
+    // Each tag off the layout moves the position the other way, by its share.
+    List<Double> shares = measurement.tagShares();
+    double[] newEachImage = new double[2]; // the tags without a place: their variance, x and y
+    for (int i = 0; i < shares.size(); i++) {
+      if (tags[i] >= 0) {
+        h[0][tagColumn(tags[i], 0)] = -shares.get(i);
+        h[1][tagColumn(tags[i], 1)] = -shares.get(i);
+      } else {
+        newEachImage[0] += shares.get(i) * shares.get(i) * TAG * TAG;
+        newEachImage[1] += shares.get(i) * shares.get(i) * TAG * TAG;
+      }
     }
     if (rows == 3) {
       h[2][2] = 1;
@@ -161,13 +194,17 @@ class PoseFilterReferenceTest {
     if (rows == 3) {
       r[2][2] = noise.heading();
     }
+    r[0][0] += newEachImage[0];
+    r[1][1] += newEachImage[1];
     if (camera < 0) {
       // A camera without a place: its turn and shift, new in each image, are just more noise.
       double[][] own = new double[rows][PER_CAMERA];
       own[0][0] = -leverY;
-      own[0][1] = 1;
+      own[0][1] = cos;
+      own[0][2] = -sin;
       own[1][0] = leverX;
-      own[1][2] = 1;
+      own[1][1] = sin;
+      own[1][2] = cos;
       if (rows == 3) {
         own[2][0] = 1;
         own[2][3] = 1;
@@ -235,7 +272,7 @@ class PoseFilterReferenceTest {
             multiply(multiply(gain, r), transpose(gain)));
   }
 
-  private final double[] kept = new double[PoseFilter.UNCERTAINTY];
+  private final double[] kept = new double[9 + 3 * C + 2 * PoseFilter.MAX_CAMERAS];
 
   /** How far the filter is from the reference, relative to the estimate's own variances. */
   private double difference(PoseFilter filter) {
@@ -317,13 +354,15 @@ class PoseFilterReferenceTest {
     this.fixesTurnHeading = fixesTurnHeading;
     PoseFilter.Considered considered =
         new PoseFilter.Considered(
-            SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS);
+            SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, TAG, SHIFT_METERS, SHIFT_RADIANS);
     double worstDifference = 0;
     double worstEigenvalue = Double.POSITIVE_INFINITY;
     int operations = 0;
     for (int sequence = 0; sequence < 60; sequence++) {
       SplittableRandom random = new SplittableRandom(sequence * 7919L + 1);
-      PoseFilter filter = new PoseFilter(considered, fixesTurnHeading);
+      PoseFilter filter = new PoseFilter(considered, TAGS, fixesTurnHeading);
+      assertThat(filter.considered()).isEqualTo(C);
+      assertThat(filter.uncertainty()).isEqualTo(kept.length);
       double start = logUniform(random, 0.01, 100);
       double startHeading = logUniform(random, 1e-3, 3);
       filter.set(
@@ -363,13 +402,18 @@ class PoseFilterReferenceTest {
           VisionMeasurement measurement = measurement(random, filter);
           int slot = random.nextInt(10);
           int camera = slot < PoseFilter.MAX_CAMERAS ? slot : -1;
+          int[] tags = new int[measurement.tagIds().size()];
+          for (int i = 0; i < tags.length; i++) {
+            // A few seen tags, the same ones again and again, now and then one without a place.
+            tags[i] = random.nextInt(10) == 0 ? -1 : measurement.tagIds().get(i);
+          }
           double yawThen = yaw - 0.01 * random.nextDouble();
-          PoseFilter.Innovation innovation = filter.innovation(measurement, yawThen, camera);
+          PoseFilter.Innovation innovation = filter.innovation(measurement, yawThen, camera, tags);
           if (innovation == null) {
             continue;
           }
           filter.correct(innovation);
-          camera(measurement, yawThen, camera);
+          camera(measurement, yawThen, camera, tags);
         } else if (u < 0.94) {
           LandmarkEvent event =
               new LandmarkEvent(
@@ -437,7 +481,7 @@ class PoseFilterReferenceTest {
           setPosition(positionVariance, 0, positionVariance);
         } else {
           // What the history keeps, it gives back exactly.
-          double[] stored = new double[PoseFilter.UNCERTAINTY];
+          double[] stored = new double[filter.uncertainty()];
           filter.copyUncertaintyTo(stored, 0);
           filter.restore(filter.x(), filter.y(), filter.offset(), stored, 0);
         }
@@ -464,7 +508,8 @@ class PoseFilterReferenceTest {
     PoseFilter filter =
         new PoseFilter(
             new PoseFilter.Considered(
-                SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, SHIFT_METERS, SHIFT_RADIANS));
+                SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, TAG, SHIFT_METERS, SHIFT_RADIANS),
+            TAGS);
     filter.set(new PoseReset(0, Pose2d.ZERO, PoseCovariance.fromStdDevs(1, 1, 0.1), "x"), 0);
     double yaw = 0;
     double worstEigenvalue = Double.POSITIVE_INFINITY;
@@ -481,7 +526,8 @@ class PoseFilterReferenceTest {
               "camera",
               List.of(1),
               VisionMeasurement.Solver.HEADING_CONSTRAINED);
-      PoseFilter.Innovation innovation = filter.innovation(sure, yaw, i % 3 == 0 ? 1 : 0);
+      PoseFilter.Innovation innovation =
+          filter.innovation(sure, yaw, i % 3 == 0 ? 1 : 0, new int[] {0});
       if (innovation == null) {
         continue;
       }
@@ -513,6 +559,14 @@ class PoseFilterReferenceTest {
                 new Translation2d(
                     logUniform(random, 0.5, 6), new Rotation2d(6.28 * random.nextDouble())));
     double correlation = 0.9 * random.nextDouble() - 0.45;
+    // One to three of the seen tags, each its own share.
+    int count = 1 + random.nextInt(3);
+    List<Integer> ids = new ArrayList<>();
+    List<Double> shares = new ArrayList<>();
+    for (int tag = random.nextInt(TAGS); ids.size() < count; tag = (tag + 1) % TAGS) {
+      ids.add(tag);
+      shares.add(0.1 + random.nextDouble());
+    }
     return new VisionMeasurement(
         1,
         new Pose2d(
@@ -523,7 +577,8 @@ class PoseFilterReferenceTest {
             spread * spread, correlation * spread * spread, spread * spread, heading * heading),
         lever,
         "camera",
-        List.of(1),
+        ids,
+        shares,
         VisionMeasurement.Solver.HEADING_CONSTRAINED);
   }
 

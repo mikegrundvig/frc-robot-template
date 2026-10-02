@@ -209,7 +209,10 @@ limit, and any later bound on its error all trust that number. A claim of 3 mm w
 check: `./gradlew consistencyStudy` drives the whole simulated robot through ten runs, twelve
 seeds of each, and compares every loop's estimate with the truth (`frc.robot.studies`:
 `ConsistencyStudy`, `ConsistencyRuns`, `Consistency`). It takes about seven minutes, one robot at a
-time (WPILib's simulation is one per program). The report is in `build/studies/consistency/`.
+time (WPILib's simulation is one per program). The report is in `build/studies/consistency/`. The
+study's memory grows with the images its cameras simulate, outside its heap, by about 50 MB each
+time a run drives the route four times: twelve seeds peak near 7.5 GB, so run fifty as several
+studies (`--seed=1 --seeds=13`, `--seed=14`, and on), not one.
 
 The runs, on the simulator's season-worn robot (`SensorErrors.TYPICAL`) with four cameras:
 
@@ -235,12 +238,13 @@ and about each axis), one for each tag (along each axis: the cameras see a tag w
 robot believes the layout), and the gyro's and the backup IMU's scales. Each kind of error, and
 each camera and tag, draws from its own stream of the seed, so no two seeds share a draw. They're
 drawn from Gaussians at the spread the estimator's configuration claims (`EstimatorConfig`'s
-`cameraTurnStdDevDegrees`, `cameraShiftStdDevMeters`, `headingStdDevDegreesPerTurn`,
-`backupHeadingStdDevDegreesPerTurn`), with the
-vision noise model halved, a little wider than the simulated cameras' noise: an estimator honest
-about its own claims reads a NEES near its number of dimensions, or a little below. Wider or
-narrower errors than it claims show it over- or under-confident, which is what the options are
-for.
+`cameraTurnStdDevDegrees`, `tagPlacementStdDevMeters`, `headingStdDevDegreesPerTurn`,
+`backupHeadingStdDevDegreesPerTurn`), each mount 3 mm off along each axis, within the 5 mm of
+`cameraShiftStdDevMeters` (a stop-gap that also covers a single tag's solve coming out short:
+[below](#what-the-simulated-cameras-repeat)), and the vision noise model halved, a little wider than
+the simulated cameras' noise: an estimator honest about its own claims reads a NEES near its number
+of dimensions, or a little below. Wider or narrower errors than it claims show it over- or
+under-confident, which is what the options are for.
 
 | Option | Default | What |
 |---|---|---|
@@ -248,7 +252,7 @@ for.
 | `--seeds=N` | 12 | Runs of each, each with its own draws |
 | `--seed=N` | 1 | The first seed |
 | `--mount-error-mm=M`, `--mount-error-degrees=D` | 3, `cameraTurnStdDevDegrees` | Each camera's mount off along and about each axis (standard deviations) |
-| `--tag-error-mm=M` | `cameraShiftStdDevMeters` | Each tag off the layout along each axis; 0 for an exact field |
+| `--tag-error-mm=M` | `tagPlacementStdDevMeters` | Each tag off the layout along each axis; 0 for an exact field |
 | `--gyro-scale-error=F`, `--backup-scale-error=F` | `headingStdDevDegreesPerTurn` / 360, `backupHeadingStdDevDegreesPerTurn` / 360 | Each IMU's scale off by this share |
 | `--noise-scale=F` | 0.5 | The vision noise model scaled; 1 is the model as shipped. The simulated cameras are quieter than half: at a quarter, the calibrated runs read a position NEES of 1.3 to 2.5, and still a heading NEES within its band |
 | `--heading=W` | `measurements` | What corrects the heading beside the gyro (`EstimatorConfig.headingCorrection`): `measurements`, `doubt`, or `every`; see [three ways to correct the heading](#three-ways-to-correct-the-heading) |
@@ -308,37 +312,107 @@ their own, the default):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.37 | 0.91 | 0.09% | 0 | 1.7 cm | 0.29° |
-| standing | 3.42 | 0.72 | 0 | 0 | 1.6 cm | 0.29° |
-| turning | 1.57 | 0.31 | 2.09% | 0 | 1.5 cm | 0.45° |
-| gyro-scale | 1.87 | 0.32 | 4.72% | 0 | 1.4 cm | 0.66° |
-| collision | 1.68 | 1.14 | 0.45% | 0.43% | 1.9 cm | 0.29° |
-| gyro-lost | 1.83 | 0.28 | 3.94% | 0 | 1.5 cm | 0.36° |
-| camera-low | 1.19 | 1.16 | 0 | 0 | 1.5 cm | 0.27° |
-| camera-turned | 3.78 | 5.91 | 2.83% | 1.92% | 2.7 cm | 0.61° |
-| camera-turned-4 | 10.71 | 23.18 | 29.68% | 28.04% | 4.8 cm | 1.18° |
-| tag-moved | 1.82 | 1.64 | 1.23% | 0.90% | 1.7 cm | 0.29° |
+| driving | 1.30 | 0.87 | 0.58% | 0 | 1.7 cm | 0.29° |
+| standing | 2.17 | 0.68 | 0 | 0 | 1.6 cm | 0.29° |
+| turning | 1.52 | 0.31 | 1.83% | 0 | 1.5 cm | 0.45° |
+| gyro-scale | 1.61 | 0.33 | 3.55% | 0 | 1.4 cm | 0.66° |
+| collision | 1.58 | 0.95 | 0.43% | 0.43% | 1.9 cm | 0.28° |
+| gyro-lost | 1.60 | 0.28 | 3.62% | 0 | 1.4 cm | 0.36° |
+| camera-low | 1.10 | 1.15 | 0 | 0 | 1.6 cm | 0.28° |
+| camera-turned | 3.64 | 5.65 | 2.87% | 1.58% | 2.7 cm | 0.62° |
+| camera-turned-4 | 10.70 | 21.48 | 29.25% | 27.55% | 4.8 cm | 1.18° |
+| tag-moved | 1.69 | 1.47 | 0.93% | 0.67% | 1.7 cm | 0.28° |
 
-Most calibrated runs are near their NEES or below it, timid rather than overconfident: the floor
+The calibrated runs are near their NEES or below it, timid rather than overconfident: the floor
 for what a camera repeats is sized for the worst of what it allows, and the noise model is a
-little wider than the simulated cameras. Two aren't, since each seed's random streams became its
-own (below). Standing reads 3.42, above its 95% band in 72% of its loops: the same tags in every image, so
-what the seeds' mounts and tags share never averages out, and the estimate claims a little more
-than it knows. And one seed is overconfident wherever the robot turns in place: seed 2, its gyro
-0.38% high and its two front cameras turned the same way (0.32° and 0.48°), is outside its
-ellipse in 25% of the turning run's loops, 57% of the gyro-scale procedure's, and 47% of the
-lost gyro's (NEES 8.0, 10.5, 10.2), which puts those runs past the 2.9% twelve seeds allow. What
-in its draws the estimate underrates isn't pinned down yet; `EstimatorConsistencySimTest` (seeds
-1 to 6) records it as known, and fails when it changes. The collision's exceedances are the loops
-of the hit, before the jolt is read, and the few after it while the cameras pull the estimate back
-across a knock of 0.6 m, more than the 25 cm `collisionStdDevMeters` allows. A tag 4 in off the
-layout, four times what `cameraShiftStdDevMeters` allows, stays within the allowance: one tag
-among several in view. A camera turned 2° is eight times what `cameraTurnStdDevDegrees` allows,
-and 4° sixteen: the estimator can't tell either from a heading error, so its heading grows sure of
-a wrong value. Catching that is the mount check's job; how well it does depends on what may
-correct the heading, below.
+little wider than the simulated cameras. Standing reads 2.17, inside its band. Standing still, both
+front cameras see tag 23 and both back cameras tag 28, so two cameras' fixes share each tag's
+place on the field: when each camera's shift held the tags' placement as well as its mount, the two
+averaged it down as if each had its own, and standing read 3.42, above its band in 72% of its
+loops. The estimator now considers each tag's placement on its own (`tagPlacementStdDevMeters`),
+the same for every camera that sees it and every time it's seen, and each camera's shift
+(`cameraShiftStdDevMeters`) is what's its own: its mount, and for now a stop-gap for its solve
+coming out short ([below](#what-the-simulated-cameras-repeat)).
 
-Numbers from before this table, in older commits, aren't comparable: the simulated drivetrain
+One seed is still overconfident where the robot stands at its start, and it's its tags. Seed 2's
+gyro reads 0.38% high and its two front cameras are turned the same way (0.32° and 0.48°), but
+drawn exact, neither changes much: its turning run's NEES 8.0 and 6.9, against 7.8. Its tags
+drawn exact, it reads 1.2, and none of its loops is outside the ellipse. From the start, only tags
+31 and 32 are in view, both back cameras see both, and seed 2 drew tag 31 3.4 cm off along the
+field (3.4 times what `tagPlacementStdDevMeters` allows) and tag 32 1.6 cm: every fix from there
+sits 2.5 cm off, 3.5 times what two tags each 1 cm off allow. The simulated cameras' own 0.5 to
+0.8 cm at that distance ([below](#what-the-simulated-cameras-repeat)) and its mounts' 0.3 add to
+it, 3.6 cm in all against a claimed 0.9, and the mounts are what tip it out: drawn exact, it stays
+inside its ellipse (a NEES of 5.4). Outside it in 22% of the turning run's loops and 43% of the
+gyro-scale procedure's and the lost gyro's, it puts those two past the 2.9% twelve seeds allow;
+`EstimatorConsistencySimTest` (seeds 1 to 6) records the procedure's as known, and fails when it
+changes. No estimator honest about tags 1 cm off can hold a pair 3.5 times that inside its 99.9%
+ellipse; fifty seeds, below, show it's the draw and not the model.
+
+Fifty seeds (`--seeds=50`, run as four studies of 12 or 13 seeds and their reports combined) put
+every calibrated run but one within the 1.48% fifty allow: driving 1.05 (0.14% of loops outside
+the ellipse), standing 1.28 (none), turning 1.27 (0.44%), collision 1.03 (0.28%), gyro-lost 1.37
+(0.87%), camera-low 0.84 (none), tag-moved 1.56 (1.07%); the 2° camera reads 3.47 (3.41%) and the
+4° 10.26 (26.55%). Seed 2 is one draw in fifty there. The gyro-scale procedure reads 2.68, with
+3.03% outside: beside seed 2, seeds 31 and 38, whose gyros read 0.55% and 0.66% low (2.0 and 2.4
+times what `headingStdDevDegreesPerTurn` allows), end its five turns 6.7° and 11.2° off, claiming
+4.9°. No heading of a multi-tag solve comes to correct it from the start's two tags (drawn exact,
+one does, and the heading comes back), and a fix's lever on the heading is linear in it: 11° off
+at 3.6 m, what the line leaves out is 7 cm along the tags, about what the estimate is off (10 cm)
+where it claims a centimeter. The estimator before this table does the same on those two seeds (a
+NEES of 16.8 and 55.8): it isn't the tags' doing, and it isn't fixed here. Without them, the
+procedure has 0.89% of its loops outside.
+
+Standing reads 1.28 over fifty, below its band (1.48 to 2.59): timid, as the other calibrated runs
+are. At its end, along its tags, the estimate is off by the tags' mean placement and 3.5 mm more,
+while it claims the tags, its cameras' shifts and 6 mm of its own: the doubt the route left, from
+wheels better than `translationStdDevPerMeter` and `translationStdDevPerRadian` claim, that fixes
+sharing two tags can't wear down (at a third of each, it claims 3.7 mm of its own, and standing
+reads 1.75). The estimator before read 2.02 there, the tags counted at half their weight (each
+camera's shift, averaged four ways) beside that same doubt.
+
+The collision's exceedances are the loops of the hit, before the jolt is read, and the few after
+it while the cameras pull the estimate back across a knock of 0.6 m, more than the 25 cm
+`collisionStdDevMeters` allows. A tag 4 in off the layout, ten times what
+`tagPlacementStdDevMeters` allows, stays within the allowance: one tag among several in view. A
+camera turned 2° is eight times what `cameraTurnStdDevDegrees` allows, and 4° sixteen: the
+estimator can't tell either from a heading error, so its heading grows sure of a wrong value.
+Catching that is the mount check's job; how well it does depends on what may correct the heading,
+below.
+
+#### What the simulated cameras repeat
+
+With every error drawn at zero (no mount, tag or gyro scale off), the simulated cameras still place
+their tags short, the same in every image: 5 to 8 mm from the start's tags 31 and 32, at 3.6 m,
+and 1 to 3 mm from the standing run's, at 2 m. It's a single tag's solve from noisy corners: with
+noiseless corners it's gone. PhotonVision's own `solvePNP_SQUARE`, on the template's sensor with
+the simulator's corner noise, shows how it hangs on the view:
+
+| Tag seen | 2 m | 3.6 m | 6 m |
+|---|---|---|---|
+| Head-on | 4.5 mm short | 14.6 mm | 40 mm |
+| 30° off its face | 0.2 mm | 0.8 mm | 2.9 mm |
+| From 0.5 m above its axis | 0.2 mm | 4.0 mm | 30.8 mm |
+
+It grows with the corner noise and about with the distance squared, and looks like a single tag's
+ambiguity near face-on. It's a real error the estimator doesn't model: one-sided, hanging on range
+and angle, and shared by every camera that sees the tag face-on. `cameraShiftStdDevMeters` covers
+it for now, as a **stop-gap**: 5 mm, against the 3 mm of mount the study draws, a constant for each
+camera that models it poorly. At 3 mm, the mount's alone, the turning run sat at exactly its 2.92%
+allowance outside the ellipse, the driving run had 1.42%, and the 2° camera rose to 3.80% (2.83%
+before tags were considered on their own); at 5 mm, 1.83%, 0.58% and 2.87%. Part of what the extra
+2 mm absorbs is seed 2's tag 31, 3.4 times `tagPlacementStdDevMeters` off, seen from the start where
+those runs stand. Modelling the short solve itself (by range and angle, for each tag face) is left
+to do; until then, measure it on the robot's own cameras ([camera
+noise](characterization.md#camera-noise)).
+
+On the same draws, before the estimator considered each tag's placement on its own, the table
+read: driving 1.37 (0.09% of loops outside the ellipse), standing 3.42 (above its band in 72% of
+loops), turning 1.57 (2.09%), gyro-scale 1.87 (4.72%), collision 1.68 (0.45%), gyro-lost 1.83
+(3.94%), camera-low 1.19 (none), the turned cameras 3.78 (2.83%) and 10.71 (29.68%), tag-moved 1.82
+(1.23%); its errors were the same to a millimeter, and its gates' pass rates to 0.2%.
+
+Numbers from before that, in older commits, aren't comparable: the simulated drivetrain
 carried a robot of about 39 kg, not the configured 68, so it sped up 75% faster and drove the
 runs' sticks along another path ([stand-ins](stand-ins.md)); before that, the simulated cameras
 stamped each image up to a loop late ([below](#the-simulators-late-stamps)), and before that the
@@ -350,7 +424,8 @@ gave its gyro's accelerometer), and so do the study's own draws (each seed's cam
 the seed before it's tag offsets, its kinds of draw mixed in as 1, 2, and 3), and the table moved
 with them: drawn the old way, it read driving 1.08, standing 1.83, turning 1.44, gyro-scale 2.10
 (0.09% outside the ellipse), collision 1.40, gyro-lost 1.71, camera-low 0.99, the turned cameras
-3.28 and 9.83, tag-moved 1.71. The rest of this section's numbers were drawn the old way.
+3.28 and 9.83, tag-moved 1.71. The rest of this section's numbers were drawn the old way, and
+with each camera's shift (then 1 cm) holding the tags' placement too.
 
 On the same simulator, with the old draws, the estimator before that table doubted a quarter of its wheels' travel
 whenever a drive motor was at its current limit, for most of a second each time the robot got up to
@@ -517,9 +592,9 @@ Nor was it what was first suspected. The tags' errors, the same for every camera
 taking them away didn't lower the heading NEES (above), and with a noise model half as wide
 (`--noise-scale=0.25`, twelve seeds), `every`'s heading NEES on a calibrated robot is 0.61 to 1.19
 with them (`measurements`' 0.48 to 0.99) and 0.33 to 0.62 without: each camera's considered shift
-covers them. A lever wrong in sign or frame: with no
-error drawn and the images stamped right, `every`'s heading is 0.02° off. The gyro's scale coupling
-with the fixes during the procedure's turns: exact scales left it at 6.45.
+covered them then (each tag's placement is considered on its own since). A lever wrong in sign or
+frame: with no error drawn and the images stamped right, `every`'s heading is 0.02° off. The
+gyro's scale coupling with the fixes during the procedure's turns: exact scales left it at 6.45.
 
 **What `every` leans on:** images stamped right while the robot turns. With every camera's stamps
 off by the same amount, drawn for each seed with a spread of 2 ms, its heading NEES after the
@@ -572,6 +647,9 @@ sooner (74% and 95%), and honestly: its heading is 0.2° off on average over eit
 to 2° off. And after the procedure's five turns, (a)'s heading claims more than a placed robot's 2°
 for a quarter of the run. None of these gates is retuned here: a lower allowance once the gyro is
 calibrated, a judging distance, or a tolerance are the team's to choose with these numbers.
+Considering each tag's placement on its own moved none of them by more than 0.2% of loops, on
+today's draws: scoring passes in all of the calibrated runs' loops but the collision's (99.71%,
+as before).
 
 ### What it proves, and what it doesn't
 
@@ -665,12 +743,13 @@ and then seeing again), and the estimate recovers in each. What's known not to h
 procedure), six matched seeds each, on every build, about 80 s. Each must land where six honest
 seeds do 999 times in 1000: its mean position NEES between 0.30 and 5.8 and its heading NEES
 between 0.04 and 4.1, its share of loops outside the ellipse and past 3.72 σ within what six seeds
-allow (4%), and its mean error under 2.5 to 3.5 cm. Six seeds can't pin a NEES down closely, so the
-test catches an estimator that's badly over- or under-confident, as the one before this study was
-(a NEES of 17 to 476 on these draws); the full study is the closer look. A change to the
-estimator, its configuration, or the vision pipeline that breaks one has made the estimate claim
-more or less than it knows, or got there by being worse. Run the whole study before and after such
-a change, and put both tables in the commit.
+allow (4%), and its mean error under 2.5 to 3.5 cm; the gyro-scale procedure's ellipse is known
+past it, for seed 2's tags (above), and checked to stay where it is. Six seeds can't pin a NEES
+down closely, so the test catches an estimator that's badly over- or under-confident, as the one
+before this study was (a NEES of 17 to 476 on these draws); the full study is the closer look. A
+change to the estimator, its configuration, or the vision pipeline that breaks one has made the
+estimate claim more or less than it knows, or got there by being worse. Run the whole study before
+and after such a change, and put both tables in the commit.
 
 ## Configuration is tested too
 

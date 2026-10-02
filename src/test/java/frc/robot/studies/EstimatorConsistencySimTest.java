@@ -75,33 +75,29 @@ class EstimatorConsistencySimTest {
     assertThat(summary.meanErrorMeters()).as("mean error").isLessThan(meanErrorMeters);
   }
 
-  /** The route there and back: the cameras' shifts, and the field's tags, change as it goes. */
+  /**
+   * The route there and back: the cameras see other tags as it goes, each off the layout its own
+   * way, and the same ones again on the way back, off as they were.
+   */
   @Test
   void drivingTheUncertaintyCoversTheError() {
     assertHonest(play("driving"), 0.03);
   }
 
   /**
-   * Standing still for 20 s after the route: the same tags in every image, so what they share
-   * (their placement, the cameras' mounts) never averages out, and the estimate doesn't claim it
-   * does.
+   * Standing still for 20 s after the route: the same tags in every image, two cameras on each, so
+   * what they share (each tag's placement, and each camera's mount) never averages out, and the
+   * estimate doesn't claim it does.
    */
   @Test
   void standingStillTheUncertaintyCoversTheError() {
     assertHonest(play("standing"), 0.025);
   }
 
-  /**
-   * Two turns in place: the gyro's scale error is the same every turn, and it adds up.
-   *
-   * <p>Known to leave its ellipse too often since each seed's random streams became its own: seed 2
-   * (its gyro reading 0.38% high, its two front cameras turned the same way, 0.32° and 0.48°) is
-   * outside it in a quarter of its loops, 4.2% of the six seeds' against the 4.1% they allow. Its
-   * NEES (1.9), its long axis, and its accuracy hold.
-   */
+  /** Two turns in place: the gyro's scale error is the same every turn, and it adds up. */
   @Test
   void turningInPlaceTheUncertaintyCoversTheError() {
-    assertHonestButOutsideItsEllipse(play("turning"), 0.035, 0.0418);
+    assertHonest(play("turning"), 0.035);
   }
 
   /**
@@ -109,12 +105,15 @@ class EstimatorConsistencySimTest {
    * fix with it is off by its tags' distance times that, the same way every image: the estimate
    * carries it, where it used to claim millimeters while 6 to 20 cm off.
    *
-   * <p>Known to leave its ellipse too often since each seed's random streams became its own: seed 2
-   * (above) is outside it in 57% of its loops (its NEES 10.5), 9.4% of the six seeds' against the
-   * 4.1% they allow. Its NEES (2.5), its long axis, and its accuracy hold.
+   * <p>Known to leave its ellipse too often: seed 2 drew tag 31 3.4 cm off the layout along the
+   * field (3.4 times what {@code tagPlacementStdDevMeters} allows) and tag 32 1.6 cm, the two tags
+   * both back cameras see from the start, where the procedure spins; with the simulated cameras'
+   * own 0.5 to 0.8 cm at that distance and its mounts' 0.3, the estimate is 3.6 cm off there,
+   * claiming 0.9. It's outside its ellipse in 43% of its loops, 7.1% of the six seeds' against the
+   * 4.1% they allow. Its NEES (2.2), its long axis, and its accuracy hold.
    */
   @Test
   void afterTheGyroScaleProcedureTheUncertaintyCoversTheError() {
-    assertHonestButOutsideItsEllipse(play("gyro-scale"), 0.03, 0.0943);
+    assertHonestButOutsideItsEllipse(play("gyro-scale"), 0.03, 0.0711);
   }
 }

@@ -125,6 +125,7 @@ class LocalizationServiceTest {
         new PoseEstimator(
             EstimatorConfig.DEFAULTS,
             FIELD::contains,
+            FIELD.tags().keySet(),
             new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed")),
         kinematics,
         FIELD,
@@ -480,6 +481,37 @@ class LocalizationServiceTest {
         .endsWith("camera 9", "front");
     assertThat(integrity.protection()).isEmpty();
     assertThat(integrity.excludedTags()).isEmpty();
+    assertThat(integrity.tagsWithoutPlaces()).as("every tag on the field's layout").isEmpty();
+  }
+
+  /**
+   * A measurement from a tag the field's layout doesn't have (one solved elsewhere, say): the
+   * estimator can't keep its placement apart, takes each image's as new, and says so.
+   */
+  @Test
+  void integritySaysWhichTagsAreOffTheLayout() {
+    LocalizationService localization = placed();
+    long now = standStill(localization, 10);
+    int offTheLayout =
+        1 + FIELD.tags().keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+
+    LocalizationOutput output =
+        loop(
+            localization,
+            now + LOOP_NANOS,
+            () ->
+                localization.camera(
+                    new VisionMeasurement(
+                        now,
+                        ROBOT,
+                        PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY),
+                        VisionMeasurement.Lever.NONE,
+                        "front",
+                        List.of(26, offTheLayout),
+                        VisionMeasurement.Solver.EXTERNAL)));
+
+    assertThat(output.frames().get(0).accepted()).isTrue();
+    assertThat(output.integrity().tagsWithoutPlaces()).containsExactly(offTheLayout);
   }
 
   /** The wheels' trust: what the IMU says of them, and that a disabled robot may be carried. */
@@ -781,6 +813,7 @@ class LocalizationServiceTest {
         new PoseEstimator(
             EstimatorConfig.DEFAULTS,
             FIELD::contains,
+            FIELD.tags().keySet(),
             new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed")),
         new SwerveKinematicsModel(DEFINITION.moduleTranslations()),
         FIELD,

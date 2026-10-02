@@ -166,6 +166,31 @@ class VisionPipelineTest {
     assertThat(moved.getNorm()).isGreaterThan(0.02);
   }
 
+  /**
+   * Each tag counts in the position as the solve weighs it, by the inverse square of its distance:
+   * a tag off the layout puts the position off by its share, which the measurement says.
+   */
+  @Test
+  void eachTagsShareOfThePositionIsAsTheSolveWeighsIt() {
+    VisionMeasurement measured =
+        measured(process(seeing(ROBOT, camera, false, 25, 26), steady(ROBOT.getRotation())));
+
+    double[] weights = new double[2];
+    for (int i = 0; i < 2; i++) {
+      double distance =
+          FIELD
+              .tag(measured.tagIds().get(i))
+              .orElseThrow()
+              .getTranslation()
+              .getDistance(new Pose3d(ROBOT).transformBy(camera.robotToCamera()).getTranslation());
+      weights[i] = 1 / (distance * distance);
+    }
+    assertThat(measured.tagShares().get(0))
+        .isCloseTo(weights[0] / (weights[0] + weights[1]), within(1e-6));
+    assertThat(measured.tagShares().get(1))
+        .isCloseTo(weights[1] / (weights[0] + weights[1]), within(1e-6));
+  }
+
   /** A solve that finds its own heading doesn't lean on the gyro's. */
   @Test
   void aFullSolveDoesntLeanOnTheGyrosHeading() {

@@ -36,10 +36,9 @@ test_recipe_covers_everything_the_image_is_made_from() {
   for path in "$IMAGE"/boards/* "$IMAGE"/files/*; do
     consumed+=("$image/${path#"$IMAGE"/}")
   done
-  # The agent's jar is built, not committed: what builds it (its libraries' versions the hash
-  # adds itself).
-  consumed+=(coprocessor/agent/src/main/x coprocessor/agent/build.gradle coprocessor/common/src/main/x
-    coprocessor/common/build.gradle gradle/quality.gradle)
+  # The agent's jar is built, not committed: what it's made of, its sources and its rules
+  # (its libraries' versions the hash adds itself).
+  consumed+=(coprocessor/agent/src/main/x coprocessor/agent/jar.gradle coprocessor/common/src/main/x)
   # The paths provision.sh reads from the repository are among those.
   grep -qF "repo/\$COPROC_AGENT_JAR" "$IMAGE/provision.sh" || fail "provision.sh reads the agent's jar differently now"
   grep -qF "repo/\$COPROC_AGENT_UNIT" "$IMAGE/provision.sh" || fail "provision.sh reads the agent's unit differently now"

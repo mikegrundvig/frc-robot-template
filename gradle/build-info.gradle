@@ -2,7 +2,13 @@
 // startup, so every log says exactly which code produced it. DIRTY counts staged, unstaged, and
 // untracked changes anywhere in the repository, so a deploy of uncommitted work is never logged as
 // clean. DIRTY: 0 = clean, 1 = uncommitted changes, -1 = git unavailable.
+//
+// Quick mode (-Pquick, the edit-test loop) leaves the build's time out: BUILD_DATE says so and
+// BUILD_UNIX_TIME is 0. The class then stays the same from build to build until the commit, the
+// branch, or DIRTY changes, so Gradle skips compiling and testing a program that hasn't changed.
+// Every other build (ci, deploy, run) stamps the time.
 
+def quick = project.hasProperty("quick")
 def generatedDir = layout.buildDirectory.dir("generated/sources/buildconstants/java/main")
 def buildConstants = tasks.register("generateBuildConstants") {
     description = "Generate frc.robot.BuildConstants from the git state."
@@ -38,13 +44,16 @@ def buildConstants = tasks.register("generateBuildConstants") {
         def gitDateText = gitDate
                 ? java.time.OffsetDateTime.parse(gitDate).atZoneSameInstant(now.zone).format(fmt)
                 : "UNKNOWN"
+        def buildDate = quick ? "not stamped (-Pquick)" : now.format(fmt)
+        def buildTime = quick ? 0L : now.toInstant().toEpochMilli()
         def file = generatedDir.get().file("frc/robot/BuildConstants.java").asFile
         file.parentFile.mkdirs()
         file.text = """\
 package frc.robot;
 
 /**
- * Generated from the git state at build time. Do not edit.
+ * Generated from the git state at build time. Do not edit. A quick build (-Pquick) leaves the
+ * build's time out, so the class changes only with the git state.
  *
  * <p>Each value passes through stamp(), so none is a compile-time constant: the classes that read
  * them don't copy them in, and a new build changes this class alone. So what's compiled from the
@@ -56,8 +65,8 @@ public final class BuildConstants {
   public static final String GIT_SHA = stamp("${git(["rev-parse", "HEAD"]) ?: "UNKNOWN"}");
   public static final String GIT_DATE = stamp("${gitDateText}");
   public static final String GIT_BRANCH = stamp("${git(["rev-parse", "--abbrev-ref", "HEAD"]) ?: "UNKNOWN"}");
-  public static final String BUILD_DATE = stamp("${now.format(fmt)}");
-  public static final long BUILD_UNIX_TIME = stamp(${now.toInstant().toEpochMilli()}L);
+  public static final String BUILD_DATE = stamp("${buildDate}");
+  public static final long BUILD_UNIX_TIME = stamp(${buildTime}L);
   public static final int DIRTY = stamp(${dirty});
 
   private BuildConstants() {}

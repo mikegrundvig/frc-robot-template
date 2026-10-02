@@ -17,10 +17,12 @@ import org.jspecify.annotations.Nullable;
 /**
  * The hash of the recipe a coprocessor image is built from, which the robot checks each
  * coprocessor's stamp against. It changes when what goes onto a board changes, and only then: the
- * image's scripts and files, the agent's and the shared code with their own build files, the
- * PhotonVision lock, and the libraries the agent runs with. A robot-side change (a GradleRIO or
- * WPILib update, the wrapper, the robot program) leaves it alone, so it never asks for a new image
- * that would be the same.
+ * image's scripts and files, the agent's and the shared code's sources, the agent's jar's rules
+ * ({@code coprocessor/agent/jar.gradle}) and its systemd unit, the PhotonVision lock, and the
+ * libraries the agent runs with. A robot-side change (a GradleRIO or WPILib update, the wrapper,
+ * the robot program) leaves it alone, and so do the coprocessor projects' own build files and the
+ * checks they apply ({@code gradle/quality.gradle}): their tests and checks don't change what the
+ * image installs. So it never asks for a new image that would be the same.
  *
  * <p>It's the SHA-256, in lowercase hex, of:
  *
@@ -41,10 +43,11 @@ public final class RecipeHash {
   public static final List<String> PATHS =
       List.of(
           "coprocessor/image",
-          "coprocessor/agent",
-          "coprocessor/common",
-          "coprocessor/photonvision.lock",
-          "gradle/quality.gradle");
+          "coprocessor/agent/src/main",
+          "coprocessor/agent/coprocessor-agent.service",
+          "coprocessor/agent/jar.gradle",
+          "coprocessor/common/src/main",
+          "coprocessor/photonvision.lock");
 
   private RecipeHash() {}
 

@@ -42,32 +42,10 @@ tasks.named("test") {
     jvmArgs "--enable-native-access=ALL-UNNAMED" // sqlite-jdbc loads its native library
 }
 
-// coprocessor-agent.jar: the agent with everything it needs, run with `java -jar`. sqlite-jdbc's
-// native libraries are kept for 64-bit ARM Linux (the coprocessors) and x86-64 Linux (CI, where
-// images are stamped), and no others: a fifth of the size.
-def keptNatives = [
-    "org/sqlite/native/Linux/aarch64",
-    "org/sqlite/native/Linux/x86_64"
-]
-tasks.named("jar") {
-    archiveFileName = "coprocessor-agent.jar"
-    manifest {
-        attributes(
-                "Main-Class": "com.michaelgrundvig.frc.coprocessor.agent.AgentMain",
-                "Enable-Native-Access": "ALL-UNNAMED")
-    }
-    dependsOn configurations.runtimeClasspath
-    from({
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }) {
-        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
-        exclude { element ->
-            def path = element.relativePath.pathString
-            path.startsWith("org/sqlite/native/") && !keptNatives.any { path.startsWith(it) || it.startsWith(path) }
-        }
-    }
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
+// coprocessor-agent.jar, what the image installs: in its own file, which the recipe hash covers
+// (coprocessor/README.md), so a change to the rest of this build, its tests and checks, isn't a
+// new image.
+apply from: rootProject.file("coprocessor/agent/jar.gradle")
 
 // The libraries the agent runs with, group:name:version one to a line, for the recipe hash
 // (coprocessor/README.md): a new sqlite-jdbc is a new image; a new WPILib, which the agent doesn't
@@ -75,15 +53,29 @@ tasks.named("jar") {
 tasks.register("runtimeLibraries") {
     description = "List the agent's runtime libraries, for the coprocessor recipe hash."
     def classpath = configurations.runtimeClasspath
+    // The resolved graph's root, which Gradle's configuration cache can keep (the configuration
+    // itself it can't): every library is reached from it.
+    def root = classpath.incoming.resolutionResult.rootComponent
     def out = layout.buildDirectory.file("coprocessor/runtime-libraries.txt")
     inputs.files(classpath)
     outputs.file(out)
     doLast {
         def libraries = new TreeSet<String>()
-        classpath.incoming.resolutionResult.allComponents.each { component ->
+        def seen = new HashSet<ComponentIdentifier>()
+        def toVisit = new ArrayDeque<ResolvedComponentResult>([root.get()])
+        while (!toVisit.isEmpty()) {
+            def component = toVisit.poll()
+            if (!seen.add(component.id)) {
+                continue
+            }
             def id = component.id
             if (id instanceof ModuleComponentIdentifier) {
                 libraries << "${id.group}:${id.module}:${id.version}".toString()
+            }
+            component.dependencies.each { dependency ->
+                if (dependency instanceof ResolvedDependencyResult) {
+                    toVisit << dependency.selected
+                }
             }
         }
         out.get().asFile.parentFile.mkdirs()

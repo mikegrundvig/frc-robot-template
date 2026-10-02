@@ -24,9 +24,68 @@ misspelled name can't pass unnoticed. A project's name in front (`:world:test`) 
 tests.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
-analysis and coverage report that `ci` runs. Each project has its own coverage report, the robot
+analysis and coverage that `ci` runs. Each project has its own coverage report, the robot
 program's at `build/reports/jacoco/test/html/index.html` and each library's under its folder
 (`lib/world/build/reports/...`), and each its own floor: a library's own tests must cover it.
+
+### The fast loop
+
+While you work on something, leave one command running in a terminal, naming the tests that
+cover it:
+
+```
+./gradlew test -Pquick --continuous --tests '*Arm*'
+```
+
+(In the Windows Command Prompt: `gradlew test -Pquick --continuous --tests *Arm*`, without the
+`./` or the quotes.)
+
+Every save reruns them, in a second or two, because Gradle stays running between saves. What keeps
+it quick:
+
+- **`--tests`** runs only what you name. Without it, quick mode runs every fast test in every
+  project.
+- **`-Pquick`** leaves out what only `ci` needs: Error Prone and NullAway, formatting, JaCoCo's
+  coverage agent and report, the simulation and end-to-end tests unless `--tests` names one, and
+  the build's time in `BuildConstants`. Without the time, a program that hasn't changed compiles
+  to the same classes, and Gradle skips tests whose inputs haven't changed. So a change to a
+  comment reruns no test, as long as it adds or removes no line (the classes record each line's
+  number) and the repository already had uncommitted changes (the first change after a commit
+  turns `BuildConstants.DIRTY` from 0 to 1, which the tests see).
+- **Gradle's caches** (`gradle.properties`): the configuration cache skips configuring the
+  projects after the first build, and the build cache hands a task the outputs of an earlier run
+  with the same inputs, such as after undoing an edit.
+
+From saving a file to the result, measured on a 16-core Linux desktop while other builds were
+running on it, so a quiet computer may do better and a laptop worse:
+
+| You save | What runs | Save to result |
+|---|---|---|
+| A word in a comment, in a robot class, its lines unmoved, with uncommitted changes already | The robot program's compile; no test, since its classes come out the same | 1.5 s |
+| Code in a robot class | The compile, then the tests | 1.8 s |
+| Code in a library (`lib/world`) | The library's compile, then the tests; the robot program compiles again only when the library's public API changed | 1.1 s |
+| Anything, with a one-off `./gradlew test -Pquick --tests ...` instead | Gradle starting and finding its cached configuration, then the above | about 7 s |
+
+About 0.9 s of a robot edit is compiling the whole robot program again. Gradle compiles only the
+classes an edit affects unless an annotation processor can't say what it generates from what, and
+three on the robot program's path can't: AdvantageKit's `@AutoLog` processor, and the processors
+for WPILib's Epilogue and avaje-jsonb that GradleRIO adds. At under a second, it's left as it is.
+
+`ci` takes four to five minutes on the same computer, most of it the robot program's simulation
+tests: `EstimatorConsistencySimTest` (80 to 105 s) and `VisionSimTest` (40 to 50 s), more as other
+builds share it. Run it before pushing, not on every save.
+
+### Memory
+
+Each project's tests run in a Java process (a JVM) of their own, with up to 1.5 GB of heap. The
+robot program's simulation tests use more outside the heap (PhotonVision's camera simulation,
+WPILib's native libraries), so its tests start a fresh JVM every 20 test classes, which keeps one
+near 3 GB where a single JVM running them all reached 5 to 6.5 GB. Projects build in parallel, and
+at most two test JVMs run at once, the robot program's and another project's. On a computer with 8
+GB, make it one: put `testJvms=1` in the `gradle.properties` of your Gradle user home (`~/.gradle/`
+on macOS and Linux, `%USERPROFILE%\.gradle\` on Windows), or pass `-PtestJvms=1` to one build. The
+limit doesn't count build-logic's plugin tests, which `ci` runs with Gradle TestKit (a Gradle of
+their own), or the robot programs `ReplayEndToEndTest` starts, one at a time, beside its test JVM.
 
 ## Where a test goes
 
@@ -134,9 +193,9 @@ What it offers:
 - **Tests run in `build/test-work`.** What simulated devices write (CTRE's `ctre_sim/`, for one)
   stays out of the project. To read a project file, start from the `frc.projectDir` system
   property, as `DashboardLayoutTest` does, and declare the file an input of the test task in
-  `build.gradle`, so Gradle knows the tests depend on it. Today the tests run on every build
-  anyway (the build's time is compiled in), but if that changes, Gradle would call them up to
-  date after a change to an undeclared file, and skip them.
+  `build.gradle`, so Gradle knows the tests depend on it. A quick build (`-Pquick`) skips tests
+  whose inputs haven't changed, so after a change to an undeclared file it would call them up to
+  date, and skip them.
 - **Coverage has a floor.** The build fails below the floors in each project's
   `coverage-floor.properties`. They catch code with no tests at all; they are not a target to
   chase.
@@ -579,7 +638,7 @@ and then seeing again), and the estimate recovers in each. What's known not to h
 ### Keeping it honest
 
 `EstimatorConsistencySimTest` runs four of the runs (driving, standing, turning, the gyro-scale
-procedure), six matched seeds each, on every build, about 75 s. Each must land where six honest
+procedure), six matched seeds each, on every build, about 80 s. Each must land where six honest
 seeds do 999 times in 1000: its mean position NEES between 0.30 and 5.8 and its heading NEES
 between 0.04 and 4.1, its share of loops outside the ellipse and past 3.72 σ within what six seeds
 allow (4%), and its mean error under 2.5 to 3.5 cm. Six seeds can't pin a NEES down closely, so the

@@ -441,11 +441,13 @@ public final class Vision implements AutoCloseable {
     }
     Pose2d then = localization.poseAt(frame.timestampNanos()).orElse(null);
     CaptureContext capture = localization.capture(frame.timestampNanos());
-    VisionPipeline.Trust trust = new VisionPipeline.Trust(camera.mountDoubtMeters(), onlyTags());
+    TagAllowlist trusted = onlyTags();
     // A camera being calibrated, or autonomous just started: solved and logged, never applied.
     boolean withheld = camera == calibrating || frame.timestampNanos() < holdUntilNanos;
     VisionResult result =
-        withheld ? localization.solve(detections, trust) : localization.camera(detections, trust);
+        withheld
+            ? localization.solve(detections, trusted)
+            : localization.camera(detections, trusted);
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.leftOut(seen, result.outcome());

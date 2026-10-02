@@ -46,6 +46,10 @@ import org.wpilib.math.util.MathUtil;
  *
  * <p>Independent of the drivetrain: its wheels come in as {@link OdometrySample}s, through its
  * {@link DriveKinematicsModel}, so swerve, tank, or any other localizes the same way.
+ *
+ * <p>Each image is solved against the field's tags through one {@link VisionPipeline}, and with its
+ * camera's mount from the robot's definition, looked up by name in {@link #solve}: the two places a
+ * venue's surveyed tags and a camera that rides a joint would change what an image is solved with.
  */
 public final class LocalizationService {
   /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
@@ -302,9 +306,9 @@ public final class LocalizationService {
 
   /**
    * How far a camera's mount may have moved since it was calibrated ({@link MountCheck}), as of
-   * now: its images are widened by it, and with {@link
+   * now: its images from now on are widened by it, and with {@link
    * EstimatorConfig.HeadingCorrection#HEADING_MEASUREMENTS_AND_MOUNT_DOUBT} the estimator takes it
-   * as part of the camera's repeated errors.
+   * as part of the camera's repeated errors. Before the cameras' images, each loop.
    *
    * @param doubtMeters how far its measurements may be off from where its mount moved
    * @param distanceMeters how far its tags were, on average, when that was judged; NaN until then
@@ -314,25 +318,22 @@ public final class LocalizationService {
     mountDoubts.put(camera, new double[] {doubtMeters, distanceMeters});
   }
 
-  /**
-   * One camera image, trusting it as its configuration says, and every tag: see {@link
-   * #camera(TagDetections, VisionPipeline.Trust)}.
-   */
+  /** One camera image, from every tag it saw: see {@link #camera(TagDetections, TagAllowlist)}. */
   public VisionResult camera(TagDetections frame) {
-    return camera(frame, VisionPipeline.Trust.FULL);
+    return camera(frame, null);
   }
 
   /**
    * One camera image, stamped when it was taken: solved as the robot was then ({@link #capture}),
-   * and its measurement, if it makes one, applied at that moment on the next {@link #update}.
+   * widened by its camera's mount's doubt ({@link #mountDoubt}), and its measurement, if it makes
+   * one, applied at that moment on the next {@link #update}.
    *
-   * @param trust how far to trust it beyond its camera's configuration: its mount's doubt, and the
-   *     tags the current task trusts
+   * @param onlyTags the tags the current task trusts ({@link TagAllowlist}); null for every tag
    * @return what the image made: a measurement, or why not
    * @throws IllegalArgumentException if the robot's definition has no camera by the frame's name
    */
-  public VisionResult camera(TagDetections frame, VisionPipeline.Trust trust) {
-    VisionResult result = solve(frame, trust);
+  public VisionResult camera(TagDetections frame, @Nullable TagAllowlist onlyTags) {
+    VisionResult result = solve(frame, onlyTags);
     VisionMeasurement measurement = result.measurement();
     if (measurement != null) {
       camera(measurement);
@@ -341,17 +342,23 @@ public final class LocalizationService {
   }
 
   /**
-   * What {@link #camera(TagDetections, VisionPipeline.Trust)} would make of an image, without
-   * applying it: for an image the robot holds back (from a camera being calibrated, or while
-   * autonomous starts), whose outcome is still logged.
+   * What {@link #camera(TagDetections, TagAllowlist)} would make of an image, without applying it:
+   * for an image the robot holds back (from a camera being calibrated, or while autonomous starts),
+   * whose outcome is still logged.
    */
-  public VisionResult solve(TagDetections frame, VisionPipeline.Trust trust) {
+  public VisionResult solve(TagDetections frame, @Nullable TagAllowlist onlyTags) {
     CameraConfig camera = cameras.get(frame.camera());
     if (camera == null) {
       throw new IllegalArgumentException(
           "the robot's definition has no camera named " + frame.camera());
     }
-    return pipeline.process(frame, camera, capture(frame.timestampNanos()), vision, trust);
+    double[] doubt = mountDoubts.get(frame.camera());
+    return pipeline.process(
+        frame,
+        camera,
+        capture(frame.timestampNanos()),
+        vision,
+        new VisionPipeline.Trust(doubt == null ? 0 : doubt[0], onlyTags));
   }
 
   /**

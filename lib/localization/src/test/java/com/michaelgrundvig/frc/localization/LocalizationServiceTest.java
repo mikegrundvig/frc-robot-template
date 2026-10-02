@@ -241,7 +241,7 @@ class LocalizationServiceTest {
         loop(
             localization,
             now + LOOP_NANOS,
-            () -> result[0] = localization.solve(hubFace(now), VisionPipeline.Trust.FULL));
+            () -> result[0] = localization.solve(hubFace(now), null));
 
     assertThat(result[0].measurement()).isNotNull();
     assertThat(output.frames()).isEmpty();

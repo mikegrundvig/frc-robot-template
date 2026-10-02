@@ -36,9 +36,11 @@ for a debugger before it starts, and takes one from any device on the robot's ne
 debugger attaches, the robot does nothing, and after a brownout or a power cycle it waits again.
 When you're done, deploy again without `-PdebugMode`, and never take a debug deploy onto the field.
 
-Gradle's configuration cache is off until GradleRIO supports it. Turn it on for yourself with
-`--configuration-cache` (`./gradlew ci --configuration-cache`), for anything but GradleRIO's own
-tasks (`run`, `deploy`, `vendordep`), which fail with it.
+Gradle's configuration cache and its build cache are on for every build (`gradle.properties`). A
+build that runs one of GradleRIO's own tasks (`run`, `deploy`, `vendordep`, WPILib's tools) goes
+without the configuration cache, which they don't support yet, and says so in a line:
+*Configuration cache disabled because incompatible task was found.* That's expected; the build is
+otherwise as it always was.
 
 ## IntelliJ IDEA
 

@@ -163,6 +163,33 @@ tasks.named("compileJava") {
     options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
 }
 
+// Gradle's configuration cache (gradle.properties) can't hold GradleRIO's own tasks yet: the
+// simulator's run, deploy, vendordep, and WPILib's tools. A build that runs one goes without it, as
+// every build used to, and says so in a line. Gradle offers that only internally
+// (ConfigurationCacheDegradation); where it's gone, the build marks the tasks incompatible instead,
+// which works too but lists every problem the cache found in them.
+def withoutConfigurationCache = { Task task, String why ->
+    try {
+        Class.forName("org.gradle.api.internal.ConfigurationCacheDegradation").methods
+                .find { it.name == "requireDegradation" && it.parameterTypes[1] == String }
+                .invoke(null, task, why)
+    } catch (ReflectiveOperationException | NullPointerException ignored) {
+        task.notCompatibleWithConfigurationCache(why)
+    }
+}
+// GradleRIO's tasks that building and testing use work with it. Deploy's first step, which asks
+// the coprocessors, goes without it as deploy does: it reads the team number GradleRIO stores.
+def cacheable = [
+    "extractReleaseNative",
+    "extractDebugNative",
+    "downloadDepsPreemptively"
+]
+tasks.configureEach { task ->
+    if (task.name in ["run", "coprocessorCheck"] || (task.class.name.startsWith("org.wpilib.") && !(task.name in cacheable))) {
+        withoutConfigurationCache(task, "GradleRIO's state can't be kept in the configuration cache")
+    }
+}
+
 // Nothing reaches a robot without a team number, or without passing every check.
 gradle.taskGraph.whenReady { graph ->
     if (graph.allTasks.any { it.name.startsWith("deploy") }) {

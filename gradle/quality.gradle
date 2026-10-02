@@ -45,9 +45,10 @@ tasks.withType(JavaCompile).configureEach {
     }
 }
 
-// Tests produce a coverage report (JaCoCo), except in quick mode. None may run past two minutes
-// (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test fails
-// instead of hanging the build.
+// Tests produce a coverage report (JaCoCo), except in quick mode, which runs them without JaCoCo's
+// agent (it instruments every class as it loads) and checks no coverage. None may run past two
+// minutes (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test
+// fails instead of hanging the build.
 //
 // Each project's tests may use up to 1.5 GB of memory, on every computer. Left to itself, Java
 // takes up to a quarter of the computer's memory, so a runaway test could take 2 GB on one laptop
@@ -63,6 +64,7 @@ tasks.named("test") {
             excludeTags "simulation", "end-to-end"
         }
     }
+    extensions.getByType(JacocoTaskExtension).enabled = !quick
     if (!quick) {
         finalizedBy "jacocoTestReport"
     }
@@ -109,6 +111,7 @@ jacoco {
 }
 tasks.named("jacocoTestReport") {
     dependsOn "test"
+    onlyIf("-Pquick measures no coverage") { !quick }
     reports {
         xml.required = true
         html.required = true
@@ -130,6 +133,7 @@ def coverageCheck = tasks.register("coverageCheck") {
     group = "verification"
     description = "Fail if test coverage drops below coverage-floor.properties."
     dependsOn "jacocoTestReport"
+    onlyIf("-Pquick measures no coverage") { !quick }
     def report = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
     def floorFile = file("coverage-floor.properties")
     inputs.file(floorFile)

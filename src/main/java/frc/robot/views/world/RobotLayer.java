@@ -1,10 +1,8 @@
 package frc.robot.views.world;
 
-import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Radians;
 
-import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
 import com.michaelgrundvig.frc.pitwall.scene.SceneState;
@@ -13,20 +11,21 @@ import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
 import frc.robot.lib.config.SwerveConfig;
 import frc.robot.lib.field.FieldModel;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
 
 /**
  * The robot where localization believes it is, as its configuration describes it: its frame and
  * bumpers with an arrow out the front; each wheel at its module, turned to its measured angle, with
  * an arrow where it's driving; each camera at its exact mount, an arrow along its optical axis and
- * a wedge out as far as it reads tags. A click on a camera says how it's mounted, and offers its
- * calibration.
+ * the first meter of its view, named off the robot. A click on a camera says how it's mounted,
+ * offers its calibration, and shows its full view ({@link CameraViews}) until the details close.
  */
 final class RobotLayer implements Layer {
   /** The robot's frame on the page: the frame the page's Follow follows. */
@@ -43,6 +42,21 @@ final class RobotLayer implements Layer {
 
   /** The arrow along a camera's optical axis. */
   private static final double CAMERA_ARROW = 0.3;
+
+  /**
+   * How far a camera's view is always drawn: past the bumpers, to show where it points and how wide
+   * it sees, and far short of the 7 m that covered the field four times over.
+   */
+  static final double VIEW_STUB_METERS = 1.0;
+
+  /** How far a camera's name stays clear of the bumpers. */
+  private static final double LABEL_CLEARANCE = 0.15;
+
+  /** How far apart two cameras' names stay, center to center. */
+  private static final double LABEL_SPACING = 0.35;
+
+  /** How far above its camera a camera's name is drawn. */
+  private static final double LABEL_RISE = 0.1;
 
   /**
    * How far the estimate must move before the page hears of it: a still robot's estimate wanders a
@@ -153,22 +167,66 @@ final class RobotLayer implements Layer {
           .length(moduleSpeeds[i])
           .style(Style.ACCENT);
     }
-    for (CameraConfig camera : cameras) {
+    List<Translation3d> labels = labelPlaces(cameras, body);
+    for (int i = 0; i < cameras.size(); i++) {
+      CameraConfig camera = cameras.get(i);
       String frame = WorldView.cameraFrame(camera.id());
+      String fullView = CameraViews.view(camera);
       scene.frame(frame, FRAME, camera.robotToCamera());
       scene
           .arrow(frame + ".axis", frame)
           .to(CAMERA_ARROW, 0, 0)
           .style(Style.ACCENT)
-          .inspect(() -> camera(camera));
+          .inspect(() -> WorldView.camera(camera, sightRange, cameraAction))
+          .reveal(fullView);
       double[] fov = fieldOfView(camera.sensor());
       scene
-          .frustum(frame + ".view", frame)
+          .frustum(frame + ".stub", frame)
           .fov(fov[0], fov[1])
-          .range(0, sightRange)
-          .inspect(() -> camera(camera));
-      scene.label(frame + ".name", frame).text(camera.name()).at(0, 0, 0.1);
+          .range(0, VIEW_STUB_METERS)
+          .inspect(() -> WorldView.camera(camera, sightRange, cameraAction))
+          .reveal(fullView);
+      Translation3d label = labels.get(i);
+      scene
+          .label(frame + ".name", FRAME)
+          .text(camera.name())
+          .at(label.getX(), label.getY(), label.getZ());
     }
+  }
+
+  /**
+   * Where each camera's name is drawn, in the robot's frame: where its view's stub ends, seen from
+   * above, then on along the way it faces while that's on the robot or on a name placed before, so
+   * the names stay off the robot and off each other.
+   */
+  static List<Translation3d> labelPlaces(List<CameraConfig> cameras, Body body) {
+    double halfLength = body.bumperLength().in(Meters) / 2 + LABEL_CLEARANCE;
+    double halfWidth = body.bumperWidth().in(Meters) / 2 + LABEL_CLEARANCE;
+    List<Translation3d> places = new ArrayList<>();
+    for (CameraConfig camera : cameras) {
+      double facing = camera.yaw().in(Radians);
+      double x = camera.forward().in(Meters);
+      double y = camera.left().in(Meters);
+      double out = VIEW_STUB_METERS;
+      for (int step = 0; step < 100; step++, out += 0.1) {
+        double atX = x + out * Math.cos(facing);
+        double atY = y + out * Math.sin(facing);
+        boolean onRobot = Math.abs(atX) < halfLength && Math.abs(atY) < halfWidth;
+        boolean onAnother =
+            places.stream()
+                .anyMatch(
+                    place -> Math.hypot(place.getX() - atX, place.getY() - atY) < LABEL_SPACING);
+        if (!onRobot && !onAnother) {
+          break;
+        }
+      }
+      places.add(
+          new Translation3d(
+              x + out * Math.cos(facing),
+              y + out * Math.sin(facing),
+              camera.up().in(Meters) + LABEL_RISE));
+    }
+    return places;
   }
 
   @Override
@@ -201,39 +259,5 @@ final class RobotLayer implements Layer {
     double diagonal = Math.hypot(width, height);
     double focal = diagonal / 2 / Math.tan(sensor.diagonalFieldOfView().in(Radians) / 2);
     return new double[] {2 * Math.atan(width / 2 / focal), 2 * Math.atan(height / 2 / focal)};
-  }
-
-  /** What a click on a camera says: where it's mounted, what it sees, and its calibration. */
-  private Inspection camera(CameraConfig camera) {
-    Inspection said =
-        Inspection.of("Camera " + camera.name())
-            .detail(
-                "Mounted",
-                String.format(
-                    Locale.ROOT,
-                    "%.3f m forward, %.3f m left, %.3f m up",
-                    camera.forward().in(Meters),
-                    camera.left().in(Meters),
-                    camera.up().in(Meters)))
-            .detail(
-                "Turned",
-                String.format(
-                    Locale.ROOT,
-                    "yaw %.1f°, tilted up %.1f°, roll %.1f°",
-                    camera.yaw().in(Degrees),
-                    camera.tiltUp().in(Degrees),
-                    camera.roll().in(Degrees)))
-            .detail(
-                "Sees",
-                String.format(
-                    Locale.ROOT,
-                    "%.0f° across its diagonal, %d × %d, out to %.0f m",
-                    camera.sensor().diagonalFieldOfView().in(Degrees),
-                    camera.sensor().widthPixels(),
-                    camera.sensor().heightPixels(),
-                    sightRange))
-            .detail("From", "the robot's configuration, in Robots.java");
-    Optional<String> calibrate = cameraAction.apply(camera.name());
-    return calibrate.isPresent() ? said.action(calibrate.get()) : said;
   }
 }

@@ -1,5 +1,9 @@
 package frc.robot.views.world;
 
+import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Meters;
+
+import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Scene;
 import frc.robot.lib.config.Body;
 import frc.robot.lib.config.CameraConfig;
@@ -20,8 +24,9 @@ import org.wpilib.math.kinematics.SwerveModuleVelocity;
  * The robot's world on Pitwall's World view: the field it plays on, the robot where localization
  * believes it is, its wheels and cameras as configured, how sure the estimate is, and each camera's
  * sight lines to the tags it saw, solid where the estimator accepted the measurement and dashed
- * where it refused it. A click on a sight line says why; a click on a camera says how it's mounted.
- * In the simulator, the simulator's truth stands beside the estimate as a dashed ghost.
+ * where it refused it. A click on a sight line says why; a click on a camera says how it's mounted,
+ * and shows its full view, which the "Camera views" layer shows for every camera. In the simulator,
+ * the simulator's truth stands beside the estimate as a dashed ghost.
  *
  * <p>It draws the code's own beliefs, not a log: a camera's wedge pointing the wrong way is a typo
  * in {@code Robots.java}, found at a glance. Pitwall draws it; this only says what's there.
@@ -88,6 +93,7 @@ public final class WorldView {
             .layer(
                 new RobotLayer(
                     field, body, drivetrain, cameras, sightRangeMeters, readings, cameraAction))
+            .layer(new CameraViews(cameras, sightRangeMeters, cameraAction), Scene.Visibility.OFF)
             .layer(new Uncertainty(readings))
             .layer(new SightLines(field, cameras, readings, cameraAction));
     if (truth != null) {
@@ -99,6 +105,44 @@ public final class WorldView {
   /** A camera's frame on the page, by its id ({@link CameraConfig#id()}). */
   static String cameraFrame(String cameraId) {
     return "camera." + cameraId;
+  }
+
+  /**
+   * What a click on a camera, or its view, says: where it's mounted, what it sees, and its
+   * calibration.
+   */
+  static Inspection camera(
+      CameraConfig camera, double sightRange, Function<String, Optional<String>> cameraAction) {
+    Inspection said =
+        Inspection.of("Camera " + camera.name())
+            .detail(
+                "Mounted",
+                String.format(
+                    Locale.ROOT,
+                    "%.3f m forward, %.3f m left, %.3f m up",
+                    camera.forward().in(Meters),
+                    camera.left().in(Meters),
+                    camera.up().in(Meters)))
+            .detail(
+                "Turned",
+                String.format(
+                    Locale.ROOT,
+                    "yaw %.1f°, tilted up %.1f°, roll %.1f°",
+                    camera.yaw().in(Degrees),
+                    camera.tiltUp().in(Degrees),
+                    camera.roll().in(Degrees)))
+            .detail(
+                "Sees",
+                String.format(
+                    Locale.ROOT,
+                    "%.0f° across its diagonal, %d × %d, out to %.0f m",
+                    camera.sensor().diagonalFieldOfView().in(Degrees),
+                    camera.sensor().widthPixels(),
+                    camera.sensor().heightPixels(),
+                    sightRange))
+            .detail("From", "the robot's configuration, in Robots.java");
+    Optional<String> calibrate = cameraAction.apply(camera.name());
+    return calibrate.isPresent() ? said.action(calibrate.get()) : said;
   }
 
   /** A tag's frame on the page. */

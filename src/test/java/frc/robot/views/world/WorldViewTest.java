@@ -1,6 +1,8 @@
 package frc.robot.views.world;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.pitwall.push.Feed;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
@@ -8,6 +10,8 @@ import com.michaelgrundvig.frc.pitwall.scene.Scenes;
 import frc.robot.RobotConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
+import frc.robot.lib.config.CameraConfig;
+import frc.robot.lib.config.CameraConfigBuilder;
 import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.localization.PoseCovariance;
 import frc.robot.lib.localization.VisionDecision;
@@ -23,6 +27,7 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
 
 /**
@@ -119,6 +124,11 @@ class WorldViewTest {
         .contains("\"walls\"", "\"bump.0\"", "\"tag.7\":{\"parent\":\"field\",\"pose\":")
         .contains("\"id\":\"tag.7.id\"", "\"text\":\"7\"")
         .contains("\"camera.front-left\":{\"parent\":\"robot\",\"pose\":")
+        .contains(
+            "\"id\":\"camera.front-left.stub\",\"kind\":\"frustum\",\"frame\":\"camera.front-left\","
+                + "\"style\":\"muted\",\"inspect\":true,\"reveals\":[\"camera.front-left.view\"]")
+        .contains("\"range\":[0,1]")
+        .contains("\"camera-views\":{\"title\":\"Camera views\",\"shown\":false")
         .contains("\"camera.front-left.view\"", "\"range\":[0,7]")
         .contains("\"wheel.back-right\"", "\"length\":\"speed.back-right\"")
         .contains("\"radii\":[\"uncertainty.major\",\"uncertainty.minor\"]")
@@ -214,6 +224,30 @@ class WorldViewTest {
 
     estimate = estimate(estimate.pose(), LocalizationEstimate.Mode.LOST);
     assertThat(loop(feed)).contains("\"styles\":{\"uncertainty.ellipse\":\"bad dashed\"}");
+  }
+
+  @Test
+  void camerasAreNamedOffTheRobotAndOffEachOther() {
+    double halfLength = ROBOT.body().bumperLength().in(Meters) / 2;
+    double halfWidth = ROBOT.body().bumperWidth().in(Meters) / 2;
+    // The template's four, and two more facing the same way from one place.
+    List<CameraConfig> cameras = new ArrayList<>(ROBOT.cameras());
+    CameraConfig back = ROBOT.cameras().getLast();
+    cameras.add(CameraConfigBuilder.builder(back).name("back-2").build());
+    cameras.add(CameraConfigBuilder.builder(back).name("back-3").yaw(Degrees.of(90)).build());
+    List<Translation3d> places = RobotLayer.labelPlaces(cameras, ROBOT.body());
+
+    for (int i = 0; i < places.size(); i++) {
+      Translation3d place = places.get(i);
+      assertThat(Math.abs(place.getX()) > halfLength || Math.abs(place.getY()) > halfWidth)
+          .as(cameras.get(i).name() + " off the robot, at " + place)
+          .isTrue();
+      for (int j = 0; j < i; j++) {
+        assertThat(place.toTranslation2d().getDistance(places.get(j).toTranslation2d()))
+            .as(cameras.get(i).name() + " apart from " + cameras.get(j).name())
+            .isGreaterThan(0.3);
+      }
+    }
   }
 
   @Test

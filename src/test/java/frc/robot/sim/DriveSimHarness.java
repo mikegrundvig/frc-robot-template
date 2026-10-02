@@ -6,7 +6,10 @@ import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.PoseEstimator;
 import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.TagAllowlist;
+import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.localization.VisionResult;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotConfig;
@@ -47,7 +50,12 @@ public final class DriveSimHarness implements AutoCloseable {
   /** Every camera measurement's fate, in order. */
   public final List<FrameVerdict> frames = new ArrayList<>();
 
+  /** What localization made of each image the tag cameras sent, at once, in order. */
+  public final List<VisionResult> images = new ArrayList<>();
+
   private @Nullable FakeCamera camera;
+  private List<FakeTagCamera> tagCameras = List.of();
+  private @Nullable TagAllowlist onlyTags;
   private @Nullable Runnable eachLoop;
 
   /**
@@ -123,9 +131,23 @@ public final class DriveSimHarness implements AutoCloseable {
     this.camera = camera;
   }
 
+  /**
+   * From now on, these cameras' raw images reach localization every loop, solved there as the robot
+   * was when each was taken.
+   */
+  public void watchWith(List<FakeTagCamera> cameras) {
+    tagCameras = List.copyOf(cameras);
+  }
+
+  /** From now on, the tag cameras' images are solved from these tags alone; null for every tag. */
+  public void trustOnly(@Nullable TagAllowlist tags) {
+    onlyTags = tags;
+  }
+
   /** From now on, no camera's results reach the estimator: blinded, until watching again. */
   public void stopWatching() {
     camera = null;
+    tagCameras = List.of();
   }
 
   /** Something to do at the end of every loop, such as feeding another estimator to compare. */
@@ -148,6 +170,11 @@ public final class DriveSimHarness implements AutoCloseable {
     if (watching != null) {
       for (VisionMeasurement measurement : watching.poll(now)) {
         service.camera(measurement);
+      }
+    }
+    for (FakeTagCamera tagCamera : tagCameras) {
+      for (TagDetections image : tagCamera.poll(now)) {
+        images.add(service.camera(image, onlyTags));
       }
     }
     frames.addAll(localization.update().frames());

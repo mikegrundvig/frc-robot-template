@@ -6,6 +6,7 @@ import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.Verdict;
 import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.pitwall.push.Feed;
@@ -172,7 +173,7 @@ class WorldViewTest {
             "front-left",
             List.of(7),
             VisionMeasurement.Solver.SINGLE_TAG);
-    decisions = List.of(new VisionDecision(measurement, false, "gate: 45.2 > 13.8", 0.8, 45.2));
+    decisions = List.of(new VisionDecision(measurement, Verdict.GATED, 0.8, 45.2, 13.8));
     String patch = loop(feed);
 
     assertThat(patch)
@@ -191,7 +192,7 @@ class WorldViewTest {
     assertThat(said.actions()).containsExactly("Calibrate front-left");
 
     // A good camera's innovation is millimeters, its χ² hundredths: shown, not rounded to nothing.
-    decisions = List.of(new VisionDecision(measurement, true, "accepted", 0.0058, 0.0189));
+    decisions = List.of(new VisionDecision(measurement, Verdict.ACCEPTED, 0.0058, 0.0189, 13.8));
     loop(feed);
     assertThat(scenes.inspect(WorldView.ID, "ray.front-left.7.ok").orElseThrow().details())
         .extracting(Inspection.Detail::value)

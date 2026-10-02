@@ -36,7 +36,7 @@ import org.wpilib.math.geometry.Translation2d;
  * off the same way every time: {@link MountCheck}) adds that doubt, as independent errors add. A
  * result may correct heading only from a multi-tag solution of several tags, with the robot barely
  * turning and the solution fitting well; otherwise the gyro keeps heading to itself. Everything
- * thrown out says why, for the log.
+ * thrown out says why, as a {@link Verdict}.
  *
  * <p>A task may trust only some tags ({@link TagAllowlist}): the image is solved from those alone,
  * and the vision software's multi-tag solution only if it used no others.
@@ -103,8 +103,13 @@ public final class VisionPipeline {
     }
     TagDetections trusted = trusted(seen, onlyTags);
     if (trusted.tags().isEmpty() && !seen.tags().isEmpty()) {
-      return rejected(
-          seen, "no tags this task trusts (" + onlyTags.describe() + ")", Double.NaN, Double.NaN);
+      return new VisionResult(
+          seen,
+          null,
+          Verdict.UNTRUSTED_TAGS,
+          Verdict.UNTRUSTED_TAGS.words() + " (" + onlyTags.describe() + ")",
+          Double.NaN,
+          Double.NaN);
     }
     return solve(new Image(trusted, camera, robot, config, trust.mountDoubtMeters()));
   }
@@ -135,21 +140,25 @@ public final class VisionPipeline {
       }
     }
     if (known.isEmpty()) {
-      return rejected(seen, "no tags from this field's layout", Double.NaN, Double.NaN);
+      return rejected(seen, Verdict.UNKNOWN_TAGS, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
     }
     distance /= known.size();
     if (!Double.isFinite(distance)) {
-      return rejected(seen, "a tag's pose from the camera isn't a number", Double.NaN, Double.NaN);
+      return rejected(
+          seen, Verdict.TAG_NOT_A_NUMBER, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
     }
     if (robot.recentYawRateRadiansPerSecond() > config.maxYawRateRadiansPerSecond()) {
       return rejected(
           seen,
-          format("turning too fast: %.1f rad/s", robot.recentYawRateRadiansPerSecond()),
+          Verdict.TURNING,
+          robot.recentYawRateRadiansPerSecond(),
+          config.maxYawRateRadiansPerSecond(),
           distance,
           Double.NaN);
     }
     if (distance > config.maxDistanceMeters()) {
-      return rejected(seen, format("too far: %.1f m", distance), distance, Double.NaN);
+      return rejected(
+          seen, Verdict.TOO_FAR, distance, config.maxDistanceMeters(), distance, Double.NaN);
     }
     Rotation2d heading = robot.heading();
     if (heading != null && robot.headingStdDevRadians() <= config.maxHeadingStdDevToConstrain()) {
@@ -174,7 +183,9 @@ public final class VisionPipeline {
     if (clearest.ambiguity() > config.maxAmbiguity()) {
       return rejected(
           seen,
-          format("ambiguous single tag: %.2f > %.2f", clearest.ambiguity(), config.maxAmbiguity()),
+          Verdict.AMBIGUOUS,
+          clearest.ambiguity(),
+          config.maxAmbiguity(),
           distance,
           Double.NaN);
     }
@@ -225,11 +236,17 @@ public final class VisionPipeline {
     }
     if (!(Math.abs(worstHeight) <= config.maxHeightErrorMeters())) {
       return rejected(
-          seen, format("a tag's height is off by %.2f m", worstHeight), distance, worstHeight);
+          seen,
+          Verdict.TAG_HEIGHT,
+          worstHeight,
+          config.maxHeightErrorMeters(),
+          distance,
+          worstHeight);
     }
     Translation2d position = new Translation2d(sumX / sumWeights, sumY / sumWeights);
     if (!Double.isFinite(position.getX()) || !Double.isFinite(position.getY())) {
-      return rejected(seen, "the solve isn't a number", distance, worstHeight);
+      return rejected(
+          seen, Verdict.SOLVE_NOT_A_NUMBER, Double.NaN, Double.NaN, distance, worstHeight);
     }
     double spread =
         widened(
@@ -274,6 +291,7 @@ public final class VisionPipeline {
     return new VisionResult(
         seen,
         measurement,
+        null,
         format(
             "heading-constrained: %d %s at %.1f m%s",
             known.size(),
@@ -321,11 +339,11 @@ public final class VisionPipeline {
     if (!Double.isFinite(pose.getX())
         || !Double.isFinite(pose.getY())
         || !Double.isFinite(pose.getRotation().getZ())) {
-      return rejected(seen, "the solve isn't a number", distance, height);
+      return rejected(seen, Verdict.SOLVE_NOT_A_NUMBER, Double.NaN, Double.NaN, distance, height);
     }
     if (!(Math.abs(height) <= config.maxHeightErrorMeters())) {
       return rejected(
-          seen, format("the solve puts the robot %.2f m off the floor", height), distance, height);
+          seen, Verdict.OFF_THE_FLOOR, height, config.maxHeightErrorMeters(), distance, height);
     }
     double scale = image.scale(used.size(), distance);
     double linear = widened(config.linearStdDevBaseline() * scale, image.mountDoubtMeters());
@@ -345,6 +363,7 @@ public final class VisionPipeline {
     return new VisionResult(
         seen,
         measurement,
+        null,
         format(
             "%s: %d %s at %.1f m",
             solver == VisionMeasurement.Solver.MULTI_TAG ? "multi-tag" : "single tag",
@@ -376,9 +395,18 @@ public final class VisionPipeline {
     return tags.stream().map(TagDetections.Tag::id).toList();
   }
 
+  /**
+   * An image thrown out, and why: the verdict, with its number and the limit it was held to in its
+   * words for the log.
+   */
   private static VisionResult rejected(
-      TagDetections seen, String why, double distance, double heightError) {
-    return new VisionResult(seen, null, why, distance, heightError);
+      TagDetections seen,
+      Verdict why,
+      double value,
+      double threshold,
+      double distance,
+      double heightError) {
+    return new VisionResult(seen, null, why, why.describe(value, threshold), distance, heightError);
   }
 
   private static String format(String pattern, Object... values) {

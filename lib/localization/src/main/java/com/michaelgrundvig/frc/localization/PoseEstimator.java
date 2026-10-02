@@ -5,7 +5,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -343,22 +342,23 @@ public final class PoseEstimator implements CameraLocalizer {
     landmarkDecisions.clear();
     List<VisionMeasurement> usable = new ArrayList<>();
     for (VisionMeasurement measurement : pending) {
-      String why = whyNotUsable(measurement);
+      Verdict why = whyNotUsable(measurement);
       if (why == null) {
         usable.add(measurement);
       } else {
         rejectedCount++;
-        decisions.add(new VisionDecision(measurement, false, why, Double.NaN, Double.NaN));
+        decisions.add(new VisionDecision(measurement, why, Double.NaN, Double.NaN, Double.NaN));
       }
     }
     pending.clear();
     List<LandmarkEvent> landmarks = new ArrayList<>();
     for (LandmarkEvent landmark : pendingLandmarks) {
-      String why = whyNotInHistory(landmark.timestampNanos());
+      Verdict why = whyNotInHistory(landmark.timestampNanos());
       if (why == null) {
         landmarks.add(landmark);
       } else {
-        landmarkDecisions.add(new LandmarkDecision(landmark, false, why, Double.NaN, Double.NaN));
+        landmarkDecisions.add(
+            new LandmarkDecision(landmark, why, Double.NaN, Double.NaN, Double.NaN));
       }
     }
     pendingLandmarks.clear();
@@ -510,30 +510,30 @@ public final class PoseEstimator implements CameraLocalizer {
     return LocalizationEstimate.Mode.DEAD_RECKONING;
   }
 
-  private @Nullable String whyNotUsable(VisionMeasurement measurement) {
-    String why = whyNotInHistory(measurement.timestampNanos());
+  private @Nullable Verdict whyNotUsable(VisionMeasurement measurement) {
+    Verdict why = whyNotInHistory(measurement.timestampNanos());
     if (why != null) {
       return why;
     }
     if (!onField.test(measurement.pose().getTranslation())) {
-      return "off the field";
+      return Verdict.OFF_FIELD;
     }
     return null;
   }
 
   /** Why a measurement at a time can't be applied: before the history, or after it. */
-  private @Nullable String whyNotInHistory(long t) {
+  private @Nullable Verdict whyNotInHistory(long t) {
     if (!started) {
-      return "before odometry started";
+      return Verdict.BEFORE_ODOMETRY;
     }
     if (t <= lastResetNanos) {
-      return "before the robot was last placed or recovered";
+      return Verdict.BEFORE_RESET;
     }
     if (t <= history.time(0)) {
-      return "too late: older than the history kept";
+      return Verdict.STALE;
     }
     if (t > history.newestTime() + futureToleranceNanos) {
-      return "from the future: after the newest odometry";
+      return Verdict.FROM_THE_FUTURE;
     }
     return null;
   }
@@ -646,12 +646,7 @@ public final class PoseEstimator implements CameraLocalizer {
               innovation.heading(),
               innovation.positionChiSquared() <= config.gateChiSquaredPosition()));
       decisions.add(
-          new VisionDecision(
-              measurement,
-              false,
-              String.format(Locale.ROOT, "gate: %.1f > %.1f", chiSquared, gate),
-              innovation.meters(),
-              chiSquared));
+          new VisionDecision(measurement, Verdict.GATED, innovation.meters(), chiSquared, gate));
       return false;
     }
     acceptedCount++;
@@ -661,7 +656,7 @@ public final class PoseEstimator implements CameraLocalizer {
     agreements.add(new Agreement(camera.time(), innovation.meters()));
     placed = true;
     decisions.add(
-        new VisionDecision(measurement, true, "accepted", innovation.meters(), chiSquared));
+        new VisionDecision(measurement, Verdict.ACCEPTED, innovation.meters(), chiSquared, gate));
     return true;
   }
 
@@ -678,17 +673,15 @@ public final class PoseEstimator implements CameraLocalizer {
     }
     if (fresh) {
       double chiSquared = innovation.chiSquared();
-      boolean passes = chiSquared <= config.gateChiSquaredAxis();
+      double gate = config.gateChiSquaredAxis();
+      boolean passes = chiSquared <= gate;
       landmarkDecisions.add(
           new LandmarkDecision(
               landmark,
-              passes,
-              passes
-                  ? "accepted"
-                  : String.format(
-                      Locale.ROOT, "gate: %.1f > %.1f", chiSquared, config.gateChiSquaredAxis()),
+              passes ? Verdict.ACCEPTED : Verdict.GATED,
               Math.abs(innovation.meters()),
-              chiSquared));
+              chiSquared,
+              gate));
       if (!passes) {
         return;
       }

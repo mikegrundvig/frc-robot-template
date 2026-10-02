@@ -27,9 +27,11 @@ import org.jspecify.annotations.Nullable;
  * as one {@code patch} event (a JSON merge patch, from {@link Delta}), and the run's new samples as
  * one {@code samples} event. Nothing changed, nothing sent. The state is built and compared at most
  * every {@link #COMPARE_NANOS} on the robot's clock (every loop for a broadcaster without one), as
- * a scene's moving parts are: no page shows more. A stream that has just opened gets a {@code
- * snapshot} first, compared that loop: the whole state as sent, the run's trace so far, and the
- * stream's own id; the patches after it apply to that.
+ * a scene's moving parts are: no page shows more. A loop that must be heard at once, such as the
+ * one that pauses the simulator's clock (after which no time passes to make a comparison due), asks
+ * for it with {@link #compareNow}. A stream that has just opened gets a {@code snapshot} first,
+ * compared that loop: the whole state as sent, the run's trace so far, and the stream's own id; the
+ * patches after it apply to that.
  *
  * <p>Some of the state goes only to the pages that show it: a {@link Feed}, such as a scene's
  * moving parts. A stream names the views its page shows, and gets each feed's changes in its
@@ -164,6 +166,15 @@ public final class Broadcaster implements AutoCloseable {
   /** How many streams are open. Safe from any thread. */
   public int size() {
     return streams.size() + waiting.size();
+  }
+
+  /**
+   * Compares the state at the next {@link #periodic}, however soon after the last comparison: for a
+   * loop every page must hear of, such as one run while the simulator's clock is paused, which
+   * stands still, so no comparison would come due. Call it from the robot loop.
+   */
+  public void compareNow() {
+    compareNanos = Long.MIN_VALUE;
   }
 
   /**

@@ -114,6 +114,44 @@ class BroadcasterTest {
     assertThat(drain(second)).hasSize(1).first().asString().contains("\"kP\":18.5");
   }
 
+  /**
+   * The loop that pauses the simulator's clock is the last before the clock stands still, so no
+   * comparison would come due after it: asked to, it's compared at once, however soon after the
+   * last, and so is each step after it.
+   */
+  @Test
+  void aLoopAskedToBeComparedNowIsHoweverSoonAfterTheLast() throws Exception {
+    AtomicLong clock = new AtomicLong();
+    Broadcaster timed = new Broadcaster(2, 1000, id -> {}, clock::get);
+    state.put("simulator", new LinkedHashMap<>(Map.of("paused", false)));
+    Stream stream = timed.open(null).orElseThrow();
+    timed.periodic(this::state, null);
+    drain(stream);
+    Map<String, Object> simulator = Objects.requireNonNull(state.get("simulator"));
+
+    // The loop after a comparison pauses the clock: not due on it, and never due after.
+    clock.addAndGet(Duration.ofMillis(20).toNanos());
+    simulator.put("paused", true);
+    timed.periodic(this::state, null);
+    assertThat(drain(stream)).as("not due, and not asked").isEmpty();
+
+    timed.compareNow();
+    timed.periodic(this::state, null);
+    assertThat(drain(stream))
+        .containsExactly("event: patch\ndata: {\"simulator\":{\"paused\":true}}\n\n");
+
+    // Each step moves the paused clock on one loop, and each is heard.
+    for (int step = 1; step <= 3; step++) {
+      clock.addAndGet(Duration.ofMillis(20).toNanos());
+      simulator.put("step", step);
+      timed.compareNow();
+      timed.periodic(this::state, null);
+      assertThat(drain(stream))
+          .as("step " + step)
+          .containsExactly("event: patch\ndata: {\"simulator\":{\"step\":" + step + "}}\n\n");
+    }
+  }
+
   @Test
   void aStreamThatOpensLaterStartsFromTheStateAsSent() throws Exception {
     Stream first = open();

@@ -360,6 +360,12 @@ public final class Pitwall implements AutoCloseable {
     changedSwitches.set(!switches.isEmpty());
     wasEnabled = enabled;
     wasFieldConnected = fieldConnected;
+    // While the simulator's clock is paused, every loop is compared: the one that paused it (its
+    // last patch tells every page) and each step. A paused clock stands still, so none would come
+    // due on it.
+    if (simulated != null && simulated.isPaused()) {
+      broadcaster.compareNow();
+    }
     // Last, so an open page hears of everything this loop changed. With none open, nothing.
     broadcaster.periodic(page::sections, experiments.run(), scenes.feeds());
   }

@@ -75,16 +75,19 @@ class EstimatorConsistencySimTest {
     assertThat(summary.meanErrorMeters()).as("mean error").isLessThan(meanErrorMeters);
   }
 
-  /** The route there and back: the cameras' shifts, and the field's tags, change as it goes. */
+  /**
+   * The route there and back: the cameras see other tags as it goes, each off the layout its own
+   * way, and the same ones again on the way back, off as they were.
+   */
   @Test
   void drivingTheUncertaintyCoversTheError() {
     assertHonest(play("driving"), 0.03);
   }
 
   /**
-   * Standing still for 20 s after the route: the same tags in every image, so what they share
-   * (their placement, the cameras' mounts) never averages out, and the estimate doesn't claim it
-   * does.
+   * Standing still for 20 s after the route: the same tags in every image, two cameras on each, so
+   * what they share (each tag's placement, and each camera's mount) never averages out, and the
+   * estimate doesn't claim it does.
    */
   @Test
   void standingStillTheUncertaintyCoversTheError() {

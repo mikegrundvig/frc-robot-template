@@ -15,6 +15,7 @@ import frc.robot.SimulationTest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.photonvision.PhotonCamera;
@@ -191,7 +192,8 @@ class CameraTruthSimTest {
       List<PhotonPipelineResult> results = run(config, robot, 0.5, VisionSim.Noise.NONE);
       for (PhotonPipelineResult result : results.subList(results.size() - 1, results.size())) {
         for (PhotonTrackedTarget target : result.getTargets()) {
-          seen.add(new Seen(config, tags.get(target.getFiducialId()), target));
+          seen.add(
+              new Seen(config, Objects.requireNonNull(tags.get(target.getFiducialId())), target));
         }
       }
     }

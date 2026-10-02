@@ -11,6 +11,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -47,14 +49,17 @@ class SimulatorControlsSimTest {
     DriverStationSim.notifyNewData();
 
     var answer =
-        send(
+        request(
             "PATCH",
             "/api/simulator",
             "{\"allianceStation\": \"RED_1\", \"mode\": \"UTILITY\", \"enabled\": true}");
+    // Loop by loop until the loop that applies it (the Driver Station's own data is enabled), not
+    // until the answer arrives: under load it can arrive a loop or more later.
+    loopUntil(DriverStationSim::getEnabled);
     boolean sameLoop = RobotState.isEnabled();
     sim.loop();
 
-    assertThat(answer.statusCode()).isEqualTo(200);
+    assertThat(answer.get(10, TimeUnit.SECONDS).statusCode()).isEqualTo(200);
     assertThat(sameLoop).as("not partway through the loop that applied it").isFalse();
     assertThat(RobotState.isEnabled()).isTrue();
     assertThat(RobotState.getRobotMode()).isEqualTo(RobotMode.UTILITY);
@@ -176,26 +181,39 @@ class SimulatorControlsSimTest {
    */
   private HttpResponse<String> send(String method, String path, @Nullable String json)
       throws Exception {
+    var answer = request(method, path, json);
+    loopUntil(answer::isDone);
+    return answer.get();
+  }
+
+  /** Sends the page's request, without running the loop that answers it. */
+  private CompletableFuture<HttpResponse<String>> request(
+      String method, String path, @Nullable String json) {
     var request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + sim.pitwall().port() + path));
     if (json != null) {
       request.header("Content-Type", JSON);
     }
     request.header("Pitwall-Stream", "1"); // as the page names its event stream
-    var answer =
-        client.sendAsync(
-            request
-                .method(
-                    method,
-                    json == null
-                        ? HttpRequest.BodyPublishers.noBody()
-                        : HttpRequest.BodyPublishers.ofString(json))
-                .build(),
-            HttpResponse.BodyHandlers.ofString());
+    return client.sendAsync(
+        request
+            .method(
+                method,
+                json == null
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofString(json))
+            .build(),
+        HttpResponse.BodyHandlers.ofString());
+  }
+
+  /**
+   * Runs the robot loop, a loop at a time, until {@code done}: what the network brings arrives in
+   * its own time, so it gives up after 10 s.
+   */
+  private void loopUntil(BooleanSupplier done) {
     long end = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-    while (!answer.isDone() && System.nanoTime() < end) {
+    while (!done.getAsBoolean() && System.nanoTime() < end) {
       sim.loop();
     }
-    return answer.get();
   }
 }

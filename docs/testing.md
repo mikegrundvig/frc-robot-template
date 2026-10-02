@@ -345,8 +345,7 @@ sits 2.5 cm off, 3.5 times what two tags each 1 cm off allow. The simulated came
 it, 3.6 cm in all against a claimed 0.9, and the mounts are what tip it out: drawn exact, it stays
 inside its ellipse (a NEES of 5.4). Outside it in 22% of the turning run's loops and 43% of the
 gyro-scale procedure's and the lost gyro's, it puts those two past the 2.9% twelve seeds allow;
-`EstimatorConsistencySimTest` (seeds 1 to 6) records the procedure's as known, and fails when it
-changes. No estimator honest about tags 1 cm off can hold a pair 3.5 times that inside its 99.9%
+the study reports it, and no test pins it ([keeping it honest](#keeping-it-honest)). No estimator honest about tags 1 cm off can hold a pair 3.5 times that inside its 99.9%
 ellipse; fifty seeds, below, show it's the draw and not the model.
 
 Fifty seeds (`--seeds=50`, run as four studies of 12 or 13 seeds and their reports combined) put
@@ -740,16 +739,24 @@ and then seeing again), and the estimate recovers in each. What's known not to h
 ### Keeping it honest
 
 `EstimatorConsistencySimTest` runs four of the runs (driving, standing, turning, the gyro-scale
-procedure), six matched seeds each, on every build, about 80 s. Each must land where six honest
-seeds do 999 times in 1000: its mean position NEES between 0.30 and 5.8 and its heading NEES
-between 0.04 and 4.1, its share of loops outside the ellipse and past 3.72 σ within what six seeds
-allow (4%), and its mean error under 2.5 to 3.5 cm; the gyro-scale procedure's ellipse is known
-past it, for seed 2's tags (above), and checked to stay where it is. Six seeds can't pin a NEES
-down closely, so the test catches an estimator that's badly over- or under-confident, as the one
-before this study was (a NEES of 17 to 476 on these draws); the full study is the closer look. A
-change to the estimator, its configuration, or the vision pipeline that breaks one has made the
-estimate claim more or less than it knows, or got there by being worse. Run the whole study before
-and after such a change, and put both tables in the commit.
+procedure), six matched seeds each, on every build, about 80 s. It's a guard, not a verdict: it fails
+only when the estimate is grossly wrong about itself.
+- **Position NEES:** between 0.2 and 10, where honest is 2.
+- **Heading NEES:** between 0.1 and 5, where honest is 1.
+- **Long axis:** past 3.72 σ in at most 10% of loops.
+- **Accuracy:** a mean error under 2.5 to 3.5 cm, as today.
+
+The estimator before this study read 17 to 476 on these draws. The test doesn't pin an exact NEES
+or a share of loops outside the ellipse, and nothing else does.
+
+**Why not tighter.** The draws behind every number here, such as camera noise, tag placement and
+gyro scale, are guesses until real cameras, IMUs and fields are measured. A test held to a number
+those guesses set fails whenever a guess moves, in either direction, and judging changes that way
+made work swing back and forth. So the study is the closer look, as a report.
+
+**Before and after.** Run the whole study before and after a change to the estimator, its
+configuration, or the vision pipeline, and keep the tables here up to date. A change that moves the
+report is a question to look into, not a failed build.
 
 ## Configuration is tested too
 

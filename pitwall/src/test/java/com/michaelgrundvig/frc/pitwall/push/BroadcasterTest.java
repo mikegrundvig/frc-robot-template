@@ -152,6 +152,40 @@ class BroadcasterTest {
     }
   }
 
+  /**
+   * A new run's section reaches the page in the loop that hands the run over, however soon after
+   * the last comparison, and so before any of its samples: the page keeps samples only for a run it
+   * knows, and would lose the step's start.
+   */
+  @Test
+  void aNewRunIsComparedAtOnceSoThePageKnowsItBeforeItsSamples() throws Exception {
+    AtomicLong clock = new AtomicLong();
+    ByHand byHand = new ByHand(new AtomicLong()::get);
+    Actions.Gate ready = new Actions.Gate(true, true, false);
+    Broadcaster timed = new Broadcaster(2, 1000, id -> {}, clock::get);
+    Stream stream = timed.open(null).orElseThrow();
+    timed.periodic(this::state, null);
+    drain(stream);
+
+    byHand.experiments().requestStart(ByHand.STEP, null);
+    List<String> events = new ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      clock.addAndGet(Duration.ofMillis(20).toNanos());
+      byHand.experiments().heard(null);
+      byHand.experiments().periodic(ready);
+      Run run = byHand.experiments().run();
+      state.put("run", run == null ? Map.of() : Map.of("id", run.id()));
+      timed.periodic(this::state, run);
+      byHand.step();
+      events.addAll(drain(stream));
+    }
+
+    assertThat(events).filteredOn(event -> event.startsWith("event: samples")).isNotEmpty();
+    assertThat(events.getFirst())
+        .as("the run's section, in the loop 20 ms after a comparison that handed it over")
+        .isEqualTo("event: patch\ndata: {\"run\":{\"id\":1}}\n\n");
+  }
+
   @Test
   void aStreamThatOpensLaterStartsFromTheStateAsSent() throws Exception {
     Stream first = open();

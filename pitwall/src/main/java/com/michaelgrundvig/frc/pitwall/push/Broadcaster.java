@@ -29,9 +29,10 @@ import org.jspecify.annotations.Nullable;
  * every {@link #COMPARE_NANOS} on the robot's clock (every loop for a broadcaster without one), as
  * a scene's moving parts are: no page shows more. A loop that must be heard at once, such as the
  * one that pauses the simulator's clock (after which no time passes to make a comparison due), asks
- * for it with {@link #compareNow}. A stream that has just opened gets a {@code snapshot} first,
- * compared that loop: the whole state as sent, the run's trace so far, and the stream's own id; the
- * patches after it apply to that.
+ * for it with {@link #compareNow}; the loop a new run is handed over in is compared at once too, so
+ * its section reaches the page before its samples. A stream that has just opened gets a {@code
+ * snapshot} first, compared that loop: the whole state as sent, the run's trace so far, and the
+ * stream's own id; the patches after it apply to that.
  *
  * <p>Some of the state goes only to the pages that show it: a {@link Feed}, such as a scene's
  * moving parts. A stream names the views its page shows, and gets each feed's changes in its
@@ -203,6 +204,11 @@ public final class Broadcaster implements AutoCloseable {
       List<? extends Feed> feeds) {
     if (!watched()) {
       return;
+    }
+    if (run != traced) {
+      // A new run's section goes out this loop, ahead of its first samples: the page keeps samples
+      // only for a run it knows, and drops those that come first.
+      compareNow();
     }
     Map<String, @Nullable Object> patch = compareIfDue(state);
     // Each feed some page shows says what changed; one no page shows isn't asked.

@@ -184,13 +184,20 @@ class ArchitectureTest {
   void theSimulatorStaysOutOfTheRobotsCode() {
     noClasses()
         .that()
-        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..", "frc.robot.views..")
+        .resideInAnyPackage(
+            "frc.robot.lib..",
+            "frc.robot.subsystems..",
+            "frc.robot.views..",
+            "frc.robot.commands..",
+            "frc.robot.dashboard..",
+            "frc.robot.game..")
         .should()
         .dependOnClassesThat()
-        .resideInAPackage("frc.robot.sim..")
+        .resideInAnyPackage("frc.robot.sim..", "com.michaelgrundvig.frc.simulation..")
         .because(
             "the robot's code runs the same on the robot as in the simulator: the simulated world"
-                + " plugs in behind the IO interfaces, chosen at the top level")
+                + " plugs in behind the IO interfaces, through its adapters in frc.robot.sim, chosen"
+                + " at the top level")
         .check(PRODUCTION_CODE);
   }
 

@@ -1,5 +1,6 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
@@ -13,9 +14,9 @@ import org.wpilib.math.geometry.Translation3d;
 /**
  * A simulated camera as the robot's code reads it, which can fail the ways a real one does while
  * the simulation runs: unplugged (no results, and it says it's disconnected), frozen (its last
- * image's tags again and again, stamped as new), knocked or turned on its mount, or later than its
- * configuration says. The robot's code still believes its configuration, and has to find out from
- * what the camera sees.
+ * image's tags again and again, stamped as new), knocked or turned on its mount, later than its
+ * configuration says, or with its clock off the robot's (its images stamped wrong). The robot's
+ * code still believes its configuration, and has to find out from what the camera sees.
  *
  * <p>Its mount moves from where it was mounted as the world was built ({@link SensorErrors}), and
  * goes back there when the fault is undone.
@@ -33,6 +34,7 @@ final class CameraIOSim implements CameraIO {
   private Translation3d moved = Translation3d.ZERO;
   private Rotation3d turned = Rotation3d.ZERO;
   private double extraLatencyMillis;
+  private double clockOffsetMillis;
 
   /** The last image seen before it froze, and its tags. */
   private @Nullable Frame lastFrame;
@@ -105,6 +107,19 @@ final class CameraIOSim implements CameraIO {
 
   boolean isLate() {
     return extraLatencyMillis != 0;
+  }
+
+  /**
+   * Sets its clock this far off the robot's: each image stamped this much later than it was taken
+   * (earlier, if negative), arriving when it would have. Zero for a clock that agrees.
+   */
+  void offsetClock(double millis) {
+    clockOffsetMillis = millis;
+    vision.offsetClock(name, millis);
+  }
+
+  boolean hasClockOffset() {
+    return clockOffsetMillis != 0;
   }
 
   private void remount() {

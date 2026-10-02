@@ -2,8 +2,8 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.ElasticLayoutCheck.Widget;
-import frc.robot.sim.SensorErrors;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

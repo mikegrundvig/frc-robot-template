@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
@@ -127,7 +129,8 @@ class ScenariosTest {
     Scenarios.addTo(components, world);
 
     assertThat(components.scenarioView().keySet())
-        .doesNotContain("camera-low", "camera-turned", "camera-late", "camera-frozen")
+        .doesNotContain(
+            "camera-low", "camera-turned", "camera-late", "camera-clock-off", "camera-frozen")
         .contains("collision", "gyro-unplugged");
   }
 
@@ -222,9 +225,9 @@ class ScenariosTest {
     assertThat(Scenarios.named("camera-low").sensorFaultsIn(world))
         .containsExactly(
             Setting.of(
-                Faults.camera(CAMERAS.get(0).name()),
-                Faults.MOVED,
-                Map.of(Faults.FORWARD, 0.0, Faults.LEFT, 0.0, Faults.UP, -4.0)));
+                FaultCatalog.camera(CAMERAS.get(0).name()),
+                FaultCatalog.MOVED,
+                Map.of(FaultCatalog.FORWARD, 0.0, FaultCatalog.LEFT, 0.0, FaultCatalog.UP, -4.0)));
     assertThat(world.camera(0).isMoved()).isTrue();
     assertThat(world.camera(1).isMoved()).isFalse();
     assertThat(world.drivetrain().gyroSim().errors()).isEqualTo(SensorErrors.TYPICAL.gyro());
@@ -235,9 +238,9 @@ class ScenariosTest {
     SimulatedWorld world = world(CAMERAS.subList(0, 1), SensorErrors.TYPICAL);
 
     assertThat(Scenarios.named("camera-turned").sensorFaultsIn(world).get(0).values())
-        .containsEntry(Faults.YAW, 2.0)
-        .containsEntry(Faults.ROLL, 0.0)
-        .containsEntry(Faults.PITCH, 0.0);
+        .containsEntry(FaultCatalog.YAW, 2.0)
+        .containsEntry(FaultCatalog.ROLL, 0.0)
+        .containsEntry(FaultCatalog.PITCH, 0.0);
   }
 
   @Test
@@ -435,7 +438,7 @@ class ScenariosTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Scenarios.named("bump-crossing").faultsIn(world))
         .withMessage("this scenario carries the robot to a bump, and the field has none");
-    assertThat(apply(List.of(Setting.of(Faults.ROBOT, Faults.TO_A_BUMP))))
+    assertThat(apply(List.of(Setting.of(FaultCatalog.ROBOT, FaultCatalog.TO_A_BUMP))))
         .isEqualTo(
             "Robot: Carried to a bump failed: carrying the robot to a bump needs a field with"
                 + " bumps, and this one has none");
@@ -452,7 +455,7 @@ class ScenariosTest {
     Scenarios.addTo(flat, world);
 
     assertThat(flat.scenarioView()).doesNotContainKey("bump-crossing").containsKey("collision");
-    assertThat(flat.whyNot(Setting.of(Faults.ROBOT, Faults.TO_A_BUMP)))
+    assertThat(flat.whyNot(Setting.of(FaultCatalog.ROBOT, FaultCatalog.TO_A_BUMP)))
         .startsWith("Robot has no fault named Carried to a bump");
   }
 

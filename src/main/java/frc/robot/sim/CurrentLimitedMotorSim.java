@@ -14,8 +14,9 @@ import org.wpilib.math.system.DCMotor;
  * the limit the whole time. So here, at the limit, the motor gives a steady torque until its back
  * EMF leaves no more than the limit's worth of voltage across its windings; below the limit, the
  * load's speed closes on the speed the voltage gives, exponentially, exactly as in {@code
- * DCMotorSim}. The drive's motor is about sixty times slower, so the drive keeps {@code
- * DCMotorSim}, with its limit set once a step.
+ * DCMotorSim}. The drive's limit is the physics' to hold ({@code WheelDrive}): its motor is about
+ * sixty times slower, and today's physics holds the limit at each step's start, so it falls a
+ * little short of the limit within each step (the truth suite's F = m a gap).
  *
  * <p>Friction is left out: a real module's wheel scrubs on the carpet as it turns, and its gearbox
  * drags, so a real one coasts less than this one. Both need measuring on a real module before they

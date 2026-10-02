@@ -387,12 +387,4 @@ class CameraScoringTest {
     assertThat(outcome.positionErrorMeters()).isCloseTo(0.01 * Math.sqrt(2), within(1e-12));
     assertThat(outcome.correctsHeading()).isFalse();
   }
-
-  @Test
-  void seedsDependOnEveryNumberMixedIn() {
-    assertThat(Seeds.mix(1, 0.5, 2.0))
-        .isEqualTo(Seeds.mix(1, 0.5, 2.0))
-        .isNotEqualTo(Seeds.mix(1, 2.0, 0.5))
-        .isNotEqualTo(Seeds.mix(2, 0.5, 2.0));
-  }
 }

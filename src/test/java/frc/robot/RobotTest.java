@@ -9,8 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.sim.Scenarios;
-import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SimulatedWorld;
 import java.util.List;
 import java.util.Optional;

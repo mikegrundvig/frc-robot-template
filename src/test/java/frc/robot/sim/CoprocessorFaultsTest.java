@@ -8,6 +8,8 @@ import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.coprocessor.table.Table;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.subsystems.coprocessors.CoprocessorIO;
@@ -29,7 +31,7 @@ import org.photonvision.PhotonVersion;
  */
 @ExtendWith(RobotSim.class)
 class CoprocessorFaultsTest {
-  private static final String PART = Faults.coprocessor("vision-front");
+  private static final String PART = FaultCatalog.coprocessor("vision-front");
   private static final long SECOND = 1_000_000_000L;
   private static final Computer FRONT =
       new Computer(
@@ -91,9 +93,9 @@ class CoprocessorFaultsTest {
   void unreachableItStopsAnsweringUntilUndone() {
     after(1);
 
-    apply(Faults.UNREACHABLE, Map.of());
+    apply(FaultCatalog.UNREACHABLE, Map.of());
     CoprocessorIOInputs silent = after(2);
-    undo(Faults.UNREACHABLE);
+    undo(FaultCatalog.UNREACHABLE);
     CoprocessorIOInputs back = after(1);
 
     assertThat(silent.answered).isFalse();
@@ -106,11 +108,11 @@ class CoprocessorFaultsTest {
 
   @Test
   void theWrongVersionIsInItsStampAndWhatItPublishes() {
-    apply(Faults.WRONG_VERSION, Map.of());
+    apply(FaultCatalog.WRONG_VERSION, Map.of());
     CoprocessorIOInputs wrong = after(1);
     PhotonVisionIOInputs published = new PhotonVisionIOInputs();
     world.photonVision().updateInputs(published);
-    undo(Faults.WRONG_VERSION);
+    undo(FaultCatalog.WRONG_VERSION);
 
     assertThat(wrong.photonVisionVersion).isEqualTo(CoprocessorIOSim.OTHER_VERSION);
     assertThat(published.reported).isEqualTo(CoprocessorIOSim.OTHER_VERSION);
@@ -119,11 +121,11 @@ class CoprocessorFaultsTest {
 
   @Test
   void hotItsZonesNearTheirTripAndPastItCapped() {
-    apply(Faults.HOT, Map.of(Faults.BELOW_TRIP, 3.0));
+    apply(FaultCatalog.HOT, Map.of(FaultCatalog.BELOW_TRIP, 3.0));
     CoprocessorIOInputs warm = after(1);
-    apply(Faults.HOT, Map.of(Faults.BELOW_TRIP, -2.0));
+    apply(FaultCatalog.HOT, Map.of(FaultCatalog.BELOW_TRIP, -2.0));
     CoprocessorIOInputs throttled = after(1);
-    undo(Faults.HOT);
+    undo(FaultCatalog.HOT);
     CoprocessorIOInputs cool = after(1);
 
     assertThat(warm.zoneCelsius).contains(82.0);
@@ -135,15 +137,16 @@ class CoprocessorFaultsTest {
 
   @Test
   void aCameraUnpluggedIsntPresentUntilPluggedBackIn() {
-    apply(Faults.CAMERA_UNPLUGGED, Map.of(Faults.CAMERA, 2.0));
+    apply(FaultCatalog.CAMERA_UNPLUGGED, Map.of(FaultCatalog.CAMERA, 2.0));
     CoprocessorIOInputs unplugged = after(1);
-    undo(Faults.CAMERA_UNPLUGGED);
+    undo(FaultCatalog.CAMERA_UNPLUGGED);
 
     assertThat(unplugged.camerasPresent).containsExactly("front-left");
     assertThat(unplugged.usbCameras).hasSize(1);
     assertThat(after(1).camerasPresent).containsExactly("front-left", "front-right");
     assertThat(
-            components.apply(Setting.of(PART, Faults.CAMERA_UNPLUGGED, Map.of(Faults.CAMERA, 1.5))))
+            components.apply(
+                Setting.of(PART, FaultCatalog.CAMERA_UNPLUGGED, Map.of(FaultCatalog.CAMERA, 1.5))))
         .contains("whole number");
   }
 
@@ -151,7 +154,7 @@ class CoprocessorFaultsTest {
   void photonVisionRestartingCountsAndComesBack() {
     after(1);
 
-    apply(Faults.PHOTONVISION_RESTARTS, Map.of());
+    apply(FaultCatalog.PHOTONVISION_RESTARTS, Map.of());
     CoprocessorIOInputs restarting = after(1);
     CoprocessorIOInputs back = after(5);
 
@@ -163,20 +166,20 @@ class CoprocessorFaultsTest {
 
   @Test
   void twoBoardsTakeTurnsAnsweringUntilUndone() {
-    apply(Faults.DUPLICATED, Map.of());
+    apply(FaultCatalog.DUPLICATED, Map.of());
     after(1);
     after(1);
     CoprocessorIOInputs twice = after(1);
-    undo(Faults.DUPLICATED);
+    undo(FaultCatalog.DUPLICATED);
 
     assertThat(twice.macsTakingTurns).hasSize(2);
   }
 
   @Test
   void settingsChangedDifferFromTheStampedOnes() {
-    apply(Faults.SETTINGS_CHANGED, Map.of());
+    apply(FaultCatalog.SETTINGS_CHANGED, Map.of());
     CoprocessorIOInputs changed = after(1);
-    undo(Faults.SETTINGS_CHANGED);
+    undo(FaultCatalog.SETTINGS_CHANGED);
 
     assertThat(changed.settingsHash).isNotEqualTo("hash-1");
     assertThat(changed.stampedSettingsHash).isEqualTo("hash-1");
@@ -187,16 +190,16 @@ class CoprocessorFaultsTest {
   @Test
   void askedToPowerDownItHaltsUnlessItIgnoresIt() {
     after(1);
-    apply(Faults.IGNORES_POWER_DOWN, Map.of());
+    apply(FaultCatalog.IGNORES_POWER_DOWN, Map.of());
     coprocessor.powerDown();
     CoprocessorIOInputs ignoring = after(5);
-    undo(Faults.IGNORES_POWER_DOWN);
+    undo(FaultCatalog.IGNORES_POWER_DOWN);
 
     coprocessor.powerDown();
     CoprocessorIOInputs halting = after(1);
     CoprocessorIOInputs halted = after(4);
-    apply(Faults.UNREACHABLE, Map.of());
-    undo(Faults.UNREACHABLE);
+    apply(FaultCatalog.UNREACHABLE, Map.of());
+    undo(FaultCatalog.UNREACHABLE);
     CoprocessorIOInputs still = after(2);
 
     assertThat(ignoring.powerDownAnswer).isEqualTo("refused: answered 404");

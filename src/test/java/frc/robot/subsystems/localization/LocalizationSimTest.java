@@ -14,6 +14,9 @@ import com.michaelgrundvig.frc.localization.SlipCheck;
 import com.michaelgrundvig.frc.localization.TerrainCrossing;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.YawSource;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrorsAccelErrorsBuilder;
+import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.ImuMountBuilder;
 import com.michaelgrundvig.frc.world.robot.Imus;
@@ -26,9 +29,6 @@ import frc.robot.SimulationTest;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
-import frc.robot.sim.SensorErrors;
-import frc.robot.sim.SensorErrorsAccelErrorsBuilder;
-import frc.robot.sim.SensorErrorsBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -755,10 +755,12 @@ class LocalizationSimTest {
   /**
    * Pushed sideways at 1 m/s for a second while the camera is blind, and seen again half a second
    * after the push lets go: a meter off, and back within 10 cm in the camera's first fixes. The
-   * scoring gate should let through no loop more than 15 cm off; it lets through 2, under 18 cm, as
+   * scoring gate should let through no loop more than 15 cm off; it lets through 3, under 20 cm, as
    * the push gets going and the camera's last fix is still recent: the slip check sees the slide
    * only once it's past its tolerance, and the doubt it adds grows only as fast as the slide, from
-   * then (docs/testing.md, known limits). The bounds are what it does today, so it does no worse.
+   * then (docs/testing.md, known limits). The bounds are what it does today, so it does no worse;
+   * where in a loop the slip check catches the slide hangs on the accelerometer's noise, and with
+   * the IMUs' noise drawn as offsets from the seed it let through 2, under 18 cm.
    */
   @Test
   void pushedWhileTheCameraIsBlindTheEstimateComesBackWhenItSees() {
@@ -774,8 +776,8 @@ class LocalizationSimTest {
 
     assertThat(pushed.worstError()).as("a meter off").isGreaterThan(0.9);
     assertThat(pushed.secondsBack()).as("back within 10 cm, seconds").isLessThanOrEqualTo(0.1);
-    assertThat(pushed.gateOpenWhileOff()).as("loops let through off").isLessThanOrEqualTo(2);
-    assertThat(pushed.worstWhileOpen()).as("the worst let through").isLessThan(0.18);
+    assertThat(pushed.gateOpenWhileOff()).as("loops let through off").isLessThanOrEqualTo(3);
+    assertThat(pushed.worstWhileOpen()).as("the worst let through").isLessThan(0.20);
   }
 
   /**

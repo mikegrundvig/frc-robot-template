@@ -147,18 +147,19 @@ What it offers:
 - **The drivers:** `sim.driver()`, the gamepad on port 0.
 - **The truth:** `sim.simulation()` knows where the robot really is (`truePose()`), and can move
   it, tilt it, or hit it.
-- **Faults and scenarios:** what can fail in the simulated world while it runs
-  (`frc.robot.sim.Faults`), applied as the Pitwall page applies them: `sim.components().apply(
-  Setting.of(Faults.GYRO, Faults.UNPLUGGED))`, and `undo` for one that lasts. A scenario is a named
-  set of them (`frc.robot.sim.Scenarios`), the ones `./gradlew run -Pscenario=<name>` starts.
+- **Faults and scenarios:** what can fail in the simulated world while it runs (the catalog,
+  `FaultCatalog` in `lib/simulation`, bound to the robot's parts in `frc.robot.sim.Faults`),
+  applied as the Pitwall page applies them: `sim.components().apply(Setting.of(FaultCatalog.GYRO,
+  FaultCatalog.UNPLUGGED))`, and `undo` for one that lasts. A scenario is a named set of them
+  (`frc.robot.sim.Scenarios`), the ones `./gradlew run -Pscenario=<name>` starts.
   `sim.build(Scenarios.named("camera-low"))` builds the robot as `./gradlew run` does, with the
   scenario's sensor faults on a season-worn robot's sensors (`SensorErrors.TYPICAL`, where
   `sim.robot()` starts from `NONE`), and `sim.start(scenario)` makes what happens in it happen (a
   collision, the gyro unplugged) at the moment the test chooses. `FaultsTest` and
   `CameraFaultsSimTest` show each fault changes what the robot's code reads, and undoing it puts
-  that back; `ScenarioSimTest` runs every scenario on the robot. A new fault goes in `Faults` with
-  such a test; a new scenario goes in `Scenarios.ALL`, with a test in `ScenariosTest` that it does
-  to the simulated world what it says.
+  that back; `ScenarioSimTest` runs every scenario on the robot. A new fault goes in
+  `FaultCatalog`, bound in `Faults`, with such a test; a new scenario goes in `Scenarios.ALL`,
+  with a test in `ScenariosTest` that it does to the simulated world what it says.
 - **What dashboards see:** `sim.telemetry()`; and the Pitwall page, `sim.pitwall()`: its status,
   actions, tuning, and experiments, as the page uses them. The page's own requests go over HTTP to
   `sim.pitwall().port()` (use `127.0.0.1`); `SteeringExperimentSimTest` drives an experiment the
@@ -169,9 +170,9 @@ What it offers:
 
 ## Rules that keep tests trustworthy
 
-- **The same run every time.** The clock moves only when stepped, and the simulator's wheel and
-  gyro noise and its cameras' noise (one seed per camera, in `VisionSim`) come from fixed seeds,
-  so a run repeats exactly. A test with cameras still checks against a margin, never an exact
+- **The same run every time.** The clock moves only when stepped, and the simulator's IMUs' noise
+  and its cameras' (one stream per camera) come from fixed seeds, each its own stream of the
+  world's seed (`Seeds`), so a run repeats exactly. A test with cameras still checks against a margin, never an exact
   value: a change anywhere else moves the noise it draws. Never `Thread.sleep` to wait for robot
   time; step the loop. To wait for the network (an answer, an event on a stream), wait on it with
   a timeout, a loop at a time; to show nothing else arrived, send a change and check it's the next
@@ -254,7 +255,12 @@ for.
 | `--out=DIR` | `build/studies/consistency` | Where the report goes |
 
 The console prints each seed's draws and numbers, so a run's result can be traced to the seeds
-behind it.
+behind it, and ends with a fingerprint of every loop's error and claim, to the bit: two studies
+with the same options print the same one, whenever and wherever they run. (The simulator's
+clock stays paused between runs, and its cameras keep the robot's poses by the time since their
+world began, not by the clock's own count, which starts wherever the computer's uptime stood and is
+too large for a double to keep to a nanosecond: before, two identical studies differed in their
+last digits.)
 
 ### Reading the report
 
@@ -302,27 +308,35 @@ their own, the default):
 
 | Run | NEES (2) | Heading NEES (1) | Outside the ellipse | Past 3.72 σ | Mean error | Heading error |
 |---|---|---|---|---|---|---|
-| driving | 1.08 | 0.56 | 0 | 0 | 1.5 cm | 0.20° |
-| standing | 1.83 | 0.37 | 0 | 0 | 1.2 cm | 0.15° |
-| turning | 1.44 | 0.68 | 0 | 0 | 1.5 cm | 0.68° |
-| gyro-scale | 2.10 | 1.05 | 0.09% | 0.00% | 1.8 cm | 1.36° |
-| collision | 1.40 | 0.63 | 0.65% | 0.65% | 1.7 cm | 0.21° |
-| gyro-lost | 1.71 | 0.46 | 0 | 0 | 1.5 cm | 0.46° |
-| camera-low | 0.99 | 0.73 | 0 | 0 | 1.4 cm | 0.21° |
-| camera-turned | 3.28 | 4.95 | 1.53% | 0.69% | 2.6 cm | 0.51° |
-| camera-turned-4 | 9.83 | 19.73 | 27.43% | 26.69% | 4.5 cm | 0.99° |
-| tag-moved | 1.71 | 2.03 | 1.28% | 0.98% | 1.7 cm | 0.32° |
+| driving | 1.37 | 0.91 | 0.09% | 0 | 1.7 cm | 0.29° |
+| standing | 3.42 | 0.72 | 0 | 0 | 1.6 cm | 0.29° |
+| turning | 1.57 | 0.31 | 2.09% | 0 | 1.5 cm | 0.45° |
+| gyro-scale | 1.87 | 0.32 | 4.72% | 0 | 1.4 cm | 0.66° |
+| collision | 1.68 | 1.14 | 0.45% | 0.43% | 1.9 cm | 0.29° |
+| gyro-lost | 1.83 | 0.28 | 3.94% | 0 | 1.5 cm | 0.36° |
+| camera-low | 1.19 | 1.16 | 0 | 0 | 1.5 cm | 0.27° |
+| camera-turned | 3.78 | 5.91 | 2.83% | 1.92% | 2.7 cm | 0.61° |
+| camera-turned-4 | 10.71 | 23.18 | 29.68% | 28.04% | 4.8 cm | 1.18° |
+| tag-moved | 1.82 | 1.64 | 1.23% | 0.90% | 1.7 cm | 0.29° |
 
-Every calibrated run is near its NEES or below it, timid rather than overconfident: the floor for
-what a camera repeats is sized for the worst of what it allows, and the noise model is a little
-wider than the simulated cameras. The collision's exceedances are the loops of the hit, before
-the jolt is read, and the few after it while the cameras pull the estimate back across a knock
-of 0.6 m, more than the 25 cm `collisionStdDevMeters` allows. A tag 4 in off the layout, four
-times what `cameraShiftStdDevMeters` allows, stays within the allowance: one tag among several in
-view. A camera turned 2° is
-eight times what `cameraTurnStdDevDegrees` allows, and 4° sixteen: the estimator can't tell either
-from a heading error, so its heading grows sure of a wrong value. Catching that is the mount
-check's job; how well it does depends on what may correct the heading, below.
+Most calibrated runs are near their NEES or below it, timid rather than overconfident: the floor
+for what a camera repeats is sized for the worst of what it allows, and the noise model is a
+little wider than the simulated cameras. Two aren't, since each seed's random streams became its
+own (below). Standing reads 3.42, above its 95% band in 72% of its loops: the same tags in every image, so
+what the seeds' mounts and tags share never averages out, and the estimate claims a little more
+than it knows. And one seed is overconfident wherever the robot turns in place: seed 2, its gyro
+0.38% high and its two front cameras turned the same way (0.32° and 0.48°), is outside its
+ellipse in 25% of the turning run's loops, 57% of the gyro-scale procedure's, and 47% of the
+lost gyro's (NEES 8.0, 10.5, 10.2), which puts those runs past the 2.9% twelve seeds allow. What
+in its draws the estimate underrates isn't pinned down yet; `EstimatorConsistencySimTest` (seeds
+1 to 6) records it as known, and fails when it changes. The collision's exceedances are the loops
+of the hit, before the jolt is read, and the few after it while the cameras pull the estimate back
+across a knock of 0.6 m, more than the 25 cm `collisionStdDevMeters` allows. A tag 4 in off the
+layout, four times what `cameraShiftStdDevMeters` allows, stays within the allowance: one tag
+among several in view. A camera turned 2° is eight times what `cameraTurnStdDevDegrees` allows,
+and 4° sixteen: the estimator can't tell either from a heading error, so its heading grows sure of
+a wrong value. Catching that is the mount check's job; how well it does depends on what may
+correct the heading, below.
 
 Numbers from before this table, in older commits, aren't comparable: the simulated drivetrain
 carried a robot of about 39 kg, not the configured 68, so it sped up 75% faster and drove the
@@ -330,10 +344,17 @@ runs' sticks along another path ([stand-ins](stand-ins.md)); before that, the si
 stamped each image up to a loop late ([below](#the-simulators-late-stamps)), and before that the
 seeds shared draws (seed 2's first camera was seed 1's second, through `Seeds.mix` adding the seed
 to what it mixed) and the mounts and tags were drawn narrower than the configuration claims.
+Since, each seed's IMUs and cameras draw from streams of their own (they were offsets from the
+seed: seed 1's gyro drew what its first camera did, and each seed's gyro what the seed before it
+gave its gyro's accelerometer), and so do the study's own draws (each seed's camera mounts were
+the seed before it's tag offsets, its kinds of draw mixed in as 1, 2, and 3), and the table moved
+with them: drawn the old way, it read driving 1.08, standing 1.83, turning 1.44, gyro-scale 2.10
+(0.09% outside the ellipse), collision 1.40, gyro-lost 1.71, camera-low 0.99, the turned cameras
+3.28 and 9.83, tag-moved 1.71. The rest of this section's numbers were drawn the old way.
 
-On the same simulator, the estimator before this table doubted a quarter of its wheels' travel
+On the same simulator, with the old draws, the estimator before that table doubted a quarter of its wheels' travel
 whenever a drive motor was at its current limit, for most of a second each time the robot got up to
-speed or changed course. In NEES, it and this table: driving 1.01 and 1.08, standing 1.80 and 1.83,
+speed or changed course. In NEES, it and that table: driving 1.01 and 1.08, standing 1.80 and 1.83,
 collision 1.28 and 1.40, camera-low 0.90 and 0.99, tag-moved 1.56 and 1.71, the turned cameras 2.87
 and 3.28, 9.00 and 9.83; the runs that turn in place didn't move. The doubt it took off fell where
 it wasn't needed: in the tenth of the driving run's loops where the estimator before claimed more
@@ -431,11 +452,13 @@ drives the same sticks along another path, and the comparison turned over: which
 mount check blames depends on how the robot drives as much as on what corrects the heading.
 
 `VisionSimTest`'s mount-check tests run under each, on one route with one seed. For a camera
-turned 4°, `every` keeps two of the original promises (out of calibration and counting for less,
-the back cameras never doubted) and breaks two (doubted by more than 8 cm, the last lap a fifth
-closer than trusting it as before): doubted by 5.7 cm, its last lap is 4.7 cm off against 5.4 cm
-trusted as before. `measurements` and `doubt` break three: the camera is never doubted, so nothing
-says it counts for less, and the last lap is 5.6 and 5.5 cm off against 5.5 cm trusted as before.
+turned 4°, all three keep two of the original promises (out of calibration and counting for less,
+the back cameras never doubted) and break two (doubted by more than 8 cm, the last lap a fifth
+closer than trusting it as before): `every` doubts it by 6.5 cm, its last lap 3.7 cm off against
+4.5 cm trusted as before; `measurements` and `doubt` by 3.0 and 3.1 cm, their last laps 4.1 and
+4.3 cm off against 4.2. With the seed's noise drawn as offsets from the seed (before its streams
+were its own), `measurements` and `doubt` never doubted it, and `every` by 5.7 cm: on one seed,
+whether they call it out at all hangs on its draws.
 A camera turned 2° stands out in its tag residuals under all three, most under `every` (2.5 times
 its worst neighbour's, against 1.7). Each test says which, and changes when one does. One route
 is a narrow look: before the simulated drivetrain carried the robot's mass, the robot drove the
@@ -577,14 +600,15 @@ and then seeing again), and the estimate recovers in each. What's known not to h
   off: the front pair at 0.5 m/s for a second, 25 cm off, claims 12.6 cm; at 1 m/s, 50 cm off,
   56 cm, the accelerometer seeing the rest. One wheel spinning claims about what it put the
   estimate off. Nor can the simulator say more: its chassis moves as the wheels' best fit says
-  (`DriveSimulation`), so in it, wheels that disagree can't put the robot anywhere their fit
+  (`KinematicPhysics`, a known gap in its [truth suite](simulator.md#how-far-to-trust-it-the-truth-suite)),
+  so in it, wheels that disagree can't put the robot anywhere their fit
   doesn't, and a rule for telling which disagreement is slip, tuned against it, would fit the
   simulator's own guesses. Wheel slip needs a simulator whose physics makes it (one modelling the
   robot as a rigid body on its tread), and logs from a real robot, before it can be judged better.
 
 - **A slide's first tenth of a second.** The slip check sees a slide only once the wheels and the
   accelerometer are 0.3 m/s apart, so the doubt starts behind it. With the camera's last fix still
-  recent, the scoring gate lets through up to 2 loops while the estimate is 15 to 18 cm off as a
+  recent, the scoring gate lets through up to 3 loops while the estimate is 15 to 20 cm off as a
   push or a launch at half grip gets going.
 - **Worn tread, far without a camera.** Tread worn a little unevenly puts the wheels' reckoning
   off by a share of every meter, where the estimator allows for an error growing with the root of

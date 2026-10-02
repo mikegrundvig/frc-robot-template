@@ -6,6 +6,11 @@ import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
+import com.michaelgrundvig.frc.simulation.Seeds;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
+import com.michaelgrundvig.frc.simulation.SensorErrorsGyroErrorsBuilder;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotConfig;
@@ -14,12 +19,8 @@ import frc.robot.Robots;
 import frc.robot.SimulatedRobot;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.sim.Faults;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
-import frc.robot.sim.SensorErrors;
-import frc.robot.sim.SensorErrorsBuilder;
-import frc.robot.sim.SensorErrorsGyroErrorsBuilder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -168,9 +169,15 @@ final class ConsistencyRuns {
                       world ->
                           List.of(
                               Setting.of(
-                                  Faults.camera(world.cameraNames().get(0)),
-                                  Faults.TURNED,
-                                  Map.of(Faults.ROLL, 0.0, Faults.PITCH, 0.0, Faults.YAW, 4.0))))
+                                  FaultCatalog.camera(world.cameraNames().get(0)),
+                                  FaultCatalog.TURNED,
+                                  Map.of(
+                                      FaultCatalog.ROLL,
+                                      0.0,
+                                      FaultCatalog.PITCH,
+                                      0.0,
+                                      FaultCatalog.YAW,
+                                      4.0))))
                   .events(Scenario.NOTHING)
                   .build(),
               robot -> {
@@ -187,10 +194,17 @@ final class ConsistencyRuns {
                   .sensorFaults(
                       Scenario.faults(
                           Setting.of(
-                              Faults.FIELD,
-                              Faults.TAG_MOVED,
+                              FaultCatalog.FIELD,
+                              FaultCatalog.TAG_MOVED,
                               Map.of(
-                                  Faults.TAG, 26.0, Faults.X, 4.0, Faults.Y, 0.0, Faults.UP, 0.0))))
+                                  FaultCatalog.TAG,
+                                  26.0,
+                                  FaultCatalog.X,
+                                  4.0,
+                                  FaultCatalog.Y,
+                                  0.0,
+                                  FaultCatalog.UP,
+                                  0.0))))
                   .events(Scenario.NOTHING)
                   .build(),
               robot -> {
@@ -252,10 +266,12 @@ final class ConsistencyRuns {
     /** How far a calibrated camera's mount is still off along each axis: a few millimeters. */
     static final double MOUNT_MILLIMETERS = 3;
 
-    // Each kind of error's stream of a seed.
-    private static final long MOUNTS = 1;
-    private static final long TAGS = 2;
-    private static final long IMUS = 3;
+    // Each kind of error's stream of a seed: constants far apart and far from any seed, since one
+    // step of mixing depends on the seed and the kind only through their sum (with 1, 2, and 3,
+    // each seed's mounts were the seed before it's tags).
+    private static final long MOUNTS = 0x6d6f756e7473L; // "mounts"
+    private static final long TAGS = 0x74616773L; // "tags"
+    private static final long IMUS = 0x696d7573L; // "imus"
 
     Spread {
       if (!(mountMillimeters >= 0)
@@ -337,7 +353,7 @@ final class ConsistencyRuns {
 
     /** A seed's stream for one kind of error and one item of it. */
     private static SplittableRandom stream(long seed, long kind, long item) {
-      return new SplittableRandom(Seeds.mix(Seeds.mix(seed, kind), item));
+      return new SplittableRandom(Seeds.stream(seed, kind, item));
     }
   }
 

@@ -1,9 +1,11 @@
 # The simulator
 
 `./gradlew run` runs the robot program on your laptop, in WPILib's simulation, with this template's
-simulated world (`frc.robot.sim`): a drivetrain that really moves, as heavy as the robot's
-configuration says, cameras that render what they'd see, and sensors that err as a season-worn
-robot's do. AdvantageScope shows the field, the robot, and the truth beside the estimate
+simulated world (the simulation library, `lib/simulation`, and its adapters to the robot's IO,
+`frc.robot.sim`: [how it's built](#how-its-built)): a drivetrain that really moves, as heavy as the
+robot's configuration says, cameras that render what they'd see, and sensors that err as a
+season-worn robot's do. [The truth suite](#how-far-to-trust-it-the-truth-suite) says how far it
+can be trusted, number by number. AdvantageScope shows the field, the robot, and the truth beside the estimate
 ([below](#see-it-in-advantagescope)), and so does Pitwall's
 [World view](#seeing-it-the-world-view).
 
@@ -229,11 +231,12 @@ refuses anywhere but WPILib's simulation.
 
 ## What can fail, live
 
-The simulated world declares its parts to Pitwall (`frc.robot.sim.Faults`); Pitwall knows nothing
-of any robot's parts. A fault that lasts says whether it's on by asking the world, and undoing it
-puts the part back as the world was built: a season-worn robot's sensors (`SensorErrors.TYPICAL`),
-not perfect ones. An event happens once, and nothing undoes it. The robot's code is never told:
-it finds out from its sensors, as on a robot.
+The simulation's catalog says what can go wrong with each part, as data (`FaultCatalog`, in
+`lib/simulation`), and the robot program binds each fault to its part and declares them to Pitwall
+(`frc.robot.sim.Faults`); Pitwall knows nothing of any robot's parts. A fault that lasts says
+whether it's on by asking the world, and undoing it puts the part back as the world was built: a
+season-worn robot's sensors (`SensorErrors.TYPICAL`), not perfect ones. An event happens once, and
+nothing undoes it. The robot's code is never told: it finds out from its sensors, as on a robot.
 
 | Part | Fault | Lasts or happens | Takes |
 |---|---|---|---|
@@ -242,6 +245,7 @@ it finds out from its sensors, as on a robot.
 | | Moved on its mount, from where it was mounted | lasts | forward, left, up (in) |
 | | Turned on its mount | lasts | roll, pitch, yaw (°) |
 | | Late: images arrive later than its configuration says, still stamped when taken | lasts | extra latency (ms) |
+| | Clock offset: its clock off the robot's, so each image arrives on time but is stamped that much after it was taken (before, if negative): the stamps are wrong | lasts | offset (ms) |
 | Gyro, and the backup IMU | Unplugged | lasts | |
 | | Frozen: the same yaw every time | lasts | |
 | | Errors: its scale, drift, and noise from now on, carrying on from what it reads | lasts | scale, drift (°/min), noise (°) |
@@ -282,8 +286,8 @@ it; undoing a moved tag puts it back there.
 ### What the simulator can't make fail yet
 
 The one list of what's not possible yet; the stand-ins and the code point here. Each waits on the
-simulator, not on Pitwall. Add each to `Faults`, and a scenario for it, when the simulator can
-make it.
+simulator, not on Pitwall. Add each to the catalog (`FaultCatalog`), bound to its part in `Faults`,
+and a scenario for it, when the simulator can make it.
 
 - One wheel off the floor: `wheel-lifted` tilts the robot and scales every wheel's grip alike, so
   its wheels never disagree as a lifted one's would, and the robot isn't raised.
@@ -395,10 +399,11 @@ state bar, its band, and *Sim*, not that the link was lost, and reconnects by it
 simulator starts again. Another page open on the simulator sees only the link lost.
 
 **What fails:** a card for each part (each camera, the gyro, the backup IMU, each module, the
-robot, and each coprocessor), each fault with what it does and what undoing it does, as `frc.robot.sim.Faults` declares
-them; each parameter with its unit and limits, checked on the page before it's sent; Apply, and
-Undo for a fault that's on. A lasting fault that's on is marked as a tuned value is, an amber bar,
-●, and "on", with the values it was applied with; an event is a button that makes it happen once.
+robot, and each coprocessor), each fault with what it does and what undoing it does, as the
+catalog has them (`FaultCatalog`); each parameter with its unit and limits, checked on the page
+before it's sent; Apply, and Undo for a fault that's on. A lasting fault that's on is marked as a
+tuned value is, an amber bar, ●, and "on", with the values it was applied with; an event is a
+button that makes it happen once.
 What's on is listed above the cards, with Undo all. The scenarios are listed there too, each with
 what it does and its faults, those it put on marked as on while they are; Apply says which faults
 it put on, which happened, and which it passed over, the part being that way as built. A refusal
@@ -418,3 +423,115 @@ where it refused it; a click on one says why (the verdict, the innovation, χ²,
 *Hold* freezes the drawing so a line that came and went can still be clicked. *Follow* keeps the
 robot in view; *Top* is the map, *3D* turns around it. The same view works on a robot, without the
 truth. How it's built, and how to add to it: [pitwall/README.md](../pitwall/README.md).
+
+## How it's built
+
+The simulated world is in two places, apart so that nothing the robot runs can reach it.
+
+- **The simulation library** (`lib/simulation`, `com.michaelgrundvig.frc.simulation`) holds what
+  doesn't speak the robot program's language: the physics, the IMUs' models (`GyroModel`,
+  `AccelerometerModel`), how the simulated robot's sensors and wheels err (`SensorErrors`), the
+  catalog of what can fail (`FaultCatalog`), and where each random stream starts (`Seeds`). It reads
+  the world model and WPILib's math alone: no hardware layer, robot program, localization, or
+  Pitwall, and no clock, unseeded randomness, threads, or static state (its `ArchitectureTest`), so
+  worlds run side by side and a run repeats to the bit.
+- **The robot program's adapters** (`frc.robot.sim`) hold what does: the modules' motor controllers
+  and encoders (`ModuleIOSim`, a TalonFX's loops and limits and the CANcoder's timing, with the
+  steering in closed form), the IMUs' IO (`GyroIOSim`), the cameras (`CameraIOSim`, over
+  PhotonVision's simulation in `VisionSim`), the coprocessors, the faults' bindings to Pitwall
+  (`Faults`), the scenarios, and `DriveSimulation`, which steps them together and takes the
+  sensors' readings at 250 Hz. Only these adapters and the program's top level see the library: the
+  robot's code sees its IO interfaces alone (the robot's `ArchitectureTest`).
+
+**The physics** sits behind one interface, `Physics`: commands go in, truth comes out.
+
+```
+ robot code ──IO──► ModuleIOSim: TalonFX loops and limits, the battery, the steering (closed form)
+                         │ each sub-step, each wheel's WheelDrive: its motor's line, its steering angle
+                         ▼
+ Disturbance ──────► Physics ──► ChassisTruth, WheelTruth ──► IMU models, encoders, cameras ──IO──►
+ (placed, pushed, tilted by hand, a slick floor, worn tread, the ground)
+```
+
+`step` moves the world on, in sub-steps of the engine's choosing, asking the actuators at the start
+of each what drives each wheel over it; `chassis()` and `wheel(i)` are the truth (pose, attitude,
+velocities, every turn the robot made, and each wheel's turn, spin, angle, radius, current, load,
+and contact); `apply` does something to the world from outside it. Today's engine,
+`KinematicPhysics`, is the simulator as it has always run: the robot moves as the best fit of its
+wheels' travel, each wheel turning its share of the robot's mass on its own motor (WPILib's
+`DCMotorSim`, worked to the bit, whose matrix exponential, worked once for each length of step, is
+WPILib's native math: the library's tests load it as the robot program's do), within the tread's
+grip, on the plane through its wheels' ground. Putting it behind the interface changed no recorded run by a bit.
+
+**Where a rigid-body engine plugs in.** ODE4j (pure Java) is to take today's engine's place behind
+the same interface: the robot's mass, center of gravity, and yaw inertia in one chassis, a wheel on
+a joint at each module, and Coulomb friction where each tread meets the carpet
+([stand-ins](stand-ins.md#the-simulators-physics)). The interface is shaped for it:
+
+- **The drive as a motor's line.** Each wheel's controller gives the voltage it asks of its
+  motor, its velocity loop's gain, and its current limit (`WheelDrive`), and the engine applies the
+  limit: the motor's torque against the wheel's speed, capped at the limit's torque. An engine that
+  integrates implicitly applies that as a joint motor through the whole sub-step, where a torque
+  held from the sub-step's start would ring as a light wheel slips. Today's engine applies the
+  limit at each 4 ms step's start and holds the voltage that gives through the step, which is the
+  F = m a gap below.
+- **The steering in closed form.** The steering settles in under a millisecond, so its controller
+  turns it (`CurrentLimitedMotorSim`) and gives the angle; the engine follows it, and hands back the
+  carpet's scrub as a torque on the steering (`WheelTruth.steerLoadNewtonMeters`) for the next
+  sub-step. Nothing reads it yet: today's engine gives none, and the closed form takes it once a
+  real module's scrub is measured, as a torque against the motion that can stop the module
+  (`CurrentLimitedMotorSim` says how).
+- **Sub-steps and determinism.** The simulator steps the physics at 250 Hz, its odometry's rate;
+  the engine sub-steps inside at a fixed length of its own, with no clock, no unseeded randomness,
+  and no order that hangs on identity hash codes, so a run repeats to the bit. The actuators keep
+  time, not count sub-steps: the steering's loop runs every millisecond, and the CANcoder sends
+  every 10 ms, whatever length the engine's sub-steps are.
+- **Disturbances made physical.** A push becomes a force the wheels resist, a slick floor a lower
+  friction, a lifted wheel the ground under it; a tilt by hand and a carry stay declared overrides,
+  and say so (`Disturbance`).
+
+Switching engines moves every recorded run, so it re-records the goldens (`EstimatorGoldenSimTest`,
+`CameraGoldenSimTest`) and reruns the [consistency study](testing.md): the robot moves differently,
+which is the point. The truth suite says whether it moves better.
+
+## How far to trust it: the truth suite
+
+The simulator is checked against physics and geometry as hard as the estimator is checked against
+the simulator. Each truth test compares the simulator with an answer worked out in the test
+(Newton, Coulomb friction, a rigid frame's geometry, a pinhole camera, the configuration), never
+with the simulator's own earlier output, and says in its Javadoc why its tolerance is what it is.
+They run with the rest, in `ci`; `./gradlew test --tests '*TruthTest' --tests '*TruthSimTest'`
+runs them alone (`'*Truth*'` would run four other tests too, whose names say they hold the
+estimate to the truth).
+
+A check today's simulator fails is a **known gap**: a test marked `@KnownGap`, with its reason, that
+asserts today's number. It passes while the gap stays as recorded, and fails loudly when it closes
+(promote it to a plain truth test, and take it off the list here) or moves (find out what moved it).
+
+A check today's simulator passes by construction, since it compares the simulator with itself, is
+**consistency**, not truth: a test marked `@Consistency`, with its reason. It guards the agreement,
+and is truth only for an engine that could fail it. Three are, below: the accelerometer during a
+launch (it differences the physics' own velocity), the cameras' latency (the stamps' gap is
+`VisionSim`'s own subtraction), and odometry (today's physics moves by odometry's own fit).
+
+| What | Its pass line | Today |
+|---|---|---|
+| F = m a at the drive's stator limit, 30 and 60 A, from rest (`DynamicsTruthSimTest`) | within 1% of 4 Kt I G / (r (m + 4 J / r²)) | **known gap:** 2.25% short at either (4.35 against 4.45 m/s² at 30 A): the controller's limit holds only at the start of each 4 ms step |
+| Yaw against inertia: tangential pushes below slip | the configured yaw inertia within 2% | **known gap:** spins as 11.1 kg m² against 6.7, as if its mass sat at its wheels |
+| Momentum and energy: spinning and coasting free, braking, standing a minute, locked in an X on a 15° ramp | 0.1%; no gain past 0.01 J a loop; under 1 mm and 0.01° | passes (the ramp only for want of a force: nothing pulls down a slope today) |
+| Braked on a 15° ramp, its wheels straight: the creep its motors' back EMF allows, I = ω / (Kv R) holding the slope's pull | 0.210 m/s across the field, within 2% | **known gap:** stands still, as nothing pulls down a slope |
+| Coasting, wheels steered a quarter turn | energy never rises | **known gap:** rises 35 J back as the robot turns to follow its wheels |
+| A launch's energy: the motors' work (each wheel's at its own current) against kinetic energy, and friction where the wheels slip (each at its own load) | within 2% | **known gaps:** 3.5% short gripping (the step's limit, and the robot moving each step half a step behind its wheels), 31% short slipping (a slipping wheel still carries its share of the robot) |
+| Grip in 16 directions, on a slick tread (μ 0.5) where every wheel slips however weight transfer loads it (`TractionTruthSimTest`) | μ g within 3%, every direction within 5% | passes |
+| Each wheel's slip onset against μ times its own load, and the loads under weight transfer | within 3% | **known gaps:** every wheel slips at once, at 209 N, against 124.7 N for the front ones (their motors' push: 122.9 N at the tread, the rest spinning the wheel up); every wheel carries a quarter of the weight |
+| One module pointed 10° off the other three: the robot turns toward it (going straight would take 214 N across the other front wheel, past its 199.5 N of grip), no faster than the odd wheel rolls with the rear two | more than 0.05° and less than 16.4° a second, at 1 m/s | passes, at 4.8° a second, as the best fit of the four, not by friction |
+| Lift-off at a crest, square and at 45° (`TerrainTruthTest`, in the library) | three touch and one hangs by the ground's twist, within 2 mm, in 99% of places | square passes; at 45°, **known gap:** every wheel a quarter of the twist off the ground |
+| Camera geometry from surveyed poses, level and tilted (`CameraTruthSimTest`) | corners against a pinhole within 0.01 px; each tag's solve within 1 mm and 0.05°; seen just inside the image, not just outside | passes |
+| Latency and rates (`CameraTruthSimTest`, `CameraTimingSimTest`, `OdometryTruthSimTest`) | stamps within 2 ms on average (4 mm at 2 m/s), and off by a clock offset within as much; latency within 0.5 ms and 10%; frame, CANcoder, and gyro rates within 1% | passes (the latency as consistency only), but the frame rate, a **known gap:** 29.3 frames a second against 30, as PhotonVision's simulation holds a frame back behind a slow image |
+| Odometry against kinematics, exact sensors, no slip | within 0.1% of the distance, 0.05° a turn | consistency today: the physics moves by the same fit odometry makes, so it can't fail; an engine whose tread rolls on a compliant contact can |
+| The accelerometer (`AccelerometerTruthTest`, in the library) | errors off, physics' specific force exactly (gravity on a tilt, the lever arm, a launch); its noise and bias as configured; an exact clip; a sample every 10 ms | passes (the launch as consistency only) |
+| Seeds and independence (`SeedsTruthSimTest`, and `DeterminismTruthTest` in the library) | no stream shared over a hundred seeds; draws uncorrelated within 3 / √n, within a world and between neighboring seeds' first draws; bit-identical alone, repeated, beside seven others, and in another JVM | passes: each stream is the seed mixed with its kind, then its index (`Seeds.stream`) |
+
+What it doesn't check yet: the frame meeting a crest (the robot's definition doesn't say how high it
+rides), dynamic events (a hop at speed, a landing, a bumper's impact), which only a real robot's logs
+can check, and how Phoenix's own simulated devices behave under the simulator's stepped time.

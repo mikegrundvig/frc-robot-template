@@ -1,6 +1,7 @@
 package frc.robot.studies;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.simulation.Seeds;
 import frc.robot.Robots;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.IOException;
@@ -166,6 +167,25 @@ public final class ConsistencyStudy {
     out.println("Report: " + directory.toAbsolutePath().resolve("summary.md"));
   }
 
+  /** A fingerprint carried on through every bit of these loops' errors and claims. */
+  static long fingerprint(long fingerprint, List<Consistency.Sample> samples) {
+    long mixed = fingerprint;
+    for (Consistency.Sample sample : samples) {
+      mixed =
+          Seeds.mix(
+              mixed,
+              sample.errorX(),
+              sample.errorY(),
+              sample.errorHeading(),
+              sample.covariance().xx(),
+              sample.covariance().xy(),
+              sample.covariance().yy(),
+              sample.covariance().heading(),
+              sample.tracking() ? 1 : 0);
+    }
+    return mixed;
+  }
+
   /** Every run, once per seed: one robot at a time, since WPILib's simulation is one a program. */
   static List<Result> study(
       List<ConsistencyRuns.Run> runs,
@@ -175,6 +195,7 @@ public final class ConsistencyStudy {
       PrintStream out) {
     List<Result> results = new ArrayList<>();
     double tolerance = Robots.SIM.vision().mountToleranceMeters();
+    long fingerprint = 0;
     for (ConsistencyRuns.Run run : runs) {
       Consistency consistency = new Consistency();
       Map<String, Integer> doubted = new LinkedHashMap<>();
@@ -184,6 +205,7 @@ public final class ConsistencyStudy {
         ConsistencyRuns.Played played = ConsistencyRuns.play(run, seed, setup);
         List<Consistency.Sample> samples = played.samples();
         consistency.add(samples);
+        fingerprint = fingerprint(fingerprint, samples);
         for (Map.Entry<String, Double> camera : played.mostDoubtMeters().entrySet()) {
           doubted.merge(camera.getKey(), camera.getValue() > 0 ? 1 : 0, Integer::sum);
           mostDoubt.merge(camera.getKey(), camera.getValue() / seeds, Double::sum);
@@ -223,6 +245,8 @@ public final class ConsistencyStudy {
           100 * summary.meanErrorMeters());
       results.add(new Result(run, consistency, doubted, mostDoubt, outOfCalibration));
     }
+    // Two studies with the same options print the same: the simulation repeats to the bit.
+    out.printf(Locale.ROOT, "Every loop's error and claim, to the bit: %016x%n", fingerprint);
     return results;
   }
 

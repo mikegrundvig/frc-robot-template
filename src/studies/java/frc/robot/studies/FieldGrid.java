@@ -2,6 +2,7 @@ package frc.robot.studies;
 
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.Body;
 import java.util.ArrayList;

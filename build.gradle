@@ -72,9 +72,10 @@ dependencies {
     implementation libs.jspecify
 
     // The libraries (lib/, each its own project): the world model (the validation kit, the field,
-    // and the robot's definition), and localization, which reads it.
+    // and the robot's definition), and localization and the simulation, which read it.
     implementation project(":world")
     implementation project(":localization")
+    implementation project(":simulation")
 
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
@@ -95,6 +96,8 @@ dependencies {
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core
     testImplementation libs.archunit
+    // The truth suite's known gaps, which the simulator's tests here share with its library's.
+    testImplementation testFixtures(project(":simulation"))
 }
 
 application.mainClass = "frc.robot.Main"

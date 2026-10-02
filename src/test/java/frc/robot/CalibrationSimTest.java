@@ -3,9 +3,9 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.sim.SensorErrors;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -75,8 +75,11 @@ class CalibrationSimTest {
 
     String report = run(sim.robot().calibration().gyroScale(), 60);
 
-    assertThat(report).startsWith("Gyro scale ").contains("reads 0.3");
-    assertThat(numbers(report)[0]).isCloseTo(1 / 1.003, within(0.0002));
+    // Within 0.03% of the truth (half a degree over five turns): the cameras' noise, which the
+    // fixes the procedure turns against carry, allows that much.
+    assertThat(report).startsWith("Gyro scale ").contains("% high");
+    assertThat(numbers(report)[0]).isCloseTo(1 / 1.003, within(0.0003));
+    assertThat(numbers(report)[1]).as("percent high").isCloseTo(0.3, within(0.03));
 
     // Five turns on a gyro reading 0.3% high leave the heading 5.5° off, and the pose centimeters
     // off while the cameras bring them back: every tag lands off then, and no camera is to blame.

@@ -4,13 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.ValuesRegister.CodeRecord;
 import frc.robot.ValuesRegister.Committed;
 import frc.robot.ValuesRegister.Component;
 import frc.robot.ValuesRegister.Knob;
 import frc.robot.ValuesRegister.Switch;
-import frc.robot.sim.SensorErrors;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -143,7 +143,7 @@ class ValuesRegisterTest {
     assertThat(ValuesRegister.registerName("frc.robot.subsystems.drive.DrivetrainControl$Limits"))
         .isEqualTo("DrivetrainControl.Limits");
     assertThat(record("SensorErrors.GyroErrors").className())
-        .isEqualTo("frc.robot.sim.SensorErrors$GyroErrors");
+        .isEqualTo("com.michaelgrundvig.frc.simulation.SensorErrors$GyroErrors");
   }
 
   private static CodeRecord record(String name) {

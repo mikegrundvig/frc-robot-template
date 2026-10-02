@@ -11,6 +11,7 @@ import com.michaelgrundvig.frc.localization.TagAllowlist;
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.VisionResult;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotConfig;

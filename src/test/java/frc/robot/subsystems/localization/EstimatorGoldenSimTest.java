@@ -4,12 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
-import frc.robot.sim.SensorErrors;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;

@@ -8,10 +8,10 @@ import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
-import frc.robot.sim.SensorErrors;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -291,28 +291,23 @@ class VisionSimTest {
   }
 
   /**
-   * The promises each way of correcting the heading keeps for a camera turned 4°, as measured. The
-   * full update keeps the first two: the camera is out of calibration and counts for less, and the
-   * back cameras are never doubted; but it's doubted by only 5.7 cm, and the last lap is 4.7 cm
-   * off, against 5.4 cm with it trusted as before: closer, not a fifth closer. Leaving the heading
-   * to measurements with a heading of their own, a turned camera's headings pull the estimate's
-   * heading its way, its neighbour's tags land off too, and the check doesn't doubt it at all: the
-   * last lap is 5.6 cm off, against 5.5 cm trusted as before. Adding the doubt to what each camera
-   * repeats changes the last lap little (5.5 cm). This test shows which; it changes when one does,
-   * either way.
+   * The promises each way of correcting the heading keeps for a camera turned 4°, as measured. Each
+   * keeps the first two: the camera is out of calibration and counts for less, and the back cameras
+   * are never doubted; and each breaks the other two. The full update doubts it by 6.5 cm, and the
+   * last lap is 3.7 cm off, against 4.5 cm with it trusted as before: closer, not a fifth closer.
+   * Leaving the heading to measurements with a heading of their own, a turned camera's headings
+   * pull the estimate's heading its way, and its neighbour's tags land off too: it's doubted by 3.0
+   * cm, and the last lap is 4.1 cm off, against 4.2 trusted as before; adding the doubt to what
+   * each camera repeats, 3.1 cm and 4.3. Whether those two call the camera out at all hangs on the
+   * noise the seed draws: drawn as offsets from the seed, they never did. This test shows which; it
+   * changes when one does, either way.
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)
   void aCameraTurnedOnItsMountCountsForLess(EstimatorConfig.HeadingCorrection heading) {
     List<String> broken = turnedFourDegrees(heading).stream().map(VisionSimTest::promise).toList();
 
-    if (heading == EstimatorConfig.HeadingCorrection.EVERY_FIX) {
-      assertThat(broken).as("the promises broken").containsExactly("doubted", "last lap");
-    } else {
-      assertThat(broken)
-          .as("the promises broken")
-          .containsExactly("no alert", "doubted", "last lap");
-    }
+    assertThat(broken).as("the promises broken").containsExactly("doubted", "last lap");
   }
 
   /** Which promise a broken one was: the words before its numbers. */

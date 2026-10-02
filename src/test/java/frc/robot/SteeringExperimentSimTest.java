@@ -3,7 +3,7 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.sim.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import io.avaje.jsonb.JsonType;
 import io.avaje.jsonb.Jsonb;
 import java.io.UncheckedIOException;

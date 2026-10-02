@@ -2,6 +2,8 @@ package frc.robot.subsystems.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrorsAccelErrorsBuilder;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.ImuMountBuilder;
 import com.michaelgrundvig.frc.world.robot.ImusBuilder;
@@ -12,8 +14,6 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.sim.DriveSimHarness;
-import frc.robot.sim.SensorErrors;
-import frc.robot.sim.SensorErrorsAccelErrorsBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Rotation3d;

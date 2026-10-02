@@ -1,8 +1,8 @@
 package frc.robot.sim;
 
-import static frc.robot.sim.Faults.BACKUP_IMU;
-import static frc.robot.sim.Faults.GYRO;
-import static frc.robot.sim.Faults.ROBOT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.BACKUP_IMU;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.GYRO;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.ROBOT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
@@ -10,6 +10,9 @@ import static org.wpilib.units.Units.Meters;
 import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
+import com.michaelgrundvig.frc.simulation.KinematicPhysics;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.timing.RobotLoop;
@@ -111,12 +114,12 @@ class FaultsTest {
         .containsExactly(
             GYRO,
             BACKUP_IMU,
-            Faults.module(0),
-            Faults.module(1),
-            Faults.module(2),
-            Faults.module(3),
+            FaultCatalog.module(0),
+            FaultCatalog.module(1),
+            FaultCatalog.module(2),
+            FaultCatalog.module(3),
             ROBOT,
-            Faults.FIELD);
+            FaultCatalog.FIELD);
   }
 
   /**
@@ -130,12 +133,18 @@ class FaultsTest {
     Pose3d layout = RobotSim.FIELD.tag(26).orElseThrow();
     Pose3d other = RobotSim.FIELD.tag(25).orElseThrow();
 
-    apply(Faults.FIELD, Faults.TAG_MOVED, Map.of(Faults.TAG, 26.0, "X", 4.0, "Y", 0.0, "Up", -2.0));
+    apply(
+        FaultCatalog.FIELD,
+        FaultCatalog.TAG_MOVED,
+        Map.of(FaultCatalog.TAG, 26.0, "X", 4.0, "Y", 0.0, "Up", -2.0));
     Pose3d moved = world.vision().tagPose(26).orElseThrow();
-    apply(Faults.FIELD, Faults.TAG_MOVED, Map.of(Faults.TAG, 25.0, "X", 0.0, "Y", 4.0, "Up", 0.0));
+    apply(
+        FaultCatalog.FIELD,
+        FaultCatalog.TAG_MOVED,
+        Map.of(FaultCatalog.TAG, 25.0, "X", 0.0, "Y", 4.0, "Up", 0.0));
     Pose3d first = world.vision().tagPose(26).orElseThrow();
     Pose3d second = world.vision().tagPose(25).orElseThrow();
-    undo(Faults.FIELD, Faults.TAG_MOVED);
+    undo(FaultCatalog.FIELD, FaultCatalog.TAG_MOVED);
 
     Translation3d expected = built.plus(new Translation3d(0.1016, 0, -0.0508));
     assertThat(moved.getTranslation().minus(layout.getTranslation()).getDistance(expected))
@@ -154,7 +163,10 @@ class FaultsTest {
 
     assertThat(
             components.apply(
-                Setting.of(Faults.FIELD, Faults.TAG_MOVED, Map.of(Faults.TAG, 26.5, "X", 4.0))))
+                Setting.of(
+                    FaultCatalog.FIELD,
+                    FaultCatalog.TAG_MOVED,
+                    Map.of(FaultCatalog.TAG, 26.5, "X", 4.0))))
         .contains("whole number");
     assertThat(components.on()).isEmpty();
   }
@@ -165,10 +177,10 @@ class FaultsTest {
     SimulatedWorld world = world();
     read(imu(world, name)); // what it read before
 
-    apply(name, Faults.UNPLUGGED);
+    apply(name, FaultCatalog.UNPLUGGED);
     step(world);
     GyroIO.GyroIOInputs unplugged = read(imu(world, name));
-    undo(name, Faults.UNPLUGGED);
+    undo(name, FaultCatalog.UNPLUGGED);
     step(world);
 
     assertThat(unplugged.connected).isFalse();
@@ -182,10 +194,10 @@ class FaultsTest {
   void aFrozenImuMissesTurnsUntilUndone(String name) {
     SimulatedWorld world = world();
 
-    apply(name, Faults.FROZEN);
+    apply(name, FaultCatalog.FROZEN);
     turn(world, 30);
     double frozen = read(imu(world, name)).yaw.getDegrees();
-    undo(name, Faults.FROZEN);
+    undo(name, FaultCatalog.FROZEN);
     turn(world, 10);
 
     assertThat(frozen).isCloseTo(0, within(1e-9));
@@ -199,12 +211,12 @@ class FaultsTest {
     SimulatedWorld world = world();
     turn(world, 20);
 
-    apply(name, Faults.ERRORS, Map.of(Faults.SCALE, 1.5));
+    apply(name, FaultCatalog.ERRORS, Map.of(FaultCatalog.SCALE, 1.5));
     step(world);
     double atTheChange = read(imu(world, name)).yaw.getDegrees();
     turn(world, 30);
     double erring = read(imu(world, name)).yaw.getDegrees();
-    undo(name, Faults.ERRORS);
+    undo(name, FaultCatalog.ERRORS);
     turn(world, 30);
 
     assertThat(atTheChange).as("no jump").isCloseTo(20, within(1e-9));
@@ -218,14 +230,14 @@ class FaultsTest {
     SimulatedWorld world = world();
     turn(world, 30);
 
-    apply(name, Faults.RESET);
+    apply(name, FaultCatalog.RESET);
     step(world);
     double reset = read(imu(world, name)).yaw.getDegrees();
     turn(world, 10);
 
     assertThat(reset).isCloseTo(0, within(1e-9));
     assertThat(read(imu(world, name)).yaw.getDegrees()).isCloseTo(10, within(1e-9));
-    assertThat(components.undo(name, Faults.RESET))
+    assertThat(components.undo(name, FaultCatalog.RESET))
         .as("an event isn't undone")
         .contains("happens once, and nothing undoes it");
   }
@@ -239,15 +251,15 @@ class FaultsTest {
     ModuleIO module = world.drivetrainHardware().modules().get(0);
     drive(world, 3.0, 0.2);
 
-    apply(Faults.module(0), Faults.STALE);
+    apply(FaultCatalog.module(0), FaultCatalog.STALE);
     ModuleIOInputs before = read(module);
     module.configure(Robots.SIM.drivetrain().gains(), Robots.SIM.drivetrain().limits());
     module.setSteerAngle(Rotation2d.fromDegrees(30));
     drive(world, 3.0, 0.5);
     ModuleIOInputs stale = read(module);
     drive(world, 3.0, 0.1);
-    double truth = world.drivetrain().moduleSim(0).wheelRotationRadians();
-    undo(Faults.module(0), Faults.STALE);
+    double truth = world.drivetrain().physics().wheel(0).rotationRadians();
+    undo(FaultCatalog.module(0), FaultCatalog.STALE);
     step(world);
     ModuleIOInputs caughtUp = read(module);
 
@@ -273,7 +285,7 @@ class FaultsTest {
     step(world);
     step(world); // turning
 
-    apply(Faults.module(0), Faults.STALE);
+    apply(FaultCatalog.module(0), FaultCatalog.STALE);
     double heard = read(module).steerVelocityRadPerSec;
     drive(world, 0, 0.5); // the module settles at 90°, unheard
     double held = read(module).steerVelocityRadPerSec;
@@ -288,9 +300,12 @@ class FaultsTest {
   @Test
   void undoingPutsASeasonWornRobotBackAsBuilt() {
     SimulatedWorld world = world(SensorErrors.TYPICAL);
-    apply(GYRO, Faults.ERRORS, Map.of(Faults.SCALE, 1.2, Faults.DRIFT, 0.0, Faults.NOISE, 0.0));
-    apply(Faults.module(0), Faults.ZEROED_OFF, Map.of(Faults.OFFSET, 10.0));
-    apply(Faults.module(1), Faults.WORN, Map.of(Faults.SCALE, 0.9));
+    apply(
+        GYRO,
+        FaultCatalog.ERRORS,
+        Map.of(FaultCatalog.SCALE, 1.2, FaultCatalog.DRIFT, 0.0, FaultCatalog.NOISE, 0.0));
+    apply(FaultCatalog.module(0), FaultCatalog.ZEROED_OFF, Map.of(FaultCatalog.OFFSET, 10.0));
+    apply(FaultCatalog.module(1), FaultCatalog.WORN, Map.of(FaultCatalog.SCALE, 0.9));
     assertThat(components.on()).hasSize(3);
 
     assertThat(components.undoAll()).isNull();
@@ -308,7 +323,7 @@ class FaultsTest {
   void aFaultAsBuiltChangesNothing() {
     world(SensorErrors.TYPICAL);
 
-    assertThat(components.apply(Setting.of(Faults.module(2), Faults.ZEROED_OFF)))
+    assertThat(components.apply(Setting.of(FaultCatalog.module(2), FaultCatalog.ZEROED_OFF)))
         .isEqualTo("Back left module: Zeroed off changes nothing: as built");
     assertThat(components.on()).isEmpty();
   }
@@ -320,10 +335,10 @@ class FaultsTest {
     ModuleIO module = world.drivetrainHardware().modules().get(2);
     double before = read(module).steerAngle.getDegrees();
 
-    apply(Faults.module(2), Faults.ZEROED_OFF, Map.of(Faults.OFFSET, 10.0));
+    apply(FaultCatalog.module(2), FaultCatalog.ZEROED_OFF, Map.of(FaultCatalog.OFFSET, 10.0));
     step(world);
     double off = read(module).steerAngle.getDegrees();
-    undo(Faults.module(2), Faults.ZEROED_OFF);
+    undo(FaultCatalog.module(2), FaultCatalog.ZEROED_OFF);
     step(world);
 
     assertThat(off - before).isCloseTo(-10, within(1e-6));
@@ -336,12 +351,12 @@ class FaultsTest {
     double fresh = drive(world(), 3.0, 1.0);
     SimulatedWorld worn = world();
     for (int i = 0; i < 4; i++) {
-      apply(Faults.module(i), Faults.WORN, Map.of(Faults.SCALE, 0.9));
+      apply(FaultCatalog.module(i), FaultCatalog.WORN, Map.of(FaultCatalog.SCALE, 0.9));
     }
 
     double wornDistance = drive(worn, 3.0, 1.0);
     for (int i = 0; i < 4; i++) {
-      undo(Faults.module(i), Faults.WORN);
+      undo(FaultCatalog.module(i), FaultCatalog.WORN);
     }
 
     // Within a thousandth: the robot follows its wheels no faster than its grip lets it.
@@ -356,7 +371,7 @@ class FaultsTest {
     ModuleIO module = world.drivetrainHardware().modules().get(3);
     double before = read(module).drivePositionRad;
 
-    apply(Faults.module(3), Faults.SLIPS, Map.of(Faults.TURNS, 1.0));
+    apply(FaultCatalog.module(3), FaultCatalog.SLIPS, Map.of(FaultCatalog.TURNS, 1.0));
     step(world);
 
     assertThat(read(module).drivePositionRad - before).isCloseTo(2 * Math.PI, within(1e-9));
@@ -371,12 +386,12 @@ class FaultsTest {
     double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
     double before = read(module).drivePositionRad;
 
-    apply(Faults.module(2), Faults.SPINNING, Map.of(Faults.SPEED, 0.5));
+    apply(FaultCatalog.module(2), FaultCatalog.SPINNING, Map.of(FaultCatalog.SPEED, 0.5));
     for (int i = 0; i < 10; i++) {
       step(world);
     }
     ModuleIOInputs spinning = read(module);
-    undo(Faults.module(2), Faults.SPINNING);
+    undo(FaultCatalog.module(2), FaultCatalog.SPINNING);
     step(world);
     step(world);
 
@@ -399,14 +414,14 @@ class FaultsTest {
     ModuleIO module = world.drivetrainHardware().modules().get(0);
     double before = read(module).drivePositionRad;
 
-    apply(ROBOT, Faults.PUSHED, Map.of(Faults.FORWARD, 0.0, Faults.LEFT, 1.0));
+    apply(ROBOT, FaultCatalog.PUSHED, Map.of(FaultCatalog.FORWARD, 0.0, FaultCatalog.LEFT, 1.0));
     step(world);
     GyroIO.GyroIOInputs starting = read(world.drivetrain().gyro());
     for (int i = 0; i < 49; i++) {
       step(world);
     }
     double slid = world.truePose().getY() - STANDING.getY();
-    undo(ROBOT, Faults.PUSHED);
+    undo(ROBOT, FaultCatalog.PUSHED);
     step(world);
     GyroIO.GyroIOInputs stopping = read(world.drivetrain().gyro());
     for (int i = 0; i < 20; i++) {
@@ -414,9 +429,9 @@ class FaultsTest {
     }
 
     assertThat(starting.accelerationYMetersPerSecSq)
-        .isCloseTo(DriveSimulation.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
+        .isCloseTo(KinematicPhysics.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
     assertThat(stopping.accelerationYMetersPerSecSq)
-        .isCloseTo(-DriveSimulation.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
+        .isCloseTo(-KinematicPhysics.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
     // A second's push: a third of a second getting going, the rest at 1 m/s.
     assertThat(slid).isCloseTo(1.0 - 1.0 / (2 * 3), within(0.01));
     assertThat(world.truePose().getX()).isCloseTo(STANDING.getX(), within(1e-9));
@@ -432,7 +447,7 @@ class FaultsTest {
   void aTiltedImuFeelsGravitysShare() {
     SimulatedWorld world = world();
 
-    apply(ROBOT, Faults.TILTED, Map.of(Faults.PITCH, -10.0, Faults.ROLL, 5.0));
+    apply(ROBOT, FaultCatalog.TILTED, Map.of(FaultCatalog.PITCH, -10.0, FaultCatalog.ROLL, 5.0));
     step(world);
     GyroIO.GyroIOInputs tilted = read(world.drivetrain().gyro());
 
@@ -451,7 +466,10 @@ class FaultsTest {
   void aShoveMovesTheRobotInItsOwnFrameAndItsGyroFeelsTheTurn() {
     SimulatedWorld world = world();
 
-    apply(ROBOT, Faults.SHOVED, Map.of(Faults.FORWARD, 1.0, Faults.LEFT, 0.0, "Turn", 90.0));
+    apply(
+        ROBOT,
+        FaultCatalog.SHOVED,
+        Map.of(FaultCatalog.FORWARD, 1.0, FaultCatalog.LEFT, 0.0, "Turn", 90.0));
     step(world);
 
     assertThat(world.truePose().getX()).isCloseTo(3.0, within(1e-9));
@@ -462,7 +480,7 @@ class FaultsTest {
   void aHitJoltsTheImu() {
     SimulatedWorld world = world();
 
-    apply(ROBOT, Faults.HIT, Map.of(Faults.FORWARD, 0.5, Faults.LEFT, 0.0));
+    apply(ROBOT, FaultCatalog.HIT, Map.of(FaultCatalog.FORWARD, 0.5, FaultCatalog.LEFT, 0.0));
     step(world);
 
     assertThat(read(world.drivetrain().gyro()).accelerationXMetersPerSecSq)
@@ -474,10 +492,10 @@ class FaultsTest {
   void aTiltIsReadByTheImuUntilTheRobotIsSetBackDown() {
     SimulatedWorld world = world();
 
-    apply(ROBOT, Faults.TILTED, Map.of(Faults.PITCH, -5.0, Faults.ROLL, 3.0));
+    apply(ROBOT, FaultCatalog.TILTED, Map.of(FaultCatalog.PITCH, -5.0, FaultCatalog.ROLL, 3.0));
     step(world);
     GyroIO.GyroIOInputs tilted = read(world.drivetrain().gyro());
-    undo(ROBOT, Faults.TILTED);
+    undo(ROBOT, FaultCatalog.TILTED);
     step(world);
 
     assertThat(Math.toDegrees(tilted.pitchRad)).isCloseTo(-5, within(1e-9));
@@ -490,9 +508,9 @@ class FaultsTest {
     double gripping = drive(world(), 3.0, 1.0);
     SimulatedWorld world = world();
 
-    apply(ROBOT, Faults.SLIPPING, Map.of(Faults.GRIP, 0.5));
+    apply(ROBOT, FaultCatalog.SLIPPING, Map.of(FaultCatalog.GRIP, 0.5));
     double slipping = drive(world, 3.0, 1.0);
-    undo(ROBOT, Faults.SLIPPING);
+    undo(ROBOT, FaultCatalog.SLIPPING);
 
     // Within a thousandth: the robot follows its wheels no faster than its grip lets it.
     assertThat(slipping / gripping).isCloseTo(0.5, within(1e-3));
@@ -503,7 +521,7 @@ class FaultsTest {
   void placedPutsTheRobotWhereAskedAndItsGyroFeelsTheTurn() {
     SimulatedWorld world = world();
 
-    apply(ROBOT, Faults.PLACED, Map.of("X", 5.0, "Y", 2.0, "Heading", -90.0));
+    apply(ROBOT, FaultCatalog.PLACED, Map.of("X", 5.0, "Y", 2.0, "Heading", -90.0));
     step(world);
 
     assertThat(world.truePose().getTranslation().getDistance(new Translation2d(5, 2)))
@@ -515,10 +533,10 @@ class FaultsTest {
   @Test
   void undoingEveryFaultPutsTheRobotBackAsBuilt() {
     SimulatedWorld world = world();
-    apply(GYRO, Faults.UNPLUGGED);
-    apply(BACKUP_IMU, Faults.ERRORS, Map.of(Faults.SCALE, 1.2));
-    apply(Faults.module(1), Faults.STALE);
-    apply(ROBOT, Faults.SLIPPING, Map.of(Faults.GRIP, 0.3));
+    apply(GYRO, FaultCatalog.UNPLUGGED);
+    apply(BACKUP_IMU, FaultCatalog.ERRORS, Map.of(FaultCatalog.SCALE, 1.2));
+    apply(FaultCatalog.module(1), FaultCatalog.STALE);
+    apply(ROBOT, FaultCatalog.SLIPPING, Map.of(FaultCatalog.GRIP, 0.3));
     assertThat(components.on()).hasSize(4);
 
     assertThat(components.undoAll()).isNull();
@@ -536,9 +554,9 @@ class FaultsTest {
   void eachFaultAppliedOrUndoneIsSaid() {
     world();
 
-    apply(GYRO, Faults.FROZEN);
-    undo(GYRO, Faults.FROZEN);
-    apply(ROBOT, Faults.HIT, Map.of(Faults.LEFT, 0.6));
+    apply(GYRO, FaultCatalog.FROZEN);
+    undo(GYRO, FaultCatalog.FROZEN);
+    apply(ROBOT, FaultCatalog.HIT, Map.of(FaultCatalog.LEFT, 0.6));
 
     assertThat(said)
         .containsExactly(

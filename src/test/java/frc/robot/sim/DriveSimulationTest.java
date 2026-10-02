@@ -10,6 +10,8 @@ import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.Body;
@@ -307,25 +309,7 @@ class DriveSimulationTest {
   }
 
   @Test
-  void errorsMustBeRealistic() {
-    assertThatThrownBy(() -> SensorErrors.NONE.withWheelRadiusScale(0))
-        .hasMessage(
-            "SensorErrors.wheelRadiusScale: [0] 0 must be positive; [1] 0 must be positive;"
-                + " [2] 0 must be positive; [3] 0 must be positive");
-    assertThatThrownBy(
-            () ->
-                SensorErrorsBuilder.builder(SensorErrors.NONE)
-                    .wheelRadiusScale(List.of(1.0, 1.0, 1.0))
-                    .build())
-        .hasMessage("SensorErrors.wheelRadiusScale: must have 4, has 3");
-    assertThatThrownBy(
-            () ->
-                SensorErrorsBuilder.builder(SensorErrors.NONE)
-                    .steerOffsetDegrees(List.of(0.0, 0.0, 0.0, Double.NaN))
-                    .build())
-        .hasMessage("SensorErrors.steerOffsetDegrees: [3] NaN must be a finite number");
-    assertThatThrownBy(() -> gyro(1.0, Double.NaN))
-        .hasMessage("GyroErrors.driftDegreesPerMinute: NaN must be a finite number");
+  void aStepTakesTime() {
     assertThatThrownBy(() -> robot(SensorErrors.NONE).simulation.step(0, 0))
         .hasMessageContaining("a step takes time");
   }

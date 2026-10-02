@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.game.Rebuilt;
@@ -11,7 +12,6 @@ import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenario;
-import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SimulatedWorld;
 import java.util.List;
 import java.util.Objects;

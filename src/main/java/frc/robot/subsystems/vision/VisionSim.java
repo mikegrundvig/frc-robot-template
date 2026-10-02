@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.IntToLongFunction;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
@@ -24,7 +25,7 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.interpolation.TimeInterpolatableBuffer;
-import org.wpilib.system.Timer;
+import org.wpilib.system.RobotController;
 
 /**
  * The simulator's cameras: PhotonVision's own simulation, rendering each camera's view of the tags
@@ -47,25 +48,61 @@ public final class VisionSim implements AutoCloseable {
 
   public static final double CORNER_NOISE_STD_DEV_PIXELS = 0.08;
 
-  /** Each seed's cameras draw their noise from seeds this far apart. */
-  private static final long SEEDS_PER_WORLD = 1000;
+  /** How much each image's latency varies, as a standard deviation: PhotonVision's example. */
+  public static final double LATENCY_STD_DEV_MILLIS = 5;
+
+  /**
+   * How a simulated camera errs from a perfect one: its tag corners' noise, in pixels, and its
+   * latency's spread.
+   *
+   * @param cornerMeanPixels how far each corner lands from where a perfect camera puts it, on
+   *     average
+   * @param cornerStdDevPixels and that distance's spread
+   * @param latencyStdDevMillis how much each image's latency varies about the configured one
+   */
+  public record Noise(
+      double cornerMeanPixels, double cornerStdDevPixels, double latencyStdDevMillis) {
+    /** PhotonVision's example camera: corners a quarter pixel off, latency varying by 5 ms. */
+    public static final Noise TYPICAL =
+        new Noise(CORNER_NOISE_MEAN_PIXELS, CORNER_NOISE_STD_DEV_PIXELS, LATENCY_STD_DEV_MILLIS);
+
+    /** A perfect camera: every corner where the lens puts it, every image exactly as late. */
+    public static final Noise NONE = new Noise(0, 0, 0);
+  }
 
   /** How far back the robot's true poses are kept, for the images taken that long ago. */
   private static final double HISTORY_SECONDS = 1.5;
 
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
-  private final long seed;
+  private final IntToLongFunction cameraSeeds;
+  private final Noise noise;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
-  /** Where the robot really was, loop by loop: what each image is taken from. */
+  /**
+   * When this world began, on the robot's clock, in nanoseconds. Its truth is kept by the time
+   * since: the clock itself counts from wherever the computer's monotonic clock stood when the
+   * simulation started (days of uptime, 10^14 ns and more), where a double's step is a tenth of a
+   * nanosecond, so poses kept by the clock's own seconds would interpolate a little differently
+   * from run to run, and an image's corners with them.
+   */
+  private final long startNanos = RobotController.getMonotonicTime();
+
+  /** Where the robot really was, loop by loop, by seconds since the world began. */
   private final TimeInterpolatableBuffer<Pose3d> truths =
       TimeInterpolatableBuffer.createBuffer(HISTORY_SECONDS);
 
-  /** A camera as added: PhotonVision's simulation of it, its configured mount and latency. */
-  private record Added(PhotonCameraSim simulated, Transform3d configured, double latencyMillis) {}
+  /**
+   * A camera as added: PhotonVision's simulation of it, its configured mount and latency, and where
+   * it's mounted now, which its images are taken from.
+   */
+  private record Added(
+      PhotonCameraSim simulated, Transform3d configured, double latencyMillis, Transform3d mount) {}
 
   private final Map<String, Added> byName = new LinkedHashMap<>();
+
+  /** How far each camera's clock is off the robot's, by name, in nanoseconds: none, unless set. */
+  private final Map<String, Long> clockOffsets = new LinkedHashMap<>();
 
   /** The field's tags as the cameras see them, by ID, and where each was as the world was built. */
   private final Map<Integer, VisionTargetSim> tags = new LinkedHashMap<>();
@@ -81,11 +118,26 @@ public final class VisionSim implements AutoCloseable {
    * @param tagErrors by tag ID, how far each tag really sits from where the field's layout says, in
    *     the field's frame, as the world is built: the cameras see it there, while their multi-tag
    *     solves, as the coprocessor's do, believe the layout ({@link #moveTag} moves one further)
-   * @param seed where the cameras' noise starts: each camera draws its own from it, so a run
-   *     repeats exactly, and a run with another seed sees other noise. Seed 1's cameras draw from
-   *     1, 2, 3, and on; seed 2's from 1001, 1002, and on.
+   * @param cameraSeeds where each camera's noise starts, by its place in the order the cameras are
+   *     added, from 0: each draws its own, so a run repeats exactly, and a run with another seed
+   *     sees other noise. The simulator gives each camera its own stream of the world's seed
+   *     ({@code Seeds.camera}).
    */
-  public VisionSim(FieldModel field, Map<Integer, Translation3d> tagErrors, long seed) {
+  public VisionSim(
+      FieldModel field, Map<Integer, Translation3d> tagErrors, IntToLongFunction cameraSeeds) {
+    this(field, tagErrors, cameraSeeds, Noise.TYPICAL);
+  }
+
+  /**
+   * As above, its cameras erring as {@code noise} says: {@link Noise#NONE} for perfect ones, whose
+   * images a test can check against a pinhole camera's.
+   */
+  public VisionSim(
+      FieldModel field,
+      Map<Integer, Translation3d> tagErrors,
+      IntToLongFunction cameraSeeds,
+      Noise noise) {
+    this.noise = noise;
     layout = field.toField();
     List<FieldTag> real = new ArrayList<>();
     for (FieldTag tag : layout.getTags()) {
@@ -108,7 +160,7 @@ public final class VisionSim implements AutoCloseable {
     for (VisionTargetSim target : world.getVisionTargets("apriltag")) {
       tags.put(target.fiducialID, target);
     }
-    this.seed = seed;
+    this.cameraSeeds = cameraSeeds;
   }
 
   /** The field's tags' IDs, as its layout lists them. */
@@ -172,30 +224,37 @@ public final class VisionSim implements AutoCloseable {
   public CameraIO camera(CameraConfig config, Transform3d mountError) {
     CameraIOPhotonVision io = new CameraIOPhotonVision(config.name());
     // Seeded, one seed per camera, so a simulated run repeats exactly.
-    long cameraSeed = (seed - 1) * SEEDS_PER_WORLD + cameras.size() + 1;
     PhotonCameraSim simulated =
-        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameraSeed), layout);
+        new PhotonCameraSim(
+            io.camera(),
+            properties(config.sensor(), cameraSeeds.applyAsLong(cameras.size()), noise),
+            layout);
     // Tags farther than the camera's sight range are not detected: small in the image, and noisy.
     simulated.setMaxSightRange(config.sensor().sightRange().in(Meters));
     Transform3d configured = config.robotToCamera();
-    world.addCamera(simulated, mounted(configured, mountError));
+    Transform3d mount = mounted(configured, mountError);
+    world.addCamera(simulated, mount);
     cameras.add(simulated);
     byName.put(
         config.name(),
-        new Added(simulated, configured, config.sensor().latency().in(Milliseconds)));
+        new Added(simulated, configured, config.sensor().latency().in(Milliseconds), mount));
     return io;
   }
 
   /**
    * Mounts a camera off its configuration from now on, as {@link #camera(CameraConfig,
-   * Transform3d)} does when it's added: images taken from now on see from there.
+   * Transform3d)} does when it's added: images rendered from now on see from there, an image
+   * already taken and still on its way included.
    *
    * @param mountError in the robot's frame, from the configured mount; zero puts it back
    * @throws IllegalArgumentException if no camera has this name
    */
   public void mount(String camera, Transform3d mountError) {
     Added added = added(camera);
-    world.adjustCamera(added.simulated(), mounted(added.configured(), mountError));
+    Transform3d mount = mounted(added.configured(), mountError);
+    world.adjustCamera(added.simulated(), mount);
+    byName.put(
+        camera, new Added(added.simulated(), added.configured(), added.latencyMillis(), mount));
   }
 
   /**
@@ -209,6 +268,19 @@ public final class VisionSim implements AutoCloseable {
   public void addLatency(String camera, double extraMillis) {
     Added added = added(camera);
     added.simulated().prop.setAvgLatencyMs(added.latencyMillis() + extraMillis);
+  }
+
+  /**
+   * Sets a camera's clock this far off the robot's, from now on: each image is stamped this much
+   * later than it was taken (earlier, if negative), as a coprocessor whose time sync is off stamps
+   * it, though it arrives when it would have. Unlike {@link #addLatency}, the stamps are wrong.
+   *
+   * @param millis zero for a clock that agrees with the robot's
+   * @throws IllegalArgumentException if no camera has this name
+   */
+  public void offsetClock(String camera, double millis) {
+    added(camera);
+    clockOffsets.put(camera, Math.round(millis * 1e6));
   }
 
   private Added added(String camera) {
@@ -239,15 +311,20 @@ public final class VisionSim implements AutoCloseable {
    * @param seed where the noise starts, so a run repeats exactly
    */
   public static SimCameraProperties properties(CameraConfig.Sensor sensor, long seed) {
+    return properties(sensor, seed, Noise.TYPICAL);
+  }
+
+  /** As above, erring as {@code noise} says. */
+  static SimCameraProperties properties(CameraConfig.Sensor sensor, long seed, Noise noise) {
     return new SimCameraProperties()
         .setCalibration(
             sensor.widthPixels(),
             sensor.heightPixels(),
             Rotation2d.fromDegrees(sensor.diagonalFieldOfView().in(Degrees)))
-        .setCalibError(CORNER_NOISE_MEAN_PIXELS, CORNER_NOISE_STD_DEV_PIXELS)
+        .setCalibError(noise.cornerMeanPixels(), noise.cornerStdDevPixels())
         .setFPS(sensor.frameRate().in(Hertz))
         .setAvgLatencyMs(sensor.latency().in(Milliseconds))
-        .setLatencyStdDevMs(5)
+        .setLatencyStdDevMs(noise.latencyStdDevMillis())
         .setRandomSeed(seed);
   }
 
@@ -265,9 +342,10 @@ public final class VisionSim implements AutoCloseable {
    * 0.7° off after the gyro-scale procedure (docs/testing.md).
    */
   public void update(Pose3d truth) {
-    truths.addSample(Timer.getMonotonicTimestamp(), truth);
+    truths.addSample(sinceStart(RobotController.getMonotonicTime()), truth);
     List<VisionTargetSim> targets = List.copyOf(world.getVisionTargets());
-    for (PhotonCameraSim camera : cameras) {
+    for (Map.Entry<String, Added> added : byName.entrySet()) {
+      PhotonCameraSim camera = added.getValue().simulated();
       Optional<Long> due = camera.consumeNextEntryTime();
       if (due.isEmpty()) {
         continue;
@@ -275,16 +353,21 @@ public final class VisionSim implements AutoCloseable {
       long arrivedNanos = due.get();
       double latencyMillis = camera.prop.estLatencyMs();
       long takenNanos = arrivedNanos - Math.round(latencyMillis * 1e6);
-      double taken = takenNanos / 1e9;
-      Pose3d robot = truths.getSample(taken).orElse(truth);
-      Pose3d from = robot.plus(world.getRobotToCamera(camera, taken).orElseThrow());
+      Pose3d robot = truths.getSample(sinceStart(takenNanos)).orElse(truth);
+      Pose3d from = robot.plus(added.getValue().mount());
       PhotonPipelineResult image = camera.process(latencyMillis, from, targets);
-      image.metadata.captureTimestampNanos = takenNanos;
+      image.metadata.captureTimestampNanos =
+          takenNanos + clockOffsets.getOrDefault(added.getKey(), 0L);
       image.metadata.publishTimestampNanos = arrivedNanos;
       camera.submitProcessedFrame(image, arrivedNanos);
     }
     // Every image due is taken, so PhotonVision's own update only keeps its record of the robot.
     world.update(truth);
+  }
+
+  /** How long after this world began a moment on the robot's clock was, in seconds. */
+  private double sinceStart(long nanos) {
+    return (nanos - startNanos) / 1e9;
   }
 
   @Override

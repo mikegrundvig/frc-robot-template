@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -71,7 +73,7 @@ class CameraFaultsSimTest {
     assertThat(seen[best]).as("tags seen from where the robot stands").isPositive();
     camera = cameras[best];
     CameraConfig config = Robots.SIM.definition().cameras().get(best);
-    name = Faults.camera(config.name());
+    name = FaultCatalog.camera(config.name());
   }
 
   @AfterEach
@@ -85,9 +87,9 @@ class CameraFaultsSimTest {
 
   @Test
   void anUnpluggedCameraSendsNothingUntilPluggedBackIn() {
-    apply(Faults.UNPLUGGED, Map.of());
+    apply(FaultCatalog.UNPLUGGED, Map.of());
     List<CameraIO.CameraIOInputs> unplugged = loops(10);
-    undo(Faults.UNPLUGGED);
+    undo(FaultCatalog.UNPLUGGED);
     List<CameraIO.CameraIOInputs> plugged = loops(10);
 
     assertThat(unplugged).allSatisfy(inputs -> assertThat(inputs.connected).isFalse());
@@ -99,10 +101,10 @@ class CameraFaultsSimTest {
   /** Frozen, it sends its last image's tags as new, however the robot moves; then sees again. */
   @Test
   void aFrozenCameraSendsTheSameTagsAsNewUntilUndone() {
-    apply(Faults.FROZEN, Map.of());
+    apply(FaultCatalog.FROZEN, Map.of());
     world().place(new Pose2d(2.5, 3.6, Rotation2d.fromDegrees(10))); // where it sees otherwise
     List<CameraIO.CameraIOInputs> frozen = loops(10);
-    undo(Faults.FROZEN);
+    undo(FaultCatalog.FROZEN);
     List<CameraIO.CameraIOInputs> unfrozen = loops(10);
 
     // Every image the same tags, the last image's before it froze, each stamped as new.
@@ -127,10 +129,12 @@ class CameraFaultsSimTest {
     int tag = mostCentered(seen);
     Translation2d before = meanCorner(seen, tag);
 
-    apply(Faults.MOVED, Map.of(Faults.FORWARD, 0.0, Faults.LEFT, 0.0, Faults.UP, -6.0));
+    apply(
+        FaultCatalog.MOVED,
+        Map.of(FaultCatalog.FORWARD, 0.0, FaultCatalog.LEFT, 0.0, FaultCatalog.UP, -6.0));
     loops(5); // images taken before the knock arrive first
     Translation2d knocked = meanCorner(loops(15), tag);
-    undo(Faults.MOVED);
+    undo(FaultCatalog.MOVED);
     loops(5);
     Translation2d after = meanCorner(loops(15), tag);
 
@@ -145,10 +149,12 @@ class CameraFaultsSimTest {
     int tag = mostCentered(seen);
     Translation2d before = meanCorner(seen, tag);
 
-    apply(Faults.TURNED, Map.of(Faults.ROLL, 0.0, Faults.PITCH, 0.0, Faults.YAW, 2.0));
+    apply(
+        FaultCatalog.TURNED,
+        Map.of(FaultCatalog.ROLL, 0.0, FaultCatalog.PITCH, 0.0, FaultCatalog.YAW, 2.0));
     loops(5);
     Translation2d turned = meanCorner(loops(15), tag);
-    undo(Faults.TURNED);
+    undo(FaultCatalog.TURNED);
     loops(5);
     Translation2d after = meanCorner(loops(15), tag);
 
@@ -162,10 +168,10 @@ class CameraFaultsSimTest {
   void aLateCameraSendsItsImagesLater() {
     double usual = meanLatencySeconds(30);
 
-    apply(Faults.LATE, Map.of(Faults.EXTRA, 200.0));
+    apply(FaultCatalog.LATE, Map.of(FaultCatalog.EXTRA, 200.0));
     loops(15); // the images already on their way arrive first
     double late = meanLatencySeconds(30);
-    undo(Faults.LATE);
+    undo(FaultCatalog.LATE);
     loops(15);
     double after = meanLatencySeconds(30);
 

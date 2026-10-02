@@ -6,11 +6,11 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenarios;
-import frc.robot.sim.SensorErrors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -71,7 +71,10 @@ class ConsistencyStudyTest {
     assertThat(loops.get(0))
         .isEqualTo("run,loop,seconds,position_nees,heading_nees,error_m,claimed_m");
     assertThat(loops).hasSize(1 + RobotLoop.loops(20));
-    assertThat(printed()).contains("turning ").contains("summary.md");
+    assertThat(printed())
+        .contains("turning ")
+        .contains("summary.md")
+        .containsPattern("Every loop's error and claim, to the bit: [0-9a-f]{16}");
   }
 
   @Test

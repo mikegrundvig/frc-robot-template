@@ -30,8 +30,11 @@ project(":coprocessor-agent").projectDir = file("coprocessor/agent")
 // The libraries (lib/), each a project of its own only where that blocks a dependency. The world
 // model (the validation kit, the field, and the robot's definition) reads only WPILib's math, units,
 // and field layouts; localization reads the world model, and nothing of the robot program, the
-// simulator, or Pitwall.
+// simulator, or Pitwall; the simulation reads the world model, and nothing of the robot program,
+// localization, or Pitwall.
 include "world"
 project(":world").projectDir = file("lib/world")
 include "localization"
 project(":localization").projectDir = file("lib/localization")
+include "simulation"
+project(":simulation").projectDir = file("lib/simulation")

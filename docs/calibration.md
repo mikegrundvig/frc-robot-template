@@ -258,8 +258,8 @@ How the robot's IMU reads crossing a bump or a ramp: how far past the ramp's slo
 (bumpers, suspension, the IMU's mount), and how closely the moment the IMU says it crossed the
 crest matches where the robot was. It checks the terrain thresholds (`TerrainCrossing.Settings`)
 and the tilts at which the estimator trusts the wheels less (`EstimatorConfig.tiltStartDegrees`
-and `tiltZeroDegrees`), and sets the slope margin and the crest's spread in `Localization` (3° and
-5 cm today).
+and `tiltZeroDegrees`), and sets the slope margin and the crest's spread in `LocalizationService`
+(3° and 5 cm today).
 
 You need the robot running its program on its Systemcore, and a bump or ramp built to the field's
 drawings, on field carpet, with tags in the cameras' view of it.
@@ -280,9 +280,9 @@ Then, from the logs:
   `Localization/TerrainCrossings` should count each crossing once, and never in flat driving.
 - **The crest's spread:** each crossing logs the crest time (`Localization/CrestSeconds`). Where was
   the robot's center then, across the crest? To see it from the cameras alone, replay the log with
-  the crest's spread in `Localization` set far larger (a meter), so the cameras place the robot and
-  the crest barely moves it. The standard deviation of the robot's distances from the crest line,
-  at the crest times, is the spread.
+  the crest's spread in `LocalizationService` set far larger (a meter), so the cameras place the
+  robot and the crest barely moves it. The standard deviation of the robot's distances from the
+  crest line, at the crest times, is the spread.
 
 Every crossing should be counted and none in flat driving, the tilt past the slope within a few
 degrees, and the crest within a few centimeters at every speed. If fast crossings read differently

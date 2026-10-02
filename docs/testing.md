@@ -38,7 +38,7 @@ what broke.
 
 | Level | What it runs | Example to copy |
 |---|---|---|
-| A component | Plain JUnit on a class in a library (`lib/world`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world` |
+| A component | Plain JUnit on a class in a library (`lib/world`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world`; `LocalizationServiceTest`, in `lib/localization`, for localization fed by hand a loop at a time |
 | A mechanism | A subsystem on simulated hardware, stepped loop by loop. The class carries `@ExtendWith(RobotSim.class)`. | `subsystems/drive/DriveBasicsTest`, with `sim/DriveSimHarness` |
 | The whole robot | The robot program as `Robot` builds and runs it, Pitwall and all, driven from a simulated Driver Station and gamepad. | `RobotContainerSimTest` |
 | The program itself | The robot program started as a program, in its own process: a session recorded, then replayed. | `ReplayEndToEndTest` |
@@ -118,9 +118,10 @@ What it offers:
   a timeout, a loop at a time; to show nothing else arrived, send a change and check it's the next
   thing to.
 - **Recorded behavior stays recorded.** `EstimatorGoldenSimTest` compares the pose estimator's
-  estimate, loop by loop through a seeded session, with a recording
-  (`estimator-golden.csv`). It fails on any change to what the estimator does, which is the point
-  while restructuring it. When a change is meant to move the estimate, run the test with the
+  estimate, loop by loop through a seeded session, with a recording (`estimator-golden.csv`). It
+  fails on any change to what the estimator does, which is the point while restructuring it: it held
+  still, character for character, through the estimator's split and the move into
+  `LocalizationService`. When a change is meant to move the estimate, run the test with the
   environment variable `GOLDEN_UPDATE=1` to record it again, and commit the recording with the
   change, saying why it moved.
 - **No test runs past two minutes.** A hung test fails instead of hanging the build. A test that

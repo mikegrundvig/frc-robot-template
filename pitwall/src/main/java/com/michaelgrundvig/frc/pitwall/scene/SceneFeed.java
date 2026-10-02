@@ -103,6 +103,9 @@ final class SceneFeed implements Feed, SceneState {
   /** Every frame's name, the root's too: what a shape of the moment may be in. */
   private Set<String> frameNames = Set.of(SceneBuilder.ROOT);
 
+  /** Every described shape's id: what a shape of the moment may reveal, besides its fellows. */
+  private Set<String> describedShapes = Set.of();
+
   private List<Value> valueList = List.of();
   private final Map<String, String> styles = new LinkedHashMap<>();
   private Map<String, String> stylesSent = Map.of();
@@ -338,7 +341,8 @@ final class SceneFeed implements Feed, SceneState {
       List<Map<String, Supplier<Inspection>>> inspections,
       Set<String> frames,
       Map<String, Double> values,
-      Map<String, SceneBuilder.Deadband> deadbands) {}
+      Map<String, SceneBuilder.Deadband> deadbands,
+      Set<String> shapes) {}
 
   /**
    * Checks the layers' descriptions fit together, and puts them in the page's form.
@@ -427,11 +431,36 @@ final class SceneFeed implements Feed, SceneState {
       wires.add(Collections.unmodifiableMap(wire));
       inspections.add(Map.copyOf(inspected));
     }
+    for (SceneBuilder builder : described) {
+      for (Shape<?> shape : builder.shapes()) {
+        checkReveals(shape, ids);
+      }
+    }
     Map<String, SceneBuilder.Deadband> deadbands = new LinkedHashMap<>();
     for (SceneBuilder builder : described) {
       deadbands.putAll(builder.deadbands());
     }
-    return new Checked(wires, inspections, frameNames, allValues, deadbands);
+    return new Checked(wires, inspections, frameNames, allValues, deadbands, Set.copyOf(ids));
+  }
+
+  /**
+   * Checks the shapes a shape reveals are there.
+   *
+   * @throws IllegalArgumentException naming the first that isn't
+   */
+  private void checkReveals(Shape<?> shape, Set<String> shapes) {
+    for (String revealed : shape.reveals()) {
+      if (!shapes.contains(revealed)) {
+        throw new IllegalArgumentException(
+            "scene "
+                + scene.id()
+                + ": shape "
+                + shape.id()
+                + " reveals shape "
+                + revealed
+                + ", which the scene doesn't have");
+      }
+    }
   }
 
   /**
@@ -498,6 +527,7 @@ final class SceneFeed implements Feed, SceneState {
     frames = poses;
     poseList = List.copyOf(poses.values());
     frameNames = Set.copyOf(checked.frames());
+    describedShapes = checked.shapes();
     Map<String, Value> held = new LinkedHashMap<>();
     checked
         .values()
@@ -533,6 +563,13 @@ final class SceneFeed implements Feed, SceneState {
         inspected.put(shape.id(), inspection);
       } else {
         inspected.remove(shape.id());
+      }
+    }
+    for (Shape<?> shape : moment.shapes()) {
+      if (!shape.reveals().isEmpty()) {
+        Set<String> there = new HashSet<>(describedShapes);
+        there.addAll(byId.keySet());
+        checkReveals(shape, there);
       }
     }
     for (Map.Entry<String, Supplier<Inspection>> before : running.shapeInspections.entrySet()) {

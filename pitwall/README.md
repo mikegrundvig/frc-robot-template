@@ -79,7 +79,8 @@ scene.frame("robot", "field")                                    // moved by upd
 | `frustum` | what a camera sees, along its frame's x: `fov(horizontal, vertical)`, `range(near, far)` |
 | `label` | a few words, the same size on screen at any zoom: a tag's number, a camera's name |
 
-Each takes `at(...)` (where in its frame, turned or not), `style(...)`, and `inspect(...)`.
+Each takes `at(...)` (where in its frame, turned or not), `style(...)`, `inspect(...)`, and
+`reveal(ids...)`.
 
 **Styles** are the page's color tokens by meaning, never colors: `Style.OK`, `BAD`, `MUTED`,
 `ACCENT`, `TRUTH`, each `.dashed()` or not. Color never carries meaning alone: a dashed line is
@@ -97,7 +98,9 @@ names of page actions (`pitwall.actions()`) it ends in, run exactly as from Pit,
 supplier runs on a web server thread, so it reads only what can't change under it, such as a record
 the loop has finished with. A shape of the moment stays inspectable for two seconds after it's
 gone, so with the page's *Hold* (which freezes the drawing) a sight line that came and went can
-still be clicked.
+still be clicked. While its details are open, the shape clicked and the shapes it `reveal`s are
+drawn whatever their layers: a camera reveals its full view, kept in a layer that starts off. What
+it reveals must be in the scene's description, or of the same moment.
 
 ### What it costs, and the wire
 

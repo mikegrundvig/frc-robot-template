@@ -483,6 +483,60 @@ class ScenesTest {
   }
 
   @Test
+  void aShapeRevealsOthersWhileItsClickedAndTheyMustBeThere() {
+    scenes.add(
+        Scene.named("world", "World")
+            .layer(
+                Layer.of(
+                    "robot",
+                    "Robot",
+                    scene -> {
+                      scene.frame("camera", "field");
+                      scene
+                          .arrow("camera.axis", "camera")
+                          .to(0.3, 0, 0)
+                          .inspect(() -> Inspection.of("camera"))
+                          .reveal("camera.view");
+                    }))
+            .layer(
+                Layer.of(
+                    "views",
+                    "Camera views",
+                    scene -> scene.frustum("camera.view", "camera").fov(1, 0.8).range(0, 7)),
+                Scene.Visibility.OFF));
+
+    assertThat(JSON.toJson(scenes.descriptions()))
+        .contains("\"id\":\"camera.axis\"", "\"reveals\":[\"camera.view\"]");
+    assertRefused(
+        scene -> scene.box("b", "field").reveal("nothing"),
+        "shape b reveals shape nothing, which the scene doesn't have");
+
+    Layer moment =
+        new Layer() {
+          @Override
+          public String id() {
+            return "moment";
+          }
+
+          @Override
+          public String title() {
+            return "Moment";
+          }
+
+          @Override
+          public void describe(SceneBuilder scene) {}
+
+          @Override
+          public void update(SceneState state) {
+            state.shapes().line("ray", "field").to(1, 0, 0).reveal("ray", "gone");
+          }
+        };
+    scenes.add(Scene.named("other", "Other").layer(moment));
+    loop(scenes.feeds().getLast());
+    assertThat(said).singleElement().asString().contains("reveals shape gone");
+  }
+
+  @Test
   void aNameTheSceneDoesntHaveInAnUpdateIsTheLayersMistake() {
     Layer typo =
         new Layer() {

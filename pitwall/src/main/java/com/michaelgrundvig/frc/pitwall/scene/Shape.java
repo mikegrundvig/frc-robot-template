@@ -37,6 +37,7 @@ public abstract sealed class Shape<S extends Shape<S>>
   private final String frame;
   private Style style = Style.MUTED;
   private @Nullable Supplier<Inspection> inspection;
+  private List<String> reveals = List.of();
   private double @Nullable [] at;
 
   Shape(String id, String kind, String frame) {
@@ -72,6 +73,20 @@ public abstract sealed class Shape<S extends Shape<S>>
     return self();
   }
 
+  /**
+   * Shapes the page shows while this one is clicked (its details open), even in a layer switched
+   * off: a camera's full view, say, kept off the drawing until its camera is clicked. Each is a
+   * shape of the scene's description, or of the same moment.
+   */
+  public S reveal(String... shapeIds) {
+    List<String> ids = new ArrayList<>(shapeIds.length);
+    for (String shape : shapeIds) {
+      ids.add(Wire.name("A shape's id", shape));
+    }
+    reveals = List.copyOf(ids);
+    return self();
+  }
+
   /** Puts it this far from its frame's origin, unturned. */
   public S at(double x, double y, double z) {
     return at(x, y, z, 0, 0, 0);
@@ -99,6 +114,11 @@ public abstract sealed class Shape<S extends Shape<S>>
     return inspection;
   }
 
+  /** The shapes the page shows while this one is clicked. */
+  List<String> reveals() {
+    return reveals;
+  }
+
   /** The value names its size reads, which the scene must declare: none for most shapes. */
   List<String> values() {
     return List.of();
@@ -118,6 +138,9 @@ public abstract sealed class Shape<S extends Shape<S>>
     wire.put("style", style.wire());
     if (inspection != null) {
       wire.put("inspect", true);
+    }
+    if (!reveals.isEmpty()) {
+      wire.put("reveals", reveals);
     }
     double[] where = at;
     if (where != null) {

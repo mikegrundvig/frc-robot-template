@@ -52,6 +52,7 @@ export class SceneRenderer {
     this.labels = [];
     this.bounds = new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(10, 10, 1));
     this.selected = null;
+    this.revealed = new Set(); // the shape clicked and those it reveals: shown whatever their layer
     this.followed = null;
     this.followedAt = null;
     this.fitted = new Set();
@@ -220,10 +221,15 @@ export class SceneRenderer {
     // A line between two frames lives in the root, and is kept between them (place).
     const parent = built.between ? this.root : this.frames.get(def.frame) || this.root;
     parent.add(built.object);
-    const layer = this.layers.get(layerId);
-    built.object.visible = !layer || layer.shown;
+    built.object.visible = this.layerShown(layerId) || this.revealed.has(def.id);
     if (this.selected === def.id) restyle(built, built.style, this.kit, true);
     return built;
+  }
+
+  /** Whether a layer is switched on: a shape in no layer always is. */
+  layerShown(layerId) {
+    const layer = this.layers.get(layerId);
+    return !layer || layer.shown;
   }
 
   remove(built) {
@@ -275,7 +281,7 @@ export class SceneRenderer {
     layer.shown = shown;
     layer.chosen = true;
     for (const built of this.shapes.values()) {
-      if (built.layer === id) built.object.visible = shown;
+      if (built.layer === id) built.object.visible = shown || this.revealed.has(built.def.id);
     }
     this.draw();
   }
@@ -606,13 +612,22 @@ export class SceneRenderer {
     return best;
   }
 
-  /** Marks a shape as the one inspected (in the focus color), or none. */
+  /**
+   * Marks a shape as the one inspected (in the focus color), or none: it, and the shapes it reveals
+   * (a camera's full view), are drawn whatever their layers until another is, or none.
+   */
   select(id) {
     const before = this.shapes.get(this.selected);
     this.selected = id;
     if (before) restyle(before, before.style, this.kit, false);
     const now = this.shapes.get(id);
     if (now) restyle(now, now.style, this.kit, true);
+    const was = this.revealed;
+    this.revealed = new Set(now ? [id, ...(now.def.reveals || [])] : []);
+    for (const shown of new Set([...was, ...this.revealed])) {
+      const built = this.shapes.get(shown);
+      if (built) built.object.visible = this.revealed.has(shown) || this.layerShown(built.layer);
+    }
     this.draw();
   }
 

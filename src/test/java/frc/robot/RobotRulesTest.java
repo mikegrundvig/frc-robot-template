@@ -15,7 +15,11 @@ class RobotRulesTest {
   void everyRobotKeepsItsRulesAsCommitted() {
     for (RobotConfig robot : Robots.all()) {
       ConfigRules rules = new ConfigRules();
-      RobotRules.register(rules, Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()));
+      RobotRules.register(
+          rules,
+          robot.definition(),
+          Drive.tuning(robot.drivetrain()),
+          Vision.tuning(robot.vision()));
 
       assertThatCode(rules::checkCommitted).as(robot.name()).doesNotThrowAnyException();
     }
@@ -27,7 +31,7 @@ class RobotRulesTest {
     var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
     var vision = Vision.tuning(Robots.SIM.vision());
     ConfigRules rules = new ConfigRules();
-    RobotRules.register(rules, drivetrain, vision);
+    RobotRules.register(rules, Robots.SIM.definition(), drivetrain, vision);
     rules
         .when(drivetrain, "limits.maxLinearSpeed")
         .check(

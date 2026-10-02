@@ -103,7 +103,7 @@ configuration: the test refuses to list it as not.
   switch's on or off) are checked: per-camera values and names are left to people.
 
 So a new value starts in its record, and the test asks for its row. A section is a `###` heading
-naming the record in backticks (`` ### `SwerveConfig.Limits` ``, a nested record with its outer
+naming the record in backticks (`` ### `DrivetrainControl.Limits` ``, a nested record with its outer
 one), followed by a table whose header starts with **Value** and has a **Kind** and a **Source**
 column; a tuning's is headed `` ### `drivetrain` tuning ``, with a table whose header starts with
 **Knob**. A table under such a heading must be one of those. Write a `|` inside a cell as `\|`. An
@@ -164,17 +164,27 @@ The values that move the robot most, and are least known today:
 
 ### `RobotConfig`
 
-`frc.robot.RobotConfig`: one robot, in `Robots`. Its other values are records with sections of
-their own.
+`frc.robot.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
+what the robot is (its definition, which names it), and how this program drives it, wires it, and
+judges what its sensors say.
+
+### `RobotDefinition`
+
+`com.michaelgrundvig.frc.world.robot.RobotDefinition`: what the robot is, read by localization, the
+simulator, and the views (`RobotConfig.definition`). Its values are records with sections of their
+own: the body, the drivetrain as built, the cameras, and the IMUs. It checks them against each
+other: the wheels inside the frame, every camera and IMU inside the robot. Mechanisms' joints join
+it with the first mechanism that describes one.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `name` | chosen | `sim` | none | Which robot this is, as its logs name it. One per robot; keep it. |
+| `name` | chosen | `sim` | none | Which robot this is, as its logs and its checks' messages name it (`RobotDefinition[sim].cameras: ...`). One per robot; keep it. |
 
 ### `Body`
 
-`frc.robot.lib.config.Body`: the frame, bumpers, and mass. Per robot, in `Robots`. The template's
-robot is the largest and heaviest the 2026 rules allowed, with the best case center of gravity.
+`com.michaelgrundvig.frc.world.robot.Body`: the frame, bumpers, and mass. Per robot, in `Robots`.
+The template's robot is the largest and heaviest the 2026 rules allowed, with the best case center
+of gravity.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -186,40 +196,110 @@ robot is the largest and heaviest the 2026 rules allowed, with the best case cen
 | `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). Nothing reads it yet: the simulator spins the robot as if its mass sat at its wheels, about 11 kg m² for the template's ([stand-ins](stand-ins.md)); a simulator that models the robot as one body will. |
 | `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
 
+### `Imus`
+
+`com.michaelgrundvig.frc.world.robot.Imus`: the robot's IMUs, each where it's mounted
+(`RobotDefinition.imus`): the gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are
+mounts, with a section of their own.
+
+### `ImuMount`
+
+`com.michaelgrundvig.frc.world.robot.ImuMount`: where an IMU sits, how it's turned, and whether its
+accelerometer has been checked to read along the robot's axes. Per IMU, in `Robots`. Localization
+compares the wheels' velocity with what the IMU feels where it sits (an IMU off the center is swung
+around it as the robot turns), the drivetrain's IO turns the IMU's own axes into the robot's by its
+orientation, and the simulator mounts its IMUs here. A new robot starts from `Imus.UNCHECKED`: both
+at the center, level, and unchecked.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `forward` | as built | 0 m | none (the simulator's IMUs sit at the center) | From CAD, or a tape: how far ahead of the robot's center the IMU sits (negative behind). For Systemcore, where its board sits. |
+| `left` | as built | 0 m | none (as `forward`) | As `forward`, to the left (negative right). |
+| `up` | as built | 3 in | guess (a belly pan) | As `forward`, above the floor. Inside the robot, as a camera is. The slip check reads only the yaw rate, which swings an IMU level whatever its height, so nothing uses it yet: a robot pitching or rolling would swing a high IMU too. |
+| `orientation` | as built | level, x forward (`Rotation3d.ZERO`) | none (the simulator's IMUs are mounted so) | How it's turned on the robot: the rotation that takes the axes printed on it into the robot's. It turns the accelerometer's axes into the robot's, and for Systemcore mounted flat, its pitch and roll too. From how it's mounted; [the accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes) confirms it. For the Pigeon, it must agree with the mount pose saved on it in Phoenix Tuner X, which its own yaw, pitch, and roll follow: the code doesn't write it there yet. |
+| `accelerometerChecked` | calibrated | true for the simulator's robot; false for a new one (`Imus.UNCHECKED`) | none (the simulator's IMUs read along their axes by construction) | [The accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes): three short drives in a log, for each IMU. Until it passes, the slip check compares the wheels' speed with that IMU's accelerometer by size, not direction, which no turn on its mount changes, once the robot has stood still long enough to learn its bias (`SlipCheck.Settings.steadySeconds`); and a jolt counts by its size alone. Off by default because a mis-mounted accelerometer trusted for direction is far worse than one compared by size: on the simulator's clean driving, one turned a quarter turn on its mount, trusted, read slip in most loops. |
+
 ## The drivetrain
 
-### `SwerveConfig`
+### `DrivetrainGeometry`
 
-`frc.robot.lib.config.SwerveConfig`: the swerve drivetrain. Per robot, in `Robots`.
+`com.michaelgrundvig.frc.world.robot.DrivetrainGeometry`: the swerve drivetrain as built
+(`RobotDefinition.drivetrain`). Per robot, in `Robots`. How it's driven, its limits and gains, is
+[`DrivetrainControl`](#drivetraincontrol).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `wheelInset` | as built | 2.625 in | datasheet (SDS MK4i's footprint) | The module's footprint drawing, or CAD: from the outside of the frame to the wheel's center. |
 
-### `SwerveConfig.Modules`
+### `DrivetrainGeometry.Modules`
 
-The module hardware, the same at every corner.
+The module hardware, the same at every corner: a Kraken X60 driving each wheel and another turning
+each module (`driveMotor`, `steerMotor`; an `_FOC` model only with a Phoenix Pro license), each
+through its gearing (`driveGearing`, `steerGearing`), with sections of their own:
+[`Motor`](#motor) and [`Gearing`](#gearing).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `driveMotor` | as built | Kraken X60 | guess (a typical build) | The motor on the module. An `_FOC` model only with a Phoenix Pro license. |
-| `steerMotor` | as built | Kraken X60 | guess (a typical build) | As `driveMotor`. |
 | `wheelRadius` | calibrated | 2 in | datasheet (a 4 in wheel) | [The wheel radius](calibration.md#the-wheel-radius), before each event: tread wears. The simulator's drive motors feel the robot's mass through it. |
-| `driveGearing` | as built | 6.75 | datasheet (SDS MK4i L2) | The module's datasheet: motor turns per wheel turn. |
-| `steerGearing` | as built | 150/7 (21.43) | datasheet (SDS MK4i) | The module's datasheet: motor turns per turn of the module. |
 | `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread. The simulator's grip; with `cgHeight`, it sets the drive's current limit. |
+| `driveInertia` | characterized | 0.001 kg m² | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. The drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of `Body.mass` at `wheelRadius`. About 2% of what the template's robot puts on each wheel, so a rough number costs little. The simulator turns it. |
+| `steerInertia` | characterized | 0.004 kg m² | datasheet (Phoenix Tuner X's generated simulation value, as AdvantageKit's swerve templates use it) | [Feedforward](characterization.md#feedforward): SysId on one module's steering. The simulator's steering turns it, so it sets how fast the steering turns at its current limit, and how high its gains can go. What it assumes is in [stand-ins](stand-ins.md). |
 
-### `SwerveConfig.Limits`
+### `Motor`
+
+`com.michaelgrundvig.frc.world.robot.Motor`: a DC motor, as its datasheet gives it. The motors FRC
+robots commonly use are named presets (`Motor.KRAKEN_X60`), with WPILib's numbers (its `DCMotor`);
+any other is described from its datasheet (`Motor.fromDatasheet()`). The template's robot drives and
+steers with Kraken X60s; the starting values are its.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | as built | Kraken X60 | none | What the motor is called, for messages. |
+| `nominalVoltage` | as built | 12 V | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet: the voltage its numbers were measured at. |
+| `stallTorque` | characterized | 7.09 N m | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet, or a dynamometer's curve: torque with the shaft held still. A motor's own often differs from its datasheet by a few percent. |
+| `stallCurrent` | characterized | 366 A | datasheet (WPILib's `DCMotor`, from CTRE's) | As `stallTorque`: the current then. |
+| `freeCurrent` | characterized | 2 A | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet, or the motor spinning freely on the bench: the current with nothing on its shaft. |
+| `freeSpeed` | characterized | 6000 rpm (628.3 rad/s) | datasheet (WPILib's `DCMotor`, from CTRE's) | As `freeCurrent`: its speed then. |
+
+### `Gearing`
+
+`com.michaelgrundvig.frc.world.robot.Gearing`: what stands between a motor and what it turns. The
+template's drivetrain has two: the drive's, whose numbers are the starting values, and the
+steering's.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `ratio` | as built | 6.75 (drive), 150/7 (21.43, steering) | datasheet (SDS MK4i L2) | The module's datasheet: motor turns per wheel turn, and per turn of the module. |
+| `efficiency` | characterized | 1 | math (no losses modeled: the drivetrain's numbers didn't change when its gearing became a record) | Why: the share of the motor's torque, through the ratio, that reaches the wheel. A gear stage loses a few percent, so the real one is lower; the simulator takes it off the motors' torque. Measure it with SysId on a module lifted off the floor ([feedforward](characterization.md#feedforward)), or keep 1 until a mechanism's simulation needs it. |
+
+### `Actuator.Motors`
+
+`com.michaelgrundvig.frc.world.robot.Actuator.Motors`: one or more identical motors driving one
+thing through one gearing. Its motor and gearing have sections of their own. The template's
+drivetrain derives one for each module's drive and steering (`DrivetrainGeometry.Modules.drive()`,
+`steer()`), which the simulator turns its wheels with.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `count` | as built | 1 (each drive and steering) | none (one motor per wheel and per module) | How many motors drive it together: two on an arm's shaft is 2. |
+
+### `DrivetrainControl`
+
+`frc.robot.subsystems.drive.DrivetrainControl`: how the drivetrain is driven
+(`RobotConfig.drivetrain`), all tunable live as the [`drivetrain` tuning](#drivetrain-tuning). Its
+values are records with sections of their own.
+
+### `DrivetrainControl.Limits`
 
 Current and speed limits, all tunable live within their [tuning limits](#tuning-limits). Check them
 in a log of hard driving: each drive motor's currents (`Drive/Module<name>/DriveStatorCurrentAmps`,
 `DriveSupplyCurrentAmps`), the battery's voltage, and whether the wheels slipped
-(`Localization/TractionLimited`, with `Localization/ResidualMeters`, how far the wheels disagree
-with each other).
+(`Localization/SlipMetersPerSecond`, the IMU against the wheels, with `Localization/ResidualMeters`,
+how far the wheels disagree with each other).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `driveStatorCurrent` | chosen | 30 A | math (weight transfer: the front wheels slip near 47 A with the configured tread, μ 1.2, and the 0.15 m center of gravity, about 50 A at μ 1.3, and near 31 A with worn tread, μ 1.0, and a 0.3 m one) | Why: torque past the tread's grip only spins the wheels and drains the battery. Measure friction and the center of gravity first; they set it. Change if the wheels slip at full stick (traction-limited, with the residual rising), or never come near it and the drivers want more push. |
+| `driveStatorCurrent` | chosen | 30 A | math (weight transfer: the front wheels slip near 47 A with the configured tread, μ 1.2, and the 0.15 m center of gravity, about 50 A at μ 1.3, and near 31 A with worn tread, μ 1.0, and a 0.3 m one) | Why: torque past the tread's grip only spins the wheels and drains the battery. Measure friction and the center of gravity first; they set it. Change if the wheels slip at full stick (`Localization/SpeedSlipMetersPerSecond` rising in a launch: the wheels speeding up faster than the accelerometer feels the robot do), or never come near it and the drivers want more push. Being at the limit isn't slipping: set below the tread's grip, the limit is what keeps the wheels from it, and the estimate doesn't doubt them for it ([`SlipCheck.Settings`](#slipchecksettings)). |
 | `driveSupplyCurrent` | chosen | 60 A | guess | Why: caps what each drive motor draws from the battery, so four together can't drag it into a brownout. It steps down: Phoenix lets a motor draw this for at most `driveSupplyLowerTime` (1 s) at a time, then lowers the limit to `driveSupplyLowerCurrent` (40 A) until the motor draws less than that again, so 60 A is for bursts and 40 A for anything longer (the two rows below). A motor draws no more from the battery than flows through it, so with the template's 30 A `driveStatorCurrent` neither limit is ever reached: they matter once the stator limit is raised past them. Set it from the weakest battery's [internal resistance](characterization.md#battery-internal-resistance): the voltage with four drive motors at the limit, about the rest voltage less 4 × limit × resistance, must stay above Systemcore's brownout voltage (still to measure on a real Systemcore) and the vision coprocessor's [ride-through voltage](characterization.md#coprocessor-brownout-ride-through). Change if the battery sags toward either in hard driving. |
 | `driveSupplyLowerCurrent` | chosen | 40 A | datasheet (Phoenix 6's default `SupplyCurrentLowerLimit`, written out; the 40 A breaker's rating) | Why: once a drive motor has been held at `driveSupplyCurrent` for `driveSupplyLowerTime`, Phoenix lowers its supply limit to this, until it draws less than this again. Phoenix does it whether the code says so or not (its defaults are 40 A after 1 s), so the template sets it where it shows. At the breaker's rating, a motor can push for as long as the driver holds the stick: an FRC 40 A breaker carries 40 A indefinitely, but the datasheets let one trip at 60 A (150%) and 80 A (200%) as early as 3.9 s and 1.5 s ([Snap Action's AT2](https://www.snapaction.net/assets/img/at2/AT2-Spec-Sheet-Revision-2023.pdf), and its MAXI-size MX5), 9 s and 5 s ([CTRE's](https://ctre.download/files/datasheet/CTRE%20Breaker%20Datasheet.pdf)), or 5 s at 80 A ([REV's](https://www.revrobotics.com/content/docs/REV-11-1860-1863-DS.pdf), which lists no 150%); a breaker already warm trips sooner. Setting it to `driveSupplyCurrent` turns the step-down off, and a long push can then trip the breaker. Check: in a log of a pushing match, a drive motor's `Drive/Module<name>/DriveSupplyCurrentAmps` flat at `driveSupplyCurrent` for a second, then flat at this, is the step-down at work; a motor that drops out for seconds (`Drive/Module<name>/DriveConnected` false, then true again) tripped its breaker anyway. Change: never above the breaker's rating; lower it to a smaller breaker's. |
 | `driveSupplyLowerTime` | chosen | 1 s | datasheet (Phoenix 6's default `SupplyCurrentLowerTime`, written out) | Why: longer than any sprint, and well short of a breaker's trip. In the simulator, which carries the robot's configured mass, a full-stick sprint, or one reversed at full speed, holds a drive motor at 60 A or more for at most 0.2 s, with `driveStatorCurrent` raised to 120 A (0.12 s at 80 A, and never at 60 A or the template's 30 A). It leaves out wheels slipping past their grip and the battery sagging ([stand-ins](stand-ins.md)), and either changes a real launch at a high limit. Only a long push, the wheels spinning, holds a motor there for a second. The fastest 40 A breaker trips at 60 A after 3.9 s at the earliest, and at 80 A, the top of `driveSupplyCurrent`'s tuning, after 1.5 s: raise `driveSupplyCurrent` toward 80 A, and shorten this. Check: in a log, how long `Drive/Module<name>/DriveSupplyCurrentAmps` stays at `driveSupplyCurrent` before it drops to `driveSupplyLowerCurrent`: this long. Change if logs show the step-down cutting into sprints, or a breaker tripping though the step-down came. |
@@ -227,7 +307,7 @@ with each other).
 | `maxLinearSpeed` | chosen | 4.4 m/s | guess (headroom under the 4.73 m/s free speed) | Why: velocity control needs headroom under the free speed to correct with. Lower it if modules can't reach their setpoints at full stick (`Drive/ModuleVelocities` against `Drive/SetpointsOptimized`). |
 | `maxAngularSpeed` | chosen | 1 rot/s | guess (driver-friendly) | Why: fast enough to turn around, slow enough to control. Ask the drivers. At full spin (6.3 rad/s) the cameras' images are thrown out: they're over `VisionConfig.maxYawRateRadiansPerSecond`. |
 
-### `SwerveConfig.Gains`
+### `DrivetrainControl.Gains`
 
 Drive feedforward and feedback, and steering feedback, all tunable live. Check them in AdvantageScope:
 each module's speed against its setpoint (`Drive/ModuleVelocities` against
@@ -244,7 +324,7 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 
 ### `SwerveWiring`
 
-`frc.robot.lib.config.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
+`frc.robot.lib.wiring.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
 read. Per robot, in `Robots`. Phoenix Tuner X's swerve generator reports every value here; copy them
 across. The template's robot runs only in simulation and has no wiring, so nothing is set today.
 
@@ -254,7 +334,7 @@ across. The template's robot runs only in simulation and has no wiring, so nothi
 | `gyroId` | as built | none | none | Tuner X: the Pigeon 2's CAN ID. |
 | `gyroYawScale` | calibrated | none (1 until measured) | none | [The gyro's scale](calibration.md#the-gyros-scale), once per gyro, and after replacing or remounting it. |
 | `couplingRatio` | as built | none | none | Tuner X's swerve generator, or the module's datasheet: drive motor turns per turn of the module, wheel held still. |
-| `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
+| `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. WPILib takes its yaw about the axis this says is up. How the board is turned on the robot is its `ImuMount` (`Imus.backup`). Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
 
 ### `SwerveWiring.ModuleWiring`
 
@@ -274,8 +354,8 @@ One module's devices.
 
 ### `CameraConfig`
 
-`frc.robot.lib.config.CameraConfig`: one camera on the robot. Per camera, in `Robots`. The
-template's four are a 2026 competition robot's, as that team's 2026 code gives them.
+`com.michaelgrundvig.frc.world.robot.CameraConfig`: one camera on the robot. Per camera, in
+`Robots`. The template's four are a 2026 competition robot's, as that team's 2026 code gives them.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -300,15 +380,16 @@ that use it. The simulator builds its cameras from it.
 | `diagonalFieldOfView` | characterized | 80° | guess (typical) | PhotonVision's lens calibration, at the resolution the robot runs, reports it. |
 | `frameRate` | characterized | 30 Hz | guess | [Coprocessor capacity](characterization.md#vision-coprocessor-capacity): results per second, with as many cameras as one coprocessor carries on the robot. |
 | `latency` | characterized | 30 ms | guess | [Camera latency](characterization.md#camera-latency-and-time-sync): from the image's capture to its result reaching the robot, with as many cameras as one coprocessor carries on the robot ([coprocessor capacity](characterization.md#vision-coprocessor-capacity)). |
+| `sightRange` | characterized | 7 m | guess (the simulator's since the template began) | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. The simulator's cameras find tags no farther, and AdvantageScope's schematic robot draws each camera's field of view out to it. |
 
 ## Localization
 
 ### `VisionConfig`
 
-`frc.robot.lib.localization.VisionConfig`: which camera results are thrown out, and how far the rest
-are trusted. Per robot (`RobotConfig.vision`); every robot starts from `VisionConfig.DEFAULTS`. Five
-are tunable live. Each image's outcome, with the number that decided it, is in
-`Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
+`com.michaelgrundvig.frc.localization.VisionConfig`: which camera results are thrown out, and how
+far the rest are trusted. Per robot (`RobotConfig.vision`); every robot starts from
+`VisionConfig.DEFAULTS`. Five are tunable live. Each image's outcome, with the number that decided
+it, is in `Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera>/Decisions`.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -331,8 +412,8 @@ are tunable live. Each image's outcome, with the number that decided it, is in
 
 ### `EstimatorConfig`
 
-`frc.robot.lib.localization.EstimatorConfig`: how the pose estimator weighs odometry, the gyro, and
-the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
+`com.michaelgrundvig.frc.localization.EstimatorConfig`: how the pose estimator weighs odometry, the
+gyro, and the cameras. Per robot (`RobotConfig.estimator`); every robot starts from
 `EstimatorConfig.DEFAULTS`, which the code calls starting points, not measurements.
 
 The estimator's uncertainty should match its error. In the simulator, the
@@ -341,8 +422,8 @@ runs (`./gradlew consistencyStudy`), and one run's log compares `Localization/Po
 with `Sim/PoseErrorMeters`; on a robot, compare it with how far the cameras move the estimate when
 they see tags again after a stretch without. Honest is a position NEES (the error squared, over the
 covariance the estimate claimed) averaging 2 and a heading NEES averaging 1, with the error outside
-the claimed covariance's 99.9% ellipse in about a thousandth of loops; the defaults read 0.9 to 2.1
-and 0.4 to 1.05 in the study's calibrated runs, the collision's 1.28 among them. Well
+the claimed covariance's 99.9% ellipse in about a thousandth of loops; the defaults read 0.99 to
+2.1 and 0.37 to 1.05 in the study's calibrated runs, the collision's 1.40 among them. Well
 above, the estimate is too sure of itself, and its gate rejects good measurements; well below, it's
 too unsure, and the cameras pull it around. On a robot, without the truth, the same test is a
 camera's correction squared over the covariance claimed for it (the estimate's and the camera's
@@ -352,12 +433,11 @@ together, the χ² gate's number): it should average 2 for a position, 3 with a 
 |---|---|---|---|---|
 | `translationStdDevPerMeter` | characterized | 0.03 m | guess | [Odometry error](characterization.md#odometry-error), per drivetrain design and tread: robots built alike share it. |
 | `translationStdDevPerRadian` | characterized | 0.02 m | guess | [Odometry error](characterization.md#odometry-error): spinning in place. |
-| `residualScale` | chosen | 1 | guess (all of it) | Why: wheels that disagree with each other put the robot's travel in doubt by about as much. Lower it if the uncertainty balloons in clean driving (`Localization/ResidualMeters` high, the cameras finding little to correct). |
-| `tractionLimitedSlipFraction` | chosen | 0.25 | guess | Why: wheels at the edge of their grip slip some of the time. Check how far the cameras correct the estimate after stretches of `Localization/TractionLimited`. |
+| `residualScale` | chosen | 1 | math (the residual is already how far the wheels' disagreement may have put their travel off: one wheel of four slipping puts it off by a quarter of its slip, and the residual says that much, within a tenth; two slipping together put it off by about twice what it says, 2.2 times on a square, so a pair is doubted about half as far as it put the estimate off, a [known limit](testing.md#what-it-proves-and-what-it-doesnt)) | Why: all of what the disagreement may have put the travel off counts as suspect. Lower it if the uncertainty balloons in clean driving (`Localization/ResidualMeters` high, the cameras finding little to correct). In the simulator, whose wheels each carry their own share of the robot and can't drag each other into line, a hard change of direction sets them apart for half a second or more, and the estimate doubts them by tens of centimeters there: on a robot, wheels set apart that far are scrubbing over the carpet. |
 | `tiltStartDegrees` | chosen | 5° | guess | Why: a small tilt is carpet and bumpers, not wheels off the floor. Check: `Localization/TiltDegrees` stays under it in flat driving. |
 | `tiltZeroDegrees` | chosen | 25° | top team (6328) | Why: by this tilt, some wheels are off the floor. Check with a [terrain crossing](calibration.md#a-terrain-crossing). |
 | `slipCorrelationSeconds` | chosen | 0.5 s | guess | Why: a slip (a push, a launch) keeps its direction for a while, so its errors add up rather than average out. Check: after a push or a launch, the cameras' correction should fall inside the uncertainty the estimate claimed (`PositionStdDevMeters`). Lengthen it if corrections often land outside; shorten it if they're always far inside. |
-| `collisionStdDevMeters` | chosen | 0.25 m | guess | Why: a hit moves the robot further than its wheels see. Check: after logged hits (`Localization/Collision`), how far the cameras moved the estimate; it should cover the largest. |
+| `collisionStdDevMeters` | chosen | 0.25 m | guess | Why: a hit moves the robot further than its wheels see. A jolt past the grip and short of a whole collision adds its share of this (`DriveConditions.collisionShare`). Check: after logged hits (`Localization/CollisionShare`), how far the cameras moved the estimate; it should cover the largest. |
 | `collisionWindowSeconds` | chosen | 0.25 s | guess | Why: one hit jolts for several loops; count it once. Check: one hit's jolts span less than it. |
 | `handlingStdDevPerSqrtSecond` | chosen | 0.02 m | guess (the idea: 254's loose trust while disabled) | Why: a disabled robot gets carried, and its wheels can't tell, so the cameras should lead. Check: placed and disabled, the estimate settles on the cameras before the match. |
 | `headingDriftDegreesPerMinute` | characterized | 0.5° | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise): the gyro's worst drift, standing still. |
@@ -389,10 +469,10 @@ together, the χ² gate's number): it should average 2 for a position, 3 with a 
 
 ### `LocalizationGate`
 
-`frc.robot.lib.localization.LocalizationGate`: whether an estimate is good enough to score from;
-the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and `NotReadyBecause`
-in a match log: ready whenever the robot is lined up with tags in view, and never while the estimate
-is off.
+`com.michaelgrundvig.frc.localization.LocalizationGate`: whether an estimate is good enough to score
+from; the robot uses `LocalizationGate.SCORING`. Check `Localization/ReadyToScore` and
+`NotReadyBecause` in a match log: ready whenever the robot is lined up with tags in view, and never
+while the estimate is off.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -401,10 +481,42 @@ is off.
 | `maxPositionStdDevMeters` | chosen | 0.15 m | guess | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
 | `maxTiltDegrees` | chosen | 5° | guess (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
 
+### `SlipCheck.Settings`
+
+`com.michaelgrundvig.frc.localization.SlipCheck.Settings`: how closely the wheels must agree with
+the IMU before the estimate doubts them for sliding over the floor together, which their
+disagreement with each other can't show; the robot uses `Settings.DEFAULTS`. How fast they may be
+sliding counts as suspect travel (`DriveConditions.slipMetersPerSecond`). The drive motors' current
+limit isn't asked: at the template's 30 A the drive pushes the robot at 4.4 m/s², well under the
+tread's 11.8 m/s² (`driveStatorCurrent`), and in the simulator's estimator golden the drivetrain
+read as at its grip's edge (a drive motor at its limit, or a wheel short of its speed) in 322 of 500
+loops with the wheels gripping. Doubting a quarter of the travel there made the estimate claim up to
+65 cm through the hard driving (31 cm on average over those loops), and let a tag misread by 1.5 m
+through its gate. Check in a log of hard driving: `Localization/TurnApartDegrees` and
+`SlideMetersPerSecond` stay under their tolerances through clean launches, turns, and stops, and
+`TurnSlipMetersPerSecond` and `SpeedSlipMetersPerSecond` rise only when a wheel spins, the wheels
+spin in a launch, or the robot is pushed, with the cameras then finding the estimate off by about as
+much as it doubted.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `windowSeconds` | chosen | 0.25 s | guess | Why: how far back the turn's comparison looks: long enough for the gyro's noise to average out, short enough that a slide shows while it lasts. The turn worn tread puts between the wheels and the gyro grows with it: change `turnToleranceDegrees` with it. |
+| `turnToleranceDegrees` | chosen | 0.5° | simulation (the simulator's season-worn robot, its tread worn 1 to 2% unevenly, turns its wheels' reckoning up to 0.44° from the gyro's in a quarter second, straight ahead at full speed; one wheel spinning 8 cm/s faster than the floor shows past it) | Why: above what worn tread and the gyro's noise put between them. Raise it if `TurnApartDegrees` passes it in clean straight driving; lower it once the wheel radii are calibrated. |
+| `turnScaleTolerance` | chosen | 0.05 | guess (as `ImuCrossCheck.Settings`: worn tread reckons a few percent more turn than the robot makes, a gyro's scale a few tenths of a percent less) | Why: on top, this share of the turn. Raise it if fast spins in clean driving raise `TurnSlipMetersPerSecond`. |
+| `speedBiasMetersPerSecSq` | chosen | 0.15 m/s² | guess (a Pigeon 2's bias, guessed at under 0.1 m/s² with a mount half a degree off level, and the simulator's at 0.094) | Why: what the accelerometer didn't feel is let go toward none at this rate and no faster, so a bias up to it never builds up, while a slide that holds at a steady speed stays seen until it stops and the accelerometer feels it stop. What it let go comes back the other way when the slide stops: a push held for two seconds leaves the tolerance's worth, 0.3 m/s. A wheel reading fast (worn tread) only builds up while the robot speeds up, and comes back as it slows, so it needs no room here. Raise it if `SlideMetersPerSecond` creeps up in clean driving; lower it once the accelerometer's bias is measured. |
+| `speedToleranceMetersPerSecond` | chosen | 0.3 m/s | simulation (on the simulator's season-worn robot, its accelerometer a Pigeon 2's with its noise, bias, sampling and filter, clean driving puts the wheels and the accelerometer at most 0.21 m/s apart: launches, stops, spinning a turn a second while driving) | Why: above how far the two drift apart without a slide: noise, and the lag of the part's filter as the robot's acceleration changes. Past it, all of the difference counts as the slide's speed, not what's past it: taking the tolerance off every slide, the doubt trailed a 1 m/s push by 0.3 m/s from its start, and the scoring gate let through 8 loops with the robot more than 15 cm off (3 counting all of it). It was tuned against the simulator's accelerometer, whose 16 ms filter is a guess: CTRE publishes no noise, offset, or filter figures for the Pigeon 2's accelerometer. Measure it on the robot: [the accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes)'s measured pass, clean launches, stops, and spins, should keep `SlideMetersPerSecond` under 0.2 m/s; raise it if they don't. |
+| `stillMetersPerSecond` | chosen | 0.05 m/s | guess (well above the wheels' and the gyro's noise standing still, well below any driving) | Why: the robot stands still when its wheels roll slower than this, and turn it slower than this at their reach, and the IMU turns it slower too. Standing still, a reading the accelerometer holds steady (`steadySeconds`) is its bias, which the speed comparison learns and takes off. |
+| `steadySeconds` | chosen | 2 s | math (a push sets the robot going in well under a second, the simulator's at 3 m/s², and then holds it at a speed, which reads as no acceleration; one speeding it up steadily for 2 s, at even 0.5 m/s², would have it sliding 1 m/s past wheels that don't roll. And it learns a checked accelerometer's bias of up to 0.3 m/s², twice what the speed comparison lets go of, before the comparison holds its tolerance's worth) | Why: standing still, a reading the accelerometer holds this long is its bias, whatever its size (gravity leaking into a case tilted on its mount, which a size limit refused, and the slide it then added up claimed meters), and the older half's average is taken for it, which a push only just begun hasn't reached. Until it's learned, an accelerometer not yet checked isn't compared with the wheels: an unchecked robot stands this long after it starts, or after its IMU comes back, before the speed comparison sees anything. Lengthen it if `Localization/AccelerometerBiasMetersPerSecSq` jumps while the robot is pushed standing; shorten it if the robot must drive sooner. |
+| `steadyMetersPerSecond` | chosen | 0.1 m/s | simulation (the simulator's 0.3 m/s² of vibration on each reading adds up over 2 s to a speed about 0.06 m/s off a steady one, past 0.1 in one window in 40, which only waits a loop to learn; a push building at 1 m/s³ strays past it half a second in) | Why: the reading holds when the speed it adds up to over `steadySeconds` keeps within this of what its average adds up to; further, it rose or fell (a push building, or come and gone), and nothing is learned. A push building slower than 0.2 m/s³ passes for steady, and the bias follows it 1.5 s behind ([known limits](testing.md#what-it-proves-and-what-it-doesnt)). Raise it if a real robot's vibration standing keeps `Localization/AccelerometerBiasMetersPerSecSq` from settling; a Pigeon 2 still reads within a few hundredths of a m/s². |
+| `largestBiasMetersPerSecSq` | chosen | 1 m/s² | math (a Pigeon 2's bias is a tenth of this; gravity leaks 1 m/s² into a case tilted 6° on its mount) | Why: a bias learned past this is gravity's share, the IMU turned on the robot otherwise than its definition's `orientation` says, and the alert "check its orientation in the robot's definition" comes on. Its pitch and roll can be right all the while (a Pigeon's follow the mount pose saved on it in Tuner X), so only the accelerometer shows it. |
+| `maxSlideMetersPerSecond` | chosen | 5 m/s | guess (faster than FRC robots drive) | Why: no slide counts faster than this. Past it, what the speed comparison holds is a bias it hasn't learned adding up, not a slide: standing half a minute with a 0.3 m/s² bias it couldn't learn, it claimed 15 m. |
+| `joltMetersPerSecSq` | chosen | 15 m/s² | math (over the tread's grip, 11.8 m/s² at its 1.2, which driving can't pass, and under the Pigeon 2's ±2 g range, 19.6 m/s², where a hit along one axis must still show: 6800 used 20, which a Pigeon 2 can't read along an axis) | Why: what the IMU feels and the wheels' own change of velocity doesn't explain (a robot stopping hard is felt by both, a hit only by the IMU) is a whole collision past it. Past the tread's grip (`wheelCoefficientOfFriction` times g) and short of it, a share of one, rising with it: up to the grip, the floor can explain it, bringing the robot to wheels that got ahead of it. So a hit counts the same standing or braking. Before the accelerometer is checked, the jolt's size alone decides. Check: `Localization/UnexplainedJoltMetersPerSecSq` stays under the grip in hard driving, and goes over this in hits. |
+| `accelerometerRangeMetersPerSecSq` | as built | 19.6 m/s² (2 g) | datasheet (Phoenix 6's `AccelerationX` signal reads from -2 to 2 g) | The most the accelerometer reports on each axis. A reading at it is past what the part can say, so it's a jolt whatever the wheels did. Another IMU, its own range. |
+
 ### `ImuCrossCheck.Settings`
 
-`frc.robot.lib.localization.ImuCrossCheck.Settings`: how closely the gyro and the backup IMU must
-agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. Check
+`com.michaelgrundvig.frc.localization.ImuCrossCheck.Settings`: how closely the gyro and the backup
+IMU must agree before an alert says one is failing; the robot uses `Settings.DEFAULTS`. Check
 `Localization/ImuDisagreementDegrees`: well inside the tolerance in normal driving, and over it only
 for a real fault.
 
@@ -416,10 +528,10 @@ for a real fault.
 
 ### `TerrainCrossing.Settings`
 
-`frc.robot.lib.localization.TerrainCrossing.Settings`: what counts as climbing, level, and one
-feature; the robot uses `Settings.DEFAULTS`. Check them with a
-[terrain crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from
-the new field's ramps.
+`com.michaelgrundvig.frc.localization.TerrainCrossing.Settings`: what counts as climbing, level, and
+one feature; the robot uses `Settings.DEFAULTS`. Check them with a [terrain
+crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from the
+new field's ramps.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -480,6 +592,26 @@ One gyro's errors. TYPICAL gives the gyro and the backup IMU each their own; EXA
 | `driftDegreesPerMinute` | characterized | 0.2 (backup 1.0) | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise), a typical run. The backup's is unknown until measured. |
 | `noiseDegrees` | characterized | 0.02 (backup 0.05) | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise), a typical run. |
 
+### `SensorErrors.AccelErrors`
+
+How one simulated accelerometer reads: its errors, and the part's own limits. TYPICAL gives the gyro
+and the backup IMU each a Pigeon 2's (`AccelErrors.PIGEON_2`); NONE gives each an ideal one
+(`AccelErrors.IDEAL`), the robot's average acceleration over each loop, exactly. The simulated IMU
+feels the robot's true motion where it sits, gravity's share as it tilts, and a hit's jolt.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `biasForward` | characterized | 0.08 m/s² | guess (CTRE publishes no bias for the Pigeon 2's accelerometer, factory-calibrated, and the boot plot in its User's Guide shows a few mg; a mount half a degree off level puts 0.09 m/s² of gravity in it) | Standing level and still, the average of `Drive/Gyro/AccelerationXMetersPerSecSq` over ten seconds. |
+| `biasLeft` | characterized | -0.05 m/s² | guess (as `biasForward`) | As `biasForward`, along y. |
+| `noise` | characterized | 0.3 m/s² | guess (no noise is published; this is a driving robot's vibration, which the part's own noise of a few mg is far under) | The spread of `AccelerationXMetersPerSecSq` while driving steadily straight. |
+| `turnedDegrees` | characterized | 0.5° | guess (an orientation set within half a degree) | How far the part really lies turned about the robot's up axis from the orientation its `ImuMount` gives it. What the [accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes) leaves: a robot speeding up straight ahead reads this share of it sideways. |
+| `flipped` | characterized | false | none (a checked mount) | Whether the part is really mounted the other way up from its `ImuMount`'s orientation. The accelerometer check: strafing left reads negative. |
+| `forwardMeters` | characterized | 0.01 m | guess (a place measured to a centimeter) | How far from where its `ImuMount` places it the IMU really sits. |
+| `leftMeters` | characterized | 0 m | guess (as `forwardMeters`) | As `forwardMeters`, to the left. |
+| `rangeMetersPerSecSq` | as built | 19.6 m/s² (2 g) | datasheet (Phoenix 6's `AccelerationX` signal reads from -2 to 2 g) | A fact of the part: a hit past it reads at it. |
+| `sampleHz` | chosen | 100 Hz | datasheet (`GyroIOPigeon2` asks for the accelerometer at 100 Hz, the CAN FD default in Phoenix 6's documentation) | How often the code asks for it. |
+| `filterSeconds` | characterized | 0.016 s | guess (CTRE doesn't publish the filter; sampled at 100 Hz, an accelerometer needs a low-pass under 50 Hz, and this is 10 Hz. At 5 ms the simulated robot's 100 Hz steering jolts, read once a loop, alias into a slide of up to 0.8 m/s spinning while driving; at 16 ms, 0.16) | A Pigeon 2 spinning in place, logged at its fastest: how much of the steering's 100 Hz shudder its readings still show. |
+
 ## Tuning limits
 
 How far the pit may take each value a mechanism tunes live, declared with the value in the
@@ -504,7 +636,7 @@ a robot keeps wanting to go past it, after asking why.
 | `limits.driveSupplyLowerCurrent` | 10 to 40 A | datasheet (40 A: the drive motors' breakers' rating) | Never above what the breaker carries indefinitely. |
 | `limits.driveSupplyLowerTime` | 0.1 to 1 s | datasheet (the fastest 40 A breaker, Snap Action's, can trip after 1.5 s at 80 A, the top of `limits.driveSupplyCurrent`) | At any supply limit in its range, the step-down comes at least half a second before the fastest breaker can trip (a warm breaker trips sooner than its datasheet's cold figures). Under 0.1 s it would cut into every hard launch; even 0.1 s cuts into one with `driveStatorCurrent` raised to 80 A or more, which holds a drive motor at 60 A or more for 0.12 to 0.2 s in the simulator. |
 | `limits.steerStatorCurrent` | 5 to 80 A | guess | Steering needs little; the top is for finding out how little. |
-| `limits.maxLinearSpeed` | 0.5 to 6 m/s | guess | Slow enough for a first drive; the record refuses anything past the free speed. |
+| `limits.maxLinearSpeed` | 0.5 to 6 m/s | guess | Slow enough for a first drive. Anything past the drivetrain's free speed is refused by the robot's rules (`RobotRules`), which hold it to the definition. |
 | `limits.maxAngularSpeed` | 0.1 to 3 rot/s | guess | Slow enough for a first drive, and three times the template's. |
 
 ### `vision` tuning
@@ -594,17 +726,13 @@ code's choices, explained beside them.
 
 | Where | Number | Kind | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `VisionSim`: the farthest tag a simulated camera detects | 7 m | characterized | guess | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. |
+| `AdvantageScopeAssets`: where the schematic robot's bumpers are drawn | 2.5 to 5.75 in above the floor | as built | rules (2026 R405, the bumper zone they must fill) | Where the robot's bumpers really sit. Only AdvantageScope's drawing reads it; it becomes configuration if anything else ever does. |
 | `VisionSim`: tag corner noise | 0.25 px average, 0.08 px spread | characterized | datasheet (PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise): how far the corners scatter, standing still. |
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
 | `PhoenixDrivetrain`: how often each module's CANcoder sends its position and velocity (the simulator's steering hears it as often) | 100 Hz | chosen | datasheet (Phoenix 6's default for a CANcoder's position) | Why: without Phoenix Pro, the steering's loop sees a new angle only this often, which sets how high its gains can go. Faster allows higher gains, for more traffic on the CAN bus: check the bus's load before raising it. Check that a robot's CANcoders send this often: Phoenix Tuner X's plot of a CANcoder's position shows a new sample every 10 ms, and in a log of a module turning, its odometry angles (`Drive/Module<name>/OdometrySteerAnglesRad`) change only every 10 ms, the same angle two or three readings running. |
 | `ModuleIOSim`: how often the steering's motor controller runs its loop | 1 ms | as built | datasheet (CTRE's Phoenix 6 documentation: a TalonFX's closed loop runs at 1 kHz) | A fact of the motor controller. |
-| `ModuleIOSim`: the drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of `Body.mass` at `wheelRadius` | 0.001 kg m² | characterized | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. About 2% of what the template's robot puts on each wheel, so a rough number costs little. |
-| `ModuleIOSim`: the steering's inertia | 0.004 kg m² | characterized | datasheet (Phoenix Tuner X's generated simulation value, as AdvantageKit's swerve templates use it) | [Feedforward](characterization.md#feedforward): SysId on one module's steering. What it assumes is in [stand-ins](stand-ins.md). |
-| `Localization`: a jolt that's a collision | 20 m/s² | chosen | top team (6800) | Why: hard driving stays near 1 g. Check: the IMU's acceleration (`Drive/Gyro/AccelerationXMetersPerSecSq`, `AccelerationYMetersPerSecSq`) stays well under it in hard driving, and goes over it in hits. |
 | `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |
 | `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot. |
-| `Drive`: a wheel this far short of its speed is at its grip's edge | 0.5 m/s | chosen | guess (the idea: 581 and 1678) | Why: a wheel that can't keep up is slipping or stalled. Check: `Localization/TractionLimited` turns on in pushing matches, and not in clean driving. |
 | `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |
 | `Vision`: how recently another camera must have agreed for a camera's tags to count toward its mount | 2 s | chosen | simulation (half a second left out cameras facing other ways, which see tags at other moments) | Why: the other cameras hold the pose a camera is judged against. |

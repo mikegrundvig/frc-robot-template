@@ -3,7 +3,9 @@
 `./gradlew run` runs the robot program on your laptop, in WPILib's simulation, with this template's
 simulated world (`frc.robot.sim`): a drivetrain that really moves, as heavy as the robot's
 configuration says, cameras that render what they'd see, and sensors that err as a season-worn
-robot's do. AdvantageScope shows the field, and so does Pitwall's World view (below).
+robot's do. AdvantageScope shows the field, the robot, and the truth beside the estimate
+([below](#see-it-in-advantagescope)), and so does Pitwall's
+[World view](#seeing-it-the-world-view).
 
 Pitwall's page drives the simulator from its *Sim* view (http://localhost:5820/#sim): the Driver
 Station, joysticks from the keyboard or a gamepad, pausing and stepping, Stop, and failing the
@@ -45,6 +47,92 @@ setting's pointer, not its value, so it always zeros. The GUI's own match time c
 enabled too. So with the GUI on, the API's joystick input is overwritten within a frame, and its
 match time fights the GUI's. So drive from *Sim* without the GUI, the default, or with `-Pgui` turn
 the GUI's Driver Station off (its *Disable DS* setting), which makes it only read.
+
+## See it in AdvantageScope
+
+The simulator logs what AdvantageScope needs to show the estimate against the truth, and the build
+draws the robot for it from `Robots.java`. A layout in the repository puts it all on screen.
+
+**Once, on each laptop:**
+
+1. Install AdvantageScope v27.0.0-alpha-6, the release that pairs with the AdvantageKit in
+   `vendordeps/` (27.0.0-alpha-6).
+2. **App > Use Custom Assets Folder** (**AdvantageScope >** on a Mac), and choose the
+   repository's `ascope_assets/` folder. The robot's model arrives with every `git pull` from then
+   on; AdvantageScope rereads the folder every five seconds.
+3. **File > Import Layout...**, and choose `layouts/advantagescope.json`. AdvantageScope warns
+   when the layout came from another version; it was exported for this one.
+
+**Then:** `./gradlew run`, and **File > Connect to Simulator > NetworkTables (AdvantageKit)**.
+AdvantageScope remembers the choice, so from then on **File > Connect to Simulator > Default**
+(Ctrl+Shift+K, Cmd+Shift+K on a Mac) connects the same way. It matters: connected as plain
+NetworkTables, the default, every value's name starts `NT:/AdvantageKit/`, and every view in the
+layout stays empty. A log opens in the same layout (**File > Open Log(s)...**, from `logs/`), since
+a log and the simulator connected this way name every value alike.
+
+| Tab | What it shows |
+|---|---|
+| 3D: estimate and truth | The robot where it believes it is, as a schematic of its configuration: bumpers, the frame (see-through, as tall as the robot), an orange arrow forward, the wheels turned as their modules measure, a small block where the gyro's IMU is mounted, and each camera with its field of view out to its sight range. The truth as a magenta ghost. A line from the robot to each tag the cameras saw this loop, green where its measurement was accepted and red where it was refused. The estimate's 99.9% ellipse on the floor, in yellow. |
+| 2D: the ellipse | The same from above, where the ellipse is easiest to read: the truth inside it is the estimate being honest. |
+| Swerve | Each module's measured velocity (red) and its setpoint (blue). |
+| Localization | How far the estimate is from the truth (meters and degrees) beside how far it claims it could be (a standard deviation), and what it rests on. |
+| Slip | The slip check: how fast the wheels may be sliding, as the gyro and as the accelerometer see it; how far the wheels' turn and the gyro's part; how much of a collision the IMU felt; and which IMU turns odometry. |
+
+**What it reads.** These names stay as they are, so old logs open in the layout too:
+
+| Value | Logged as |
+|---|---|
+| The estimate | `Localization/Pose` (2D); `Localization/Pose3d`, raised to the ground under it and tilted as the IMU says |
+| Its uncertainty | `Localization/Ellipse`: the 99.9% ellipse (3.72 standard deviations, where the consistency study's "outside the ellipse" begins), a closed outline of 17 poses; nothing while it's wider than the field |
+| The truth (simulator only) | `Sim/TruePose`, and `Sim/TruePose3d`, raised and tilted as the robot really is |
+| Each camera's tags | `Vision/<camera>/AcceptedTags` and `RejectedTags`: this loop's tags where the field's layout has them, by what became of their images; `RejectedReasons`, why each refused one was, in the same order |
+| The wheels | `Drive/ModulePoses`: each wheel's center in the robot's frame, turned to its measured angle, which turns the model's wheels |
+| The slip check | `Localization/SlipMetersPerSecond`, `TurnSlipMetersPerSecond`, `SpeedSlipMetersPerSecond`, `SlideMetersPerSecond`, `TurnApartDegrees`, `CollisionShare` |
+
+**Where the robot's model comes from.** Every build (and so `ci`) writes `ascope_assets/` from the
+robot's configuration in `Robots.java`, through a Gradle plugin of the template's own
+(`frc.advantagescope-assets`, in `build-logic/`): `Robot_<name>/`, the schematic with its
+cameras' fields of view, and `Robot_<name>_NoCones/`, the same without them, for the truth's
+ghost. Commit the folder with the change to `Robots.java` that made it.
+
+- **One plugin per tool.** A team that doesn't use AdvantageScope removes its line from
+  `build.gradle`'s `plugins`, and nothing of it runs: not the plugin, and not its own tests in
+  `ci` (`build-logic/`'s, which run only while one of its plugins is applied). A path tool's
+  plugin, once one is chosen, will be another line, and work the same way.
+- **Which robots:** `advantageScope { robots = ["competition", "practice"] }` in `build.gradle`,
+  one folder each; by default every robot in `Robots.all()`.
+- **Part of the build, never of `run` or `test`.** The simulator never waits for it, and it never
+  starts the robot program to draw it: it builds only the robots' configuration records, in a Java
+  process of its own on the project's Java, with a 32 MB heap. It can't tell `Robots.java` from
+  the rest of the program, so it runs again whenever the compiled program or its libraries change
+  (any change to the main code, to a library in `lib/`, where the writer is, or to a vendordep):
+  0.3 s on the template's robot. With the code unchanged it's skipped as up to date (0.025 s).
+- **Don't edit the folder:** the next build writes over an edit, from `Robots.java`. Nobody edits
+  these files with a tool, so the build simply keeps them in step: after a pull, a `clean`, or a
+  merge alike. **A merge conflict in `ascope_assets/`:** take either side
+  (`git checkout --theirs ascope_assets`), build, and commit what the build writes. (A plugin for
+  a tool whose GUI rewrites its own file, such as a path tool's, would instead fail the build on an
+  edit made outside it, naming the difference: the plugins' shared base in `build-logic/` can.)
+- **What the model leaves out:** everything it doesn't draw, such as the mass, the motors, the
+  gains, and each camera's noise and latency (the writer's Javadoc lists them, and a test keeps
+  the list whole).
+- **Your own assets go in `ascope_assets/` too:** a CAD robot, a joystick, a field.
+  AdvantageScope takes one custom assets folder, and the build leaves alone every folder it didn't
+  write: it removes only a folder it wrote itself whose robot is gone (renamed, or dropped from
+  `advantageScope { robots }`).
+
+**Known limits.**
+
+- A tag's line starts at the robot's center, half a meter up, not at the camera that saw it:
+  AdvantageScope draws vision targets from the robot's pose (its `RobotManager.ts`). Which camera
+  saw a tag is in the line's source, one pair of sources per camera.
+- A field of view is drawn flat at the sight range along the camera's axis; the simulator's limit
+  is a distance from the camera, so the cone's corners reach a little past it.
+- The cameras' fields of view are fixed to the frame: a camera on a mechanism would need its cone
+  moved with the mechanism, which the model can't do yet.
+- The layout names AdvantageScope's 2026 field as `2026 Field`, a name not checked against the
+  field AdvantageScope downloads. If it's wrong, AdvantageScope opens the first field it lists
+  instead: the newest season's, once its fields have downloaded.
 
 ## Pitwall's simulator controls
 
@@ -162,7 +250,9 @@ it finds out from its sensors, as on a robot.
 | | Zeroed off: its absolute encoder's zero | lasts | offset (°) |
 | | Worn tread: its wheel's true radius over the configured one | lasts | scale |
 | | Slips: spins without moving the robot | happens | turns |
+| | Spinning: its wheel keeps spinning faster than the floor moves it, as one losing its grip does | lasts | speed (m/s) |
 | Robot | Shoved, without its wheels turning; only its gyro feels a turn | happens | forward, left (m), turn (°) |
+| | Pushed, its wheels skidding: they never see it, and its IMU feels the push get going and stop (3 m/s²) | lasts | forward, left (m/s) |
 | | Hit, with a 4 g jolt its IMU feels | happens | forward, left (m) |
 | | Tilted by hand, whatever the ground | lasts | pitch, roll (°) |
 | | Slipping: only a share of its wheels' rolling moves it | lasts | grip |
@@ -197,7 +287,8 @@ make it.
 
 - One wheel off the floor: `wheel-lifted` tilts the robot and scales every wheel's grip alike, so
   its wheels never disagree as a lifted one's would, and the robot isn't raised.
-- A wheel slipping on its own under acceleration: traction isn't modeled (maple-sim,
+- One wheel slipping on its own under acceleration: the robot keeps to its tread's grip as a whole,
+  and every wheel carries the same share, so they slip all alike or not at all (maple-sim,
   [stand-ins](stand-ins.md)).
 - A CAN device dropping off the bus, or browning out: the simulated modules have no bus.
 - The battery sagging: the simulated world models no battery.

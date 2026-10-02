@@ -1,25 +1,26 @@
 package frc.robot.subsystems.vision;
 
+import com.michaelgrundvig.frc.localization.AttitudeHistory;
+import com.michaelgrundvig.frc.localization.CameraLocalizer;
+import com.michaelgrundvig.frc.localization.CaptureContext;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.MountCheck;
+import com.michaelgrundvig.frc.localization.TagAllowlist;
+import com.michaelgrundvig.frc.localization.TagDetections;
+import com.michaelgrundvig.frc.localization.Timestamps;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.localization.VisionPipeline;
+import com.michaelgrundvig.frc.localization.VisionResult;
+import com.michaelgrundvig.frc.localization.calibration.CameraMountCalibration;
+import com.michaelgrundvig.frc.localization.calibration.HeadingAverage;
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
-import frc.robot.lib.calibration.CameraMountCalibration;
-import frc.robot.lib.calibration.HeadingAverage;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
-import frc.robot.lib.localization.AttitudeHistory;
-import frc.robot.lib.localization.CameraLocalizer;
-import frc.robot.lib.localization.CaptureContext;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.MountCheck;
-import frc.robot.lib.localization.TagAllowlist;
-import frc.robot.lib.localization.TagDetections;
-import frc.robot.lib.localization.Timestamps;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.VisionMeasurement;
-import frc.robot.lib.localization.VisionPipeline;
-import frc.robot.lib.localization.VisionResult;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +30,6 @@ import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Quaternion;
@@ -451,8 +451,9 @@ public final class Vision implements AutoCloseable {
   private void processFrame(
       Camera camera, CameraIO.Frame frame, int first, Motion motion, long nowNanos) {
     TagDetections detections = detections(frame, camera.inputs.tags, first, camera.name());
+    List<Pose3d> seen = onTheField(detections);
     if (!camera.enabled.get()) {
-      camera.outcome("camera turned off");
+      camera.leftOut(seen, "camera turned off");
       return;
     }
     if (!camera.isNew(frame.timestampNanos())) {
@@ -462,7 +463,11 @@ public final class Vision implements AutoCloseable {
     // An image that arrived before it was taken, or far later than its camera's images do, has
     // the wrong capture time: solved as of that time, it would put the robot where it wasn't.
     if (!camera.arrivedInTime(
-        frame.timestampNanos(), nowNanos, previousLoopNanos, current.latencyMarginSeconds())) {
+        frame.timestampNanos(),
+        nowNanos,
+        previousLoopNanos,
+        current.latencyMarginSeconds(),
+        seen)) {
       return;
     }
     Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);
@@ -483,11 +488,11 @@ public final class Vision implements AutoCloseable {
             new VisionPipeline.Trust(camera.mountDoubtMeters(), onlyTags()));
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
-      camera.outcome(result.outcome());
+      camera.leftOut(seen, result.outcome());
     } else if (camera == calibrating) {
-      camera.outcome("withheld while calibrating this camera: " + result.outcome());
+      camera.leftOut(seen, "withheld while calibrating this camera: " + result.outcome());
     } else if (frame.timestampNanos() < holdUntilNanos) {
-      camera.outcome("held, autonomous just started: " + result.outcome());
+      camera.leftOut(seen, "held, autonomous just started: " + result.outcome());
     } else {
       localizer.addVision(measurement);
       camera.outcome(result.outcome());
@@ -580,8 +585,19 @@ public final class Vision implements AutoCloseable {
   /** Counts and logs what the estimator decided about each camera's measurements. */
   public void record(List<VisionDecision> decisions) {
     for (Camera camera : cameras) {
-      camera.record(decisions, current.mountToleranceMeters());
+      camera.record(decisions, current.mountToleranceMeters(), field::tag);
     }
+  }
+
+  /**
+   * An image's tags where the field's layout has them; a tag the field doesn't have is left out.
+   */
+  private List<Pose3d> onTheField(TagDetections detections) {
+    List<Pose3d> tags = new ArrayList<>(detections.tags().size());
+    for (TagDetections.Tag tag : detections.tags()) {
+      field.tag(tag.id()).ifPresent(tags::add);
+    }
+    return tags;
   }
 
   /**

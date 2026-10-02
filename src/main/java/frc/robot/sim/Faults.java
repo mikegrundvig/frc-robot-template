@@ -8,7 +8,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Component;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
-import frc.robot.lib.field.Bump;
+import com.michaelgrundvig.frc.world.field.Bump;
 import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
@@ -59,7 +59,9 @@ public final class Faults {
   public static final String ZEROED_OFF = "Zeroed off";
   public static final String WORN = "Worn tread";
   public static final String SLIPS = "Slips";
+  public static final String SPINNING = "Spinning";
   public static final String SHOVED = "Shoved";
+  public static final String PUSHED = "Pushed";
   public static final String HIT = "Hit";
   public static final String TILTED = "Tilted";
   public static final String SLIPPING = "Slipping";
@@ -88,6 +90,7 @@ public final class Faults {
   public static final String OFFSET = "Offset";
   public static final String TURNS = "Turns";
   public static final String GRIP = "Grip";
+  public static final String SPEED = "Speed";
   public static final String EXTRA = "Extra";
   public static final String TURN = "Turn";
   public static final String X = "X";
@@ -105,6 +108,9 @@ public final class Faults {
 
   private static final double MOUNT_DEGREES = 30;
   private static final double SHOVE_METERS = 3;
+
+  /** The fastest the page may spin a wheel past the floor, or push the robot, in m/s. */
+  private static final double SLIDE_METERS_PER_SECOND = 3;
 
   private static final String RECOVERS =
       "Nothing undoes it: place the robot again, or let its cameras find it";
@@ -403,6 +409,20 @@ public final class Faults {
             .undoneBy(
                 "Nothing undoes it: odometry has to notice the wheels disagreeing, and the cameras"
                     + " correct what it missed.")
+            .build(),
+        Fault.lasting(SPINNING)
+            .does(
+                "Its wheel keeps spinning this much faster than the floor moves it, as a wheel"
+                    + " losing its grip does: its encoder counts travel the floor never saw, and the"
+                    + " other wheels and the gyro disagree with it.")
+            .parameter(
+                SPEED,
+                "m/s",
+                Limits.between(-SLIDE_METERS_PER_SECOND, SLIDE_METERS_PER_SECOND),
+                0.5)
+            .isOn(() -> module.spinMetersPerSecond() != 0)
+            .apply(values -> drivetrain.spinAt(index, values.get(SPEED)))
+            .undo("It grips again.", () -> drivetrain.spinAt(index, 0))
             .build());
   }
 
@@ -427,6 +447,27 @@ public final class Faults {
                             values.get(LEFT),
                             Rotation2d.fromDegrees(values.get(TURN)))))
             .undoneBy(RECOVERS)
+            .build());
+    faults.add(
+        Fault.lasting(PUSHED)
+            .does(
+                "Pushed at this speed, in its own frame as it faces when the push starts, as"
+                    + " another robot pushes it: its wheels skid and never see it, and its IMU feels"
+                    + " the push get going, and stop, at 3 m/s².")
+            .parameter(
+                FORWARD,
+                "m/s",
+                Limits.between(-SLIDE_METERS_PER_SECOND, SLIDE_METERS_PER_SECOND),
+                0)
+            .parameter(
+                LEFT, "m/s", Limits.between(-SLIDE_METERS_PER_SECOND, SLIDE_METERS_PER_SECOND), 1)
+            .isOn(drivetrain::isPushed)
+            .apply(
+                values -> drivetrain.push(new Translation2d(values.get(FORWARD), values.get(LEFT))))
+            .undo(
+                "The push stops: the robot slows to its wheels' pace, and nothing undoes how far"
+                    + " it slid.",
+                () -> drivetrain.push(Translation2d.ZERO))
             .build());
     faults.add(
         Fault.event(HIT)

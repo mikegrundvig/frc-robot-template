@@ -1,7 +1,7 @@
 package frc.robot.sim;
 
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;

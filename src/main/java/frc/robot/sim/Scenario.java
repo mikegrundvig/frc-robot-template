@@ -1,11 +1,11 @@
 package frc.robot.sim;
 
-import static frc.robot.lib.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
-import frc.robot.lib.config.Rule;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.config.Rule;
 import java.util.ArrayList;
 import java.util.List;
 

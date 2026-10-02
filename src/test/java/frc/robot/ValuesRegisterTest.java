@@ -2,13 +2,14 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.ValuesRegister.CodeRecord;
 import frc.robot.ValuesRegister.Committed;
 import frc.robot.ValuesRegister.Component;
 import frc.robot.ValuesRegister.Knob;
 import frc.robot.ValuesRegister.Switch;
-import frc.robot.lib.localization.LocalizationGate;
 import frc.robot.sim.SensorErrors;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -62,18 +63,32 @@ class ValuesRegisterTest {
     committed.put(
         "SensorErrors.GyroErrors",
         new Committed("SensorErrors.TYPICAL's gyro", SensorErrors.TYPICAL.gyro()));
-    committed.put("Body", new Committed("Robots.SIM's body", robot.body()));
-    committed.put("SwerveConfig", new Committed("Robots.SIM's drivetrain", robot.drivetrain()));
     committed.put(
-        "SwerveConfig.Modules",
-        new Committed("Robots.SIM's modules", robot.drivetrain().modules()));
+        "SensorErrors.AccelErrors",
+        new Committed(
+            "SensorErrors.TYPICAL's accelerometer", SensorErrors.TYPICAL.accelerometer()));
+    RobotDefinition definition = robot.definition();
+    committed.put("Body", new Committed("Robots.SIM's body", definition.body()));
     committed.put(
-        "SwerveConfig.Limits", new Committed("Robots.SIM's limits", robot.drivetrain().limits()));
+        "DrivetrainGeometry", new Committed("Robots.SIM's drivetrain", definition.drivetrain()));
     committed.put(
-        "SwerveConfig.Gains", new Committed("Robots.SIM's gains", robot.drivetrain().gains()));
+        "DrivetrainGeometry.Modules",
+        new Committed("Robots.SIM's modules", definition.drivetrain().modules()));
+    committed.put(
+        "Motor",
+        new Committed("Robots.SIM's drive motor", definition.drivetrain().modules().driveMotor()));
+    committed.put(
+        "Gearing",
+        new Committed(
+            "Robots.SIM's drive gearing", definition.drivetrain().modules().driveGearing()));
+    committed.put(
+        "DrivetrainControl.Limits",
+        new Committed("Robots.SIM's limits", robot.drivetrain().limits()));
+    committed.put(
+        "DrivetrainControl.Gains", new Committed("Robots.SIM's gains", robot.drivetrain().gains()));
     committed.put(
         "CameraConfig.Sensor",
-        new Committed("Robots.SIM's camera sensor", robot.cameras().get(0).sensor()));
+        new Committed("Robots.SIM's camera sensor", definition.cameras().get(0).sensor()));
     return committed;
   }
 
@@ -104,14 +119,18 @@ class ValuesRegisterTest {
   void theScanFindsEveryConfigurationRecordAndWhatEachValueHolds() {
     assertThat(Scanned.RECORDS)
         .extracting(CodeRecord::name)
-        .contains("RobotConfig", "Body", "SwerveConfig.Limits", "ImuCrossCheck.Settings")
+        .contains(
+            "RobotConfig", "Body", "DrivetrainControl.Limits", "ImuCrossCheck.Settings", "Motor")
         .contains("ImuReadings") // listed in the register as not configuration
         .doesNotHaveDuplicates();
     assertThat(record("RobotConfig").components())
         .contains(
+            new Component("definition", "RobotDefinition"),
+            new Component("drivetrainWiring", "SwerveWiring")); // in an Optional
+    assertThat(record("RobotDefinition").components())
+        .contains(
             new Component("name", null),
             new Component("body", "Body"),
-            new Component("drivetrainWiring", "SwerveWiring"), // in an Optional
             new Component("cameras", "CameraConfig")); // in a List
     assertThat(record("SensorErrors").components())
         .contains(
@@ -121,8 +140,8 @@ class ValuesRegisterTest {
 
   @Test
   void nestedRecordsAreNamedWithTheirOuterRecord() {
-    assertThat(ValuesRegister.registerName("frc.robot.lib.config.SwerveConfig$Limits"))
-        .isEqualTo("SwerveConfig.Limits");
+    assertThat(ValuesRegister.registerName("frc.robot.subsystems.drive.DrivetrainControl$Limits"))
+        .isEqualTo("DrivetrainControl.Limits");
     assertThat(record("SensorErrors.GyroErrors").className())
         .isEqualTo("frc.robot.sim.SensorErrors$GyroErrors");
   }

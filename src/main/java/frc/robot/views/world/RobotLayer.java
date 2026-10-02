@@ -7,10 +7,10 @@ import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
 import com.michaelgrundvig.frc.pitwall.scene.SceneState;
 import com.michaelgrundvig.frc.pitwall.scene.Style;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -78,9 +78,11 @@ final class RobotLayer implements Layer {
 
   private final FieldModel field;
   private final Body body;
-  private final SwerveConfig drivetrain;
+
+  /** The wheels' radius, in meters. */
+  private final double radius;
+
   private final List<CameraConfig> cameras;
-  private final double sightRange;
   private final WorldView.Readings readings;
   private final Function<String, Optional<String>> cameraAction;
   private final Translation2d[] modules;
@@ -92,20 +94,16 @@ final class RobotLayer implements Layer {
 
   RobotLayer(
       FieldModel field,
-      Body body,
-      SwerveConfig drivetrain,
-      List<CameraConfig> cameras,
-      double sightRange,
+      RobotDefinition robot,
       WorldView.Readings readings,
       Function<String, Optional<String>> cameraAction) {
     this.field = field;
-    this.body = body;
-    this.drivetrain = drivetrain;
-    this.cameras = List.copyOf(cameras);
-    this.sightRange = sightRange;
+    body = robot.body();
+    radius = robot.drivetrain().modules().wheelRadius().in(Meters);
+    cameras = List.copyOf(robot.cameras());
     this.readings = readings;
     this.cameraAction = cameraAction;
-    modules = drivetrain.moduleTranslations(body);
+    modules = robot.moduleTranslations();
     int count = Math.min(modules.length, WorldView.MODULES.size());
     moduleFrames = new String[count];
     moduleSpeeds = new String[count];
@@ -146,7 +144,6 @@ final class RobotLayer implements Layer {
         .from(0, 0, height + 0.02)
         .to(bumperLength / 2 + 0.2, 0, height + 0.02)
         .style(Style.ACCENT);
-    double radius = drivetrain.modules().wheelRadius().in(Meters);
     for (int i = 0; i < moduleFrames.length; i++) {
       String module = WorldView.MODULES.get(i);
       String frame = moduleFrames[i];
@@ -177,14 +174,14 @@ final class RobotLayer implements Layer {
           .arrow(frame + ".axis", frame)
           .to(CAMERA_ARROW, 0, 0)
           .style(Style.ACCENT)
-          .inspect(() -> WorldView.camera(camera, sightRange, cameraAction))
+          .inspect(() -> WorldView.camera(camera, cameraAction))
           .reveal(fullView);
       double[] fov = fieldOfView(camera.sensor());
       scene
           .frustum(frame + ".stub", frame)
           .fov(fov[0], fov[1])
           .range(0, VIEW_STUB_METERS)
-          .inspect(() -> WorldView.camera(camera, sightRange, cameraAction))
+          .inspect(() -> WorldView.camera(camera, cameraAction))
           .reveal(fullView);
       Translation3d label = labels.get(i);
       scene

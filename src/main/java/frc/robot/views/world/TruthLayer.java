@@ -6,7 +6,7 @@ import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
 import com.michaelgrundvig.frc.pitwall.scene.SceneState;
 import com.michaelgrundvig.frc.pitwall.scene.Style;
-import frc.robot.lib.config.Body;
+import com.michaelgrundvig.frc.world.robot.Body;
 import java.util.function.Supplier;
 import org.wpilib.math.geometry.Pose3d;
 

@@ -4,18 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.pitwall.push.Feed;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Scenes;
-import frc.robot.RobotConfig;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.CameraConfigBuilder;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.VisionMeasurement;
 import io.avaje.jsonb.JsonType;
 import io.avaje.jsonb.Jsonb;
 import java.util.ArrayList;
@@ -37,7 +37,7 @@ import org.wpilib.math.kinematics.SwerveModuleVelocity;
 class WorldViewTest {
   private static final JsonType<Object> JSON =
       Jsonb.builder().serializeNulls(true).build().type(Object.class);
-  private static final RobotConfig ROBOT = Robots.SIM;
+  private static final RobotDefinition ROBOT = Robots.SIM.definition();
 
   private final AtomicLong clock = new AtomicLong(1_000_000_000L);
   private final List<String> said = new ArrayList<>();
@@ -99,10 +99,7 @@ class WorldViewTest {
     scenes.add(
         WorldView.scene(
             RobotSim.FIELD,
-            ROBOT.body(),
-            ROBOT.drivetrain(),
-            ROBOT.cameras(),
-            7,
+            ROBOT,
             readings,
             simulated ? () -> new Pose3d(new Pose2d(3.05, 4, Rotation2d.fromDegrees(31))) : null,
             camera -> Optional.of("Calibrate " + camera)));

@@ -43,7 +43,11 @@ class CoprocessorFaultsTest {
 
   private final SimulatedWorld world =
       new SimulatedWorld(
-          RobotSim.FIELD, Robots.SIM.drivetrain(), Robots.SIM.body(), List.of(), SensorErrors.NONE);
+          RobotSim.FIELD,
+          Robots.SIM.definition().drivetrain(),
+          Robots.SIM.definition().body(),
+          List.of(),
+          SensorErrors.NONE);
   private final Components components = new Components(said -> {});
   private final CoprocessorIO coprocessor =
       world.coprocessors(TABLE, Coprocessors.Settings.DEFAULTS)[0];

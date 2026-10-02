@@ -1,8 +1,8 @@
 package frc.robot.subsystems.coprocessors;
 
-import static frc.robot.lib.config.Rules.atMost;
-import static frc.robot.lib.config.Rules.between;
-import static frc.robot.lib.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.atMost;
+import static com.michaelgrundvig.frc.world.config.Rules.between;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
 
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
@@ -12,8 +12,8 @@ import com.michaelgrundvig.frc.pitwall.Devices;
 import com.michaelgrundvig.frc.pitwall.Notices;
 import com.michaelgrundvig.frc.pitwall.Notices.Notice;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

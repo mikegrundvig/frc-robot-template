@@ -1,13 +1,14 @@
 package frc.robot.sim;
 
-import static frc.robot.lib.config.Rules.each;
-import static frc.robot.lib.config.Rules.finite;
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.positive;
-import static frc.robot.lib.config.Rules.size;
+import static com.michaelgrundvig.frc.world.config.Rules.each;
+import static com.michaelgrundvig.frc.world.config.Rules.finite;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.size;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +33,8 @@ import org.wpilib.math.geometry.Translation3d;
  *     that much away from where the code thinks it points
  * @param gyro the gyro's errors
  * @param backupGyro the backup IMU's errors (Systemcore's own), read once a loop
+ * @param accelerometer how the gyro's accelerometer reads: its errors, and the part's limits
+ * @param backupAccelerometer the same for the backup IMU's
  * @param cameraMountErrors by camera name, how each camera is really mounted off its configured
  *     mount, in the robot's frame: a camera knocked 4 in low, or turned 2 degrees
  * @param tagErrors by tag ID, how far each tag really sits from where the field's layout says, in
@@ -46,6 +49,8 @@ public record SensorErrors(
     List<Double> steerOffsetDegrees,
     GyroErrors gyro,
     GyroErrors backupGyro,
+    AccelErrors accelerometer,
+    AccelErrors backupAccelerometer,
     Map<String, Transform3d> cameraMountErrors,
     Map<Integer, Translation3d> tagErrors,
     long seed) {
@@ -58,6 +63,8 @@ public record SensorErrors(
           .steerOffsetDegrees(List.of(0.0, 0.0, 0.0, 0.0))
           .gyro(GyroErrors.EXACT)
           .backupGyro(GyroErrors.EXACT)
+          .accelerometer(AccelErrors.IDEAL)
+          .backupAccelerometer(AccelErrors.IDEAL)
           .cameraMountErrors(Map.of())
           .tagErrors(Map.of())
           .seed(1)
@@ -66,8 +73,9 @@ public record SensorErrors(
   /**
    * A robot partway through a season: tread worn 1-2% and unevenly, absolute encoder zeros off by
    * up to half a degree, and a gyro reading 0.3% high, drifting 0.2° a minute; its backup IMU reads
-   * 0.5% high and drifts a degree a minute. Plausible estimates, not measurements: replace them
-   * with a real robot's once it is calibrated.
+   * 0.5% high and drifts a degree a minute. Both accelerometers read as a Pigeon 2's does, with its
+   * range, rate, noise, and a small bias and mount error ({@link AccelErrors#PIGEON_2}). Plausible
+   * estimates, not measurements: replace them with a real robot's once it is calibrated.
    */
   public static final SensorErrors TYPICAL =
       SensorErrorsBuilder.builder()
@@ -85,6 +93,8 @@ public record SensorErrors(
                   .driftDegreesPerMinute(1.0)
                   .noiseDegrees(0.05)
                   .build())
+          .accelerometer(AccelErrors.PIGEON_2)
+          .backupAccelerometer(AccelErrors.PIGEON_2)
           .cameraMountErrors(Map.of())
           .tagErrors(Map.of())
           .seed(1)
@@ -114,6 +124,106 @@ public record SensorErrors(
     /** Starts describing a gyro's errors, one named value at a time. */
     public static SensorErrorsGyroErrorsBuilder.ScaleStage builder() {
       return SensorErrorsGyroErrorsBuilder.builder();
+    }
+  }
+
+  /**
+   * How a simulated accelerometer reads: its errors, and the part's own limits. The simulated IMU
+   * feels the robot's true motion where it sits, and gravity's share as it tilts; this is what
+   * comes between that and the reading.
+   *
+   * @param biasForward a steady offset along the robot's forward axis, in m/s²: the part's own, and
+   *     a mount a little off level, whose tilt puts a share of gravity in it
+   * @param biasLeft the same along the robot's left axis
+   * @param noise random noise on each sample, as a standard deviation, in m/s²: the part's, and the
+   *     robot's vibration
+   * @param turnedDegrees how far its axes really lie turned, about the robot's up axis, from the
+   *     orientation the robot's definition gives it ({@code ImuMount.orientation}),
+   *     counterclockwise from above: an orientation set a little off, or the part turned on its
+   *     mount since
+   * @param flipped whether it's really mounted the other way up from its orientation in the robot's
+   *     definition: its left axis reads the robot's right
+   * @param forwardMeters how far ahead of where the robot's definition places it it really sits
+   * @param leftMeters and how far left
+   * @param rangeMetersPerSecSq the most it reports on each axis, either way: past it, it reads the
+   *     range. Infinite for none.
+   * @param sampleHz how often its readings are sampled and sent; the robot reads the latest each
+   *     loop. Zero for an ideal accelerometer read as the robot's average acceleration over the
+   *     loop.
+   * @param filterSeconds the time constant of the low-pass filter ahead of its sampling: what it
+   *     smooths of the robot's jolts, and how late it reads a change
+   */
+  @ConfigRecord
+  public record AccelErrors(
+      double biasForward,
+      double biasLeft,
+      double noise,
+      double turnedDegrees,
+      boolean flipped,
+      double forwardMeters,
+      double leftMeters,
+      double rangeMetersPerSecSq,
+      double sampleHz,
+      double filterSeconds) {
+    /** An ideal accelerometer: the robot's average acceleration over each loop, exactly. */
+    public static final AccelErrors IDEAL =
+        builder()
+            .biasForward(0)
+            .biasLeft(0)
+            .noise(0)
+            .turnedDegrees(0)
+            .flipped(false)
+            .forwardMeters(0)
+            .leftMeters(0)
+            .rangeMetersPerSecSq(Double.POSITIVE_INFINITY)
+            .sampleHz(0)
+            .filterSeconds(0)
+            .build();
+
+    /**
+     * A Pigeon 2's: ±2 g on each axis (the range of Phoenix 6's {@code AccelerationX} signal),
+     * sampled at the 100 Hz the robot's code asks for, behind a filter of 16 ms. Its noise and bias
+     * are guesses: CTRE publishes neither for the accelerometer (its User's Guide plots a few mg at
+     * rest on a vibrating fixture), so the noise is a driving robot's vibration, 0.3 m/s², and the
+     * bias a part calibrated at the factory on a mount half a degree off level, under 0.1 m/s². Its
+     * mount pose set within half a degree, and its place measured to a centimeter.
+     */
+    public static final AccelErrors PIGEON_2 =
+        builder()
+            .biasForward(0.08)
+            .biasLeft(-0.05)
+            .noise(0.3)
+            .turnedDegrees(0.5)
+            .flipped(false)
+            .forwardMeters(0.01)
+            .leftMeters(0)
+            .rangeMetersPerSecSq(2 * ImuReadings.STANDARD_GRAVITY)
+            .sampleHz(100)
+            .filterSeconds(0.016)
+            .build();
+
+    public AccelErrors {
+      Checks.on(AccelErrors.class)
+          .field("biasForward", biasForward, finite())
+          .field("biasLeft", biasLeft, finite())
+          .field("noise", noise, nonNegative())
+          .field("turnedDegrees", turnedDegrees, finite())
+          .field("forwardMeters", forwardMeters, finite())
+          .field("leftMeters", leftMeters, finite())
+          .check(
+              "rangeMetersPerSecSq",
+              () ->
+                  rangeMetersPerSecSq > 0
+                      ? null
+                      : rangeMetersPerSecSq + " must be positive, or infinite for no range")
+          .field("sampleHz", sampleHz, nonNegative())
+          .field("filterSeconds", filterSeconds, nonNegative())
+          .orThrow();
+    }
+
+    /** Starts describing an accelerometer, one named value at a time. */
+    public static SensorErrorsAccelErrorsBuilder.BiasForwardStage builder() {
+      return SensorErrorsAccelErrorsBuilder.builder();
     }
   }
 
@@ -152,6 +262,11 @@ public record SensorErrors(
   /** The same errors, with both the gyro and the backup IMU reading like this. */
   public SensorErrors withGyros(GyroErrors both) {
     return SensorErrorsBuilder.builder(this).gyro(both).backupGyro(both).build();
+  }
+
+  /** The same errors, with the gyro's accelerometer reading like this. */
+  public SensorErrors withAccelerometer(AccelErrors accelerometer) {
+    return SensorErrorsBuilder.builder(this).accelerometer(accelerometer).build();
   }
 
   /** The same errors, with the backup IMU reading like this. */

@@ -1,15 +1,15 @@
 package frc.robot.views.world;
 
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
 import com.michaelgrundvig.frc.pitwall.scene.SceneState;
 import com.michaelgrundvig.frc.pitwall.scene.Shapes;
 import com.michaelgrundvig.frc.pitwall.scene.Style;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;

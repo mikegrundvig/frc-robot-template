@@ -22,7 +22,9 @@ public interface GyroIO {
 
     /**
      * Acceleration along the robot's forward and left axes, as the IMU feels it: a jolt beyond what
-     * driving explains is a collision. Gravity is in it too, a little, when the robot tilts.
+     * driving explains is a collision, and a change of speed the wheels don't show is them sliding.
+     * Gravity's share is in it too when the robot tilts, which localization takes out by the
+     * attitude. Not a number from an IMU that can't say.
      */
     public double accelerationXMetersPerSecSq = 0.0;
 

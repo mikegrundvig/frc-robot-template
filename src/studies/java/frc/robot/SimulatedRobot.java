@@ -1,8 +1,8 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
-import frc.robot.lib.localization.LocalizationEstimate;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.SensorErrors;

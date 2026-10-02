@@ -4,16 +4,16 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.localization.calibration.CameraMountCalibration;
+import com.michaelgrundvig.frc.localization.calibration.GyroScaleCalibration;
+import com.michaelgrundvig.frc.localization.calibration.HeadingAverage;
+import com.michaelgrundvig.frc.localization.calibration.LevelCheck;
+import com.michaelgrundvig.frc.localization.calibration.WheelRadiusCalibration;
 import com.michaelgrundvig.frc.pitwall.Actions;
-import frc.robot.lib.calibration.CameraMountCalibration;
-import frc.robot.lib.calibration.GyroScaleCalibration;
-import frc.robot.lib.calibration.HeadingAverage;
-import frc.robot.lib.calibration.LevelCheck;
-import frc.robot.lib.calibration.WheelRadiusCalibration;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveWiring;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.vision.Vision;
@@ -34,8 +34,8 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  * The calibration procedures, as actions for the Pitwall page: each drives or watches the robot,
  * works out a number its configuration should have, and says where it goes, with the date. The
  * written procedures are in {@code docs/calibration.md}; the math is in {@code
- * frc.robot.lib.calibration}. Nothing is changed on its own: the numbers go into {@code Robots},
- * and the robot is redeployed.
+ * com.michaelgrundvig.frc.localization.calibration}. Nothing is changed on its own: the numbers go
+ * into {@code Robots}, and the robot is redeployed.
  */
 public final class Calibration {
   /** Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (6328). */
@@ -83,7 +83,7 @@ public final class Calibration {
   private final Localization localization;
   private final List<CameraConfig> cameras;
   private final Optional<SwerveWiring> wiring;
-  private final Supplier<SwerveConfig> drivetrain;
+  private final DrivetrainGeometry drivetrain;
   private final Supplier<LocalDate> today;
   private String lastResult = "None run yet";
 
@@ -91,7 +91,7 @@ public final class Calibration {
    * @param cameras the robot's cameras, whose mounts can be calibrated
    * @param wiring the drivetrain's wiring, with the gyro's scale as configured; empty for a robot
    *     that only runs in simulation
-   * @param drivetrain the drivetrain's configuration, with any values tuned while running
+   * @param drivetrain the drivetrain as defined, whose wheel radius the measurement replaces
    * @param today the date, for each result's note
    */
   public Calibration(
@@ -100,7 +100,7 @@ public final class Calibration {
       Localization localization,
       List<CameraConfig> cameras,
       Optional<SwerveWiring> wiring,
-      Supplier<SwerveConfig> drivetrain,
+      DrivetrainGeometry drivetrain,
       Supplier<LocalDate> today) {
     this.drive = drive;
     this.vision = vision;
@@ -183,7 +183,7 @@ public final class Calibration {
                 spin.update(drive.gyroYaw().getRadians(), drive.wheelRotationsRadians());
               }
               stop(coroutine);
-              double configured = drivetrain.get().modules().wheelRadius().in(Inches);
+              double configured = drivetrain.modules().wheelRadius().in(Inches);
               double measured = Meters.of(spin.radiusMeters()).in(Inches);
               double[] wheels = spin.radiiMeters();
               report(

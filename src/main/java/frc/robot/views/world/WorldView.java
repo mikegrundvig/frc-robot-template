@@ -3,14 +3,13 @@ package frc.robot.views.world;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Scene;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.VisionDecision;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -42,7 +41,7 @@ public final class WorldView {
 
   /**
    * The swerve modules' names on the page, in the order the drivetrain lists them ({@link
-   * SwerveConfig#moduleTranslations}).
+   * RobotDefinition#moduleTranslations}).
    */
   static final List<String> MODULES =
       List.of("front-left", "front-right", "back-left", "back-right");
@@ -59,7 +58,7 @@ public final class WorldView {
     double rollRadians();
 
     /**
-     * Each module's measured wheel speed and angle, in {@link SwerveConfig#moduleTranslations}'s
+     * Each module's measured wheel speed and angle, in {@link RobotDefinition#moduleTranslations}'s
      * order.
      */
     SwerveModuleVelocity[] modules();
@@ -73,31 +72,26 @@ public final class WorldView {
   /**
    * The world as a scene for Pitwall: {@code pitwall.scenes().add(WorldView.scene(...))}.
    *
-   * @param sightRangeMeters how far a camera's wedge reaches: as far as it reads tags
+   * @param robot what the robot is: its frame, wheels, cameras and IMUs, where each is mounted
    * @param truth where the robot really is, in the simulator; null elsewhere
    * @param cameraAction the Pitwall action that calibrates a camera's mount, by the camera's name,
    *     to end a camera's or a sight line's details in
    */
   public static Scene scene(
       FieldModel field,
-      Body body,
-      SwerveConfig drivetrain,
-      List<CameraConfig> cameras,
-      double sightRangeMeters,
+      RobotDefinition robot,
       Readings readings,
       @Nullable Supplier<Pose3d> truth,
       Function<String, Optional<String>> cameraAction) {
     Scene scene =
         Scene.named(ID, "World")
             .layer(new FieldLayer(field))
-            .layer(
-                new RobotLayer(
-                    field, body, drivetrain, cameras, sightRangeMeters, readings, cameraAction))
-            .layer(new CameraViews(cameras, sightRangeMeters, cameraAction), Scene.Visibility.OFF)
+            .layer(new RobotLayer(field, robot, readings, cameraAction))
+            .layer(new CameraViews(robot.cameras(), cameraAction), Scene.Visibility.OFF)
             .layer(new Uncertainty(readings))
-            .layer(new SightLines(field, cameras, readings, cameraAction));
+            .layer(new SightLines(field, robot.cameras(), readings, cameraAction));
     if (truth != null) {
-      scene.layer(new TruthLayer(body, truth));
+      scene.layer(new TruthLayer(robot.body(), truth));
     }
     return scene.focus(RobotLayer.FRAME);
   }
@@ -111,8 +105,7 @@ public final class WorldView {
    * What a click on a camera, or its view, says: where it's mounted, what it sees, and its
    * calibration.
    */
-  static Inspection camera(
-      CameraConfig camera, double sightRange, Function<String, Optional<String>> cameraAction) {
+  static Inspection camera(CameraConfig camera, Function<String, Optional<String>> cameraAction) {
     Inspection said =
         Inspection.of("Camera " + camera.name())
             .detail(
@@ -139,7 +132,7 @@ public final class WorldView {
                     camera.sensor().diagonalFieldOfView().in(Degrees),
                     camera.sensor().widthPixels(),
                     camera.sensor().heightPixels(),
-                    sightRange))
+                    camera.sensor().sightRange().in(Meters)))
             .detail("From", "the robot's configuration, in Robots.java");
     Optional<String> calibrate = cameraAction.apply(camera.name());
     return calibrate.isPresent() ? said.action(calibrate.get()) : said;

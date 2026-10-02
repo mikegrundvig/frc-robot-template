@@ -2,7 +2,6 @@ package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.config.SwerveConfig;
 import java.util.List;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Rotation2d;
@@ -24,9 +23,6 @@ public class Module {
   private double driveKs;
   private double driveKv;
 
-  /** The wheel speed last sent, in meters per second: zero once stopped. */
-  private double commandedMetersPerSecond;
-
   Module(ModuleIO io, int index, Distance wheelRadius) {
     this.io = io;
     this.name = NAMES.get(index);
@@ -34,7 +30,7 @@ public class Module {
   }
 
   /** Takes new gains and limits: the feedforward here, the rest on the motor controllers. */
-  void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
+  void configure(DrivetrainControl.Gains gains, DrivetrainControl.Limits limits) {
     driveKs = gains.driveKs();
     driveKv = gains.driveKv();
     io.configure(gains, limits);
@@ -61,7 +57,6 @@ public class Module {
             : desired.optimize(current).cosineScale(current);
 
     double velocity = target.velocity;
-    commandedMetersPerSecond = velocity;
     double feedforward = driveKs * Math.signum(velocity) + driveKv * velocity;
     io.setDriveVelocity(velocity / wheelRadiusMeters, feedforward);
     io.setSteerAngle(target.angle);
@@ -74,13 +69,11 @@ public class Module {
    * turning past 90°), so the steering makes the whole move asked of it.
    */
   void holdSteer(Rotation2d angle) {
-    commandedMetersPerSecond = 0;
     io.setDriveVelocity(0, 0);
     io.setSteerAngle(angle);
   }
 
   void stop() {
-    commandedMetersPerSecond = 0;
     io.stop();
   }
 
@@ -99,20 +92,6 @@ public class Module {
     return inputs.unconfigured;
   }
 
-  /** Whether the drive motor hit its current limit since the last loop. */
-  boolean isTorqueLimited() {
-    return inputs.driveTorqueLimited;
-  }
-
-  /**
-   * How far the wheel's speed falls short of the speed it was last sent, in meters per second:
-   * negative when it's faster.
-   */
-  double speedDeficitMetersPerSecond() {
-    return Math.abs(commandedMetersPerSecond)
-        - Math.abs(inputs.driveVelocityRadPerSec * wheelRadiusMeters);
-  }
-
   SwerveModulePosition getPosition() {
     return new SwerveModulePosition(inputs.drivePositionRad * wheelRadiusMeters, inputs.steerAngle);
   }
@@ -120,6 +99,11 @@ public class Module {
   SwerveModuleVelocity getVelocity() {
     return new SwerveModuleVelocity(
         inputs.driveVelocityRadPerSec * wheelRadiusMeters, inputs.steerAngle);
+  }
+
+  /** Which way the wheel points, as its module measures it. */
+  Rotation2d steerAngle() {
+    return inputs.steerAngle;
   }
 
   /** How far the wheel has turned, in radians. */

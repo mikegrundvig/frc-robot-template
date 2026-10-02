@@ -60,6 +60,10 @@ jobs:
             pitwall/build/test-results/
             pitwall/docs-processor/build/reports/
             pitwall/docs-processor/build/test-results/
+            build-logic/build/reports/
+            build-logic/build/test-results/
             coprocessor/*/build/reports/
             coprocessor/*/build/test-results/
+            lib/*/build/reports/
+            lib/*/build/test-results/
           if-no-files-found: warn

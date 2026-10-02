@@ -1,12 +1,12 @@
 package frc.robot.views.world;
 
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
 import com.michaelgrundvig.frc.pitwall.scene.SceneState;
 import com.michaelgrundvig.frc.pitwall.scene.Style;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseCovariance;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 

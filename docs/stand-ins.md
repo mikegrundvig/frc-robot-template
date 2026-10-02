@@ -6,7 +6,7 @@ delete the row when you replace it.
 
 | Stand-in | Stands in for | Replace when |
 |---|---|---|
-| The swerve drivetrain, `src/main/java/frc/robot/subsystems/drive/`, including its CTRE hardware code (`PhoenixDrivetrain`: TalonFX drive and steering, CANcoders, a Pigeon 2, and the thread that reads them at 250 Hz) | AdvantageKit's swerve templates, which bring the same for CTRE and REV hardware. Only the drivetrain goes: where the robot is belongs to `subsystems/localization` (the estimator, choosing between the gyro and the backup IMU, trusting the wheels, terrain and its landmarks), and the simulated world to `frc.robot.sim`, and both stay. Theirs needs one addition, an adapter that reports `DrivetrainReadings` each loop (every wheel reading, both IMUs, the velocity, and whether the wheels are at their grip's edge), and to take its pose from `Localization` rather than its own estimator. Keep what ours adds if theirs lacks it: the steer-drive coupling, the current-limit flag for slip, the IMU's attitude and acceleration. | AdvantageKit publishes its 2027 swerve templates, planned for WPILib's 2027 beta (AdvantageKit 27.0.0-alpha-6 release notes) |
+| The swerve drivetrain, `src/main/java/frc/robot/subsystems/drive/`, including its CTRE hardware code (`PhoenixDrivetrain`: TalonFX drive and steering, CANcoders, a Pigeon 2, and the thread that reads them at 250 Hz) | AdvantageKit's swerve templates, which bring the same for CTRE and REV hardware. Only the drivetrain goes: where the robot is belongs to `subsystems/localization` (the estimator, choosing between the gyro and the backup IMU, trusting the wheels, terrain and its landmarks), and the simulated world to `frc.robot.sim`, and both stay. Theirs needs one addition, an adapter that reports `DrivetrainReadings` each loop (every wheel reading, both IMUs, and the velocity), and to take its pose from `Localization` rather than its own estimator. Keep what ours adds if theirs lacks it: the steer-drive coupling, the IMU's attitude and acceleration (localization checks the wheels against them for slip), and not a number for an acceleration an IMU can't read. | AdvantageKit publishes its 2027 swerve templates, planned for WPILib's 2027 beta (AdvantageKit 27.0.0-alpha-6 release notes) |
 | PhotonLib, pinned to a development build (`vendordeps/photonlib.json`, dev-v2027.0.0-alpha-2-69-g71416112) | A PhotonLib release for WPILib alpha 7. Its one 2027 release (alpha-2, May 2026) targets alpha 5, and GradleRIO alpha 7 refuses it. The coprocessor must run the same PhotonVision version as the pinned library. | PhotonVision releases a build for the WPILib version in use |
 
 ## Alpha dependencies
@@ -27,38 +27,49 @@ Not built here at all, because the library has no 2027 build yet. Add these when
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
 - **Physics simulation** (traction, collisions, game pieces, the robot as one rigid body):
   maple-sim. Until then, simulation tests the code, not the robot's traction or power. Power
-  includes the drive motors' supply current
-  limit: the simulator models neither it nor Phoenix's step-down from it
-  (`SwerveConfig.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`), and its battery holds
-  12 V, so the supply current a simulated module reports is what its motor would draw with no supply
-  limit. At the template's 30 A stator limit that changes nothing: a drive motor draws under 30 A
-  from the battery, below both limits. Raise the stator limit past them, and the simulator lets a
-  motor draw more from the battery than its motor controller would. The simulator keeps the robot's true pose apart from
-  its sensors (`DriveSimulation`, `SensorErrors`), the drive and steering motors obey their stator
-  current limits, the steering's loop runs as a TalonFX's does (every millisecond, on the angle its
-  CANcoder sends every 10 ms), the robot rides over the field's bumps (tilted and raised by the
-  ground under its wheels), and faults can be made while it runs, from the Pitwall page, by name
-  (`frc.robot.sim.Scenarios`, `./gradlew run -Pscenario=<name>`), or in a test
-  (`frc.robot.sim.Faults`, listed in [simulator.md](simulator.md)): a slipping wheel, a push, a hit
-  the IMU feels, a gyro unplugged, frozen, or reset, a camera knocked off its mount, frozen, or
-  late, a module's encoders gone stale. Wheels still never slip on their own, and no one wheel can
-  leave the floor: `wheel-lifted` tilts the robot by hand (which holds over any bump for the rest of
-  the run) and scales every wheel's grip alike, so its wheels never disagree as a lifted one's
-  would, and the robot isn't raised. The steering has no friction: a wheel's scrub on the carpet
-  and its gearbox's drag need measuring on a real module first (`CurrentLimitedMotorSim` says where
-  they go). And it hears its CANcoder at the rate the code asks for
-  (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet confirmed.
+  includes the drive motors' supply current limit: the simulator models neither it nor Phoenix's
+  step-down from it (`DrivetrainControl.Limits.driveSupplyLowerCurrent` and `driveSupplyLowerTime`),
+  and its battery holds 12 V, so the supply current a simulated module reports is what its motor
+  would draw with no supply limit. At the template's 30 A stator limit that changes nothing: a drive
+  motor draws under 30 A from the battery, below both limits. Raise the stator limit past them, and
+  the simulator lets a motor draw more from the battery than its motor controller would. The
+  simulator keeps the robot's true pose apart from its sensors (`DriveSimulation`, `SensorErrors`),
+  the drive and steering motors obey their stator current limits, the steering's loop runs as a
+  TalonFX's does (every millisecond, on the angle its CANcoder sends every 10 ms), the robot rides
+  over the field's bumps (tilted and raised by the ground under its wheels), and faults can be made
+  while it runs, from the Pitwall page, by name (`frc.robot.sim.Scenarios`,
+  `./gradlew run -Pscenario=<name>`), or in a test (`frc.robot.sim.Faults`, listed in
+  [simulator.md](simulator.md)): a slipping wheel, a push, a hit the IMU feels, a gyro unplugged,
+  frozen, or reset, a camera knocked off its mount, frozen, or late, a module's encoders gone stale.
+  Wheels still never slip on their own, and no one wheel can leave the floor: `wheel-lifted` tilts
+  the robot by hand (which holds over any bump for the rest of the run) and scales every wheel's
+  grip alike, so its wheels never disagree as a lifted one's would, and the robot isn't raised. The
+  steering has no friction: a wheel's scrub on the carpet and its gearbox's drag need measuring on a
+  real module first (`CurrentLimitedMotorSim` says where they go). And it hears its CANcoder at the
+  rate the code asks for (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet
+  confirmed.
 
   The drive carries the robot's configured mass. Each drive motor turns its wheel's share of
-  `Body.mass` as inertia at the configured `SwerveConfig.Modules.wheelRadius`, (m / 4) r², plus the
-  wheel's own moving parts (`ModuleIOSim.WHEEL_INERTIA_KG_M2`, an estimate: about 2% more), so the
-  robot speeds up as F = m a, and a heavier robot in `Robots.java` is a slower one in the
-  simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is within
-  10% of full speed in under a second. What that leaves out:
+  `Body.mass` as inertia at the configured `DrivetrainGeometry.Modules.wheelRadius`, (m / 4) r²,
+  plus the wheel's own moving parts (`DrivetrainGeometry.Modules.driveInertia`, an estimate: about
+  2% more), so the robot speeds up as F = m a, and a heavier robot in `Robots.java` is a slower one
+  in the simulator. At the template's 30 A stator limit, it speeds up from rest at 4.4 m/s² and is
+  within 10% of full speed in under a second. What that leaves out:
 
-  - **Traction:** past the tread's grip (`wheelCoefficientOfFriction` times g, 11.8 m/s² at the
-    template's 1.2), the simulated robot keeps speeding up as hard as its motors push, where a real
-    one's wheels spin. At the template's 30 A it never gets there; at 120 A it reaches 17 m/s².
+  - **Traction:** the robot follows its wheels only as fast as the tread's grip lets it change
+    course (`wheelCoefficientOfFriction` times g, 11.8 m/s² at the template's 1.2): past that, the
+    chassis keeps its momentum and the wheels skid, as a real robot's do when a module turns at
+    speed. That's all of traction there is. Each wheel still turns as its own motor drives it,
+    not as the floor drags it, so wheels that disagree with each other (each speeding up or
+    slowing to its own new speed after a change of direction) stay apart longer than a real
+    robot's would, and push and pull the chassis between them at up to the grip, shuddering at the
+    steering's 100 Hz as the modules re-steer. And a robot whose motors push harder than the grip
+    (a stator limit of 120 A, 17 m/s²) speeds up at 11.8 m/s² while its wheels spin up past it,
+    all alike: a launch that slips, which only the accelerometer can see. No one wheel slips on
+    its own: that's a fault to make by hand (a module Spinning).
+    Its IMUs read as a Pigeon 2's do on the season-worn robot (`SensorErrors.AccelErrors`), so the
+    slip check sees what a real accelerometer would: its noise, bias, range, and its filter and
+    100 Hz sampling, which smooth that shudder before it's read once a loop.
   - **Weight transfer:** every wheel carries a quarter of the mass however hard the robot speeds
     up, where a real one's front wheels lighten and slip first (`Robots` estimates where).
   - **The battery:** it holds 12 V through a launch, as above.
@@ -69,7 +80,10 @@ Not built here at all, because the library has no 2027 build yet. Add these when
   - **Coupling between the modules:** each wheel moves its own share of the robot, and the robot
     follows the wheels' best fit, so a module pushing harder or weaker than the others, or pointed
     off, doesn't drag on them through the frame as on a robot: its wheel just disagrees with
-    theirs.
+    theirs. The robot still moves exactly as their best fit says, so the doubt the estimate takes
+    from their disagreement through a hard change of direction (tens of centimeters, while the
+    wheels speed up and slow down to their new speeds) is more than the simulated robot needs. On a
+    robot, wheels set that far apart are scrubbing over the carpet.
 
   The steering turns a fixed load, 0.004 kg m² (Phoenix Tuner X's generated simulation value, as
   AdvantageKit's swerve templates use it; not measured). It assumes the module's turning parts and

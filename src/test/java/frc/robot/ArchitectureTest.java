@@ -7,24 +7,28 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaField;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
-import frc.robot.lib.config.ConfigRecord;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.hardware.imu.OnboardIMU;
+import org.wpilib.math.filter.Debouncer;
+import org.wpilib.math.filter.EdgeCounterFilter;
+import org.wpilib.math.filter.SlewRateLimiter;
+import org.wpilib.math.util.MathSharedStore;
 
 /**
  * Architecture rules, checked on every build. Each rule prevents a kind of bug that robot code
@@ -39,14 +43,23 @@ class ArchitectureTest {
   };
 
   /**
-   * The world's model: the field and the robot as configured. Moving to {@code
-   * com.michaelgrundvig.frc.world} (ADR 0015), when only these names change.
+   * The world's model: the field and the robot as configured, and the validation kit they're built
+   * with (ADR 0015). Not its bridges, which write it out for other tools.
    */
-  private static final String[] WORLD_MODEL = {"frc.robot.lib.config..", "frc.robot.lib.field.."};
+  private static final String[] WORLD_MODEL = {
+    "com.michaelgrundvig.frc.world.config..",
+    "com.michaelgrundvig.frc.world.field..",
+    "com.michaelgrundvig.frc.world.robot.."
+  };
 
-  /** Localization: moving to {@code com.michaelgrundvig.frc.localization}. */
-  private static final String[] LOCALIZATION = {"frc.robot.lib.localization.."};
+  /** Localization (ADR 0015). */
+  private static final String[] LOCALIZATION = {"com.michaelgrundvig.frc.localization.."};
 
+  /**
+   * The robot program's own components (its loop timing, its wiring), which only it reads, beside
+   * the libraries in lib/ (the world model, localization), whose boundaries Gradle keeps: neither
+   * depends on the robot program, so they can't reach it.
+   */
   @Test
   void componentsNeverDependOnRobotCode() {
     classes()
@@ -59,14 +72,13 @@ class ArchitectureTest {
                     "java..",
                     "org.wpilib.math..",
                     "org.wpilib.units..",
-                    "org.wpilib.fields..",
                     "org.jspecify..",
                     // The annotations on generated configuration builders; nothing at run time.
-                    "io.soabase.recordbuilder..")
-                // Plain values from elsewhere in WPILib.
-                .or(
-                    belongToAnyOf(
-                        Alliance.class, CANPort.class, OnboardIMU.MountOrientation.class)))
+                    "io.soabase.recordbuilder..",
+                    // The validation kit, which every configuration record is built with.
+                    "com.michaelgrundvig.frc.world.config..")
+                // Plain values from elsewhere in WPILib: the wiring's CAN port and mount.
+                .or(belongToAnyOf(CANPort.class, OnboardIMU.MountOrientation.class)))
         .because(
             "components must work in any robot and be testable without one: no hardware, robot"
                 + " state, NetworkTables, telemetry, tunables, commands, or simulation inside")
@@ -88,6 +100,15 @@ class ArchitectureTest {
         .callMethod(LocalDate.class, "now")
         .orShould()
         .callMethod(LocalDateTime.class, "now")
+        // WPILib's math reads the robot's clock in a few places: its shared timestamp, the filters
+        // that time what they see, and its pose estimators' update without a time.
+        .orShould()
+        .callMethod(MathSharedStore.class, "getTimestamp")
+        .orShould()
+        .callMethodWhere(wpilibPoseEstimatorUpdateWithoutATime())
+        .orShould()
+        .dependOnClassesThat()
+        .belongToAnyOf(Debouncer.class, SlewRateLimiter.class, EdgeCounterFilter.class)
         .because(
             "a component that reads the clock decides differently in a replay than it did on the"
                 + " robot; take the time as an argument, stamped when the data was captured")
@@ -254,5 +275,17 @@ class ArchitectureTest {
         }
       }
     };
+  }
+
+  /**
+   * A WPILib pose estimator's {@code update}, which stamps what it's given with the clock's time.
+   */
+  private static DescribedPredicate<JavaMethodCall> wpilibPoseEstimatorUpdateWithoutATime() {
+    return DescribedPredicate.describe(
+        "a WPILib pose estimator's update, which reads the clock (updateWithTime doesn't)",
+        call ->
+            call.getName().equals("update")
+                && call.getTargetOwner().getPackageName().equals("org.wpilib.math.estimator")
+                && call.getTargetOwner().getSimpleName().contains("PoseEstimator"));
   }
 }

@@ -2,11 +2,11 @@ package frc.robot.studies;
 
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.config.ConfigException;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotConfig;
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.ConfigException;
-import frc.robot.lib.field.FieldModel;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -133,15 +133,20 @@ public final class CameraStudy {
     Weights weights = weightsFile == null ? Weights.NONE : Weights.read(Path.of(weightsFile));
     FieldGrid grid =
         new FieldGrid(
-            field, robot.body(), config.gridMeters(), config.headings(), weights, config.seed());
+            field,
+            robot.definition().body(),
+            config.gridMeters(),
+            config.headings(),
+            weights,
+            config.seed());
     List<Sample> samples = grid.samples();
     Candidate own = Candidates.own(robot);
-    CameraConfig.Sensor sensor = robot.cameras().get(0).sensor();
+    CameraConfig.Sensor sensor = robot.definition().cameras().get(0).sensor();
     String mountsFile = options.get("mounts");
     List<Candidate> candidates = new ArrayList<>(List.of(own));
     String layouts;
     if (mountsFile == null) {
-      candidates.addAll(Candidates.family(robot.body(), sensor, config.mostCameras()));
+      candidates.addAll(Candidates.family(robot.definition().body(), sensor, config.mostCameras()));
       layouts =
           format(
               "Layouts: the robot's own, and the family around its frame, of up to %d cameras.",
@@ -198,7 +203,7 @@ public final class CameraStudy {
                     : config.otherRobotsLeast() + " to " + config.otherRobotsMost(),
                 config.otherRobotsHeightMeters() > 0
                     ? config.otherRobotsHeightMeters()
-                    : robot.body().height().in(Meters)));
+                    : robot.definition().body().height().in(Meters)));
     Conditions nominal = Conditions.nominal(config);
     setup.add("Nominal conditions: " + nominal.described() + ".");
     out.println(setup.get(0));

@@ -2,7 +2,7 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.lib.localization.YawSource;
+import com.michaelgrundvig.frc.localization.YawSource;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
 import java.util.stream.Stream;

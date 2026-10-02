@@ -129,7 +129,7 @@ A finer grid costs the square: `--grid-meters=0.25` takes four times as long.
 | `--frames=N` | 2 | Images each camera takes at each pose, each with its own noise |
 | `--corner-noise-pixels=P` | the simulator's, 0.25 | How far each tag corner lands from where a perfect camera would put it, on average |
 | `--corner-spread-pixels=P` | the simulator's, 0.08 | That distance's spread |
-| `--sight-meters=M` | the simulator's, 7 | Tags farther than this aren't detected |
+| `--sight-meters=M` | the robot's cameras' `sightRange`, 7 | Tags farther than this aren't detected |
 | `--gyro-error-degrees=D` | 0.25 | The gyro heading's typical error (one standard deviation) |
 | `--mount-error-mm=M` | 0 | How far each camera really sits from its configured place, at most, along each axis |
 | `--mount-error-degrees=D` | 0 | How far each camera is really turned, at most, about each axis |
@@ -279,7 +279,8 @@ How CAD uses it while designing:
 ## Weights
 
 A CSV file of regions, each written for the blue alliance, in meters in the field's frame (see
-`frc.robot.lib.field`). The study adds each region's image on red's half by the field's symmetry.
+`com.michaelgrundvig.frc.world.field`). The study adds each region's image on red's half by the
+field's symmetry.
 A pose counts as the product of the weights of the regions it's in, and 1 in none: 0 leaves a spot
 out (inside a field element), 3 counts it three times (where the robot scores).
 

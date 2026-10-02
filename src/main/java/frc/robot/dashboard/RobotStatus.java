@@ -1,6 +1,6 @@
 package frc.robot.dashboard;
 
-import frc.robot.lib.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 
 /**
  * The robot's state, as the drive team's dashboard shows it: what it needs to know before and

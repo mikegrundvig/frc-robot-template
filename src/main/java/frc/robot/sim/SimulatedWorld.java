@@ -3,10 +3,11 @@ package frc.robot.sim;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Imus;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.coprocessors.CoprocessorIO;
 import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
@@ -49,19 +50,37 @@ public final class SimulatedWorld implements AutoCloseable {
 
   /**
    * @param field the field, with its tags and terrain
-   * @param drivetrain the drivetrain's configuration
+   * @param drivetrain the drivetrain as defined: its modules, and where its wheels sit
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
    * @param cameras the robot's cameras, as configured
    * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
    */
   public SimulatedWorld(
       FieldModel field,
-      SwerveConfig drivetrain,
+      DrivetrainGeometry drivetrain,
       Body body,
       List<CameraConfig> cameras,
       SensorErrors errors) {
+    this(field, drivetrain, body, cameras, Imus.UNCHECKED, errors);
+  }
+
+  /**
+   * @param field the field, with its tags and terrain
+   * @param drivetrain the drivetrain as defined: its modules, and where its wheels sit
+   * @param body the robot's frame, which places the wheels, and its mass, which they carry
+   * @param cameras the robot's cameras, as configured
+   * @param imus where the robot's definition mounts its IMUs
+   * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
+   */
+  public SimulatedWorld(
+      FieldModel field,
+      DrivetrainGeometry drivetrain,
+      Body body,
+      List<CameraConfig> cameras,
+      Imus imus,
+      SensorErrors errors) {
     this.field = field;
-    this.drivetrain = new DriveSimulation(body, drivetrain, errors);
+    this.drivetrain = new DriveSimulation(body, drivetrain, errors, imus);
     this.drivetrain.setTerrain(field.terrain());
     vision = new VisionSim(field, errors.tagErrors(), errors.seed());
     this.cameras = new CameraIOSim[cameras.size()];
@@ -167,11 +186,12 @@ public final class SimulatedWorld implements AutoCloseable {
 
   /**
    * Logs where the robot really is, and how far the estimate is from it: what localization has to
-   * close.
+   * close. In 3D too, raised and tilted as the robot really is, for AdvantageScope's ghost.
    */
   public void log(Pose2d estimated) {
     Pose2d truth = drivetrain.truePose();
     Logger.recordOutput("Sim/TruePose", truth);
+    Logger.recordOutput("Sim/TruePose3d", drivetrain.truePose3d());
     Logger.recordOutput(
         "Sim/PoseErrorMeters", truth.getTranslation().getDistance(estimated.getTranslation()));
     Logger.recordOutput(

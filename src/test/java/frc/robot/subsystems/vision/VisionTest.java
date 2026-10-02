@@ -6,24 +6,26 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.CameraConfigBuilder;
-import frc.robot.lib.field.Bump;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
-import frc.robot.lib.field.Symmetry;
-import frc.robot.lib.localization.BodyMotion;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.PoseEstimator;
-import frc.robot.lib.localization.PoseReset;
-import frc.robot.lib.localization.TagAllowlist;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionConfigBuilder;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.YawSource;
+import com.michaelgrundvig.frc.localization.BodyMotion;
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.PoseEstimator;
+import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.TagAllowlist;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.YawSource;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.Bump;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
+import com.michaelgrundvig.frc.world.field.Symmetry;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -34,12 +36,12 @@ import org.junit.jupiter.api.Test;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.tunable.MockTunableBackend;
@@ -73,6 +75,7 @@ class VisionTest {
                   .diagonalFieldOfView(Degrees.of(80))
                   .frameRate(Hertz.of(30))
                   .latency(Milliseconds.of(30))
+                  .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
           .build();
@@ -163,6 +166,31 @@ class VisionTest {
     assertThat(vision.summary())
         .isEqualTo("1 of 1 cameras connected, 100% of measurements accepted");
     assertThat(vision.meanTagResidualMeters("front")).isLessThan(1e-6);
+    assertThat(vision.camera(0).acceptedTags())
+        .as("where the field has the tags it saw, for AdvantageScope's lines")
+        .containsExactly(FIELD.tag(25).orElseThrow(), FIELD.tag(26).orElseThrow());
+    assertThat(vision.camera(0).rejectedTags()).isEmpty();
+  }
+
+  /** A measurement the estimator refuses has its tags drawn refused, each with the reason. */
+  @Test
+  void anImageTheEstimatorRefusesShowsItsTagsRefusedAndWhy() {
+    io.see(
+        T0 + 200_000_000L, camera, new Pose3d(ROBOT.plus(new Transform2d(3, 0, Rotation2d.ZERO))));
+
+    loop();
+
+    Camera front = vision.camera(0);
+    assertThat(front.rejected()).isEqualTo(1);
+    assertThat(front.acceptedTags()).isEmpty();
+    assertThat(front.rejectedTags())
+        .containsExactly(FIELD.tag(25).orElseThrow(), FIELD.tag(26).orElseThrow());
+    assertThat(front.rejectedReasons()).hasSize(2).allMatch(why -> !why.isBlank());
+    assertThat(front.rejectedReasons().get(0)).isEqualTo(front.rejectedReasons().get(1));
+
+    loop();
+
+    assertThat(front.rejectedTags()).as("only this loop's").isEmpty();
   }
 
   /** A tuned setting applies from the next loop's images. */
@@ -199,6 +227,8 @@ class VisionTest {
 
     assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
     assertThat(vision.summary()).endsWith("no measurements yet");
+    assertThat(vision.camera(0).rejectedTags()).hasSize(2);
+    assertThat(vision.camera(0).rejectedReasons()).containsOnly("camera turned off");
   }
 
   @Test
@@ -416,6 +446,8 @@ class VisionTest {
     loop();
 
     assertThat(vision.camera(0).accepted() + vision.camera(0).rejected()).isZero();
+    assertThat(vision.camera(0).rejectedReasons())
+        .containsOnly("arrived at least 300 ms after it was taken, more than 130 ms");
     assertThat(vision.camera(0).isOutOfStepAlertActive()).isTrue();
     assertThat(vision.camera(0).outOfStepAlertText())
         .isEqualTo(

@@ -2,6 +2,7 @@ package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.RadiansPerSecond;
@@ -9,14 +10,13 @@ import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 import static org.wpilib.units.Units.Volts;
 
+import com.michaelgrundvig.frc.localization.DrivetrainReadings;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.OdometrySample;
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.experiment.Rig;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.localization.DrivetrainReadings;
-import frc.robot.lib.localization.ImuReadings;
-import frc.robot.lib.localization.OdometrySample;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,7 +28,9 @@ import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveDriveKinematics;
@@ -54,9 +56,6 @@ import org.wpilib.util.Alert;
 public class Drive implements Mechanism, AutoCloseable {
   private static final double STICK_DEADBAND = 0.1;
 
-  /** A wheel this far short of its commanded speed, in m/s, is at the edge of its grip. */
-  private static final double SPEED_DEFICIT = 0.5;
-
   /**
    * Wheels that report connected but send no readings this long have lost what reads them: on a
    * robot, the thread that records their high-rate readings.
@@ -67,7 +66,7 @@ public class Drive implements Mechanism, AutoCloseable {
   private static final List<String> WHEELS =
       List.of("Front left", "Front right", "Back left", "Back right");
 
-  private final Supplier<SwerveConfig> config;
+  private final Supplier<DrivetrainControl> config;
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
   private final GyroIOInputsAutoLogged gyroInputs = new GyroIOInputsAutoLogged();
@@ -75,11 +74,24 @@ public class Drive implements Mechanism, AutoCloseable {
   private final GyroIOInputsAutoLogged backupInputs = new GyroIOInputsAutoLogged();
   private final Module[] modules = new Module[4];
   private final SwerveDriveKinematics kinematics;
+
+  /** Where each wheel touches the floor, from the robot's center. */
+  private final Translation2d[] moduleTranslations;
+
+  /** The wheels' radius, as built: their centers are this far above the floor. */
+  private final double wheelRadiusMeters;
+
+  /** The wheels' poses as last logged, reused loop after loop. */
+  private final Pose3d[] modulePoses = new Pose3d[4];
+
+  /** The steer angles the logged poses were made for: NaN before the first. */
+  private final double[] posedAngles = {Double.NaN, Double.NaN, Double.NaN, Double.NaN};
+
   private final Supplier<Pose2d> pose;
   private final Lock odometryLock;
 
   /** The configuration the motor controllers have, and the limits taken from it. */
-  private SwerveConfig applied;
+  private DrivetrainControl applied;
 
   private double maxLinearSpeedMps;
   private double maxAngularSpeedRadPerSec;
@@ -103,7 +115,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * that's safe to dial in on a running robot (a range narrower than what's valid). Publish it, and
    * give the drivetrain its {@link LiveConfig#get}.
    */
-  public static LiveConfig<SwerveConfig> tuning(SwerveConfig committed) {
+  public static LiveConfig<DrivetrainControl> tuning(DrivetrainControl committed) {
     return LiveConfig.of("drivetrain", committed)
         .number("gains.driveKs", Limits.between(0, 1)) // volts
         .number("gains.driveKv", Limits.between(0, 5)) // volts per meter per second
@@ -126,15 +138,15 @@ public class Drive implements Mechanism, AutoCloseable {
   /**
    * @param name alert group name: "Drive" on the robot, another name for a second instance
    * @param hardware the modules, the gyro, and the backup IMU
-   * @param body the robot's frame, which places the wheels
-   * @param config the drivetrain's configuration, read every loop so tuned values take effect
+   * @param robot the robot's definition: its frame and its drivetrain's geometry place the wheels
+   * @param config how the drivetrain is driven, read every loop so tuned values take effect
    * @param pose where the robot is, from localization: field-relative driving turns by its heading
    */
   public Drive(
       String name,
       DriveHardware hardware,
-      Body body,
-      Supplier<SwerveConfig> config,
+      RobotDefinition robot,
+      Supplier<DrivetrainControl> config,
       Scheduler scheduler,
       Supplier<Pose2d> pose) {
     this.config = config;
@@ -143,20 +155,22 @@ public class Drive implements Mechanism, AutoCloseable {
     this.backupImuIO = hardware.backupImu();
     this.pose = pose;
     this.odometryLock = hardware.odometryLock();
-    SwerveConfig initial = config.get();
+    DrivetrainControl initial = config.get();
     for (int i = 0; i < 4; i++) {
-      modules[i] = new Module(hardware.modules().get(i), i, initial.modules().wheelRadius());
+      modules[i] =
+          new Module(hardware.modules().get(i), i, robot.drivetrain().modules().wheelRadius());
     }
     applied = initial;
     apply(initial);
-    kinematics = new SwerveDriveKinematics(initial.moduleTranslations(body));
+    moduleTranslations = robot.moduleTranslations();
+    wheelRadiusMeters = robot.drivetrain().modules().wheelRadius().in(Meters);
+    kinematics = new SwerveDriveKinematics(moduleTranslations);
     readings =
         DrivetrainReadings.builder()
             .wheels(List.of())
             .gyro(ImuReadings.NONE)
             .backupImu(ImuReadings.NONE)
             .velocities(new ChassisVelocities())
-            .tractionLimited(false)
             .build();
 
     odometryStopped =
@@ -196,7 +210,7 @@ public class Drive implements Mechanism, AutoCloseable {
    * @param enabled whether the robot is enabled
    */
   public void periodic(boolean enabled) {
-    SwerveConfig now = config.get();
+    DrivetrainControl now = config.get();
     if (!now.equals(applied)) {
       apply(now);
     }
@@ -235,7 +249,6 @@ public class Drive implements Mechanism, AutoCloseable {
             .gyro(imuReadings(gyroInputs))
             .backupImu(imuReadings(backupInputs))
             .velocities(getRobotRelativeVelocities())
-            .tractionLimited(tractionLimited())
             .build();
 
     for (int i = 0; i < 4; i++) {
@@ -253,6 +266,26 @@ public class Drive implements Mechanism, AutoCloseable {
     }
     Logger.recordOutput("Drive/Pose", getPose());
     Logger.recordOutput("Drive/ModuleVelocities", moduleVelocities());
+    Logger.recordOutput("Drive/ModulePoses", modulePoses());
+  }
+
+  /**
+   * Each wheel's center in the robot's frame, turned to the angle its module measures: front left,
+   * front right, back left, back right. AdvantageScope turns the schematic robot's wheels by these
+   * (its components 0 to 3, generated into ascope_assets/ from the robot's configuration).
+   */
+  Pose3d[] modulePoses() {
+    for (int i = 0; i < 4; i++) {
+      double angle = modules[i].steerAngle().getRadians();
+      // A wheel that hasn't turned keeps its pose: nothing new to make, most loops.
+      if (angle != posedAngles[i]) {
+        Translation2d at = moduleTranslations[i];
+        modulePoses[i] =
+            new Pose3d(at.getX(), at.getY(), wheelRadiusMeters, new Rotation3d(0, 0, angle));
+        posedAngles[i] = angle;
+      }
+    }
+    return modulePoses;
   }
 
   /** What the sensors read this loop: the wheels at every high-rate reading, and the IMUs. */
@@ -300,6 +333,7 @@ public class Drive implements Mechanism, AutoCloseable {
     return ImuReadings.builder()
         .reporting(imu.connected)
         .yawRadians(imu.yaw.getRadians())
+        .yawRateRadiansPerSecond(imu.yawVelocityRadPerSec)
         .pitchRadians(imu.pitchRad)
         .rollRadians(imu.rollRad)
         .forwardAccelerationMetersPerSecSq(imu.accelerationXMetersPerSecSq)
@@ -309,21 +343,8 @@ public class Drive implements Mechanism, AutoCloseable {
         .build();
   }
 
-  /**
-   * Whether the wheels are at the edge of their grip: a drive motor at its current limit, or a
-   * wheel well short of the speed it was sent (581 and 1678 watched for that shortfall).
-   */
-  private boolean tractionLimited() {
-    for (Module module : modules) {
-      if (module.isTorqueLimited() || module.speedDeficitMetersPerSecond() > SPEED_DEFICIT) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /** Sends new gains and limits to the modules, and keeps the limits driving uses. */
-  private void apply(SwerveConfig drivetrain) {
+  private void apply(DrivetrainControl drivetrain) {
     for (Module module : modules) {
       module.configure(drivetrain.gains(), drivetrain.limits());
     }
@@ -441,7 +462,7 @@ public class Drive implements Mechanism, AutoCloseable {
    *
    * @param tuning the drivetrain's configuration as the pit tunes it
    */
-  public Rig steeringRig(LiveConfig<SwerveConfig> tuning) {
+  public Rig steeringRig(LiveConfig<DrivetrainControl> tuning) {
     Rig.Builder rig =
         Rig.builder()
             .name("Steering")

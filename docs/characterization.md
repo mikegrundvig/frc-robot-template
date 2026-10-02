@@ -42,8 +42,9 @@ for all of them:
 
 **What it measures:** how far a camera's view of a tag scatters with everything still, how far it
 is off, and how both grow with distance. It sets vision's trust in a camera:
-`VisionConfig.linearStdDevBaseline`, `angularStdDevBaseline`, `distanceExponent`, and
-`headingConstrainedFactor`, and the simulator's corner noise and sight range (`VisionSim`).
+`VisionConfig.linearStdDevBaseline`, `angularStdDevBaseline`, `distanceExponent`,
+`headingConstrainedFactor`, the simulator's corner noise (`VisionSim`), and the camera's sight
+range (`CameraConfig.Sensor.sightRange`).
 
 **Equipment:**
 
@@ -102,7 +103,8 @@ drawn from a normal distribution, in a random direction; `VisionSim`'s two numbe
 distance's mean and standard deviation (today 0.25 px and 0.08 px). To measure them at one still
 spot: for each corner in each image, its distance in pixels from that corner's average position
 over all the images. The mean of all those distances, and their standard deviation, are the two
-numbers. The sight range is the farthest spot where the camera found the tag in most images.
+numbers. The sight range (`sightRange`) is the farthest spot where the camera found the tag in
+most images.
 
 **What good looks like:** the exponent near 2, since a tag's distance error grows with the distance
 squared (its sideways error only with the distance). A still camera's error at 1 m is a few
@@ -297,9 +299,9 @@ headings wrap at ±180°: count the whole turns.
 ## Tread friction
 
 **What it measures:** the tread's grip on carpet, new and worn: the coefficient of friction,
-`SwerveConfig.Modules.wheelCoefficientOfFriction`. The simulator's grip comes from it, and with the
-center of gravity's height it sets where the wheels slip under acceleration, which the drive's
-current limit is chosen to stay under.
+`DrivetrainGeometry.Modules.wheelCoefficientOfFriction`. The simulator's grip comes from it, and
+with the center of gravity's height it sets where the wheels slip under acceleration, which the
+drive's current limit is chosen to stay under.
 
 **Equipment:**
 
@@ -339,10 +341,10 @@ near the scale while the robot is enabled, and the reading taken from the side o
 
 ## Feedforward
 
-**What it measures:** the drive's feedforward: `SwerveConfig.Gains.driveKs`, the volts to overcome
-friction, and `driveKv`, the volts per meter per second. These belong to a drivetrain design
-(modules, gearing, tread): robots built alike share them, measured on one. Measure again when any
-of those changes.
+**What it measures:** the drive's feedforward: `DrivetrainControl.Gains.driveKs`, the volts to
+overcome friction, and `driveKv`, the volts per meter per second. These belong to a drivetrain
+design (modules, gearing, tread): robots built alike share them, measured on one. Measure again when
+any of those changes.
 
 **Equipment:** the robot, running its program on its Systemcore, and a long clear floor.
 
@@ -355,24 +357,25 @@ spinning wheels.
 voltage steps, and fits kS, kV, and kA from the log. Follow
 [WPILib's SysId guide](https://docs.wpilib.org/en/stable/docs/software/advanced-controls/system-identification/index.html);
 the template doesn't have a SysId routine yet. The same tests on one module, lifted off the floor,
-give the inertia of its wheel, gears, and motor, which the simulator estimates today
-(`ModuleIOSim.WHEEL_INERTIA_KG_M2`) and adds to the share of the robot's mass each wheel carries
-(`Body.mass`).
+give the inertia of its wheel, gears, and motor, which the template estimates today
+(`DrivetrainGeometry.Modules.driveInertia`) and the simulator adds to the share of the robot's mass
+each wheel carries (`Body.mass`).
 
 **Units:** SysId reports in the units the routine logged; the template's gains are in volts per
 meter per second.
 
 - Logged in wheel rotations: divide its kV by the wheel's circumference in meters
   (`2π × wheelRadius`).
-- Logged in motor rotations: multiply by `driveGearing` first, then divide by the circumference.
+- Logged in motor rotations: multiply by `driveGearing`'s ratio first, then divide by the
+  circumference.
 
 A 2026 drivetrain's 0.7237 V per wheel rotation per second, with a 0.049 m wheel radius, is
 `0.7237 / (2π × 0.049)` = 2.35 V per m/s.
 
 **Without SysId,** the template's own tools get close:
 
-- `driveKv` starts at `SwerveConfig.Modules.idealDriveKv()`, the motor and gearing's ideal (what
-  the template's robot uses).
+- `driveKv` starts at `DrivetrainGeometry.Modules.idealDriveKv()`, the motor and gearing's ideal
+  (what the template's robot uses).
 - Then tune both live on the Pitwall page: with `driveKp` at zero, drive at a steady speed and
   compare each module's speed with its setpoint in AdvantageScope (`Drive/ModuleVelocities`
   against `Drive/SetpointsOptimized`). Raise kV until they match at speed; raise kS until slow
@@ -431,7 +434,7 @@ distance between the two.
 
 **What good looks like:** a calibrated swerve drivetrain on carpet ends within about 1 to 2% of the
 distance it drove. Much more means a wheel radius or the gyro's scale needs calibrating again, or
-the wheels slip: the log's `Localization/TractionLimited` and `ResidualMeters` show where.
+the wheels slip: the log's `Localization/SlipMetersPerSecond` and `ResidualMeters` show where.
 
 ## Battery internal resistance
 
@@ -439,7 +442,7 @@ the wheels slip: the log's `Localization/TractionLimited` and `ResidualMeters` s
 resistance, in milliohms. It belongs to each battery, not to a model: batteries age differently, so
 measure every one, and label each with its own name. It sets how far the voltage sags in a hard
 acceleration, and so how much current the drivetrain may draw before the robot browns out:
-`SwerveConfig.Limits.driveSupplyCurrent` is chosen for the weakest battery the team plays with.
+`DrivetrainControl.Limits.driveSupplyCurrent` is chosen for the weakest battery the team plays with.
 
 **Equipment:** a battery analyzer that measures internal resistance (no Systemcore needed); or the
 robot, running its program on its Systemcore to log, and a clear floor.

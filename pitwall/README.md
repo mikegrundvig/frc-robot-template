@@ -159,15 +159,15 @@ The template contributes its world from `frc.robot.views.world` (`WorldView.scen
 
 - **Field:** the field model's walls and carpet, its bumps, and its AprilTags where the layout puts
   them, each with its number.
-- **Robot:** at the localization estimate, on the ground under it and tilted as its IMU says: its
-  frame and bumpers from `Body` with an arrow out the front; each wheel at its module, turned to
-  its measured angle, with an arrow as far as it will go in 0.2 s; each camera at its configured
-  mount, an arrow along its optical axis and the first meter of its view, its name beside it, off
-  the robot. A click on a camera says how it's mounted, offers its calibration, and shows its full
-  view until the details close. A wedge pointing the wrong way is a mistake in `Robots.java`, found
-  at a glance.
-- **Camera views,** off at first: every camera's full view, out as far as it reads tags (the
-  simulator's 7 m).
+- **Robot:** at the localization estimate, on the ground under it and tilted as its IMU says, as
+  its `RobotDefinition` describes it: its frame and bumpers from `Body` with an arrow out the
+  front; each wheel at its module, turned to its measured angle, with an arrow as far as it will go
+  in 0.2 s; each camera at its configured mount, an arrow along its optical axis and the first
+  meter of its view, its name beside it, off the robot. A click on a camera says how it's mounted,
+  offers its calibration, and shows its full view until the details close. A wedge pointing the
+  wrong way is a mistake in `Robots.java`, found at a glance.
+- **Camera views,** off at first: every camera's full view, out as far as it reads tags (its
+  sensor's `sightRange`, 7 m on the template's robot).
 - **Uncertainty (2σ):** the estimate's position uncertainty as a dashed ellipse, two standard
   deviations across; in the color of trouble while the estimate is lost or the gyro is.
 - **Sight lines:** from each camera to the tags its measurements used, solid where the estimator

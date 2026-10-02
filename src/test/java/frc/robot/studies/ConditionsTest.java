@@ -3,7 +3,9 @@ package frc.robot.studies;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Meters;
 
+import frc.robot.Robots;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.HashSet;
 import java.util.Set;
@@ -20,7 +22,8 @@ class ConditionsTest {
 
     assertThat(nominal.cornerNoiseMeanPixels()).isEqualTo(VisionSim.CORNER_NOISE_MEAN_PIXELS);
     assertThat(nominal.cornerNoiseStdDevPixels()).isEqualTo(VisionSim.CORNER_NOISE_STD_DEV_PIXELS);
-    assertThat(nominal.sightMeters()).isEqualTo(VisionSim.MAX_SIGHT_METERS);
+    assertThat(nominal.sightMeters())
+        .isEqualTo(Robots.current().definition().cameras().get(0).sensor().sightRange().in(Meters));
     assertThat(nominal.mountError(42)).isEqualTo(Transform3d.ZERO);
     assertThat(nominal.described())
         .isEqualTo(

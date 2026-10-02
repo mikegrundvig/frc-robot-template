@@ -3,10 +3,10 @@ package frc.robot.studies;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Symmetry;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Symmetry;
 import java.util.List;
 import org.wpilib.fields.Field;
 import org.wpilib.fields.FieldTag;
@@ -44,7 +44,7 @@ final class StudyFixtures {
   /** The same spot, facing away. */
   static final Sample FACING_AWAY = new Sample(new Pose2d(3, 4, Rotation2d.ZERO), 1, 1, 0);
 
-  static final CameraConfig.Sensor SENSOR = Robots.SIM.cameras().get(0).sensor();
+  static final CameraConfig.Sensor SENSOR = Robots.SIM.definition().cameras().get(0).sensor();
 
   private StudyFixtures() {}
 

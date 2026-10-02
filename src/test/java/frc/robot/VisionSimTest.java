@@ -3,12 +3,12 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.EstimatorConfigBuilder;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.VisionConfig;
-import frc.robot.lib.localization.VisionConfigBuilder;
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
@@ -84,7 +84,7 @@ class VisionSimTest {
           worst = Math.max(worst, error());
           sum += error();
           loops++;
-          for (CameraConfig camera : Robots.SIM.cameras()) {
+          for (CameraConfig camera : Robots.SIM.definition().cameras()) {
             mostDoubted.merge(
                 camera.name(), sim.robot().vision().mountDoubtMeters(camera.name()), Math::max);
           }
@@ -109,7 +109,7 @@ class VisionSimTest {
   /** How far a camera's tags land from their real places, against the worst of the others. */
   private double standsOut(String camera) {
     double others = 0;
-    for (var config : Robots.SIM.cameras()) {
+    for (var config : Robots.SIM.definition().cameras()) {
       if (!config.name().equals(camera)) {
         others = Math.max(others, sim.robot().vision().meanTagResidualMeters(config.name()));
       }
@@ -172,7 +172,7 @@ class VisionSimTest {
 
     double worst = drive(4);
 
-    for (CameraConfig camera : Robots.SIM.cameras()) {
+    for (CameraConfig camera : Robots.SIM.definition().cameras()) {
       assertThat(sim.robot().vision().mountOffsetMeters(camera.name()))
           .as(camera.name() + ": judged, and within the tolerance")
           .isLessThan(Robots.SIM.vision().mountToleranceMeters());
@@ -293,12 +293,12 @@ class VisionSimTest {
   /**
    * The promises each way of correcting the heading keeps for a camera turned 4°, as measured. The
    * full update keeps the first two: the camera is out of calibration and counts for less, and the
-   * back cameras are never doubted; but it's doubted by only 2.6 cm, and the last lap is 5.0 cm
-   * off, against 5.7 cm with it trusted as before: closer, not a fifth closer. Leaving the heading
+   * back cameras are never doubted; but it's doubted by only 5.7 cm, and the last lap is 4.7 cm
+   * off, against 5.4 cm with it trusted as before: closer, not a fifth closer. Leaving the heading
    * to measurements with a heading of their own, a turned camera's headings pull the estimate's
    * heading its way, its neighbour's tags land off too, and the check doesn't doubt it at all: the
-   * last lap is 5.8 cm off, as with it trusted as before. Adding the doubt to what each camera
-   * repeats changes only the last lap (5.4 cm). This test shows which; it changes when one does,
+   * last lap is 5.6 cm off, against 5.5 cm trusted as before. Adding the doubt to what each camera
+   * repeats changes the last lap little (5.5 cm). This test shows which; it changes when one does,
    * either way.
    */
   @ParameterizedTest
@@ -327,9 +327,9 @@ class VisionSimTest {
 
   /**
    * A camera turned 2° stands out in its tag residuals, more than 1.4 times its worst neighbour's,
-   * however the heading is corrected, and most when every fix corrects it (2.4). Otherwise its
+   * however the heading is corrected, and most when every fix corrects it (2.5). Otherwise its
    * headings pull the estimate's heading partway its way, and its neighbour's tags land off too: it
-   * stands out less (1.6).
+   * stands out less (1.7).
    */
   @ParameterizedTest
   @EnumSource(EstimatorConfig.HeadingCorrection.class)

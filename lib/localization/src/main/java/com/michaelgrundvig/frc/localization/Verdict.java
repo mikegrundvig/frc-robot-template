@@ -68,6 +68,12 @@ public enum Verdict {
   /** The solve put the robot off the floor: the value is how far, in meters. */
   OFF_THE_FLOOR("off the floor", "the solve puts the robot %1$.2f m off the floor");
 
+  /**
+   * A number a verdict doesn't have, or a measurement that wasn't compared: what an output record's
+   * builder leaves such a number as.
+   */
+  public static final double NONE = Double.NaN;
+
   private final String words;
   private final String pattern;
 

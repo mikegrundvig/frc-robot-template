@@ -203,20 +203,31 @@ class WorldViewTest {
   private static FrameVerdict frontLeftSawTag7(
       Verdict verdict, double innovationMeters, double chiSquared) {
     double gate = 13.8;
-    return new FrameVerdict(
-        "front-left",
-        1,
-        verdict,
-        gate,
-        chiSquared,
-        Optional.empty(),
-        List.of(new TagVerdict(7, verdict, innovationMeters, chiSquared, gate, chiSquared)),
-        Optional.of(
-            new FrameVerdict.Measured(
-                new Pose2d(3.2, 4.1, Rotation2d.fromDegrees(30)),
-                VisionMeasurement.Solver.SINGLE_TAG,
-                innovationMeters,
-                chiSquared)));
+    return FrameVerdict.builder()
+        .camera("front-left")
+        .captureNanos(1)
+        .verdict(verdict)
+        .threshold(gate)
+        .value(chiSquared)
+        .tags(
+            List.of(
+                TagVerdict.builder()
+                    .tag(7)
+                    .verdict(verdict)
+                    .innovationMeters(innovationMeters)
+                    .chiSquared(chiSquared)
+                    .threshold(gate)
+                    .value(chiSquared)
+                    .build()))
+        .measured(
+            Optional.of(
+                FrameVerdict.Measured.builder()
+                    .pose(new Pose2d(3.2, 4.1, Rotation2d.fromDegrees(30)))
+                    .solver(VisionMeasurement.Solver.SINGLE_TAG)
+                    .innovationMeters(innovationMeters)
+                    .chiSquared(chiSquared)
+                    .build()))
+        .build();
   }
 
   @Test

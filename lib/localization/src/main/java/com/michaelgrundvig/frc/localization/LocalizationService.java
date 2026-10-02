@@ -12,7 +12,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -440,7 +439,12 @@ public final class LocalizationService {
     for (VisionDecision decision : decisions) {
       frames.add(FrameVerdict.of(decision));
     }
-    return new LocalizationOutput(estimate, integrity(), frames, landmarks);
+    return LocalizationOutput.builder()
+        .estimate(estimate)
+        .integrity(integrity())
+        .frames(frames)
+        .landmarks(landmarks)
+        .build();
   }
 
   /** Where the robot is: cheap, for driving every loop. */
@@ -491,15 +495,16 @@ public final class LocalizationService {
 
   /** How far the wheels are trusted this loop, and why. */
   public WheelTrust wheels() {
-    return new WheelTrust(
-        conditions,
-        slipCheck.turnSlipMetersPerSecond(),
-        slipCheck.speedSlipMetersPerSecond(),
-        slipCheck.turnApartRadians(),
-        slipCheck.slideMetersPerSecond(),
-        slipCheck.unexplainedMetersPerSecSq(),
-        slipCheck.biasMetersPerSecSq(),
-        slipCheck.leaksGravity());
+    return WheelTrust.builder()
+        .conditions(conditions)
+        .turnSlipMetersPerSecond(slipCheck.turnSlipMetersPerSecond())
+        .speedSlipMetersPerSecond(slipCheck.speedSlipMetersPerSecond())
+        .turnApartRadians(slipCheck.turnApartRadians())
+        .slideMetersPerSecond(slipCheck.slideMetersPerSecond())
+        .unexplainedMetersPerSecSq(slipCheck.unexplainedMetersPerSecSq())
+        .accelerometerBiasMetersPerSecSq(slipCheck.biasMetersPerSecSq())
+        .accelerometerLeaksGravity(slipCheck.leaksGravity())
+        .build();
   }
 
   /** Where the robot is on raised terrain: level, climbing, or descending. */
@@ -578,14 +583,15 @@ public final class LocalizationService {
     for (String camera : mountDoubts.keySet()) {
       trust.putIfAbsent(camera, trust(camera, true));
     }
-    return new Integrity(trust, wheels(), Optional.empty(), Set.of());
+    return Integrity.builder().cameras(trust).wheels(wheels()).build();
   }
 
   private CameraTrust trust(String camera, boolean keptApart) {
     double[] doubt = mountDoubts.get(camera);
+    CameraTrustBuilder trust = CameraTrust.builder().keptApart(keptApart);
     return doubt == null
-        ? new CameraTrust(0, Double.NaN, keptApart)
-        : new CameraTrust(doubt[0], doubt[1], keptApart);
+        ? trust.build()
+        : trust.mountDoubtMeters(doubt[0]).mountDistanceMeters(doubt[1]).build();
   }
 
   /**

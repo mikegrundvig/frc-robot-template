@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.localization;
 
+import io.soabase.recordbuilder.core.RecordBuilder;
+
 /**
  * How far localization trusts the wheels this loop, and why: what the IMU that turns odometry says
  * of them, through the {@link SlipCheck}. The slip check judges the wheels together, as they slide
@@ -24,12 +26,19 @@ package com.michaelgrundvig.frc.localization;
  *     past any bias a part has: the IMU's orientation in the robot's definition isn't how it's
  *     mounted
  */
+@OutputRecord
 public record WheelTrust(
-    DriveConditions conditions,
+    @RecordBuilder.Initializer(value = "NORMAL", source = DriveConditions.class)
+        DriveConditions conditions,
     double turnSlipMetersPerSecond,
     double speedSlipMetersPerSecond,
     double turnApartRadians,
     double slideMetersPerSecond,
     double unexplainedMetersPerSecSq,
     double accelerometerBiasMetersPerSecSq,
-    boolean accelerometerLeaksGravity) {}
+    boolean accelerometerLeaksGravity) {
+  /** Builds one by name: normal conditions, and nothing sliding, unless said. */
+  public static WheelTrustBuilder builder() {
+    return WheelTrustBuilder.builder();
+  }
+}

@@ -1,7 +1,9 @@
 package com.michaelgrundvig.frc.localization;
 
+import io.soabase.recordbuilder.core.RecordBuilder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.wpilib.math.geometry.Pose2d;
 
@@ -24,17 +26,25 @@ import org.wpilib.math.geometry.Pose2d;
  * @param measured the image's measurement as the estimator weighed it; empty for an image refused
  *     before it got there
  */
+@OutputRecord
 public record FrameVerdict(
     String camera,
     long captureNanos,
     Verdict verdict,
-    double threshold,
-    double value,
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double threshold,
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double value,
     Optional<Verdict> multiTag,
     List<TagVerdict> tags,
     Optional<Measured> measured) {
   public FrameVerdict {
+    Objects.requireNonNull(camera, "a frame's camera");
+    Objects.requireNonNull(verdict, "a frame's verdict");
     tags = List.copyOf(tags);
+  }
+
+  /** Builds one by name; a number left out is NaN, and the tags and the measurement none. */
+  public static FrameVerdictBuilder builder() {
+    return FrameVerdictBuilder.builder();
   }
 
   /** Whether it moved the estimate. */
@@ -56,8 +66,22 @@ public record FrameVerdict(
    *     refused before being compared
    * @param chiSquared its squared Mahalanobis distance from the estimate; NaN if not compared
    */
+  @OutputRecord
   public record Measured(
-      Pose2d pose, VisionMeasurement.Solver solver, double innovationMeters, double chiSquared) {}
+      Pose2d pose,
+      VisionMeasurement.Solver solver,
+      @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double innovationMeters,
+      @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double chiSquared) {
+    public Measured {
+      Objects.requireNonNull(pose, "a measurement's pose");
+      Objects.requireNonNull(solver, "how a measurement was solved");
+    }
+
+    /** Builds one by name; a number left out is NaN. */
+    public static FrameVerdictMeasuredBuilder builder() {
+      return FrameVerdictMeasuredBuilder.builder();
+    }
+  }
 
   /** What the estimator decided about one camera measurement, by tag. */
   static FrameVerdict of(VisionDecision decision) {
@@ -66,30 +90,35 @@ public record FrameVerdict(
     List<TagVerdict> tags = new ArrayList<>(measurement.tagIds().size());
     for (int id : measurement.tagIds()) {
       tags.add(
-          new TagVerdict(
-              id,
-              verdict,
-              decision.innovationMeters(),
-              decision.chiSquared(),
-              decision.threshold(),
-              decision.chiSquared()));
+          TagVerdict.builder()
+              .tag(id)
+              .verdict(verdict)
+              .innovationMeters(decision.innovationMeters())
+              .chiSquared(decision.chiSquared())
+              .threshold(decision.threshold())
+              .value(decision.chiSquared())
+              .build());
     }
-    return new FrameVerdict(
-        measurement.camera(),
-        measurement.timestampNanos(),
-        verdict,
-        decision.threshold(),
-        decision.chiSquared(),
-        measurement.solver() == VisionMeasurement.Solver.MULTI_TAG
-            ? Optional.of(verdict)
-            : Optional.empty(),
-        tags,
-        Optional.of(
-            new Measured(
-                measurement.pose(),
-                measurement.solver(),
-                decision.innovationMeters(),
-                decision.chiSquared())));
+    return builder()
+        .camera(measurement.camera())
+        .captureNanos(measurement.timestampNanos())
+        .verdict(verdict)
+        .threshold(decision.threshold())
+        .value(decision.chiSquared())
+        .multiTag(
+            measurement.solver() == VisionMeasurement.Solver.MULTI_TAG
+                ? Optional.of(verdict)
+                : Optional.empty())
+        .tags(tags)
+        .measured(
+            Optional.of(
+                Measured.builder()
+                    .pose(measurement.pose())
+                    .solver(measurement.solver())
+                    .innovationMeters(decision.innovationMeters())
+                    .chiSquared(decision.chiSquared())
+                    .build()))
+        .build();
   }
 
   /** An image the pipeline refused, before it became a measurement: every tag it saw, refused. */
@@ -102,17 +131,20 @@ public record FrameVerdict(
     List<TagVerdict> tags = new ArrayList<>(image.tags().size());
     for (TagDetections.Tag tag : image.tags()) {
       tags.add(
-          new TagVerdict(
-              tag.id(), verdict, Double.NaN, Double.NaN, result.threshold(), result.value()));
+          TagVerdict.builder()
+              .tag(tag.id())
+              .verdict(verdict)
+              .threshold(result.threshold())
+              .value(result.value())
+              .build());
     }
-    return new FrameVerdict(
-        image.camera(),
-        image.timestampNanos(),
-        verdict,
-        result.threshold(),
-        result.value(),
-        Optional.empty(),
-        tags,
-        Optional.empty());
+    return builder()
+        .camera(image.camera())
+        .captureNanos(image.timestampNanos())
+        .verdict(verdict)
+        .threshold(result.threshold())
+        .value(result.value())
+        .tags(tags)
+        .build();
   }
 }

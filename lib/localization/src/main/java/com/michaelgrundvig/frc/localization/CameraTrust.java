@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.localization;
 
+import io.soabase.recordbuilder.core.RecordBuilder;
+
 /**
  * How far localization trusts one camera, beyond its configuration, as of an update.
  *
@@ -13,4 +15,16 @@ package com.michaelgrundvig.frc.localization;
  *     PoseFilter#MAX_CAMERAS}) counts each image's errors as new, so its images, averaged, grow
  *     surer than they should
  */
-public record CameraTrust(double mountDoubtMeters, double mountDistanceMeters, boolean keptApart) {}
+@OutputRecord
+public record CameraTrust(
+    double mountDoubtMeters,
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double mountDistanceMeters,
+    @RecordBuilder.Initializer("KEPT_APART") boolean keptApart) {
+  /** Every camera is kept apart, up to the estimator's places: what a builder leaves it as. */
+  public static final boolean KEPT_APART = true;
+
+  /** Builds one by name: no doubt, judged at no distance, and kept apart, unless said. */
+  public static CameraTrustBuilder builder() {
+    return CameraTrustBuilder.builder();
+  }
+}

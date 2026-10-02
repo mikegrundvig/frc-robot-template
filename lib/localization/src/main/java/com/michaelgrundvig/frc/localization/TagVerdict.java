@@ -1,5 +1,8 @@
 package com.michaelgrundvig.frc.localization;
 
+import io.soabase.recordbuilder.core.RecordBuilder;
+import java.util.Objects;
+
 /**
  * What became of one tag in a camera's image: the verdict on the measurement it went into, or on
  * the image, if it was refused before it became one. An image's tags are weighed together today, so
@@ -16,13 +19,23 @@ package com.michaelgrundvig.frc.localization;
  * @param value the verdict's number: the χ² for the estimator's verdicts; the tags' distance, the
  *     robot's turning, a tag's ambiguity or height for the pipeline's; NaN where it has none
  */
+@OutputRecord
 public record TagVerdict(
     int tag,
     Verdict verdict,
-    double innovationMeters,
-    double chiSquared,
-    double threshold,
-    double value) {
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double innovationMeters,
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double chiSquared,
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double threshold,
+    @RecordBuilder.Initializer(value = "NONE", source = Verdict.class) double value) {
+  public TagVerdict {
+    Objects.requireNonNull(verdict, "a tag's verdict");
+  }
+
+  /** Builds one by name; a number left out is NaN. */
+  public static TagVerdictBuilder builder() {
+    return TagVerdictBuilder.builder();
+  }
+
   /** Whether it moved the estimate. */
   public boolean accepted() {
     return verdict == Verdict.ACCEPTED;

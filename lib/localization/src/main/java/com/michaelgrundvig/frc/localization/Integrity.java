@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.localization;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -17,6 +18,7 @@ import java.util.Set;
  * @param protection the bound on the position's error; empty, since nothing computes one yet
  * @param excludedTags the tags left out of every measurement; none yet
  */
+@OutputRecord
 public record Integrity(
     Map<String, CameraTrust> cameras,
     WheelTrust wheels,
@@ -24,6 +26,12 @@ public record Integrity(
     Set<Integer> excludedTags) {
   public Integrity {
     cameras = Collections.unmodifiableMap(new LinkedHashMap<>(cameras));
+    Objects.requireNonNull(wheels, "the wheels' trust");
     excludedTags = Set.copyOf(excludedTags);
+  }
+
+  /** Builds one by name: no cameras, no protection level and no tags excluded, unless said. */
+  public static IntegrityBuilder builder() {
+    return IntegrityBuilder.builder();
   }
 }

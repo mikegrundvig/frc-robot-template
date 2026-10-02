@@ -162,6 +162,22 @@ class ArchitectureTest {
     return DescribedPredicate.describe("are arrays", field -> field.getRawType().isArray());
   }
 
+  /**
+   * An output, too, is built by name, so the integrity line can add a value to one without breaking
+   * a caller: its builder leaves out what it isn't told.
+   */
+  @Test
+  void outputsAreBuiltByName() {
+    classes()
+        .that()
+        .areAnnotatedWith(OutputRecord.class)
+        .should(onlyBeConstructedByTheirBuilder())
+        .because(
+            "a constructor takes its values by position, so a value added to an output breaks every"
+                + " caller; the builder takes them by name, and leaves out what it isn't told")
+        .check(LOCALIZATION);
+  }
+
   /** A record {@code a.b.Outer$Name} is built by {@code a.b.OuterNameBuilder}, and nothing else. */
   private static ArchCondition<JavaClass> onlyBeConstructedByTheirBuilder() {
     return new ArchCondition<>("only be constructed by their generated builder") {

@@ -451,10 +451,12 @@ class LocalizationServiceTest {
             });
 
     Integrity integrity = output.integrity();
-    assertThat(integrity.cameras()).containsEntry("front", new CameraTrust(0.04, 3.0, true));
     assertThat(integrity.cameras())
-        .containsEntry("camera 8", new CameraTrust(0, Double.NaN, true))
-        .containsEntry("camera 9", new CameraTrust(0, Double.NaN, false));
+        .containsEntry(
+            "front", CameraTrust.builder().mountDoubtMeters(0.04).mountDistanceMeters(3.0).build());
+    assertThat(integrity.cameras())
+        .containsEntry("camera 8", CameraTrust.builder().build())
+        .containsEntry("camera 9", CameraTrust.builder().keptApart(false).build());
     assertThat(integrity.cameras().keySet())
         .as("as the estimator first heard from each, then the robot's others")
         .endsWith("camera 9", "front");

@@ -87,9 +87,12 @@ class TractionTruthSimTest {
   /**
    * From rest, the drive motors pushing straight ahead at a steady current: the least current at
    * which each wheel slips, found by halving between runs, puts each wheel's push at μ times its
-   * own load. Speeding up shifts load to the rear wheels (m a h / L off each front wheel, h the
-   * center of gravity's height and L the wheelbase), so the front wheels slip first, at μ N within
-   * 3%: about 48 A on the template's robot.
+   * own load, plus the share of it that spins the wheel itself up. Speeding up shifts load to the
+   * rear wheels (m a h / (2 L) off each front wheel, h the center of gravity's height and L the
+   * wheelbase), so the front wheels slip first. A front wheel's tread holds m a / 4 until that
+   * reaches μ (m g / 4 − m a h / (2 L)), at a = μ g / (1 + 2 μ h / L), and its motor pushes (m + 4
+   * J / r²) a / 4 then: 124.7 N (122.9 at the tread, the rest the wheel's own spin), about 48 A on
+   * the template's robot, within 3%.
    *
    * <p>Today every wheel slips at once, at the push that would speed the whole robot up at μ g,
    * since the simulator caps the robot as a whole and loads every wheel alike.
@@ -113,11 +116,10 @@ class TractionTruthSimTest {
       onsets[wheel] = template.force(slipping);
     }
 
-    double m = template.mass();
     double g = ImuReadings.STANDARD_GRAVITY;
     double h = template.body.cgHeight().in(Meters);
     double wheelbase = template.wheels[0].getX() - template.wheels[2].getX();
-    double front = MU * m * g / 4 / (1 + 2 * MU * m * h / (wheelbase * template.effectiveMass()));
+    double front = template.effectiveMass() * MU * g / 4 / (1 + 2 * MU * h / wheelbase);
     boolean allAtOnce = Math.abs(onsets[0] - onsets[3]) < 0.01 * onsets[0];
     stillOpen("the front left wheel's push at its slip, N", onsets[0], front, 0.03, 208.9, 0.5);
     stillOpen(

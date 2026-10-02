@@ -169,16 +169,19 @@ tasks.named("compileJava") {
 
 // Gradle's configuration cache (gradle.properties) can't hold GradleRIO's own tasks yet: the
 // simulator's run, deploy, vendordep, and WPILib's tools. A build that runs one goes without it, as
-// every build used to, and says so in a line. Gradle offers that only internally
-// (ConfigurationCacheDegradation); where it's gone, the build marks the tasks incompatible instead,
-// which works too but lists every problem the cache found in them.
+// every build used to. Marking them incompatible is enough for that; Gradle's internal
+// ConfigurationCacheDegradation, where it's there as today, also keeps the problems the cache finds
+// in them out of the output, so the build says so in a line. Should it change or go, the build
+// works as before and lists them.
 def withoutConfigurationCache = { Task task, String why ->
+    task.notCompatibleWithConfigurationCache(why)
     try {
-        Class.forName("org.gradle.api.internal.ConfigurationCacheDegradation").methods
-                .find { it.name == "requireDegradation" && it.parameterTypes[1] == String }
-                .invoke(null, task, why)
-    } catch (ReflectiveOperationException | NullPointerException ignored) {
-        task.notCompatibleWithConfigurationCache(why)
+        def degrade = Class.forName("org.gradle.api.internal.ConfigurationCacheDegradation").methods.find {
+            it.name == "requireDegradation" && it.parameterCount == 2 && it.parameterTypes[1] == String
+        }
+        degrade?.invoke(null, task, why)
+    } catch (Exception | LinkageError ignored) {
+        // Marked incompatible above, which is all a build needs.
     }
 }
 // GradleRIO's tasks that building and testing use work with it. Deploy's first step, which asks

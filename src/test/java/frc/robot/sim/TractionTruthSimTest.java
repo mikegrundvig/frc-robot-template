@@ -158,18 +158,27 @@ class TractionTruthSimTest {
   }
 
   /**
-   * One module pointing 10° off the others (its absolute encoder zeroed off, so its steering holds
-   * it there), all four driven ahead at 1 m/s: the three that agree hold the robot straight, their
-   * grip across their wheels (3 μN) far past the one wheel's scrub (μN), and that wheel slides. So
-   * physics says the robot neither drifts sideways nor turns: under 1 mm and 0.05° in a second.
+   * One module, the front left, pointing 10° off the others (its absolute encoder zeroed off, so
+   * its steering holds it there), all four driven ahead at 1 m/s by their velocity loops: the robot
+   * turns toward the odd wheel, counterclockwise, by more than 0.05° in a second, but no faster
+   * than the odd wheel rolls along with the two rear ones, v sin 10° / (b (sin 10° + 2 cos 10°)),
+   * 16.4° a second at 1 m/s (v the robot's speed, b half its wheelbase).
    *
-   * <p>Today the robot moves as the best fit of all four wheels, so wheels that disagree move it
-   * where none of them is going: it drifts toward the odd wheel and turns, about 5° a second, and
-   * since odometry fits the wheels the same way, it never errs for it.
+   * <p>Statics says it can't go straight. Going straight, the odd wheel slides across itself, and
+   * its friction (μ N, 199.5 N) pushes its corner left and turns the robot; the velocity loops make
+   * no couple against that while the wheels agree on their speed, so the other three would have to
+   * hold the push and its moment by their grip across them alone, which takes 214 N across the
+   * other front wheel, past its 199.5 N. That wheel slides, and the robot turns. Turning faster
+   * than the odd wheel rolls with the rear two, the odd wheel's slide reverses, and every wheel's
+   * friction turns the robot back. Where between the two it settles hangs on how stiffly the
+   * velocity loops resist the turn, which statics doesn't say.
+   *
+   * <p>Today the robot moves as the best fit of all four wheels, turning about 5° a second: within
+   * the bound by geometry, not by friction. Odometry fits the wheels the same way, so it never errs
+   * for it.
    */
   @Test
-  @KnownGap("the robot moves as the best fit of its wheels, so wheels that disagree can't scrub")
-  void threeWheelsThatAgreeHoldTheRobotStraightAgainstOneThatDoesnt() {
+  void aWheelPointedOffTurnsTheRobotNoFasterThanItRolls() {
     TruthRig rig =
         new TruthRig(Robots.SIM.definition().body(), MU, SensorErrors.NONE.withSteerOffset(0, 10));
     double kv = Robots.SIM.drivetrain().gains().driveKv();
@@ -183,14 +192,17 @@ class TractionTruthSimTest {
     Pose2d before = rig.simulation.truePose();
     rig.run(1);
     Pose2d after = rig.simulation.truePose();
-    double sideways = after.relativeTo(before).getY();
     double turned = after.getRotation().minus(before.getRotation()).getDegrees();
 
-    stillOpen(
-        "the robot held straight by the three wheels that agree",
-        Math.abs(turned) < 0.05 && Math.abs(sideways) < 0.001,
-        Math.abs(turned - 4.79) < 0.05,
-        "it turned " + turned + "° and drifted " + sideways + " m in a second");
+    double speed = after.getTranslation().getDistance(before.getTranslation());
+    double b = rig.wheels[0].getX();
+    double off = Math.toRadians(10);
+    double rolling = speed * Math.sin(off) / (b * (Math.sin(off) + 2 * Math.cos(off)));
+    assertThat(speed).as("driven at 1 m/s").isCloseTo(1, within(0.05));
+    assertThat(turned)
+        .as("degrees turned toward the odd wheel in a second")
+        .isGreaterThan(0.05)
+        .isLessThan(Math.toDegrees(rolling));
   }
 
   /**

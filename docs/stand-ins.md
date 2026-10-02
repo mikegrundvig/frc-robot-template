@@ -107,7 +107,9 @@ each a known gap in the truth suite, with its number:
   from their disagreement through a hard change of direction (tens of centimeters, while the
   wheels speed up and slow down to their new speeds) is more than the simulated robot needs. On a
   robot, wheels set that far apart are scrubbing over the carpet. One module pointed 10° off the
-  other three turns the simulated robot 4.8° a second, where the three would hold it straight.
+  other three turns the simulated robot 4.8° a second, as their best fit. A real one turns too,
+  since the three can't hold it straight (the other front wheel would need more grip across it
+  than it has), at a rate statics only bounds: up to 16.4° a second at 1 m/s.
 - **A wheel leaving the ground:** the robot stands on the plane that best fits the ground under
   its four wheels, so crossing a bump at 45°, where a rigid frame rests on three wheels and the
   fourth hangs, each wheel sits a quarter of the ground's twist off it instead.

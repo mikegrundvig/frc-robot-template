@@ -24,9 +24,50 @@ misspelled name can't pass unnoticed. A project's name in front (`:world:test`) 
 tests.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
-analysis and coverage report that `ci` runs. Each project has its own coverage report, the robot
+analysis and coverage that `ci` runs. Each project has its own coverage report, the robot
 program's at `build/reports/jacoco/test/html/index.html` and each library's under its folder
 (`lib/world/build/reports/...`), and each its own floor: a library's own tests must cover it.
+
+### The fast loop
+
+While you work on something, leave one command running in a terminal, naming the tests that
+cover it:
+
+```
+./gradlew test -Pquick --continuous --tests '*Arm*'
+```
+
+Every save reruns them, in a second or two, because Gradle stays running between saves. What keeps
+it quick:
+
+- **`--tests`** runs only what you name. Without it, quick mode runs every fast test in every
+  project.
+- **`-Pquick`** leaves out what only `ci` needs: Error Prone and NullAway, formatting, JaCoCo's
+  coverage agent and report, the simulation and end-to-end tests unless `--tests` names one, and
+  the build's time in `BuildConstants`. Without the time, a program that hasn't changed compiles
+  to the same classes, and Gradle skips tests whose inputs haven't changed: change a word in a
+  comment, and no test reruns.
+- **Gradle's caches** (`gradle.properties`): the configuration cache skips configuring the
+  projects after the first build, and the build cache hands a task the outputs of an earlier run
+  with the same inputs, such as after undoing an edit.
+
+From saving a file to the result, on a 16-core Linux desktop:
+
+| You save | What runs | Save to result |
+|---|---|---|
+| A word in a comment, in a robot class | The robot program's compile; no test, since its classes come out the same | 1.5 s |
+| Code in a robot class | The compile, then the tests | 1.8 s |
+| Code in a library (`lib/world`) | The library's compile, then the tests; the robot program compiles again only when the library's public API changed | 1.1 s |
+| Anything, with a one-off `./gradlew test -Pquick --tests ...` instead | Gradle starting and finding its cached configuration, then the above | about 7 s |
+
+About 0.9 s of a robot edit is compiling the whole robot program again. Gradle compiles only the
+classes an edit affects unless an annotation processor can't say what it generates from what, and
+three on the robot program's path can't: AdvantageKit's `@AutoLog` processor, and the processors
+for WPILib's Epilogue and avaje-jsonb that GradleRIO adds. At under a second, it's left as it is.
+
+`ci` takes four to five minutes, most of it the robot program's simulation tests:
+`EstimatorConsistencySimTest` (about 80 s) and `VisionSimTest` (about 40 s). Run it before pushing,
+not on every save.
 
 ## Where a test goes
 
@@ -573,7 +614,7 @@ and then seeing again), and the estimate recovers in each. What's known not to h
 ### Keeping it honest
 
 `EstimatorConsistencySimTest` runs four of the runs (driving, standing, turning, the gyro-scale
-procedure), six matched seeds each, on every build, about 75 s. Each must land where six honest
+procedure), six matched seeds each, on every build, about 80 s. Each must land where six honest
 seeds do 999 times in 1000: its mean position NEES between 0.30 and 5.8 and its heading NEES
 between 0.04 and 4.1, its share of loops outside the ellipse and past 3.72 σ within what six seeds
 allow (4%), and its mean error under 2.5 to 3.5 cm. Six seeds can't pin a NEES down closely, so the

@@ -14,7 +14,7 @@ Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
 | Job | Command |
 |---|---|
 | Every check CI runs; run it before pushing | `./gradlew ci` |
-| Rerun the tests on every save | `./gradlew test -Pquick --continuous` |
+| Rerun the tests you're working on, on every save ([the fast loop](testing.md#the-fast-loop)) | `./gradlew test -Pquick --continuous --tests '*Arm*'` |
 | Run one test class ([more on tests](testing.md)) | `./gradlew test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, driven from Pitwall's Sim view at http://localhost:5820/#sim ([more](simulator.md)) | `./gradlew run` |
 | Start it with WPILib's simulator GUI too, enabled and drivable from its keyboard | `./gradlew run -Pgui` |

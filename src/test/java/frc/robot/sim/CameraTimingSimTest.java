@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import com.michaelgrundvig.frc.localization.TagSolver;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -69,7 +70,9 @@ class CameraTimingSimTest {
         assertThat(
                 components.apply(
                     Setting.of(
-                        Faults.camera(camera), Faults.CLOCK_OFFSET, Map.of(Faults.OFFSET, 20.0))))
+                        FaultCatalog.camera(camera),
+                        FaultCatalog.CLOCK_OFFSET,
+                        Map.of(FaultCatalog.OFFSET, 20.0))))
             .isNull();
       }
 

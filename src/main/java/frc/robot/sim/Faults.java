@@ -1,5 +1,31 @@
 package frc.robot.sim;
 
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.BACKUP_IMU;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.BELOW_TRIP;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.CAMERA;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.DRIFT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.EXTRA;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.FIELD;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.FORWARD;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.GRIP;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.GYRO;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.HEADING;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.LEFT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.MODULES;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.NOISE;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.OFFSET;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.PITCH;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.ROBOT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.ROLL;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.SCALE;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.SPEED;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TAG;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TURN;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TURNS;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.UP;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.X;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.Y;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.YAW;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
@@ -8,6 +34,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Component;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Bump;
 import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
@@ -15,6 +42,8 @@ import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
@@ -23,123 +52,23 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
 
 /**
- * What can go wrong with the simulated world's parts while it runs, declared to Pitwall's simulator
- * controls: each camera, the gyro, the backup IMU, each module, the robot itself, the field's tags,
- * and each coprocessor, with their faults. The page lists them, applies them, and undoes them; the
- * scenarios ({@link Scenarios}) are made of them. The robot's code is never told: it has to find
- * out from its sensors.
+ * The simulated world's faults, declared to Pitwall's simulator controls: each fault in the
+ * simulation's catalog ({@link FaultCatalog}, which says what each is and what it takes) bound to
+ * the part it fails, here, where the parts are: each camera, the gyro, the backup IMU, each module,
+ * the robot itself, the field's tags, and each coprocessor. The page lists them, applies them, and
+ * undoes them; the scenarios ({@link Scenarios}) are made of them. The robot's code is never told:
+ * it has to find out from its sensors.
  *
  * <p>A fault that lasts (a camera unplugged) says whether it's on by asking the world, and undoing
  * it puts the part back as the world was built: a season-worn robot's sensors ({@link
  * SensorErrors}), not perfect ones. An event (a hit) happens once; nothing undoes it, and each says
- * how the robot recovers.
- *
- * <p>Names are the page's, and the scenarios' ({@link #GYRO}, {@link #UNPLUGGED}). What the world
- * can't make fail yet is listed in docs/simulator.md.
+ * how the robot recovers. What the world can't make fail yet is listed in docs/simulator.md.
  */
 public final class Faults {
-  // The parts.
-  public static final String GYRO = "Gyro";
-  public static final String BACKUP_IMU = "Backup IMU";
-  public static final String ROBOT = "Robot";
-  public static final String FIELD = "Field";
-
-  /** The modules' names, front left first, in the drivetrain's order. */
-  static final List<String> MODULES =
-      List.of("Front left module", "Front right module", "Back left module", "Back right module");
-
-  // What can go wrong with them.
-  public static final String UNPLUGGED = "Unplugged";
-  public static final String FROZEN = "Frozen";
-  public static final String MOVED = "Moved on its mount";
-  public static final String TURNED = "Turned on its mount";
-  public static final String LATE = "Late";
-  public static final String CLOCK_OFFSET = "Clock offset";
-  public static final String ERRORS = "Errors";
-  public static final String RESET = "Reset";
-  public static final String STALE = "Stale encoder";
-  public static final String ZEROED_OFF = "Zeroed off";
-  public static final String WORN = "Worn tread";
-  public static final String SLIPS = "Slips";
-  public static final String SPINNING = "Spinning";
-  public static final String SHOVED = "Shoved";
-  public static final String PUSHED = "Pushed";
-  public static final String HIT = "Hit";
-  public static final String TILTED = "Tilted";
-  public static final String SLIPPING = "Slipping";
-  public static final String PLACED = "Placed";
-  public static final String TO_A_BUMP = "Carried to a bump";
-  public static final String TAG_MOVED = "Tag moved";
-  public static final String UNREACHABLE = "Unreachable";
-  public static final String WRONG_VERSION = "Wrong version";
-  public static final String HOT = "Hot";
-  public static final String CAMERA_UNPLUGGED = "Camera unplugged";
-  public static final String PHOTONVISION_RESTARTS = "PhotonVision restarts";
-  public static final String DUPLICATED = "Duplicated address";
-  public static final String SETTINGS_CHANGED = "Settings changed";
-  public static final String IGNORES_POWER_DOWN = "Ignores power-down";
-
-  // Their parameters, as the scenarios give them.
-  public static final String FORWARD = "Forward";
-  public static final String LEFT = "Left";
-  public static final String UP = "Up";
-  public static final String YAW = "Yaw";
-  public static final String PITCH = "Pitch";
-  public static final String ROLL = "Roll";
-  public static final String SCALE = "Scale";
-  public static final String DRIFT = "Drift";
-  public static final String NOISE = "Noise";
-  public static final String OFFSET = "Offset";
-  public static final String TURNS = "Turns";
-  public static final String GRIP = "Grip";
-  public static final String SPEED = "Speed";
-  public static final String EXTRA = "Extra";
-  public static final String TURN = "Turn";
-  public static final String X = "X";
-  public static final String Y = "Y";
-  public static final String HEADING = "Heading";
-  public static final String TAG = "Tag";
-  public static final String BELOW_TRIP = "Below its trip point";
-  public static final String CAMERA = "Camera";
-
   /** How far short of a bump's ramp the robot is set down, from its center: clear of the ramp. */
   static final double BUMP_CLEARANCE_METERS = 1.0;
 
-  /** The farthest the page may set a camera's clock off the robot's, either way, in ms. */
-  private static final double CLOCK_OFFSET_MILLIS = 100;
-
-  /** The farthest the page may knock a camera, or push the robot, in one go. */
-  private static final double MOUNT_INCHES = 12;
-
-  private static final double MOUNT_DEGREES = 30;
-  private static final double SHOVE_METERS = 3;
-
-  /** The fastest the page may spin a wheel past the floor, or push the robot, in m/s. */
-  private static final double SLIDE_METERS_PER_SECOND = 3;
-
-  private static final String RECOVERS =
-      "Nothing undoes it: place the robot again, or let its cameras find it";
-
   private Faults() {}
-
-  /** A camera's name on the page: {@code "Camera front-left"}. */
-  public static String camera(String name) {
-    return "Camera " + name;
-  }
-
-  /** A coprocessor's name on the page: {@code "Coprocessor vision-front"}. */
-  public static String coprocessor(String name) {
-    return "Coprocessor " + name;
-  }
-
-  /**
-   * A module's name on the page: {@code "Front left module"}.
-   *
-   * @param module front left, front right, back left, back right: 0 to 3
-   */
-  public static String module(int module) {
-    return MODULES.get(module);
-  }
 
   /** Declares every part of the world that can fail. */
   static void declare(SimulatedWorld world, Components components) {
@@ -147,8 +76,8 @@ public final class Faults {
       components.add(camera(world.camera(i)));
     }
     DriveSimulation drivetrain = world.drivetrain();
-    components.add(imu(GYRO, "gyro", drivetrain.gyroSim()));
-    components.add(imu(BACKUP_IMU, "backup IMU", drivetrain.backupGyroSim()));
+    components.add(imu(GYRO, FaultCatalog.Imu.GYRO_KIND, drivetrain.gyroSim()));
+    components.add(imu(BACKUP_IMU, FaultCatalog.Imu.BACKUP_KIND, drivetrain.backupGyroSim()));
     for (int i = 0; i < MODULES.size(); i++) {
       components.add(module(drivetrain, i));
     }
@@ -161,87 +90,89 @@ public final class Faults {
     }
   }
 
+  /** A fault that lasts, as the catalog has it, bound to its part. */
+  private static Fault lasting(
+      FaultCatalog.Fault fault, BooleanSupplier isOn, Consumer<Values> apply, Runnable undo) {
+    return parameters(Fault.lasting(fault.name()), fault)
+        .isOn(isOn)
+        .apply(apply)
+        .undo(fault.undone(), undo)
+        .build();
+  }
+
+  /** A fault that happens once, as the catalog has it, bound to its part. */
+  private static Fault event(FaultCatalog.Fault fault, Consumer<Values> apply) {
+    return parameters(Fault.event(fault.name()), fault)
+        .apply(apply)
+        .undoneBy(fault.undone())
+        .build();
+  }
+
+  private static Fault.Builder parameters(Fault.Builder builder, FaultCatalog.Fault fault) {
+    builder.does(fault.does());
+    for (FaultCatalog.Parameter parameter : fault.parameters()) {
+      builder.parameter(
+          parameter.name(),
+          parameter.unit(),
+          Limits.between(parameter.min(), parameter.max()),
+          parameter.initial());
+    }
+    return builder;
+  }
+
   /** A coprocessor, as its health agent tells the robot of it. */
   private static Component coprocessor(CoprocessorIOSim coprocessor) {
     List<Fault> faults = new ArrayList<>();
     faults.add(
-        Fault.lasting(UNREACHABLE)
-            .does(
-                "Its health agent stops answering, as a coprocessor unplugged, off, or off the"
-                    + " network: the robot's code finds it missing.")
-            .isOn(coprocessor::isUnreachable)
-            .apply(values -> coprocessor.unreachable(true))
-            .undo("Answers again.", () -> coprocessor.unreachable(false))
-            .build());
+        lasting(
+            FaultCatalog.Coprocessor.UNREACHABLE,
+            coprocessor::isUnreachable,
+            values -> coprocessor.unreachable(true),
+            () -> coprocessor.unreachable(false)));
     faults.add(
-        Fault.lasting(WRONG_VERSION)
-            .does(
-                "Its image carries PhotonVision "
-                    + CoprocessorIOSim.OTHER_VERSION
-                    + ", as a board left on last season's image would, and it publishes that"
-                    + " version.")
-            .isOn(coprocessor::hasWrongVersion)
-            .apply(values -> coprocessor.wrongVersion(true))
-            .undo("Back to this build's image.", () -> coprocessor.wrongVersion(false))
-            .build());
+        lasting(
+            FaultCatalog.Coprocessor.wrongVersion(CoprocessorIOSim.OTHER_VERSION),
+            coprocessor::hasWrongVersion,
+            values -> coprocessor.wrongVersion(true),
+            () -> coprocessor.wrongVersion(false)));
     faults.add(
-        Fault.lasting(HOT)
-            .does(
-                "Its big cores run this far below their trip point; at it or past it, the kernel"
-                    + " caps their clock.")
-            .parameter(BELOW_TRIP, "°C", Limits.between(-10, 30), 2)
-            .isOn(coprocessor::isHot)
-            .apply(values -> coprocessor.heat(values.get(BELOW_TRIP)))
-            .undo("Back to its usual temperature.", () -> coprocessor.heat(Double.NaN))
-            .build());
+        lasting(
+            FaultCatalog.Coprocessor.HOT,
+            coprocessor::isHot,
+            values -> coprocessor.heat(values.get(BELOW_TRIP)),
+            () -> coprocessor.heat(Double.NaN)));
     if (coprocessor.cameraCount() > 0) {
       faults.add(
-          Fault.lasting(CAMERA_UNPLUGGED)
-              .does(
-                  "One of its cameras, numbered from 1 in the table's order, is unplugged: its USB"
-                      + " port is empty.")
-              .parameter(CAMERA, "", Limits.between(1, coprocessor.cameraCount()), 1)
-              .isOn(coprocessor::isCameraUnplugged)
-              .apply(values -> coprocessor.unplugCamera(cameraIndex(values.get(CAMERA))))
-              .undo("Plugs it back in.", () -> coprocessor.unplugCamera(-1))
-              .build());
+          lasting(
+              FaultCatalog.Coprocessor.cameraUnplugged(coprocessor.cameraCount()),
+              coprocessor::isCameraUnplugged,
+              values -> coprocessor.unplugCamera(cameraIndex(values.get(CAMERA))),
+              () -> coprocessor.unplugCamera(-1)));
     }
     faults.add(
-        Fault.event(PHOTONVISION_RESTARTS)
-            .does("PhotonVision exits, and systemd restarts it: it's back after a few seconds.")
-            .apply(values -> coprocessor.restartPhotonVision())
-            .undoneBy(
-                "Nothing undoes it: the count of restarts since boot stays, until it reboots.")
-            .build());
+        event(
+            FaultCatalog.Coprocessor.PHOTONVISION_RESTARTS,
+            values -> coprocessor.restartPhotonVision()));
     faults.add(
-        Fault.lasting(DUPLICATED)
-            .does(
-                "A second board with its image answers at its address too, the two taking turns,"
-                    + " as a spare drive in another board would.")
-            .isOn(coprocessor::hasTwoBoards)
-            .apply(values -> coprocessor.twoBoards(true))
-            .undo("Only its own board answers.", () -> coprocessor.twoBoards(false))
-            .build());
+        lasting(
+            FaultCatalog.Coprocessor.DUPLICATED,
+            coprocessor::hasTwoBoards,
+            values -> coprocessor.twoBoards(true),
+            () -> coprocessor.twoBoards(false)));
     faults.add(
-        Fault.lasting(SETTINGS_CHANGED)
-            .does(
-                "Its PhotonVision settings change from those it was stamped with, as calibrating or"
-                    + " tuning in PhotonVision's own page does: they differ from Git's, if Git has"
-                    + " any.")
-            .isOn(coprocessor::hasSettingsChanged)
-            .apply(values -> coprocessor.settingsChanged(true))
-            .undo("Back to its stamped settings.", () -> coprocessor.settingsChanged(false))
-            .build());
+        lasting(
+            FaultCatalog.Coprocessor.SETTINGS_CHANGED,
+            coprocessor::hasSettingsChanged,
+            values -> coprocessor.settingsChanged(true),
+            () -> coprocessor.settingsChanged(false)));
     faults.add(
-        Fault.lasting(IGNORES_POWER_DOWN)
-            .does(
-                "Its image is older than powering down from the robot: asked, its agent refuses"
-                    + " (404), and it keeps running.")
-            .isOn(coprocessor::isIgnoringPowerDown)
-            .apply(values -> coprocessor.ignoresPowerDown(true))
-            .undo("Powers down when asked.", () -> coprocessor.ignoresPowerDown(false))
-            .build());
-    return new Component(coprocessor(coprocessor.name()), "coprocessor", faults);
+        lasting(
+            FaultCatalog.Coprocessor.IGNORES_POWER_DOWN,
+            coprocessor::isIgnoringPowerDown,
+            values -> coprocessor.ignoresPowerDown(true),
+            () -> coprocessor.ignoresPowerDown(false)));
+    return new Component(
+        FaultCatalog.coprocessor(coprocessor.name()), FaultCatalog.Coprocessor.KIND, faults);
   }
 
   /** A camera's number, from 1, as an index from 0. */
@@ -254,75 +185,48 @@ public final class Faults {
 
   private static Component camera(CameraIOSim camera) {
     return Component.of(
-        camera(camera.name()),
-        "camera",
-        Fault.lasting(UNPLUGGED)
-            .does("No results at all: the robot's code sees it disconnected.")
-            .isOn(camera::isUnplugged)
-            .apply(values -> camera.unplug(true))
-            .undo("Plugs it back in.", () -> camera.unplug(false))
-            .build(),
-        Fault.lasting(FROZEN)
-            .does(
-                "Keeps sending its last image's tags as new ones, at its frame rate: to the robot's"
-                    + " code, the robot seems not to move.")
-            .isOn(camera::isFrozen)
-            .apply(values -> camera.freeze(true))
-            .undo("Sends new images again.", () -> camera.freeze(false))
-            .build(),
-        Fault.lasting(MOVED)
-            .does(
-                "Knocked this far from where it's mounted, in the robot's frame (forward, left,"
-                    + " up); the robot's code still believes its configured mount.")
-            .parameter(FORWARD, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 0)
-            .parameter(LEFT, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 0)
-            .parameter(UP, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), -4)
-            .isOn(camera::isMoved)
-            .apply(
-                values ->
-                    camera.move(
-                        new Translation3d(
-                            Inches.of(values.get(FORWARD)),
-                            Inches.of(values.get(LEFT)),
-                            Inches.of(values.get(UP)))))
-            .undo("Puts it back where it was mounted.", () -> camera.move(Translation3d.ZERO))
-            .build(),
-        Fault.lasting(TURNED)
-            .does(
-                "Turned this far from how it's mounted, in the robot's frame; the robot's code"
-                    + " still believes its configured mount.")
-            .parameter(ROLL, "°", Limits.between(-MOUNT_DEGREES, MOUNT_DEGREES), 0)
-            .parameter(PITCH, "°", Limits.between(-MOUNT_DEGREES, MOUNT_DEGREES), 0)
-            .parameter(YAW, "°", Limits.between(-MOUNT_DEGREES, MOUNT_DEGREES), 2)
-            .isOn(camera::isTurned)
-            .apply(
-                values ->
-                    camera.turn(
-                        new Rotation3d(
-                            Degrees.of(values.get(ROLL)),
-                            Degrees.of(values.get(PITCH)),
-                            Degrees.of(values.get(YAW)))))
-            .undo("Turns it back as it was mounted.", () -> camera.turn(Rotation3d.ZERO))
-            .build(),
-        Fault.lasting(LATE)
-            .does(
-                "Its images arrive this much later than its configuration says, still carrying"
-                    + " when they were taken; past its frame time, it sends fewer of them.")
-            .parameter(EXTRA, "ms", Limits.between(0, 1000), 100)
-            .isOn(camera::isLate)
-            .apply(values -> camera.delay(values.get(EXTRA)))
-            .undo("Back to its usual latency.", () -> camera.delay(0))
-            .build(),
-        Fault.lasting(CLOCK_OFFSET)
-            .does(
-                "Its clock is this far off the robot's, as a coprocessor whose time sync failed:"
-                    + " each image arrives on time, but is stamped this much later than it was taken"
-                    + " (earlier, if negative). Unlike Late, the stamps are wrong.")
-            .parameter(OFFSET, "ms", Limits.between(-CLOCK_OFFSET_MILLIS, CLOCK_OFFSET_MILLIS), 10)
-            .isOn(camera::hasClockOffset)
-            .apply(values -> camera.offsetClock(values.get(OFFSET)))
-            .undo("Its clock agrees with the robot's again.", () -> camera.offsetClock(0))
-            .build());
+        FaultCatalog.camera(camera.name()),
+        FaultCatalog.Camera.KIND,
+        lasting(
+            FaultCatalog.Camera.UNPLUGGED,
+            camera::isUnplugged,
+            values -> camera.unplug(true),
+            () -> camera.unplug(false)),
+        lasting(
+            FaultCatalog.Camera.FROZEN,
+            camera::isFrozen,
+            values -> camera.freeze(true),
+            () -> camera.freeze(false)),
+        lasting(
+            FaultCatalog.Camera.MOVED,
+            camera::isMoved,
+            values ->
+                camera.move(
+                    new Translation3d(
+                        Inches.of(values.get(FORWARD)),
+                        Inches.of(values.get(LEFT)),
+                        Inches.of(values.get(UP)))),
+            () -> camera.move(Translation3d.ZERO)),
+        lasting(
+            FaultCatalog.Camera.TURNED,
+            camera::isTurned,
+            values ->
+                camera.turn(
+                    new Rotation3d(
+                        Degrees.of(values.get(ROLL)),
+                        Degrees.of(values.get(PITCH)),
+                        Degrees.of(values.get(YAW)))),
+            () -> camera.turn(Rotation3d.ZERO)),
+        lasting(
+            FaultCatalog.Camera.LATE,
+            camera::isLate,
+            values -> camera.delay(values.get(EXTRA)),
+            () -> camera.delay(0)),
+        lasting(
+            FaultCatalog.Camera.CLOCK_OFFSET,
+            camera::hasClockOffset,
+            values -> camera.offsetClock(values.get(OFFSET)),
+            () -> camera.offsetClock(0)));
   }
 
   /** The gyro, or the backup IMU: they fail alike. */
@@ -331,48 +235,28 @@ public final class Faults {
     return Component.of(
         name,
         kind,
-        Fault.lasting(UNPLUGGED)
-            .does("No readings at all: the robot's code sees it disconnected.")
-            .isOn(() -> !imu.isConnected())
-            .apply(values -> imu.setConnected(false))
-            .undo("Plugs it back in.", () -> imu.setConnected(true))
-            .build(),
-        Fault.lasting(FROZEN)
-            .does("Keeps reporting, the same yaw every time, however the robot turns.")
-            .isOn(imu::isFrozen)
-            .apply(values -> imu.setFrozen(true))
-            .undo("Reports the robot's turns again.", () -> imu.setFrozen(false))
-            .build(),
-        Fault.lasting(ERRORS)
-            .does(
-                "Errs this way from now on: its reading per true turn (1.15 reads 15% too much),"
-                    + " a steady drift, and noise on each reading. It carries on from what it"
-                    + " reads now.")
-            .parameter(SCALE, "", around(0.5, 1.5, built.scale()), built.scale())
-            .parameter(
-                DRIFT,
-                "°/min",
-                around(-10, 10, built.driftDegreesPerMinute()),
-                built.driftDegreesPerMinute())
-            .parameter(NOISE, "°", around(0, 2, built.noiseDegrees()), built.noiseDegrees())
-            .isOn(() -> !imu.errors().equals(built))
-            .apply(
-                values ->
-                    imu.setErrors(
-                        SensorErrors.GyroErrors.builder()
-                            .scale(values.get(SCALE))
-                            .driftDegreesPerMinute(values.get(DRIFT))
-                            .noiseDegrees(values.get(NOISE))
-                            .build()))
-            .undo("Errs as it did as the robot was built.", () -> imu.setErrors(built))
-            .build(),
-        Fault.event(RESET)
-            .does(
-                "Its yaw resets to zero wherever the robot points, as a gyro that browns out and"
-                    + " restarts does.")
-            .apply(values -> imu.reset())
-            .undoneBy("Nothing undoes it: the robot's code has to notice the jump.")
-            .build());
+        lasting(
+            FaultCatalog.Imu.UNPLUGGED,
+            () -> !imu.isConnected(),
+            values -> imu.setConnected(false),
+            () -> imu.setConnected(true)),
+        lasting(
+            FaultCatalog.Imu.FROZEN,
+            imu::isFrozen,
+            values -> imu.setFrozen(true),
+            () -> imu.setFrozen(false)),
+        lasting(
+            FaultCatalog.Imu.errors(built),
+            () -> !imu.errors().equals(built),
+            values ->
+                imu.setErrors(
+                    SensorErrors.GyroErrors.builder()
+                        .scale(values.get(SCALE))
+                        .driftDegreesPerMinute(values.get(DRIFT))
+                        .noiseDegrees(values.get(NOISE))
+                        .build()),
+            () -> imu.setErrors(built)),
+        event(FaultCatalog.Imu.RESET, values -> imu.reset()));
   }
 
   private static Component module(DriveSimulation drivetrain, int index) {
@@ -380,174 +264,79 @@ public final class Faults {
     double builtOffset = Math.toDegrees(module.builtSteerOffsetRadians());
     double builtTread = drivetrain.builtTreadScale(index);
     return Component.of(
-        module(index),
-        "module",
-        Fault.lasting(STALE)
-            .does(
-                "Its encoders' readings stop changing while the wheel turns on, as signals that"
-                    + " stop arriving do: odometry thinks the wheel stands still, pointing where it"
-                    + " last did.")
-            .isOn(module::isStale)
-            .apply(values -> module.setStale(true))
-            .undo("Its readings catch up with the wheel.", () -> module.setStale(false))
-            .build(),
-        Fault.lasting(ZEROED_OFF)
-            .does(
-                "Its absolute encoder's zero this far off: the module points that far from where"
-                    + " the robot's code thinks.")
-            .parameter(OFFSET, "°", around(-45, 45, builtOffset), builtOffset)
-            .isOn(
-                () ->
-                    Math.abs(module.steerOffsetRadians() - module.builtSteerOffsetRadians()) > 1e-9)
-            .apply(values -> module.setSteerOffset(Math.toRadians(values.get(OFFSET))))
-            .undo(
-                "Back to its zero as the robot was built.",
-                () -> module.setSteerOffset(module.builtSteerOffsetRadians()))
-            .build(),
-        Fault.lasting(WORN)
-            .does(
-                "Its wheel's true radius over the configured one: 0.97 is tread worn 3%, and the"
-                    + " robot goes 3% less far than this wheel's encoder counts.")
-            .parameter(SCALE, "", around(0.8, 1.1, builtTread), builtTread)
-            .isOn(() -> drivetrain.treadScale(index) != builtTread)
-            .apply(values -> drivetrain.wearTread(index, values.get(SCALE)))
-            .undo(
-                "Back to its tread as the robot was built.",
-                () -> drivetrain.wearTread(index, builtTread))
-            .build(),
-        Fault.event(SLIPS)
-            .does(
-                "Spins this many turns without moving the robot: its encoder counts travel the"
-                    + " floor never saw.")
-            .parameter(TURNS, "turns", Limits.between(-10, 10), 0.5)
-            .apply(values -> drivetrain.spin(index, 2 * Math.PI * values.get(TURNS)))
-            .undoneBy(
-                "Nothing undoes it: odometry has to notice the wheels disagreeing, and the cameras"
-                    + " correct what it missed.")
-            .build(),
-        Fault.lasting(SPINNING)
-            .does(
-                "Its wheel keeps spinning this much faster than the floor moves it, as a wheel"
-                    + " losing its grip does: its encoder counts travel the floor never saw, and the"
-                    + " other wheels and the gyro disagree with it.")
-            .parameter(
-                SPEED,
-                "m/s",
-                Limits.between(-SLIDE_METERS_PER_SECOND, SLIDE_METERS_PER_SECOND),
-                0.5)
-            .isOn(() -> module.spinMetersPerSecond() != 0)
-            .apply(values -> drivetrain.spinAt(index, values.get(SPEED)))
-            .undo("It grips again.", () -> drivetrain.spinAt(index, 0))
-            .build());
+        FaultCatalog.module(index),
+        FaultCatalog.Module.KIND,
+        lasting(
+            FaultCatalog.Module.STALE,
+            module::isStale,
+            values -> module.setStale(true),
+            () -> module.setStale(false)),
+        lasting(
+            FaultCatalog.Module.zeroedOff(builtOffset),
+            () -> Math.abs(module.steerOffsetRadians() - module.builtSteerOffsetRadians()) > 1e-9,
+            values -> module.setSteerOffset(Math.toRadians(values.get(OFFSET))),
+            () -> module.setSteerOffset(module.builtSteerOffsetRadians())),
+        lasting(
+            FaultCatalog.Module.worn(builtTread),
+            () -> drivetrain.treadScale(index) != builtTread,
+            values -> drivetrain.wearTread(index, values.get(SCALE)),
+            () -> drivetrain.wearTread(index, builtTread)),
+        event(
+            FaultCatalog.Module.SLIPS,
+            values -> drivetrain.spin(index, 2 * Math.PI * values.get(TURNS))),
+        lasting(
+            FaultCatalog.Module.SPINNING,
+            () -> module.spinMetersPerSecond() != 0,
+            values -> drivetrain.spinAt(index, values.get(SPEED)),
+            () -> drivetrain.spinAt(index, 0)));
   }
 
   private static Component robot(SimulatedWorld world) {
     DriveSimulation drivetrain = world.drivetrain();
-    double length = world.field().length();
-    double width = world.field().width();
     List<Fault> faults = new ArrayList<>();
     faults.add(
-        Fault.event(SHOVED)
-            .does(
-                "Pushed this far in its own frame without its wheels turning, as another robot"
-                    + " pushes it: its gyro feels a turn, and nothing feels the move.")
-            .parameter(FORWARD, "m", Limits.between(-SHOVE_METERS, SHOVE_METERS), 0)
-            .parameter(LEFT, "m", Limits.between(-SHOVE_METERS, SHOVE_METERS), 0.6)
-            .parameter(TURN, "°", Limits.between(-180, 180), 0)
-            .apply(
-                values ->
-                    drivetrain.shove(
-                        new Transform2d(
-                            values.get(FORWARD),
-                            values.get(LEFT),
-                            Rotation2d.fromDegrees(values.get(TURN)))))
-            .undoneBy(RECOVERS)
-            .build());
+        event(
+            FaultCatalog.Robot.SHOVED,
+            values ->
+                drivetrain.shove(
+                    new Transform2d(
+                        values.get(FORWARD),
+                        values.get(LEFT),
+                        Rotation2d.fromDegrees(values.get(TURN))))));
     faults.add(
-        Fault.lasting(PUSHED)
-            .does(
-                "Pushed at this speed, in its own frame as it faces when the push starts, as"
-                    + " another robot pushes it: its wheels skid and never see it, and its IMU feels"
-                    + " the push get going, and stop, at 3 m/s².")
-            .parameter(
-                FORWARD,
-                "m/s",
-                Limits.between(-SLIDE_METERS_PER_SECOND, SLIDE_METERS_PER_SECOND),
-                0)
-            .parameter(
-                LEFT, "m/s", Limits.between(-SLIDE_METERS_PER_SECOND, SLIDE_METERS_PER_SECOND), 1)
-            .isOn(drivetrain::isPushed)
-            .apply(
-                values -> drivetrain.push(new Translation2d(values.get(FORWARD), values.get(LEFT))))
-            .undo(
-                "The push stops: the robot slows to its wheels' pace, and nothing undoes how far"
-                    + " it slid.",
-                () -> drivetrain.push(Translation2d.ZERO))
-            .build());
+        lasting(
+            FaultCatalog.Robot.PUSHED,
+            drivetrain::isPushed,
+            values -> drivetrain.push(new Translation2d(values.get(FORWARD), values.get(LEFT))),
+            () -> drivetrain.push(Translation2d.ZERO)));
     faults.add(
-        Fault.event(HIT)
-            .does(
-                "Knocked this far in its own frame, as a collision knocks it, with a 4 g jolt its"
-                    + " IMU feels.")
-            .parameter(FORWARD, "m", Limits.between(-SHOVE_METERS, SHOVE_METERS), 0)
-            .parameter(LEFT, "m", Limits.between(-SHOVE_METERS, SHOVE_METERS), 0.6)
-            .apply(
-                values ->
-                    drivetrain.hit(
-                        new Transform2d(values.get(FORWARD), values.get(LEFT), Rotation2d.ZERO)))
-            .undoneBy(RECOVERS)
-            .build());
+        event(
+            FaultCatalog.Robot.HIT,
+            values ->
+                drivetrain.hit(
+                    new Transform2d(values.get(FORWARD), values.get(LEFT), Rotation2d.ZERO))));
     faults.add(
-        Fault.lasting(TILTED)
-            .does(
-                "Tilted by hand, whatever the ground under it, as a wheel up on a game piece"
-                    + " tilts it: nose up is a negative pitch, left side up a positive roll. Its IMU"
-                    + " reads the tilt.")
-            .parameter(PITCH, "°", Limits.between(-MOUNT_DEGREES, MOUNT_DEGREES), -5)
-            .parameter(ROLL, "°", Limits.between(-MOUNT_DEGREES, MOUNT_DEGREES), 5)
-            .isOn(drivetrain::isTiltedByHand)
-            .apply(
-                values ->
-                    drivetrain.tilt(
-                        Math.toRadians(values.get(PITCH)), Math.toRadians(values.get(ROLL))))
-            .undo(
-                "Sets it back on the ground, which tilts it as the terrain does.",
-                () -> drivetrain.setTerrain(drivetrain.terrain()))
-            .build());
+        lasting(
+            FaultCatalog.Robot.TILTED,
+            drivetrain::isTiltedByHand,
+            values ->
+                drivetrain.tilt(
+                    Math.toRadians(values.get(PITCH)), Math.toRadians(values.get(ROLL))),
+            () -> drivetrain.setTerrain(drivetrain.terrain())));
     faults.add(
-        Fault.lasting(SLIPPING)
-            .does(
-                "Only this share of its wheels' rolling moves it, as with wheels in the air or on"
-                    + " a slick floor; the encoders count all of it, alike, so the wheels never"
-                    + " disagree.")
-            .parameter(GRIP, "", Limits.between(0, 1), 0.75)
-            .isOn(() -> drivetrain.grip() < 1)
-            .apply(values -> drivetrain.grip(values.get(GRIP)))
-            .undo("Full grip again.", () -> drivetrain.grip(1))
-            .build());
+        lasting(
+            FaultCatalog.Robot.SLIPPING,
+            () -> drivetrain.grip() < 1,
+            values -> drivetrain.grip(values.get(GRIP)),
+            () -> drivetrain.grip(1)));
     faults.add(
-        Fault.event(PLACED)
-            .does(
-                "Carried here by the drive team, facing this way (from the blue end): its wheels"
-                    + " don't turn, and its gyro feels any turn.")
-            .parameter(X, "m", Limits.between(0, length), length / 2)
-            .parameter(Y, "m", Limits.between(0, width), width / 2)
-            .parameter(HEADING, "°", Limits.between(-180, 180), 0)
-            .apply(values -> world.place(placed(values)))
-            .undoneBy("Place it again.")
-            .build());
+        event(
+            FaultCatalog.Robot.placed(world.field().length(), world.field().width()),
+            values -> world.place(placed(values))));
     if (hasBumps(world)) {
-      faults.add(
-          Fault.event(TO_A_BUMP)
-              .does(
-                  "Carried to 1 m short of the nearest bump's ramp, facing across it, to drive"
-                      + " over. Its gyro feels the turn but its wheels see no move, so only its"
-                      + " cameras can say where it is.")
-              .apply(values -> beforeTheNearestBump(world))
-              .undoneBy("Place it again.")
-              .build());
+      faults.add(event(FaultCatalog.Robot.TO_A_BUMP, values -> beforeTheNearestBump(world)));
     }
-    return new Component(ROBOT, "robot", faults);
+    return new Component(ROBOT, FaultCatalog.Robot.KIND, faults);
   }
 
   /** The field's tags: one can be knocked off where the field was built. */
@@ -557,28 +346,18 @@ public final class Faults {
     int highest = ids.stream().mapToInt(Integer::intValue).max().orElseThrow();
     return Component.of(
         FIELD,
-        "field",
-        Fault.lasting(TAG_MOVED)
-            .does(
-                "One tag moved this far from where the field was built, in the field's frame (x"
-                    + " away from the blue wall, y to its left, up), as a tag knocked at an event"
-                    + " is; moving another puts this one back. The robot's code, and the cameras'"
-                    + " multi-tag solves, still believe the field's layout.")
-            .parameter(TAG, "", Limits.between(lowest, highest), ids.get(0))
-            .parameter(X, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 4)
-            .parameter(Y, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 0)
-            .parameter(UP, "in", Limits.between(-MOUNT_INCHES, MOUNT_INCHES), 0)
-            .isOn(vision::isTagMoved)
-            .apply(
-                values ->
-                    vision.moveTag(
-                        tagId(values.get(TAG)),
-                        new Translation3d(
-                            Inches.of(values.get(X)),
-                            Inches.of(values.get(Y)),
-                            Inches.of(values.get(UP)))))
-            .undo("Puts it back where the field was built.", vision::putTagsBack)
-            .build());
+        FaultCatalog.Field.KIND,
+        lasting(
+            FaultCatalog.Field.tagMoved(lowest, highest, ids.get(0)),
+            vision::isTagMoved,
+            values ->
+                vision.moveTag(
+                    tagId(values.get(TAG)),
+                    new Translation3d(
+                        Inches.of(values.get(X)),
+                        Inches.of(values.get(Y)),
+                        Inches.of(values.get(UP)))),
+            vision::putTagsBack));
   }
 
   /** A tag's ID, given as a number. */
@@ -596,11 +375,6 @@ public final class Faults {
 
   private static Pose2d placed(Values values) {
     return new Pose2d(values.get(X), values.get(Y), Rotation2d.fromDegrees(values.get(HEADING)));
-  }
-
-  /** A range that holds what the robot was built with, however far out that is. */
-  private static Limits around(double min, double max, double built) {
-    return Limits.between(Math.min(min, built), Math.max(max, built));
   }
 
   /**

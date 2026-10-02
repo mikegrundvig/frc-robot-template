@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.localization.YawSource;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
-import frc.robot.sim.Faults;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -122,7 +122,11 @@ class SimulatorControlsSimTest {
         send(
             "POST",
             "/api/simulator/faults",
-            "{\"component\": \"" + Faults.GYRO + "\", \"fault\": \"" + Faults.UNPLUGGED + "\"}");
+            "{\"component\": \""
+                + FaultCatalog.GYRO
+                + "\", \"fault\": \""
+                + FaultCatalog.UNPLUGGED
+                + "\"}");
     sim.run(0.5);
     YawSource without = sim.robot().localization().yawSource();
     var pluggedIn =

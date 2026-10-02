@@ -1,41 +1,42 @@
 package frc.robot.sim;
 
-import static frc.robot.sim.Faults.BACKUP_IMU;
-import static frc.robot.sim.Faults.CLOCK_OFFSET;
-import static frc.robot.sim.Faults.DRIFT;
-import static frc.robot.sim.Faults.ERRORS;
-import static frc.robot.sim.Faults.EXTRA;
-import static frc.robot.sim.Faults.FORWARD;
-import static frc.robot.sim.Faults.FROZEN;
-import static frc.robot.sim.Faults.GRIP;
-import static frc.robot.sim.Faults.GYRO;
-import static frc.robot.sim.Faults.HIT;
-import static frc.robot.sim.Faults.LATE;
-import static frc.robot.sim.Faults.LEFT;
-import static frc.robot.sim.Faults.MOVED;
-import static frc.robot.sim.Faults.NOISE;
-import static frc.robot.sim.Faults.OFFSET;
-import static frc.robot.sim.Faults.PITCH;
-import static frc.robot.sim.Faults.RESET;
-import static frc.robot.sim.Faults.ROBOT;
-import static frc.robot.sim.Faults.ROLL;
-import static frc.robot.sim.Faults.SCALE;
-import static frc.robot.sim.Faults.SHOVED;
-import static frc.robot.sim.Faults.SLIPPING;
-import static frc.robot.sim.Faults.SLIPS;
-import static frc.robot.sim.Faults.STALE;
-import static frc.robot.sim.Faults.TILTED;
-import static frc.robot.sim.Faults.TO_A_BUMP;
-import static frc.robot.sim.Faults.TURN;
-import static frc.robot.sim.Faults.TURNED;
-import static frc.robot.sim.Faults.TURNS;
-import static frc.robot.sim.Faults.UNPLUGGED;
-import static frc.robot.sim.Faults.UP;
-import static frc.robot.sim.Faults.WORN;
-import static frc.robot.sim.Faults.YAW;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.BACKUP_IMU;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.CLOCK_OFFSET;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.DRIFT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.ERRORS;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.EXTRA;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.FORWARD;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.FROZEN;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.GRIP;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.GYRO;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.HIT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.LATE;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.LEFT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.MOVED;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.NOISE;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.OFFSET;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.PITCH;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.RESET;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.ROBOT;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.ROLL;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.SCALE;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.SHOVED;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.SLIPPING;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.SLIPS;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.STALE;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TILTED;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TO_A_BUMP;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TURN;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TURNED;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.TURNS;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.UNPLUGGED;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.UP;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.WORN;
+import static com.michaelgrundvig.frc.simulation.FaultCatalog.YAW;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -121,7 +122,8 @@ public final class Scenarios {
                       + " the code thinks.")
               .sensorFaults(
                   Scenario.faults(
-                      Setting.of(Faults.module(0), Faults.ZEROED_OFF, Map.of(OFFSET, 5.0))))
+                      Setting.of(
+                          FaultCatalog.module(0), FaultCatalog.ZEROED_OFF, Map.of(OFFSET, 5.0))))
               .events(Scenario.NOTHING)
               .build(),
           Scenario.builder()
@@ -159,7 +161,8 @@ public final class Scenarios {
                   "The front left wheel spins half a turn without moving the robot: its encoder"
                       + " counts travel the floor never saw.")
               .sensorFaults(Scenario.NO_FAULTS)
-              .events(Scenario.faults(Setting.of(Faults.module(0), SLIPS, Map.of(TURNS, 0.5))))
+              .events(
+                  Scenario.faults(Setting.of(FaultCatalog.module(0), SLIPS, Map.of(TURNS, 0.5))))
               .build(),
           // An approximation: the simulator can tilt the robot and scale how far all its wheels
           // move it, but can't lift one wheel. A lifted wheel would spin free and disagree with the
@@ -213,7 +216,7 @@ public final class Scenarios {
                   "The front left module's encoders go stale: their readings stop changing while"
                       + " the wheel turns on, so the wheels disagree.")
               .sensorFaults(Scenario.NO_FAULTS)
-              .events(Scenario.faults(Setting.of(Faults.module(0), STALE)))
+              .events(Scenario.faults(Setting.of(FaultCatalog.module(0), STALE)))
               .build(),
           Scenario.builder()
               .name("camera-frozen")
@@ -307,14 +310,14 @@ public final class Scenarios {
     if (cameras.isEmpty()) {
       throw new IllegalArgumentException("this scenario knocks a camera, and the robot has none");
     }
-    return Faults.camera(cameras.get(0));
+    return FaultCatalog.camera(cameras.get(0));
   }
 
   /** The same fault on every module. */
   private static Setting[] everyModule(String fault, Map<String, Double> values) {
     List<Setting> settings = new ArrayList<>();
-    for (int i = 0; i < Faults.MODULES.size(); i++) {
-      settings.add(Setting.of(Faults.module(i), fault, values));
+    for (int i = 0; i < FaultCatalog.MODULES.size(); i++) {
+      settings.add(Setting.of(FaultCatalog.module(i), fault, values));
     }
     return settings.toArray(Setting[]::new);
   }
@@ -322,9 +325,10 @@ public final class Scenarios {
   /** Every wheel and sensor exactly as configured. */
   private static Setting[] exactSensors() {
     List<Setting> settings = new ArrayList<>();
-    for (int i = 0; i < Faults.MODULES.size(); i++) {
-      settings.add(Setting.of(Faults.module(i), WORN, Map.of(SCALE, 1.0)));
-      settings.add(Setting.of(Faults.module(i), Faults.ZEROED_OFF, Map.of(OFFSET, 0.0)));
+    for (int i = 0; i < FaultCatalog.MODULES.size(); i++) {
+      settings.add(Setting.of(FaultCatalog.module(i), WORN, Map.of(SCALE, 1.0)));
+      settings.add(
+          Setting.of(FaultCatalog.module(i), FaultCatalog.ZEROED_OFF, Map.of(OFFSET, 0.0)));
     }
     for (String imu : List.of(GYRO, BACKUP_IMU)) {
       settings.add(Setting.of(imu, ERRORS, Map.of(SCALE, 1.0, DRIFT, 0.0, NOISE, 0.0)));

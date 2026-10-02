@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import com.michaelgrundvig.frc.simulation.SensorErrorsGyroErrorsBuilder;
@@ -17,7 +18,6 @@ import frc.robot.Robots;
 import frc.robot.SimulatedRobot;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.sim.Faults;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
 import java.util.ArrayList;
@@ -168,9 +168,15 @@ final class ConsistencyRuns {
                       world ->
                           List.of(
                               Setting.of(
-                                  Faults.camera(world.cameraNames().get(0)),
-                                  Faults.TURNED,
-                                  Map.of(Faults.ROLL, 0.0, Faults.PITCH, 0.0, Faults.YAW, 4.0))))
+                                  FaultCatalog.camera(world.cameraNames().get(0)),
+                                  FaultCatalog.TURNED,
+                                  Map.of(
+                                      FaultCatalog.ROLL,
+                                      0.0,
+                                      FaultCatalog.PITCH,
+                                      0.0,
+                                      FaultCatalog.YAW,
+                                      4.0))))
                   .events(Scenario.NOTHING)
                   .build(),
               robot -> {
@@ -187,10 +193,17 @@ final class ConsistencyRuns {
                   .sensorFaults(
                       Scenario.faults(
                           Setting.of(
-                              Faults.FIELD,
-                              Faults.TAG_MOVED,
+                              FaultCatalog.FIELD,
+                              FaultCatalog.TAG_MOVED,
                               Map.of(
-                                  Faults.TAG, 26.0, Faults.X, 4.0, Faults.Y, 0.0, Faults.UP, 0.0))))
+                                  FaultCatalog.TAG,
+                                  26.0,
+                                  FaultCatalog.X,
+                                  4.0,
+                                  FaultCatalog.Y,
+                                  0.0,
+                                  FaultCatalog.UP,
+                                  0.0))))
                   .events(Scenario.NOTHING)
                   .build(),
               robot -> {

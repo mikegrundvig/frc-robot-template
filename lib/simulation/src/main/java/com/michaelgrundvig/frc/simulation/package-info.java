@@ -20,6 +20,9 @@
  *       com.michaelgrundvig.frc.simulation.GyroModel} and its {@link
  *       com.michaelgrundvig.frc.simulation.AccelerometerModel} read the chassis's truth as an IMU
  *       does. The robot program's adapters hand their readings to its IO.
+ *   <li><b>Faults:</b> {@link com.michaelgrundvig.frc.simulation.FaultCatalog} lists what can go
+ *       wrong with each part, as data; the robot program binds each to its part and declares it to
+ *       Pitwall.
  *   <li><b>Seeds:</b> {@link com.michaelgrundvig.frc.simulation.Seeds} says where each random
  *       stream starts, so a run is a function of its seed.
  * </ul>

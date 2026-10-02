@@ -17,20 +17,22 @@ import org.wpilib.math.geometry.Translation2d;
  */
 class PoseFilterTest {
   private static final double TURN = Math.toRadians(0.25);
-  private static final double SHIFT = 0.01;
+  private static final double SHIFT = 0.003;
+  private static final double TAG = 0.01;
 
   private static final double HEADING_SHIFT = Math.toRadians(1);
 
   /**
-   * A gyro whose scale may be off by 0.3%, and cameras turned 0.25°, their positions shifted 1 cm
-   * and their headings 1°.
+   * A gyro whose scale may be off by 0.3%, cameras turned 0.25° and shifted 3 mm on their mounts,
+   * their headings 1°, and tags 1 cm off the layout.
    */
   private static final PoseFilter.Considered CONSIDERED =
-      new PoseFilter.Considered(0.003, 0.005, TURN, SHIFT, HEADING_SHIFT, 1.0, Math.toRadians(45));
+      new PoseFilter.Considered(
+          0.003, 0.005, TURN, SHIFT, HEADING_SHIFT, TAG, 1.0, Math.toRadians(45));
 
   /** Nothing considered: every error is new each time, the textbook filter. */
   private static final PoseFilter.Considered TEXTBOOK =
-      new PoseFilter.Considered(0, 0, 0, 0, 0, 1.0, Math.toRadians(45));
+      new PoseFilter.Considered(0, 0, 0, 0, 0, 0, 1.0, Math.toRadians(45));
 
   private static PoseFilter placed(
       PoseFilter.Considered considered, double meters, double radians) {
@@ -48,13 +50,19 @@ class PoseFilterTest {
   /** A position solved with this heading, from tags this far off. */
   private static VisionMeasurement fix(
       Translation2d position, Translation2d toTags, double noise, Rotation2d solvedWith) {
+    return fix(position, toTags, noise, solvedWith, 26);
+  }
+
+  /** A position solved with this heading from one tag, this far off. */
+  private static VisionMeasurement fix(
+      Translation2d position, Translation2d toTag, double noise, Rotation2d solvedWith, int tag) {
     return new VisionMeasurement(
         1,
         new Pose2d(position, solvedWith),
         PoseCovariance.fromStdDevs(noise, noise, Double.POSITIVE_INFINITY),
-        new VisionMeasurement.Lever(solvedWith, toTags),
+        new VisionMeasurement.Lever(solvedWith, toTag),
         "front",
-        List.of(26),
+        List.of(tag),
         VisionMeasurement.Solver.HEADING_CONSTRAINED);
   }
 
@@ -70,8 +78,19 @@ class PoseFilterTest {
         VisionMeasurement.Solver.MULTI_TAG);
   }
 
+  /** Each tag's place among the filter's: its number, within the places there are. */
+  private static int[] places(VisionMeasurement measurement) {
+    return measurement.tagIds().stream().mapToInt(id -> id % PoseFilter.MAX_TAGS).toArray();
+  }
+
   private static void apply(PoseFilter filter, VisionMeasurement measurement, int camera) {
-    filter.correct(Objects.requireNonNull(filter.innovation(measurement, 0, camera)));
+    apply(filter, measurement, 0, camera);
+  }
+
+  private static void apply(
+      PoseFilter filter, VisionMeasurement measurement, double yaw, int camera) {
+    filter.correct(
+        Objects.requireNonNull(filter.innovation(measurement, yaw, camera, places(measurement))));
   }
 
   @Test
@@ -87,8 +106,9 @@ class PoseFilterTest {
   }
 
   /**
-   * However many images one camera takes of the same tags, its shift is in every one: the position
-   * can't be surer than it along the tags, nor than its shift and turn together square to them.
+   * However many images one camera takes of the same tag, its shift on its mount and the tag's
+   * placement are in every one: the position can't be surer than they along the tag, nor than they
+   * and its turn together square to it.
    */
   @Test
   void oneCameraCantPlaceTheRobotBetterThanItsRepeatedErrorsAllow() {
@@ -98,61 +118,108 @@ class PoseFilterTest {
     }
 
     PoseCovariance covariance = filter.covariance();
-    assertThat(covariance.xStdDev()).isCloseTo(SHIFT, within(0.02 * SHIFT));
-    double square = Math.hypot(SHIFT, 3 * TURN); // 1.65 cm
+    double along = Math.hypot(SHIFT, TAG);
+    assertThat(covariance.xStdDev()).isCloseTo(along, within(0.02 * along));
+    double square = Math.hypot(along, 3 * TURN); // 1.73 cm
     assertThat(covariance.yStdDev()).isCloseTo(square, within(0.02 * square));
   }
 
-  /** Two cameras, each with its own shift, together do better than either: by √2. */
+  /**
+   * Two cameras seeing the same tag, each with its own shift, together do better than either: but
+   * only at their shifts, by √2. The tag's placement they share, and its doubt stays whole.
+   */
   @Test
-  void twoCamerasEachWithItsOwnErrorsDoBetter() {
+  void twoCamerasSeeingOneTagShareItsPlacement() {
     PoseFilter filter = placed(CONSIDERED, 1.0, 0);
     for (int i = 0; i < 2000; i++) {
       apply(filter, fix(Translation2d.ZERO, new Translation2d(3, 0), 0.05), i % 2);
     }
 
-    assertThat(filter.covariance().xStdDev()).isCloseTo(SHIFT / Math.sqrt(2), within(0.02 * SHIFT));
+    double shared = Math.hypot(TAG, SHIFT / Math.sqrt(2));
+    assertThat(filter.covariance().xStdDev()).isCloseTo(shared, within(0.02 * shared));
+  }
+
+  /** Two cameras seeing a tag each do better by √2: neither the shifts nor the tags are shared. */
+  @Test
+  void twoCamerasSeeingATagEachDoBetter() {
+    PoseFilter filter = placed(CONSIDERED, 1.0, 0);
+    for (int i = 0; i < 2000; i++) {
+      int camera = i % 2;
+      apply(
+          filter,
+          fix(Translation2d.ZERO, new Translation2d(3, 0), 0.05, Rotation2d.ZERO, 25 + camera),
+          camera);
+    }
+
+    double each = Math.hypot(TAG, SHIFT) / Math.sqrt(2);
+    assertThat(filter.covariance().xStdDev()).isCloseTo(each, within(0.02 * each));
   }
 
   /**
    * A camera without a place among the considered errors (beyond {@link PoseFilter#MAX_CAMERAS})
    * still has its turn and shift, in every image: they're taken as new each time, so its images
-   * average them down with their noise, as the textbook would.
+   * average them down with their noise, as the textbook would. A tag without a place, likewise.
    */
   @Test
-  void aCameraWithoutAPlaceCountsEachImagesErrorsAsNew() {
+  void aCameraAndATagWithoutAPlaceCountEachImagesErrorsAsNew() {
     PoseFilter filter = placed(CONSIDERED, 1.0, 0);
+    VisionMeasurement fix = fix(Translation2d.ZERO, new Translation2d(3, 0), 0.005);
     for (int i = 0; i < 2500; i++) {
-      apply(filter, fix(Translation2d.ZERO, new Translation2d(3, 0), 0.005), -1);
+      filter.correct(Objects.requireNonNull(filter.innovation(fix, 0, -1, new int[] {-1})));
     }
 
-    // 5 mm of noise and 1 cm of shift in each image, averaged over 2,500 of them.
-    double each = Math.hypot(0.005, SHIFT) / Math.sqrt(2500);
+    // 5 mm of noise, the shift and the tag's placement in each image, averaged over 2,500 of them.
+    double each = Math.hypot(0.005, Math.hypot(SHIFT, TAG)) / Math.sqrt(2500);
     assertThat(filter.covariance().xStdDev()).isCloseTo(each, within(0.02 * each));
   }
 
   /**
-   * Driving on, the camera sees its tags from elsewhere and its shift is a new one: its images
-   * count again, and the position gets surer than standing still allowed.
+   * Turned around, a camera's shift on its mount points the other way on the field: its fixes from
+   * both ways cancel it, and only the tags' placement is left.
    */
   @Test
-  void asTheRobotMovesACamerasShiftBecomesANewOne() {
+  void aCamerasShiftTurnsWithTheRobot() {
     PoseFilter filter = placed(CONSIDERED, 1.0, 0);
     for (int i = 0; i < 2000; i++) {
       apply(filter, fix(Translation2d.ZERO, new Translation2d(3, 0), 0.05), 0);
     }
-    double standing = filter.covariance().xStdDev();
+    double facingOneWay = filter.covariance().xStdDev();
 
-    // Two meters straight ahead, sure of every millimeter: the shift is mostly forgotten.
-    filter.predict(0, 0, 2, 0, 0, 0, YawSource.GYRO);
+    // Half a turn, the heading as sure as before; the camera now sees a tag behind, as sure.
+    filter.predict(0, Math.PI, 0, 0, 0, 0, YawSource.WHEELS);
+    Rotation2d around = new Rotation2d(Math.PI);
     for (int i = 0; i < 2000; i++) {
-      apply(filter, fix(new Translation2d(2, 0), new Translation2d(3, 0), 0.05), 0);
+      apply(
+          filter, fix(Translation2d.ZERO, new Translation2d(-3, 0), 0.05, around, 27), Math.PI, 0);
     }
 
-    // Even knowing the shift had changed exactly by e^-2, nothing could do better than averaging
-    // old and new: the shift times √((1 + e^-2) / 2), 0.75 of it.
-    assertThat(standing).isCloseTo(SHIFT, within(0.02 * SHIFT));
-    assertThat(filter.covariance().xStdDev()).isLessThan(0.85 * standing);
+    // Nothing could do better than the two tags alone, TAG / √2; the filter, which never estimates
+    // the shift, gets most of the way there.
+    assertThat(facingOneWay).isCloseTo(Math.hypot(SHIFT, TAG), within(0.02 * TAG));
+    assertThat(filter.covariance().xStdDev()).isBetween(TAG / Math.sqrt(2), 0.8 * facingOneWay);
+  }
+
+  /**
+   * Turning on, a camera sees its tags from elsewhere and what its headings share is a new error:
+   * its headings count again, and the heading gets surer than standing still allowed.
+   */
+  @Test
+  void asTheRobotTurnsACamerasHeadingsShiftBecomesANewOne() {
+    PoseFilter filter = placed(CONSIDERED, 1.0, 0.1);
+    for (int i = 0; i < 2000; i++) {
+      apply(filter, withHeading(Rotation2d.ZERO, 0.5, 0.05), 0);
+    }
+    double standing = filter.covariance().headingStdDev();
+
+    // A quarter turn on the wheels (no scale error), the turn itself sure: the shift mostly
+    // forgotten, e^-2 of it left.
+    filter.predict(0, Math.PI / 2, 0, 0, 0, 0, YawSource.WHEELS);
+    for (int i = 0; i < 2000; i++) {
+      apply(filter, withHeading(new Rotation2d(Math.PI / 2), 0.5, 0.05), Math.PI / 2, 0);
+    }
+
+    assertThat(standing).isCloseTo(Math.hypot(TURN, HEADING_SHIFT), within(0.03 * HEADING_SHIFT));
+    assertThat(filter.covariance().headingStdDev()).isLessThan(0.85 * standing);
   }
 
   /**
@@ -243,12 +310,12 @@ class PoseFilterTest {
   @Test
   void onlyTheLatestInnovationCanBeApplied() {
     PoseFilter filter = placed(TEXTBOOK, 0.1, 0.01);
+    VisionMeasurement here = fix(Translation2d.ZERO, Translation2d.ZERO, 0.1);
+    VisionMeasurement there = fix(new Translation2d(0.2, 0), Translation2d.ZERO, 0.1);
     PoseFilter.Innovation first =
-        Objects.requireNonNull(
-            filter.innovation(fix(Translation2d.ZERO, Translation2d.ZERO, 0.1), 0, 0));
+        Objects.requireNonNull(filter.innovation(here, 0, 0, places(here)));
     PoseFilter.Innovation second =
-        Objects.requireNonNull(
-            filter.innovation(fix(new Translation2d(0.2, 0), Translation2d.ZERO, 0.1), 0, 0));
+        Objects.requireNonNull(filter.innovation(there, 0, 0, places(there)));
 
     assertThatThrownBy(() -> filter.correct(first))
         .isInstanceOf(IllegalStateException.class)

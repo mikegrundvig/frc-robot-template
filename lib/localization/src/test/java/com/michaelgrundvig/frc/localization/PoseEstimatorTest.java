@@ -31,6 +31,7 @@ class PoseEstimatorTest {
           .cameraTurnStdDevDegrees(0)
           .cameraShiftStdDevMeters(0)
           .cameraShiftStdDevDegrees(0)
+          .tagPlacementStdDevMeters(0)
           .build();
 
   /** A robot driven by hand: a clock, a gyro, and wheels that report steady motion. */
@@ -422,9 +423,13 @@ class PoseEstimatorTest {
       alongTheTags[way] = robot.estimate().covariance().xStdDev();
     }
 
-    double shift = EstimatorConfig.DEFAULTS.cameraShiftStdDevMeters();
-    assertThat(alongTheTags[0]).as("the doubt ignored").isCloseTo(shift, within(0.1 * shift));
-    double doubted = Math.hypot(shift, 0.05);
+    // Along its tag: its shift and the tag's placement, and the doubt with them.
+    double repeated =
+        Math.hypot(
+            EstimatorConfig.DEFAULTS.cameraShiftStdDevMeters(),
+            EstimatorConfig.DEFAULTS.tagPlacementStdDevMeters());
+    assertThat(alongTheTags[0]).as("the doubt ignored").isCloseTo(repeated, within(0.1 * repeated));
+    double doubted = Math.hypot(repeated, 0.05);
     assertThat(alongTheTags[1]).as("the doubt added").isCloseTo(doubted, within(0.1 * doubted));
   }
 

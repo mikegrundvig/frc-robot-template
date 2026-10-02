@@ -263,7 +263,11 @@ final class ConsistencyRuns {
     /** Cameras, tags, and IMUs exactly as configured. */
     static final Spread EXACT = new Spread(0, 0, 0, 0, 0);
 
-    /** How far a calibrated camera's mount is still off along each axis: a few millimeters. */
+    /**
+     * How far a calibrated camera's mount is still off along each axis: a few millimeters, what the
+     * mount procedure leaves. The estimator's {@code cameraShiftStdDevMeters} is wider: it holds
+     * this and what the camera itself repeats from image to image.
+     */
     static final double MOUNT_MILLIMETERS = 3;
 
     // Each kind of error's stream of a seed: constants far apart and far from any seed, since one
@@ -296,16 +300,17 @@ final class ConsistencyRuns {
     /**
      * The errors the estimator's configuration allows for, drawn at the spread it claims: each
      * camera turned by {@code cameraTurnStdDevDegrees} about each axis, each tag off by {@code
-     * cameraShiftStdDevMeters} along each, the gyro's scale off by {@code
+     * tagPlacementStdDevMeters} along each, the gyro's scale off by {@code
      * headingStdDevDegreesPerTurn} and the backup IMU's by {@code
-     * backupHeadingStdDevDegreesPerTurn}, and a few millimeters of mount. An estimator honest about
-     * these reads a NEES near its number of dimensions.
+     * backupHeadingStdDevDegreesPerTurn}, and a few millimeters of mount ({@link
+     * #MOUNT_MILLIMETERS}). An estimator honest about these reads a NEES near its number of
+     * dimensions.
      */
     static Spread matched(EstimatorConfig config) {
       return new Spread(
           MOUNT_MILLIMETERS,
           config.cameraTurnStdDevDegrees(),
-          1000 * config.cameraShiftStdDevMeters(),
+          1000 * config.tagPlacementStdDevMeters(),
           config.headingStdDevDegreesPerTurn() / 360,
           config.backupHeadingStdDevDegreesPerTurn() / 360);
     }

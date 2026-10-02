@@ -219,6 +219,7 @@ public final class VisionPipeline {
     double sumToTagY = 0;
     double sumWeights = 0;
     double worstHeight = 0;
+    List<Double> weights = new ArrayList<>(known.size());
     for (TagDetections.Tag tag : known) {
       Pose3d fieldToTag = field.tag(tag.id()).orElseThrow();
       Transform3d cameraToTag = agreeingWithTheGyro(tag, fieldToTag, robotToCamera, heading);
@@ -232,6 +233,7 @@ public final class VisionPipeline {
       sumToTagX += weight * (fieldToTag.getX() - fix.position().getX());
       sumToTagY += weight * (fieldToTag.getY() - fix.position().getY());
       sumWeights += weight;
+      weights.add(weight);
       if (Math.abs(fix.heightErrorMeters()) > Math.abs(worstHeight)) {
         worstHeight = fix.heightErrorMeters();
       }
@@ -289,6 +291,7 @@ public final class VisionPipeline {
                 heading, new Translation2d(sumToTagX / sumWeights, sumToTagY / sumWeights)),
             camera.name(),
             ids(known),
+            weights,
             VisionMeasurement.Solver.HEADING_CONSTRAINED);
     return new VisionResult(
         seen,

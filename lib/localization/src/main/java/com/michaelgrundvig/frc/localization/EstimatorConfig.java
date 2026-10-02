@@ -51,15 +51,21 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  *     error does, and its headings by the angle. However many images it takes, the estimator never
  *     trusts a camera's positions or headings more than this allows.
  * @param cameraShiftStdDevMeters how far each camera's positions may be off the same way image
- *     after image, beyond its turn: its mount's shift, and how far the tags it sees sit from where
- *     the field's layout says (the field's tolerance, and how it was built)
+ *     after image, beyond its turn and the tags': its mount's shift (what calibrating it leaves),
+ *     and what its lens repeats along its view. Along the robot's forward and left, so it turns
+ *     with the robot.
  * @param cameraShiftStdDevDegrees and how far its headings may, beyond its turn: tags off the
  *     layout turn a multi-tag solve's heading by how far off they are over how far apart they sit
+ * @param tagPlacementStdDevMeters how far each tag may sit from where the field's layout says,
+ *     along the field and across it (the field's tolerance, and how it was built): the same for
+ *     every camera that sees it and every time it's seen, so the estimator keeps it apart for each
+ *     tag, and a tag several cameras see counts once
  * @param headingCorrection what may correct the heading the gyro owns, beside measurements with a
  *     heading of their own; three ways under comparison (docs/testing.md), {@link
  *     HeadingCorrection#HEADING_MEASUREMENTS} until the team chooses
- * @param cameraShiftCorrelationMeters how far the robot moves before a camera's shift is mostly a
- *     new one: it sees other tags, or the same ones from elsewhere
+ * @param cameraShiftCorrelationMeters how far the robot moves before what a camera's headings share
+ *     is mostly new ({@code cameraShiftStdDevDegrees}): it sees other tags, or the same ones from
+ *     elsewhere
  * @param cameraShiftCorrelationDegrees and how far it turns
  * @param historySeconds how far back a late camera measurement can still be applied at its capture
  *     time
@@ -107,6 +113,7 @@ public record EstimatorConfig(
     double cameraTurnStdDevDegrees,
     double cameraShiftStdDevMeters,
     double cameraShiftStdDevDegrees,
+    double tagPlacementStdDevMeters,
     HeadingCorrection headingCorrection,
     double cameraShiftCorrelationMeters,
     double cameraShiftCorrelationDegrees,
@@ -143,8 +150,9 @@ public record EstimatorConfig(
           .headingNoiseDegreesPerTurn(0.1)
           .wheelHeadingStdDevDegreesPerTurn(10)
           .cameraTurnStdDevDegrees(0.25)
-          .cameraShiftStdDevMeters(0.01)
+          .cameraShiftStdDevMeters(0.005)
           .cameraShiftStdDevDegrees(2.0)
+          .tagPlacementStdDevMeters(0.01)
           .headingCorrection(HeadingCorrection.HEADING_MEASUREMENTS)
           .cameraShiftCorrelationMeters(1.0)
           .cameraShiftCorrelationDegrees(45)
@@ -185,6 +193,7 @@ public record EstimatorConfig(
         .field("cameraTurnStdDevDegrees", cameraTurnStdDevDegrees, nonNegative())
         .field("cameraShiftStdDevMeters", cameraShiftStdDevMeters, nonNegative())
         .field("cameraShiftStdDevDegrees", cameraShiftStdDevDegrees, nonNegative())
+        .field("tagPlacementStdDevMeters", tagPlacementStdDevMeters, nonNegative())
         .field("cameraShiftCorrelationMeters", cameraShiftCorrelationMeters, positive())
         .field("cameraShiftCorrelationDegrees", cameraShiftCorrelationDegrees, positive())
         .field("historySeconds", historySeconds, positive())

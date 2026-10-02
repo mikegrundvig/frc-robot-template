@@ -42,9 +42,9 @@ import org.wpilib.math.util.MathUtil;
  * repeat are never averaged away as if each were new: a position a camera solved with the gyro's
  * heading carries the heading's doubt (and turns it only if {@link
  * EstimatorConfig#headingCorrection} lets every fix), the gyro's scale error is the same every
- * turn, and each camera's turn on its mount and its shift (its mount's offset, the tags' placement)
- * are in every image it takes ({@link PoseFilter} considers them). Each camera is told apart by its
- * name.
+ * turn, each camera's turn and shift on its mount are in every image it takes, and each tag's
+ * placement is in every image any camera takes of it ({@link PoseFilter} considers them). Each
+ * camera is told apart by its name, and each tag by its number.
  *
  * <p>Its parts: {@link OdometryHistory} keeps the steps, {@link PoseFilter} does the filter's math,
  * and {@link Recovery} judges when the cameras agree against odometry. This class feeds them and
@@ -89,6 +89,12 @@ public final class PoseEstimator {
 
   /** The cameras that came after every place was taken, in the order they came. */
   private final Set<String> camerasWithoutPlaces = new LinkedHashSet<>();
+
+  /** Each tag's place among the errors the filter keeps apart, by ID, as tags are first seen. */
+  private final Map<Integer, Integer> tagSlots = new HashMap<>();
+
+  /** A measurement's tags' places, for the filter: room for this many, grown as needed. */
+  private int[] measuredTags = new int[8];
 
   // The IMUs' readings, unwrapped into one continuous yaw.
   private boolean started;
@@ -181,6 +187,7 @@ public final class PoseEstimator {
                 Math.toRadians(config.cameraTurnStdDevDegrees()),
                 config.cameraShiftStdDevMeters(),
                 Math.toRadians(config.cameraShiftStdDevDegrees()),
+                config.tagPlacementStdDevMeters(),
                 config.cameraShiftCorrelationMeters(),
                 Math.toRadians(config.cameraShiftCorrelationDegrees())),
             config.headingCorrection() == EstimatorConfig.HeadingCorrection.EVERY_FIX);
@@ -622,8 +629,15 @@ public final class PoseEstimator {
   private void applyCamera(
       CameraCorrection camera, boolean fresh, double yawThen, List<VisionDecision> decisions) {
     VisionMeasurement measurement = camera.measurement();
+    List<Integer> ids = measurement.tagIds();
+    if (measuredTags.length < ids.size()) {
+      measuredTags = new int[ids.size()];
+    }
+    for (int i = 0; i < ids.size(); i++) {
+      measuredTags[i] = tagSlot(ids.get(i));
+    }
     PoseFilter.Innovation innovation =
-        filter.innovation(measurement, yawThen, cameraSlot(measurement.camera()));
+        filter.innovation(measurement, yawThen, cameraSlot(measurement.camera()), measuredTags);
     if (innovation == null) {
       return;
     }
@@ -781,6 +795,23 @@ public final class PoseEstimator {
     }
     cameraSlots.put(camera, cameraSlots.size());
     return cameraSlots.size() - 1;
+  }
+
+  /**
+   * A tag's place among the errors the filter keeps apart, given as tags are first seen; -1 once
+   * there are more tags than places, and a tag without one counts its placement as new in each
+   * image.
+   */
+  private int tagSlot(int id) {
+    Integer slot = tagSlots.get(id);
+    if (slot != null) {
+      return slot;
+    }
+    if (tagSlots.size() >= PoseFilter.MAX_TAGS) {
+      return -1;
+    }
+    tagSlots.put(id, tagSlots.size());
+    return tagSlots.size() - 1;
   }
 
   /** Moves the current state through part of step j: from fraction f0 of it to f1. */

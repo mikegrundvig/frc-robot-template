@@ -97,9 +97,10 @@
  *       {@link com.michaelgrundvig.frc.localization.EstimatorConfig#headingCorrection} can let
  *       every fix correct it;
  *   <li>a gyro reading its turns a little long or short is off the same way every turn;
- *   <li>each camera's turn on its mount, and its shift (its mount's offset, and how far the tags it
- *       sees sit from the field's layout), are in every image it takes, until it moves on and sees
- *       other tags.
+ *   <li>each camera's turn and shift on its mount are in every image it takes, and what its
+ *       multi-tag headings share, until it moves on and sees other tags;
+ *   <li>each tag's placement off the field's layout is in every image any camera takes of it: two
+ *       cameras seeing the same tags share its error, and turning away and back finds it again.
  * </ul>
  *
  * <p>The filter keeps these as "consider" parameters: errors it accounts for but never estimates.

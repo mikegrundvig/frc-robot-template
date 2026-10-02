@@ -163,6 +163,47 @@ class MeasurementsTest {
         .hasMessageContaining("offset to its tags");
   }
 
+  /**
+   * Each tag's share of a measurement's position: equal unless said, and as given otherwise, made
+   * to add up to 1.
+   */
+  @Test
+  void aVisionMeasurementsTagsShareItsPosition() {
+    VisionMeasurement equal =
+        new VisionMeasurement(
+            5,
+            Pose2d.ZERO,
+            PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY),
+            VisionMeasurement.Lever.NONE,
+            "front-left",
+            List.of(25, 26),
+            VisionMeasurement.Solver.MULTI_TAG);
+    VisionMeasurement weighed = share(List.of(25, 26), List.of(3.0, 1.0));
+
+    assertThat(equal.tagShares()).containsExactly(0.5, 0.5);
+    assertThat(weighed.tagShares()).containsExactly(0.75, 0.25);
+    assertThatThrownBy(() -> share(List.of(25, 26), List.of(1.0)))
+        .hasMessageContaining("a share for each");
+    assertThatThrownBy(() -> share(List.of(25, 26), List.of(1.0, -1.0)))
+        .hasMessageContaining("zero or more");
+    assertThatThrownBy(() -> share(List.of(25), List.of(Double.POSITIVE_INFINITY)))
+        .hasMessageContaining("zero or more");
+    assertThatThrownBy(() -> share(List.of(25, 26), List.of(0.0, 0.0)))
+        .hasMessageContaining("share its position");
+  }
+
+  private static VisionMeasurement share(List<Integer> tags, List<Double> shares) {
+    return new VisionMeasurement(
+        5,
+        Pose2d.ZERO,
+        PoseCovariance.fromStdDevs(0.05, 0.05, Double.POSITIVE_INFINITY),
+        VisionMeasurement.Lever.NONE,
+        "front-left",
+        tags,
+        shares,
+        VisionMeasurement.Solver.HEADING_CONSTRAINED);
+  }
+
   @Test
   void aPoseResetSaysWhy() {
     PoseReset reset =

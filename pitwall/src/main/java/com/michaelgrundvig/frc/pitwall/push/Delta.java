@@ -1,8 +1,7 @@
 package com.michaelgrundvig.frc.pitwall.push;
 
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,10 +54,14 @@ public final class Delta {
         patch.put(section.getKey(), changes);
       }
     }
-    for (String gone : new ArrayList<>(sent.keySet())) {
-      if (!current.containsKey(gone)) {
-        sent.remove(gone);
-        patch.put(gone, null);
+    // Every section now is among those sent, so only fewer now means one has gone.
+    if (sent.size() > current.size()) {
+      for (Iterator<String> names = sent.keySet().iterator(); names.hasNext(); ) {
+        String gone = names.next();
+        if (!current.containsKey(gone)) {
+          names.remove();
+          patch.put(gone, null);
+        }
       }
     }
     return patch;
@@ -82,22 +85,34 @@ public final class Delta {
    */
   private static Map<String, @Nullable Object> sectionChanges(
       Map<String, Object> was, Map<String, Object> now, boolean all) {
-    Map<String, @Nullable Object> changes = new LinkedHashMap<>();
+    // Made only once something changed: most sections, most loops, have nothing to say.
+    Map<String, @Nullable Object> changes = all ? new LinkedHashMap<>() : null;
     for (Map.Entry<String, Object> entry : now.entrySet()) {
       Object before = was.get(entry.getKey());
       Object after = entry.getValue();
       if (all || before == null || changed(before, after)) {
         was.put(entry.getKey(), after);
+        if (changes == null) {
+          changes = new LinkedHashMap<>();
+        }
         changes.put(entry.getKey(), replacing(before, after));
       }
     }
-    Map<String, Object> removed = new HashMap<>(was);
-    removed.keySet().removeAll(now.keySet());
-    for (String gone : removed.keySet()) {
-      was.remove(gone);
-      changes.put(gone, null);
+    // Every key now is in what was sent (just put there if it wasn't), so only a section with
+    // fewer keys now has lost any: no copy of it to find out.
+    if (was.size() > now.size()) {
+      for (Iterator<String> keys = was.keySet().iterator(); keys.hasNext(); ) {
+        String gone = keys.next();
+        if (!now.containsKey(gone)) {
+          keys.remove();
+          if (changes == null) {
+            changes = new LinkedHashMap<>();
+          }
+          changes.put(gone, null);
+        }
+      }
     }
-    return changes;
+    return changes == null ? Map.of() : changes;
   }
 
   /**

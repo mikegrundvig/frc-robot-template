@@ -147,18 +147,19 @@ What it offers:
 - **The drivers:** `sim.driver()`, the gamepad on port 0.
 - **The truth:** `sim.simulation()` knows where the robot really is (`truePose()`), and can move
   it, tilt it, or hit it.
-- **Faults and scenarios:** what can fail in the simulated world while it runs
-  (`frc.robot.sim.Faults`), applied as the Pitwall page applies them: `sim.components().apply(
-  Setting.of(Faults.GYRO, Faults.UNPLUGGED))`, and `undo` for one that lasts. A scenario is a named
-  set of them (`frc.robot.sim.Scenarios`), the ones `./gradlew run -Pscenario=<name>` starts.
+- **Faults and scenarios:** what can fail in the simulated world while it runs (the catalog,
+  `FaultCatalog` in `lib/simulation`, bound to the robot's parts in `frc.robot.sim.Faults`),
+  applied as the Pitwall page applies them: `sim.components().apply(Setting.of(FaultCatalog.GYRO,
+  FaultCatalog.UNPLUGGED))`, and `undo` for one that lasts. A scenario is a named set of them
+  (`frc.robot.sim.Scenarios`), the ones `./gradlew run -Pscenario=<name>` starts.
   `sim.build(Scenarios.named("camera-low"))` builds the robot as `./gradlew run` does, with the
   scenario's sensor faults on a season-worn robot's sensors (`SensorErrors.TYPICAL`, where
   `sim.robot()` starts from `NONE`), and `sim.start(scenario)` makes what happens in it happen (a
   collision, the gyro unplugged) at the moment the test chooses. `FaultsTest` and
   `CameraFaultsSimTest` show each fault changes what the robot's code reads, and undoing it puts
-  that back; `ScenarioSimTest` runs every scenario on the robot. A new fault goes in `Faults` with
-  such a test; a new scenario goes in `Scenarios.ALL`, with a test in `ScenariosTest` that it does
-  to the simulated world what it says.
+  that back; `ScenarioSimTest` runs every scenario on the robot. A new fault goes in
+  `FaultCatalog`, bound in `Faults`, with such a test; a new scenario goes in `Scenarios.ALL`,
+  with a test in `ScenariosTest` that it does to the simulated world what it says.
 - **What dashboards see:** `sim.telemetry()`; and the Pitwall page, `sim.pitwall()`: its status,
   actions, tuning, and experiments, as the page uses them. The page's own requests go over HTTP to
   `sim.pitwall().port()` (use `127.0.0.1`); `SteeringExperimentSimTest` drives an experiment the

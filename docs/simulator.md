@@ -286,8 +286,8 @@ it; undoing a moved tag puts it back there.
 ### What the simulator can't make fail yet
 
 The one list of what's not possible yet; the stand-ins and the code point here. Each waits on the
-simulator, not on Pitwall. Add each to `Faults`, and a scenario for it, when the simulator can
-make it.
+simulator, not on Pitwall. Add each to the catalog (`FaultCatalog`), bound to its part in `Faults`,
+and a scenario for it, when the simulator can make it.
 
 - One wheel off the floor: `wheel-lifted` tilts the robot and scales every wheel's grip alike, so
   its wheels never disagree as a lifted one's would, and the robot isn't raised.
@@ -500,7 +500,9 @@ The simulator is checked against physics and geometry as hard as the estimator i
 the simulator. Each truth test compares the simulator with an answer worked out in the test
 (Newton, Coulomb friction, a rigid frame's geometry, a pinhole camera, the configuration), never
 with the simulator's own earlier output, and says in its Javadoc why its tolerance is what it is.
-They run with the rest, in `ci`; `./gradlew test --tests '*Truth*'` runs them alone.
+They run with the rest, in `ci`; `./gradlew test --tests '*TruthTest' --tests '*TruthSimTest'`
+runs them alone (`'*Truth*'` would run four other tests too, whose names say they hold the
+estimate to the truth).
 
 A check today's simulator fails is a **known gap**: a test marked `@KnownGap`, with its reason, that
 asserts today's number. It passes while the gap stays as recorded, and fails loudly when it closes
@@ -525,7 +527,7 @@ launch (it differences the physics' own velocity), the cameras' latency (the sta
 | One module pointed 10° off the other three: the robot turns toward it (going straight would take 214 N across the other front wheel, past its 199.5 N of grip), no faster than the odd wheel rolls with the rear two | more than 0.05° and less than 16.4° a second, at 1 m/s | passes, at 4.8° a second, as the best fit of the four, not by friction |
 | Lift-off at a crest, square and at 45° (`TerrainTruthTest`, in the library) | three touch and one hangs by the ground's twist, within 2 mm, in 99% of places | square passes; at 45°, **known gap:** every wheel a quarter of the twist off the ground |
 | Camera geometry from surveyed poses, level and tilted (`CameraTruthSimTest`) | corners against a pinhole within 0.01 px; each tag's solve within 1 mm and 0.05°; seen just inside the image, not just outside | passes |
-| Latency and rates (`CameraTruthSimTest`, `CameraTimingSimTest`, `OdometryTruthSimTest`) | stamps exact, and off by exactly a clock offset; latency within 0.5 ms and 10%; frame, CANcoder, and gyro rates within 1% | passes (the latency as consistency only), but the frame rate, a **known gap:** 29.3 frames a second against 30, as PhotonVision's simulation holds a frame back behind a slow image |
+| Latency and rates (`CameraTruthSimTest`, `CameraTimingSimTest`, `OdometryTruthSimTest`) | stamps within 2 ms on average (4 mm at 2 m/s), and off by a clock offset within as much; latency within 0.5 ms and 10%; frame, CANcoder, and gyro rates within 1% | passes (the latency as consistency only), but the frame rate, a **known gap:** 29.3 frames a second against 30, as PhotonVision's simulation holds a frame back behind a slow image |
 | Odometry against kinematics, exact sensors, no slip | within 0.1% of the distance, 0.05° a turn | consistency today: the physics moves by the same fit odometry makes, so it can't fail; an engine whose tread rolls on a compliant contact can |
 | The accelerometer (`AccelerometerTruthTest`, in the library) | errors off, physics' specific force exactly (gravity on a tilt, the lever arm, a launch); its noise and bias as configured; an exact clip; a sample every 10 ms | passes (the launch as consistency only) |
 | Seeds and independence (`SeedsTruthSimTest`, and `DeterminismTruthTest` in the library) | no stream shared over a hundred seeds; draws uncorrelated within 3 / √n, within a world and between neighboring seeds' first draws; bit-identical alone, repeated, beside seven others, and in another JVM | passes: each stream is the seed mixed with its kind, then its index (`Seeds.stream`) |

@@ -94,7 +94,7 @@ each a known gap in the truth suite, with its number:
 - **Weight transfer:** every wheel carries a quarter of the mass however hard the robot speeds
   up, where a real one's front wheels lighten and slip first (`Robots` estimates where): the
   template's front wheels at a push of 125 N each (123 N at the tread, the rest spinning the wheel
-  up), about 48 A, where the simulator slips all four at once at 209 N, about 80 A.
+  up), about 48 A, where the simulator slips all four at once at 209 N, about 81 A.
 - **The battery:** it holds 12 V through a launch, as above.
 - **Yaw inertia beyond the wheels':** the robot spins as if all its mass sat at its wheels, 11.1
   kg m² for the template's robot against the 6.7 its body is configured with

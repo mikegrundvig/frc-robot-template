@@ -58,8 +58,9 @@ class ArchitectureTest {
   /**
    * WPILib's math brings the rest of its utilities along (its logs, its own clock), which Gradle
    * can't keep out: the simulation uses its math and units, and the world model, and nothing more.
-   * No hardware layer (WPILib's HAL, its simulated devices), so a simulated world needs no native
-   * libraries and runs on any thread; no robot program, localization, or Pitwall, which see it only
+   * No hardware layer (WPILib's HAL, its simulated devices), so a simulated world runs on any
+   * thread, and needs no native code but WPILib's math's (today's physics discretizes its motors
+   * with its matrix exponential); no robot program, localization, or Pitwall, which see it only
    * through the robot's adapters.
    */
   @Test

@@ -19,6 +19,7 @@ import com.michaelgrundvig.frc.localization.LoopContext;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.PoseEstimator;
 import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import com.michaelgrundvig.frc.localization.TagAllowlist;
 import com.michaelgrundvig.frc.localization.TagVerdict;
 import com.michaelgrundvig.frc.localization.VisionConfig;
@@ -146,7 +147,12 @@ class VisionTest {
   /** Localization around that odometry: it solves each image as the robot was then. */
   private final LocalizationService localization =
       new LocalizationService(
-          estimator, FIELD, FIELD.terrain(), definition, RobotLoop.PERIOD_SECONDS);
+          estimator,
+          new SwerveKinematicsModel(definition.moduleTranslations()),
+          FIELD,
+          FIELD.terrain(),
+          definition,
+          RobotLoop.PERIOD_SECONDS);
 
   private Vision vision;
 

@@ -111,11 +111,17 @@ class LocalizationServiceTest {
 
   /** Localization with the robot placed in front of the hub, to 5 cm and half a degree. */
   private static LocalizationService placed() {
+    return placed(new SwerveKinematicsModel(DEFINITION.moduleTranslations()));
+  }
+
+  /** The same, with another drivetrain's wheels. */
+  private static LocalizationService placed(DriveKinematicsModel kinematics) {
     return new LocalizationService(
         new PoseEstimator(
             EstimatorConfig.DEFAULTS,
             FIELD::contains,
             new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed")),
+        kinematics,
         FIELD,
         FIELD.terrain(),
         DEFINITION,
@@ -231,6 +237,35 @@ class LocalizationServiceTest {
                   .isEqualTo(EstimatorConfig.DEFAULTS.gateChiSquaredPosition());
             });
     assertThat(output.estimate().health().accepted()).isEqualTo(1);
+  }
+
+  /**
+   * Any drivetrain localizes the same way, through its own kinematics: a tank drive's two sides,
+   * here, rolling a meter forward.
+   */
+  @Test
+  void aTankDriveLocalizesThroughItsOwnKinematics() {
+    LocalizationService localization = placed(new DifferentialKinematicsModel(0.6));
+    long now = T0;
+    for (int k = 0; k <= 10; k++) {
+      now = T0 + k * LOOP_NANOS;
+      double rolled = k * 0.1;
+      LoopContext loop = new LoopContext(now, true);
+      localization.drivetrain(
+          DrivetrainReadings.builder()
+              .wheels(
+                  List.of(new OdometrySample(now, new double[] {rolled, rolled}, new double[2])))
+              .gyro(still(now, 0, 0).gyro())
+              .backupImu(ImuReadings.NONE)
+              .velocities(new ChassisVelocities(5, 0, 0))
+              .build(),
+          loop);
+      localization.update(loop);
+    }
+
+    assertThat(localization.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isCloseTo(1.0, within(1e-9));
+    assertThat(localization.pose().getRotation()).isEqualTo(ROBOT.getRotation());
   }
 
   /** An image held back is solved and said, and never moves the estimate. */

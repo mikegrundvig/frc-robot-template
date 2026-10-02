@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
@@ -279,7 +280,11 @@ public final class RobotContainer implements AutoCloseable {
     localization =
         new Localization(
             new LocalizationService(
-                field, definition, robot.estimator(), RobotLoop.PERIOD_SECONDS));
+                field,
+                definition,
+                new SwerveKinematicsModel(definition.moduleTranslations()),
+                robot.estimator(),
+                RobotLoop.PERIOD_SECONDS));
     drive =
         new Drive("Drive", driveHardware, definition, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;

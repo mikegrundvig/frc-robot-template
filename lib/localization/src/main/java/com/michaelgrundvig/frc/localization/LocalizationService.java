@@ -174,13 +174,20 @@ public final class LocalizationService {
    *     the ground explains and a crest crossed come from; and its edges, past which no measurement
    *     can put the robot
    * @param robot what the robot is: its wheels, its IMUs, and its cameras' mounts
+   * @param kinematics how the drivetrain's wheels move the robot: {@link SwerveKinematicsModel} for
+   *     the robot's swerve modules, {@link DifferentialKinematicsModel} for a tank drive
    * @param config how the estimator weighs its sources
    * @param loopSeconds how long one robot loop is
    */
   public LocalizationService(
-      FieldModel field, RobotDefinition robot, EstimatorConfig config, double loopSeconds) {
+      FieldModel field,
+      RobotDefinition robot,
+      DriveKinematicsModel kinematics,
+      EstimatorConfig config,
+      double loopSeconds) {
     this(
         new PoseEstimator(config, field::contains, notPlacedYet(field)),
+        kinematics,
         field,
         field.terrain(),
         robot,
@@ -192,6 +199,7 @@ public final class LocalizationService {
    * robot stands), and a terrain other than the field's own.
    *
    * @param estimator the pose estimator, which this owns from now on
+   * @param kinematics how the drivetrain's wheels move the robot
    * @param field the field whose tags images are solved against
    * @param terrain the ground the robot drives on: a tilt it explains keeps the wheels trusted, and
    *     its crests are landmarks
@@ -200,6 +208,7 @@ public final class LocalizationService {
    */
   public LocalizationService(
       PoseEstimator estimator,
+      DriveKinematicsModel kinematics,
       FieldModel field,
       Terrain terrain,
       RobotDefinition robot,
@@ -208,8 +217,9 @@ public final class LocalizationService {
       throw new IllegalArgumentException("a loop takes some time: " + loopSeconds);
     }
     this.estimator = estimator;
+    this.kinematics = kinematics;
+    // How far the wheels reach from the robot's center, for the slip check and the ground under it.
     Translation2d[] wheels = robot.moduleTranslations();
-    kinematics = new SwerveKinematicsModel(wheels);
     double reach = 0;
     for (Translation2d wheel : wheels) {
       reach = Math.max(reach, wheel.getNorm());

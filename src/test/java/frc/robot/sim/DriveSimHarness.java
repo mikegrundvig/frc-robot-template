@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.PoseEstimator;
 import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import com.michaelgrundvig.frc.localization.TagAllowlist;
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
@@ -85,7 +86,12 @@ public final class DriveSimHarness implements AutoCloseable {
       RobotConfig robot, PoseEstimator estimator, Terrain terrain) {
     return new Localization(
         new LocalizationService(
-            estimator, RobotSim.FIELD, terrain, robot.definition(), RobotLoop.PERIOD_SECONDS));
+            estimator,
+            new SwerveKinematicsModel(robot.definition().moduleTranslations()),
+            RobotSim.FIELD,
+            terrain,
+            robot.definition(),
+            RobotLoop.PERIOD_SECONDS));
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */

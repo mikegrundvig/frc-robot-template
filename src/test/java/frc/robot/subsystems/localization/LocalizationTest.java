@@ -102,8 +102,8 @@ class LocalizationTest {
 
       for (int camera = 1; camera <= 9; camera++) {
         localization
-            .forCameras()
-            .addVision(
+            .service()
+            .camera(
                 new VisionMeasurement(
                     11_000_000L,
                     Pose2d.ZERO,
@@ -137,7 +137,7 @@ class LocalizationTest {
       assertThat(localization.ellipse(at, PoseCovariance.fromStdDevs(10, 10, 1)))
           .as("wider than the field: nothing to draw")
           .isEmpty();
-      assertThat(localization.pose3d(at))
+      assertThat(localization.service().pose3d(at))
           .as("on flat ground, level")
           .isEqualTo(new Pose3d(3, 2, 0, new Rotation3d(0, 0, at.getRotation().getRadians())));
     }

@@ -97,7 +97,7 @@ what broke.
 
 | Level | What it runs | Example to copy |
 |---|---|---|
-| A component | Plain JUnit on a class in a library (`lib/world`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world` |
+| A component | Plain JUnit on a class in a library (`lib/world`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world`; `LocalizationServiceTest`, in `lib/localization`, for localization fed by hand a loop at a time |
 | A mechanism | A subsystem on simulated hardware, stepped loop by loop. The class carries `@ExtendWith(RobotSim.class)`. | `subsystems/drive/DriveBasicsTest`, with `sim/DriveSimHarness` |
 | The whole robot | The robot program as `Robot` builds and runs it, Pitwall and all, driven from a simulated Driver Station and gamepad. | `RobotContainerSimTest` |
 | The program itself | The robot program started as a program, in its own process: a session recorded, then replayed. | `ReplayEndToEndTest` |
@@ -176,12 +176,18 @@ What it offers:
   time; step the loop. To wait for the network (an answer, an event on a stream), wait on it with
   a timeout, a loop at a time; to show nothing else arrived, send a change and check it's the next
   thing to.
-- **Recorded behavior stays recorded.** `EstimatorGoldenSimTest` compares the pose estimator's
-  estimate, loop by loop through a seeded session, with a recording
-  (`estimator-golden.csv`). It fails on any change to what the estimator does, which is the point
-  while restructuring it. When a change is meant to move the estimate, run the test with the
-  environment variable `GOLDEN_UPDATE=1` to record it again, and commit the recording with the
-  change, saying why it moved.
+- **Recorded behavior stays recorded.** Two seeded sessions are recorded loop by loop, and must
+  come out the same, numbers within a millionth. Each guards its own part, and neither the other's:
+  - `EstimatorGoldenSimTest` (`estimator-golden.csv`) guards the pose estimator. It's fed
+    measurements already solved (driving, a misread tag, a collision, an unfelt shove, a tilt), so
+    it never reaches the camera path.
+  - `CameraGoldenSimTest` (`camera-golden.csv`) guards the camera path up to the estimator: four
+    cameras' raw tag images, each solved by `LocalizationService` as the robot was when it was taken
+    (its heading, attitude and turning then), with a camera's mount doubt and a task's tags, and
+    every image's solve and every measurement's verdict recorded.
+
+  When a change is meant to move one, run its test with the environment variable `GOLDEN_UPDATE=1`
+  to record it again, and commit the recording with the change, saying why it moved.
 - **No test runs past two minutes.** A hung test fails instead of hanging the build. A test that
   really needs longer says so with `@Timeout`.
 - **Tests run in `build/test-work`.** What simulated devices write (CTRE's `ctre_sim/`, for one)

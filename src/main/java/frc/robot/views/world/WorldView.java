@@ -3,8 +3,8 @@ package frc.robot.views.world;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Scene;
 import com.michaelgrundvig.frc.world.field.FieldModel;
@@ -64,8 +64,11 @@ public final class WorldView {
      */
     SwerveModuleVelocity[] modules();
 
-    /** What the estimator did with each camera measurement in the last loop. */
-    List<VisionDecision> decisions();
+    /**
+     * What became of each camera image's measurement in the last loop's update, by tag ({@code
+     * LocalizationOutput.frames}).
+     */
+    List<FrameVerdict> frames();
   }
 
   private WorldView() {}

@@ -6,12 +6,12 @@ import static org.assertj.core.api.Assertions.within;
 import com.michaelgrundvig.frc.localization.DriveConditions;
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.EstimatorConfigBuilder;
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.localization.SlipCheck;
 import com.michaelgrundvig.frc.localization.TerrainCrossing;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.YawSource;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
@@ -828,7 +828,7 @@ class LocalizationSimTest {
           long now = RobotController.getTime();
           wpilib.updateWithTime(now / 1e9, robot.drive.gyroYaw(), robot.drive.modulePositions());
           for (VisionMeasurement seen : camera.poll(now)) {
-            robot.localization.forCameras().addVision(seen);
+            robot.service.camera(seen);
             wpilib.addVisionMeasurement(
                 seen.pose(), seen.timestampNanos() / 1e9, VecBuilder.fill(0.03, 0.03, 1e6));
           }
@@ -851,9 +851,10 @@ class LocalizationSimTest {
 
     assertThat(worst[0]).as("ours, worst after the misread").isLessThan(0.05);
     assertThat(worst[1]).as("WPILib's, worst after the misread").isGreaterThan(0.5);
-    assertThat(robot.decisions)
-        .filteredOn(decision -> decision.innovationMeters() > 1)
-        .extracting(VisionDecision::accepted)
+    assertThat(robot.frames)
+        .filteredOn(
+            frame -> frame.measured().filter(weighed -> weighed.innovationMeters() > 1).isPresent())
+        .extracting(FrameVerdict::accepted)
         .containsExactly(false);
   }
 }

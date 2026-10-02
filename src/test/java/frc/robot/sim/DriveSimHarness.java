@@ -1,13 +1,16 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
-import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.FrameVerdict;
+import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.PoseEstimator;
 import com.michaelgrundvig.frc.localization.PoseReset;
 import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
-import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.TagAllowlist;
+import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.localization.VisionResult;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotConfig;
@@ -24,7 +27,6 @@ import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.system.RobotController;
 
 /**
@@ -38,12 +40,23 @@ public final class DriveSimHarness implements AutoCloseable {
   public final DriveSimulation simulation;
   public final PoseEstimator estimator;
   public final Localization localization;
+
+  /**
+   * Localization itself, behind {@link #localization}: what a test asks beyond the robot's view.
+   */
+  public final LocalizationService service;
+
   public final Drive drive;
 
   /** Every camera measurement's fate, in order. */
-  public final List<VisionDecision> decisions = new ArrayList<>();
+  public final List<FrameVerdict> frames = new ArrayList<>();
+
+  /** What localization made of each image the tag cameras sent, at once, in order. */
+  public final List<VisionResult> images = new ArrayList<>();
 
   private @Nullable FakeCamera camera;
+  private List<FakeTagCamera> tagCameras = List.of();
+  private @Nullable TagAllowlist onlyTags;
   private @Nullable Runnable eachLoop;
 
   /**
@@ -65,22 +78,20 @@ public final class DriveSimHarness implements AutoCloseable {
     return localizationFor(robot, estimator, Terrain.FLAT);
   }
 
-  /** Localization for a robot on this terrain, starting with its estimator. */
+  /**
+   * Localization for a robot on this terrain, starting with its estimator. Its images are solved
+   * against the simulator's field's tags.
+   */
   public static Localization localizationFor(
       RobotConfig robot, PoseEstimator estimator, Terrain terrain) {
-    Translation2d[] wheels = robot.definition().moduleTranslations();
-    double reach = 0;
-    for (Translation2d wheel : wheels) {
-      reach = Math.max(reach, wheel.getNorm());
-    }
     return new Localization(
-        estimator,
-        new SwerveKinematicsModel(wheels),
-        terrain,
-        reach,
-        robot.definition().drivetrain().modules().wheelCoefficientOfFriction()
-            * ImuReadings.STANDARD_GRAVITY,
-        robot.definition().imus());
+        new LocalizationService(
+            estimator,
+            new SwerveKinematicsModel(robot.definition().moduleTranslations()),
+            RobotSim.FIELD,
+            terrain,
+            robot.definition(),
+            RobotLoop.PERIOD_SECONDS));
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */
@@ -101,6 +112,7 @@ public final class DriveSimHarness implements AutoCloseable {
       RobotConfig robot, SensorErrors errors, EstimatorConfig config, Terrain terrain) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     localization = localizationFor(robot, estimator, terrain);
+    service = localization.service();
     RobotDefinition definition = robot.definition();
     simulation =
         new DriveSimulation(definition.body(), definition.drivetrain(), errors, definition.imus());
@@ -125,9 +137,23 @@ public final class DriveSimHarness implements AutoCloseable {
     this.camera = camera;
   }
 
+  /**
+   * From now on, these cameras' raw images reach localization every loop, solved there as the robot
+   * was when each was taken.
+   */
+  public void watchWith(List<FakeTagCamera> cameras) {
+    tagCameras = List.copyOf(cameras);
+  }
+
+  /** From now on, the tag cameras' images are solved from these tags alone; null for every tag. */
+  public void trustOnly(@Nullable TagAllowlist tags) {
+    onlyTags = tags;
+  }
+
   /** From now on, no camera's results reach the estimator: blinded, until watching again. */
   public void stopWatching() {
     camera = null;
+    tagCameras = List.of();
   }
 
   /** Something to do at the end of every loop, such as feeding another estimator to compare. */
@@ -149,10 +175,15 @@ public final class DriveSimHarness implements AutoCloseable {
     FakeCamera watching = camera;
     if (watching != null) {
       for (VisionMeasurement measurement : watching.poll(now)) {
-        localization.forCameras().addVision(measurement);
+        service.camera(measurement);
       }
     }
-    decisions.addAll(localization.update());
+    for (FakeTagCamera tagCamera : tagCameras) {
+      for (TagDetections image : tagCamera.poll(now)) {
+        images.add(service.camera(image, onlyTags));
+      }
+    }
+    frames.addAll(localization.update().frames());
     scheduler.run();
     Runnable action = eachLoop;
     if (action != null) {

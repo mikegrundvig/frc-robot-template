@@ -3,9 +3,9 @@ package com.michaelgrundvig.frc.localization;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -53,7 +53,7 @@ import org.wpilib.math.util.MathUtil;
  * <p>Pure logic: no clock, no hardware, no static state. Every input comes in through a method,
  * stamped with its capture time, so a replay reproduces every decision. Use it from one thread.
  */
-public final class PoseEstimator implements CameraLocalizer {
+public final class PoseEstimator {
   private static final long VELOCITY_WINDOW_NANOS = 100_000_000L;
 
   private final EstimatorConfig config;
@@ -80,7 +80,7 @@ public final class PoseEstimator implements CameraLocalizer {
   private final Recovery recovery;
 
   /** Each camera's place among the errors the filter keeps apart, by name, as cameras appear. */
-  private final Map<String, Integer> cameraSlots = new HashMap<>();
+  private final Map<String, Integer> cameraSlots = new LinkedHashMap<>();
 
   /**
    * Each camera's doubt about its mount, and the distance it was judged at, to apply next update.
@@ -284,7 +284,6 @@ public final class PoseEstimator implements CameraLocalizer {
   }
 
   /** A camera measurement, to apply at the next {@link #update}. */
-  @Override
   public void addVision(VisionMeasurement measurement) {
     pending.add(measurement);
   }
@@ -300,8 +299,10 @@ public final class PoseEstimator implements CameraLocalizer {
    * estimate already took from them stays as sure as it was, and what's left of the doubt holds the
    * camera's later fixes off. Since the mount check judges over its latest few hundred tags, the
    * doubt always comes a little after the knock.
+   *
+   * @param doubtMeters how far its measurements may be off from where its mount moved
+   * @param distanceMeters how far its tags were, on average, when that was judged; NaN until then
    */
-  @Override
   public void mountDoubt(String camera, double doubtMeters, double distanceMeters) {
     if (config.headingCorrection()
         == EstimatorConfig.HeadingCorrection.HEADING_MEASUREMENTS_AND_MOUNT_DOUBT) {
@@ -326,6 +327,16 @@ public final class PoseEstimator implements CameraLocalizer {
     return List.copyOf(camerasWithoutPlaces);
   }
 
+  /**
+   * Every camera it has weighed a measurement from (or been told a mount's doubt about), in the
+   * order each first came: those whose repeated errors it keeps apart, then any beyond them.
+   */
+  public List<String> cameras() {
+    List<String> cameras = new ArrayList<>(cameraSlots.keySet());
+    cameras.addAll(camerasWithoutPlaces);
+    return List.copyOf(cameras);
+  }
+
   /** What the last {@link #update} did with each landmark, for the log. */
   public List<LandmarkDecision> landmarkDecisions() {
     return List.copyOf(landmarkDecisions);
@@ -343,22 +354,23 @@ public final class PoseEstimator implements CameraLocalizer {
     landmarkDecisions.clear();
     List<VisionMeasurement> usable = new ArrayList<>();
     for (VisionMeasurement measurement : pending) {
-      String why = whyNotUsable(measurement);
+      Verdict why = whyNotUsable(measurement);
       if (why == null) {
         usable.add(measurement);
       } else {
         rejectedCount++;
-        decisions.add(new VisionDecision(measurement, false, why, Double.NaN, Double.NaN));
+        decisions.add(new VisionDecision(measurement, why, Double.NaN, Double.NaN, Double.NaN));
       }
     }
     pending.clear();
     List<LandmarkEvent> landmarks = new ArrayList<>();
     for (LandmarkEvent landmark : pendingLandmarks) {
-      String why = whyNotInHistory(landmark.timestampNanos());
+      Verdict why = whyNotInHistory(landmark.timestampNanos());
       if (why == null) {
         landmarks.add(landmark);
       } else {
-        landmarkDecisions.add(new LandmarkDecision(landmark, false, why, Double.NaN, Double.NaN));
+        landmarkDecisions.add(
+            new LandmarkDecision(landmark, why, Double.NaN, Double.NaN, Double.NaN));
       }
     }
     pendingLandmarks.clear();
@@ -427,7 +439,6 @@ public final class PoseEstimator implements CameraLocalizer {
    *
    * @return empty outside the history
    */
-  @Override
   public Optional<Pose2d> poseAt(long timestampNanos) {
     if (!started || timestampNanos < history.time(0)) {
       return Optional.empty();
@@ -510,30 +521,30 @@ public final class PoseEstimator implements CameraLocalizer {
     return LocalizationEstimate.Mode.DEAD_RECKONING;
   }
 
-  private @Nullable String whyNotUsable(VisionMeasurement measurement) {
-    String why = whyNotInHistory(measurement.timestampNanos());
+  private @Nullable Verdict whyNotUsable(VisionMeasurement measurement) {
+    Verdict why = whyNotInHistory(measurement.timestampNanos());
     if (why != null) {
       return why;
     }
     if (!onField.test(measurement.pose().getTranslation())) {
-      return "off the field";
+      return Verdict.OFF_FIELD;
     }
     return null;
   }
 
   /** Why a measurement at a time can't be applied: before the history, or after it. */
-  private @Nullable String whyNotInHistory(long t) {
+  private @Nullable Verdict whyNotInHistory(long t) {
     if (!started) {
-      return "before odometry started";
+      return Verdict.BEFORE_ODOMETRY;
     }
     if (t <= lastResetNanos) {
-      return "before the robot was last placed or recovered";
+      return Verdict.BEFORE_RESET;
     }
     if (t <= history.time(0)) {
-      return "too late: older than the history kept";
+      return Verdict.STALE;
     }
     if (t > history.newestTime() + futureToleranceNanos) {
-      return "from the future: after the newest odometry";
+      return Verdict.FROM_THE_FUTURE;
     }
     return null;
   }
@@ -646,12 +657,7 @@ public final class PoseEstimator implements CameraLocalizer {
               innovation.heading(),
               innovation.positionChiSquared() <= config.gateChiSquaredPosition()));
       decisions.add(
-          new VisionDecision(
-              measurement,
-              false,
-              String.format(Locale.ROOT, "gate: %.1f > %.1f", chiSquared, gate),
-              innovation.meters(),
-              chiSquared));
+          new VisionDecision(measurement, Verdict.GATED, innovation.meters(), chiSquared, gate));
       return false;
     }
     acceptedCount++;
@@ -661,7 +667,7 @@ public final class PoseEstimator implements CameraLocalizer {
     agreements.add(new Agreement(camera.time(), innovation.meters()));
     placed = true;
     decisions.add(
-        new VisionDecision(measurement, true, "accepted", innovation.meters(), chiSquared));
+        new VisionDecision(measurement, Verdict.ACCEPTED, innovation.meters(), chiSquared, gate));
     return true;
   }
 
@@ -678,17 +684,15 @@ public final class PoseEstimator implements CameraLocalizer {
     }
     if (fresh) {
       double chiSquared = innovation.chiSquared();
-      boolean passes = chiSquared <= config.gateChiSquaredAxis();
+      double gate = config.gateChiSquaredAxis();
+      boolean passes = chiSquared <= gate;
       landmarkDecisions.add(
           new LandmarkDecision(
               landmark,
-              passes,
-              passes
-                  ? "accepted"
-                  : String.format(
-                      Locale.ROOT, "gate: %.1f > %.1f", chiSquared, config.gateChiSquaredAxis()),
+              passes ? Verdict.ACCEPTED : Verdict.GATED,
               Math.abs(innovation.meters()),
-              chiSquared));
+              chiSquared,
+              gate));
       if (!passes) {
         return;
       }

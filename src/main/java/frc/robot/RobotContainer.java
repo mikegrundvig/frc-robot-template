@@ -5,14 +5,12 @@ import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
-import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
-import com.michaelgrundvig.frc.localization.PoseEstimator;
-import com.michaelgrundvig.frc.localization.PoseReset;
 import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import com.michaelgrundvig.frc.localization.VisionConfig;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
@@ -32,6 +30,7 @@ import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
 import frc.robot.lib.timing.LoopMonitor;
+import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
@@ -144,7 +143,7 @@ public final class RobotContainer implements AutoCloseable {
   private final Localization localization;
 
   /** What the estimator did with the last loop's camera measurements, for the World view. */
-  private List<VisionDecision> decisions = List.of();
+  private List<FrameVerdict> frames = List.of();
 
   /** What the robot is, as configured, for the World view. */
   private final RobotDefinition robotDefinition;
@@ -274,30 +273,18 @@ public final class RobotContainer implements AutoCloseable {
       noHardware.set(mode == Constants.Mode.REAL);
     }
 
-    // Until the robot is placed it could be anywhere: the middle of the field stands in, with an
-    // uncertainty as big as the field, so the first camera measurement wins.
+    // Until the robot is placed it could be anywhere: localization starts it in the middle of the
+    // field, as unsure as the field is big, so the first camera measurement wins. The simulated
+    // robot stands there too.
     Pose2d middle = new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO);
-    Translation2d[] wheels = definition.moduleTranslations();
-    double wheelReach = 0;
-    for (Translation2d wheel : wheels) {
-      wheelReach = Math.max(wheelReach, wheel.getNorm());
-    }
     localization =
         new Localization(
-            new PoseEstimator(
+            new LocalizationService(
+                field,
+                definition,
+                new SwerveKinematicsModel(definition.moduleTranslations()),
                 robot.estimator(),
-                field::contains,
-                new PoseReset(
-                    0,
-                    middle,
-                    PoseCovariance.fromStdDevs(field.length(), field.width(), Math.PI),
-                    "not placed yet")),
-            new SwerveKinematicsModel(wheels),
-            field.terrain(),
-            wheelReach,
-            definition.drivetrain().modules().wheelCoefficientOfFriction()
-                * ImuReadings.STANDARD_GRAVITY,
-            definition.imus());
+                RobotLoop.PERIOD_SECONDS));
     drive =
         new Drive("Drive", driveHardware, definition, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
@@ -319,12 +306,7 @@ public final class RobotContainer implements AutoCloseable {
     }
     vision =
         new Vision(
-            cameras,
-            cameraIOs,
-            localization.forCameras(),
-            field,
-            visionTuning::get,
-            () -> alliance);
+            cameras, cameraIOs, localization.service(), field, visionTuning::get, () -> alliance);
     // The vision coprocessors' health agents: over the network on a robot, simulated in the
     // simulator, the log in a replay. Each is asked on a thread of its own; the loop never waits.
     // A robot watches none of the template's example table's (team 0): they'd all read missing.
@@ -442,14 +424,10 @@ public final class RobotContainer implements AutoCloseable {
     // Told where it is after odometry, so a turn made in placing it isn't counted twice.
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
     placed.ifPresent(pose -> localization.place(pose, PLACED, placedOn));
-    vision.periodic(
-        RobotController.getTime(),
-        localization.estimate(),
-        localization.pitchRadians(),
-        localization.rollRadians());
+    vision.periodic(RobotController.getTime());
     loop.mark("Vision", System.nanoTime());
-    decisions = localization.update();
-    vision.record(decisions);
+    frames = localization.update().frames();
+    vision.record(frames);
     loop.mark("Localization", System.nanoTime());
     coprocessors.periodic(RobotController.getTime(), enabled);
     loop.mark("Coprocessors", System.nanoTime());
@@ -711,8 +689,8 @@ public final class RobotContainer implements AutoCloseable {
       }
 
       @Override
-      public List<VisionDecision> decisions() {
-        return decisions;
+      public List<FrameVerdict> frames() {
+        return frames;
       }
     };
   }

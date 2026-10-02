@@ -1,87 +1,52 @@
 package frc.robot.subsystems.localization;
 
-import com.michaelgrundvig.frc.localization.BodyMotion;
-import com.michaelgrundvig.frc.localization.CameraLocalizer;
-import com.michaelgrundvig.frc.localization.CrestLandmarks;
+import com.michaelgrundvig.frc.localization.CameraTrust;
 import com.michaelgrundvig.frc.localization.DriveConditions;
-import com.michaelgrundvig.frc.localization.DriveKinematicsModel;
 import com.michaelgrundvig.frc.localization.DrivetrainReadings;
-import com.michaelgrundvig.frc.localization.ImuCrossCheck;
-import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.localization.LandmarkDecision;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.LocalizationGate;
-import com.michaelgrundvig.frc.localization.OdometrySample;
+import com.michaelgrundvig.frc.localization.LocalizationOutput;
+import com.michaelgrundvig.frc.localization.LocalizationService;
+import com.michaelgrundvig.frc.localization.LoopContext;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
-import com.michaelgrundvig.frc.localization.PoseEstimator;
 import com.michaelgrundvig.frc.localization.PoseReset;
-import com.michaelgrundvig.frc.localization.SlipCheck;
 import com.michaelgrundvig.frc.localization.TerrainCrossing;
 import com.michaelgrundvig.frc.localization.Timestamps;
-import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.WheelTrust;
 import com.michaelgrundvig.frc.localization.YawSource;
-import com.michaelgrundvig.frc.localization.YawTrack;
-import com.michaelgrundvig.frc.world.field.Terrain;
-import com.michaelgrundvig.frc.world.robot.ImuMount;
-import com.michaelgrundvig.frc.world.robot.Imus;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.kinematics.ChassisVelocities;
-import org.wpilib.math.util.MathUtil;
 import org.wpilib.system.RobotController;
 import org.wpilib.util.Alert;
 
 /**
- * Where the robot is: the one owner of the pose estimator. Everything that asks where the robot is
- * asks here, and nothing else changes the estimate.
+ * Where the robot is, for the robot program: the {@link LocalizationService} (the one owner of the
+ * estimate, in {@code lib/localization}), fed on the robot loop, with what the robot does with what
+ * it says: the log, the alerts, and the lines for the pit and the drive team. Everything that asks
+ * where the robot is asks here, and nothing else changes the estimate.
  *
  * <p>Each loop, in order:
  *
  * <ol>
- *   <li>{@link #periodic}, with what the drivetrain read: picks what turns odometry (the gyro, the
- *       backup IMU while the gyro is lost, or the wheels), weighs the wheels by what the IMU says
- *       (a tilt, a jolt, the wheels sliding: {@link SlipCheck}), feeds every wheel reading to the
- *       estimator, follows the robot over raised terrain, and takes a crest it crossed as a
- *       landmark;
- *   <li>the cameras, through {@link #forCameras()}: each image's measurement, at its capture time;
- *   <li>{@link #update}: applies them, and says whether the estimate is good enough to score from.
+ *   <li>{@link #periodic}, with what the drivetrain read: the service takes it, with the loop's
+ *       time from the robot's clock;
+ *   <li>the cameras, through {@link #service()}: each image, at its capture time;
+ *   <li>{@link #update}: the service applies them, and this logs what it made of them, and says
+ *       whether the estimate is good enough to score from.
  * </ol>
  *
- * <p>Independent of the drivetrain: its wheels come in as {@link OdometrySample}s, through its
- * {@link DriveKinematicsModel}, so swerve, tank, or any other localizes the same way. Replacing the
- * drivetrain's code (with AdvantageKit's 2027 swerve template, say) only needs it to report {@link
- * DrivetrainReadings}.
+ * <p>The log's keys ({@code Localization/...}) are what the AdvantageScope layout reads, and what a
+ * replay compares: they stay as they are.
  */
 public final class Localization implements AutoCloseable {
-
-  /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
-  private static final double MOVING = 0.25;
-
-  /**
-   * On a known bump, a tilt up to this much steeper than its ramps is still the ground's: bumpers,
-   * suspension, and the IMU's mount.
-   */
-  private static final double GROUND_SLOPE_MARGIN = Math.toRadians(3);
-
-  /** How far off a bump's footprint the estimate may put the robot and still be on it. */
-  private static final double MAX_GROUND_REACH_METERS = 1.0;
-
-  /**
-   * A crest places the robot's center within about this far across it: a guess, to measure on a
-   * real robot (docs/calibration.md, a terrain crossing).
-   */
-  private static final double CREST_SPREAD_METERS = 0.05;
-
-  /** A crest is taken for a bump only when the estimate is within this far of it. */
-  private static final double CREST_REACH_METERS = 1.0;
 
   /** A reset to "exactly here": a millimeter and a milliradian. */
   private static final PoseCovariance EXACTLY = PoseCovariance.fromStdDevs(0.001, 0.001, 0.001);
@@ -118,51 +83,10 @@ public final class Localization implements AutoCloseable {
   /** The logged ellipse's points, reused loop after loop. */
   private final Pose2d[] ellipse = new Pose2d[ELLIPSE_POINTS + 1];
 
-  private final PoseEstimator estimator;
-  private final DriveKinematicsModel kinematics;
-  private final Terrain ground;
-  private final double wheelReach;
-  private final CrestLandmarks crestLandmarks;
-  private final YawTrack gyroYaws = new YawTrack();
-  private final YawTrack backupYaws = new YawTrack();
-
-  /** The gyro and the backup IMU should turn alike. */
-  private final ImuCrossCheck crossCheck = new ImuCrossCheck(ImuCrossCheck.Settings.DEFAULTS);
-
-  /** Crossings of raised terrain, from the IMU. */
-  private final TerrainCrossing terrain = new TerrainCrossing(TerrainCrossing.Settings.DEFAULTS);
-
-  /** The wheels against the IMU: whether they slide over the floor together. */
-  private final SlipCheck slipCheck;
-
-  /** The last wheel reading's time, last loop, and which IMU read its yaw, and what it read. */
-  private long lastStepNanos = Long.MIN_VALUE;
-
-  private YawSource lastStepSource = YawSource.WHEELS;
-  private double lastStepYaw = Double.NaN;
-
-  /**
-   * Where the IMUs are mounted, and whether each one's accelerometer reads along the robot's axes.
-   */
-  private final Imus imus;
-
-  private YawSource yawSource = YawSource.GYRO;
-
-  /** The previous wheel reading, which the next one's motion is measured from. */
-  private @Nullable OdometrySample lastReading;
-
-  /** The IMU the robot's attitude comes from this loop: null without one. */
-  private @Nullable ImuReadings attitude;
-
-  /** What the IMU and the motors said about trusting the wheels this loop. */
-  private DriveConditions conditions = DriveConditions.NORMAL;
-
-  private LocalizationEstimate estimate;
+  private final LocalizationService service;
 
   /** Why the estimate isn't good enough to score from; null when it is. */
   private @Nullable String notReadyToScore = "not started";
-
-  private int landmarksAccepted;
 
   /** The uncertainty as {@link #describe()} last showed it; NaN before it did. */
   private double shownCentimeters = Double.NaN;
@@ -202,31 +126,18 @@ public final class Localization implements AutoCloseable {
           Alert.Level.MEDIUM);
 
   /**
-   * @param estimator the pose estimator, which this owns from now on
-   * @param kinematics how the drivetrain's wheels move the robot
-   * @param terrain the field's raised terrain: a tilt it explains keeps the wheels trusted, and its
-   *     crests are landmarks
-   * @param wheelReachMeters how far the wheels reach from the robot's center
-   * @param gripMetersPerSecSq the most the tread's grip can change the robot's velocity: its
-   *     friction times g
-   * @param imus where the IMUs are mounted, and whether each one's accelerometer has been checked
-   *     to read along the robot's axes
+   * @param service localization itself, which this feeds and reports on from now on
    */
-  public Localization(
-      PoseEstimator estimator,
-      DriveKinematicsModel kinematics,
-      Terrain terrain,
-      double wheelReachMeters,
-      double gripMetersPerSecSq,
-      Imus imus) {
-    this.estimator = estimator;
-    this.kinematics = kinematics;
-    this.ground = terrain;
-    this.wheelReach = wheelReachMeters;
-    crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
-    this.imus = imus;
-    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters, gripMetersPerSecSq);
-    estimate = estimator.estimate();
+  public Localization(LocalizationService service) {
+    this.service = service;
+  }
+
+  /**
+   * Localization itself: where the cameras send their images, and what a test or a view asks beyond
+   * what this says.
+   */
+  public LocalizationService service() {
+    return service;
   }
 
   /**
@@ -236,61 +147,40 @@ public final class Localization implements AutoCloseable {
    *     wheels can't see
    */
   public void periodic(DrivetrainReadings readings, boolean enabled) {
-    ImuReadings gyro = readings.gyro();
-    ImuReadings backup = readings.backupImu();
-    Steps steps = steps(readings.wheels(), gyro, backup);
-    // One IMU says everything this loop: the one whose yaw turns odometry.
-    attitude =
-        switch (steps.source()) {
-          case GYRO -> gyro;
-          case BACKUP -> backup;
-          case WHEELS -> null;
-        };
-    compareWithTheImu(steps, attitude, readings.velocities());
-    checkOrientation(steps.source());
-    conditions = conditions(enabled);
-    estimator.setConditions(conditions);
-    for (Step step : steps.steps()) {
-      estimator.addOdometry(step.timestampNanos(), step.motion(), step.yaw(), steps.source());
-    }
-    watchTerrain(readings.velocities());
-    checkImus(gyro, backup);
-    gyroDisconnected.set(!gyro.usable() && !backup.usable());
-    usingBackup.set(!gyro.usable() && backup.usable());
+    service.drivetrain(readings, new LoopContext(RobotController.getTime(), enabled));
+    WheelTrust wheels = service.wheels();
+    DriveConditions conditions = wheels.conditions();
+    checkOrientation(wheels);
+    logTerrain();
+    checkImus();
+    gyroDisconnected.set(!readings.gyro().usable() && !readings.backupImu().usable());
+    usingBackup.set(!readings.gyro().usable() && readings.backupImu().usable());
     Logger.recordOutput("Localization/TiltDegrees", Math.toDegrees(conditions.tiltRadians()));
     Logger.recordOutput(
         "Localization/GroundSlopeDegrees", Math.toDegrees(conditions.groundSlopeRadians()));
     Logger.recordOutput("Localization/CollisionShare", conditions.collisionShare());
     Logger.recordOutput(
-        "Localization/UnexplainedJoltMetersPerSecSq", slipCheck.unexplainedMetersPerSecSq());
+        "Localization/UnexplainedJoltMetersPerSecSq", wheels.unexplainedMetersPerSecSq());
     Logger.recordOutput("Localization/SlipMetersPerSecond", conditions.slipMetersPerSecond());
+    Logger.recordOutput("Localization/TurnSlipMetersPerSecond", wheels.turnSlipMetersPerSecond());
+    Logger.recordOutput("Localization/SpeedSlipMetersPerSecond", wheels.speedSlipMetersPerSecond());
+    Logger.recordOutput("Localization/TurnApartDegrees", Math.toDegrees(wheels.turnApartRadians()));
+    Logger.recordOutput("Localization/SlideMetersPerSecond", wheels.slideMetersPerSecond());
     Logger.recordOutput(
-        "Localization/TurnSlipMetersPerSecond", slipCheck.turnSlipMetersPerSecond());
-    Logger.recordOutput(
-        "Localization/SpeedSlipMetersPerSecond", slipCheck.speedSlipMetersPerSecond());
-    Logger.recordOutput(
-        "Localization/TurnApartDegrees", Math.toDegrees(slipCheck.turnApartRadians()));
-    Logger.recordOutput("Localization/SlideMetersPerSecond", slipCheck.slideMetersPerSecond());
-    Logger.recordOutput(
-        "Localization/AccelerometerBiasMetersPerSecSq", slipCheck.biasMetersPerSecSq());
-    estimate = estimator.estimate();
-  }
-
-  /** Where the cameras send their measurements, and learn where the robot was. */
-  public CameraLocalizer forCameras() {
-    return estimator;
+        "Localization/AccelerometerBiasMetersPerSecSq", wheels.accelerometerBiasMetersPerSecSq());
   }
 
   /**
-   * Applies the loop's measurements, and says whether the estimate is good enough to score from.
-   * After the cameras.
+   * Applies the loop's measurements, logs what became of them, and says whether the estimate is
+   * good enough to score from. After the cameras.
    *
-   * @return what became of each camera measurement, for the cameras' records
+   * @return what the service made of the loop: the estimate, how far each source is trusted, and
+   *     what became of each camera measurement, for the cameras' records and the World view
    */
-  public List<VisionDecision> update() {
-    List<VisionDecision> decisions = estimator.update();
+  public LocalizationOutput update() {
+    LocalizationOutput output = service.update();
     List<String> landmarks = new ArrayList<>();
-    for (LandmarkDecision decision : estimator.landmarkDecisions()) {
+    for (LandmarkDecision decision : output.landmarks()) {
       landmarks.add(
           String.format(
               Locale.ROOT,
@@ -298,13 +188,16 @@ public final class Localization implements AutoCloseable {
               decision.landmark().name(),
               decision.reason(),
               decision.innovationMeters()));
-      landmarksAccepted += decision.accepted() ? 1 : 0;
     }
     Logger.recordOutput("Localization/Landmarks", landmarks.toArray(String[]::new));
-    Logger.recordOutput("Localization/LandmarksAccepted", landmarksAccepted);
-    estimate = estimator.estimate();
-    notReadyToScore = LocalizationGate.SCORING.whyNot(estimate);
-    List<String> beyond = estimator.camerasWithoutPlaces();
+    Logger.recordOutput("Localization/LandmarksAccepted", service.landmarksAccepted());
+    notReadyToScore = LocalizationGate.SCORING.whyNot(output.estimate());
+    List<String> beyond = new ArrayList<>();
+    for (Map.Entry<String, CameraTrust> camera : output.integrity().cameras().entrySet()) {
+      if (!camera.getValue().keptApart()) {
+        beyond.add(camera.getKey());
+      }
+    }
     if (!beyond.isEmpty()) {
       camerasWithoutPlaces.setText(
           "More cameras than the estimator keeps apart: "
@@ -313,18 +206,18 @@ public final class Localization implements AutoCloseable {
               + " more than they know");
     }
     camerasWithoutPlaces.set(!beyond.isEmpty());
-    log();
-    return decisions;
+    log(output.estimate());
+    return output;
   }
 
   /** Where the robot is: cheap, for driving every loop. */
   public Pose2d pose() {
-    return estimator.pose();
+    return service.pose();
   }
 
   /** The estimate, with its uncertainty, mode, and health, as of the last step. */
   public LocalizationEstimate estimate() {
-    return estimate;
+    return service.estimate();
   }
 
   /**
@@ -335,8 +228,7 @@ public final class Localization implements AutoCloseable {
    * @param reason for the log, such as "placed on Center"
    */
   public void place(Pose2d pose, PoseCovariance how, String reason) {
-    estimator.reset(new PoseReset(RobotController.getTime(), pose, how, reason));
-    estimate = estimator.estimate();
+    service.place(new PoseReset(RobotController.getTime(), pose, how, reason));
   }
 
   /** The robot is exactly here, now. */
@@ -349,8 +241,7 @@ public final class Localization implements AutoCloseable {
    * the cameras' headings will agree against it and the estimate turns back to them.
    */
   public void resetHeading(Rotation2d heading, double stdDevRadians) {
-    estimator.resetHeading(heading, stdDevRadians);
-    estimate = estimator.estimate();
+    service.resetHeading(heading, stdDevRadians);
   }
 
   /**
@@ -372,6 +263,7 @@ public final class Localization implements AutoCloseable {
    * so the line doesn't flicker as the uncertainty wanders within a step.
    */
   public String describe() {
+    LocalizationEstimate estimate = service.estimate();
     PoseCovariance uncertainty = estimate.covariance();
     shownCentimeters = held(shownCentimeters, 100 * uncertainty.largestPositionStdDev(), 1);
     shownDegrees = held(shownDegrees, Math.toDegrees(uncertainty.headingStdDev()), 0.1);
@@ -394,29 +286,27 @@ public final class Localization implements AutoCloseable {
 
   /** The robot's pitch, from the IMU: zero without one. Positive is nose down. */
   public double pitchRadians() {
-    ImuReadings imu = attitude;
-    return imu == null ? 0 : imu.pitchRadians();
+    return service.pitchRadians();
   }
 
   /** The robot's roll, from the IMU: zero without one. */
   public double rollRadians() {
-    ImuReadings imu = attitude;
-    return imu == null ? 0 : imu.rollRadians();
+    return service.rollRadians();
   }
 
   /** What turns odometry now: the gyro, the backup IMU, or the wheels. */
   public YawSource yawSource() {
-    return yawSource;
+    return service.yawSource();
   }
 
   /** What the IMU said about trusting the wheels this loop. */
   public DriveConditions conditions() {
-    return conditions;
+    return service.conditions();
   }
 
   /** Where the robot is on raised terrain: level, climbing, or descending. */
   public TerrainCrossing.Phase terrainPhase() {
-    return terrain.phase();
+    return service.terrainPhase();
   }
 
   /**
@@ -424,232 +314,54 @@ public final class Localization implements AutoCloseable {
    * that drives over a bump waits for this to count up.
    */
   public int terrainCrossings() {
-    return terrain.crossings();
+    return service.terrainCrossings();
   }
 
   /** How many crests the estimator has taken as landmarks since the robot started. */
   public int landmarksAccepted() {
-    return landmarksAccepted;
-  }
-
-  /**
-   * What the IMU says about trusting the wheels: the robot's tilt, a jolt beyond driving, the
-   * wheels sliding over the floor, and whether people might be carrying it. The IMU that turns
-   * odometry says (the gyro, or the backup while the gyro is lost); without one, nothing can.
-   */
-  private DriveConditions conditions(boolean enabled) {
-    ImuReadings imu = attitude;
-    double tilt = imu == null ? 0 : tilt(imu);
-    return new DriveConditions(
-        tilt,
-        imu == null ? 0 : groundSlope(tilt),
-        slipCheck.collisionShare(),
-        slipCheck.slipMetersPerSecond(),
-        !enabled);
-  }
-
-  /** How far the robot is tilted from level, by an IMU's attitude: its up against straight up. */
-  private static double tilt(ImuReadings imu) {
-    return Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
-  }
-
-  /**
-   * Gives the slip check the loop's wheel readings and what the IMU that turns odometry felt
-   * ({@link SlipCheck}): whether the wheels slid, and whether the IMU felt a collision. A loop
-   * without wheel readings, or with another IMU than the last, starts it over.
-   *
-   * @param imu the IMU that turns odometry this loop, or null without one
-   * @param wheels the robot's velocity as its wheels measure it, robot-relative
-   */
-  private void compareWithTheImu(Steps steps, @Nullable ImuReadings imu, ChassisVelocities wheels) {
-    Felt felt = imu == null ? Felt.NOTHING : driving(imu);
-    List<Step> loop = steps.steps();
-    if (loop.isEmpty() || imu == null) {
-      slipCheck.startOver(felt.forward(), felt.left());
-      return;
-    }
-    Step last = loop.get(loop.size() - 1);
-    YawSource source = steps.source();
-    if (source == lastStepSource && lastStepNanos < last.timestampNanos()) {
-      double wheelTurn = 0;
-      for (Step step : loop) {
-        wheelTurn += step.motion().dthetaRadians();
-      }
-      ImuMount mount = source == YawSource.GYRO ? imus.gyro() : imus.backup();
-      slipCheck.update(
-          new SlipCheck.Sample(
-              Timestamps.toSeconds(last.timestampNanos() - lastStepNanos),
-              wheelTurn,
-              MathUtil.angleModulus(last.yaw() - lastStepYaw),
-              last.yaw(),
-              imu.yawRateRadiansPerSecond(),
-              mount.position(),
-              mount.accelerometerChecked(),
-              wheels,
-              felt.forward(),
-              felt.left(),
-              tilt(imu)));
-    } else {
-      slipCheck.startOver(felt.forward(), felt.left());
-    }
-    lastStepNanos = last.timestampNanos();
-    lastStepSource = source;
-    lastStepYaw = last.yaw();
+    return service.landmarksAccepted();
   }
 
   /**
    * Says when the accelerometer of the IMU that turns odometry reads, standing still, past any bias
-   * a part has ({@link SlipCheck#leaksGravity}): gravity's share, leaking in because the robot's
-   * definition gives the IMU another orientation than it's mounted with. Its pitch and roll can be
-   * right all the while (a Pigeon's follow the mount pose saved on it), so only the accelerometer
-   * shows it.
+   * a part has: gravity's share, leaking in because the robot's definition gives the IMU another
+   * orientation than it's mounted with. Its pitch and roll can be right all the while (a Pigeon's
+   * follow the mount pose saved on it), so only the accelerometer shows it.
    */
-  private void checkOrientation(YawSource source) {
-    boolean leaks = slipCheck.leaksGravity();
+  private void checkOrientation(WheelTrust wheels) {
+    boolean leaks = wheels.accelerometerLeaksGravity();
     if (leaks) {
       imuOrientation.setText(
           String.format(
               Locale.ROOT,
               "The %s's accelerometer reads %.1f m/s² standing still, gravity's share: check its"
                   + " orientation in the robot's definition (docs/calibration.md)",
-              source == YawSource.BACKUP ? "backup IMU" : "gyro",
-              slipCheck.biasMetersPerSecSq()));
+              wheels.imu() == YawSource.BACKUP ? "backup IMU" : "gyro",
+              wheels.accelerometerBiasMetersPerSecSq()));
     }
     imuOrientation.set(leaks);
   }
 
-  /**
-   * What an IMU felt of the robot's own motion, along the robot's axes, in m/s²: its reading less
-   * gravity's share. Not a number where the IMU can't say.
-   */
-  private record Felt(double forward, double left) {
-    static final Felt NOTHING = new Felt(Double.NaN, Double.NaN);
-  }
-
-  /**
-   * What the IMU felt of the robot's own motion: its reading less gravity's share, which it feels
-   * along the robot's axes as the robot tilts (WPILib's attitude: a positive pitch is nose down, a
-   * positive roll the left side up).
-   */
-  private static Felt driving(ImuReadings imu) {
-    double pitch = imu.pitchRadians();
-    double roll = imu.rollRadians();
-    return new Felt(
-        imu.forwardAccelerationMetersPerSecSq() + ImuReadings.STANDARD_GRAVITY * Math.sin(pitch),
-        imu.leftAccelerationMetersPerSecSq()
-            - ImuReadings.STANDARD_GRAVITY * Math.sin(roll) * Math.cos(pitch));
-  }
-
-  /**
-   * How much of a tilt the ground explains: on a known bump (where the estimate puts the robot,
-   * give or take its wheels' reach and the estimate's doubt), up to its ramps' slope; none on flat
-   * ground.
-   */
-  private double groundSlope(double tilt) {
-    if (ground.bumps().isEmpty() || tilt == 0) {
-      return 0;
-    }
-    double doubt = 2 * estimator.estimate().covariance().largestPositionStdDev();
-    double reach = Math.min(MAX_GROUND_REACH_METERS, wheelReach + doubt);
-    return ground
-        .under(pose().getTranslation(), reach)
-        .map(bump -> Math.min(tilt, bump.slopeRadians() + GROUND_SLOPE_MARGIN))
-        .orElse(0.0);
-  }
-
-  /**
-   * One wheel reading, as the estimator takes it: when, how the robot moved since, the yaw then.
-   */
-  private record Step(long timestampNanos, BodyMotion motion, double yaw) {}
-
-  /** A loop's wheel readings as steps, and what turns them. */
-  private record Steps(List<Step> steps, YawSource source) {}
-
-  /**
-   * Every wheel reading since the last loop, as the robot's motion between readings, with the yaw
-   * at each: the gyro's, or while it's lost the backup IMU's (interpolated between its readings),
-   * or with neither, none, and the wheels' turning stands in, which the estimator says drifts. The
-   * estimator is told which, so it keeps each IMU's scale error apart, and turns the step where the
-   * source changes by the wheels, rather than take the two IMUs' different zeros as a turn.
-   */
-  private Steps steps(List<OdometrySample> wheels, ImuReadings gyro, ImuReadings backup) {
-    track(gyroYaws, gyro);
-    track(backupYaws, backup);
-    YawSource source =
-        gyroYaws.hasReadings()
-            ? YawSource.GYRO
-            : backupYaws.hasReadings() ? YawSource.BACKUP : YawSource.WHEELS;
-    YawTrack yaws = source == YawSource.GYRO ? gyroYaws : backupYaws;
-    if (!wheels.isEmpty()) {
-      yawSource = source;
-    }
-    List<Step> steps = new ArrayList<>(wheels.size());
-    for (OdometrySample reading : wheels) {
-      OdometrySample previous = lastReading;
-      BodyMotion motion =
-          previous == null ? new BodyMotion(0, 0, 0, 0) : kinematics.motion(previous, reading);
-      double yaw = source == YawSource.WHEELS ? Double.NaN : yaws.at(reading.timestampNanos());
-      steps.add(new Step(reading.timestampNanos(), motion, yaw));
-      lastReading = reading;
-    }
-    return new Steps(steps, source);
-  }
-
-  /** Takes an IMU's yaw readings this loop, or forgets them all while it's lost. */
-  private static void track(YawTrack yaws, ImuReadings imu) {
-    int count = imu.yawTimesNanos().size();
-    if (!imu.usable() || count == 0) {
-      yaws.clear();
-      return;
-    }
-    long[] times = new long[count];
-    double[] values = new double[count];
-    for (int i = 0; i < count; i++) {
-      times[i] = imu.yawTimesNanos().get(i);
-      values[i] = imu.yawsRadians().get(i);
-    }
-    yaws.update(times, values);
-  }
-
-  /**
-   * Follows the robot over raised terrain (the slope along the way it moves, and its tilt), and
-   * takes a crest it passed as a landmark: the robot was on the bump's crest line then.
-   */
-  private void watchTerrain(ChassisVelocities moving) {
-    boolean still = Math.hypot(moving.vx, moving.vy) < MOVING;
-    double way = Math.atan2(moving.vy, moving.vx);
-    double climb = still ? 0 : TerrainCrossing.climb(pitchRadians(), rollRadians(), way);
-    double fieldWay = still ? Double.NaN : way + pose().getRotation().getRadians();
-    terrain.update(RobotController.getTime(), climb, conditions.tiltRadians(), fieldWay);
-    terrain
+  /** Logs the robot's crossing of raised terrain this loop, and a crest it passed. */
+  private void logTerrain() {
+    service
         .crest()
         .ifPresent(
-            crest -> {
-              Logger.recordOutput(
-                  "Localization/CrestSeconds", Timestamps.toSeconds(crest.timestampNanos()));
-              estimator
-                  .poseAt(crest.timestampNanos())
-                  .flatMap(then -> crestLandmarks.landmark(crest, then.getTranslation()))
-                  .ifPresent(estimator::addLandmark);
-            });
-    Logger.recordOutput("Localization/ClimbDegrees", Math.toDegrees(climb));
-    Logger.recordOutput("Localization/Terrain", terrain.phase().name());
-    Logger.recordOutput("Localization/TerrainCrossings", terrain.crossings());
+            crest ->
+                Logger.recordOutput(
+                    "Localization/CrestSeconds", Timestamps.toSeconds(crest.timestampNanos())));
+    Logger.recordOutput("Localization/ClimbDegrees", Math.toDegrees(service.climbRadians()));
+    Logger.recordOutput("Localization/Terrain", service.terrainPhase().name());
+    Logger.recordOutput("Localization/TerrainCrossings", service.terrainCrossings());
   }
 
   /**
-   * While both report, compares the gyro with the backup IMU: a sustained disagreement means one is
-   * failing, loose, or needs its scale calibrated. It raises the question rather than silently
-   * picking one.
+   * Says when the gyro and the backup IMU disagree for long: one is failing, loose, or needs its
+   * scale calibrated. It raises the question rather than silently picking one.
    */
-  private void checkImus(ImuReadings gyro, ImuReadings backup) {
-    if (gyro.usable() && backup.usable()) {
-      crossCheck.update(RobotController.getTime(), gyro.yawRadians(), backup.yawRadians());
-    } else {
-      crossCheck.reset();
-    }
-    double disagreement = Math.toDegrees(crossCheck.disagreementRadians());
-    if (crossCheck.disagrees()) {
+  private void checkImus() {
+    double disagreement = Math.toDegrees(service.imuDisagreementRadians());
+    if (service.imusDisagree()) {
       imusDisagree.setText(
           String.format(
               Locale.ROOT,
@@ -657,9 +369,9 @@ public final class Localization implements AutoCloseable {
                   + " loose, or needs its scale calibrated",
               Math.abs(disagreement)));
     }
-    imusDisagree.set(crossCheck.disagrees());
+    imusDisagree.set(service.imusDisagree());
     Logger.recordOutput("Localization/ImuDisagreementDegrees", disagreement);
-    Logger.recordOutput("Localization/YawSource", yawSource.name());
+    Logger.recordOutput("Localization/YawSource", service.yawSource().name());
   }
 
   /**
@@ -667,12 +379,12 @@ public final class Localization implements AutoCloseable {
    * estimate in 3D, raised to the ground under it and tilted as the IMU says, and its 99.9% ellipse
    * as a closed outline on the field.
    */
-  private void log() {
+  private void log(LocalizationEstimate estimate) {
     PoseCovariance uncertainty = estimate.covariance();
     LocalizationEstimate.Health health = estimate.health();
     Pose2d pose = estimate.pose();
     Logger.recordOutput("Localization/Pose", pose);
-    Logger.recordOutput("Localization/Pose3d", pose3d(pose));
+    Logger.recordOutput("Localization/Pose3d", service.pose3d(pose));
     Logger.recordOutput("Localization/Ellipse", ellipse(pose, uncertainty));
     Logger.recordOutput("Localization/Mode", estimate.mode().name());
     Logger.recordOutput("Localization/PositionStdDevMeters", uncertainty.largestPositionStdDev());
@@ -685,15 +397,6 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput("Localization/ReadyToScore", notReadyToScore == null);
     Logger.recordOutput(
         "Localization/NotReadyBecause", notReadyToScore == null ? "" : notReadyToScore);
-  }
-
-  /** A pose on the field in 3D: as high as the ground under it, tilted as the IMU says. */
-  Pose3d pose3d(Pose2d pose) {
-    return new Pose3d(
-        pose.getX(),
-        pose.getY(),
-        ground.heightAt(pose.getTranslation()),
-        new Rotation3d(rollRadians(), pitchRadians(), pose.getRotation().getRadians()));
   }
 
   /**

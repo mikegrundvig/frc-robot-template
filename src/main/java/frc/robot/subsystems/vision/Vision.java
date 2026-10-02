@@ -1,15 +1,15 @@
 package frc.robot.subsystems.vision;
 
-import com.michaelgrundvig.frc.localization.AttitudeHistory;
-import com.michaelgrundvig.frc.localization.CameraLocalizer;
 import com.michaelgrundvig.frc.localization.CaptureContext;
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.MountCheck;
 import com.michaelgrundvig.frc.localization.TagAllowlist;
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.Timestamps;
+import com.michaelgrundvig.frc.localization.Verdict;
 import com.michaelgrundvig.frc.localization.VisionConfig;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.VisionPipeline;
 import com.michaelgrundvig.frc.localization.VisionResult;
@@ -21,7 +21,6 @@ import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -33,7 +32,6 @@ import org.wpilib.command3.Command;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Quaternion;
-import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
@@ -43,10 +41,10 @@ import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.Alert;
 
 /**
- * The robot's cameras: reads each one's results, turns them into measurements through the {@link
- * VisionPipeline}, and hands those to the pose estimator. Call {@link #periodic} after the
- * drivetrain's odometry and before the estimator's update, then {@link #record} with the update's
- * decisions.
+ * The robot's cameras: reads each one's results, and hands each image to localization ({@link
+ * LocalizationService#camera}), which solves it through the {@link VisionPipeline} as the robot was
+ * when it was taken. Call {@link #periodic} after the drivetrain's odometry and before
+ * localization's update, then {@link #record} with what the update made of each image.
  *
  * <p>For the pit and the log, per camera: whether it's connected, what became of every image and
  * why, and each tag as the camera sees it (placed through the estimated pose and the camera's
@@ -75,19 +73,10 @@ public final class Vision implements AutoCloseable {
   /** The share of measurements accepted as last shown: NaN before there was one. */
   private double shownAcceptedPercent = Double.NaN;
 
-  /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
-  private static final int YAW_RATE_LOOPS = RobotLoop.loops(0.3);
-
   private final List<Camera> cameras;
-  private final CameraLocalizer localizer;
+  private final LocalizationService localization;
   private final FieldModel field;
-  private final VisionPipeline pipeline;
   private final Supplier<VisionConfig> settings;
-  private final double[] recentYawRates = new double[YAW_RATE_LOOPS];
-  private int yawRateLoop;
-
-  /** Half a second of the robot's attitude, for each image's capture time. */
-  private final AttitudeHistory attitudes = new AttitudeHistory(RobotLoop.loops(0.5));
 
   /** The robot's pose is good enough to calibrate a camera against: within 5 cm. */
   private static final double CALIBRATION_POSE_STD_DEV_METERS = 0.05;
@@ -171,7 +160,7 @@ public final class Vision implements AutoCloseable {
   /**
    * @param cameras each camera's configuration, in the same order as its IO
    * @param ios each camera's door to its vision software
-   * @param localizer where the robot was when each image was taken, and where measurements go
+   * @param localization what solves each image, as the robot was when it was taken, and weighs it
    * @param field the field, whose tags the cameras see
    * @param settings how far images are trusted, as tuned: read once a loop
    * @param alliance the robot's alliance, once the Driver Station or the field says
@@ -179,7 +168,7 @@ public final class Vision implements AutoCloseable {
   public Vision(
       List<CameraConfig> cameras,
       CameraIO[] ios,
-      CameraLocalizer localizer,
+      LocalizationService localization,
       FieldModel field,
       Supplier<VisionConfig> settings,
       Supplier<Optional<Alliance>> alliance) {
@@ -191,9 +180,8 @@ public final class Vision implements AutoCloseable {
       each.add(new Camera(cameras.get(i), ios[i], MOUNT_SIGHTINGS));
     }
     this.cameras = List.copyOf(each);
-    this.localizer = localizer;
+    this.localization = localization;
     this.field = field;
-    pipeline = new VisionPipeline(field);
     this.settings = settings;
     this.alliance = alliance;
     current = settings.get();
@@ -366,30 +354,20 @@ public final class Vision implements AutoCloseable {
   }
 
   /**
-   * Reads every camera and hands the estimator a measurement for each usable image.
+   * Reads every camera and hands localization each usable image. Each is solved with the robot
+   * tilted as it was when the image was taken, since a tag seen from a tilted camera as if level
+   * lands off by the tilt times its distance.
    *
    * @param nowNanos the robot's clock this loop: how late each image arrived is measured to it
-   * @param estimate the estimate as of this loop's odometry: the robot's motion and how sure its
-   *     heading is
-   * @param pitchRadians the robot's pitch now, from the IMU: each image is solved with the robot
-   *     tilted as it was when the image was taken, since a tag seen from a tilted camera as if
-   *     level lands off by the tilt times its distance
-   * @param rollRadians the robot's roll now
    */
-  public void periodic(
-      long nowNanos, LocalizationEstimate estimate, double pitchRadians, double rollRadians) {
-    attitudes.add(estimate.timestampNanos(), pitchRadians, rollRadians);
+  public void periodic(long nowNanos) {
+    LocalizationEstimate estimate = localization.estimate();
     if (estimate.fieldVelocity().getNorm() > STILL_METERS_PER_SECOND
         || Math.abs(estimate.yawRateRadiansPerSecond()) > STILL_RADIANS_PER_SECOND) {
       movingUntil = estimate.timestampNanos();
     }
-    recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());
-    yawRateLoop = (yawRateLoop + 1) % YAW_RATE_LOOPS;
-    double recentYawRate = 0;
-    for (double rate : recentYawRates) {
-      recentYawRate = Math.max(recentYawRate, rate);
-    }
     current = settings.get();
+    localization.vision(current);
     TagAllowlist trusted = onlyTags();
     Logger.recordOutput("Vision/OnlyTags", trusted != null ? trusted.describe() : "");
     if (!leases.isEmpty()) {
@@ -398,8 +376,6 @@ public final class Vision implements AutoCloseable {
     trustingFewerTags.set(!leases.isEmpty());
     Motion motion =
         new Motion(
-            estimate.fieldVelocity().getNorm(),
-            recentYawRate,
             estimate.covariance().largestPositionStdDev(),
             estimate.covariance().headingStdDev(),
             estimate.mode() == LocalizationEstimate.Mode.TRACKING,
@@ -408,7 +384,8 @@ public final class Vision implements AutoCloseable {
     for (Camera camera : cameras) {
       camera.read();
       camera.checkMount(current.mountToleranceMeters());
-      localizer.mountDoubt(camera.name(), camera.mountDoubtMeters(), camera.mountDistanceMeters());
+      localization.mountDoubt(
+          camera.name(), camera.mountDoubtMeters(), camera.mountDistanceMeters());
       int next = 0;
       for (CameraIO.Frame frame : camera.inputs.frames) {
         int first = next;
@@ -427,25 +404,18 @@ public final class Vision implements AutoCloseable {
   }
 
   /**
-   * How the robot moves this loop, and how well its pose is known: what every image is solved with.
+   * How well the robot's pose is known this loop: what each camera's mount is judged against.
    *
-   * @param speed meters per second, over the field
-   * @param recentYawRate the fastest the robot turned lately, radians per second
    * @param positionStdDev how sure the estimate's position is, meters, the least sure way
    * @param headingStdDev how sure the estimate's heading is, radians
    * @param tracking whether recent camera measurements agree with odometry
    * @param poseKnown whether the pose is held well enough to calibrate a camera against
    */
   private record Motion(
-      double speed,
-      double recentYawRate,
-      double positionStdDev,
-      double headingStdDev,
-      boolean tracking,
-      boolean poseKnown) {}
+      double positionStdDev, double headingStdDev, boolean tracking, boolean poseKnown) {}
 
   /**
-   * One image: solved into a measurement for the estimator (unless it's held back), and its tags
+   * One image: solved into a measurement for localization (unless it's held back), and its tags
    * placed on the field, for the camera's residual and any calibration collecting them.
    */
   private void processFrame(
@@ -470,31 +440,24 @@ public final class Vision implements AutoCloseable {
         seen)) {
       return;
     }
-    Pose2d then = localizer.poseAt(frame.timestampNanos()).orElse(null);
-    Rotation2d heading = then != null ? then.getRotation() : null;
-    AttitudeHistory.Attitude tilted = attitudes.at(frame.timestampNanos());
+    Pose2d then = localization.poseAt(frame.timestampNanos()).orElse(null);
+    CaptureContext capture = localization.capture(frame.timestampNanos());
+    TagAllowlist trusted = onlyTags();
+    // A camera being calibrated, or autonomous just started: solved and logged, never applied.
+    Verdict held =
+        camera == calibrating
+            ? Verdict.CALIBRATING
+            : frame.timestampNanos() < holdUntilNanos ? Verdict.HELD : null;
     VisionResult result =
-        pipeline.process(
-            detections,
-            camera.config,
-            new CaptureContext(
-                heading,
-                motion.headingStdDev(),
-                tilted.pitchRadians(),
-                tilted.rollRadians(),
-                motion.speed(),
-                motion.recentYawRate()),
-            current,
-            new VisionPipeline.Trust(camera.mountDoubtMeters(), onlyTags()));
+        held != null
+            ? localization.hold(detections, trusted, held)
+            : localization.camera(detections, trusted);
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.leftOut(seen, result.outcome());
-    } else if (camera == calibrating) {
-      camera.leftOut(seen, "withheld while calibrating this camera: " + result.outcome());
-    } else if (frame.timestampNanos() < holdUntilNanos) {
-      camera.leftOut(seen, "held, autonomous just started: " + result.outcome());
+    } else if (held != null) {
+      camera.leftOut(seen, held.words() + ": " + result.outcome());
     } else {
-      localizer.addVision(measurement);
       camera.outcome(result.outcome());
     }
     HeadingAverage collecting = headings;
@@ -509,7 +472,7 @@ public final class Vision implements AutoCloseable {
               then.getY(),
               field.terrain().heightAt(then.getTranslation()),
               new Rotation3d(
-                  tilted.rollRadians(), tilted.pitchRadians(), then.getRotation().getRadians()));
+                  capture.rollRadians(), capture.pitchRadians(), then.getRotation().getRadians()));
       CameraMountCalibration sightings =
           camera == calibrating
                   && motion.poseKnown()
@@ -523,7 +486,7 @@ public final class Vision implements AutoCloseable {
       // off, the same way each time, which is just what a camera turned on its mount looks like.
       boolean judging =
           motion.tracking()
-              && motion.recentYawRate() <= current.maxYawRateForHeading()
+              && capture.recentYawRateRadiansPerSecond() <= current.maxYawRateForHeading()
               && !isCalibrating()
               && othersHold(camera, frame.timestampNanos());
       recordSightings(camera, robotThen, detections, judging ? motion : null, sightings);
@@ -582,10 +545,10 @@ public final class Vision implements AutoCloseable {
         && estimate.covariance().largestPositionStdDev() <= CALIBRATION_POSE_STD_DEV_METERS;
   }
 
-  /** Counts and logs what the estimator decided about each camera's measurements. */
-  public void record(List<VisionDecision> decisions) {
+  /** Counts and logs what localization's update made of each camera's measurements. */
+  public void record(List<FrameVerdict> frames) {
     for (Camera camera : cameras) {
-      camera.record(decisions, current.mountToleranceMeters(), field::tag);
+      camera.record(frames, current.mountToleranceMeters(), field::tag);
     }
   }
 

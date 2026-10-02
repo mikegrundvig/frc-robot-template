@@ -7,6 +7,21 @@
  * <p>Where to start reading:
  *
  * <ul>
+ *   <li><b>The service:</b> {@link com.michaelgrundvig.frc.localization.LocalizationService} is
+ *       localization as the robot program uses it, one loop at a time: the drivetrain's readings
+ *       ({@link com.michaelgrundvig.frc.localization.DrivetrainReadings}), each camera image, a
+ *       placement, and landmarks in, stamped with their times, and each loop's {@link
+ *       com.michaelgrundvig.frc.localization.LocalizationOutput} out. The loop's time comes in a
+ *       {@link com.michaelgrundvig.frc.localization.LoopContext}. The robot program's {@code
+ *       Localization} only feeds it, logs it, and raises its alerts.
+ *   <li><b>What it says:</b> the estimate; how far each source is trusted ({@link
+ *       com.michaelgrundvig.frc.localization.Integrity}: each camera's {@link
+ *       com.michaelgrundvig.frc.localization.CameraTrust}, the wheels' {@link
+ *       com.michaelgrundvig.frc.localization.WheelTrust}); and what became of each camera image, by
+ *       tag ({@link com.michaelgrundvig.frc.localization.FrameVerdict}, {@link
+ *       com.michaelgrundvig.frc.localization.TagVerdict}). Every refusal is a {@link
+ *       com.michaelgrundvig.frc.localization.Verdict}, whose words the log and the page show, so
+ *       nothing reads a reason back out of a sentence.
  *   <li><b>The estimator:</b> {@link com.michaelgrundvig.frc.localization.PoseEstimator} takes
  *       every measurement and keeps the estimate, tuned by {@link
  *       com.michaelgrundvig.frc.localization.EstimatorConfig}. What it reports is a {@link
@@ -25,12 +40,18 @@
  *   <li><b>IMUs:</b> {@link com.michaelgrundvig.frc.localization.YawTrack} places yaw readings in
  *       time, {@link com.michaelgrundvig.frc.localization.ImuCrossCheck} compares two IMUs, and
  *       {@link com.michaelgrundvig.frc.localization.TerrainCrossing} follows the robot over raised
- *       terrain.
+ *       terrain. The service picks which IMU turns odometry: the gyro, the backup while the gyro is
+ *       lost, or the wheels.
  *   <li><b>Cameras:</b> the raw {@link com.michaelgrundvig.frc.localization.TagDetections} of one
  *       image go through the {@link com.michaelgrundvig.frc.localization.VisionPipeline}, which
  *       solves them (with {@link com.michaelgrundvig.frc.localization.TagSolver}) into a {@link
  *       com.michaelgrundvig.frc.localization.VisionMeasurement}, or says why not; the estimator's
- *       {@link com.michaelgrundvig.frc.localization.VisionDecision} says what became of it. {@link
+ *       {@link com.michaelgrundvig.frc.localization.VisionDecision} says what became of it. The
+ *       service solves each image as the robot was when it was taken ({@link
+ *       com.michaelgrundvig.frc.localization.CaptureContext}), against the field's tag poses. The
+ *       robot program's {@code Vision} still holds a field model of its own, to place each tag it
+ *       saw for its camera checks, until venues (the architecture's migration step 5) make the
+ *       service the one owner of the tags' poses. {@link
  *       com.michaelgrundvig.frc.localization.MountCheck} judges, from where a camera's tags land,
  *       whether it still sits where its configuration says, and how much less to trust it if not; a
  *       {@link com.michaelgrundvig.frc.localization.TagAllowlist} keeps a task to the tags it
@@ -46,7 +67,11 @@
  *   <li><b>Time:</b> every measurement carries the moment it was captured, not when it arrived, in
  *       nanoseconds on the robot's clock ({@code RobotController.getTime()}, WPILib 2027's integer
  *       clock). Vendors report seconds: convert with {@link
- *       com.michaelgrundvig.frc.localization.Timestamps}. Nothing here reads a clock.
+ *       com.michaelgrundvig.frc.localization.Timestamps}. Nothing here reads a clock: the loop's
+ *       own time comes in its {@link com.michaelgrundvig.frc.localization.LoopContext}.
+ *   <li><b>Threads:</b> every call is made on the robot loop's thread, in the service's fixed
+ *       order. The drivetrain's 250 Hz thread only samples and queues; its readings come in once a
+ *       loop.
  *   <li><b>Frames:</b> as written in {@code com.michaelgrundvig.frc.world.field}: poses in the
  *       field frame, the robot's own motion in the robot frame.
  *   <li><b>Uncertainty:</b> a {@link com.michaelgrundvig.frc.localization.PoseCovariance}, in

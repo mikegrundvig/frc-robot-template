@@ -10,14 +10,20 @@ import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
 import com.michaelgrundvig.frc.localization.BodyMotion;
+import com.michaelgrundvig.frc.localization.DrivetrainReadings;
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.FrameVerdict;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.LocalizationService;
+import com.michaelgrundvig.frc.localization.LoopContext;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.PoseEstimator;
 import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import com.michaelgrundvig.frc.localization.TagAllowlist;
+import com.michaelgrundvig.frc.localization.TagVerdict;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.localization.YawSource;
 import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.Bump;
@@ -26,6 +32,10 @@ import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.field.Symmetry;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import frc.robot.Robots;
+import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -44,6 +54,7 @@ import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.tunable.MockTunableBackend;
 import org.wpilib.tunable.TunableRegistry;
 
@@ -116,11 +127,33 @@ class VisionTest {
   }
 
   private final ScriptedCamera io = new ScriptedCamera();
+
+  /**
+   * Odometry, fed by hand below: the robot stands still, its gyro reading 0.3 rad, while the
+   * cameras see it.
+   */
   private final PoseEstimator estimator =
       new PoseEstimator(
           EstimatorConfig.DEFAULTS,
           FIELD::contains,
           new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed"));
+
+  /** The template's robot, with this test's cameras: the front one, and a second beside it. */
+  private final RobotDefinition definition =
+      RobotDefinitionBuilder.builder(Robots.SIM.definition())
+          .cameras(List.of(camera, CameraConfigBuilder.builder(camera).name("second").build()))
+          .build();
+
+  /** Localization around that odometry: it solves each image as the robot was then. */
+  private final LocalizationService localization =
+      new LocalizationService(
+          estimator,
+          new SwerveKinematicsModel(definition.moduleTranslations()),
+          FIELD,
+          FIELD.terrain(),
+          definition,
+          RobotLoop.PERIOD_SECONDS);
+
   private Vision vision;
 
   /** The robot's alliance, as the Driver Station would say it: unknown until set. */
@@ -134,7 +167,12 @@ class VisionTest {
     TunableRegistry.registerBackend("", new MockTunableBackend());
     vision =
         new Vision(
-            List.of(camera), new CameraIO[] {io}, estimator, FIELD, () -> tuned, () -> ourAlliance);
+            List.of(camera),
+            new CameraIO[] {io},
+            localization,
+            FIELD,
+            () -> tuned,
+            () -> ourAlliance);
     for (int k = 0; k <= 10; k++) {
       estimator.addOdometry(T0 + k * 20_000_000L, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
     }
@@ -151,9 +189,43 @@ class VisionTest {
     loop(0, 0);
   }
 
-  private void loop(double pitch, double roll) {
-    vision.periodic(estimator.estimate().timestampNanos(), estimator.estimate(), pitch, roll);
-    vision.record(estimator.update());
+  /**
+   * One loop as the robot runs it, at the newest odometry's time: localization hears the IMU (its
+   * tilt, and no new wheel readings), the cameras hand it their images, and it applies them.
+   *
+   * @return what became of each image's measurement
+   */
+  private List<FrameVerdict> loop(double pitch, double roll) {
+    long now = estimator.estimate().timestampNanos();
+    LoopContext loop = new LoopContext(now, true);
+    localization.drivetrain(tilted(now, pitch, roll), loop);
+    vision.periodic(now);
+    List<FrameVerdict> frames = localization.update().frames();
+    vision.record(frames);
+    return frames;
+  }
+
+  /** The drivetrain's readings in a loop without new wheel readings: the gyro, tilted so. */
+  private static DrivetrainReadings tilted(long now, double pitch, double roll) {
+    return DrivetrainReadings.builder()
+        .wheels(List.of())
+        .gyro(
+            ImuReadings.builder()
+                .reporting(true)
+                .yawRadians(0.3)
+                .yawRateRadiansPerSecond(0)
+                .pitchRadians(pitch)
+                .rollRadians(roll)
+                // Gravity, as an accelerometer tilted so feels it standing still.
+                .forwardAccelerationMetersPerSecSq(-ImuReadings.STANDARD_GRAVITY * Math.sin(pitch))
+                .leftAccelerationMetersPerSecSq(
+                    ImuReadings.STANDARD_GRAVITY * Math.sin(roll) * Math.cos(pitch))
+                .yawTimesNanos(List.of(now))
+                .yawsRadians(List.of(0.3))
+                .build())
+        .backupImu(ImuReadings.NONE)
+        .velocities(new ChassisVelocities())
+        .build();
   }
 
   @Test
@@ -396,7 +468,12 @@ class VisionTest {
     vision.close();
     vision =
         new Vision(
-            List.of(camera), new CameraIO[] {io}, estimator, bumpy, () -> tuned, () -> ourAlliance);
+            List.of(camera),
+            new CameraIO[] {io},
+            localization,
+            bumpy,
+            () -> tuned,
+            () -> ourAlliance);
     io.see(
         T0 + 200_000_000L,
         camera,
@@ -489,8 +566,7 @@ class VisionTest {
     estimator.addOdometry(now, new BodyMotion(0, 0, 0, 0), 0.3, YawSource.GYRO);
     io.see(before + 20_000_000L, camera); // arrived 30 ms later, then waited 350 ms for the loop
 
-    vision.periodic(now, estimator.estimate(), 0, 0);
-    vision.record(estimator.update());
+    loop();
 
     assertThat(vision.camera(0).accepted()).isEqualTo(1);
     assertThat(vision.camera(0).isOutOfStepAlertActive()).isFalse();
@@ -519,10 +595,10 @@ class VisionTest {
 
   /** One loop, and the tags each of its measurements came from. */
   private List<List<Integer>> tagsMeasuredFrom() {
-    vision.periodic(estimator.estimate().timestampNanos(), estimator.estimate(), 0, 0);
-    List<VisionDecision> decisions = estimator.update();
-    vision.record(decisions);
-    return decisions.stream().map(decision -> decision.measurement().tagIds()).toList();
+    return loop(0, 0).stream()
+        .filter(frame -> frame.measured().isPresent())
+        .map(frame -> frame.tags().stream().map(TagVerdict::tag).toList())
+        .toList();
   }
 
   /** The next image of the hub's near face, each a millisecond after the last. */
@@ -733,7 +809,7 @@ class VisionTest {
         new Vision(
             List.of(camera, second),
             new CameraIO[] {io, secondIo},
-            estimator,
+            localization,
             FIELD,
             () -> tuned,
             () -> ourAlliance);

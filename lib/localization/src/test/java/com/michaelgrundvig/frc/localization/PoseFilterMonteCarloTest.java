@@ -15,25 +15,31 @@ import org.wpilib.math.util.MathUtil;
 /**
  * The filter against a world that errs exactly as it claims: every error it considers drawn at the
  * spread it considers, every image's noise at the spread the image claims. Its NEES must then
- * average its number of dimensions, 2 for position and 1 for heading, at every moment: above, the
- * bookkeeping of how the estimate relates to the considered errors is wrong somewhere; below, it
- * claims less than it knows.
+ * average its number of dimensions, 2 for position and 1 for heading, in each part of the run.
+ *
+ * <p>It's a check on the whole, not on each step: a mistake in how the estimate relates to one
+ * considered error can be too small, or average out over the worlds, to move a mean NEES, so this
+ * misses some that {@link PoseFilterReferenceTest}, which checks every step against the textbook,
+ * catches. What it adds is the other side: that the model the filter's arithmetic carries out, the
+ * errors it considers and how each enters a measurement, is one a world can really err by.
  *
  * <p>The world: a ring of tags around the robot, each off its layout, four cameras on mounts turned
- * and shifted a little, two of them seeing the same tags, and a gyro whose scale is off.
+ * and shifted a centimeter or so, two of them seeing the same tags, and a gyro whose scale is off.
+ * The images are quiet beside those, so what repeats is most of what's left.
  */
 class PoseFilterMonteCarloTest {
   private static final double DT = 0.02;
   private static final double SCALE = 1.0 / 360;
   private static final double TURN = Math.toRadians(0.25);
-  private static final double SHIFT = 0.003;
+  private static final double SHIFT = 0.01;
   private static final double HEADING_SHIFT = Math.toRadians(2);
   private static final double TAG = 0.01;
   private static final double SHIFT_METERS = 1.0;
   private static final double SHIFT_RADIANS = Math.toRadians(45);
-  private static final double NOISE = 0.02;
+  private static final double NOISE = 0.005;
   private static final double HEADING_NOISE = Math.toRadians(3);
   private static final double TRANSLATION_PER_RADIAN = 0.02;
+  private static final double TRANSLATION_PER_METER = 0.03;
   private static final double HEADING_PER_RADIAN = Math.toRadians(0.1) / Math.sqrt(2 * Math.PI);
 
   /** Where each camera looks, from the robot's heading: the two at the back see the same tags. */
@@ -55,7 +61,7 @@ class PoseFilterMonteCarloTest {
   /** One world: the truth, what it drew, and the filter following it. */
   private static final class World {
     final SplittableRandom random;
-    final PoseFilter filter = new PoseFilter(CONSIDERED);
+    final PoseFilter filter = new PoseFilter(CONSIDERED, TAG_DISTANCES.length);
     double x;
     double y;
     double heading;
@@ -97,27 +103,35 @@ class PoseFilterMonteCarloTest {
           yaw);
     }
 
-    /** One loop: turning at this rate, then every camera's image, with its heading or without. */
-    void loop(double rate, boolean headings) {
+    /**
+     * One loop: driving straight ahead at this speed, or turning in place at this rate, then every
+     * camera's image, with its heading only while the robot stands.
+     */
+    void loop(double speed, double rate) {
+      double forward = speed * DT;
       double trueTurn = rate * DT;
       double read = (1 + scale) * trueTurn;
-      double positionNoise = TRANSLATION_PER_RADIAN * TRANSLATION_PER_RADIAN * Math.abs(read);
+      double positionNoise =
+          TRANSLATION_PER_RADIAN * TRANSLATION_PER_RADIAN * Math.abs(read)
+              + TRANSLATION_PER_METER * TRANSLATION_PER_METER * Math.abs(forward);
       double headingNoise = HEADING_PER_RADIAN * HEADING_PER_RADIAN * Math.abs(read);
       double turned = read + Math.sqrt(headingNoise) * random.nextGaussian();
-      filter.predict(yaw, turned, 0, 0, positionNoise, headingNoise, YawSource.GYRO);
+      filter.predict(yaw, turned, forward, 0, positionNoise, headingNoise, YawSource.GYRO);
       yaw += turned;
+      // The wheels' travel, along the true heading: off by the odometry's own error.
+      x += Math.cos(heading) * forward + Math.sqrt(positionNoise) * random.nextGaussian();
+      y += Math.sin(heading) * forward + Math.sqrt(positionNoise) * random.nextGaussian();
       heading += trueTurn;
-      x += Math.sqrt(positionNoise) * random.nextGaussian();
-      y += Math.sqrt(positionNoise) * random.nextGaussian();
-      // What a camera's headings share fades as it turns, to a fresh one.
-      double kept = Math.exp(-Math.abs(turned) / SHIFT_RADIANS);
+      // What a camera's headings share fades as it moves and turns, to a fresh one.
+      double kept = Math.exp(-Math.abs(forward) / SHIFT_METERS - Math.abs(turned) / SHIFT_RADIANS);
       for (int c = 0; c < LOOKS.length; c++) {
         headingShift[c] =
             kept * headingShift[c]
                 + Math.sqrt(1 - kept * kept) * HEADING_SHIFT * random.nextGaussian();
       }
+      boolean standing = speed == 0 && rate == 0;
       for (int c = 0; c < LOOKS.length; c++) {
-        image(c, headings);
+        image(c, standing);
       }
     }
 
@@ -212,23 +226,25 @@ class PoseFilterMonteCarloTest {
   }
 
   /**
-   * Standing with headings, two turns in place on the gyro, standing with headings again: each
-   * camera's turn and shift, each tag's placement, and the gyro's scale, as considered.
+   * Standing, driving out a meter and a half and back, standing, two turns in place on the gyro,
+   * and standing again: each camera's turn and shifts, each tag's placement, and the gyro's scale,
+   * as considered.
    */
   @Test
-  void standingTurningAndStandingAgainItsNeesAveragesItsDimensions() {
+  void standingDrivingAndTurningItsNeesAveragesItsDimensions() {
     // Each world's draws last all its loops, so the worlds are the sample: a thousand put the mean
     // NEES within about 0.06 of 2, and 0.05 of 1.
     int worlds = 1000;
-    int[] phases = {150, 300, 150};
-    double[] rates = {0, 4 * Math.PI / (phases[1] * DT), 0};
+    int[] phases = {150, 75, 75, 100, 300, 150};
+    double[] speeds = {0, 1, -1, 0, 0, 0};
+    double[] rates = {0, 0, 0, 0, 4 * Math.PI / (300 * DT), 0};
     double[][] position = new double[phases.length][2];
     double[][] heading = new double[phases.length][2];
     for (int w = 0; w < worlds; w++) {
       World world = new World(w * 31L + 7);
       for (int phase = 0; phase < phases.length; phase++) {
         for (int i = 0; i < phases[phase]; i++) {
-          world.loop(rates[phase], rates[phase] == 0);
+          world.loop(speeds[phase], rates[phase]);
           position[phase][0] += world.positionNees();
           position[phase][1]++;
           heading[phase][0] += world.headingNees();

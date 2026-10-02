@@ -75,15 +75,29 @@ tasks.named("jar") {
 tasks.register("runtimeLibraries") {
     description = "List the agent's runtime libraries, for the coprocessor recipe hash."
     def classpath = configurations.runtimeClasspath
+    // The resolved graph's root, which Gradle's configuration cache can keep (the configuration
+    // itself it can't): every library is reached from it.
+    def root = classpath.incoming.resolutionResult.rootComponent
     def out = layout.buildDirectory.file("coprocessor/runtime-libraries.txt")
     inputs.files(classpath)
     outputs.file(out)
     doLast {
         def libraries = new TreeSet<String>()
-        classpath.incoming.resolutionResult.allComponents.each { component ->
+        def seen = new HashSet<ComponentIdentifier>()
+        def toVisit = new ArrayDeque<ResolvedComponentResult>([root.get()])
+        while (!toVisit.isEmpty()) {
+            def component = toVisit.poll()
+            if (!seen.add(component.id)) {
+                continue
+            }
             def id = component.id
             if (id instanceof ModuleComponentIdentifier) {
                 libraries << "${id.group}:${id.module}:${id.version}".toString()
+            }
+            component.dependencies.each { dependency ->
+                if (dependency instanceof ResolvedDependencyResult) {
+                    toVisit << dependency.selected
+                }
             }
         }
         out.get().asFile.parentFile.mkdirs()

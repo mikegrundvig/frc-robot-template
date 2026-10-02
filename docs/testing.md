@@ -37,6 +37,9 @@ cover it:
 ./gradlew test -Pquick --continuous --tests '*Arm*'
 ```
 
+(In the Windows Command Prompt: `gradlew test -Pquick --continuous --tests *Arm*`, without the
+`./` or the quotes.)
+
 Every save reruns them, in a second or two, because Gradle stays running between saves. What keeps
 it quick:
 
@@ -45,17 +48,20 @@ it quick:
 - **`-Pquick`** leaves out what only `ci` needs: Error Prone and NullAway, formatting, JaCoCo's
   coverage agent and report, the simulation and end-to-end tests unless `--tests` names one, and
   the build's time in `BuildConstants`. Without the time, a program that hasn't changed compiles
-  to the same classes, and Gradle skips tests whose inputs haven't changed: change a word in a
-  comment, and no test reruns.
+  to the same classes, and Gradle skips tests whose inputs haven't changed. So a change to a
+  comment reruns no test, as long as it adds or removes no line (the classes record each line's
+  number) and the repository already had uncommitted changes (the first change after a commit
+  turns `BuildConstants.DIRTY` from 0 to 1, which the tests see).
 - **Gradle's caches** (`gradle.properties`): the configuration cache skips configuring the
   projects after the first build, and the build cache hands a task the outputs of an earlier run
   with the same inputs, such as after undoing an edit.
 
-From saving a file to the result, on a 16-core Linux desktop:
+From saving a file to the result, measured on a 16-core Linux desktop while other builds were
+running on it, so a quiet computer may do better and a laptop worse:
 
 | You save | What runs | Save to result |
 |---|---|---|
-| A word in a comment, in a robot class | The robot program's compile; no test, since its classes come out the same | 1.5 s |
+| A word in a comment, in a robot class, its lines unmoved, with uncommitted changes already | The robot program's compile; no test, since its classes come out the same | 1.5 s |
 | Code in a robot class | The compile, then the tests | 1.8 s |
 | Code in a library (`lib/world`) | The library's compile, then the tests; the robot program compiles again only when the library's public API changed | 1.1 s |
 | Anything, with a one-off `./gradlew test -Pquick --tests ...` instead | Gradle starting and finding its cached configuration, then the above | about 7 s |
@@ -65,9 +71,9 @@ classes an edit affects unless an annotation processor can't say what it generat
 three on the robot program's path can't: AdvantageKit's `@AutoLog` processor, and the processors
 for WPILib's Epilogue and avaje-jsonb that GradleRIO adds. At under a second, it's left as it is.
 
-`ci` takes four to five minutes, most of it the robot program's simulation tests:
-`EstimatorConsistencySimTest` (about 80 s) and `VisionSimTest` (about 40 s). Run it before pushing,
-not on every save.
+`ci` takes four to five minutes on the same computer, most of it the robot program's simulation
+tests: `EstimatorConsistencySimTest` (80 to 105 s) and `VisionSimTest` (40 to 50 s), more as other
+builds share it. Run it before pushing, not on every save.
 
 ### Memory
 

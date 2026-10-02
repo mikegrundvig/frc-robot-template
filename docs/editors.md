@@ -9,7 +9,8 @@ and nothing depends on a particular editor.
 ## The commands
 
 Run these from the repository folder. They work as written in PowerShell, Git Bash, macOS, and
-Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
+Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`), and the single quotes
+around a pattern (`gradlew test -Pquick --continuous --tests *Arm*`).
 
 | Job | Command |
 |---|---|
@@ -39,8 +40,9 @@ When you're done, deploy again without `-PdebugMode`, and never take a debug dep
 Gradle's configuration cache, its build cache, and parallel builds are on for every build
 (`gradle.properties`). A build that runs one of GradleRIO's own tasks (`run`, `deploy`,
 `vendordep`, WPILib's tools) goes without the configuration cache, which they don't support yet,
-and says so in a line: *Configuration cache disabled because incompatible task was found.* That's
-expected; the build is otherwise as it always was.
+and says so in its last line: `Configuration cache disabled because incompatible task was found.`,
+or `incompatible tasks were found.` when there are several, as in a deploy. For `run` it comes
+after the simulator stops. That's expected; the build is otherwise as it always was.
 
 ## IntelliJ IDEA
 

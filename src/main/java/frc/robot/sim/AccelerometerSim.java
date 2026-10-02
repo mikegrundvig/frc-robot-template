@@ -73,7 +73,7 @@ final class AccelerometerSim {
             new Rotation3d(
                 errors.flipped() ? Math.PI : 0, 0, Math.toRadians(errors.turnedDegrees())));
     noise = new Random(seed);
-    upNoise = new Random(~seed);
+    upNoise = new Random(Seeds.upAxis(seed));
     period = errors.sampleHz() > 0 ? 1 / errors.sampleHz() : 0;
     lastVelocity = robot.pointVelocity(place);
     loopStartVelocity = lastVelocity;

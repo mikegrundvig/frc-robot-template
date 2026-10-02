@@ -43,9 +43,6 @@ import org.wpilib.math.geometry.Twist2d;
  * through the frame) is in docs/stand-ins.md.
  */
 public final class DriveSimulation {
-  /** The backup IMU's noise is drawn this far from the gyro's seed: no seed's gyro shares it. */
-  private static final long BACKUP_SEED_OFFSET = 1L << 32;
-
   /** Physics steps, and odometry readings, per robot loop: 250 Hz at a 50 Hz loop. */
   static final int STEPS_PER_LOOP = 5;
 
@@ -146,13 +143,14 @@ public final class DriveSimulation {
       trueRadiusMeters[i] = configuredRadiusMeters * treadScale[i];
     }
     gripLimit = config.wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY;
-    // Each IMU's noise from its own stream of the seed: the backup's isn't the next seed's gyro.
+    // Each IMU's noise from its own stream of the seed (Seeds).
     gyro =
         new GyroIOSim(
             this,
             errors.gyro(),
-            new AccelerometerSim(this, errors.accelerometer(), imus.gyro(), errors.seed() + 1),
-            errors.seed());
+            new AccelerometerSim(
+                this, errors.accelerometer(), imus.gyro(), Seeds.gyroAccelerometer(errors.seed())),
+            Seeds.gyro(errors.seed()));
     backupGyro =
         new GyroIOSim(
             this,
@@ -161,8 +159,8 @@ public final class DriveSimulation {
                 this,
                 errors.backupAccelerometer(),
                 imus.backup(),
-                errors.seed() + BACKUP_SEED_OFFSET + 1),
-            errors.seed() + BACKUP_SEED_OFFSET);
+                Seeds.backupAccelerometer(errors.seed())),
+            Seeds.backupGyro(errors.seed()));
     lastTrue = trueWheels();
   }
 

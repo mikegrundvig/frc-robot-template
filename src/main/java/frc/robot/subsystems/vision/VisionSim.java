@@ -47,6 +47,28 @@ public final class VisionSim implements AutoCloseable {
 
   public static final double CORNER_NOISE_STD_DEV_PIXELS = 0.08;
 
+  /** How much each image's latency varies, as a standard deviation: PhotonVision's example. */
+  public static final double LATENCY_STD_DEV_MILLIS = 5;
+
+  /**
+   * How a simulated camera errs from a perfect one: its tag corners' noise, in pixels, and its
+   * latency's spread.
+   *
+   * @param cornerMeanPixels how far each corner lands from where a perfect camera puts it, on
+   *     average
+   * @param cornerStdDevPixels and that distance's spread
+   * @param latencyStdDevMillis how much each image's latency varies about the configured one
+   */
+  public record Noise(
+      double cornerMeanPixels, double cornerStdDevPixels, double latencyStdDevMillis) {
+    /** PhotonVision's example camera: corners a quarter pixel off, latency varying by 5 ms. */
+    public static final Noise TYPICAL =
+        new Noise(CORNER_NOISE_MEAN_PIXELS, CORNER_NOISE_STD_DEV_PIXELS, LATENCY_STD_DEV_MILLIS);
+
+    /** A perfect camera: every corner where the lens puts it, every image exactly as late. */
+    public static final Noise NONE = new Noise(0, 0, 0);
+  }
+
   /** Each seed's cameras draw their noise from seeds this far apart. */
   private static final long SEEDS_PER_WORLD = 1000;
 
@@ -56,6 +78,7 @@ public final class VisionSim implements AutoCloseable {
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
   private final long seed;
+  private final Noise noise;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
   /** Where the robot really was, loop by loop: what each image is taken from. */
@@ -86,6 +109,16 @@ public final class VisionSim implements AutoCloseable {
    *     1, 2, 3, and on; seed 2's from 1001, 1002, and on.
    */
   public VisionSim(FieldModel field, Map<Integer, Translation3d> tagErrors, long seed) {
+    this(field, tagErrors, seed, Noise.TYPICAL);
+  }
+
+  /**
+   * As above, its cameras erring as {@code noise} says: {@link Noise#NONE} for perfect ones, whose
+   * images a test can check against a pinhole camera's.
+   */
+  public VisionSim(
+      FieldModel field, Map<Integer, Translation3d> tagErrors, long seed, Noise noise) {
+    this.noise = noise;
     layout = field.toField();
     List<FieldTag> real = new ArrayList<>();
     for (FieldTag tag : layout.getTags()) {
@@ -157,6 +190,17 @@ public final class VisionSim implements AutoCloseable {
     return target == null ? Optional.empty() : Optional.of(target.getPose());
   }
 
+  /**
+   * Where a camera's noise starts: seed 1's cameras draw from 1, 2, 3, and on, in the order they're
+   * added; seed 2's from 1001, 1002, and on.
+   *
+   * @param seed the simulated world's
+   * @param camera the camera's place in the order they're added, from 0
+   */
+  public static long cameraSeed(long seed, int camera) {
+    return (seed - 1) * SEEDS_PER_WORLD + camera + 1;
+  }
+
   /** Adds a camera, mounted exactly as configured, and returns the IO the robot code reads. */
   public CameraIO camera(CameraConfig config) {
     return camera(config, Transform3d.ZERO);
@@ -172,9 +216,11 @@ public final class VisionSim implements AutoCloseable {
   public CameraIO camera(CameraConfig config, Transform3d mountError) {
     CameraIOPhotonVision io = new CameraIOPhotonVision(config.name());
     // Seeded, one seed per camera, so a simulated run repeats exactly.
-    long cameraSeed = (seed - 1) * SEEDS_PER_WORLD + cameras.size() + 1;
     PhotonCameraSim simulated =
-        new PhotonCameraSim(io.camera(), properties(config.sensor(), cameraSeed), layout);
+        new PhotonCameraSim(
+            io.camera(),
+            properties(config.sensor(), cameraSeed(seed, cameras.size()), noise),
+            layout);
     // Tags farther than the camera's sight range are not detected: small in the image, and noisy.
     simulated.setMaxSightRange(config.sensor().sightRange().in(Meters));
     Transform3d configured = config.robotToCamera();
@@ -239,15 +285,20 @@ public final class VisionSim implements AutoCloseable {
    * @param seed where the noise starts, so a run repeats exactly
    */
   public static SimCameraProperties properties(CameraConfig.Sensor sensor, long seed) {
+    return properties(sensor, seed, Noise.TYPICAL);
+  }
+
+  /** As above, erring as {@code noise} says. */
+  static SimCameraProperties properties(CameraConfig.Sensor sensor, long seed, Noise noise) {
     return new SimCameraProperties()
         .setCalibration(
             sensor.widthPixels(),
             sensor.heightPixels(),
             Rotation2d.fromDegrees(sensor.diagonalFieldOfView().in(Degrees)))
-        .setCalibError(CORNER_NOISE_MEAN_PIXELS, CORNER_NOISE_STD_DEV_PIXELS)
+        .setCalibError(noise.cornerMeanPixels(), noise.cornerStdDevPixels())
         .setFPS(sensor.frameRate().in(Hertz))
         .setAvgLatencyMs(sensor.latency().in(Milliseconds))
-        .setLatencyStdDevMs(5)
+        .setLatencyStdDevMs(noise.latencyStdDevMillis())
         .setRandomSeed(seed);
   }
 

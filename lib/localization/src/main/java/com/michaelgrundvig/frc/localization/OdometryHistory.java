@@ -25,8 +25,10 @@ final class OdometryHistory {
   private final double[] yAfter;
   private final double[] offsetAfter;
 
-  /** The filter's uncertainty after each step: {@link PoseFilter#UNCERTAINTY} numbers a step. */
+  /** The filter's uncertainty after each step: {@link PoseFilter#uncertainty()} numbers a step. */
   private final double[] uncertaintyAfter;
+
+  private final int uncertainty;
 
   private int oldest;
   private int size;
@@ -34,8 +36,14 @@ final class OdometryHistory {
   /** How the robot moved lately: its velocity over the field, and its turn rate. */
   record Motion(Translation2d velocity, double yawRate) {}
 
-  OdometryHistory(int capacity) {
+  /**
+   * @param capacity how many steps it keeps
+   * @param uncertainty how many numbers the filter's uncertainty takes ({@link
+   *     PoseFilter#uncertainty()})
+   */
+  OdometryHistory(int capacity, int uncertainty) {
     this.capacity = capacity;
+    this.uncertainty = uncertainty;
     time = new long[capacity];
     dx = new double[capacity];
     dy = new double[capacity];
@@ -46,7 +54,7 @@ final class OdometryHistory {
     xAfter = new double[capacity];
     yAfter = new double[capacity];
     offsetAfter = new double[capacity];
-    uncertaintyAfter = new double[capacity * PoseFilter.UNCERTAINTY];
+    uncertaintyAfter = new double[capacity * uncertainty];
   }
 
   /** Starts over with a single step: where odometry starts. */
@@ -150,18 +158,14 @@ final class OdometryHistory {
     xAfter[slot] = filter.x();
     yAfter[slot] = filter.y();
     offsetAfter[slot] = filter.offset();
-    filter.copyUncertaintyTo(uncertaintyAfter, slot * PoseFilter.UNCERTAINTY);
+    filter.copyUncertaintyTo(uncertaintyAfter, slot * uncertainty);
   }
 
   /** Puts the filter back in its state after a step. */
   void restore(int step, PoseFilter filter) {
     int slot = slot(step);
     filter.restore(
-        xAfter[slot],
-        yAfter[slot],
-        offsetAfter[slot],
-        uncertaintyAfter,
-        slot * PoseFilter.UNCERTAINTY);
+        xAfter[slot], yAfter[slot], offsetAfter[slot], uncertaintyAfter, slot * uncertainty);
   }
 
   /** Drops every step but the newest, which becomes the history's start. */

@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.localization;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -17,20 +18,28 @@ import java.util.Set;
  * @param wheels the drivetrain's wheels' trust this loop, from the IMU and the slip check
  * @param protection the bound on the position's error; empty, since nothing computes one yet
  * @param excludedTags the tags left out of every measurement; none yet
+ * @param tagsWithoutPlaces the tags measurements named that the field's layout doesn't have, in the
+ *     order they came: the estimator can't keep their placement apart, so it takes each image's as
+ *     new, and their images together claim more than they know. None, normally
  */
 @OutputRecord
 public record Integrity(
     Map<String, CameraTrust> cameras,
     WheelTrust wheels,
     Optional<ProtectionLevel> protection,
-    Set<Integer> excludedTags) {
+    Set<Integer> excludedTags,
+    Set<Integer> tagsWithoutPlaces) {
   public Integrity {
     cameras = Collections.unmodifiableMap(new LinkedHashMap<>(cameras));
     Objects.requireNonNull(wheels, "the wheels' trust");
     excludedTags = Set.copyOf(excludedTags);
+    tagsWithoutPlaces = Collections.unmodifiableSet(new LinkedHashSet<>(tagsWithoutPlaces));
   }
 
-  /** Builds one by name: no cameras, no protection level and no tags excluded, unless said. */
+  /**
+   * Builds one by name: no cameras, no protection level, no tags excluded and every tag kept apart,
+   * unless said.
+   */
   public static IntegrityBuilder builder() {
     return IntegrityBuilder.builder();
   }

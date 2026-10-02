@@ -20,18 +20,15 @@ import org.wpilib.math.util.MathUtil;
  * covariance, and how the estimate relates to each considered error), so random sequences of every
  * operation it has must leave both with the same estimate and the same covariance, and the joint
  * covariance must stay positive semidefinite.
- *
- * <p>The sequences see only the first {@link #TAGS} of the filter's tags, so the reference keeps
- * only theirs, and the filter's relations to the rest must stay none.
  */
 class PoseFilterReferenceTest {
   private static final int PER_CAMERA = 4;
   private static final int PER_TAG = 2;
 
-  /** The tags the sequences see, of the filter's {@link PoseFilter#MAX_TAGS}. */
+  /** The field's tags, each of whose placement the filter keeps apart. */
   private static final int TAGS = 4;
 
-  /** The considered errors the reference keeps: the IMUs', every camera's, and the tags' seen. */
+  /** The considered errors: the IMUs' scales, every camera's, and every tag's. */
   private static final int C = 2 + PER_CAMERA * PoseFilter.MAX_CAMERAS + PER_TAG * TAGS;
 
   private static final int N = 3 + C;
@@ -275,7 +272,7 @@ class PoseFilterReferenceTest {
             multiply(multiply(gain, r), transpose(gain)));
   }
 
-  private final double[] kept = new double[PoseFilter.UNCERTAINTY];
+  private final double[] kept = new double[9 + 3 * C + 2 * PoseFilter.MAX_CAMERAS];
 
   /** How far the filter is from the reference, relative to the estimate's own variances. */
   private double difference(PoseFilter filter) {
@@ -289,10 +286,8 @@ class PoseFilterReferenceTest {
       for (int j = 0; j < 3; j++) {
         worst = Math.max(worst, Math.abs(kept[i * 3 + j] - p[i][j]) / scale);
       }
-      for (int k = 0; k < PoseFilter.CONSIDERED; k++) {
-        double reference = k < C ? p[i][3 + k] : 0; // the tags never seen: related to nothing
-        worst =
-            Math.max(worst, Math.abs(kept[9 + i * PoseFilter.CONSIDERED + k] - reference) / scale);
+      for (int k = 0; k < C; k++) {
+        worst = Math.max(worst, Math.abs(kept[9 + i * C + k] - p[i][3 + k]) / scale);
       }
     }
     double moved =
@@ -341,11 +336,10 @@ class PoseFilterReferenceTest {
     for (int i = 0; i < 3; i++) {
       for (int j = 0; j < 3; j++) {
         double value = kept[i * 3 + j];
-        for (int k = 0; k < PoseFilter.CONSIDERED; k++) {
-          double variance = k < C ? variances.applyAsDouble(k) : TAG * TAG;
+        for (int k = 0; k < C; k++) {
+          double variance = variances.applyAsDouble(k);
           if (variance > 0) {
-            int c = PoseFilter.CONSIDERED;
-            value -= kept[9 + i * c + k] * kept[9 + j * c + k] / variance;
+            value -= kept[9 + i * C + k] * kept[9 + j * C + k] / variance;
           }
         }
         schur[i][j] = value;
@@ -366,7 +360,9 @@ class PoseFilterReferenceTest {
     int operations = 0;
     for (int sequence = 0; sequence < 60; sequence++) {
       SplittableRandom random = new SplittableRandom(sequence * 7919L + 1);
-      PoseFilter filter = new PoseFilter(considered, fixesTurnHeading);
+      PoseFilter filter = new PoseFilter(considered, TAGS, fixesTurnHeading);
+      assertThat(filter.considered()).isEqualTo(C);
+      assertThat(filter.uncertainty()).isEqualTo(kept.length);
       double start = logUniform(random, 0.01, 100);
       double startHeading = logUniform(random, 1e-3, 3);
       filter.set(
@@ -485,7 +481,7 @@ class PoseFilterReferenceTest {
           setPosition(positionVariance, 0, positionVariance);
         } else {
           // What the history keeps, it gives back exactly.
-          double[] stored = new double[PoseFilter.UNCERTAINTY];
+          double[] stored = new double[filter.uncertainty()];
           filter.copyUncertaintyTo(stored, 0);
           filter.restore(filter.x(), filter.y(), filter.offset(), stored, 0);
         }
@@ -512,7 +508,8 @@ class PoseFilterReferenceTest {
     PoseFilter filter =
         new PoseFilter(
             new PoseFilter.Considered(
-                SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, TAG, SHIFT_METERS, SHIFT_RADIANS));
+                SCALE, BACKUP_SCALE, TURN, SHIFT, HEADING_SHIFT, TAG, SHIFT_METERS, SHIFT_RADIANS),
+            TAGS);
     filter.set(new PoseReset(0, Pose2d.ZERO, PoseCovariance.fromStdDevs(1, 1, 0.1), "x"), 0);
     double yaw = 0;
     double worstEigenvalue = Double.POSITIVE_INFINITY;

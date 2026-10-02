@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.localization;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -9,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Predicate;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
@@ -90,8 +92,11 @@ public final class PoseEstimator {
   /** The cameras that came after every place was taken, in the order they came. */
   private final Set<String> camerasWithoutPlaces = new LinkedHashSet<>();
 
-  /** Each tag's place among the errors the filter keeps apart, by ID, as tags are first seen. */
+  /** Each of the field's tags' place among the errors the filter keeps apart, by ID. */
   private final Map<Integer, Integer> tagSlots = new HashMap<>();
+
+  /** The tags measurements named that the field doesn't have, in the order they came. */
+  private final Set<Integer> tagsWithoutPlaces = new LinkedHashSet<>();
 
   /** A measurement's tags' places, for the filter: room for this many, grown as needed. */
   private int[] measuredTags = new int[8];
@@ -149,11 +154,17 @@ public final class PoseEstimator {
   /**
    * @param config how to weigh the sources
    * @param onField whether a point is on the field: measurements off it are rejected
+   * @param tags the field's tags: each one's placement is kept apart, the same for every camera
+   *     that sees it and every time it's seen. A measurement from any other counts its placement as
+   *     new in each image ({@link #tagsWithoutPlaces})
    * @param initial where the robot is at the start, and how sure that is; for a placeholder (the
    *     robot not placed yet) give a large uncertainty, and the first camera measurement wins
    */
   public PoseEstimator(
-      EstimatorConfig config, Predicate<Translation2d> onField, PoseReset initial) {
+      EstimatorConfig config,
+      Predicate<Translation2d> onField,
+      Collection<Integer> tags,
+      PoseReset initial) {
     this.config = config;
     this.onField = onField;
     this.initial = initial;
@@ -175,9 +186,9 @@ public final class PoseEstimator {
     collisionWindowNanos = Timestamps.fromSeconds(config.collisionWindowSeconds());
     handlingVariancePerSecond = square(config.handlingStdDevPerSqrtSecond());
     disagreementWindowNanos = Timestamps.fromSeconds(config.disagreementWindowSeconds());
-    // Room for the history at up to 1 kHz of odometry.
-    history =
-        new OdometryHistory(Math.max(16, (int) Math.ceil(config.historySeconds() * 1000) + 1));
+    for (int id : new TreeSet<>(tags)) {
+      tagSlots.put(id, tagSlots.size());
+    }
     recovery = new Recovery(config);
     filter =
         new PoseFilter(
@@ -190,7 +201,13 @@ public final class PoseEstimator {
                 config.tagPlacementStdDevMeters(),
                 config.cameraShiftCorrelationMeters(),
                 Math.toRadians(config.cameraShiftCorrelationDegrees())),
+            tagSlots.size(),
             config.headingCorrection() == EstimatorConfig.HeadingCorrection.EVERY_FIX);
+    // Room for the history at up to 1 kHz of odometry.
+    history =
+        new OdometryHistory(
+            Math.max(16, (int) Math.ceil(config.historySeconds() * 1000) + 1),
+            filter.uncertainty());
     filter.set(initial, yaw);
   }
 
@@ -332,6 +349,15 @@ public final class PoseEstimator {
    */
   public List<String> camerasWithoutPlaces() {
     return List.copyOf(camerasWithoutPlaces);
+  }
+
+  /**
+   * The tags measurements have named that aren't the field's, in the order each first came: their
+   * placement can't be kept apart, so each image's is taken as new, and their images, averaged,
+   * grow surer than they should. Empty unless a measurement comes from a tag off the layout.
+   */
+  public List<Integer> tagsWithoutPlaces() {
+    return List.copyOf(tagsWithoutPlaces);
   }
 
   /**
@@ -798,20 +824,16 @@ public final class PoseEstimator {
   }
 
   /**
-   * A tag's place among the errors the filter keeps apart, given as tags are first seen; -1 once
-   * there are more tags than places, and a tag without one counts its placement as new in each
-   * image.
+   * A tag's place among the errors the filter keeps apart: every field tag has one; -1 for a tag
+   * the field doesn't have, which counts its placement as new in each image, and is reported.
    */
   private int tagSlot(int id) {
     Integer slot = tagSlots.get(id);
     if (slot != null) {
       return slot;
     }
-    if (tagSlots.size() >= PoseFilter.MAX_TAGS) {
-      return -1;
-    }
-    tagSlots.put(id, tagSlots.size());
-    return tagSlots.size() - 1;
+    tagsWithoutPlaces.add(id);
+    return -1;
   }
 
   /** Moves the current state through part of step j: from fraction f0 of it to f1. */

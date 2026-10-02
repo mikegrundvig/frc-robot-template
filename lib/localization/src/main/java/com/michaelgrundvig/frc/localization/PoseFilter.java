@@ -54,18 +54,13 @@ import org.wpilib.math.util.MathUtil;
  * several cameras, each with its own, together do better, but no better than the tags they share.
  *
  * <p>The covariance is row-major: x, y, offset. How the estimate relates to the considered errors
- * is a 3 by {@link #CONSIDERED} block, row-major too: their own variances stay fixed, and two
- * considered errors stay unrelated, since nothing ever corrects them.
+ * is a 3 by {@link #considered()} block, row-major too: their own variances stay fixed, and two
+ * considered errors stay unrelated, since nothing ever corrects them. How many there are depends on
+ * how many tags the field has.
  */
 final class PoseFilter {
   /** The most cameras whose errors the filter keeps apart; any more are treated as independent. */
   static final int MAX_CAMERAS = 8;
-
-  /**
-   * The most tags whose placement the filter keeps apart: a field's worth (2026's has 32); any more
-   * are taken as new in each image.
-   */
-  static final int MAX_TAGS = 32;
 
   /**
    * How many errors the filter considers for each camera: its turn, its shift forward and left, and
@@ -85,13 +80,10 @@ final class PoseFilter {
    * How many errors the filter considers: the gyro's scale and the backup IMU's, then each camera's
    * turn and shifts, then each tag's placement.
    */
-  static final int CONSIDERED = 2 + PER_CAMERA * MAX_CAMERAS + PER_TAG * MAX_TAGS;
+  private final int considered;
 
-  /**
-   * How many numbers the filter's uncertainty takes to store: the covariance, its relations, and
-   * each camera's turn's and shift's variances.
-   */
-  static final int UNCERTAINTY = 9 + 3 * CONSIDERED + 2 * MAX_CAMERAS;
+  /** How many tags' placement it keeps apart. */
+  private final int tags;
 
   private static final int SCALE = 0;
   private static final int BACKUP_SCALE = 1;
@@ -137,8 +129,8 @@ final class PoseFilter {
   private double offset;
   private final double[] covariance = new double[9];
 
-  /** How each of x, y, and the offset relates to each considered error: 3 by CONSIDERED. */
-  private final double[] related = new double[3 * CONSIDERED];
+  /** How each of x, y, and the offset relates to each considered error: 3 by considered. */
+  private final double[] related;
 
   /**
    * Each camera's turn's variance, and its shift's along each axis: as considered, unless a doubt
@@ -161,7 +153,7 @@ final class PoseFilter {
   private int[] measuredColumn = new int[measuredCapacity];
   private double[] measuredVariance = new double[measuredCapacity];
   private double[] hMeasured = new double[3 * measuredCapacity];
-  private final double[] hRelated = new double[3 * CONSIDERED]; // H times the relations: rows x C
+  private final double[] hRelated; // H times the relations: rows x considered
   private final double[] ph3 = new double[9]; // P H^T: 3 x rows
   private final double[] s3 = new double[9]; // S = H P H^T + R: rows x rows
   private final double[] sInverse3 = new double[9];
@@ -171,25 +163,36 @@ final class PoseFilter {
   /** How many camera innovations the filter has worked out: the latest's stamp. */
   private long innovations;
 
-  PoseFilter(Considered considered) {
-    this(considered, false);
+  /**
+   * @param tags how many tags' placement to keep apart: the field's, each given a place from 0
+   */
+  PoseFilter(Considered sizes, int tags) {
+    this(sizes, tags, false);
   }
 
   /**
+   * @param tags how many tags' placement to keep apart: the field's, each given a place from 0
    * @param fixesTurnHeading whether a position fix also corrects the heading, through its lever and
    *     how the position's error has come to relate to the heading's: a full Kalman update. False
    *     leaves the heading to measurements with a heading of their own: the gyro owns it.
    */
-  PoseFilter(Considered considered, boolean fixesTurnHeading) {
+  PoseFilter(Considered sizes, int tags, boolean fixesTurnHeading) {
+    if (tags < 0) {
+      throw new IllegalArgumentException("how many tags to keep apart: " + tags);
+    }
+    this.tags = tags;
+    considered = 2 + PER_CAMERA * MAX_CAMERAS + PER_TAG * tags;
+    related = new double[3 * considered];
+    hRelated = new double[3 * considered];
     this.fixesTurnHeading = fixesTurnHeading;
-    scaleVariance = square(considered.gyroScaleStdDev());
-    backupScaleVariance = square(considered.backupScaleStdDev());
-    turnVariance = square(considered.cameraTurnStdDevRadians());
-    shiftVariance = square(considered.cameraShiftStdDevMeters());
-    headingShiftVariance = square(considered.cameraShiftStdDevRadians());
-    tagVariance = square(considered.tagPlacementStdDevMeters());
-    shiftMeters = considered.shiftCorrelationMeters();
-    shiftRadians = considered.shiftCorrelationRadians();
+    scaleVariance = square(sizes.gyroScaleStdDev());
+    backupScaleVariance = square(sizes.backupScaleStdDev());
+    turnVariance = square(sizes.cameraTurnStdDevRadians());
+    shiftVariance = square(sizes.cameraShiftStdDevMeters());
+    headingShiftVariance = square(sizes.cameraShiftStdDevRadians());
+    tagVariance = square(sizes.tagPlacementStdDevMeters());
+    shiftMeters = sizes.shiftCorrelationMeters();
+    shiftRadians = sizes.shiftCorrelationRadians();
     Arrays.fill(cameraTurnVariance, turnVariance);
     Arrays.fill(cameraShiftVariance, shiftVariance);
   }
@@ -212,7 +215,7 @@ final class PoseFilter {
     if (to < from) {
       double factor = from > 0 ? Math.sqrt(to / from) : 0;
       for (int row = 0; row < 3; row++) {
-        related[row * CONSIDERED + column] *= factor;
+        related[row * considered + column] *= factor;
       }
     }
   }
@@ -368,10 +371,10 @@ final class PoseFilter {
     covariance[5] += b * p22;
     covariance[7] = covariance[5];
     // The same F for how the position relates to the considered errors.
-    for (int k = 0; k < CONSIDERED; k++) {
-      double withHeading = related[2 * CONSIDERED + k];
+    for (int k = 0; k < considered; k++) {
+      double withHeading = related[2 * considered + k];
       related[k] += a * withHeading;
-      related[CONSIDERED + k] += b * withHeading;
+      related[considered + k] += b * withHeading;
     }
 
     // An IMU reading its turns a little large or small adds its scale error times the turn to the
@@ -379,12 +382,12 @@ final class PoseFilter {
     int scale = turnedBy == YawSource.GYRO ? SCALE : BACKUP_SCALE;
     double variance = turnedBy == YawSource.GYRO ? scaleVariance : backupScaleVariance;
     if (turnedBy != YawSource.WHEELS && variance > 0) {
-      covariance[8] += 2 * turn * related[2 * CONSIDERED + scale] + turn * turn * variance;
+      covariance[8] += 2 * turn * related[2 * considered + scale] + turn * turn * variance;
       covariance[2] += turn * related[scale];
       covariance[6] = covariance[2];
-      covariance[5] += turn * related[CONSIDERED + scale];
+      covariance[5] += turn * related[considered + scale];
       covariance[7] = covariance[5];
-      related[2 * CONSIDERED + scale] += turn * variance;
+      related[2 * considered + scale] += turn * variance;
     }
 
     // As the robot moves and turns, each camera sees other tags, or the same ones from elsewhere,
@@ -394,7 +397,7 @@ final class PoseFilter {
     if (kept < 1) {
       for (int slot = 0; slot < MAX_CAMERAS; slot++) {
         for (int row = 0; row < 3; row++) {
-          related[row * CONSIDERED + turnColumn(slot) + HEADINGS_SHIFT] *= kept;
+          related[row * considered + turnColumn(slot) + HEADINGS_SHIFT] *= kept;
         }
       }
     }
@@ -412,9 +415,9 @@ final class PoseFilter {
    * @param camera which camera, from 0 to {@link #MAX_CAMERAS} - 1, whose turn and shifts it shares
    *     with the camera's other images; -1 for one without a place, whose turn and shifts are taken
    *     as new in each image
-   * @param tags each of its tags' place, from 0 to {@link #MAX_TAGS} - 1, in the order of its
-   *     {@link VisionMeasurement#tagIds}: the placement it shares with every image of the tag; -1
-   *     for one without a place, whose placement is taken as new in each image
+   * @param tags each of its tags' place, from 0 to {@link #tags()} - 1, in the order of its {@link
+   *     VisionMeasurement#tagIds}: the placement it shares with every image of the tag; -1 for one
+   *     without a place, whose placement is taken as new in each image
    * @return null if its uncertainty and the estimate's together are degenerate
    */
   @Nullable Innovation innovation(
@@ -452,7 +455,7 @@ final class PoseFilter {
     List<Double> shares = measurement.tagShares();
     for (int i = 0; i < shares.size(); i++) {
       double share = shares.get(i);
-      int tag = i < tags.length && tags[i] >= 0 ? tagColumn(tags[i]) : -1;
+      int tag = i < tags.length && tags[i] >= 0 && tags[i] < this.tags ? tagColumn(tags[i]) : -1;
       measure(tag, tagVariance, -share, 0, 0);
       measure(tag >= 0 ? tag + 1 : -1, tagVariance, 0, -share, 0);
     }
@@ -479,7 +482,7 @@ final class PoseFilter {
         for (int m = 0; m < measured; m++) {
           int k = measuredColumn[m];
           if (k >= 0) {
-            sum += related[i * CONSIDERED + k] * hMeasured[j * measuredCapacity + m];
+            sum += related[i * considered + k] * hMeasured[j * measuredCapacity + m];
           }
         }
         ph3[i * 3 + j] = sum;
@@ -499,8 +502,8 @@ final class PoseFilter {
             if (k >= 0) {
               own +=
                   related[k] * h3[j * 3]
-                      + related[CONSIDERED + k] * h3[j * 3 + 1]
-                      + related[2 * CONSIDERED + k] * h3[j * 3 + 2];
+                      + related[considered + k] * h3[j * 3 + 1]
+                      + related[2 * considered + k] * h3[j * 3 + 2];
             }
             sum += hm * own;
           }
@@ -643,26 +646,26 @@ final class PoseFilter {
     // measurement related to it: C's considered rows, H times P's considered columns, and for an
     // error it shares, its own variance through what it measures of it.
     for (int r = 0; r < rows; r++) {
-      for (int k = 0; k < CONSIDERED; k++) {
-        hRelated[r * CONSIDERED + k] =
+      for (int k = 0; k < considered; k++) {
+        hRelated[r * considered + k] =
             related[k] * h3[r * 3]
-                + related[CONSIDERED + k] * h3[r * 3 + 1]
-                + related[2 * CONSIDERED + k] * h3[r * 3 + 2];
+                + related[considered + k] * h3[r * 3 + 1]
+                + related[2 * considered + k] * h3[r * 3 + 2];
       }
       for (int m = 0; m < measured; m++) {
         int k = measuredColumn[m];
         if (k >= 0) {
-          hRelated[r * CONSIDERED + k] += measuredVariance[m] * hMeasured[r * measuredCapacity + m];
+          hRelated[r * considered + k] += measuredVariance[m] * hMeasured[r * measuredCapacity + m];
         }
       }
     }
     for (int i = 0; i < 3; i++) {
-      for (int k = 0; k < CONSIDERED; k++) {
+      for (int k = 0; k < considered; k++) {
         double change = 0;
         for (int r = 0; r < rows; r++) {
-          change += gain[i * 3 + r] * hRelated[r * CONSIDERED + k];
+          change += gain[i * 3 + r] * hRelated[r * considered + k];
         }
-        related[i * CONSIDERED + k] -= change;
+        related[i * considered + k] -= change;
       }
     }
   }
@@ -702,11 +705,11 @@ final class PoseFilter {
       }
     }
     symmetrize();
-    for (int c = 0; c < CONSIDERED; c++) {
+    for (int c = 0; c < considered; c++) {
       double across =
-          innovation.acrossX() * related[c] + innovation.acrossY() * related[CONSIDERED + c];
+          innovation.acrossX() * related[c] + innovation.acrossY() * related[considered + c];
       for (int row = 0; row < 3; row++) {
-        related[row * CONSIDERED + c] -= k[row] * across;
+        related[row * considered + c] -= k[row] * across;
       }
     }
   }
@@ -728,7 +731,25 @@ final class PoseFilter {
     return new PoseCovariance(xx, xy, yy, Math.max(0, covariance[8]));
   }
 
-  /** Copies the uncertainty, {@link #UNCERTAINTY} numbers, for the history to keep. */
+  /** How many errors it considers: the IMUs' scales, each camera's four, and each tag's two. */
+  int considered() {
+    return considered;
+  }
+
+  /** How many tags' placement it keeps apart. */
+  int tags() {
+    return tags;
+  }
+
+  /**
+   * How many numbers its uncertainty takes to store: the covariance, its relations, and each
+   * camera's turn's and shift's variances.
+   */
+  int uncertainty() {
+    return 9 + 3 * considered + 2 * MAX_CAMERAS;
+  }
+
+  /** Copies the uncertainty, {@link #uncertainty()} numbers, for the history to keep. */
   void copyUncertaintyTo(double[] into, int at) {
     System.arraycopy(covariance, 0, into, at, 9);
     System.arraycopy(related, 0, into, at + 9, related.length);
@@ -779,7 +800,7 @@ final class PoseFilter {
 
   /** One of x, y, or the offset, unrelated to every considered error: it was just set afresh. */
   private void unrelate(int row) {
-    Arrays.fill(related, row * CONSIDERED, (row + 1) * CONSIDERED, 0);
+    Arrays.fill(related, row * considered, (row + 1) * considered, 0);
   }
 
   private void symmetrize() {

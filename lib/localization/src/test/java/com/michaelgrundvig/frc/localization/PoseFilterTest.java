@@ -20,6 +20,9 @@ class PoseFilterTest {
   private static final double SHIFT = 0.003;
   private static final double TAG = 0.01;
 
+  /** How many tags the field has: each kept apart, in its place. */
+  private static final int TAGS = 32;
+
   private static final double HEADING_SHIFT = Math.toRadians(1);
 
   /**
@@ -36,7 +39,7 @@ class PoseFilterTest {
 
   private static PoseFilter placed(
       PoseFilter.Considered considered, double meters, double radians) {
-    PoseFilter filter = new PoseFilter(considered);
+    PoseFilter filter = new PoseFilter(considered, TAGS);
     filter.set(
         new PoseReset(0, Pose2d.ZERO, PoseCovariance.fromStdDevs(meters, meters, radians), "x"), 0);
     return filter;
@@ -80,7 +83,7 @@ class PoseFilterTest {
 
   /** Each tag's place among the filter's: its number, within the places there are. */
   private static int[] places(VisionMeasurement measurement) {
-    return measurement.tagIds().stream().mapToInt(id -> id % PoseFilter.MAX_TAGS).toArray();
+    return measurement.tagIds().stream().mapToInt(id -> id % TAGS).toArray();
   }
 
   private static void apply(PoseFilter filter, VisionMeasurement measurement, int camera) {
@@ -339,9 +342,9 @@ class PoseFilterTest {
     PoseFilter filter = placed(CONSIDERED, 0.1, 0.02);
     filter.predict(0, 1, 1, 0.5, 0.001, 0.0001, YawSource.GYRO);
     apply(filter, fix(new Translation2d(1, 0.6), new Translation2d(2, 1), 0.05), 3);
-    double[] kept = new double[PoseFilter.UNCERTAINTY];
+    double[] kept = new double[filter.uncertainty()];
     filter.copyUncertaintyTo(kept, 0);
-    PoseFilter other = new PoseFilter(CONSIDERED);
+    PoseFilter other = new PoseFilter(CONSIDERED, TAGS);
 
     other.restore(filter.x(), filter.y(), filter.offset(), kept, 0);
     apply(filter, fix(new Translation2d(1.1, 0.5), new Translation2d(2, 1), 0.05), 3);

@@ -5,11 +5,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 
-import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.simulation.KnownGap;
+import com.michaelgrundvig.frc.simulation.WheelTruth;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import frc.robot.RobotSim;
+import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.subsystems.drive.ModuleIO;
 import java.util.List;
@@ -235,34 +236,93 @@ class DynamicsTruthSimTest {
   }
 
   /**
-   * A launch past the tread's grip (120 A against μ 1.2): the motors' work is the robot's kinetic
-   * energy plus what the slipping wheels lose to friction, μ N times how far each slips, within 2%.
-   * Today each wheel carries its share of the robot's inertia while it slips, so the motors' work
-   * goes into a robot the floor holds back, and a third of it goes nowhere.
+   * A launch past the tread's grip (120 A against μ 1.2): over 0.1 s, the motors' work is what the
+   * robot's kinetic energy gained plus what the slipping wheels lost to friction, within 2%. Each
+   * wheel's work is Kt I G through its turn, at the current the physics reports for it; each one's
+   * friction is μ times its own load ({@code loadNewtons}) through how far its tread slid over the
+   * floor; both summed loop by loop, each loop at the mean of its two ends' current and load.
+   *
+   * <p>Neither is the same at every wheel. Weight transfer at this push leaves each front wheel
+   * about 65 N and loads each rear one past what its motor pushes (309 N), so physics says the rear
+   * wheels grip, at their limit, and the front ones slip: their motors spin them up past the robot
+   * within milliseconds (their own inertia against 78 N of friction), into their voltage limit,
+   * where their current falls to what holds that friction, about 30 A. The window opens at 0.04 s,
+   * once the front wheels have settled (in about 2 ms each time constant), so a loop's two ends
+   * stand for all of it.
+   *
+   * <p>Today every wheel slips alike, carrying a quarter of the robot's weight, and its share of
+   * the robot's inertia while it slips, so its motor's work goes into a robot the floor holds back,
+   * and a third of it goes nowhere.
    */
   @Test
   @KnownGap("a slipping wheel still carries its share of the robot's inertia")
   void aSlippingLaunchSpendsTheMotorsWorkOnEnergyAndFriction() {
     TruthRig rig = new TruthRig();
-    double[] start = wheelTurns(rig);
     rig.limitDrives(120);
     rig.driveVolts(12);
-    rig.run(0.14);
+    rig.run(0.04);
 
-    double work = motorWork(rig, start, rig.force(120) * rig.wheelRadius());
-    double r = rig.wheelRadius();
-    double[] end = wheelTurns(rig);
-    double traveled = rig.simulation.truePose().getX();
-    double load = rig.mass() * ImuReadings.STANDARD_GRAVITY / 4;
+    double before = kineticEnergy(rig);
+    double torquePerAmp = rig.driveMotor().Kt * rig.gearing();
+    double work = 0;
     double friction = 0;
-    for (int i = 0; i < 4; i++) {
-      friction += 1.2 * load * ((end[i] - start[i]) * r - traveled);
+    double slid = 0;
+    WheelState[] last = wheelStates(rig);
+    for (int loop = 0; loop < 5; loop++) {
+      rig.loops(1);
+      WheelState[] now = wheelStates(rig);
+      for (int i = 0; i < 4; i++) {
+        double turned = now[i].turnRadians() - last[i].turnRadians();
+        work += torquePerAmp * (last[i].amps() + now[i].amps()) / 2 * turned;
+        // The tread's travel along the way the wheel points, less the ground's under it.
+        Translation2d rolled = new Translation2d(turned * rig.wheelRadius(), now[i].heading());
+        double slide = rolled.minus(now[i].contact().minus(last[i].contact())).getNorm();
+        friction += MU * (last[i].loadNewtons() + now[i].loadNewtons()) / 2 * slide;
+        slid += slide;
+      }
+      last = now;
     }
-    double spent = kineticEnergy(rig) + friction;
+    double spent = kineticEnergy(rig) - before + friction;
 
-    assertThat(friction).as("the wheels slipped").isPositive();
+    assertThat(slid).as("the wheels slipped").isGreaterThan(0.01);
     stillOpen(
-        "kinetic energy and friction over the motors' work", spent / work, 1, 0.02, 0.6553, 0.002);
+        "kinetic energy gained and friction over the motors' work",
+        spent / work,
+        1,
+        0.02,
+        0.6888,
+        0.002);
+  }
+
+  /** The template's tread: 1.2. */
+  private static final double MU =
+      Robots.SIM.definition().drivetrain().modules().wheelCoefficientOfFriction();
+
+  /**
+   * One wheel as the physics has it now: its turn, its drive's current, its load, where its tread
+   * meets the floor, and which way it points on the field.
+   */
+  private record WheelState(
+      double turnRadians,
+      double amps,
+      double loadNewtons,
+      Translation2d contact,
+      Rotation2d heading) {}
+
+  private static WheelState[] wheelStates(TruthRig rig) {
+    WheelState[] states = new WheelState[4];
+    Rotation2d robot = rig.simulation.truePose().getRotation();
+    for (int i = 0; i < 4; i++) {
+      WheelTruth wheel = rig.simulation.physics().wheel(i);
+      states[i] =
+          new WheelState(
+              wheel.rotationRadians(),
+              wheel.driveCurrentAmps(),
+              wheel.loadNewtons(),
+              wheel.contactPoint().toTranslation2d(),
+              robot.plus(new Rotation2d(wheel.steerRadians())));
+    }
+    return states;
   }
 
   /** Standing for a minute with its motors off, the robot creeps less than 1 mm and 0.01°. */

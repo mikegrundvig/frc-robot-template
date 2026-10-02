@@ -68,7 +68,9 @@ tasks.named("run") {
         systemProperty "frc.sim.scenario", scenario
     }
     if (pitwallPort != null) {
-        systemProperty "pitwall.port", pitwallPort // read by Pitwall.start
+        // As a plain decimal: Pitwall.start reads it with Integer.getInteger, which takes a leading
+        // zero for octal, so 05920 would fail on its 9 and quietly serve on 5820 after all.
+        systemProperty "pitwall.port", pitwallPort.toInteger().toString()
     }
     def defaults = fileTree("sim") { include "simgui*.json" }
     def target = projectDir

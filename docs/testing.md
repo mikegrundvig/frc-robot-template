@@ -69,6 +69,18 @@ for WPILib's Epilogue and avaje-jsonb that GradleRIO adds. At under a second, it
 `EstimatorConsistencySimTest` (about 80 s) and `VisionSimTest` (about 40 s). Run it before pushing,
 not on every save.
 
+### Memory
+
+Each project's tests run in a Java process (a JVM) of their own, with up to 1.5 GB of heap. The
+robot program's simulation tests use more outside the heap (PhotonVision's camera simulation,
+WPILib's native libraries), so its tests start a fresh JVM every 20 test classes, which keeps one
+near 3 GB where a single JVM running them all reached 5 to 6.5 GB. Projects build in parallel, and
+at most two test JVMs run at once, the robot program's and another project's. On a computer with 8
+GB, make it one: put `testJvms=1` in the `gradle.properties` of your Gradle user home (`~/.gradle/`
+on macOS and Linux, `%USERPROFILE%\.gradle\` on Windows), or pass `-PtestJvms=1` to one build. The
+limit doesn't count build-logic's plugin tests, which `ci` runs with Gradle TestKit (a Gradle of
+their own), or the robot programs `ReplayEndToEndTest` starts, one at a time, beside its test JVM.
+
 ## Where a test goes
 
 Test classes mirror the package of what they test, in the same project: the tests for the world

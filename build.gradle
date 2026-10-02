@@ -104,6 +104,10 @@ wpi.java.configureTestTasks(test)
 
 tasks.named("test") {
     useJUnitPlatform()
+    // A fresh test JVM every 20 test classes. The simulation tests' native memory (PhotonVision's
+    // camera simulation, WPILib's HAL) isn't on the heap the cap in gradle/quality.gradle limits:
+    // one JVM running them all grows to 5 to 6.5 GB, where a fresh one now and then stays near 3.
+    forkEvery = 20
     // Tests run in the build folder, so what simulated devices and logs write (CTRE's ctre_sim/,
     // for one) stays out of the project. A test finds project files through frc.projectDir.
     def work = layout.buildDirectory.dir("test-work")

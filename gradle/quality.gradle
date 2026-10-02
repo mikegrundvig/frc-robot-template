@@ -59,10 +59,16 @@ tasks.withType(JavaCompile).configureEach {
 // the cap here.
 //
 // At most two test JVMs run at once in a build, however many tasks Gradle runs in parallel: the
-// robot program's simulation tests grow theirs to several GB, and a test JVM beside it for each
-// project would add up on a laptop.
+// robot program's simulation tests grow theirs to a few GB, and a test JVM beside it for each
+// project would add up on a laptop. On a computer with 8 GB, make it one: testJvms=1 in the
+// gradle.properties of your Gradle user home, or -PtestJvms=1 (docs/testing.md, memory). Not
+// counted: build-logic's TestKit builds, and the robot programs ReplayEndToEndTest starts.
+def testJvmsAsked = (project.findProperty("testJvms") ?: "2").toString()
+if (!(testJvmsAsked.isInteger() && testJvmsAsked.toInteger() >= 1)) {
+    throw new GradleException("testJvms is how many test JVMs may run at once, 1 or more, not ${testJvmsAsked}")
+}
 def testJvms = gradle.sharedServices.registerIfAbsent("testJvms", TestJvms) {
-    maxParallelUsages = 2
+    maxParallelUsages = testJvmsAsked.toInteger()
 }
 tasks.withType(Test).configureEach {
     usesService(testJvms)

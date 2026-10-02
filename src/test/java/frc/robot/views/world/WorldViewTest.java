@@ -4,10 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.TagVerdict;
 import com.michaelgrundvig.frc.localization.Verdict;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.pitwall.push.Feed;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
@@ -47,7 +48,7 @@ class WorldViewTest {
   private LocalizationEstimate estimate =
       estimate(new Pose2d(3, 4, Rotation2d.fromDegrees(30)), LocalizationEstimate.Mode.TRACKING);
   private SwerveModuleVelocity[] modules = still();
-  private List<VisionDecision> decisions = List.of();
+  private List<FrameVerdict> frames = List.of();
 
   private final WorldView.Readings readings =
       new WorldView.Readings() {
@@ -72,8 +73,8 @@ class WorldViewTest {
         }
 
         @Override
-        public List<VisionDecision> decisions() {
-          return decisions;
+        public List<FrameVerdict> frames() {
+          return frames;
         }
       };
 
@@ -164,16 +165,7 @@ class WorldViewTest {
   @Test
   void aSightLineSaysWhyItsMeasurementWasRefusedAndOffersTheCamerasCalibration() {
     Feed feed = world(false);
-    VisionMeasurement measurement =
-        new VisionMeasurement(
-            1,
-            new Pose2d(3.2, 4.1, Rotation2d.fromDegrees(30)),
-            PoseCovariance.fromStdDevs(0.1, 0.1, 0.1),
-            VisionMeasurement.Lever.NONE,
-            "front-left",
-            List.of(7),
-            VisionMeasurement.Solver.SINGLE_TAG);
-    decisions = List.of(new VisionDecision(measurement, Verdict.GATED, 0.8, 45.2, 13.8));
+    frames = List.of(frontLeftSawTag7(Verdict.GATED, 0.8, 45.2));
     String patch = loop(feed);
 
     assertThat(patch)
@@ -192,7 +184,7 @@ class WorldViewTest {
     assertThat(said.actions()).containsExactly("Calibrate front-left");
 
     // A good camera's innovation is millimeters, its χ² hundredths: shown, not rounded to nothing.
-    decisions = List.of(new VisionDecision(measurement, Verdict.ACCEPTED, 0.0058, 0.0189, 13.8));
+    frames = List.of(frontLeftSawTag7(Verdict.ACCEPTED, 0.0058, 0.0189));
     loop(feed);
     assertThat(scenes.inspect(WorldView.ID, "ray.front-left.7.ok").orElseThrow().details())
         .extracting(Inspection.Detail::value)
@@ -205,6 +197,24 @@ class WorldViewTest {
     assertThat(scenes.inspect(WorldView.ID, "ray.front-left.7.bad"))
         .as("still answered for a while after")
         .isPresent();
+  }
+
+  /** The front-left camera's single-tag measurement from tag 7, as an update judged it. */
+  private static FrameVerdict frontLeftSawTag7(
+      Verdict verdict, double innovationMeters, double chiSquared) {
+    double gate = 13.8;
+    return new FrameVerdict(
+        "front-left",
+        1,
+        Optional.empty(),
+        List.of(new TagVerdict(7, verdict, innovationMeters, chiSquared, gate)),
+        new FrameVerdict.Measured(
+            new Pose2d(3.2, 4.1, Rotation2d.fromDegrees(30)),
+            VisionMeasurement.Solver.SINGLE_TAG,
+            verdict,
+            innovationMeters,
+            chiSquared,
+            gate));
   }
 
   @Test

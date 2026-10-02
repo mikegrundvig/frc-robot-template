@@ -1,7 +1,7 @@
 package frc.robot.views.world;
 
-import com.michaelgrundvig.frc.localization.VisionDecision;
-import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.localization.FrameVerdict;
+import com.michaelgrundvig.frc.localization.TagVerdict;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
@@ -24,11 +24,11 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 
 /**
- * Each camera's sight lines to the tags its measurement used: solid where the estimator accepted
- * the measurement, dashed where it refused it. A click on one says why, from the decision itself,
- * and offers the camera's calibration. A line stays a moment after its measurement, so it doesn't
- * flicker; the robot keeps what a click says for two seconds after it's gone, and the page's Hold
- * keeps it drawn.
+ * Each camera's sight lines to the tags its measurement used: solid where localization accepted the
+ * tag's measurement, dashed where it refused it. A click on one says why, from the tag's verdict
+ * itself ({@link TagVerdict}), and offers the camera's calibration. A line stays a moment after its
+ * measurement, so it doesn't flicker; the robot keeps what a click says for two seconds after it's
+ * gone, and the page's Hold keeps it drawn.
  */
 final class SightLines implements Layer {
   /** How long a line stays after its camera's last measurement of its tag. */
@@ -37,7 +37,7 @@ final class SightLines implements Layer {
   /**
    * One camera's sight line to one tag, with one verdict, made once: its id, how it's drawn, and
    * what a click on it says, from its latest measurement. A click reads that on a web server
-   * thread, so it's a record the loop hands over whole.
+   * thread, so it's records the loop hands over whole.
    */
   private final class Line {
     final String id;
@@ -50,7 +50,8 @@ final class SightLines implements Layer {
     /** What a click says: the same supplier while the line stands, so Pitwall keeps it as is. */
     final Supplier<Inspection> inspection = () -> inspection(this);
 
-    volatile @Nullable VisionDecision decision;
+    /** The latest image whose measurement went through this line's tag with its verdict. */
+    volatile @Nullable FrameVerdict frame;
 
     Line(CameraConfig camera, int tag, boolean accepted) {
       id = "ray." + camera.id() + "." + tag + (accepted ? ".ok" : ".bad");
@@ -91,7 +92,7 @@ final class SightLines implements Layer {
   /** Every sight, in the order first seen: the order the lines are drawn in. */
   private final List<Sight> seen = new ArrayList<>();
 
-  private List<VisionDecision> lastDecisions = List.of();
+  private List<FrameVerdict> lastFrames = List.of();
 
   SightLines(
       FieldModel field,
@@ -121,7 +122,7 @@ final class SightLines implements Layer {
   public void describe(SceneBuilder scene) {}
 
   /**
-   * Takes the loop's decisions into the lines they're drawn as, and draws the lines again only when
+   * Takes the loop's verdicts into the lines they're drawn as, and draws the lines again only when
    * which there are changes. Every loop while the World is shown, so nothing here is made but a
    * sight seen for the first time.
    */
@@ -129,24 +130,24 @@ final class SightLines implements Layer {
   public void update(SceneState state) {
     long now = state.nowNanos();
     boolean changed = false;
-    List<VisionDecision> decisions = readings.decisions();
-    if (decisions != lastDecisions) {
-      lastDecisions = decisions;
-      for (int i = 0; i < decisions.size(); i++) {
-        VisionDecision decision = decisions.get(i);
-        VisionMeasurement measurement = decision.measurement();
-        CameraConfig camera = cameras.get(measurement.camera());
+    List<FrameVerdict> frames = readings.frames();
+    if (frames != lastFrames) {
+      lastFrames = frames;
+      for (int i = 0; i < frames.size(); i++) {
+        FrameVerdict frame = frames.get(i);
+        CameraConfig camera = cameras.get(frame.camera());
         if (camera == null) {
           continue;
         }
-        List<Integer> tags = measurement.tagIds();
+        List<TagVerdict> tags = frame.tags();
         for (int t = 0; t < tags.size(); t++) {
-          Sight sight = sight(camera, tags.get(t));
+          TagVerdict verdict = tags.get(t);
+          Sight sight = sight(camera, verdict.tag());
           if (sight == null) {
             continue;
           }
-          Line line = decision.accepted() ? sight.accepted : sight.rejected;
-          line.decision = decision;
+          Line line = verdict.accepted() ? sight.accepted : sight.rejected;
+          line.frame = frame;
           changed |= sight.drawn != line;
           sight.drawn = line;
           sight.decidedNanos = now;
@@ -194,30 +195,31 @@ final class SightLines implements Layer {
   }
 
   /**
-   * What a click on a line says, from the decision alone (a record the loop no longer touches): the
-   * verdict and its numbers, called on a web server thread.
+   * What a click on a line says, from its image's verdicts alone (a record the loop no longer
+   * touches): the tag's verdict and its numbers, called on a web server thread.
    */
   private Inspection inspection(Line line) {
-    VisionDecision decision = line.decision;
-    if (decision == null) {
+    FrameVerdict frame = line.frame;
+    TagVerdict verdict = frame == null ? null : verdictOn(frame, line.tag);
+    if (frame == null || verdict == null) {
       return Inspection.of(line.camera + " → tag " + line.tag).detail("Verdict", "not measured");
     }
-    VisionMeasurement measurement = decision.measurement();
+    FrameVerdict.Measured measurement = frame.measured();
     Pose2d measured = measurement.pose();
     Optional<Pose3d> tag = field.tag(line.tag);
     Inspection said =
         Inspection.of(line.camera + " → tag " + line.tag)
-            .detail("Verdict", decision.accepted() ? "accepted" : "rejected: " + decision.reason())
+            .detail("Verdict", verdict.accepted() ? "accepted" : "rejected: " + verdict.reason())
             .detail(
                 "Innovation",
-                Double.isFinite(decision.innovationMeters())
-                    ? WorldView.offset(decision.innovationMeters())
+                Double.isFinite(verdict.innovationMeters())
+                    ? WorldView.offset(verdict.innovationMeters())
                         + " from the estimate, before this measurement moved it"
                     : "not compared")
             .detail(
                 "χ²",
-                Double.isFinite(decision.chiSquared())
-                    ? WorldView.chiSquared(decision.chiSquared())
+                Double.isFinite(verdict.chiSquared())
+                    ? WorldView.chiSquared(verdict.chiSquared())
                     : "not compared")
             .detail(
                 "Distance",
@@ -240,10 +242,20 @@ final class SightLines implements Layer {
                 "Solved",
                 measurement.solver().name().toLowerCase(Locale.ROOT).replace('_', ' ')
                     + " from tags "
-                    + measurement.tagIds().stream()
-                        .map(String::valueOf)
+                    + frame.tags().stream()
+                        .map(seen -> String.valueOf(seen.tag()))
                         .collect(Collectors.joining(", ")));
     Optional<String> calibrate = cameraAction.apply(line.camera);
     return calibrate.isPresent() ? said.action(calibrate.get()) : said;
+  }
+
+  /** An image's verdict on one of its tags; null if the image didn't use it. */
+  private static @Nullable TagVerdict verdictOn(FrameVerdict frame, int tag) {
+    for (TagVerdict verdict : frame.tags()) {
+      if (verdict.tag() == tag) {
+        return verdict;
+      }
+    }
+    return null;
   }
 }

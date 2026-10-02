@@ -2,9 +2,10 @@ package frc.robot.subsystems.vision;
 
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.MountCheck;
+import com.michaelgrundvig.frc.localization.TagVerdict;
 import com.michaelgrundvig.frc.localization.Timestamps;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -380,40 +381,41 @@ final class Camera implements AutoCloseable {
   }
 
   /**
-   * Counts and logs what the estimator decided about this camera's measurements, and this loop's
+   * Counts and logs what localization's update made of this camera's measurements, and this loop's
    * tags by what became of them: {@code AcceptedTags} and {@code RejectedTags}, where the field's
    * layout has them, and beside each refused one why ({@code RejectedReasons}, in the same order).
    *
    * @param agreeMeters an accepted measurement this close to the estimate agrees with it
    * @param field where the field's layout has each tag, by its ID
    */
-  void record(
-      List<VisionDecision> decisions, double agreeMeters, IntFunction<Optional<Pose3d>> field) {
+  void record(List<FrameVerdict> frames, double agreeMeters, IntFunction<Optional<Pose3d>> field) {
     List<String> reasons = new ArrayList<>();
-    for (VisionDecision decision : decisions) {
-      if (decision.measurement().camera().equals(name())) {
-        reasons.add(decision.reason());
-        for (int id : decision.measurement().tagIds()) {
-          field
-              .apply(id)
-              .ifPresent(
-                  tag -> {
-                    if (decision.accepted()) {
-                      acceptedTags.add(tag);
-                    } else {
-                      rejectedTags.add(tag);
-                      rejectedReasons.add(decision.reason());
-                    }
-                  });
+    for (FrameVerdict frame : frames) {
+      if (!frame.camera().equals(name())) {
+        continue;
+      }
+      FrameVerdict.Measured measured = frame.measured();
+      reasons.add(measured.reason());
+      for (TagVerdict seen : frame.tags()) {
+        field
+            .apply(seen.tag())
+            .ifPresent(
+                tag -> {
+                  if (seen.accepted()) {
+                    acceptedTags.add(tag);
+                  } else {
+                    rejectedTags.add(tag);
+                    rejectedReasons.add(seen.reason());
+                  }
+                });
+      }
+      if (measured.accepted()) {
+        accepted++;
+        if (measured.innovationMeters() <= agreeMeters) {
+          lastAgreed = Math.max(lastAgreed, frame.captureNanos());
         }
-        if (decision.accepted()) {
-          accepted++;
-          if (decision.innovationMeters() <= agreeMeters) {
-            lastAgreed = Math.max(lastAgreed, decision.measurement().timestampNanos());
-          }
-        } else {
-          rejected++;
-        }
+      } else {
+        rejected++;
       }
     }
     Logger.recordOutput(decisionsKey, reasons.toArray(String[]::new));

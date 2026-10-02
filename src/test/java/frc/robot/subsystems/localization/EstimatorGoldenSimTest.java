@@ -3,8 +3,8 @@ package frc.robot.subsystems.localization;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
+import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
-import com.michaelgrundvig.frc.localization.VisionDecision;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
@@ -75,15 +75,18 @@ class EstimatorGoldenSimTest {
    */
   @Test
   void theMisreadTagIsRejected() {
-    List<VisionDecision> misread =
-        session().decisions().stream().filter(decision -> decision.innovationMeters() > 1).toList();
+    List<FrameVerdict.Measured> misread =
+        session().frames().stream()
+            .map(FrameVerdict::measured)
+            .filter(measured -> measured.innovationMeters() > 1)
+            .toList();
 
     assertThat(misread).hasSize(1);
     assertThat(misread.get(0).accepted()).isFalse();
   }
 
   /** What the session did: a row per loop, and what became of every camera measurement. */
-  private record Session(List<String> rows, List<VisionDecision> decisions) {}
+  private record Session(List<String> rows, List<FrameVerdict> frames) {}
 
   /** The session, one row per loop: the loop, the pose, the mode, and the measurement counts. */
   private static Session session() {
@@ -107,7 +110,7 @@ class EstimatorGoldenSimTest {
       robot.drive(1, 0.6, 0, 0);
       robot.simulation.tilt(0, 0);
       robot.idle(1);
-      return new Session(rows, List.copyOf(robot.decisions));
+      return new Session(rows, List.copyOf(robot.frames));
     }
   }
 

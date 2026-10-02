@@ -3,14 +3,14 @@ package frc.robot.sim;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.field.Terrain;
-import frc.robot.lib.localization.BodyMotion;
-import frc.robot.lib.localization.ImuPlacement;
-import frc.robot.lib.localization.ImuReadings;
-import frc.robot.lib.localization.OdometrySample;
-import frc.robot.lib.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.localization.BodyMotion;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.OdometrySample;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.world.field.Terrain;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Imus;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
 import org.wpilib.math.geometry.Pose2d;
@@ -109,25 +109,24 @@ public final class DriveSimulation {
    * On flat ground until given its terrain ({@link #setTerrain}), its IMUs at the robot's center.
    *
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
-   * @param drivetrain the drivetrain as configured: the code's belief about its modules
+   * @param drivetrain the drivetrain as defined: the code's belief about its modules
    * @param errors how the real wheels and sensors differ from the configuration
    */
-  public DriveSimulation(Body body, SwerveConfig drivetrain, SensorErrors errors) {
-    this(body, drivetrain, errors, ImuPlacement.UNCHECKED);
+  public DriveSimulation(Body body, DrivetrainGeometry drivetrain, SensorErrors errors) {
+    this(body, drivetrain, errors, Imus.UNCHECKED);
   }
 
   /**
    * On flat ground until given its terrain ({@link #setTerrain}).
    *
    * @param body the robot's frame, which places the wheels, and its mass, which they carry
-   * @param drivetrain the drivetrain as configured: the code's belief about its modules
+   * @param drivetrain the drivetrain as defined: the code's belief about its modules
    * @param errors how the real wheels and sensors differ from the configuration
-   * @param imus where the robot's configuration places its IMUs: they really sit off that by their
-   *     accelerometers' errors
+   * @param imus where the robot's definition mounts its IMUs: they really sit off that, and are
+   *     turned off it, by their accelerometers' errors
    */
-  public DriveSimulation(
-      Body body, SwerveConfig drivetrain, SensorErrors errors, ImuPlacement imus) {
-    SwerveConfig.Modules config = drivetrain.modules();
+  public DriveSimulation(Body body, DrivetrainGeometry drivetrain, SensorErrors errors, Imus imus) {
+    DrivetrainGeometry.Modules config = drivetrain.modules();
     Translation2d[] moduleLocations = drivetrain.moduleTranslations(body);
     kinematics = new SwerveKinematicsModel(moduleLocations);
     this.moduleLocations = moduleLocations.clone();

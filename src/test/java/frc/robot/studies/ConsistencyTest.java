@@ -4,8 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.SplittableRandom;

@@ -3,8 +3,8 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.TunableTee;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.ValuesRegister.Switch;
-import frc.robot.lib.config.CameraConfig;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,7 +31,8 @@ class ValuesRegisterSimTest {
   void everySwitchTheRobotPublishesHasARow() throws IOException {
     sim.robot();
     sim.loop(); // the tunables update, as on a robot
-    List<String> cameras = Robots.SIM.cameras().stream().map(CameraConfig::name).toList();
+    List<String> cameras =
+        Robots.SIM.definition().cameras().stream().map(CameraConfig::name).toList();
     Map<String, Switch> switches = new TreeMap<>();
     for (TunableTee.Listed listed : sim.pitwall().tunables().view()) {
       String path = generic(listed.path(), cameras);

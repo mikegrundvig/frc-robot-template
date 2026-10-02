@@ -1,18 +1,18 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.finite;
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.notBlank;
-import static frc.robot.lib.config.Rules.shown;
+import static com.michaelgrundvig.frc.world.config.Rules.finite;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.shown;
 
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigException;
-import frc.robot.lib.field.FieldModel;
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigException;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.math.geometry.Translation2d;
 
 /**

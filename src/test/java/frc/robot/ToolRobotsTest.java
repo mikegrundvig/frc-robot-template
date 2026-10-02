@@ -21,9 +21,9 @@ class ToolRobotsTest {
     for (RobotConfig robot : Robots.all()) {
       RobotDescription described = catalog.named(robot.name());
 
-      assertThat(described.body()).isEqualTo(robot.body());
-      assertThat(described.drivetrain()).isEqualTo(robot.drivetrain());
-      assertThat(described.cameras()).isEqualTo(robot.cameras());
+      assertThat(described.body()).isEqualTo(robot.definition().body());
+      assertThat(described.drivetrain()).isEqualTo(robot.definition().drivetrain());
+      assertThat(described.cameras()).isEqualTo(robot.definition().cameras());
       assertThat(described.imu()).isEmpty();
     }
   }

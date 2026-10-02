@@ -1,7 +1,7 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import frc.robot.Robots;
-import frc.robot.lib.localization.EstimatorConfig;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -229,7 +229,7 @@ public final class ConsistencyStudy {
   /** How far each of the robot's cameras is turned on its mount for a seed, in degrees. */
   private static String turns(ConsistencyRuns.Spread spread, long seed) {
     List<String> turns = new ArrayList<>();
-    for (int camera = 0; camera < Robots.SIM.cameras().size(); camera++) {
+    for (int camera = 0; camera < Robots.SIM.definition().cameras().size(); camera++) {
       turns.add(format("%+.2f°", Math.toDegrees(spread.mount(seed, camera).getRotation().getZ())));
     }
     return String.join(" ", turns);
@@ -300,7 +300,9 @@ public final class ConsistencyStudy {
         """);
     md.append("| Run | ");
     List<String> cameras =
-        Robots.SIM.cameras().stream().map(frc.robot.lib.config.CameraConfig::name).toList();
+        Robots.SIM.definition().cameras().stream()
+            .map(com.michaelgrundvig.frc.world.robot.CameraConfig::name)
+            .toList();
     md.append(String.join(" | ", cameras)).append(" |\n|---|");
     md.append("---|".repeat(cameras.size())).append('\n');
     for (Result result : results) {

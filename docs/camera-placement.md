@@ -279,7 +279,8 @@ How CAD uses it while designing:
 ## Weights
 
 A CSV file of regions, each written for the blue alliance, in meters in the field's frame (see
-`frc.robot.lib.field`). The study adds each region's image on red's half by the field's symmetry.
+`com.michaelgrundvig.frc.world.field`). The study adds each region's image on red's half by the
+field's symmetry.
 A pose counts as the product of the weights of the regions it's in, and 1 in none: 0 leaves a spot
 out (inside a field element), 3 counts it three times (where the robot scores).
 

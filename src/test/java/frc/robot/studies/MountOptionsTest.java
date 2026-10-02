@@ -7,8 +7,8 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.Robots;
-import frc.robot.lib.config.CameraConfig;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

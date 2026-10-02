@@ -35,8 +35,8 @@ class DocCommentTest {
 
   @Test
   void aLinkShowsItsLabelOrWhatItNames() {
-    assertThat(plain("{@link frc.robot.lib.config.SwerveConfig.Gains}"))
-        .isEqualTo("SwerveConfig.Gains");
+    assertThat(plain("{@link frc.robot.subsystems.drive.DrivetrainControl.Gains}"))
+        .isEqualTo("DrivetrainControl.Gains");
     assertThat(plain("{@link Limits#between(double, double)}"))
         .isEqualTo("between(double, double)");
     assertThat(plain("{@linkplain Limits#between(double, double) its limits}"))

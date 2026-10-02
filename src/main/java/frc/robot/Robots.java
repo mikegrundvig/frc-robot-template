@@ -12,16 +12,20 @@ import static org.wpilib.units.Units.Pounds;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.Motor;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.ImuPlacement;
-import frc.robot.lib.localization.ImuPlacementBuilder;
-import frc.robot.lib.localization.VisionConfig;
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.VisionConfig;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Gearing;
+import com.michaelgrundvig.frc.world.robot.ImuMount;
+import com.michaelgrundvig.frc.world.robot.Imus;
+import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import frc.robot.subsystems.drive.DrivetrainControl;
 import java.util.List;
 import java.util.Optional;
+import org.wpilib.math.geometry.Rotation3d;
 
 /**
  * The team's robots, one {@link RobotConfig} each. A test builds every one, so an invalid value
@@ -60,23 +64,30 @@ public final class Robots {
   /**
    * SDS MK4i modules with L2 gearing (6.75:1 drive, 150/7:1 steer) and 4 in wheels, driven by
    * Kraken X60s without FOC: it needs a Phoenix Pro license, and under this drivetrain's 30 A limit
-   * it adds nothing. Free speed: 4.73 m/s.
+   * it adds nothing. Free speed: 4.73 m/s. The gearing's losses aren't modeled yet (efficiency 1).
+   * The drive's moving parts, as inertia at the wheel, are an estimate (a 4 in wheel, about 0.0004
+   * kg m², and a Kraken X60's rotor through 6.75:1, about 0.0006); the steering's is Phoenix Tuner
+   * X's generated simulation value.
    */
-  private static final SwerveConfig.Modules MODULES =
-      SwerveConfig.Modules.builder()
+  private static final DrivetrainGeometry.Modules MODULES =
+      DrivetrainGeometry.Modules.builder()
           .driveMotor(Motor.KRAKEN_X60)
           .steerMotor(Motor.KRAKEN_X60)
           .wheelRadius(Inches.of(2))
-          .driveGearing(6.75)
-          .steerGearing(150.0 / 7.0)
+          .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
+          .steerGearing(Gearing.builder().ratio(150.0 / 7.0).efficiency(1.0).build())
           .wheelCoefficientOfFriction(1.2)
+          .driveInertia(KilogramSquareMeters.of(0.001))
+          .steerInertia(KilogramSquareMeters.of(0.004))
           .build();
 
+  /** The modules sit on the corners, where MK4i wheels are 2.625 in in from the frame's edges. */
+  private static final DrivetrainGeometry DRIVETRAIN =
+      DrivetrainGeometry.builder().modules(MODULES).wheelInset(Inches.of(2.625)).build();
+
   /**
-   * The modules sit on the corners, where MK4i wheels are 2.625 in in from the frame's edges.
-   *
-   * <p>Drive stator limit 30 A. Under hard acceleration, weight shifts off the front wheels, and by
-   * a simple weight-transfer estimate they start to slip near 47 A with this tread (friction 1.2;
+   * Drive stator limit 30 A. Under hard acceleration, weight shifts off the front wheels, and by a
+   * simple weight-transfer estimate they start to slip near 47 A with this tread (friction 1.2;
    * about 50 A at 1.3, new) and this low center of gravity, or near 31 A with worn tread (friction
    * 1.0) and a center of gravity at 0.3 m. More current than that only spins the wheels and drains
    * the battery. Steering needs little torque: 40 A, the value Phoenix Tuner X's swerve generator
@@ -95,12 +106,10 @@ public final class Robots {
    * kD are the 2026 code's (100 V per rotation and 0.5, converted). Measure and tune them all on
    * the real robot.
    */
-  private static final SwerveConfig DRIVETRAIN =
-      SwerveConfig.builder()
-          .modules(MODULES)
-          .wheelInset(Inches.of(2.625))
+  private static final DrivetrainControl DRIVING =
+      DrivetrainControl.builder()
           .limits(
-              SwerveConfig.Limits.builder()
+              DrivetrainControl.Limits.builder()
                   .driveStatorCurrent(Amps.of(30))
                   .driveSupplyCurrent(Amps.of(60))
                   .driveSupplyLowerCurrent(Amps.of(40))
@@ -110,7 +119,7 @@ public final class Robots {
                   .maxAngularSpeed(RotationsPerSecond.of(1))
                   .build())
           .gains(
-              SwerveConfig.Gains.builder()
+              DrivetrainControl.Gains.builder()
                   .driveKs(0.0)
                   .driveKv(MODULES.idealDriveKv())
                   .driveKp(2.0)
@@ -192,25 +201,40 @@ public final class Robots {
               .build());
 
   /**
+   * The simulator's IMUs: at the center, 3 in up on the belly pan, level with x forward, and
+   * checked (they read along their axes by construction).
+   */
+  private static final ImuMount SIM_IMU =
+      ImuMount.builder()
+          .forward(Meters.of(0))
+          .left(Meters.of(0))
+          .up(Inches.of(3))
+          .orientation(Rotation3d.ZERO)
+          .accelerometerChecked(true)
+          .build();
+
+  /**
    * The template's robot. It has no wiring: on real hardware its drivetrain stays still and says
    * so. Give a real robot its own entry, with its wiring from Phoenix Tuner X's swerve generator.
    */
   public static final RobotConfig SIM =
       RobotConfig.builder()
-          .name("sim")
-          .body(BODY)
-          .drivetrain(DRIVETRAIN)
+          .definition(
+              RobotDefinition.builder()
+                  .name("sim")
+                  .body(BODY)
+                  .drivetrain(DRIVETRAIN)
+                  .cameras(CAMERAS)
+                  // The simulator's IMUs sit at the center on the belly pan, level, x forward, and
+                  // read along their axes by construction. A real robot starts from
+                  // Imus.UNCHECKED, its IMUs measured where they're mounted, until each passes the
+                  // accelerometer check (docs/calibration.md).
+                  .imus(Imus.builder().gyro(SIM_IMU).backup(SIM_IMU).build())
+                  .build())
+          .drivetrain(DRIVING)
           .drivetrainWiring(Optional.empty())
-          .cameras(CAMERAS)
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)
-          // The simulator's IMUs sit at the center and read along the robot's axes by
-          // construction. A real robot starts from ImuPlacement.UNCHECKED, its IMUs where they're
-          // mounted, until it passes the accelerometer check (docs/calibration.md).
-          .imus(
-              ImuPlacementBuilder.builder(ImuPlacement.UNCHECKED)
-                  .accelerometerChecked(true)
-                  .build())
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */

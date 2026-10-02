@@ -1,22 +1,12 @@
 package frc.robot;
 
-import static frc.robot.lib.config.ConfigFixtures.body;
-import static frc.robot.lib.config.ConfigFixtures.camera;
-import static frc.robot.lib.config.ConfigFixtures.swerve;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
-import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.MetersPerSecond;
 
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfigBuilder;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.ImuPlacement;
-import frc.robot.lib.localization.VisionConfig;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import frc.robot.subsystems.drive.DrivetrainControlBuilder;
+import frc.robot.subsystems.drive.DrivetrainControlLimitsBuilder;
 import org.junit.jupiter.api.Test;
-import org.wpilib.math.geometry.Translation3d;
 
 class RobotConfigTest {
   @Test
@@ -26,72 +16,24 @@ class RobotConfigTest {
     assertThat(Robots.all()).extracting(RobotConfig::name).doesNotHaveDuplicates();
   }
 
+  /**
+   * The driver's top speed is how it's driven, the free speed what the robot is: the configuration
+   * holds one to the other. The template's robot reaches 4.73 m/s free.
+   */
   @Test
-  void wheelPositionsComeFromTheFrameAndDrivetrain() {
-    RobotConfig robot = robot(List.of());
-
-    assertThat(robot.moduleTranslations()).containsExactly(swerve().moduleTranslations(body()));
-  }
-
-  @Test
-  void aRobotNeedsAName() {
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> RobotConfigBuilder.builder(robot(List.of())).name(" ").build())
-        .withMessageContaining("name");
-  }
-
-  @Test
-  void theWheelsMustFitTheFrame() {
-    var tooDeep = SwerveConfigBuilder.builder(swerve()).wheelInset(Inches.of(14)).build();
+  void topSpeedCannotExceedTheFreeSpeed() {
+    var tooFast =
+        DrivetrainControlBuilder.builder(Robots.SIM.drivetrain())
+            .limits(
+                DrivetrainControlLimitsBuilder.builder(Robots.SIM.drivetrain().limits())
+                    .maxLinearSpeed(MetersPerSecond.of(5))
+                    .build())
+            .build();
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> RobotConfigBuilder.builder(robot(List.of())).drivetrain(tooDeep).build())
-        .withMessageContaining("wheelInset");
-  }
-
-  @Test
-  void cameraNamesMustBeUnique() {
-    var cameras = List.of(camera("front", inches(10, 0, 8)), camera("front", inches(-10, 0, 8)));
-
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> robot(cameras))
-        .withMessageContaining("two cameras are named front");
-  }
-
-  @Test
-  void camerasMustBeOnTheRobot() {
-    // 10 m ahead: the kind of mistake made by typing inches where meters belong.
-    var cameras = List.of(camera("front", new Translation3d(10, 0, 0.2)));
-
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> robot(cameras))
-        .withMessageContaining("camera front is outside the robot");
-  }
-
-  @Test
-  void theCameraListCannotChangeAfterwards() {
-    List<CameraConfig> cameras = new ArrayList<>(List.of(camera("front", inches(10, 0, 8))));
-    RobotConfig robot = robot(cameras);
-
-    cameras.clear();
-
-    assertThat(robot.cameras()).hasSize(1);
-  }
-
-  private static RobotConfig robot(List<CameraConfig> cameras) {
-    return RobotConfig.builder()
-        .name("test")
-        .body(body())
-        .drivetrain(swerve())
-        .drivetrainWiring(Optional.empty())
-        .cameras(cameras)
-        .vision(VisionConfig.DEFAULTS)
-        .estimator(EstimatorConfig.DEFAULTS)
-        .imus(ImuPlacement.UNCHECKED)
-        .build();
-  }
-
-  private static Translation3d inches(double x, double y, double z) {
-    return new Translation3d(Inches.of(x), Inches.of(y), Inches.of(z));
+        .isThrownBy(() -> RobotConfigBuilder.builder(Robots.SIM).drivetrain(tooFast).build())
+        .withMessage(
+            "RobotConfig[sim].drivetrain.limits.maxLinearSpeed: 5 m/s is faster than the"
+                + " drivetrain's free speed of 4.729 m/s");
   }
 }

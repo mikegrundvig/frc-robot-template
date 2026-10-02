@@ -23,7 +23,7 @@ class ConditionsTest {
     assertThat(nominal.cornerNoiseMeanPixels()).isEqualTo(VisionSim.CORNER_NOISE_MEAN_PIXELS);
     assertThat(nominal.cornerNoiseStdDevPixels()).isEqualTo(VisionSim.CORNER_NOISE_STD_DEV_PIXELS);
     assertThat(nominal.sightMeters())
-        .isEqualTo(Robots.current().cameras().get(0).sensor().sightRange().in(Meters));
+        .isEqualTo(Robots.current().definition().cameras().get(0).sensor().sightRange().in(Meters));
     assertThat(nominal.mountError(42)).isEqualTo(Transform3d.ZERO);
     assertThat(nominal.described())
         .isEqualTo(

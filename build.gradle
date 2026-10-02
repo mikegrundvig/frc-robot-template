@@ -71,6 +71,11 @@ dependencies {
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
+    // The libraries (lib/, each its own project): the world model (the validation kit, the field,
+    // and the robot's definition), and localization, which reads it.
+    implementation project(":world")
+    implementation project(":localization")
+
     // Pitwall (pitwall/, its own project): the robot program's own web page.
     implementation project(":pitwall")
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
@@ -130,10 +135,20 @@ tasks.named("jacocoTestReport") {
     executionData.from(fileTree(layout.buildDirectory.dir("jacoco")) { include "end-to-end.exec" })
 }
 
-// A copy of the source travels with every deploy, so the code on a robot can always be recovered.
+// A copy of the source travels with every deploy, so the code on a robot can always be recovered:
+// the robot program's, and the libraries' and Pitwall's that it's built with.
 tasks.named("jar") {
     from("src") { into "backup/src" }
     from("vendordeps") { into "backup/vendordeps" }
+    from("lib") {
+        exclude "**/build/**"
+        into "backup/lib"
+    }
+    from("pitwall") {
+        exclude "**/build/**"
+        into "backup/pitwall"
+    }
+    from("settings.gradle") { into "backup" }
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -142,7 +157,7 @@ tasks.withType(JavaCompile).configureEach {
 // Pitwall's documentation processor documents only the configuration records, which it knows by
 // their annotation's name.
 tasks.named("compileJava") {
-    options.compilerArgs.add "-Apitwall.docs.records=frc.robot.lib.config.ConfigRecord"
+    options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
 }
 
 // Nothing reaches a robot without a team number, or without passing every check.
@@ -157,6 +172,26 @@ gradle.taskGraph.whenReady { graph ->
 // Every check means ci: the robot program's and Pitwall's, which the robot runs too.
 tasks.matching { it.name == "deploy" }.configureEach {
     dependsOn "ci"
+    dependsOn "coprocessorCheck"
+}
+
+// Before a deploy, each coprocessor in the table is asked which image it runs, within a second
+// (frc.robot.subsystems.coprocessors.DeployCheck): one running another PhotonVision, recipe, name,
+// team, or address than this build's fails the deploy, as does one answering on PhotonVision's port
+// but not the agent's; one not answering only warns. -PskipCoprocessorCheck skips it, saying so.
+tasks.register("coprocessorCheck", JavaExec) {
+    group = "DeployUtils" // beside deploy
+    description = "Ask each coprocessor which image it runs, as deploy does first: -PskipCoprocessorCheck skips it."
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = "frc.robot.subsystems.coprocessors.DeployCheck"
+    args deploy.targets.systemcore.team.toString()
+    def skip = project.hasProperty("skipCoprocessorCheck")
+    onlyIf("-PskipCoprocessorCheck wasn't given") {
+        if (skip) {
+            logger.lifecycle("Coprocessor check skipped (-PskipCoprocessorCheck): the coprocessors' images weren't compared with this build")
+        }
+        !skip
+    }
 }
 
 // Store the team number: ./gradlew setTeamNumber -PteamNumber=NNNN
@@ -177,9 +212,9 @@ tasks.register("setTeamNumber") {
     }
 }
 
-// NullAway checks the robot program's packages, and the libraries' moving to com.michaelgrundvig.frc.
-ext.nullSafePackages = "frc.robot,com.michaelgrundvig.frc.world"
 apply from: "gradle/quality.gradle"     // formatting, static analysis, coverage, the ci task
 apply from: "gradle/build-info.gradle"  // git SHA and build time, logged by the robot at startup
 apply from: "gradle/simulation.gradle"  // simulator defaults for ./gradlew run
 apply from: "gradle/studies.gradle"     // simulation studies, such as camera placement
+apply from: "gradle/coprocessors.gradle" // the coprocessor table and the PhotonVision version lock
+apply from: "gradle/coprocessor-image.gradle"  // the coprocessor image scripts' tests

@@ -2,10 +2,11 @@ package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
-import frc.robot.lib.config.CanBus;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveWiring;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.SwerveWiring;
 import java.util.concurrent.locks.Lock;
+import org.wpilib.math.geometry.Rotation3d;
 
 /**
  * The drivetrain's hardware on CTRE devices: four modules, each a TalonFX driving the wheel, a
@@ -41,8 +42,10 @@ public final class PhoenixDrivetrain implements AutoCloseable {
    *
    * @param wiring where the devices are, and how the encoders read
    * @param hardware the modules' gearing and wheels
+   * @param gyroOrientation how the Pigeon 2 is turned on the robot, from the robot's definition
    */
-  public PhoenixDrivetrain(SwerveWiring wiring, SwerveConfig.Modules hardware) {
+  public PhoenixDrivetrain(
+      SwerveWiring wiring, DrivetrainGeometry.Modules hardware, Rotation3d gyroOrientation) {
     SignalLogger.enableAutoLogging(false);
     CANBus bus = bus(wiring.canBus());
     for (int i = 0; i < 4; i++) {
@@ -50,7 +53,8 @@ public final class PhoenixDrivetrain implements AutoCloseable {
           new ModuleIOTalonFX(
               wiring.modules().get(i), bus, hardware, wiring.couplingRatio(), odometry);
     }
-    gyro = new GyroIOPigeon2(wiring.gyroId(), bus, wiring.gyroYawScale(), odometry);
+    gyro =
+        new GyroIOPigeon2(wiring.gyroId(), bus, wiring.gyroYawScale(), gyroOrientation, odometry);
     odometry.start();
   }
 

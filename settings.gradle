@@ -21,3 +21,17 @@ include "pitwall"
 // Pitwall's documentation processor, which reads the configuration records' Javadoc as the robot program
 // compiles, so the page can say what each value means. A compiler plugin, so it's a project of its own.
 include "pitwall:docs-processor"
+// The vision coprocessors (coprocessor/): what they share with the robot program (the table, the
+// agent's API, the settings' canonical form), and the health agent each one runs.
+include "coprocessor-common"
+project(":coprocessor-common").projectDir = file("coprocessor/common")
+include "coprocessor-agent"
+project(":coprocessor-agent").projectDir = file("coprocessor/agent")
+// The libraries (lib/), each a project of its own only where that blocks a dependency. The world
+// model (the validation kit, the field, and the robot's definition) reads only WPILib's math, units,
+// and field layouts; localization reads the world model, and nothing of the robot program, the
+// simulator, or Pitwall.
+include "world"
+project(":world").projectDir = file("lib/world")
+include "localization"
+project(":localization").projectDir = file("lib/localization")

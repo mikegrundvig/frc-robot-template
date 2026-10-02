@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.field.FieldModel;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenario;
@@ -53,11 +54,14 @@ import org.wpilib.tunable.TunableRegistry;
  */
 public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   /** The field the simulator's robot plays on. */
-  public static final FieldModel FIELD = Rebuilt.field(Robots.SIM.body());
+  public static final FieldModel FIELD = Rebuilt.field(Robots.SIM.definition().body());
 
   /** The simulator's robot without its cameras: odometry alone. */
   public static final RobotConfig WITHOUT_CAMERAS =
-      RobotConfigBuilder.builder(Robots.SIM).cameras(List.of()).build();
+      RobotConfigBuilder.builder(Robots.SIM)
+          .definition(
+              RobotDefinitionBuilder.builder(Robots.SIM.definition()).cameras(List.of()).build())
+          .build();
 
   private @Nullable MockTelemetryBackend telemetry;
   private @Nullable Scheduler scheduler;

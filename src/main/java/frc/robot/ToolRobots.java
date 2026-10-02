@@ -2,6 +2,7 @@ package frc.robot;
 
 import com.michaelgrundvig.frc.world.bridges.RobotCatalog;
 import com.michaelgrundvig.frc.world.bridges.RobotDescription;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,11 +22,17 @@ public final class ToolRobots implements RobotCatalog {
   }
 
   /**
-   * A robot as the writers read it. The IMUs' mounts are known only along the floor (their forward
-   * and left offsets) until a mount gives their height too, so none is drawn yet.
+   * A robot as the writers read it: its definition's body, drivetrain, and cameras. The IMUs'
+   * mounts are known only along the floor (their forward and left offsets) until a mount gives
+   * their height too, so none is drawn yet.
    */
   static RobotDescription describe(RobotConfig robot) {
+    RobotDefinition definition = robot.definition();
     return new RobotDescription(
-        robot.name(), robot.body(), robot.drivetrain(), robot.cameras(), Optional.empty());
+        definition.name(),
+        definition.body(),
+        definition.drivetrain(),
+        definition.cameras(),
+        Optional.empty());
   }
 }

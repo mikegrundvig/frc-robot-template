@@ -1,15 +1,17 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.PoseEstimator;
+import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.world.field.Terrain;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotConfig;
 import frc.robot.RobotSim;
-import frc.robot.lib.field.Terrain;
-import frc.robot.lib.localization.EstimatorConfig;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.PoseEstimator;
-import frc.robot.lib.localization.PoseReset;
-import frc.robot.lib.localization.SwerveKinematicsModel;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.VisionMeasurement;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
@@ -66,13 +68,19 @@ public final class DriveSimHarness implements AutoCloseable {
   /** Localization for a robot on this terrain, starting with its estimator. */
   public static Localization localizationFor(
       RobotConfig robot, PoseEstimator estimator, Terrain terrain) {
-    Translation2d[] wheels = robot.drivetrain().moduleTranslations(robot.body());
+    Translation2d[] wheels = robot.definition().moduleTranslations();
     double reach = 0;
     for (Translation2d wheel : wheels) {
       reach = Math.max(reach, wheel.getNorm());
     }
     return new Localization(
-        estimator, new SwerveKinematicsModel(wheels), terrain, reach, robot.imus());
+        estimator,
+        new SwerveKinematicsModel(wheels),
+        terrain,
+        reach,
+        robot.definition().drivetrain().modules().wheelCoefficientOfFriction()
+            * ImuReadings.STANDARD_GRAVITY,
+        robot.definition().imus());
   }
 
   /** Wheels and sensors exactly as configured: odometry is the truth. */
@@ -93,7 +101,9 @@ public final class DriveSimHarness implements AutoCloseable {
       RobotConfig robot, SensorErrors errors, EstimatorConfig config, Terrain terrain) {
     estimator = estimatorAt(Pose2d.ZERO, config);
     localization = localizationFor(robot, estimator, terrain);
-    simulation = new DriveSimulation(robot.body(), robot.drivetrain(), errors, robot.imus());
+    RobotDefinition definition = robot.definition();
+    simulation =
+        new DriveSimulation(definition.body(), definition.drivetrain(), errors, definition.imus());
     simulation.setTerrain(terrain);
     drive =
         new Drive(
@@ -104,7 +114,7 @@ public final class DriveSimHarness implements AutoCloseable {
                 .backupImu(simulation.backupGyro())
                 .odometryLock(new ReentrantLock())
                 .build(),
-            robot.body(),
+            definition,
             robot::drivetrain,
             scheduler,
             localization::pose);

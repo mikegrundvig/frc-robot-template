@@ -84,8 +84,8 @@ class DriveBasicsTest {
 
     Pose3d[] wheels = harness.drive.modulePoses();
 
-    Translation2d[] corners = Robots.SIM.moduleTranslations();
-    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    Translation2d[] corners = Robots.SIM.definition().moduleTranslations();
+    double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
     assertEquals(4, wheels.length);
     for (int i = 0; i < 4; i++) {
       assertEquals(corners[i].getX(), wheels[i].getX(), 1e-9, "module " + i + " forward");
@@ -182,7 +182,7 @@ class DriveBasicsTest {
     return new Drive(
         name,
         hardware,
-        Robots.SIM.body(),
+        Robots.SIM.definition(),
         Robots.SIM::drivetrain,
         harness.scheduler,
         () -> Pose2d.ZERO);

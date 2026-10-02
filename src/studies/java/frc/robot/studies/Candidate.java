@@ -1,11 +1,11 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotConfig;
-import frc.robot.RobotConfigBuilder;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.Checks;
 import java.util.List;
 
 /**
@@ -25,14 +25,14 @@ public record Candidate(String name, List<CameraConfig> cameras) {
   }
 
   /**
-   * Checks these cameras on the robot, as the robot's configuration checks its own: a camera
-   * outside the robot, or two with one name, is refused.
+   * Checks these cameras on the robot, as the robot's definition checks its own: a camera outside
+   * the robot, or two with one name, is refused.
    *
    * @throws IllegalArgumentException naming this layout and every camera that doesn't fit
    */
   public void checkOn(RobotConfig robot) {
     try {
-      RobotConfigBuilder.builder(robot).cameras(cameras).build();
+      RobotDefinitionBuilder.builder(robot.definition()).cameras(cameras).build();
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(name + ": " + e.getMessage(), e);
     }

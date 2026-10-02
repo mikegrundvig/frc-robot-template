@@ -242,7 +242,12 @@ public class Robot extends LoggedRobot {
       LoopHealth loopHealth) {
     RobotContainer container =
         new RobotContainer(
-            mode, scheduler, robot, Rebuilt.field(robot.body()), simulatedErrors, loopHealth);
+            mode,
+            scheduler,
+            robot,
+            Rebuilt.field(robot.definition().body()),
+            simulatedErrors,
+            loopHealth);
     container.addTo(pitwall);
     return container;
   }

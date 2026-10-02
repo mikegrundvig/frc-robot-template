@@ -11,7 +11,9 @@ def quick = project.hasProperty("quick")
 def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
 
 // NullAway checks the project's own packages: the robot program's, unless a project (such as a
-// library) sets ext.nullSafePackages before applying this file.
+// library) sets ext.nullSafePackages before applying this file. The libraries in lib/ also mark
+// every package @NullMarked (in its package-info), so a project that reads one trusts its @Nullable
+// as its own: a library's null can't reach the robot program unchecked.
 def nullSafePackages = project.findProperty("nullSafePackages") ?: "frc.robot"
 gradle.taskGraph.whenReady { graph ->
     if (quick && graph.allTasks.any { it.name == "ci" }) {
@@ -65,6 +67,43 @@ tasks.named("test") {
         finalizedBy "jacocoTestReport"
     }
 }
+
+// --tests names tests by class or pattern, wherever they are: `./gradlew test --tests '*Arm*'` runs
+// them in whichever project has them (the robot program, a library in lib/, Pitwall). A project
+// with none of them passes, rather than failing the build as Gradle would; but if no project ran a
+// test at all, the build fails, so a misspelled name can't pass quietly (testsMatched, below).
+if (testsNamed) {
+    tasks.withType(Test).configureEach {
+        filter.failOnNoMatchingTests = false
+        finalizedBy ":testsMatched"
+    }
+}
+if (testsNamed && project == rootProject) {
+    // The results of every test task in this build, as each last left them: a task that's up to
+    // date, or restored from the build cache, ran these same tests last time.
+    def results = objects.fileCollection()
+    gradle.taskGraph.whenReady { graph ->
+        graph.allTasks.findAll { it instanceof Test }.each {
+            results.from(it.reports.junitXml.outputLocation.get().asFile)
+        }
+    }
+    def asked = gradle.startParameter.taskRequests.collectMany { request ->
+        def args = request.args
+        (0..<args.size()).findAll { args[it] == "--tests" && it + 1 < args.size() }.collect { args[it + 1] }
+    }.join(", ")
+    tasks.register("testsMatched") {
+        group = "verification"
+        description = "Fail if --tests matched no test in any project."
+        doLast {
+            def ran = results.asFileTree.matching { include "TEST-*.xml" }.files
+            if (ran.isEmpty()) {
+                throw new GradleException("No test in any project matched --tests ${asked}: check the"
+                + " class's name, or its package (a library's are com.michaelgrundvig.frc...)")
+            }
+        }
+    }
+}
+
 jacoco {
     toolVersion = "0.8.15"
 }

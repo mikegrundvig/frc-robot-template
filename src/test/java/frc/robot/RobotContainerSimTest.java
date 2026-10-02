@@ -5,17 +5,17 @@ import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Outcome;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Placement;
 import frc.robot.game.Rebuilt;
-import frc.robot.lib.config.CanBus;
-import frc.robot.lib.config.SwerveWiring;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Placement;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.SensorErrors;
 import java.util.List;
@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.hardware.imu.OnboardIMU;
@@ -382,7 +381,6 @@ class RobotContainerSimTest {
                         .couplingRatio(3.5)
                         .modules(List.of(modules))
                         .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
-                        .systemcoreYaw(Degrees.of(0))
                         .build()))
             .build();
     sim.build(Constants.Mode.REAL, wired, SensorErrors.NONE);

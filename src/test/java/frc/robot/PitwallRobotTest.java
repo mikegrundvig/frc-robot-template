@@ -17,8 +17,8 @@ import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
 import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
-import frc.robot.lib.config.SwerveConfig;
 import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.drive.DrivetrainControl;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
@@ -52,7 +52,7 @@ import org.wpilib.util.AlertDataJNI;
 @ExtendWith(RobotSim.class)
 class PitwallRobotTest {
   private Pitwall pitwall;
-  private LiveConfig<SwerveConfig> drivetrain;
+  private LiveConfig<DrivetrainControl> drivetrain;
 
   @BeforeEach
   void setUp() {

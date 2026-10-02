@@ -3,9 +3,9 @@ package frc.robot.studies;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotConfig;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -62,7 +62,7 @@ public final class Candidates {
    */
   public static List<Candidate> of(RobotConfig robot) {
     List<Candidate> all = new ArrayList<>(List.of(own(robot)));
-    all.addAll(family(robot.body(), robot.cameras().get(0).sensor(), 4));
+    all.addAll(family(robot.definition().body(), robot.definition().cameras().get(0).sensor(), 4));
     return all;
   }
 
@@ -72,11 +72,11 @@ public final class Candidates {
    * @throws IllegalArgumentException if the robot has no camera, whose sensor every layout uses
    */
   public static Candidate own(RobotConfig robot) {
-    if (robot.cameras().isEmpty()) {
+    if (robot.definition().cameras().isEmpty()) {
       throw new IllegalArgumentException(
           "robot " + robot.name() + " has no cameras: give it one, the sensor for every layout");
     }
-    return new Candidate("The robot's own: " + robot.name(), robot.cameras());
+    return new Candidate("The robot's own: " + robot.name(), robot.definition().cameras());
   }
 
   /**

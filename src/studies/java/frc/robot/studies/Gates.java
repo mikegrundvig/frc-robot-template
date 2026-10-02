@@ -1,8 +1,8 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.localization.LocalizationGate;
+import com.michaelgrundvig.frc.localization.VisionConfig;
 import frc.robot.Robots;
-import frc.robot.lib.localization.LocalizationGate;
-import frc.robot.lib.localization.VisionConfig;
 
 /**
  * The robot code's tests on the estimate's claimed uncertainty, as the consistency study counts

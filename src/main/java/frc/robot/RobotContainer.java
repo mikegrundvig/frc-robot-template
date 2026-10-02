@@ -3,6 +3,15 @@ package frc.robot;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
+import com.michaelgrundvig.frc.coprocessor.table.Computer;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.PoseEstimator;
+import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
@@ -10,30 +19,32 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
 import com.michaelgrundvig.frc.pitwall.experiment.Profile;
 import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
+import com.michaelgrundvig.frc.world.field.Placement;
+import com.michaelgrundvig.frc.world.field.Zone;
+import com.michaelgrundvig.frc.world.field.ZoneTrigger;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
-import frc.robot.lib.config.Body;
-import frc.robot.lib.config.CameraConfig;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
-import frc.robot.lib.field.Placement;
-import frc.robot.lib.field.Zone;
-import frc.robot.lib.field.ZoneTrigger;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.PoseEstimator;
-import frc.robot.lib.localization.PoseReset;
-import frc.robot.lib.localization.SwerveKinematicsModel;
-import frc.robot.lib.localization.VisionConfig;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SensorErrors;
 import frc.robot.sim.SimulatedWorld;
+import frc.robot.subsystems.coprocessors.CoprocessorIO;
+import frc.robot.subsystems.coprocessors.CoprocessorIOHttp;
+import frc.robot.subsystems.coprocessors.Coprocessors;
+import frc.robot.subsystems.coprocessors.PhotonVisionIO;
+import frc.robot.subsystems.coprocessors.PhotonVisionIONetworkTables;
+import frc.robot.subsystems.coprocessors.PowerButtonIO;
+import frc.robot.subsystems.coprocessors.PowerButtonIODigitalInput;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
+import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.localization.Localization;
@@ -42,6 +53,7 @@ import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,13 +65,13 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.button.CommandGamepad;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
+import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.Telemetry;
@@ -101,7 +113,7 @@ public final class RobotContainer implements AutoCloseable {
    * @param drivetrain the drivetrain's gains and limits ({@link Drive#tuning})
    * @param vision how far the cameras are trusted ({@link Vision#tuning})
    */
-  record Tunings(LiveConfig<SwerveConfig> drivetrain, LiveConfig<VisionConfig> vision) {
+  record Tunings(LiveConfig<DrivetrainControl> drivetrain, LiveConfig<VisionConfig> vision) {
     /** Every one. */
     List<LiveConfig<?>> all() {
       return List.of(drivetrain, vision);
@@ -114,7 +126,7 @@ public final class RobotContainer implements AutoCloseable {
   }
 
   /** The drivetrain's and vision's configurations as the pit tunes them. */
-  private final LiveConfig<SwerveConfig> drivetrainTuning;
+  private final LiveConfig<DrivetrainControl> drivetrainTuning;
 
   private final LiveConfig<VisionConfig> visionTuning;
   private final FieldModel field;
@@ -129,6 +141,7 @@ public final class RobotContainer implements AutoCloseable {
   private final Localization localization;
   private final Drive drive;
   private final Vision vision;
+  private final Coprocessors coprocessors;
   private final Calibration calibration;
   private final CommandGamepad driver;
   private final Alert noHardware =
@@ -197,14 +210,14 @@ public final class RobotContainer implements AutoCloseable {
     // The rules across mechanisms: checked on every change the pit makes, and here, as committed,
     // so a configuration that breaks one stops the program with every rule it breaks.
     ConfigRules rules = new ConfigRules();
-    RobotRules.register(rules, drivetrainTuning, visionTuning);
+    RobotDefinition definition = robot.definition();
+    RobotRules.register(rules, definition, drivetrainTuning, visionTuning);
     rules.checkCommitted();
-    Supplier<SwerveConfig> drivetrain = drivetrainTuning::get;
+    Supplier<DrivetrainControl> drivetrain = drivetrainTuning::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
     loop = loopHealth.monitor();
-    Body body = robot.body();
-    List<CameraConfig> cameras = robot.cameras();
+    List<CameraConfig> cameras = definition.cameras();
     this.field = field;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
@@ -216,13 +229,22 @@ public final class RobotContainer implements AutoCloseable {
     DriveHardware driveHardware;
     if (mode == Constants.Mode.SIM) {
       world =
-          new SimulatedWorld(field, drivetrain.get(), body, cameras, robot.imus(), simulatedErrors);
+          new SimulatedWorld(
+              field,
+              definition.drivetrain(),
+              definition.body(),
+              cameras,
+              definition.imus(),
+              simulatedErrors);
       hardware = null;
       driveHardware = world.drivetrainHardware();
     } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
       world = null;
       PhoenixDrivetrain phoenix =
-          new PhoenixDrivetrain(robot.drivetrainWiring().get(), drivetrain.get().modules());
+          new PhoenixDrivetrain(
+              robot.drivetrainWiring().get(),
+              definition.drivetrain().modules(),
+              definition.imus().gyro().orientation());
       hardware = phoenix;
       driveHardware =
           DriveHardware.builder()
@@ -231,7 +253,7 @@ public final class RobotContainer implements AutoCloseable {
               .backupImu(
                   new GyroIOSystemcore(
                       robot.drivetrainWiring().get().systemcoreMount(),
-                      robot.drivetrainWiring().get().systemcoreYaw()))
+                      definition.imus().backup().orientation()))
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {
@@ -244,7 +266,7 @@ public final class RobotContainer implements AutoCloseable {
     // Until the robot is placed it could be anywhere: the middle of the field stands in, with an
     // uncertainty as big as the field, so the first camera measurement wins.
     Pose2d middle = new Pose2d(field.length() / 2, field.width() / 2, Rotation2d.ZERO);
-    Translation2d[] wheels = drivetrain.get().moduleTranslations(body);
+    Translation2d[] wheels = definition.moduleTranslations();
     double wheelReach = 0;
     for (Translation2d wheel : wheels) {
       wheelReach = Math.max(wheelReach, wheel.getNorm());
@@ -262,8 +284,11 @@ public final class RobotContainer implements AutoCloseable {
             new SwerveKinematicsModel(wheels),
             field.terrain(),
             wheelReach,
-            robot.imus());
-    drive = new Drive("Drive", driveHardware, body, drivetrain, scheduler, localization::pose);
+            definition.drivetrain().modules().wheelCoefficientOfFriction()
+                * ImuReadings.STANDARD_GRAVITY,
+            definition.imus());
+    drive =
+        new Drive("Drive", driveHardware, definition, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (world != null) {
       world.place(middle);
@@ -289,6 +314,41 @@ public final class RobotContainer implements AutoCloseable {
             field,
             visionTuning::get,
             () -> alliance);
+    // The vision coprocessors' health agents: over the network on a robot, simulated in the
+    // simulator, the log in a replay. Each is asked on a thread of its own; the loop never waits.
+    // A robot watches none of the template's example table's (team 0): they'd all read missing.
+    CompiledTable table = Coprocessors.compiledTable();
+    Coprocessors.Settings coprocessorSettings = Coprocessors.Settings.DEFAULTS;
+    boolean watchNone = world == null && Coprocessors.isExample(table);
+    CoprocessorIO[] coprocessorIOs =
+        new CoprocessorIO[watchNone ? 0 : table.table().computers().size()];
+    PhotonVisionIO photonVision;
+    if (world != null) {
+      coprocessorIOs = world.coprocessors(table, coprocessorSettings);
+      photonVision = world.photonVision();
+    } else if (mode == Constants.Mode.REAL) {
+      for (int i = 0; i < coprocessorIOs.length; i++) {
+        Computer computer = table.table().computers().get(i);
+        coprocessorIOs[i] =
+            new CoprocessorIOHttp(
+                computer.name(),
+                table.table().ip(computer),
+                computer.agentPort(),
+                coprocessorSettings,
+                RobotController::getTime);
+      }
+      photonVision = new PhotonVisionIONetworkTables(NetworkTableInstance.getDefault());
+    } else {
+      Arrays.fill(coprocessorIOs, new CoprocessorIO() {});
+      photonVision = new PhotonVisionIO() {};
+    }
+    // A button that powers the coprocessors down, on a robot whose settings wire one.
+    PowerButtonIO powerButton =
+        mode == Constants.Mode.REAL && coprocessorSettings.powerDownButton() >= 0
+            ? new PowerButtonIODigitalInput(coprocessorSettings.powerDownButton())
+            : new PowerButtonIO() {};
+    coprocessors =
+        new Coprocessors(table, coprocessorIOs, photonVision, powerButton, coprocessorSettings);
     calibration =
         new Calibration(
             drive,
@@ -296,7 +356,7 @@ public final class RobotContainer implements AutoCloseable {
             localization,
             cameras,
             robot.drivetrainWiring(),
-            drivetrain,
+            definition.drivetrain(),
             LocalDate::now);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
@@ -337,7 +397,7 @@ public final class RobotContainer implements AutoCloseable {
    */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
-    alliance = MatchState.getAlliance();
+    alliance = MatchState.getAlliance().map(RobotContainer::alliance);
     location = MatchState.getLocation();
     Optional<Place> chosen = chosenStart();
     Optional<Pose2d> chosenPose = alliance.flatMap(ours -> chosen.map(s -> s.on(field, ours)));
@@ -379,6 +439,8 @@ public final class RobotContainer implements AutoCloseable {
     loop.mark("Vision", System.nanoTime());
     vision.record(localization.update());
     loop.mark("Localization", System.nanoTime());
+    coprocessors.periodic(RobotController.getTime(), enabled);
+    loop.mark("Coprocessors", System.nanoTime());
     Pose2d pose = localization.pose();
     placement =
         Placement.check(
@@ -455,6 +517,17 @@ public final class RobotContainer implements AutoCloseable {
     }
   }
 
+  /**
+   * The Driver Station's alliance, as the field model names it: the model has its own, so that
+   * nothing reading it needs WPILib's Driver Station.
+   */
+  static Alliance alliance(org.wpilib.driverstation.Alliance driverStation) {
+    return switch (driverStation) {
+      case BLUE -> Alliance.BLUE;
+      case RED -> Alliance.RED;
+    };
+  }
+
   /** The alliance and station, such as "Red 2", or "Unknown". */
   String allianceStation() {
     if (alliance.isEmpty()) {
@@ -511,6 +584,10 @@ public final class RobotContainer implements AutoCloseable {
     return vision;
   }
 
+  Coprocessors coprocessors() {
+    return coprocessors;
+  }
+
   Localization localization() {
     return localization;
   }
@@ -565,6 +642,7 @@ public final class RobotContainer implements AutoCloseable {
               });
     }
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
+    coprocessors.addTo(pitwall);
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .experiments()
@@ -587,7 +665,7 @@ public final class RobotContainer implements AutoCloseable {
   }
 
   /** The drivetrain's configuration as the pit tunes it. */
-  LiveConfig<SwerveConfig> drivetrainTuning() {
+  LiveConfig<DrivetrainControl> drivetrainTuning() {
     return drivetrainTuning;
   }
 
@@ -619,6 +697,7 @@ public final class RobotContainer implements AutoCloseable {
     offField.close();
     loopHealth.close();
     vision.close();
+    coprocessors.close();
     if (world != null) {
       world.close();
     }

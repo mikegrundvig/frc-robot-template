@@ -5,10 +5,6 @@ import static org.wpilib.units.Units.Amps;
 
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveConfigBuilder;
-import frc.robot.lib.config.SwerveConfigGainsBuilder;
-import frc.robot.lib.config.SwerveConfigLimitsBuilder;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
@@ -23,11 +19,11 @@ import org.wpilib.math.geometry.Pose2d;
 class DriveTuningTest {
   /** A module that remembers what its motor controllers were last given. */
   private static final class RecordingModuleIO implements ModuleIO {
-    SwerveConfig.@Nullable Gains gains;
-    SwerveConfig.@Nullable Limits limits;
+    DrivetrainControl.@Nullable Gains gains;
+    DrivetrainControl.@Nullable Limits limits;
 
     @Override
-    public void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
+    public void configure(DrivetrainControl.Gains gains, DrivetrainControl.Limits limits) {
       this.gains = gains;
       this.limits = limits;
     }
@@ -35,14 +31,14 @@ class DriveTuningTest {
 
   @Test
   void tunedGainsAndLimitsReachEveryModule() {
-    SwerveConfig committed = Robots.SIM.drivetrain();
-    SwerveConfig tuned =
-        SwerveConfigBuilder.builder(committed)
+    DrivetrainControl committed = Robots.SIM.drivetrain();
+    DrivetrainControl tuned =
+        DrivetrainControlBuilder.builder(committed)
             .limits(
-                SwerveConfigLimitsBuilder.builder(committed.limits())
+                DrivetrainControlLimitsBuilder.builder(committed.limits())
                     .driveStatorCurrent(Amps.of(15))
                     .build())
-            .gains(SwerveConfigGainsBuilder.builder(committed.gains()).driveKp(3.0).build())
+            .gains(DrivetrainControlGainsBuilder.builder(committed.gains()).driveKp(3.0).build())
             .build();
     var config = new AtomicReference<>(committed);
     RecordingModuleIO[] modules = {
@@ -61,7 +57,7 @@ class DriveTuningTest {
                 .backupImu(new GyroIO() {})
                 .odometryLock(new ReentrantLock())
                 .build(),
-            Robots.SIM.body(),
+            Robots.SIM.definition(),
             config::get,
             Scheduler.createIndependentScheduler(),
             () -> Pose2d.ZERO)) {

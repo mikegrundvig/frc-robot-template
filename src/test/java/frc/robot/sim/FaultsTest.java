@@ -7,11 +7,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.localization.ImuReadings;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
@@ -61,7 +61,11 @@ class FaultsTest {
   private SimulatedWorld world(SensorErrors errors) {
     SimulatedWorld built =
         new SimulatedWorld(
-            RobotSim.FIELD, Robots.SIM.drivetrain(), Robots.SIM.body(), List.of(), errors);
+            RobotSim.FIELD,
+            Robots.SIM.definition().drivetrain(),
+            Robots.SIM.definition().body(),
+            List.of(),
+            errors);
     worlds.add(built);
     components = new Components(said::add);
     built.addTo(components);
@@ -364,7 +368,7 @@ class FaultsTest {
   void aSpinningWheelCountsTravelTheFloorNeverSawUntilItGrips() {
     SimulatedWorld world = world();
     ModuleIO module = world.drivetrainHardware().modules().get(2);
-    double radius = Robots.SIM.drivetrain().modules().wheelRadius().in(Meters);
+    double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
     double before = read(module).drivePositionRad;
 
     apply(Faults.module(2), Faults.SPINNING, Map.of(Faults.SPEED, 0.5));

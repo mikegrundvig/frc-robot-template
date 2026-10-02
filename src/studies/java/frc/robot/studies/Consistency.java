@@ -1,7 +1,7 @@
 package frc.robot.studies;
 
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;

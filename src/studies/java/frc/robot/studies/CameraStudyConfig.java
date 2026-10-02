@@ -1,14 +1,14 @@
 package frc.robot.studies;
 
-import static frc.robot.lib.config.Rules.atLeast;
-import static frc.robot.lib.config.Rules.nonNegative;
-import static frc.robot.lib.config.Rules.positive;
-import static frc.robot.lib.config.Rules.shown;
+import static com.michaelgrundvig.frc.world.config.Rules.atLeast;
+import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.config.Checks;
+import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import frc.robot.Robots;
-import frc.robot.lib.config.Checks;
-import frc.robot.lib.config.ConfigRecord;
 import frc.robot.subsystems.vision.VisionSim;
 
 /**
@@ -73,7 +73,8 @@ public record CameraStudyConfig(
           .frames(2)
           .cornerNoiseMeanPixels(VisionSim.CORNER_NOISE_MEAN_PIXELS)
           .cornerNoiseStdDevPixels(VisionSim.CORNER_NOISE_STD_DEV_PIXELS)
-          .sightMeters(Robots.current().cameras().get(0).sensor().sightRange().in(Meters))
+          .sightMeters(
+              Robots.current().definition().cameras().get(0).sensor().sightRange().in(Meters))
           .gyroErrorDegrees(0.25)
           .mountErrorMillimeters(0)
           .mountErrorDegrees(0)

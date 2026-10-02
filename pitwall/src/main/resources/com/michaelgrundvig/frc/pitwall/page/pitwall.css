@@ -265,6 +265,50 @@ table { border-collapse: collapse; }
 .switch[aria-checked="true"] .knob::after { left: 19px; }
 .setter { display: flex; gap: 6px; align-items: center; }
 .setter input { width: 6em; }
+.sev.warn { color: var(--warn); }
+.alist .adetail.locked { color: var(--lock); }
+
+/* Notices: what the robot has to tell whoever is here, atop Pit and in the state bar. */
+.notices:empty { display: none; }
+.banner.notice { font-size: var(--value); }
+.banner.notice .nmark { font-weight: 700; }
+.banner.notice.ok { color: var(--ok); border-color: var(--ok); border-width: 2px; }
+.banner.notice.ok b { color: var(--text); }
+.banner.notice.info { border-color: var(--line-strong); }
+.banner.notice.warn { background: var(--warn-tint); border-color: var(--warn); }
+.banner.notice.bad { color: var(--bad); background: var(--bad-tint); border-color: var(--bad); }
+.notice-pills { display: inline-flex; flex-wrap: wrap; gap: var(--s2); }
+.notice-pills:empty { display: none; }
+.pill.notice { text-decoration: none; padding-right: 10px; }
+.pill.notice.ok { color: var(--ok); border-color: var(--ok); border-width: 2px; }
+.pill.notice.warning { color: var(--warn); border-color: var(--warn); background: var(--warn-tint); }
+.pill.notice.problem { color: var(--bad); border-color: var(--bad); background: var(--bad-tint); }
+
+/* Pit's devices: a card each, in as many columns as fit; the log viewer's entries, one a line. */
+.devices-title { font-size: var(--value); margin: var(--s2) 0 var(--s1); }
+.devices-section > .meta { margin-bottom: 10px; }
+.devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+           gap: 0 14px; align-items: start; }
+.device.problem { border-color: var(--bad); box-shadow: inset 4px 0 0 var(--bad); }
+.dhead { font-size: var(--value); display: flex; flex-wrap: wrap; gap: var(--s2); align-items: baseline;
+         margin-bottom: var(--s1); }
+.dstate { margin-left: auto; font-size: var(--body); font-weight: 600; }
+.device .slist li { grid-template-columns: 26px minmax(80px, 8em) minmax(0, 1fr); }
+.device .acts { margin-top: 10px; }
+a.button { display: inline-flex; align-items: center; min-height: var(--row); padding: var(--s1) var(--s3);
+           border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface);
+           color: var(--text); text-decoration: none; }
+a.button:hover { background: var(--surface-2); }
+@media (pointer: coarse) { a.button { min-height: 44px; } }
+dialog.logdialog { width: min(960px, calc(100vw - 32px)); max-width: none; }
+.logdialog .toolbar label { display: inline-flex; gap: 6px; align-items: center; }
+.logview { list-style: none; margin: var(--s2) 0; padding: var(--s2); max-height: 55vh; overflow: auto;
+           background: var(--surface-2); border-radius: 8px; font: var(--meta)/1.5 var(--mono); }
+.logview li { overflow-wrap: anywhere; }
+.logview .t, .logview .u { color: var(--text-2); }
+.logview .p { font-weight: 600; }
+.logview li.bad .p { color: var(--bad); }
+.logview li.warn .p { color: var(--warn); }
 
 /* ---- Tune: values beside what they mean ---- */
 

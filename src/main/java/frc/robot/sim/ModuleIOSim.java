@@ -8,10 +8,13 @@
 package frc.robot.sim;
 
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Meters;
 
-import frc.robot.lib.config.SwerveConfig;
+import com.michaelgrundvig.frc.world.robot.Actuator;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import java.util.Arrays;
@@ -25,16 +28,17 @@ import org.wpilib.simulation.DCMotorSim;
  * A simulated swerve module: each motor turns a load through its gearing, under its motor
  * controller's loop. The drive turns the wheel's share of the robot's configured mass, as inertia
  * at the wheel ({@link #driveInertiaKgM2}), so the robot accelerates as a robot of that mass does;
- * the steering turns a fixed load, the module itself. A {@link DriveSimulation} steps it and moves
- * the robot with its true wheel motion; its absolute encoder can read off true ({@link
+ * the steering turns the module itself. Both loads, and the motors and their gearing, are the
+ * robot's definition's ({@code DrivetrainGeometry.Modules}). A {@link DriveSimulation} steps it and
+ * moves the robot with its true wheel motion; its absolute encoder can read off true ({@link
  * SensorErrors}), and its zero can be knocked further off while it runs. Its encoders' readings can
  * go stale: the wheel turns on, and what the robot's code reads stops changing, as signals that
  * stop arriving do. Both motors' stator current limits are modeled: the drive's caps the torque
  * that accelerates the robot and says when a wheel is at the edge of its grip, and the steering's
  * caps how hard the module turns and stops ({@link CurrentLimitedMotorSim}). The battery is not,
  * and neither is the drive's supply current limit with Phoenix's step-down from it ({@code
- * SwerveConfig.Limits.driveSupplyLowerCurrent}): the supply current it reports is what the motor
- * would draw from a steady 12 V with no supply limit. So this tests the code rather than the
+ * DrivetrainControl.Limits.driveSupplyLowerCurrent}): the supply current it reports is what the
+ * motor would draw from a steady 12 V with no supply limit. So this tests the code rather than the
  * robot's power; docs/stand-ins.md says when that matters.
  *
  * <p>The steering runs as a TalonFX without a Phoenix Pro license runs it: its loop every
@@ -42,25 +46,6 @@ import org.wpilib.simulation.DCMotorSim;
  * high its gains can go before it overshoots, as on a robot.
  */
 final class ModuleIOSim implements ModuleIO {
-  /**
-   * The drive's own moving parts, as inertia at the wheel, in kg m²: the wheel with its tread, its
-   * gears, and the motor's rotor, which the gearing multiplies by its ratio squared. An estimate
-   * for a 4 in wheel (about 0.0004) and a Kraken X60's rotor through 6.75:1 (about 0.0006; the
-   * rotor's inertia isn't published): about 2% of what the template's robot gives each wheel, so
-   * another module's differs by little that matters. SysId on one module lifted off the floor
-   * measures it (docs/characterization.md).
-   */
-  static final double WHEEL_INERTIA_KG_M2 = 0.001;
-
-  /**
-   * The steering's load, in kg m²: the module turning about its steering axis, with the motor's
-   * rotor through the steering's gearing. Not measured: the simulation value of Phoenix Tuner X's
-   * generated constants, as AdvantageKit's swerve templates use it. It sets how fast the steering
-   * turns at its current limit, and so how high its gains can go; nothing in the drive depends on
-   * it, nor it on the robot's mass (docs/stand-ins.md).
-   */
-  private static final double STEER_INERTIA_KG_M2 = 0.004;
-
   private static final double MAX_VOLTS = 12.0;
 
   /** A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz). */
@@ -155,8 +140,10 @@ final class ModuleIOSim implements ModuleIO {
   private double steerPeakAmps;
 
   /**
-   * @param modules the modules as configured; the motor controllers convert with this wheel radius,
-   *     and the robot's mass reaches the motor through it
+   * @param modules the modules as defined: their motors, gearing, and moving parts. The motor
+   *     controllers convert with this wheel radius, and the robot's mass reaches the motor through
+   *     it. The steering's inertia sets how fast it turns at its current limit, and so how high its
+   *     gains can go (docs/stand-ins.md).
    * @param carriedKilograms the share of the robot's mass this wheel moves: the robot's configured
    *     mass ({@code Body.mass}) over its number of modules
    * @param steerOffsetRadians how far the absolute encoder's zero is off
@@ -164,18 +151,28 @@ final class ModuleIOSim implements ModuleIO {
    *     CANcoder sends on its own clock
    */
   ModuleIOSim(
-      SwerveConfig.Modules modules,
+      DrivetrainGeometry.Modules modules,
       double carriedKilograms,
       double steerOffsetRadians,
       double encoderPhase) {
-    driveMotor = modules.driveMotor().model();
-    driveGearing = modules.driveGearing();
+    Actuator.Motors drive = modules.drive();
+    Actuator.Motors steer = modules.steer();
+    driveMotor = drive.model();
+    driveGearing = drive.gearing().ratio();
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     driveSim =
-        motorSim(driveMotor, driveInertiaKgM2(carriedKilograms, wheelRadiusMeters), driveGearing);
+        motorSim(
+            driveMotor,
+            driveInertiaKgM2(
+                carriedKilograms,
+                wheelRadiusMeters,
+                modules.driveInertia().in(KilogramSquareMeters)),
+            driveGearing);
     steerSim =
         new CurrentLimitedMotorSim(
-            modules.steerMotor().model(), STEER_INERTIA_KG_M2, modules.steerGearing());
+            steer.model(),
+            modules.steerInertia().in(KilogramSquareMeters),
+            steer.gearing().ratio());
     this.steerOffsetRadians = steerOffsetRadians;
     builtSteerOffsetRadians = steerOffsetRadians;
     heardSteerRadians = measuredSteerRadians();
@@ -218,17 +215,20 @@ final class ModuleIOSim implements ModuleIO {
 
   /**
    * The drive's load, as inertia at the wheel, in kg m²: the mass the wheel moves, at the wheel's
-   * radius, (m / N) r², plus the wheel's own moving parts ({@link #WHEEL_INERTIA_KG_M2}). A force F
-   * at the tread then accelerates the wheel's share of the robot as F = (m / N) a, so the four
-   * wheels together move the robot as F = m a. Both m and r are the configuration's ({@code
-   * Body.mass}, {@code SwerveConfig.Modules.wheelRadius}): change either, and the simulated robot
-   * changes with it. A worn tread's true radius, a few percent short, is left out of it.
+   * radius, (m / N) r², plus the drive's own moving parts. A force F at the tread then accelerates
+   * the wheel's share of the robot as F = (m / N) a, so the four wheels together move the robot as
+   * F = m a. All three are the definition's ({@code Body.mass}, {@code
+   * DrivetrainGeometry.Modules.wheelRadius} and {@code driveInertia}): change one, and the
+   * simulated robot changes with it. A worn tread's true radius, a few percent short, is left out
+   * of it.
    *
    * @param carriedKilograms the share of the robot's mass this wheel moves
    * @param wheelRadiusMeters the wheel's radius
+   * @param ownKgM2 the drive's own moving parts (wheel, gears, rotor), as inertia at the wheel
    */
-  static double driveInertiaKgM2(double carriedKilograms, double wheelRadiusMeters) {
-    return carriedKilograms * wheelRadiusMeters * wheelRadiusMeters + WHEEL_INERTIA_KG_M2;
+  static double driveInertiaKgM2(
+      double carriedKilograms, double wheelRadiusMeters, double ownKgM2) {
+    return carriedKilograms * wheelRadiusMeters * wheelRadiusMeters + ownKgM2;
   }
 
   /** A motor turning a load. WPILib 2027 names this model for an arm; without gravity it's one. */
@@ -380,7 +380,7 @@ final class ModuleIOSim implements ModuleIO {
    * modeled.
    */
   @Override
-  public void configure(SwerveConfig.Gains gains, SwerveConfig.Limits limits) {
+  public void configure(DrivetrainControl.Gains gains, DrivetrainControl.Limits limits) {
     driveKp = gains.driveKp();
     steerKp = gains.steerKp();
     steerKd = gains.steerKd();

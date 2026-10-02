@@ -4,15 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Place;
 import frc.robot.Robots;
-import frc.robot.lib.field.FieldModel;
-import frc.robot.lib.field.Place;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.wpilib.driverstation.Alliance;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
@@ -24,14 +24,14 @@ import org.wpilib.math.geometry.Translation2d;
  * tag for tag, and places derived from tags land where the tags say.
  */
 class RebuiltTest {
-  private final FieldModel field = Rebuilt.field(Robots.SIM.body());
+  private final FieldModel field = Rebuilt.field(Robots.SIM.definition().body());
 
   @ParameterizedTest
   @EnumSource(
       value = Fields.class,
       names = {"FRC_2026_REBUILT_WELDED", "FRC_2026_REBUILT_ANDY_MARK"})
   void everyTagLandsOnAPartnerUnderTheDeclaredSymmetry(Fields layout) {
-    FieldModel model = Rebuilt.field(Robots.SIM.body(), layout);
+    FieldModel model = Rebuilt.field(Robots.SIM.definition().body(), layout);
 
     assertThat(model.tags()).hasSize(32);
     assertThat(model.symmetryError()).as("meters, worst tag").isLessThan(0.01);
@@ -50,7 +50,7 @@ class RebuiltTest {
   void theTowerSpotFacesTheTowerFromJustClearOfIt() {
     Pose2d blue = Rebuilt.TOWER.on(field, Alliance.BLUE);
     Pose2d red = Rebuilt.TOWER.on(field, Alliance.RED);
-    double halfLength = Robots.SIM.body().bumperLength().in(Meters) / 2;
+    double halfLength = Robots.SIM.definition().body().bumperLength().in(Meters) / 2;
 
     assertThat(blue.getX() - halfLength)
         .as("front bumper beyond the tower's face, 43.51 in from the wall")
@@ -65,7 +65,7 @@ class RebuiltTest {
 
   @Test
   void startsAreInTheAllianceZoneWithBumpersOnTheStartingLineFacingTheField() {
-    double halfLength = Robots.SIM.body().bumperLength().in(Meters) / 2;
+    double halfLength = Robots.SIM.definition().body().bumperLength().in(Meters) / 2;
     assertThat(field.starts()).extracting(Place::name).containsExactly("Left", "Center", "Right");
     for (Place start : field.starts()) {
       for (Alliance alliance : Alliance.values()) {

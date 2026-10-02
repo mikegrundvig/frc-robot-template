@@ -1,0 +1,81 @@
+// The world model: what the field and the robot are. Three packages, which ArchitectureTest keeps
+// apart: the validation kit every configuration record is built with (config), the field with its
+// tags, places, and terrain (field), and the robot's definition (robot). It reads WPILib's math,
+// units, and field layouts and nothing more, so everything can read it, the robot itself, the
+// simulator, localization, and the views, without reaching anything else of theirs.
+
+plugins {
+    id "java-library"
+    id "jacoco"
+    id "com.diffplug.spotless"
+    id "net.ltgt.errorprone"
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+base {
+    archivesName = "world"
+}
+
+// WPILib's libraries, from wherever GradleRIO finds them for the robot program.
+apply from: rootProject.file("gradle/wpilib-repositories.gradle")
+
+// WPILib's libraries, at the versions GradleRIO gives the robot program. WPILib publishes its jars
+// without their dependencies, which GradleRIO lists itself, so the model takes its share of that list.
+def wpilibJava = { List<String> artifacts ->
+    rootProject.wpi.java.deps.wpilib().findAll { dep ->
+        artifacts.any { dep.get().contains(":${it}:") }
+    }
+}
+
+dependencies {
+    // The model's own vocabulary: poses, transforms, and measures in its records' signatures, and
+    // the season's official tag layouts, with what they're built on (WPILib's utilities, the matrix
+    // library under its math, and the readers of its formats).
+    api wpilibJava([
+        "wpimath-java",
+        "wpiunits-java",
+        "wpiutil-java",
+        "fields-java",
+        "ejml-simple",
+        "quickbuf-runtime",
+        "avaje-jsonb"
+    ])
+    api libs.jspecify
+
+    // Configuration records are built by name, through builders generated as they compile.
+    compileOnly libs.recordbuilder.core
+    testCompileOnly libs.recordbuilder.core
+    annotationProcessor libs.recordbuilder.processor
+    // Writes the configuration records' Javadoc into the jar, so Pitwall's page can say what each
+    // value means. It runs in the compiler only: the model never sees Pitwall.
+    annotationProcessor project(":pitwall:docs-processor")
+
+    errorprone libs.errorprone.core
+    errorprone libs.nullaway
+
+    testImplementation platform(libs.junit.bom)
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testImplementation libs.assertj.core
+    testImplementation libs.archunit
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // As the robot program compiles: the model runs on the robot.
+    options.compilerArgs.add "-XDstringConcat=inline"
+}
+tasks.named("compileJava") {
+    options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+ext.nullSafePackages = "com.michaelgrundvig.frc.world"
+apply from: rootProject.file("gradle/quality.gradle")

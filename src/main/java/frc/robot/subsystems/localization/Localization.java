@@ -1,28 +1,29 @@
 package frc.robot.subsystems.localization;
 
-import frc.robot.lib.field.Terrain;
-import frc.robot.lib.localization.BodyMotion;
-import frc.robot.lib.localization.CameraLocalizer;
-import frc.robot.lib.localization.CrestLandmarks;
-import frc.robot.lib.localization.DriveConditions;
-import frc.robot.lib.localization.DriveKinematicsModel;
-import frc.robot.lib.localization.DrivetrainReadings;
-import frc.robot.lib.localization.ImuCrossCheck;
-import frc.robot.lib.localization.ImuPlacement;
-import frc.robot.lib.localization.ImuReadings;
-import frc.robot.lib.localization.LandmarkDecision;
-import frc.robot.lib.localization.LocalizationEstimate;
-import frc.robot.lib.localization.LocalizationGate;
-import frc.robot.lib.localization.OdometrySample;
-import frc.robot.lib.localization.PoseCovariance;
-import frc.robot.lib.localization.PoseEstimator;
-import frc.robot.lib.localization.PoseReset;
-import frc.robot.lib.localization.SlipCheck;
-import frc.robot.lib.localization.TerrainCrossing;
-import frc.robot.lib.localization.Timestamps;
-import frc.robot.lib.localization.VisionDecision;
-import frc.robot.lib.localization.YawSource;
-import frc.robot.lib.localization.YawTrack;
+import com.michaelgrundvig.frc.localization.BodyMotion;
+import com.michaelgrundvig.frc.localization.CameraLocalizer;
+import com.michaelgrundvig.frc.localization.CrestLandmarks;
+import com.michaelgrundvig.frc.localization.DriveConditions;
+import com.michaelgrundvig.frc.localization.DriveKinematicsModel;
+import com.michaelgrundvig.frc.localization.DrivetrainReadings;
+import com.michaelgrundvig.frc.localization.ImuCrossCheck;
+import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.localization.LandmarkDecision;
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
+import com.michaelgrundvig.frc.localization.LocalizationGate;
+import com.michaelgrundvig.frc.localization.OdometrySample;
+import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.localization.PoseEstimator;
+import com.michaelgrundvig.frc.localization.PoseReset;
+import com.michaelgrundvig.frc.localization.SlipCheck;
+import com.michaelgrundvig.frc.localization.TerrainCrossing;
+import com.michaelgrundvig.frc.localization.Timestamps;
+import com.michaelgrundvig.frc.localization.VisionDecision;
+import com.michaelgrundvig.frc.localization.YawSource;
+import com.michaelgrundvig.frc.localization.YawTrack;
+import com.michaelgrundvig.frc.world.field.Terrain;
+import com.michaelgrundvig.frc.world.robot.ImuMount;
+import com.michaelgrundvig.frc.world.robot.Imus;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -140,8 +141,10 @@ public final class Localization implements AutoCloseable {
   private YawSource lastStepSource = YawSource.WHEELS;
   private double lastStepYaw = Double.NaN;
 
-  /** Where the IMUs sit, and whether the gyro's accelerometer reads along the robot's axes. */
-  private final ImuPlacement imus;
+  /**
+   * Where the IMUs are mounted, and whether each one's accelerometer reads along the robot's axes.
+   */
+  private final Imus imus;
 
   private YawSource yawSource = YawSource.GYRO;
 
@@ -190,6 +193,13 @@ public final class Localization implements AutoCloseable {
           "camerasWithoutPlaces",
           "More cameras than the estimator keeps apart",
           Alert.Level.MEDIUM);
+  private final Alert imuOrientation =
+      new Alert(
+          "Localization",
+          "imuOrientation",
+          "The accelerometer reads gravity standing still: check the IMU's orientation in the"
+              + " robot's definition",
+          Alert.Level.MEDIUM);
 
   /**
    * @param estimator the pose estimator, which this owns from now on
@@ -197,23 +207,25 @@ public final class Localization implements AutoCloseable {
    * @param terrain the field's raised terrain: a tilt it explains keeps the wheels trusted, and its
    *     crests are landmarks
    * @param wheelReachMeters how far the wheels reach from the robot's center
-   * @param imus where the IMUs sit, and whether the gyro's accelerometer reads along the robot's
-   *     axes
+   * @param gripMetersPerSecSq the most the tread's grip can change the robot's velocity: its
+   *     friction times g
+   * @param imus where the IMUs are mounted, and whether each one's accelerometer has been checked
+   *     to read along the robot's axes
    */
   public Localization(
       PoseEstimator estimator,
       DriveKinematicsModel kinematics,
       Terrain terrain,
       double wheelReachMeters,
-      ImuPlacement imus) {
+      double gripMetersPerSecSq,
+      Imus imus) {
     this.estimator = estimator;
     this.kinematics = kinematics;
     this.ground = terrain;
     this.wheelReach = wheelReachMeters;
     crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
     this.imus = imus;
-    slipCheck =
-        new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters, imus.accelerometerChecked());
+    slipCheck = new SlipCheck(SlipCheck.Settings.DEFAULTS, wheelReachMeters, gripMetersPerSecSq);
     estimate = estimator.estimate();
   }
 
@@ -235,6 +247,7 @@ public final class Localization implements AutoCloseable {
           case WHEELS -> null;
         };
     compareWithTheImu(steps, attitude, readings.velocities());
+    checkOrientation(steps.source());
     conditions = conditions(enabled);
     estimator.setConditions(conditions);
     for (Step step : steps.steps()) {
@@ -248,6 +261,8 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput(
         "Localization/GroundSlopeDegrees", Math.toDegrees(conditions.groundSlopeRadians()));
     Logger.recordOutput("Localization/CollisionShare", conditions.collisionShare());
+    Logger.recordOutput(
+        "Localization/UnexplainedJoltMetersPerSecSq", slipCheck.unexplainedMetersPerSecSq());
     Logger.recordOutput("Localization/SlipMetersPerSecond", conditions.slipMetersPerSecond());
     Logger.recordOutput(
         "Localization/TurnSlipMetersPerSecond", slipCheck.turnSlipMetersPerSecond());
@@ -256,6 +271,8 @@ public final class Localization implements AutoCloseable {
     Logger.recordOutput(
         "Localization/TurnApartDegrees", Math.toDegrees(slipCheck.turnApartRadians()));
     Logger.recordOutput("Localization/SlideMetersPerSecond", slipCheck.slideMetersPerSecond());
+    Logger.recordOutput(
+        "Localization/AccelerometerBiasMetersPerSecSq", slipCheck.biasMetersPerSecSq());
     estimate = estimator.estimate();
   }
 
@@ -422,17 +439,18 @@ public final class Localization implements AutoCloseable {
    */
   private DriveConditions conditions(boolean enabled) {
     ImuReadings imu = attitude;
-    double tilt =
-        imu == null
-            ? 0
-            // The angle between the robot's up and straight up.
-            : Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
+    double tilt = imu == null ? 0 : tilt(imu);
     return new DriveConditions(
         tilt,
         imu == null ? 0 : groundSlope(tilt),
         slipCheck.collisionShare(),
         slipCheck.slipMetersPerSecond(),
         !enabled);
+  }
+
+  /** How far the robot is tilted from level, by an IMU's attitude: its up against straight up. */
+  private static double tilt(ImuReadings imu) {
+    return Math.acos(Math.min(1, Math.cos(imu.pitchRadians()) * Math.cos(imu.rollRadians())));
   }
 
   /**
@@ -457,6 +475,7 @@ public final class Localization implements AutoCloseable {
       for (Step step : loop) {
         wheelTurn += step.motion().dthetaRadians();
       }
+      ImuMount mount = source == YawSource.GYRO ? imus.gyro() : imus.backup();
       slipCheck.update(
           new SlipCheck.Sample(
               Timestamps.toSeconds(last.timestampNanos() - lastStepNanos),
@@ -464,16 +483,39 @@ public final class Localization implements AutoCloseable {
               MathUtil.angleModulus(last.yaw() - lastStepYaw),
               last.yaw(),
               imu.yawRateRadiansPerSecond(),
-              source == YawSource.GYRO ? imus.gyro() : imus.backup(),
+              mount.position(),
+              mount.accelerometerChecked(),
               wheels,
               felt.forward(),
-              felt.left()));
+              felt.left(),
+              tilt(imu)));
     } else {
       slipCheck.startOver(felt.forward(), felt.left());
     }
     lastStepNanos = last.timestampNanos();
     lastStepSource = source;
     lastStepYaw = last.yaw();
+  }
+
+  /**
+   * Says when the accelerometer of the IMU that turns odometry reads, standing still, past any bias
+   * a part has ({@link SlipCheck#leaksGravity}): gravity's share, leaking in because the robot's
+   * definition gives the IMU another orientation than it's mounted with. Its pitch and roll can be
+   * right all the while (a Pigeon's follow the mount pose saved on it), so only the accelerometer
+   * shows it.
+   */
+  private void checkOrientation(YawSource source) {
+    boolean leaks = slipCheck.leaksGravity();
+    if (leaks) {
+      imuOrientation.setText(
+          String.format(
+              Locale.ROOT,
+              "The %s's accelerometer reads %.1f m/s² standing still, gravity's share: check its"
+                  + " orientation in the robot's definition (docs/calibration.md)",
+              source == YawSource.BACKUP ? "backup IMU" : "gyro",
+              slipCheck.biasMetersPerSecSq()));
+    }
+    imuOrientation.set(leaks);
   }
 
   /**
@@ -688,11 +730,16 @@ public final class Localization implements AutoCloseable {
     return imusDisagree.get();
   }
 
+  boolean isImuOrientationAlertActive() {
+    return imuOrientation.get();
+  }
+
   @Override
   public void close() {
     gyroDisconnected.close();
     usingBackup.close();
     imusDisagree.close();
     camerasWithoutPlaces.close();
+    imuOrientation.close();
   }
 }

@@ -10,15 +10,13 @@ import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
-import com.ctre.phoenix6.configs.MountPoseConfigs;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import com.ctre.phoenix6.hardware.TalonFX;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import frc.robot.lib.config.SwerveConfig;
-import frc.robot.lib.config.SwerveConfigLimitsBuilder;
-import frc.robot.lib.config.SwerveWiring;
+import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
@@ -28,6 +26,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation3d;
 
 /**
@@ -38,7 +37,8 @@ import org.wpilib.math.geometry.Translation3d;
 @ExtendWith(RobotSim.class)
 class PhoenixIOTest {
   private static final CANBus BUS = new CANBus("drivetrain");
-  private static final SwerveConfig DRIVETRAIN = Robots.SIM.drivetrain();
+  private static final DrivetrainGeometry GEOMETRY = Robots.SIM.definition().drivetrain();
+  private static final DrivetrainControl DRIVETRAIN = Robots.SIM.drivetrain();
   private static final double COUPLING = 3.5;
 
   private final PhoenixOdometryThread odometry = new PhoenixOdometryThread();
@@ -82,10 +82,10 @@ class PhoenixIOTest {
   @Test
   void theWheelTurnsByItsGearingLessWhatTurningTheModulePutThere() throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(1, 2, 3), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(1, 2, 3), BUS, GEOMETRY.modules(), COUPLING, odometry);
     io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits());
     odometry.start();
-    double gearing = DRIVETRAIN.modules().driveGearing();
+    double gearing = GEOMETRY.modules().driveGearing().ratio();
 
     new TalonFX(1, BUS).getSimState().setRawRotorPosition(2 * gearing); // two wheel turns' worth
     new CANcoder(3, BUS).getSimState().setRawPosition(0.25); // the module turned a quarter
@@ -113,8 +113,8 @@ class PhoenixIOTest {
   /**
    * What Phoenix does with a motor's supply current when the code doesn't say: a supply limit is on
    * (70 A), and it steps down to 40 A once the motor has been held at the limit for 1 s. The
-   * comments in {@link ModuleIOTalonFX} and {@code SwerveConfig.Limits} say so; if a Phoenix update
-   * changes these defaults, change those comments.
+   * comments in {@link ModuleIOTalonFX} and {@code DrivetrainControl.Limits} say so; if a Phoenix
+   * update changes these defaults, change those comments.
    */
   @Test
   void phoenixStepsTheSupplyLimitDownTo40AmpsAfterASecondUnlessToldOtherwise() {
@@ -135,7 +135,7 @@ class PhoenixIOTest {
   void theDriveMotorsSupplyLimitStepsDownAsConfiguredAtStartupAndWhenTuned()
       throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, GEOMETRY.modules(), COUPLING, odometry);
     TalonFX drive = new TalonFX(11, BUS);
 
     io.configure(DRIVETRAIN.gains(), stepDown(55, 35, 0.5));
@@ -145,7 +145,7 @@ class PhoenixIOTest {
     assertSupplyLimit(drive, 50, 30, 0.8);
 
     io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits()); // back to the template's
-    SwerveConfig.Limits template = DRIVETRAIN.limits();
+    DrivetrainControl.Limits template = DRIVETRAIN.limits();
     assertSupplyLimit(
         drive,
         template.driveSupplyCurrent().in(Amps),
@@ -160,7 +160,7 @@ class PhoenixIOTest {
   @Test
   void theSteeringHasNoSupplyLimitAndSoNoStepDown() throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, DRIVETRAIN.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, GEOMETRY.modules(), COUPLING, odometry);
     TalonFX steer = new TalonFX(15, BUS);
     CurrentLimitsConfigs read = new CurrentLimitsConfigs();
 
@@ -171,7 +171,7 @@ class PhoenixIOTest {
 
     io.configure(
         DRIVETRAIN.gains(),
-        SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+        DrivetrainControlLimitsBuilder.builder(DRIVETRAIN.limits())
             .steerStatorCurrent(Amps.of(35))
             .build());
     boolean applied =
@@ -183,8 +183,9 @@ class PhoenixIOTest {
   }
 
   /** The template's limits, with the drive's supply limit and its step-down changed. */
-  private static SwerveConfig.Limits stepDown(double amps, double lowerAmps, double lowerSeconds) {
-    return SwerveConfigLimitsBuilder.builder(DRIVETRAIN.limits())
+  private static DrivetrainControl.Limits stepDown(
+      double amps, double lowerAmps, double lowerSeconds) {
+    return DrivetrainControlLimitsBuilder.builder(DRIVETRAIN.limits())
         .driveSupplyCurrent(Amps.of(amps))
         .driveSupplyLowerCurrent(Amps.of(lowerAmps))
         .driveSupplyLowerTime(Seconds.of(lowerSeconds))
@@ -268,7 +269,7 @@ class PhoenixIOTest {
 
   @Test
   void theGyroPassesItsAnglesThroughInWpilibsConvention() throws InterruptedException {
-    GyroIOPigeon2 io = new GyroIOPigeon2(20, BUS, 1.0, odometry);
+    GyroIOPigeon2 io = new GyroIOPigeon2(20, BUS, 1.0, Rotation3d.ZERO, odometry);
     odometry.start();
 
     var pigeon = new Pigeon2(20, BUS).getSimState();
@@ -294,28 +295,17 @@ class PhoenixIOTest {
    * The accelerometer reads along the Pigeon's case, whatever its mount pose: turned a quarter turn
    * left on the robot, it feels the robot speed up forward on its -y axis; mounted logo down, it
    * feels a push left on its -y axis and the floor holding it up on its -z axis. Turned by the
-   * mount pose, both read along the robot's axes again.
+   * orientation the robot's definition gives it, both read along the robot's axes again.
    */
   @Test
   void theAccelerometerIsTurnedFromThePigeonsCaseToTheRobotsAxes() {
-    MountPoseConfigs turnedLeft = new MountPoseConfigs().withMountPoseYaw(90);
-    MountPoseConfigs logoDown = new MountPoseConfigs().withMountPoseRoll(180);
+    Rotation3d turnedLeft = new Rotation3d(0, 0, Math.PI / 2);
+    Rotation3d logoDown = new Rotation3d(Math.PI, 0, 0);
 
-    Translation3d forward = GyroIOPigeon2.robotAxes(GyroIOPigeon2.mount(turnedLeft), 0, -1, 0);
-    Translation3d left = GyroIOPigeon2.robotAxes(GyroIOPigeon2.mount(logoDown), 0, -1, -9.81);
+    Translation3d forward = GyroIOPigeon2.robotAxes(turnedLeft, 0, -1, 0);
+    Translation3d left = GyroIOPigeon2.robotAxes(logoDown, 0, -1, -9.81);
 
     assertThat(forward.getDistance(new Translation3d(1, 0, 0))).isLessThan(1e-12);
     assertThat(left.getDistance(new Translation3d(0, 1, 9.81))).isLessThan(1e-12);
-  }
-
-  @Test
-  void theGyroReadsItsMountPoseAtStartup() {
-    Pigeon2 pigeon = new Pigeon2(21, BUS);
-    StatusCode applied =
-        pigeon.getConfigurator().apply(new MountPoseConfigs().withMountPoseYaw(90));
-    GyroIOPigeon2 io = new GyroIOPigeon2(21, BUS, 1.0, odometry);
-
-    assertThat(applied.isOK()).isTrue();
-    assertThat(Math.toDegrees(io.mount().getZ())).isCloseTo(90, within(1e-3));
   }
 }

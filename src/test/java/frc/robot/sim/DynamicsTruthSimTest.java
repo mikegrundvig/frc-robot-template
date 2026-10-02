@@ -318,7 +318,7 @@ class DynamicsTruthSimTest {
   private static double[] wheelTurns(TruthRig rig) {
     double[] turns = new double[4];
     for (int i = 0; i < 4; i++) {
-      turns[i] = rig.simulation.moduleSim(i).wheelRotationRadians();
+      turns[i] = rig.simulation.physics().wheel(i).rotationRadians();
     }
     return turns;
   }

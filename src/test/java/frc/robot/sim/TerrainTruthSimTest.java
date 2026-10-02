@@ -10,7 +10,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
@@ -130,22 +129,17 @@ class TerrainTruthSimTest {
   }
 
   /**
-   * How far above the ground under it each wheel's tread is, in meters (below it, negative): the
-   * plane the robot's frame stands on, from its pose (through its origin, on the floor at its
-   * center, square to its up axis), against the terrain.
+   * How far above the ground under it each wheel's tread is, in meters (below it, negative): where
+   * the physics says it meets the ground, against the terrain there. A wheel the physics says is
+   * off the ground is hanging, however close.
    */
   private static double[] gaps(TruthRig rig) {
-    Pose3d pose = rig.simulation.truePose3d();
-    Translation3d up = new Translation3d(0, 0, 1).rotateBy(pose.getRotation());
-    Translation2d[] treads = treads(rig);
     double[] gaps = new double[4];
     for (int i = 0; i < 4; i++) {
-      double planeHeight =
-          pose.getZ()
-              - (up.getX() * (treads[i].getX() - pose.getX())
-                      + up.getY() * (treads[i].getY() - pose.getY()))
-                  / up.getZ();
-      gaps[i] = planeHeight - rig.simulation.terrain().heightAt(treads[i]);
+      WheelTruth wheel = rig.simulation.physics().wheel(i);
+      Translation3d contact = wheel.contactPoint();
+      double gap = contact.getZ() - rig.simulation.terrain().heightAt(contact.toTranslation2d());
+      gaps[i] = wheel.inContact() || gap > ON_THE_GROUND ? gap : ON_THE_GROUND;
     }
     return gaps;
   }

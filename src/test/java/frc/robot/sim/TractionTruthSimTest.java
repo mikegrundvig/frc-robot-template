@@ -110,6 +110,36 @@ class TractionTruthSimTest {
   }
 
   /**
+   * Speeding up straight ahead at the template's 30 A, gripping, the wheels carry the robot's
+   * weight as quasi-static weight transfer shares it: each front wheel m g / 4 − m a h / (2 L),
+   * each rear one as much more, within 3%, with a the robot's acceleration, h the center of
+   * gravity's height, and L the wheelbase. Today every wheel carries a quarter of the weight
+   * however hard the robot speeds up.
+   */
+  @Test
+  @KnownGap("every wheel carries a quarter of the robot's weight")
+  void speedingUpShiftsLoadFromTheFrontWheelsToTheRear() {
+    TruthRig rig = new TruthRig();
+    rig.driveVolts(12);
+    rig.run(0.1);
+    double before = rig.velocity().getX();
+    rig.loops(1);
+    double acceleration = (rig.velocity().getX() - before) / 0.02;
+
+    double m = rig.mass();
+    double h = rig.body.cgHeight().in(Meters);
+    double wheelbase = rig.wheels[0].getX() - rig.wheels[2].getX();
+    double front = m * ImuReadings.STANDARD_GRAVITY / 4 - m * acceleration * h / (2 * wheelbase);
+    WheelTruth frontLeft = rig.simulation.physics().wheel(0);
+    WheelTruth backLeft = rig.simulation.physics().wheel(2);
+    assertThat(acceleration).as("speeding up").isGreaterThan(4);
+    stillOpen("the front left wheel's load, N", frontLeft.loadNewtons(), front, 0.03, 166.25, 0.01);
+    assertThat(backLeft.loadNewtons())
+        .as("today, the back's too")
+        .isEqualTo(frontLeft.loadNewtons());
+  }
+
+  /**
    * One module pointing 10° off the others (its absolute encoder zeroed off, so its steering holds
    * it there), all four driven ahead at 1 m/s: the three that agree hold the robot straight, their
    * grip across their wheels (3 μN) far past the one wheel's scrub (μN), and that wheel slides. So
@@ -154,11 +184,11 @@ class TractionTruthSimTest {
     rig.limitDrives(amps);
     rig.driveVolts(12);
     for (int loop = 0; loop < 10; loop++) {
-      double before = rig.simulation.moduleSim(wheel).wheelRotationRadians();
+      double before = rig.simulation.physics().wheel(wheel).rotationRadians();
       Translation2d start = rig.simulation.truePose().getTranslation();
       rig.loops(1);
       double rolled =
-          (rig.simulation.moduleSim(wheel).wheelRotationRadians() - before) * rig.wheelRadius();
+          (rig.simulation.physics().wheel(wheel).rotationRadians() - before) * rig.wheelRadius();
       double moved = rig.simulation.truePose().getTranslation().getDistance(start);
       if ((rolled - moved) / 0.02 > 0.001) {
         return true;

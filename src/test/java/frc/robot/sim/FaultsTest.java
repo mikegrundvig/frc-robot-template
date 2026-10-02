@@ -246,7 +246,7 @@ class FaultsTest {
     drive(world, 3.0, 0.5);
     ModuleIOInputs stale = read(module);
     drive(world, 3.0, 0.1);
-    double truth = world.drivetrain().moduleSim(0).wheelRotationRadians();
+    double truth = world.drivetrain().physics().wheel(0).rotationRadians();
     undo(Faults.module(0), Faults.STALE);
     step(world);
     ModuleIOInputs caughtUp = read(module);
@@ -414,9 +414,9 @@ class FaultsTest {
     }
 
     assertThat(starting.accelerationYMetersPerSecSq)
-        .isCloseTo(DriveSimulation.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
+        .isCloseTo(KinematicPhysics.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
     assertThat(stopping.accelerationYMetersPerSecSq)
-        .isCloseTo(-DriveSimulation.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
+        .isCloseTo(-KinematicPhysics.PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED, within(1e-6));
     // A second's push: a third of a second getting going, the rest at 1 m/s.
     assertThat(slid).isCloseTo(1.0 - 1.0 / (2 * 3), within(0.01));
     assertThat(world.truePose().getX()).isCloseTo(STANDING.getX(), within(1e-9));

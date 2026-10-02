@@ -48,6 +48,12 @@ public final class Components {
 
   private final Map<String, Object> shown = new LinkedHashMap<>();
 
+  /** {@link #shown} as last handed out, and the scenarios' view, made again only on a change. */
+  private Map<String, Object> shownView = Map.of();
+
+  private @Nullable Map<String, Scenario> scenariosShown;
+  private Map<String, Object> scenarioView = Map.of();
+
   /**
    * @param say told each fault applied or undone, in a sentence, for the console and the log
    */
@@ -309,9 +315,11 @@ public final class Components {
    * Every component as the page shows it, by name: {@code {"kind", "faults": {name: {"does",
    * "lasting", "undo", "parameters": [{"name", "unit", "min", "max", "initial"}], "on",
    * "values"}}}}. A lasting fault that's on gives the values it was applied with. Call it from the
-   * robot loop; a component's map is rebuilt only when one of its faults turns on or off.
+   * robot loop; a component's map is rebuilt only when one of its faults turns on or off, and the
+   * same map is returned until one does, so the page's comparison stops at it.
    */
   public Map<String, Object> view() {
+    boolean changed = shownView.size() != components.size();
     for (Component component : components.values()) {
       List<Object> from = new ArrayList<>();
       for (Fault fault : component.faults()) {
@@ -322,9 +330,13 @@ public final class Components {
       if (!from.equals(shownFrom.get(component.name()))) {
         shownFrom.put(component.name(), from);
         shown.put(component.name(), shown(component));
+        changed = true;
       }
     }
-    return new LinkedHashMap<>(shown);
+    if (changed) {
+      shownView = Collections.unmodifiableMap(new LinkedHashMap<>(shown));
+    }
+    return shownView;
   }
 
   /**
@@ -332,8 +344,12 @@ public final class Components {
    * "fault", "values"}]}}.
    */
   public Map<String, Object> scenarioView() {
+    Map<String, Scenario> scenarios = declaredScenarios;
+    if (scenarios == scenariosShown) {
+      return scenarioView; // the same map until a scenario is declared
+    }
     Map<String, Object> view = new LinkedHashMap<>();
-    for (Scenario scenario : declaredScenarios.values()) {
+    for (Scenario scenario : scenarios.values()) {
       List<Object> faults = new ArrayList<>();
       for (Setting setting : scenario.faults()) {
         Map<String, Object> fault = new LinkedHashMap<>();
@@ -347,7 +363,9 @@ public final class Components {
       shown.put("faults", faults);
       view.put(scenario.name(), shown);
     }
-    return view;
+    scenariosShown = scenarios;
+    scenarioView = Collections.unmodifiableMap(view);
+    return scenarioView;
   }
 
   private Map<String, Object> shown(Component component) {

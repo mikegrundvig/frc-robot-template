@@ -61,6 +61,9 @@ public final class Status {
   private final Map<String, Source> items = new LinkedHashMap<>();
   private final Map<String, Shown> shown = new LinkedHashMap<>();
 
+  /** The units section, made once the items are known; null until then, or after an addition. */
+  private @Nullable Map<String, Object> units;
+
   /** The read a request asked for, shared by every request until the loop reads; null for none. */
   private @Nullable CompletableFuture<List<Item>> asked;
 
@@ -128,6 +131,7 @@ public final class Status {
     if (items.putIfAbsent(name, source) != null) {
       throw new IllegalArgumentException("two status items are named " + name);
     }
+    units = null;
     return this;
   }
 
@@ -205,8 +209,20 @@ public final class Status {
     return read;
   }
 
-  /** The unit and resolution of each number that has them, for the page to show it with. */
+  /**
+   * The unit and resolution of each number that has them, for the page to show it with: the same
+   * map until an item is added.
+   */
   Map<String, Object> units() {
+    Map<String, Object> made = units;
+    if (made == null) {
+      made = makeUnits();
+      units = made;
+    }
+    return made;
+  }
+
+  private Map<String, Object> makeUnits() {
     Map<String, Object> units = new LinkedHashMap<>();
     items.forEach(
         (name, source) -> {

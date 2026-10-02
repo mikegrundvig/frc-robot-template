@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Trace;
 import com.michaelgrundvig.frc.pitwall.scene.Scenes;
 import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,32 @@ public final class Page {
   private boolean pathsFound;
   private Map<String, Object> rigSection = Map.of();
   private Map<String, Object> experimentSection = Map.of();
+
+  /**
+   * The sections that change now and then, each with what it was built from: built again only when
+   * that changes, else handed over as the same map, where the comparison with what was sent stops.
+   */
+  private final Built robotSection = new Built();
+
+  private final Built actionSection = new Built();
+  private final Built tuningSection = new Built();
+  private final Built wpilibSection = new Built();
+  private final Built runSection = new Built();
+
+  /** A section and what it was built from. */
+  private static final class Built {
+    private @Nullable Object from;
+    private Map<String, Object> section = Map.of();
+
+    /** The section, built again only when what it's built from differs (by equals). */
+    Map<String, Object> from(Object now, Supplier<Map<String, Object>> build) {
+      if (!now.equals(from)) {
+        section = build.get();
+        from = now;
+      }
+      return section;
+    }
+  }
 
   /** A page that doesn't know the robot's mode, and has no simulator: a test's, say. */
   public Page(
@@ -203,6 +230,8 @@ public final class Page {
    *       joysticks the page drives), {@code components} (what can fail, and how), and {@code
    *       scenarios}: see {@link Simulator#view}.
    * </ul>
+   *
+   * <p>A section that hasn't changed since the last call is the same map as then.
    */
   public Map<String, Map<String, Object>> sections() {
     List<LiveConfig<?>> configs = tunables.configs();
@@ -213,21 +242,48 @@ public final class Page {
     }
     rebuildTuningIfChanged(configs);
     Map<String, Map<String, Object>> sections = new LinkedHashMap<>();
-    sections.put("robot", robot());
+    sections.put(
+        "robot",
+        robotSection.from(
+            Arrays.asList(
+                mode.get(),
+                Objects.requireNonNullElse(actions.whyLocked(), ""),
+                Objects.requireNonNullElse(experiments.whyLocked(), "")),
+            this::robot));
     sections.put("status", status.values());
     sections.put("units", status.units());
-    sections.put("actions", actionStates());
-    sections.put("tuning", session());
+    List<Actions.State> actionStates = actions.view();
+    sections.put("actions", actionSection.from(actionStates, () -> actionStates(actionStates)));
+    sections.put(
+        "tuning",
+        tuningSection.from(
+            Arrays.asList(
+                tuning.name(), tuning.isEnabled(), tuning.isFieldConnected(), tunables.refusals()),
+            this::session));
     sections.put("configs", configSection);
     sections.put("tunables", tunableSection);
     sections.put("values", valueSection);
     sections.put("changes", changeSection);
-    sections.put("wpilibTunables", wpilibTunables());
+    List<TunableTee.Listed> listed = tunables.view();
+    sections.put("wpilibTunables", wpilibSection.from(listed, () -> wpilibTunables(listed)));
     rebuildRigsIfChanged();
     sections.put("rigs", rigSection);
     sections.put("experiments", experimentSection);
     Run run = experiments.run();
-    sections.put("run", run == null ? Map.of() : run(run));
+    sections.put(
+        "run",
+        run == null
+            ? Map.of()
+            : runSection.from(
+                Arrays.asList(
+                    run,
+                    run.startNanos(),
+                    run.state(),
+                    run.gainsChanged(),
+                    run.controller(),
+                    rigsBuiltFor,
+                    pathsFound),
+                () -> run(run)));
     sections.put("devices", devices.view());
     sections.put("notices", notices.view());
     sections.put("scenes", scenes.descriptions());
@@ -400,9 +456,9 @@ public final class Page {
     builtLock = lock;
   }
 
-  private Map<String, Object> actionStates() {
+  private static Map<String, Object> actionStates(List<Actions.State> states) {
     Map<String, Object> shown = new LinkedHashMap<>();
-    for (Actions.State state : actions.view()) {
+    for (Actions.State state : states) {
       Map<String, Object> each = pair("phase", state.phase().name(), "detail", state.detail());
       each.put("locked", state.locked());
       each.put("when", state.when().name());
@@ -411,9 +467,9 @@ public final class Page {
     return shown;
   }
 
-  private Map<String, Object> wpilibTunables() {
+  private static Map<String, Object> wpilibTunables(List<TunableTee.Listed> listed) {
     Map<String, Object> shown = new LinkedHashMap<>();
-    for (TunableTee.Listed tunable : tunables.view()) {
+    for (TunableTee.Listed tunable : listed) {
       Map<String, Object> described = new LinkedHashMap<>();
       described.put("type", tunable.type());
       described.put("value", tunable.value());

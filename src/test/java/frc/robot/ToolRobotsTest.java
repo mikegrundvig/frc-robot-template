@@ -24,7 +24,7 @@ class ToolRobotsTest {
       assertThat(described.body()).isEqualTo(robot.definition().body());
       assertThat(described.drivetrain()).isEqualTo(robot.definition().drivetrain());
       assertThat(described.cameras()).isEqualTo(robot.definition().cameras());
-      assertThat(described.imu()).isEmpty();
+      assertThat(described.imu()).contains(robot.definition().imus().gyro().position());
     }
   }
 }

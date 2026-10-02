@@ -36,7 +36,7 @@ import org.wpilib.math.geometry.Translation3d;
  *   <li>an arrow on the frame's top pointing forward;
  *   <li>each camera, a small box at its lens with an arrow along its optical axis, and its field of
  *       view, a see-through pyramid out to its sight range;
- *   <li>the gyro's IMU, a small block, when its mount is known in three dimensions;
+ *   <li>the gyro's IMU, a small block where its mount puts it, when the robot gives one;
  *   <li>each wheel, a disc at its module with an arrow the way it rolls forward. The wheels are
  *       AdvantageScope's "components" 0 to 3, which the robot turns by its logged module poses
  *       ({@code Drive/ModulePoses}); without them they stand pointing forward.
@@ -45,9 +45,9 @@ import org.wpilib.math.geometry.Translation3d;
  * <p><b>What it drops</b> ({@link #DROPPED}; a test pins the list): everything that isn't drawn.
  * The mass, its inertia and the center of gravity; the drivetrain's motors, gearing, grip and
  * inertias; each camera's noise, frame rate and latency. How the drivetrain is driven (its limits
- * and gains), the robot's vision and estimator settings, its wiring, and its IMUs' accelerometer
- * check never reach it. The fields of view are fixed to the frame, so a camera that rode on a
- * mechanism would need its cone posed with it; none can yet.
+ * and gains), the robot's vision and estimator settings, its wiring, the backup IMU, and the gyro's
+ * orientation and accelerometer check never reach it. The fields of view are fixed to the frame, so
+ * a camera that rode on a mechanism would need its cone posed with it; none can yet.
  *
  * <p><b>Two models a robot.</b> {@code Robot_<name>/} is the robot with its cameras' fields of
  * view; {@code Robot_<name>_NoCones/} is the same without them, for a second copy drawn beside it

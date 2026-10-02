@@ -70,7 +70,7 @@ a log and the simulator connected this way name every value alike.
 
 | Tab | What it shows |
 |---|---|
-| 3D: estimate and truth | The robot where it believes it is, as a schematic of its configuration: bumpers, the frame (see-through, as tall as the robot), an orange arrow forward, the wheels turned as their modules measure, and each camera with its field of view out to its sight range. The truth as a magenta ghost. A line from the robot to each tag the cameras saw this loop, green where its measurement was accepted and red where it was refused. The estimate's 99.9% ellipse on the floor, in yellow. |
+| 3D: estimate and truth | The robot where it believes it is, as a schematic of its configuration: bumpers, the frame (see-through, as tall as the robot), an orange arrow forward, the wheels turned as their modules measure, a small block where the gyro's IMU is mounted, and each camera with its field of view out to its sight range. The truth as a magenta ghost. A line from the robot to each tag the cameras saw this loop, green where its measurement was accepted and red where it was refused. The estimate's 99.9% ellipse on the floor, in yellow. |
 | 2D: the ellipse | The same from above, where the ellipse is easiest to read: the truth inside it is the estimate being honest. |
 | Swerve | Each module's measured velocity (red) and its setpoint (blue). |
 | Localization | How far the estimate is from the truth (meters and degrees) beside how far it claims it could be (a standard deviation), and what it rests on. |

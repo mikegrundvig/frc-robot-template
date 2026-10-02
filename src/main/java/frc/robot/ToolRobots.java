@@ -22,9 +22,8 @@ public final class ToolRobots implements RobotCatalog {
   }
 
   /**
-   * A robot as the writers read it: its definition's body, drivetrain, and cameras. The IMUs'
-   * mounts are known only along the floor (their forward and left offsets) until a mount gives
-   * their height too, so none is drawn yet.
+   * A robot as the writers read it: its definition's body, drivetrain, and cameras, and where its
+   * gyro's IMU is mounted (the backup IMU isn't drawn).
    */
   static RobotDescription describe(RobotConfig robot) {
     RobotDefinition definition = robot.definition();
@@ -33,6 +32,6 @@ public final class ToolRobots implements RobotCatalog {
         definition.body(),
         definition.drivetrain(),
         definition.cameras(),
-        Optional.empty());
+        Optional.of(definition.imus().gyro().position()));
   }
 }

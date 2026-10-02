@@ -17,8 +17,8 @@ import org.wpilib.math.geometry.Translation3d;
  * @param body its frame, bumpers, and height
  * @param drivetrain its modules, which (with the body) place the wheels
  * @param cameras each camera's mount and sensor
- * @param imu where the gyro's IMU sits, from the robot's origin, when its mount is known in three
- *     dimensions; empty when it isn't
+ * @param imu where the gyro's IMU sits, from the robot's origin, as its mount gives it; empty for a
+ *     robot whose catalog doesn't give it
  */
 public record RobotDescription(
     String name,

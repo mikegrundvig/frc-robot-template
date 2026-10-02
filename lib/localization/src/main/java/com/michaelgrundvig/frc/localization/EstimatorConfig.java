@@ -52,8 +52,9 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  *     trusts a camera's positions or headings more than this allows.
  * @param cameraShiftStdDevMeters how far each camera's positions may be off the same way image
  *     after image, beyond its turn and the tags': its mount's shift (what calibrating it leaves),
- *     and what its lens repeats along its view. Along the robot's forward and left, so it turns
- *     with the robot.
+ *     along the robot's forward and left, so it turns with the robot. Today it also stands in for a
+ *     single tag's solve coming out short from noisy corners, which hangs on the tag's range and
+ *     angle and is shared by every camera seeing it face-on: a stop-gap (docs/values.md).
  * @param cameraShiftStdDevDegrees and how far its headings may, beyond its turn: tags off the
  *     layout turn a multi-tag solve's heading by how far off they are over how far apart they sit
  * @param tagPlacementStdDevMeters how far each tag may sit from where the field's layout says,

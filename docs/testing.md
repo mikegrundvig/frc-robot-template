@@ -240,7 +240,7 @@ each camera and tag, draws from its own stream of the seed, so no two seeds shar
 drawn from Gaussians at the spread the estimator's configuration claims (`EstimatorConfig`'s
 `cameraTurnStdDevDegrees`, `tagPlacementStdDevMeters`, `headingStdDevDegreesPerTurn`,
 `backupHeadingStdDevDegreesPerTurn`), each mount 3 mm off along each axis, within the 5 mm of
-`cameraShiftStdDevMeters` (which holds what the camera's own solve repeats too:
+`cameraShiftStdDevMeters` (a stop-gap that also covers a single tag's solve coming out short:
 [below](#what-the-simulated-cameras-repeat)), and the vision noise model halved, a little wider than
 the simulated cameras' noise: an estimator honest about its own claims reads a NEES near its number
 of dimensions, or a little below. Wider or narrower errors than it claims show it over- or
@@ -331,7 +331,8 @@ place on the field: when each camera's shift held the tags' placement as well as
 averaged it down as if each had its own, and standing read 3.42, above its band in 72% of its
 loops. The estimator now considers each tag's placement on its own (`tagPlacementStdDevMeters`),
 the same for every camera that sees it and every time it's seen, and each camera's shift
-(`cameraShiftStdDevMeters`) is what's its own: its mount, and what its solve repeats.
+(`cameraShiftStdDevMeters`) is what's its own: its mount, and for now a stop-gap for its solve
+coming out short ([below](#what-the-simulated-cameras-repeat)).
 
 One seed is still overconfident where the robot stands at its start, and it's its tags. Seed 2's
 gyro reads 0.38% high and its two front cameras are turned the same way (0.32° and 0.48°), but
@@ -381,15 +382,29 @@ below.
 
 #### What the simulated cameras repeat
 
-With every error drawn at zero (no mount, tag or gyro scale off), the simulated cameras still
-place their tags a little short, the same in every image: 5 to 8 mm at 3.6 m (the start's tags 31
-and 32) and 1 to 3 mm at 2 m. It's their corner noise: with noiseless corners they're exact. Each
-tag's solve from a quarter-pixel of noise comes out a little near, image after image, and that
-doesn't average away as the noise model's spread does. `cameraShiftStdDevMeters` holds it, beside
-the mount's 3 mm the study draws: 5 mm. At 3 mm, the mount's alone, the turning run had 2.92% of
-its loops outside the ellipse, the driving run 1.42% (seed 2 again) and the 2° camera 3.80%.
-Whether real cameras repeat as much at that distance is for [camera
-noise](characterization.md#camera-noise) to measure.
+With every error drawn at zero (no mount, tag or gyro scale off), the simulated cameras still place
+their tags short, the same in every image: 5 to 8 mm from the start's tags 31 and 32, at 3.6 m,
+and 1 to 3 mm from the standing run's, at 2 m. It's a single tag's solve from noisy corners: with
+noiseless corners it's gone. PhotonVision's own `solvePNP_SQUARE`, on the template's sensor with
+the simulator's corner noise, shows how it hangs on the view:
+
+| Tag seen | 2 m | 3.6 m | 6 m |
+|---|---|---|---|
+| Head-on | 4.5 mm short | 14.6 mm | 40 mm |
+| 30° off its face | 0.2 mm | 0.8 mm | 2.9 mm |
+| From 0.5 m above its axis | 0.2 mm | 4.0 mm | 30.8 mm |
+
+It grows with the corner noise and about with the distance squared, and looks like a single tag's
+ambiguity near face-on. It's a real error the estimator doesn't model: one-sided, hanging on range
+and angle, and shared by every camera that sees the tag face-on. `cameraShiftStdDevMeters` covers
+it for now, as a **stop-gap**: 5 mm, against the 3 mm of mount the study draws, a constant for each
+camera that models it poorly. At 3 mm, the mount's alone, the turning run sat at exactly its 2.92%
+allowance outside the ellipse, the driving run had 1.42%, and the 2° camera rose to 3.80% (2.83%
+before tags were considered on their own); at 5 mm, 1.83%, 0.58% and 2.87%. Part of what the extra
+2 mm absorbs is seed 2's tag 31, 3.4 times `tagPlacementStdDevMeters` off, seen from the start where
+those runs stand. Modelling the short solve itself (by range and angle, for each tag face) is left
+to do; until then, measure it on the robot's own cameras ([camera
+noise](characterization.md#camera-noise)).
 
 On the same draws, before the estimator considered each tag's placement on its own, the table
 read: driving 1.37 (0.09% of loops outside the ellipse), standing 3.42 (above its band in 72% of

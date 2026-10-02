@@ -1,8 +1,11 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.simulation.AccelerometerModel;
 import com.michaelgrundvig.frc.simulation.Actuators;
+import com.michaelgrundvig.frc.simulation.ChassisTruth;
 import com.michaelgrundvig.frc.simulation.Disturbance;
+import com.michaelgrundvig.frc.simulation.GyroModel;
 import com.michaelgrundvig.frc.simulation.KinematicPhysics;
 import com.michaelgrundvig.frc.simulation.Physics;
 import com.michaelgrundvig.frc.simulation.Seeds;
@@ -99,23 +102,29 @@ public final class DriveSimulation {
           }
         };
     // Each IMU's noise from its own stream of the seed (Seeds).
+    ChassisTruth chassis = physics.chassis();
     gyro =
         new GyroIOSim(
-            this,
-            errors.gyro(),
-            new AccelerometerSim(
-                this, errors.accelerometer(), imus.gyro(), Seeds.gyroAccelerometer(errors.seed())),
-            Seeds.gyro(errors.seed()));
+            new GyroModel(
+                chassis,
+                errors.gyro(),
+                new AccelerometerModel(
+                    chassis,
+                    errors.accelerometer(),
+                    imus.gyro(),
+                    Seeds.gyroAccelerometer(errors.seed())),
+                Seeds.gyro(errors.seed())));
     backupGyro =
         new GyroIOSim(
-            this,
-            errors.backupGyro(),
-            new AccelerometerSim(
-                this,
-                errors.backupAccelerometer(),
-                imus.backup(),
-                Seeds.backupAccelerometer(errors.seed())),
-            Seeds.backupGyro(errors.seed()));
+            new GyroModel(
+                chassis,
+                errors.backupGyro(),
+                new AccelerometerModel(
+                    chassis,
+                    errors.backupAccelerometer(),
+                    imus.backup(),
+                    Seeds.backupAccelerometer(errors.seed())),
+                Seeds.backupGyro(errors.seed())));
   }
 
   /** The modules' motor controllers and encoders, for the drivetrain. */

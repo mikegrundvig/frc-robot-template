@@ -1,8 +1,5 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
-import com.michaelgrundvig.frc.localization.ImuReadings;
-import com.michaelgrundvig.frc.simulation.Seeds;
-import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import java.util.Random;
 import org.wpilib.math.geometry.Rotation3d;
@@ -18,9 +15,13 @@ import org.wpilib.math.geometry.Translation3d;
  * those axes into the robot's by the definition's orientation, as the real IO does. An ideal one
  * reads the robot's average acceleration over each loop, exactly. A hit's jolt reaches each IMU on
  * its own.
+ *
+ * <p>It reads the chassis's truth ({@link ChassisTruth}) after each physics step: its velocity
+ * where the IMU sits, a step apart, so the step's average acceleration, and the attitude that tips
+ * gravity into its axes.
  */
-final class AccelerometerSim {
-  private final DriveSimulation robot;
+public final class AccelerometerModel {
+  private final ChassisTruth chassis;
   private final SensorErrors.AccelErrors errors;
   private final Translation2d place;
 
@@ -58,15 +59,15 @@ final class AccelerometerSim {
   private Translation2d jolt = Translation2d.ZERO;
 
   /**
-   * @param robot the simulated robot it rides on
+   * @param chassis the chassis it rides on, as the physics keeps it
    * @param errors how it reads
    * @param mount where the robot's definition says it's mounted; it really sits off that by its
    *     errors' place, and is turned off it by their turn
    * @param seed for its noise
    */
-  AccelerometerSim(
-      DriveSimulation robot, SensorErrors.AccelErrors errors, ImuMount mount, long seed) {
-    this.robot = robot;
+  public AccelerometerModel(
+      ChassisTruth chassis, SensorErrors.AccelErrors errors, ImuMount mount, long seed) {
+    this.chassis = chassis;
     this.errors = errors;
     place = mount.place().plus(new Translation2d(errors.forwardMeters(), errors.leftMeters()));
     orientation = mount.orientation();
@@ -77,13 +78,13 @@ final class AccelerometerSim {
     noise = new Random(seed);
     upNoise = new Random(Seeds.upAxis(seed));
     period = errors.sampleHz() > 0 ? 1 / errors.sampleHz() : 0;
-    lastVelocity = robot.pointVelocity(place);
+    lastVelocity = chassis.pointVelocity(place);
     loopStartVelocity = lastVelocity;
   }
 
   /** After each physics step: the part filters what it feels, and samples it at its rate. */
-  void step(double seconds) {
-    Translation2d velocity = robot.pointVelocity(place);
+  public void step(double seconds) {
+    Translation2d velocity = chassis.pointVelocity(place);
     if (period > 0) {
       Translation3d felt = alongTheRobot(velocity.minus(lastVelocity).div(seconds));
       double share =
@@ -103,18 +104,18 @@ final class AccelerometerSim {
   }
 
   /** At the end of each loop: an ideal accelerometer reads the loop's average acceleration. */
-  void endLoop(double seconds) {
+  public void endLoop(double seconds) {
     loopAcceleration = alongTheRobot(lastVelocity.minus(loopStartVelocity).div(seconds));
     loopStartVelocity = lastVelocity;
   }
 
   /** A hit's jolt, along the robot's axes: the next reading feels it. */
-  void jolt(Translation2d robotAxes) {
+  public void jolt(Translation2d robotAxes) {
     jolt = jolt.plus(robotAxes);
   }
 
   /** Forgets a jolt it was never read for: unplugged, it felt nothing. */
-  void missed() {
+  public void missed() {
     jolt = Translation2d.ZERO;
   }
 
@@ -122,7 +123,7 @@ final class AccelerometerSim {
    * What the robot's IO reports, once a loop: the part's reading along its own axes, turned into
    * the robot's forward and left by the definition's orientation.
    */
-  Translation2d read() {
+  public Translation2d read() {
     Translation3d robotAxes =
         (period > 0 ? new Translation3d(heldX, heldY, heldZ) : loopAcceleration)
             .plus(new Translation3d(jolt.getX(), jolt.getY(), 0))
@@ -145,12 +146,12 @@ final class AccelerometerSim {
    * the left side up; the floor, tipped, pushes along all three.
    */
   private Translation3d alongTheRobot(Translation2d fieldAcceleration) {
-    double pitch = robot.pitchRadians();
-    double roll = robot.rollRadians();
-    Translation2d driving = fieldAcceleration.rotateBy(robot.truePose().getRotation().unaryMinus());
+    double pitch = chassis.pitchRadians();
+    double roll = chassis.rollRadians();
+    Translation2d driving = fieldAcceleration.rotateBy(chassis.pose().getRotation().unaryMinus());
     return new Translation3d(
-        driving.getX() - ImuReadings.STANDARD_GRAVITY * Math.sin(pitch),
-        driving.getY() + ImuReadings.STANDARD_GRAVITY * Math.sin(roll) * Math.cos(pitch),
-        ImuReadings.STANDARD_GRAVITY * Math.cos(roll) * Math.cos(pitch));
+        driving.getX() - Physics.STANDARD_GRAVITY * Math.sin(pitch),
+        driving.getY() + Physics.STANDARD_GRAVITY * Math.sin(roll) * Math.cos(pitch),
+        Physics.STANDARD_GRAVITY * Math.cos(roll) * Math.cos(pitch));
   }
 }

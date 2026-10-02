@@ -16,7 +16,10 @@
  *       {@link com.michaelgrundvig.frc.simulation.KinematicPhysics}; a rigid-body engine takes its
  *       place behind the same interface.
  *   <li><b>Sensors:</b> {@link com.michaelgrundvig.frc.simulation.SensorErrors} says how the
- *       simulated robot's sensors and wheels differ from what its code believes.
+ *       simulated robot's sensors and wheels differ from what its code believes; {@link
+ *       com.michaelgrundvig.frc.simulation.GyroModel} and its {@link
+ *       com.michaelgrundvig.frc.simulation.AccelerometerModel} read the chassis's truth as an IMU
+ *       does. The robot program's adapters hand their readings to its IO.
  *   <li><b>Seeds:</b> {@link com.michaelgrundvig.frc.simulation.Seeds} says where each random
  *       stream starts, so a run is a function of its seed.
  * </ul>

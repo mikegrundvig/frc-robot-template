@@ -153,6 +153,7 @@ public final class Pitwall implements AutoCloseable {
             notices,
             scenes);
     // A page whose stream closes can't keep an experiment it started going, or drive a joystick.
+    // The page's state is compared at most 20 times a second, on the robot's clock.
     broadcaster =
         new Broadcaster(
             Broadcaster.MAX_STREAMS,
@@ -162,7 +163,8 @@ public final class Pitwall implements AutoCloseable {
               if (simulated != null) {
                 simulated.lost(stream);
               }
-            });
+            },
+            RobotController::getTime);
     server = replaying ? null : startPage(page, broadcaster, port);
   }
 

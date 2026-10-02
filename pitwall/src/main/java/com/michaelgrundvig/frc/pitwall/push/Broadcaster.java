@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
@@ -22,11 +23,13 @@ import org.jspecify.annotations.Nullable;
  * Pushes the page's state to every open event stream, only when something changed.
  *
  * <p>Once per loop, and only while a stream is open, the robot loop hands over the state, section
- * by section, and the run in progress. What changed since the last loop goes to every stream as one
- * {@code patch} event (a JSON merge patch, from {@link Delta}), and the run's new samples as one
- * {@code samples} event. Nothing changed, nothing sent. A stream that has just opened gets a {@code
- * snapshot} first: the whole state as sent, the run's trace so far, and the stream's own id; the
- * patches after it apply to that.
+ * by section, and the run in progress. What changed since it was last compared goes to every stream
+ * as one {@code patch} event (a JSON merge patch, from {@link Delta}), and the run's new samples as
+ * one {@code samples} event. Nothing changed, nothing sent. The state is built and compared at most
+ * every {@link #COMPARE_NANOS} on the robot's clock (every loop for a broadcaster without one), as
+ * a scene's moving parts are: no page shows more. A stream that has just opened gets a {@code
+ * snapshot} first, compared that loop: the whole state as sent, the run's trace so far, and the
+ * stream's own id; the patches after it apply to that.
  *
  * <p>Some of the state goes only to the pages that show it: a {@link Feed}, such as a scene's
  * moving parts. A stream names the views its page shows, and gets each feed's changes in its
@@ -43,10 +46,17 @@ public final class Broadcaster implements AutoCloseable {
   /** How many events may wait for a stream before it counts as fallen behind: 2.56 s of loops. */
   public static final int MAILBOX = 128;
 
+  /** The least time between two comparisons of the state: at most 20 patches a second. */
+  public static final long COMPARE_NANOS = 50_000_000L;
+
   private final int maxStreams;
   private final int mailbox;
   private final Consumer<String> onClosed;
+  private final @Nullable LongSupplier clock;
   private final Delta delta = new Delta();
+
+  /** When the state is next compared, on {@link #clock}. */
+  private long compareNanos = Long.MIN_VALUE;
 
   /** Streams that have had their snapshot, and those still waiting for it. */
   private final List<Stream> streams = new CopyOnWriteArrayList<>();
@@ -61,14 +71,29 @@ public final class Broadcaster implements AutoCloseable {
   private int[] sent = new int[0];
 
   /**
+   * A broadcaster that compares the state every loop: a test's, that steps it loop by loop.
+   *
    * @param maxStreams how many streams may be open at once
    * @param mailbox how many events may wait for a stream before it's closed as fallen behind
    * @param onClosed told each stream's id as it closes, from whichever thread closes it
    */
   public Broadcaster(int maxStreams, int mailbox, Consumer<String> onClosed) {
+    this(maxStreams, mailbox, onClosed, null);
+  }
+
+  /**
+   * @param maxStreams how many streams may be open at once
+   * @param mailbox how many events may wait for a stream before it's closed as fallen behind
+   * @param onClosed told each stream's id as it closes, from whichever thread closes it
+   * @param clock the robot's clock, in nanoseconds, the state compared at most every {@link
+   *     #COMPARE_NANOS} on it; null to compare every loop
+   */
+  public Broadcaster(
+      int maxStreams, int mailbox, Consumer<String> onClosed, @Nullable LongSupplier clock) {
     this.maxStreams = maxStreams;
     this.mailbox = mailbox;
     this.onClosed = onClosed;
+    this.clock = clock;
   }
 
   /**
@@ -168,7 +193,7 @@ public final class Broadcaster implements AutoCloseable {
     if (!watched()) {
       return;
     }
-    Map<String, @Nullable Object> patch = delta.patch(state.get());
+    Map<String, @Nullable Object> patch = compareIfDue(state);
     // Each feed some page shows says what changed; one no page shows isn't asked.
     Set<String> shown = new HashSet<>();
     for (Stream stream : all()) {
@@ -216,6 +241,24 @@ public final class Broadcaster implements AutoCloseable {
         promote(stream);
       }
     }
+  }
+
+  /**
+   * What changed in the state since it was last compared, if it's time to compare it again, or a
+   * stream is waiting for its snapshot; else nothing, without building the state.
+   */
+  private Map<String, @Nullable Object> compareIfDue(
+      Supplier<Map<String, Map<String, Object>>> state) {
+    LongSupplier time = clock;
+    if (time == null) {
+      return delta.patch(state.get());
+    }
+    long now = time.getAsLong();
+    if (now < compareNanos && waiting.isEmpty()) {
+      return Map.of();
+    }
+    compareNanos = now + COMPARE_NANOS;
+    return delta.patch(state.get());
   }
 
   /**

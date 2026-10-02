@@ -91,6 +91,30 @@ class BroadcasterTest {
   }
 
   @Test
+  void onTheRobotsClockTheStateIsComparedAtMostTwentyTimesASecond() throws Exception {
+    AtomicLong clock = new AtomicLong();
+    Broadcaster timed = new Broadcaster(2, 1000, id -> {}, clock::get);
+    Stream first = timed.open(null).orElseThrow();
+    timed.periodic(this::state, null);
+    assertThat(built).as("a new stream's snapshot is compared at once").hasValue(1);
+
+    Objects.requireNonNull(state.get("values")).put("kP", 18.5);
+    for (int i = 0; i < 50; i++) {
+      clock.addAndGet(Duration.ofMillis(20).toNanos());
+      timed.periodic(this::state, null);
+    }
+    assertThat(built.get()).as("built in a second of loops").isBetween(16, 21);
+    assertThat(drain(first)).contains("event: patch\ndata: {\"values\":{\"kP\":18.5}}\n\n");
+
+    int before = built.get();
+    Stream second = timed.open(null).orElseThrow();
+    clock.addAndGet(Duration.ofMillis(20).toNanos());
+    timed.periodic(this::state, null);
+    assertThat(built).as("a waiting stream doesn't wait for its turn").hasValue(before + 1);
+    assertThat(drain(second)).hasSize(1).first().asString().contains("\"kP\":18.5");
+  }
+
+  @Test
   void aStreamThatOpensLaterStartsFromTheStateAsSent() throws Exception {
     Stream first = open();
     loop(null);

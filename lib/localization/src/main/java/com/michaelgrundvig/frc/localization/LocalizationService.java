@@ -141,13 +141,17 @@ public final class LocalizationService {
   /** How fast the robot turned in each of the latest loops, for how fast it has turned lately. */
   private final double[] recentYawRates;
 
-  private int yawRateLoop;
+  /** This loop's place among {@link #recentYawRates}: -1 before the first loop. */
+  private int yawRateLoop = -1;
+
+  /** Whether a loop is under way: {@link #drivetrain} has come, and {@link #update} hasn't yet. */
+  private boolean inLoop;
 
   /**
    * How the robot moves this loop, and how sure its heading is: what this loop's images are solved
-   * with. Taken once a loop, by its first image or its update, so it includes a placement.
+   * with. Taken as the loop's readings come in, and again if the robot is placed during the loop.
    */
-  private @Nullable Motion motion;
+  private Motion motion;
 
   /**
    * @param speedMetersPerSecond how fast the robot moves over the field
@@ -224,6 +228,8 @@ public final class LocalizationService {
     attitudes = new AttitudeHistory(loops(ATTITUDE_SECONDS, loopSeconds));
     recentYawRates = new double[loops(RECENT_TURNING_SECONDS, loopSeconds)];
     estimate = estimator.estimate();
+    motion =
+        new Motion(estimate.fieldVelocity().getNorm(), 0, estimate.covariance().headingStdDev());
   }
 
   /**
@@ -270,7 +276,12 @@ public final class LocalizationService {
     watchTerrain(readings.velocities(), loop.nowNanos());
     checkImus(gyro, backup, loop.nowNanos());
     estimate = estimator.estimate();
-    motion = null;
+    // The loop's images are solved as the robot is now: its attitude and turning, recorded once a
+    // loop.
+    attitudes.add(estimate.timestampNanos(), pitchRadians(), rollRadians());
+    yawRateLoop = (yawRateLoop + 1) % recentYawRates.length;
+    inLoop = true;
+    takeMotion();
   }
 
   /**
@@ -280,6 +291,9 @@ public final class LocalizationService {
   public void place(PoseReset reset) {
     estimator.reset(reset);
     estimate = estimator.estimate();
+    if (inLoop) {
+      takeMotion();
+    }
   }
 
   /**
@@ -289,6 +303,9 @@ public final class LocalizationService {
   public void resetHeading(Rotation2d heading, double stdDevRadians) {
     estimator.resetHeading(heading, stdDevRadians);
     estimate = estimator.estimate();
+    if (inLoop) {
+      takeMotion();
+    }
   }
 
   /** A landmark the robot crossed, applied at its time on the next {@link #update}. */
@@ -371,10 +388,11 @@ public final class LocalizationService {
 
   /**
    * The robot when an image was taken, as the vision pipeline solves it: its heading then, if the
-   * estimate reaches back that far, its tilt then, and how it moves this loop.
+   * estimate reaches back that far, its tilt then, and how it moves this loop. Read-only: asking
+   * changes nothing, however often or early in the loop it's asked.
    */
   public CaptureContext capture(long timestampNanos) {
-    Motion now = motion();
+    Motion now = motion;
     Rotation2d heading = estimator.poseAt(timestampNanos).map(Pose2d::getRotation).orElse(null);
     AttitudeHistory.Attitude tilted = attitudes.at(timestampNanos);
     return new CaptureContext(
@@ -393,9 +411,7 @@ public final class LocalizationService {
    * @param loop the loop: the one {@link #drivetrain} was given
    */
   public LocalizationOutput update(LoopContext loop) {
-    // This loop's images are solved as of now, whether any came or not: the record of the robot's
-    // turning and tilt takes one entry a loop.
-    motion();
+    inLoop = false;
     List<VisionDecision> decisions = estimator.update();
     List<LandmarkDecision> landmarks = estimator.landmarkDecisions();
     for (LandmarkDecision decision : landmarks) {
@@ -510,28 +526,22 @@ public final class LocalizationService {
   }
 
   /**
-   * This loop's images' motion: taken by the first image, or the update, so it includes the loop's
-   * placement, and the robot's attitude and turning are recorded once a loop.
+   * This loop's images' motion, as the estimate has it now: how fast the robot moves, the fastest
+   * it turned lately (this loop's turning in its place among the latest loops'), and how sure its
+   * heading is. Taken as the loop's readings come in, and again when a placement moves the estimate
+   * before the loop's images.
    */
-  private Motion motion() {
-    Motion now = motion;
-    if (now != null) {
-      return now;
-    }
-    attitudes.add(estimate.timestampNanos(), pitchRadians(), rollRadians());
+  private void takeMotion() {
     recentYawRates[yawRateLoop] = Math.abs(estimate.yawRateRadiansPerSecond());
-    yawRateLoop = (yawRateLoop + 1) % recentYawRates.length;
     double recentYawRate = 0;
     for (double rate : recentYawRates) {
       recentYawRate = Math.max(recentYawRate, rate);
     }
-    now =
+    motion =
         new Motion(
             estimate.fieldVelocity().getNorm(),
             recentYawRate,
             estimate.covariance().headingStdDev());
-    motion = now;
-    return now;
   }
 
   /**

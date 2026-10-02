@@ -22,6 +22,7 @@ import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
@@ -246,6 +247,50 @@ class LocalizationServiceTest {
     assertThat(result[0].measurement()).isNotNull();
     assertThat(output.frames()).isEmpty();
     assertThat(output.estimate().health().accepted()).isZero();
+  }
+
+  /**
+   * Asking how the robot stood, or solving an image held back, before the drive team places the
+   * robot that loop changes nothing: the loop's images are solved as the robot stands once placed,
+   * here with a heading too unsure to solve with, and the loop is recorded once.
+   */
+  @Test
+  void askingBeforeAPlacementChangesNothing() {
+    LocalizationService asked = placed();
+    LocalizationService notAsked = placed();
+    long now = standStill(asked, 10) + LOOP_NANOS;
+    standStill(notAsked, 10);
+    PoseReset roughly =
+        new PoseReset(now, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.5), "facing roughly");
+
+    VisionResult[] results = new VisionResult[2];
+    loop(
+        asked,
+        now,
+        () -> {
+          for (int k = 0; k < 5; k++) {
+            asked.capture(now);
+            asked.solve(hubFace(now), null);
+          }
+          asked.place(roughly);
+          results[0] = asked.camera(hubFace(now));
+        });
+    loop(
+        notAsked,
+        now,
+        () -> {
+          notAsked.place(roughly);
+          results[1] = notAsked.camera(hubFace(now));
+        });
+
+    assertThat(results[0]).isEqualTo(results[1]);
+    assertThat(Objects.requireNonNull(results[1].measurement()).solver())
+        .as("solved without the placement's unsure heading")
+        .isEqualTo(VisionMeasurement.Solver.SINGLE_TAG);
+    long later = now + LOOP_NANOS;
+    loop(asked, later, () -> {});
+    loop(notAsked, later, () -> {});
+    assertThat(asked.capture(now)).isEqualTo(notAsked.capture(now));
   }
 
   /** An image the pipeline refuses says why at once, typed: it never reaches the estimator. */

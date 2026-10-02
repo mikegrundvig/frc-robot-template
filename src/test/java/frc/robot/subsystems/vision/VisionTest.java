@@ -590,6 +590,7 @@ class VisionTest {
   /** One loop, and the tags each of its measurements came from. */
   private List<List<Integer>> tagsMeasuredFrom() {
     return loop(0, 0).stream()
+        .filter(frame -> frame.measured().isPresent())
         .map(frame -> frame.tags().stream().map(TagVerdict::tag).toList())
         .toList();
   }

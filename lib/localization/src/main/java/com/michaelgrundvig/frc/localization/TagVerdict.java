@@ -1,8 +1,8 @@
 package com.michaelgrundvig.frc.localization;
 
 /**
- * What became of one tag in a camera's image: the verdict on the measurement it went into, with
- * that measurement's numbers. An image's tags are weighed together today, as one measurement, so
+ * What became of one tag in a camera's image: the verdict on the measurement it went into, or on
+ * the image, if it was refused before it became one. An image's tags are weighed together today, so
  * every tag of a frame carries the frame's verdict; each is its own record so a check of each tag
  * on its own has a place to say what it found.
  *
@@ -11,17 +11,25 @@ package com.michaelgrundvig.frc.localization;
  * @param innovationMeters how far the measurement was from the estimate at its capture time; NaN if
  *     it was refused before being compared
  * @param chiSquared its squared Mahalanobis distance from the estimate; NaN if not compared
- * @param threshold the gate its χ² was held to; NaN if not compared
+ * @param threshold the limit the verdict's value was held to: the gate a χ² was, the farthest the
+ *     tags may be, the fastest the robot may turn; NaN where the verdict has none
+ * @param value the verdict's number: the χ² for the estimator's verdicts; the tags' distance, the
+ *     robot's turning, a tag's ambiguity or height for the pipeline's; NaN where it has none
  */
 public record TagVerdict(
-    int tag, Verdict verdict, double innovationMeters, double chiSquared, double threshold) {
+    int tag,
+    Verdict verdict,
+    double innovationMeters,
+    double chiSquared,
+    double threshold,
+    double value) {
   /** Whether it moved the estimate. */
   public boolean accepted() {
     return verdict == Verdict.ACCEPTED;
   }
 
-  /** Why, in words with its numbers, as the log has them: "gate: 45.2 > 13.8". */
+  /** Why, in words with its numbers, as the log has them: "gate: 45.2 > 13.8", "too far: 6.3 m". */
   public String reason() {
-    return verdict.describe(chiSquared, threshold);
+    return verdict.describe(value, threshold);
   }
 }

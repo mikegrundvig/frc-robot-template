@@ -72,8 +72,9 @@ class CameraGoldenSimTest {
         .anyMatch(outcome -> outcome.endsWith("with heading"))
         .anyMatch(outcome -> outcome.startsWith("heading-constrained"));
     assertThat(session.frames())
-        .extracting(frame -> frame.measured().verdict())
-        .contains(Verdict.ACCEPTED);
+        .extracting(FrameVerdict::verdict)
+        .as("the update says what became of every image, refused or weighed")
+        .contains(Verdict.ACCEPTED, Verdict.TURNING, Verdict.UNTRUSTED_TAGS);
   }
 
   /** What the session did: a row per loop, image and measurement, and the records behind them. */
@@ -106,7 +107,9 @@ class CameraGoldenSimTest {
               rows.add(imageRow(robot.images.get(seen[0]), start));
             }
             for (; seen[1] < robot.frames.size(); seen[1]++) {
-              rows.add(frameRow(robot.frames.get(seen[1]), start));
+              FrameVerdict frame = robot.frames.get(seen[1]);
+              // An image refused before it became a measurement has its row above.
+              frame.measured().ifPresent(weighed -> rows.add(frameRow(frame, weighed, start)));
             }
           });
 
@@ -171,18 +174,17 @@ class CameraGoldenSimTest {
   }
 
   /** A measurement as the estimator weighed it. */
-  private static String frameRow(FrameVerdict frame, long start) {
-    FrameVerdict.Measured measured = frame.measured();
+  private static String frameRow(FrameVerdict frame, FrameVerdict.Measured measured, long start) {
     return String.format(
         Locale.ROOT,
         "F,%s,%d,%s,%s,%.9f,%.9f,%.9f,%s",
         frame.camera(),
         frame.captureNanos() - start,
-        measured.verdict(),
+        frame.verdict(),
         measured.solver(),
         measured.innovationMeters(),
         measured.chiSquared(),
-        measured.threshold(),
+        frame.threshold(),
         frame.tags().stream()
             .map(tag -> String.valueOf(tag.tag()))
             .collect(Collectors.joining(" ")));

@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
@@ -214,9 +215,10 @@ class LocalizationServiceTest {
     assertThat(frame.camera()).isEqualTo("front");
     assertThat(frame.captureNanos()).isEqualTo(now);
     assertThat(frame.multiTag()).as("solved from each tag, not the multi-tag").isEmpty();
-    assertThat(frame.measured().verdict()).isEqualTo(Verdict.ACCEPTED);
-    assertThat(frame.measured().solver()).isEqualTo(VisionMeasurement.Solver.HEADING_CONSTRAINED);
-    assertThat(frame.measured().pose().getTranslation().getDistance(ROBOT.getTranslation()))
+    FrameVerdict.Measured measured = frame.measured().orElseThrow();
+    assertThat(frame.verdict()).isEqualTo(Verdict.ACCEPTED);
+    assertThat(measured.solver()).isEqualTo(VisionMeasurement.Solver.HEADING_CONSTRAINED);
+    assertThat(measured.pose().getTranslation().getDistance(ROBOT.getTranslation()))
         .isLessThan(1e-6);
     assertThat(frame.tags()).extracting(TagVerdict::tag).containsExactly(25, 26);
     assertThat(frame.tags())
@@ -293,7 +295,10 @@ class LocalizationServiceTest {
     assertThat(asked.capture(now)).isEqualTo(notAsked.capture(now));
   }
 
-  /** An image the pipeline refuses says why at once, typed: it never reaches the estimator. */
+  /**
+   * An image the pipeline refuses says why at once, typed, and never reaches the estimator; the
+   * update says so too, among every image's verdicts, with its numbers and every tag it saw.
+   */
   @Test
   void anImageThePipelineRefusesSaysWhyAtOnce() {
     LocalizationService localization = placed();
@@ -309,7 +314,18 @@ class LocalizationServiceTest {
     assertThat(result[0].outcome())
         .isEqualTo(Verdict.TOO_FAR.describe(result[0].distanceMeters(), 0.5))
         .startsWith("too far: ");
-    assertThat(output.frames()).isEmpty();
+    FrameVerdict refused = output.frames().get(0);
+    assertThat(output.frames()).hasSize(1);
+    assertThat(refused.verdict()).isEqualTo(Verdict.TOO_FAR);
+    assertThat(refused.measured()).as("never weighed").isEmpty();
+    assertThat(refused.reason()).isEqualTo(result[0].outcome());
+    assertThat(refused.captureNanos()).isEqualTo(now);
+    assertThat(refused.tags())
+        .extracting(TagVerdict::tag, TagVerdict::verdict, TagVerdict::reason)
+        .containsExactly(
+            tuple(25, Verdict.TOO_FAR, result[0].outcome()),
+            tuple(26, Verdict.TOO_FAR, result[0].outcome()));
+    assertThat(output.estimate().health().rejected()).as("the estimator never saw it").isZero();
   }
 
   /**
@@ -329,10 +345,11 @@ class LocalizationServiceTest {
                 localization.camera(
                     measured(now, ROBOT.plus(new Transform2d(1.5, 0, Rotation2d.ZERO)))));
 
-    FrameVerdict.Measured gated = output.frames().get(0).measured();
+    FrameVerdict gated = output.frames().get(0);
+    FrameVerdict.Measured measured = gated.measured().orElseThrow();
     assertThat(gated.verdict()).isEqualTo(Verdict.GATED);
-    assertThat(gated.chiSquared()).isGreaterThan(gated.threshold());
-    assertThat(gated.innovationMeters()).isCloseTo(1.5, within(0.01));
+    assertThat(measured.chiSquared()).isGreaterThan(gated.threshold()).isEqualTo(gated.value());
+    assertThat(measured.innovationMeters()).isCloseTo(1.5, within(0.01));
     assertThat(gated.reason()).startsWith("gate: ").endsWith("> 13.8");
     assertThat(output.frames().get(0).tags())
         .allSatisfy(
@@ -364,9 +381,9 @@ class LocalizationServiceTest {
               localization.camera(measured(now, ROBOT));
             });
 
-    FrameVerdict.Measured refused = output.frames().get(0).measured();
+    FrameVerdict refused = output.frames().get(0);
     assertThat(refused.verdict()).isEqualTo(Verdict.BEFORE_RESET);
-    assertThat(refused.chiSquared()).isNaN();
+    assertThat(refused.measured().orElseThrow().chiSquared()).isNaN();
     assertThat(refused.reason()).isEqualTo("before the robot was last placed or recovered");
   }
 
@@ -490,7 +507,16 @@ class LocalizationServiceTest {
     assertThatThrownBy(() -> new ProtectionLevel(Double.NaN))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(
-            () -> new VisionResult(hubFace(T0), null, null, "neither", Double.NaN, Double.NaN))
+            () ->
+                new VisionResult(
+                    hubFace(T0),
+                    null,
+                    null,
+                    "neither",
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN,
+                    Double.NaN))
         .isInstanceOf(IllegalArgumentException.class);
   }
 

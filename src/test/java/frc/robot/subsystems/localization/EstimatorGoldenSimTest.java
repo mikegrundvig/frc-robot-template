@@ -47,10 +47,11 @@ class EstimatorGoldenSimTest {
    */
   @Test
   void theMisreadTagIsRejected() {
-    List<FrameVerdict.Measured> misread =
+    List<FrameVerdict> misread =
         session().frames().stream()
-            .map(FrameVerdict::measured)
-            .filter(measured -> measured.innovationMeters() > 1)
+            .filter(
+                frame ->
+                    frame.measured().filter(weighed -> weighed.innovationMeters() > 1).isPresent())
             .toList();
 
     assertThat(misread).hasSize(1);

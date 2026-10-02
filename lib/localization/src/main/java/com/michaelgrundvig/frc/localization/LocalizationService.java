@@ -135,6 +135,9 @@ public final class LocalizationService {
   /** What the robot last said of each camera's mount: its doubt, and the distance judged at. */
   private final Map<String, double[]> mountDoubts = new HashMap<>();
 
+  /** The images refused since the last update, before they became measurements, in order. */
+  private final List<FrameVerdict> refused = new ArrayList<>();
+
   /** Half a second of the robot's attitude, for each image's capture time. */
   private final AttitudeHistory attitudes;
 
@@ -346,7 +349,8 @@ public final class LocalizationService {
    * one, applied at that moment on the next {@link #update}.
    *
    * @param onlyTags the tags the current task trusts ({@link TagAllowlist}); null for every tag
-   * @return what the image made: a measurement, or why not
+   * @return what the image made: a measurement, or why not. The next update says it too, among its
+   *     frames, as it does what became of the measurement
    * @throws IllegalArgumentException if the robot's definition has no camera by the frame's name
    */
   public VisionResult camera(TagDetections frame, @Nullable TagAllowlist onlyTags) {
@@ -354,6 +358,8 @@ public final class LocalizationService {
     VisionMeasurement measurement = result.measurement();
     if (measurement != null) {
       camera(measurement);
+    } else {
+      refused.add(FrameVerdict.refused(result));
     }
     return result;
   }
@@ -418,7 +424,9 @@ public final class LocalizationService {
       landmarksAccepted += decision.accepted() ? 1 : 0;
     }
     estimate = estimator.estimate();
-    List<FrameVerdict> frames = new ArrayList<>(decisions.size());
+    List<FrameVerdict> frames = new ArrayList<>(refused.size() + decisions.size());
+    frames.addAll(refused);
+    refused.clear();
     for (VisionDecision decision : decisions) {
       frames.add(FrameVerdict.of(decision));
     }

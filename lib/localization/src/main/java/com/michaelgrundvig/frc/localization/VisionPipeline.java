@@ -109,6 +109,8 @@ public final class VisionPipeline {
           Verdict.UNTRUSTED_TAGS,
           Verdict.UNTRUSTED_TAGS.words() + " (" + onlyTags.describe() + ")",
           Double.NaN,
+          Double.NaN,
+          Double.NaN,
           Double.NaN);
     }
     return solve(new Image(trusted, camera, robot, config, trust.mountDoubtMeters()));
@@ -299,7 +301,9 @@ public final class VisionPipeline {
             distance,
             Double.isFinite(headingStdDev) ? ", with heading" : ""),
         distance,
-        worstHeight);
+        worstHeight,
+        Double.NaN,
+        Double.NaN);
   }
 
   /** Of a tag's two possible poses, the one whose robot heading is closer to the gyro's. */
@@ -371,7 +375,9 @@ public final class VisionPipeline {
             used.size() == 1 ? "tag" : "tags",
             distance),
         distance,
-        height);
+        height,
+        Double.NaN,
+        Double.NaN);
   }
 
   /**
@@ -406,7 +412,8 @@ public final class VisionPipeline {
       double threshold,
       double distance,
       double heightError) {
-    return new VisionResult(seen, null, why, why.describe(value, threshold), distance, heightError);
+    return new VisionResult(
+        seen, null, why, why.describe(value, threshold), distance, heightError, threshold, value);
   }
 
   private static String format(String pattern, Object... values) {

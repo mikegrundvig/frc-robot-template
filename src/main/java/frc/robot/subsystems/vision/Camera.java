@@ -381,9 +381,10 @@ final class Camera implements AutoCloseable {
   }
 
   /**
-   * Counts and logs what localization's update made of this camera's measurements, and this loop's
-   * tags by what became of them: {@code AcceptedTags} and {@code RejectedTags}, where the field's
-   * layout has them, and beside each refused one why ({@code RejectedReasons}, in the same order).
+   * Counts and logs what localization's update made of this camera's measurements (its images
+   * refused before they became one were logged then), and this loop's tags by what became of them:
+   * {@code AcceptedTags} and {@code RejectedTags}, where the field's layout has them, and beside
+   * each refused one why ({@code RejectedReasons}, in the same order).
    *
    * @param agreeMeters an accepted measurement this close to the estimate agrees with it
    * @param field where the field's layout has each tag, by its ID
@@ -391,11 +392,12 @@ final class Camera implements AutoCloseable {
   void record(List<FrameVerdict> frames, double agreeMeters, IntFunction<Optional<Pose3d>> field) {
     List<String> reasons = new ArrayList<>();
     for (FrameVerdict frame : frames) {
-      if (!frame.camera().equals(name())) {
+      // An image refused before it became a measurement was logged as it was refused.
+      Optional<FrameVerdict.Measured> weighed = frame.measured();
+      if (!frame.camera().equals(name()) || weighed.isEmpty()) {
         continue;
       }
-      FrameVerdict.Measured measured = frame.measured();
-      reasons.add(measured.reason());
+      reasons.add(frame.reason());
       for (TagVerdict seen : frame.tags()) {
         field
             .apply(seen.tag())
@@ -409,9 +411,9 @@ final class Camera implements AutoCloseable {
                   }
                 });
       }
-      if (measured.accepted()) {
+      if (frame.accepted()) {
         accepted++;
-        if (measured.innovationMeters() <= agreeMeters) {
+        if (weighed.get().innovationMeters() <= agreeMeters) {
           lastAgreed = Math.max(lastAgreed, frame.captureNanos());
         }
       } else {

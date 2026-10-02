@@ -206,15 +206,17 @@ class WorldViewTest {
     return new FrameVerdict(
         "front-left",
         1,
+        verdict,
+        gate,
+        chiSquared,
         Optional.empty(),
-        List.of(new TagVerdict(7, verdict, innovationMeters, chiSquared, gate)),
-        new FrameVerdict.Measured(
-            new Pose2d(3.2, 4.1, Rotation2d.fromDegrees(30)),
-            VisionMeasurement.Solver.SINGLE_TAG,
-            verdict,
-            innovationMeters,
-            chiSquared,
-            gate));
+        List.of(new TagVerdict(7, verdict, innovationMeters, chiSquared, gate, chiSquared)),
+        Optional.of(
+            new FrameVerdict.Measured(
+                new Pose2d(3.2, 4.1, Rotation2d.fromDegrees(30)),
+                VisionMeasurement.Solver.SINGLE_TAG,
+                innovationMeters,
+                chiSquared)));
   }
 
   @Test

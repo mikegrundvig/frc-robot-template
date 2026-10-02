@@ -852,9 +852,9 @@ class LocalizationSimTest {
     assertThat(worst[0]).as("ours, worst after the misread").isLessThan(0.05);
     assertThat(worst[1]).as("WPILib's, worst after the misread").isGreaterThan(0.5);
     assertThat(robot.frames)
-        .extracting(FrameVerdict::measured)
-        .filteredOn(measured -> measured.innovationMeters() > 1)
-        .extracting(FrameVerdict.Measured::accepted)
+        .filteredOn(
+            frame -> frame.measured().filter(weighed -> weighed.innovationMeters() > 1).isPresent())
+        .extracting(FrameVerdict::accepted)
         .containsExactly(false);
   }
 }

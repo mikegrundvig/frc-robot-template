@@ -136,7 +136,9 @@ final class SightLines implements Layer {
       for (int i = 0; i < frames.size(); i++) {
         FrameVerdict frame = frames.get(i);
         CameraConfig camera = cameras.get(frame.camera());
-        if (camera == null) {
+        // Lines are drawn to the tags a measurement rested on: an image refused before it became
+        // one has none.
+        if (camera == null || frame.measured().isEmpty()) {
           continue;
         }
         List<TagVerdict> tags = frame.tags();
@@ -201,10 +203,10 @@ final class SightLines implements Layer {
   private Inspection inspection(Line line) {
     FrameVerdict frame = line.frame;
     TagVerdict verdict = frame == null ? null : verdictOn(frame, line.tag);
-    if (frame == null || verdict == null) {
+    FrameVerdict.Measured measurement = frame == null ? null : frame.measured().orElse(null);
+    if (frame == null || verdict == null || measurement == null) {
       return Inspection.of(line.camera + " → tag " + line.tag).detail("Verdict", "not measured");
     }
-    FrameVerdict.Measured measurement = frame.measured();
     Pose2d measured = measurement.pose();
     Optional<Pose3d> tag = field.tag(line.tag);
     Inspection said =

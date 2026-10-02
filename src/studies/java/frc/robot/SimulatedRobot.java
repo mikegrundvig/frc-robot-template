@@ -29,7 +29,9 @@ import org.wpilib.tunable.TunableRegistry;
  * and repeats exactly.
  *
  * <p>WPILib's simulation is one per program (its clock, the Driver Station), so one robot runs at a
- * time: close it before building the next. Closing puts everything back as it was found.
+ * time: close it before building the next. Closing puts everything back as it was found, but the
+ * clock, which stays paused: resumed, it would run on the wall clock until the next robot paused
+ * it, and each run would start at a moment that hung on how long the last took.
  */
 public final class SimulatedRobot implements AutoCloseable {
   private final Scheduler scheduler = Scheduler.createIndependentScheduler();
@@ -162,6 +164,5 @@ public final class SimulatedRobot implements AutoCloseable {
     TunableRegistry.reset();
     DriverStationSim.resetData();
     DriverStationSim.notifyNewData();
-    SimHooks.resumeTiming();
   }
 }

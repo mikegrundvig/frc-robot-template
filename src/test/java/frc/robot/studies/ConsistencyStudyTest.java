@@ -71,7 +71,10 @@ class ConsistencyStudyTest {
     assertThat(loops.get(0))
         .isEqualTo("run,loop,seconds,position_nees,heading_nees,error_m,claimed_m");
     assertThat(loops).hasSize(1 + RobotLoop.loops(20));
-    assertThat(printed()).contains("turning ").contains("summary.md");
+    assertThat(printed())
+        .contains("turning ")
+        .contains("summary.md")
+        .containsPattern("Every loop's error and claim, to the bit: [0-9a-f]{16}");
   }
 
   @Test

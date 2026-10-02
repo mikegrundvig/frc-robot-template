@@ -25,7 +25,7 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.interpolation.TimeInterpolatableBuffer;
-import org.wpilib.system.Timer;
+import org.wpilib.system.RobotController;
 
 /**
  * The simulator's cameras: PhotonVision's own simulation, rendering each camera's view of the tags
@@ -79,12 +79,25 @@ public final class VisionSim implements AutoCloseable {
   private final Noise noise;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
-  /** Where the robot really was, loop by loop: what each image is taken from. */
+  /**
+   * When this world began, on the robot's clock, in nanoseconds. Its truth is kept by the time
+   * since: the clock itself counts from wherever the computer's monotonic clock stood when the
+   * simulation started (days of uptime, 10^14 ns and more), where a double's step is a tenth of a
+   * nanosecond, so poses kept by the clock's own seconds would interpolate a little differently
+   * from run to run, and an image's corners with them.
+   */
+  private final long startNanos = RobotController.getMonotonicTime();
+
+  /** Where the robot really was, loop by loop, by seconds since the world began. */
   private final TimeInterpolatableBuffer<Pose3d> truths =
       TimeInterpolatableBuffer.createBuffer(HISTORY_SECONDS);
 
-  /** A camera as added: PhotonVision's simulation of it, its configured mount and latency. */
-  private record Added(PhotonCameraSim simulated, Transform3d configured, double latencyMillis) {}
+  /**
+   * A camera as added: PhotonVision's simulation of it, its configured mount and latency, and where
+   * it's mounted now, which its images are taken from.
+   */
+  private record Added(
+      PhotonCameraSim simulated, Transform3d configured, double latencyMillis, Transform3d mount) {}
 
   private final Map<String, Added> byName = new LinkedHashMap<>();
 
@@ -219,24 +232,29 @@ public final class VisionSim implements AutoCloseable {
     // Tags farther than the camera's sight range are not detected: small in the image, and noisy.
     simulated.setMaxSightRange(config.sensor().sightRange().in(Meters));
     Transform3d configured = config.robotToCamera();
-    world.addCamera(simulated, mounted(configured, mountError));
+    Transform3d mount = mounted(configured, mountError);
+    world.addCamera(simulated, mount);
     cameras.add(simulated);
     byName.put(
         config.name(),
-        new Added(simulated, configured, config.sensor().latency().in(Milliseconds)));
+        new Added(simulated, configured, config.sensor().latency().in(Milliseconds), mount));
     return io;
   }
 
   /**
    * Mounts a camera off its configuration from now on, as {@link #camera(CameraConfig,
-   * Transform3d)} does when it's added: images taken from now on see from there.
+   * Transform3d)} does when it's added: images rendered from now on see from there, an image
+   * already taken and still on its way included.
    *
    * @param mountError in the robot's frame, from the configured mount; zero puts it back
    * @throws IllegalArgumentException if no camera has this name
    */
   public void mount(String camera, Transform3d mountError) {
     Added added = added(camera);
-    world.adjustCamera(added.simulated(), mounted(added.configured(), mountError));
+    Transform3d mount = mounted(added.configured(), mountError);
+    world.adjustCamera(added.simulated(), mount);
+    byName.put(
+        camera, new Added(added.simulated(), added.configured(), added.latencyMillis(), mount));
   }
 
   /**
@@ -324,9 +342,10 @@ public final class VisionSim implements AutoCloseable {
    * 0.7° off after the gyro-scale procedure (docs/testing.md).
    */
   public void update(Pose3d truth) {
-    truths.addSample(Timer.getMonotonicTimestamp(), truth);
+    truths.addSample(sinceStart(RobotController.getMonotonicTime()), truth);
     List<VisionTargetSim> targets = List.copyOf(world.getVisionTargets());
-    for (PhotonCameraSim camera : cameras) {
+    for (Map.Entry<String, Added> added : byName.entrySet()) {
+      PhotonCameraSim camera = added.getValue().simulated();
       Optional<Long> due = camera.consumeNextEntryTime();
       if (due.isEmpty()) {
         continue;
@@ -334,17 +353,21 @@ public final class VisionSim implements AutoCloseable {
       long arrivedNanos = due.get();
       double latencyMillis = camera.prop.estLatencyMs();
       long takenNanos = arrivedNanos - Math.round(latencyMillis * 1e6);
-      double taken = takenNanos / 1e9;
-      Pose3d robot = truths.getSample(taken).orElse(truth);
-      Pose3d from = robot.plus(world.getRobotToCamera(camera, taken).orElseThrow());
+      Pose3d robot = truths.getSample(sinceStart(takenNanos)).orElse(truth);
+      Pose3d from = robot.plus(added.getValue().mount());
       PhotonPipelineResult image = camera.process(latencyMillis, from, targets);
       image.metadata.captureTimestampNanos =
-          takenNanos + clockOffsets.getOrDefault(camera.getCamera().getName(), 0L);
+          takenNanos + clockOffsets.getOrDefault(added.getKey(), 0L);
       image.metadata.publishTimestampNanos = arrivedNanos;
       camera.submitProcessedFrame(image, arrivedNanos);
     }
     // Every image due is taken, so PhotonVision's own update only keeps its record of the robot.
     world.update(truth);
+  }
+
+  /** How long after this world began a moment on the robot's clock was, in seconds. */
+  private double sinceStart(long nanos) {
+    return (nanos - startNanos) / 1e9;
   }
 
   @Override

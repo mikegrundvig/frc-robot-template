@@ -254,7 +254,12 @@ for.
 | `--out=DIR` | `build/studies/consistency` | Where the report goes |
 
 The console prints each seed's draws and numbers, so a run's result can be traced to the seeds
-behind it.
+behind it, and ends with a fingerprint of every loop's error and claim, to the bit: two studies
+with the same options print the same one, whenever and wherever they run. (The simulator's
+clock stays paused between runs, and its cameras keep the robot's poses by the time since their
+world began, not by the clock's own count, which starts wherever the computer's uptime stood and is
+too large for a double to keep to a nanosecond: before, two identical studies differed in their
+last digits.)
 
 ### Reading the report
 

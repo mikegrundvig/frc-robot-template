@@ -74,7 +74,7 @@ class TractionTruthSimTest {
    * which each wheel slips, found by halving between runs, puts each wheel's push at μ times its
    * own load. Speeding up shifts load to the rear wheels (m a h / L off each front wheel, h the
    * center of gravity's height and L the wheelbase), so the front wheels slip first, at μ N within
-   * 3%: about 47 A on the template's robot, where its register says.
+   * 3%: about 48 A on the template's robot.
    *
    * <p>Today every wheel slips at once, at the push that would speed the whole robot up at μ g,
    * since the simulator caps the robot as a whole and loads every wheel alike.

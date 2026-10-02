@@ -89,8 +89,8 @@ Day to day:
 ### The WPILib installer's VS Code
 
 It works as-is. This is the standard WPILib project layout, with the libraries beside it as ordinary
-Gradle projects (`lib/world`, `lib/localization`, `pitwall`), which the Java extension imports with
-the rest. Its Build, Test, and Deploy commands run the same Gradle tasks; *Set Team Number* writes
+Gradle projects (`lib/world`, `lib/localization`, `lib/simulation`, `pitwall`), which the Java
+extension imports with the rest. Its Build, Test, and Deploy commands run the same Gradle tasks; *Set Team Number* writes
 the same file as `setTeamNumber`. One difference: *Simulate Robot Code* uses Gradle only to prepare,
 then starts the robot itself under the debugger, with whichever simulation extensions it offers you
 (WPILib's simulator GUI among them). The robot then starts as a real robot does, disabled with no

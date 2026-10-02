@@ -577,7 +577,8 @@ and then seeing again), and the estimate recovers in each. What's known not to h
   off: the front pair at 0.5 m/s for a second, 25 cm off, claims 12.6 cm; at 1 m/s, 50 cm off,
   56 cm, the accelerometer seeing the rest. One wheel spinning claims about what it put the
   estimate off. Nor can the simulator say more: its chassis moves as the wheels' best fit says
-  (`DriveSimulation`), so in it, wheels that disagree can't put the robot anywhere their fit
+  (`KinematicPhysics`, a known gap in its [truth suite](simulator.md#how-far-to-trust-it-the-truth-suite)),
+  so in it, wheels that disagree can't put the robot anywhere their fit
   doesn't, and a rule for telling which disagreement is slip, tuned against it, would fit the
   simulator's own guesses. Wheel slip needs a simulator whose physics makes it (one modelling the
   robot as a rigid body on its tread), and logs from a real robot, before it can be judged better.

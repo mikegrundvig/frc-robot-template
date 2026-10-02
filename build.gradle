@@ -111,9 +111,9 @@ tasks.named("test") {
     systemProperty "frc.projectDir", projectDir.absolutePath
     // Project files the tests check against the code, declared so Gradle knows the tests depend
     // on them: the values register (ValuesRegisterTest), the drive team's dashboard
-    // (DashboardLayoutTest), and AdvantageScope's layout (AdvantageScopeLayoutTest). Today the
-    // tests rerun on every build anyway, since BuildConstants compiles in the build's time; an
-    // undeclared file would let Gradle skip them once it doesn't.
+    // (DashboardLayoutTest), and AdvantageScope's layout (AdvantageScopeLayoutTest). A quick build
+    // (-Pquick) skips tests whose inputs haven't changed, so an undeclared file would let a change
+    // to it pass untested.
     inputs.file("docs/values.md").withPropertyName("valuesRegister")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file("layouts/elastic-layout.json").withPropertyName("dashboardLayout")
@@ -125,6 +125,9 @@ tasks.named("test") {
     inputs.files(fileTree("ascope_assets")).withPropertyName("advantageScopeAssets")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     mustRunAfter tasks.matching { it.name == "advantageScopeAssets" }
+    // GOLDEN_UPDATE=1 has EstimatorGoldenSimTest record its recording again, so asking for it
+    // reruns the tests rather than finding them up to date.
+    inputs.property("goldenUpdate", providers.environmentVariable("GOLDEN_UPDATE").orElse(""))
     doFirst { work.get().asFile.mkdirs() }
     // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
     // coverage report to count: the program's startup runs nowhere else.

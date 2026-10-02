@@ -18,6 +18,7 @@ import org.wpilib.math.linalg.Matrix;
 import org.wpilib.math.linalg.VecBuilder;
 import org.wpilib.math.numbers.N1;
 import org.wpilib.math.numbers.N2;
+import org.wpilib.math.numbers.N3;
 import org.wpilib.math.system.DCMotor;
 import org.wpilib.math.system.LinearSystem;
 import org.wpilib.math.system.Models;
@@ -399,7 +400,7 @@ public final class KinematicPhysics implements Physics {
 
   /**
    * One wheel: its drive motor turning the wheel's share of the robot, exactly as WPILib's {@code
-   * DCMotorSim} turns a load (its state-space model, discretized each step, at the voltage held
+   * DCMotorSim} turns a load (its state-space model, discretized for the step, at the voltage held
    * through it), and the angle its steering was turned to.
    */
   private final class Wheel implements WheelTruth {
@@ -419,6 +420,15 @@ public final class KinematicPhysics implements Physics {
     private double radiusMeters;
     private double steerRadians;
     private boolean currentLimited;
+
+    /**
+     * The model discretized for a step this long: worked out once for each length of step, since
+     * the matrix exponential it takes is native code, and today's steps are all one length.
+     */
+    private double discretizedSeconds = Double.NaN;
+
+    private Matrix<N2, N2> discreteA = new Matrix<>(Nat.N2(), Nat.N2());
+    private Matrix<N2, N1> discreteB = new Matrix<>(Nat.N2(), Nat.N1());
 
     Wheel(int index, DCMotor motor, double inertiaKgM2, double ratio, double radiusMeters) {
       this.index = index;
@@ -444,8 +454,29 @@ public final class KinematicPhysics implements Physics {
       currentLimited = limited != drive.volts();
       input = VecBuilder.fill(limited * Math.min(1.0, drive.batteryVolts() / Math.abs(limited)));
       steerRadians = drive.steerRadians();
-      state = plant.calculateX(state, input, seconds);
+      if (seconds != discretizedSeconds) {
+        discretize(seconds);
+      }
+      // As LinearSystem.calculateX works it, to the bit, but discretized once.
+      state = discreteA.times(state).plus(discreteB.times(input));
       output = plant.calculateY(state, input);
+    }
+
+    /**
+     * Discretizes the model for a step this long, exactly as WPILib's {@code
+     * Discretization.discretizeAB} does (which hands the result back in a pair outside WPILib's
+     * math): the exponential of [A B; 0 0] times the step, its blocks the discrete A and B.
+     */
+    private void discretize(double seconds) {
+      Matrix<N3, N3> continuous = new Matrix<>(Nat.N3(), Nat.N3());
+      continuous.assignBlock(0, 0, plant.getA());
+      continuous.assignBlock(0, 2, plant.getB());
+      Matrix<N3, N3> phi = continuous.times(seconds).exp();
+      discreteA = new Matrix<>(Nat.N2(), Nat.N2());
+      discreteA.extractFrom(0, 0, phi);
+      discreteB = new Matrix<>(Nat.N2(), Nat.N1());
+      discreteB.extractFrom(0, 2, phi);
+      discretizedSeconds = seconds;
     }
 
     @Override

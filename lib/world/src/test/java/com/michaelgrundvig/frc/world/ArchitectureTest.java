@@ -234,6 +234,10 @@ class ArchitectureTest {
         .callConstructor(SecureRandom.class)
         .orShould()
         .callMethod(UUID.class, "randomUUID")
+        // WPILib's random draws (Normal) come from a generator of its own that nobody seeds.
+        .orShould()
+        .dependOnClassesThat()
+        .resideInAPackage("org.wpilib.math.random..")
         .because(
             "a draw nobody seeded differs in every run, so a replay can't reproduce it; take the"
                 + " seed, or the draws, as an argument")

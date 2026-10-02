@@ -459,9 +459,9 @@ velocities, every turn the robot made, and each wheel's turn, spin, angle, radiu
 and contact); `apply` does something to the world from outside it. Today's engine,
 `KinematicPhysics`, is the simulator as it has always run: the robot moves as the best fit of its
 wheels' travel, each wheel turning its share of the robot's mass on its own motor (WPILib's
-`DCMotorSim`, worked to the bit, whose matrix exponential is WPILib's native math: the library's
-tests load it as the robot program's do), within the tread's grip, on the plane through its wheels'
-ground. Putting it behind the interface changed no recorded run by a bit.
+`DCMotorSim`, worked to the bit, whose matrix exponential, worked once for each length of step, is
+WPILib's native math: the library's tests load it as the robot program's do), within the tread's
+grip, on the plane through its wheels' ground. Putting it behind the interface changed no recorded run by a bit.
 
 **Where a rigid-body engine plugs in.** ODE4j (pure Java) is to take today's engine's place behind
 the same interface: the robot's mass, center of gravity, and yaw inertia in one chassis, a wheel on

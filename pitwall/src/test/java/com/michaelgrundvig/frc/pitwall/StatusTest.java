@@ -114,17 +114,28 @@ class StatusTest {
         .isThrownBy(() -> status.add("Pressure", () -> 1, "psi", 0));
   }
 
-  /** A line that moves faster than anyone reads it changes at most once an interval. */
+  /**
+   * A line that moves faster than anyone reads it is read at most once an interval, so it changes
+   * at most that often, and the loop doesn't make its text in between.
+   */
   @Test
-  void anItemWithAnIntervalChangesAtMostOnceAnInterval() {
+  void anItemWithAnIntervalIsReadAtMostOnceAnInterval() {
     var clock = new AtomicLong();
-    var count = new AtomicInteger();
+    var frames = new AtomicInteger();
+    var reads = new AtomicInteger();
     var status =
         new Status(clock::get)
-            .add("Seen", () -> count.incrementAndGet() + " frames", Duration.ofSeconds(1));
+            .add(
+                "Seen",
+                () -> {
+                  reads.incrementAndGet();
+                  return frames.get() + " frames";
+                },
+                Duration.ofSeconds(1));
     List<Object> shown = new ArrayList<>();
 
     for (int loop = 0; loop < 150; loop++) {
+      frames.incrementAndGet();
       status.periodic(true);
       shown.add(status.view().get(0).value());
       clock.addAndGet(Duration.ofMillis(20).toNanos());
@@ -133,6 +144,7 @@ class StatusTest {
     assertThat(shown.stream().distinct()).as("three seconds: three changes").hasSize(3);
     assertThat(shown.get(49)).as("held a second").isEqualTo("1 frames");
     assertThat(shown.get(50)).as("then the latest").isEqualTo("51 frames");
+    assertThat(reads).as("read once a second, not every loop").hasValue(3);
     assertThat(status.values()).containsEntry("Seen", shown.get(149));
     assertThatIllegalArgumentException()
         .isThrownBy(() -> status.add("Other", () -> 1, Duration.ofSeconds(-1)));

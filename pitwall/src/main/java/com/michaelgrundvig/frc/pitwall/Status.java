@@ -25,7 +25,8 @@ import org.jspecify.annotations.Nullable;
  * RobotController::getBatteryVoltage, "V", 0.1)}, so the page hears of it only once it has really
  * moved. Each change goes to every open page, so write a line to change only when something worth
  * reading does; one that still moves faster than anyone reads it (a running count) can say how
- * often it may change: {@code status.add("Loop", loop::describe, Duration.ofSeconds(1))}.
+ * often it's read: {@code status.add("Loop", loop::describe, Duration.ofSeconds(1))}, which also
+ * spares the loop making its text in between.
  *
  * <p>Items are read in {@link #periodic}, on the robot loop's thread, so they may read robot state
  * freely; keep each one cheap. They're read only while someone is looking: a page has its event
@@ -50,10 +51,10 @@ public final class Status {
    */
   private record Source(Supplier<?> value, String unit, double resolution, long intervalNanos) {}
 
-  /** What an item last showed, and when that changed. */
+  /** What an item held to an interval last read, and when. */
   private static final class Shown {
     @Nullable Object value;
-    long sinceNanos;
+    long readNanos;
   }
 
   private final LongSupplier clock;
@@ -90,8 +91,9 @@ public final class Status {
   }
 
   /**
-   * Adds an item that changes at most once an interval: between changes, the page shows the value
-   * it last changed to. For a line that moves faster than anyone reads it.
+   * Adds an item read at most once an interval: between reads, the page shows the value last read,
+   * and its supplier isn't called. For a line that moves faster than anyone reads it, or costs the
+   * loop something to make.
    *
    * @return this, to add the next item
    * @throws IllegalArgumentException if the name is blank or already used, or the interval is
@@ -145,13 +147,19 @@ public final class Status {
     Map<String, Object> values = new LinkedHashMap<>();
     for (Map.Entry<String, Source> item : items.entrySet()) {
       Source source = item.getValue();
-      Object value = read(source.value());
-      if (source.resolution() > 0 && value instanceof Number number) {
-        values.put(item.getKey(), Reading.of(number.doubleValue()).toNearest(source.resolution()));
-        value = shown(number.doubleValue(), source);
-      } else {
-        value = held(item.getKey(), value, source.intervalNanos(), nowNanos);
+      Object value;
+      if (source.intervalNanos() > 0) {
+        value = everyInterval(item.getKey(), source, nowNanos);
         values.put(item.getKey(), value);
+      } else {
+        value = read(source.value());
+        if (source.resolution() > 0 && value instanceof Number number) {
+          values.put(
+              item.getKey(), Reading.of(number.doubleValue()).toNearest(source.resolution()));
+          value = shown(number.doubleValue(), source);
+        } else {
+          values.put(item.getKey(), value);
+        }
       }
       lines.add(new Item(item.getKey(), value));
     }
@@ -212,16 +220,17 @@ public final class Status {
     return units;
   }
 
-  /** The value to show: the new one, unless the last change was less than an interval ago. */
-  private Object held(String name, Object value, long intervalNanos, long nowNanos) {
+  /** An item held to an interval: read once it's due, else as last read. */
+  private Object everyInterval(String name, Source source, long nowNanos) {
     Shown last = shown.computeIfAbsent(name, n -> new Shown());
     Object was = last.value;
-    if (was == null || (!was.equals(value) && nowNanos - last.sinceNanos >= intervalNanos)) {
-      last.value = value;
-      last.sinceNanos = nowNanos;
-      return value;
+    if (was != null && nowNanos - last.readNanos < source.intervalNanos()) {
+      return was;
     }
-    return was;
+    Object value = read(source.value());
+    last.value = value;
+    last.readNanos = nowNanos;
+    return value;
   }
 
   private static Object read(Supplier<?> item) {

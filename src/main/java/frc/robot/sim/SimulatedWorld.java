@@ -3,6 +3,7 @@ package frc.robot.sim;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.Body;
@@ -83,7 +84,9 @@ public final class SimulatedWorld implements AutoCloseable {
     this.field = field;
     this.drivetrain = new DriveSimulation(body, drivetrain, errors, imus);
     this.drivetrain.setTerrain(field.terrain());
-    vision = new VisionSim(field, errors.tagErrors(), errors.seed());
+    // Each camera's noise from its own stream of the seed (Seeds).
+    vision =
+        new VisionSim(field, errors.tagErrors(), camera -> Seeds.camera(errors.seed(), camera));
     this.cameras = new CameraIOSim[cameras.size()];
     for (int i = 0; i < cameras.size(); i++) {
       CameraConfig camera = cameras.get(i);

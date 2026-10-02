@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.IntToLongFunction;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
@@ -69,15 +70,12 @@ public final class VisionSim implements AutoCloseable {
     public static final Noise NONE = new Noise(0, 0, 0);
   }
 
-  /** Each seed's cameras draw their noise from seeds this far apart. */
-  private static final long SEEDS_PER_WORLD = 1000;
-
   /** How far back the robot's true poses are kept, for the images taken that long ago. */
   private static final double HISTORY_SECONDS = 1.5;
 
   private final VisionSystemSim world = new VisionSystemSim("main");
   private final Field layout;
-  private final long seed;
+  private final IntToLongFunction cameraSeeds;
   private final Noise noise;
   private final List<PhotonCameraSim> cameras = new ArrayList<>();
 
@@ -107,12 +105,14 @@ public final class VisionSim implements AutoCloseable {
    * @param tagErrors by tag ID, how far each tag really sits from where the field's layout says, in
    *     the field's frame, as the world is built: the cameras see it there, while their multi-tag
    *     solves, as the coprocessor's do, believe the layout ({@link #moveTag} moves one further)
-   * @param seed where the cameras' noise starts: each camera draws its own from it, so a run
-   *     repeats exactly, and a run with another seed sees other noise. Seed 1's cameras draw from
-   *     1, 2, 3, and on; seed 2's from 1001, 1002, and on.
+   * @param cameraSeeds where each camera's noise starts, by its place in the order the cameras are
+   *     added, from 0: each draws its own, so a run repeats exactly, and a run with another seed
+   *     sees other noise. The simulator gives each camera its own stream of the world's seed
+   *     ({@code Seeds.camera}).
    */
-  public VisionSim(FieldModel field, Map<Integer, Translation3d> tagErrors, long seed) {
-    this(field, tagErrors, seed, Noise.TYPICAL);
+  public VisionSim(
+      FieldModel field, Map<Integer, Translation3d> tagErrors, IntToLongFunction cameraSeeds) {
+    this(field, tagErrors, cameraSeeds, Noise.TYPICAL);
   }
 
   /**
@@ -120,7 +120,10 @@ public final class VisionSim implements AutoCloseable {
    * images a test can check against a pinhole camera's.
    */
   public VisionSim(
-      FieldModel field, Map<Integer, Translation3d> tagErrors, long seed, Noise noise) {
+      FieldModel field,
+      Map<Integer, Translation3d> tagErrors,
+      IntToLongFunction cameraSeeds,
+      Noise noise) {
     this.noise = noise;
     layout = field.toField();
     List<FieldTag> real = new ArrayList<>();
@@ -144,7 +147,7 @@ public final class VisionSim implements AutoCloseable {
     for (VisionTargetSim target : world.getVisionTargets("apriltag")) {
       tags.put(target.fiducialID, target);
     }
-    this.seed = seed;
+    this.cameraSeeds = cameraSeeds;
   }
 
   /** The field's tags' IDs, as its layout lists them. */
@@ -193,17 +196,6 @@ public final class VisionSim implements AutoCloseable {
     return target == null ? Optional.empty() : Optional.of(target.getPose());
   }
 
-  /**
-   * Where a camera's noise starts: seed 1's cameras draw from 1, 2, 3, and on, in the order they're
-   * added; seed 2's from 1001, 1002, and on.
-   *
-   * @param seed the simulated world's
-   * @param camera the camera's place in the order they're added, from 0
-   */
-  public static long cameraSeed(long seed, int camera) {
-    return (seed - 1) * SEEDS_PER_WORLD + camera + 1;
-  }
-
   /** Adds a camera, mounted exactly as configured, and returns the IO the robot code reads. */
   public CameraIO camera(CameraConfig config) {
     return camera(config, Transform3d.ZERO);
@@ -222,7 +214,7 @@ public final class VisionSim implements AutoCloseable {
     PhotonCameraSim simulated =
         new PhotonCameraSim(
             io.camera(),
-            properties(config.sensor(), cameraSeed(seed, cameras.size()), noise),
+            properties(config.sensor(), cameraSeeds.applyAsLong(cameras.size()), noise),
             layout);
     // Tags farther than the camera's sight range are not detected: small in the image, and noisy.
     simulated.setMaxSightRange(config.sensor().sightRange().in(Meters));

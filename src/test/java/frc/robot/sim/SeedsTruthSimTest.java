@@ -1,9 +1,7 @@
 package frc.robot.sim;
 
-import static com.michaelgrundvig.frc.simulation.KnownGap.Check.stillOpen;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.simulation.KnownGap;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
@@ -11,8 +9,8 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.ModuleIO;
-import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -41,12 +39,11 @@ class SeedsTruthSimTest {
 
   /**
    * Every random stream, over a study's seeds, starts from a seed of its own: no two draw the same
-   * numbers. Today the streams are offsets from the world's seed, and they overlap: a seed's gyro
-   * draws what another seed's gyro's accelerometer does, and seed 1's gyro what its first camera
-   * does.
+   * numbers. Each is the world's seed mixed with its kind, then its index ({@link Seeds#stream});
+   * as offsets from the world's seed, 202 overlapped, a seed's gyro drawing what the seed before it
+   * gave its gyro's accelerometer, and seed 1's gyro what its first camera drew.
    */
   @Test
-  @KnownGap("each stream is an offset from the world's seed, not drawn from the seed and its name")
   void everyStreamOfEverySeedIsItsOwn() {
     Map<Long, String> streams = new LinkedHashMap<>();
     List<String> shared = new ArrayList<>();
@@ -61,26 +58,17 @@ class SeedsTruthSimTest {
       }
     }
 
-    stillOpen(
-        "every stream its own",
-        shared.isEmpty(),
-        shared.size() == 202
-            && shared.contains("seed 1's first camera = seed 1's gyro")
-            && shared.contains("seed 2's gyro = seed 1's gyro's accelerometer"),
-        shared.size()
-            + " streams shared, the first "
-            + shared.subList(0, Math.min(4, shared.size())));
+    assertThat(shared).isEmpty();
   }
 
   /**
    * Streams from seeds of their own draw uncorrelated numbers: the first 10,000 normal draws of
    * every pair of a world's streams (neighbors included, a seed and the next), correlated within
    * three standard errors, 3 / √n. Every stream counts by its name, so two that share a seed are
-   * compared too, and caught: they draw the same numbers. Today seed 1's first two cameras share
-   * the seeds of its gyro and its gyro's accelerometer, and draw exactly what those do.
+   * compared too, and caught: they draw the same numbers, as seed 1's first two cameras once drew
+   * what its gyro and its gyro's accelerometer did.
    */
   @Test
-  @KnownGap("each stream is an offset from the world's seed, not drawn from the seed and its name")
   void streamsFromTheirOwnSeedsAreUncorrelated() {
     int n = 10_000;
     List<String> names = new ArrayList<>();
@@ -105,13 +93,49 @@ class SeedsTruthSimTest {
       }
     }
 
-    stillOpen(
-        "every pair of streams uncorrelated",
-        correlated.isEmpty(),
-        correlated.equals(
-            List.of(
-                "gyro and first camera, 1.000", "gyro's accelerometer and second camera, 1.000")),
-        "correlated: " + correlated);
+    assertThat(correlated).isEmpty();
+  }
+
+  /**
+   * Streams start apart too: over a hundred worlds, each stream's first draw against every other
+   * stream's of the same world, and against its own of the next world, correlated within three
+   * standard errors, 3 / √n. Java's {@code Random} seeded with numbers a step apart starts from
+   * nearly the same state, so its first draws move together: seeded as offsets from the world's
+   * seed, a world's four cameras drew the same first number (correlated 1.0 over a hundred worlds),
+   * its IMUs' streams nearly so (0.96 and more), and each IMU's stream the next world's.
+   */
+  @Test
+  void streamsStartApartWithinAWorldAndFromTheNext() {
+    Map<String, double[]> first = new LinkedHashMap<>();
+    for (long seed = 1; seed <= SEEDS + 1; seed++) {
+      for (Map.Entry<String, Long> stream : streams(seed).entrySet()) {
+        first.computeIfAbsent(stream.getKey(), name -> new double[SEEDS + 1])[(int) seed - 1] =
+            new Random(stream.getValue()).nextDouble();
+      }
+    }
+    List<String> names = List.copyOf(first.keySet());
+    List<double[]> draws = List.copyOf(first.values());
+    List<String> together = new ArrayList<>();
+    for (int a = 0; a < names.size(); a++) {
+      for (int b = a + 1; b < names.size(); b++) {
+        check(together, names.get(a) + " and " + names.get(b), draws.get(a), draws.get(b), 0);
+      }
+      check(together, names.get(a) + " and the next world's", draws.get(a), draws.get(a), 1);
+    }
+
+    assertThat(together).isEmpty();
+  }
+
+  /** Notes these first draws if they move together, a hundred worlds of one against the other's. */
+  private static void check(
+      List<String> together, String what, double[] one, double[] other, int worldsOn) {
+    double r =
+        correlation(
+            Arrays.copyOfRange(one, 0, SEEDS),
+            Arrays.copyOfRange(other, worldsOn, SEEDS + worldsOn));
+    if (!(Math.abs(r) < 3 / Math.sqrt(SEEDS))) {
+      together.add(what + String.format(Locale.ROOT, ", %.2f", r));
+    }
   }
 
   /**
@@ -152,7 +176,7 @@ class SeedsTruthSimTest {
       String[] order = {"first", "second", "third", "fourth", "fifth", "sixth"};
       streams.put(
           (camera < order.length ? order[camera] : "#" + (camera + 1)) + " camera",
-          VisionSim.cameraSeed(seed, camera));
+          Seeds.camera(seed, camera));
     }
     return streams;
   }

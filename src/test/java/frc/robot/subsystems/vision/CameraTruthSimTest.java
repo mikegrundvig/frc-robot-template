@@ -9,6 +9,7 @@ import static org.wpilib.units.Units.Milliseconds;
 
 import com.michaelgrundvig.frc.simulation.Consistency;
 import com.michaelgrundvig.frc.simulation.KnownGap;
+import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -220,7 +221,8 @@ class CameraTruthSimTest {
   private static List<PhotonPipelineResult> run(
       CameraConfig config, Pose3d robot, double seconds, VisionSim.Noise noise) {
     List<PhotonPipelineResult> results = new ArrayList<>();
-    try (VisionSim vision = new VisionSim(RobotSim.FIELD, Map.of(), 1, noise)) {
+    try (VisionSim vision =
+        new VisionSim(RobotSim.FIELD, Map.of(), camera -> Seeds.camera(1, camera), noise)) {
       PhotonCamera camera = ((CameraIOPhotonVision) vision.camera(config)).camera();
       for (int loop = 0; loop < Math.round(seconds / 0.02); loop++) {
         RobotSim.stepClock();

@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import com.michaelgrundvig.frc.simulation.FaultCatalog;
+import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import com.michaelgrundvig.frc.simulation.SensorErrorsGyroErrorsBuilder;
@@ -265,10 +266,12 @@ final class ConsistencyRuns {
     /** How far a calibrated camera's mount is still off along each axis: a few millimeters. */
     static final double MOUNT_MILLIMETERS = 3;
 
-    // Each kind of error's stream of a seed.
-    private static final long MOUNTS = 1;
-    private static final long TAGS = 2;
-    private static final long IMUS = 3;
+    // Each kind of error's stream of a seed: constants far apart and far from any seed, since one
+    // step of mixing depends on the seed and the kind only through their sum (with 1, 2, and 3,
+    // each seed's mounts were the seed before it's tags).
+    private static final long MOUNTS = 0x6d6f756e7473L; // "mounts"
+    private static final long TAGS = 0x74616773L; // "tags"
+    private static final long IMUS = 0x696d7573L; // "imus"
 
     Spread {
       if (!(mountMillimeters >= 0)
@@ -350,7 +353,7 @@ final class ConsistencyRuns {
 
     /** A seed's stream for one kind of error and one item of it. */
     private static SplittableRandom stream(long seed, long kind, long item) {
-      return new SplittableRandom(Seeds.mix(Seeds.mix(seed, kind), item));
+      return new SplittableRandom(Seeds.stream(seed, kind, item));
     }
   }
 

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import com.michaelgrundvig.frc.localization.TagSolver;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;

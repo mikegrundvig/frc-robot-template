@@ -1,4 +1,4 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 /**
  * The simulated world's physics: the robot's chassis and wheels, and their contact with the field,
@@ -23,6 +23,12 @@ package frc.robot.sim;
  * </ul>
  */
 public interface Physics {
+  /**
+   * The acceleration of gravity the world pulls with, in m/s²: the standard one, as localization
+   * reads an IMU's.
+   */
+  double STANDARD_GRAVITY = 9.80665;
+
   /**
    * Moves the world on by this long: the engine's sub-steps, each starting with the actuators told
    * the truth as it stands and asked what drives each wheel over it.

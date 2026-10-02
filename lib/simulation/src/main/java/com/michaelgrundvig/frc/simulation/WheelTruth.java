@@ -1,4 +1,4 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 import org.wpilib.math.geometry.Translation3d;
 

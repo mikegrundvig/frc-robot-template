@@ -1,8 +1,12 @@
 package frc.robot.sim;
 
-import static frc.robot.sim.KnownGap.Check.stillOpen;
+import static com.michaelgrundvig.frc.simulation.KnownGap.Check.stillOpen;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.simulation.KnownGap;
+import com.michaelgrundvig.frc.simulation.Seeds;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.subsystems.drive.GyroIO;

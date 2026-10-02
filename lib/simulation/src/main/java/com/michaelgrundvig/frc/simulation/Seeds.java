@@ -1,15 +1,16 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 /**
  * Where each of the simulated world's random streams starts, from the world's one seed ({@code
  * SensorErrors.seed}), so a run repeats exactly and each stream draws its own numbers. The cameras'
- * come from {@code VisionSim.cameraSeed}, beside PhotonVision's simulation.
+ * come from the robot program's camera simulation, beside PhotonVision's ({@code
+ * VisionSim.cameraSeed}).
  *
  * <p>These are offsets from the seed, kept as they were so recorded runs don't move. They don't
  * keep every stream apart: seed 1's gyro draws what its first camera does, and each seed's gyro
- * what the seed before it gave its gyro's accelerometer (the truth suite's {@code
- * SeedsTruthSimTest} keeps this as a known gap). Deriving each stream from the seed and its own
- * name fixes that, and moves every recording.
+ * what the seed before it gave its gyro's accelerometer (the truth suite keeps this as a known gap,
+ * in the robot program's {@code SeedsTruthSimTest}, beside the cameras' streams). Deriving each
+ * stream from the seed and its own name fixes that, and moves every recording.
  */
 public final class Seeds {
   /** The backup IMU's streams start this far from the gyro's: no small seed's gyro shares one. */

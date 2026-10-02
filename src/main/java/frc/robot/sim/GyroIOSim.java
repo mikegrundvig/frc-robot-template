@@ -1,5 +1,6 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.subsystems.drive.GyroIO;
 import java.util.Arrays;
 import java.util.Random;

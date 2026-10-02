@@ -3,9 +3,9 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.sim.SensorErrors;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

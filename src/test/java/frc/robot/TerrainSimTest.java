@@ -2,7 +2,7 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.sim.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;

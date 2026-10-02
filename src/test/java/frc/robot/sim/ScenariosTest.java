@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;

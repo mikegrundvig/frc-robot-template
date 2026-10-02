@@ -1,0 +1,31 @@
+/**
+ * The simulation: the simulated world's truth, and how its sensors read it. The robot's code never
+ * sees any of it directly; it reads its IO, and in the simulator the robot program's adapters
+ * ({@code frc.robot.sim}) answer that IO from here, as hardware would.
+ *
+ * <p>Where to start reading:
+ *
+ * <ul>
+ *   <li><b>Physics:</b> {@link com.michaelgrundvig.frc.simulation.Physics} is the engine apart from
+ *       the sensors and faults: the {@link com.michaelgrundvig.frc.simulation.Actuators} drive it,
+ *       sub-step by sub-step, each wheel through a {@link
+ *       com.michaelgrundvig.frc.simulation.WheelDrive}; it keeps the {@link
+ *       com.michaelgrundvig.frc.simulation.ChassisTruth} and each {@link
+ *       com.michaelgrundvig.frc.simulation.WheelTruth}; and a {@link
+ *       com.michaelgrundvig.frc.simulation.Disturbance} acts on it from outside. Today's engine is
+ *       {@link com.michaelgrundvig.frc.simulation.KinematicPhysics}; a rigid-body engine takes its
+ *       place behind the same interface.
+ *   <li><b>Sensors:</b> {@link com.michaelgrundvig.frc.simulation.SensorErrors} says how the
+ *       simulated robot's sensors and wheels differ from what its code believes.
+ *   <li><b>Seeds:</b> {@link com.michaelgrundvig.frc.simulation.Seeds} says where each random
+ *       stream starts, so a run is a function of its seed.
+ * </ul>
+ *
+ * <p>Conventions: no static state, no clock, and no unseeded randomness, so worlds run side by side
+ * and a run repeats to the bit. Frames as in {@code com.michaelgrundvig.frc.world.field}: poses in
+ * the field's frame, a robot's own motion in its frame; SI units throughout.
+ */
+@NullMarked
+package com.michaelgrundvig.frc.simulation;
+
+import org.jspecify.annotations.NullMarked;

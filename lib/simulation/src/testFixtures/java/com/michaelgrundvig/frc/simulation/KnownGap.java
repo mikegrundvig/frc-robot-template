@@ -1,4 +1,4 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 import static org.assertj.core.api.Assertions.fail;
 

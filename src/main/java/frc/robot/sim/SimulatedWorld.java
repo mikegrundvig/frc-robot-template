@@ -3,6 +3,7 @@ package frc.robot.sim;
 import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
 import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;

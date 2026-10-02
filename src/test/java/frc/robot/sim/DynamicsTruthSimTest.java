@@ -1,11 +1,12 @@
 package frc.robot.sim;
 
-import static frc.robot.sim.KnownGap.Check.stillOpen;
+import static com.michaelgrundvig.frc.simulation.KnownGap.Check.stillOpen;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 
 import com.michaelgrundvig.frc.localization.ImuReadings;
+import com.michaelgrundvig.frc.simulation.KnownGap;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import frc.robot.RobotSim;

@@ -6,11 +6,11 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenarios;
-import frc.robot.sim.SensorErrors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;

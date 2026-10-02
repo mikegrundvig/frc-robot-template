@@ -10,6 +10,8 @@ import static org.wpilib.units.Units.Meters;
 import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.KinematicPhysics;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.timing.RobotLoop;

@@ -1,14 +1,12 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
-import static frc.robot.sim.KnownGap.Check.stillOpen;
+import static com.michaelgrundvig.frc.simulation.KnownGap.Check.stillOpen;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
-import frc.robot.RobotSim;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
@@ -26,14 +24,17 @@ import org.wpilib.math.geometry.Translation3d;
  * quasi-static, so this is the ground it would stand on. The frame itself is left out: the robot's
  * definition doesn't say how high it rides, so a frame that would meet the crest isn't checked.
  */
-@ExtendWith(RobotSim.class)
-class TerrainTruthSimTest {
+class TerrainTruthTest {
   /** A bump about as tall as REBUILT's, with a long crest along the field's y axis, at x = 5. */
-  private static final Bump BUMP =
-      new Bump("A bump", new Translation2d(5, 1), new Translation2d(5, 7), 0.165, 1.2);
+  private static final Terrain BUMP =
+      new Terrain(
+          List.of(
+              new Bump("A bump", new Translation2d(5, 1), new Translation2d(5, 7), 0.165, 1.2)));
 
   /** A wheel this close to the ground is on it: far below any hang geometry predicts here. */
   private static final double ON_THE_GROUND = 0.001;
+
+  private final KinematicPhysics physics = TestRobot.physics();
 
   /**
    * Crossing square to the crest, the wheels on each axle stand at one height, so the ground under
@@ -41,13 +42,12 @@ class TerrainTruthSimTest {
    */
   @Test
   void crossingSquareAllFourWheelsTouch() {
-    TruthRig rig = rig();
+    physics.apply(new Disturbance.Ground(BUMP));
     for (double x = 3; x <= 7; x += 0.01) {
-      rig.simulation.place(new Pose2d(x, 4, Rotation2d.ZERO));
-      double[] gaps = gaps(rig);
+      physics.apply(new Disturbance.Placed(new Pose2d(x, 4, Rotation2d.ZERO)));
 
-      assertThat(twist(rig)).as("at x = %.2f", x).isLessThan(1e-9);
-      for (double gap : gaps) {
+      assertThat(twist()).as("at x = %.2f", x).isLessThan(1e-9);
+      for (double gap : gaps()) {
         assertThat(Math.abs(gap)).as("at x = %.2f", x).isLessThan(ON_THE_GROUND);
       }
     }
@@ -63,22 +63,21 @@ class TerrainTruthSimTest {
   @Test
   @KnownGap("the robot stands on the plane that best fits all four wheels' ground")
   void crossingAt45DegreesOneWheelHangsByTheTwist() {
-    TruthRig rig = rig();
+    physics.apply(new Disturbance.Ground(BUMP));
     int twisted = 0;
     int asGeometrySays = 0;
     double worstQuarter = 0;
     double mostTwist = 0;
     for (double x = 3; x <= 7; x += 0.01) {
-      rig.simulation.place(new Pose2d(x, 4, Rotation2d.fromDegrees(45)));
-      double twist = twist(rig);
+      physics.apply(new Disturbance.Placed(new Pose2d(x, 4, Rotation2d.fromDegrees(45))));
+      double twist = twist();
       if (twist < 0.01) {
         continue;
       }
       twisted++;
-      double[] gaps = gaps(rig);
       int touching = 0;
       int hanging = 0;
-      for (double gap : gaps) {
+      for (double gap : gaps()) {
         touching += Math.abs(gap) < ON_THE_GROUND ? 1 : 0;
         hanging += Math.abs(gap - twist) < 0.002 ? 1 : 0;
         worstQuarter = Math.max(worstQuarter, Math.abs(Math.abs(gap) - twist / 4));
@@ -95,50 +94,36 @@ class TerrainTruthSimTest {
         asGeometrySays
             + " of "
             + twisted
-            + " places as geometry says; each wheel a quarter of the"
-            + " twist off the ground, within "
+            + " places as geometry says; each wheel a quarter of the twist off the ground, within "
             + worstQuarter
             + " m");
   }
 
-  private static TruthRig rig() {
-    TruthRig rig = new TruthRig();
-    rig.simulation.setTerrain(new Terrain(List.of(BUMP)));
-    return rig;
-  }
-
-  /** Where each wheel's tread touches the field, flat: under its module, as the robot faces. */
-  private static Translation2d[] treads(TruthRig rig) {
-    Pose2d pose = rig.simulation.truePose();
-    Translation2d[] treads = new Translation2d[4];
-    for (int i = 0; i < 4; i++) {
-      treads[i] = pose.getTranslation().plus(rig.wheels[i].rotateBy(pose.getRotation()));
-    }
-    return treads;
+  /** Where each wheel's tread is over the field, flat. */
+  private Translation2d under(int wheel) {
+    return physics.wheel(wheel).contactPoint().toTranslation2d();
   }
 
   /** The ground's twist under the wheels, in meters: zero where it's a plane. */
-  private static double twist(TruthRig rig) {
-    Terrain ground = rig.simulation.terrain();
-    Translation2d[] treads = treads(rig);
+  private double twist() {
     return Math.abs(
-        ground.heightAt(treads[0])
-            + ground.heightAt(treads[3])
-            - ground.heightAt(treads[1])
-            - ground.heightAt(treads[2]));
+        BUMP.heightAt(under(0))
+            + BUMP.heightAt(under(3))
+            - BUMP.heightAt(under(1))
+            - BUMP.heightAt(under(2)));
   }
 
   /**
    * How far above the ground under it each wheel's tread is, in meters (below it, negative): where
    * the physics says it meets the ground, against the terrain there. A wheel the physics says is
-   * off the ground is hanging, however close.
+   * off the ground hangs, however close.
    */
-  private static double[] gaps(TruthRig rig) {
+  private double[] gaps() {
     double[] gaps = new double[4];
     for (int i = 0; i < 4; i++) {
-      WheelTruth wheel = rig.simulation.physics().wheel(i);
+      WheelTruth wheel = physics.wheel(i);
       Translation3d contact = wheel.contactPoint();
-      double gap = contact.getZ() - rig.simulation.terrain().heightAt(contact.toTranslation2d());
+      double gap = contact.getZ() - BUMP.heightAt(contact.toTranslation2d());
       gaps[i] = wheel.inContact() || gap > ON_THE_GROUND ? gap : ON_THE_GROUND;
     }
     return gaps;

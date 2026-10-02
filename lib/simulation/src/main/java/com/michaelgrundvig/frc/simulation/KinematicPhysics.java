@@ -1,4 +1,4 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
@@ -56,9 +56,6 @@ public final class KinematicPhysics implements Physics {
    * one robot driving into another starts it moving.
    */
   public static final double PUSH_ACCELERATION_METERS_PER_SECOND_SQUARED = 3.0;
-
-  /** The standard acceleration of gravity, in m/s². */
-  static final double STANDARD_GRAVITY = 9.80665;
 
   private final Wheel[] wheels;
   private final WheelDrive[] drives;

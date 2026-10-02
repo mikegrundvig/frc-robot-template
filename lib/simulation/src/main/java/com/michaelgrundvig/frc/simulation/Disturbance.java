@@ -1,4 +1,4 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 import com.michaelgrundvig.frc.world.field.Terrain;
 import org.wpilib.math.geometry.Pose2d;

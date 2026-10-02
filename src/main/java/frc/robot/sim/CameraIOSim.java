@@ -1,5 +1,6 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;

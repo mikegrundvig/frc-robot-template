@@ -569,7 +569,7 @@ coprocessors' health agents how they are, and when it raises alerts about them; 
 
 ### `SensorErrors`
 
-`frc.robot.sim.SensorErrors`: how the simulated robot's sensors differ from the truth.
+`com.michaelgrundvig.frc.simulation.SensorErrors`: how the simulated robot's sensors differ from the truth.
 `SensorErrors.TYPICAL` is a robot partway through a season (the simulator and its scenarios use it);
 `NONE` is exact, for tests of exact numbers. The code calls TYPICAL's values plausible estimates:
 replace them with a real robot's once it's calibrated.

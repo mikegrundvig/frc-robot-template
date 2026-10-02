@@ -8,6 +8,7 @@ import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.coprocessor.table.Table;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.subsystems.coprocessors.CoprocessorIO;

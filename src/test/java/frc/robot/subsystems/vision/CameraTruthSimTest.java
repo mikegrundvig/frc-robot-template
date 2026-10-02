@@ -1,17 +1,17 @@
 package frc.robot.subsystems.vision;
 
-import static frc.robot.sim.KnownGap.Check.stillOpen;
+import static com.michaelgrundvig.frc.simulation.KnownGap.Check.stillOpen;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Milliseconds;
 
+import com.michaelgrundvig.frc.simulation.KnownGap;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
-import frc.robot.sim.KnownGap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;

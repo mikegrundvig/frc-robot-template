@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import com.michaelgrundvig.frc.localization.BodyMotion;
 import com.michaelgrundvig.frc.localization.OdometrySample;
 import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.simulation.Consistency;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.subsystems.drive.GyroIO;
@@ -31,9 +32,11 @@ class OdometryTruthSimTest {
   /**
    * Straight, curving, and spinning in place, each held steady after its wheels point their way
    * (under 30% of the grip): odometry from the encoders' 250 Hz readings is within 0.1% of the
-   * distance the robot truly went, and its heading within 0.05° a turn.
+   * distance the robot truly went, and its heading within 0.05° a turn. Consistency today, truth
+   * for an engine whose tread rolls on a compliant contact.
    */
   @Test
+  @Consistency("today's physics moves the robot by the same fit of its wheels that odometry makes")
   void withExactSensorsOdometryFollowsTheTruth() {
     // Robot-relative: forward, left (m/s), counterclockwise (rad/s).
     double[][] maneuvers = {{1.0, 0.6, 0}, {1.2, 0, 0.8}, {0, 0, 1.5}, {0.5, -0.8, -0.6}};

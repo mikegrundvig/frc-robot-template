@@ -7,6 +7,7 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Milliseconds;
 
+import com.michaelgrundvig.frc.simulation.Consistency;
 import com.michaelgrundvig.frc.simulation.KnownGap;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
@@ -156,9 +157,13 @@ class CameraTruthSimTest {
   /**
    * Each image arrives its latency after it was taken: over 20 s, a mean within 0.5 ms of the
    * configured latency, and a spread within 10% of the configured one ({@link
-   * VisionSim#LATENCY_STD_DEV_MILLIS}).
+   * VisionSim#LATENCY_STD_DEV_MILLIS}). Consistency, not truth: {@link VisionSim} stamps each image
+   * the latency PhotonVision drew for it before it arrives, so the stamps' gap is that draw, and
+   * this checks only that the draws are as configured. That the stamp is when the image was taken
+   * is {@code CameraTimingSimTest}'s check, against where each image shows the robot.
    */
   @Test
+  @Consistency("the stamps' gap is VisionSim's own subtraction of the latency PhotonVision drew")
   void imagesArriveTheirConfiguredLatencyAfterTheyWereTaken() {
     CameraConfig config = CAMERAS.get(0);
     List<PhotonPipelineResult> results = run(config, SURVEYED.get(0), 20);

@@ -92,9 +92,12 @@ class AccelerometerTruthTest {
 
   /**
    * Speeding up straight ahead at its drive motors' stator limit, it reads how fast the robot's
-   * speed changed over its last step, exactly: the robot's own acceleration then.
+   * speed changed over its last step, exactly: the robot's own acceleration then. Consistency, not
+   * truth: the model takes the physics' velocity a step apart, the very difference this compares it
+   * with. Newton's answer for a launch is the robot program's {@code DynamicsTruthSimTest}.
    */
   @Test
+  @Consistency("the accelerometer differences the physics' own velocity, as this does")
   void speedingUpItReadsTheRobotsAcceleration() {
     AccelerometerModel part = mounted(EXACT_SAMPLED, Translation2d.ZERO);
     controllers.volts = 12;

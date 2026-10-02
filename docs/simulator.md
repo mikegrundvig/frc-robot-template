@@ -477,11 +477,15 @@ a joint at each module, and Coulomb friction where each tread meets the carpet
   F = m a gap below.
 - **The steering in closed form.** The steering settles in under a millisecond, so its controller
   turns it (`CurrentLimitedMotorSim`) and gives the angle; the engine follows it, and hands back the
-  carpet's scrub as a torque on the steering (`WheelTruth.steerLoadNewtonMeters`, none today) for
-  the next sub-step.
+  carpet's scrub as a torque on the steering (`WheelTruth.steerLoadNewtonMeters`) for the next
+  sub-step. Nothing reads it yet: today's engine gives none, and the closed form takes it once a
+  real module's scrub is measured, as a torque against the motion that can stop the module
+  (`CurrentLimitedMotorSim` says how).
 - **Sub-steps and determinism.** The simulator steps the physics at 250 Hz, its odometry's rate;
   the engine sub-steps inside at a fixed length of its own, with no clock, no unseeded randomness,
-  and no order that hangs on identity hash codes, so a run repeats to the bit.
+  and no order that hangs on identity hash codes, so a run repeats to the bit. The actuators keep
+  time, not count sub-steps: the steering's loop runs every millisecond, and the CANcoder sends
+  every 10 ms, whatever length the engine's sub-steps are.
 - **Disturbances made physical.** A push becomes a force the wheels resist, a slick floor a lower
   friction, a lifted wheel the ground under it; a tilt by hand and a carry stay declared overrides,
   and say so (`Disturbance`).

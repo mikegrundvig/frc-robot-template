@@ -21,7 +21,9 @@ package com.michaelgrundvig.frc.simulation;
  *   <li><b>A wheel's steering stays closed form.</b> The steering settles in under a millisecond,
  *       so the actuators turn it themselves ({@code CurrentLimitedMotorSim}) and give the angle;
  *       the physics follows it, and returns what the floor's scrub pushes back with ({@link
- *       WheelTruth#steerLoadNewtonMeters}) for the next sub-step.
+ *       WheelTruth#steerLoadNewtonMeters}) for the next sub-step: unread yet, as today's engine
+ *       models no scrub. The actuators keep time, not count sub-steps, so their own rates (the
+ *       steering's loop, the encoders') hold whatever length the sub-steps are.
  * </ul>
  */
 @FunctionalInterface

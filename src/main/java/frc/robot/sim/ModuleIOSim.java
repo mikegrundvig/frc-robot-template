@@ -56,34 +56,36 @@ final class ModuleIOSim implements ModuleIO {
    */
   private static final double BATTERY_VOLTS = 12.0;
 
-  /** A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz). */
-  private static final double STEER_LOOP_SECONDS = 0.001;
+  /**
+   * A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz), in
+   * nanoseconds. The module keeps its own time in whole nanoseconds, so the loop's rate, and the
+   * CANcoder's, hold whatever length the physics' sub-steps are.
+   */
+  private static final long STEER_LOOP_NANOS = 1_000_000;
 
   /**
-   * How often the module's CANcoder sends its angle to the steering motor, in seconds: at the rate
-   * the robot's code sets ({@link PhoenixDrivetrain#ENCODER_FREQUENCY_HZ}), every 10 ms at 100 Hz.
-   * Without a Phoenix Pro license the steering closes its loop on the CANcoder as a remote sensor,
-   * and takes a new angle and speed only when the CANcoder sends them over CAN. In between, its
-   * loop runs on what it last heard, up to a period old, and that wait, more than the loop's rate
-   * or the current limit, is what makes the steering overshoot at high gains. The fraction of a
-   * millisecond a frame takes on the bus is left out. With Pro's FusedCANcoder, the loop would read
-   * the motor's own sensor every loop, and this would be {@link #STEER_LOOP_SECONDS}.
+   * How often the module's CANcoder sends its angle to the steering motor, in nanoseconds: at the
+   * rate the robot's code sets ({@link PhoenixDrivetrain#ENCODER_FREQUENCY_HZ}), every 10 ms at 100
+   * Hz. Without a Phoenix Pro license the steering closes its loop on the CANcoder as a remote
+   * sensor, and takes a new angle and speed only when the CANcoder sends them over CAN. In between,
+   * its loop runs on what it last heard, up to a period old, and that wait, more than the loop's
+   * rate or the current limit, is what makes the steering overshoot at high gains. The fraction of
+   * a millisecond a frame takes on the bus is left out. With Pro's FusedCANcoder, the loop would
+   * read the motor's own sensor every loop, and this would be {@link #STEER_LOOP_NANOS}.
    */
-  private static final double ENCODER_PERIOD_SECONDS = 1 / PhoenixDrivetrain.ENCODER_FREQUENCY_HZ;
-
-  private static final int ENCODER_PERIOD_LOOPS =
-      (int) Math.round(ENCODER_PERIOD_SECONDS / STEER_LOOP_SECONDS);
+  private static final long ENCODER_PERIOD_NANOS =
+      Math.round(1e9 / PhoenixDrivetrain.ENCODER_FREQUENCY_HZ);
 
   // The CANcoder sends on the steering loop's millisecond, and the same number of times every robot
   // loop, so each robot loop finds every CANcoder at the same point in its cycle.
   static {
-    double loopsPerRobotLoop = RobotLoop.PERIOD_SECONDS / ENCODER_PERIOD_SECONDS;
-    if (Math.abs(ENCODER_PERIOD_LOOPS * STEER_LOOP_SECONDS - ENCODER_PERIOD_SECONDS) > 1e-9
-        || Math.abs(loopsPerRobotLoop - Math.round(loopsPerRobotLoop)) > 1e-9) {
+    long robotLoopNanos = Math.round(RobotLoop.PERIOD_SECONDS * 1e9);
+    if (ENCODER_PERIOD_NANOS % STEER_LOOP_NANOS != 0
+        || robotLoopNanos % ENCODER_PERIOD_NANOS != 0) {
       throw new IllegalStateException(
           "the CANcoder's period, "
-              + ENCODER_PERIOD_SECONDS
-              + " s, must be a whole number of milliseconds and divide the robot's loop");
+              + ENCODER_PERIOD_NANOS
+              + " ns, must be a whole number of milliseconds and divide the robot's loop");
     }
   }
 
@@ -144,8 +146,14 @@ final class ModuleIOSim implements ModuleIO {
 
   private double heardSteerRadPerSec;
 
-  /** The steering's loops until the CANcoder next sends. */
-  private int loopsUntilEncoderSends;
+  /** How long until the CANcoder next sends, in nanoseconds: none, when it sends now. */
+  private long untilEncoderSendsNanos;
+
+  /** How long until the steering's loop next runs, in nanoseconds: none, when it runs now. */
+  private long untilSteerLoopNanos;
+
+  /** The voltage the steering's loop last asked for, which its motor holds until it runs again. */
+  private double steerVolts;
 
   /** The most current through the steering motor since the last loop read it. */
   private double steerPeakAmps;
@@ -175,7 +183,8 @@ final class ModuleIOSim implements ModuleIO {
     this.steerOffsetRadians = steerOffsetRadians;
     builtSteerOffsetRadians = steerOffsetRadians;
     heardSteerRadians = measuredSteerRadians();
-    loopsUntilEncoderSends = (int) (encoderPhase * ENCODER_PERIOD_LOOPS);
+    long encoderPeriodLoops = ENCODER_PERIOD_NANOS / STEER_LOOP_NANOS;
+    untilEncoderSendsNanos = (long) (encoderPhase * encoderPeriodLoops) * STEER_LOOP_NANOS;
   }
 
   /**
@@ -238,10 +247,7 @@ final class ModuleIOSim implements ModuleIO {
         BATTERY_VOLTS);
     subStepUnread = true;
     spinRadians += spinRadPerSec * seconds;
-    int loops = Math.max(1, (int) Math.round(seconds / STEER_LOOP_SECONDS));
-    for (int i = 0; i < loops; i++) {
-      steer(seconds / loops);
-    }
+    steer(Math.round(seconds * 1e9));
     drive.steer(trueSteerAngle().getRadians());
   }
 
@@ -256,24 +262,44 @@ final class ModuleIOSim implements ModuleIO {
     }
   }
 
-  /** One pass of the steering's loop, on what the CANcoder last sent, then its motor that long. */
-  private void steer(double seconds) {
-    if (loopsUntilEncoderSends == 0) {
-      heardSteerRadians = measuredSteerRadians();
-      heardSteerRadPerSec = steerSim.velocityRadPerSec();
-      loopsUntilEncoderSends = ENCODER_PERIOD_LOOPS;
+  /**
+   * Turns the steering through this long, on its own clocks: the CANcoder sends every period, the
+   * steering's loop runs every millisecond on what it last heard, and between them its motor holds
+   * the loop's voltage, turned in closed form. Each runs when its time comes, however the time is
+   * cut into sub-steps.
+   *
+   * <p>The physics' scrub on the steering ({@link WheelTruth#steerLoadNewtonMeters}) isn't felt
+   * yet: today's physics models none, and a real module's needs measuring first, as a torque
+   * against the motion that can stop the module, which {@link CurrentLimitedMotorSim} says how to
+   * add.
+   */
+  private void steer(long nanos) {
+    long remaining = nanos;
+    while (remaining > 0) {
+      if (untilEncoderSendsNanos == 0) {
+        heardSteerRadians = measuredSteerRadians();
+        heardSteerRadPerSec = steerSim.velocityRadPerSec();
+        untilEncoderSendsNanos = ENCODER_PERIOD_NANOS;
+      }
+      if (untilSteerLoopNanos == 0) {
+        // The steering loop runs on what the absolute encoder sent, right or not.
+        steerVolts =
+            steering
+                ? Math.clamp(
+                    steerKp * MathUtil.angleModulus(steerSetpointRad - heardSteerRadians)
+                        - steerKd * heardSteerRadPerSec,
+                    -MAX_VOLTS,
+                    MAX_VOLTS)
+                : 0.0;
+        untilSteerLoopNanos = STEER_LOOP_NANOS;
+      }
+      long run = Math.min(remaining, Math.min(untilSteerLoopNanos, untilEncoderSendsNanos));
+      steerPeakAmps =
+          Math.max(steerPeakAmps, steerSim.run(steerVolts, steerStatorLimitAmps, run / 1e9));
+      remaining -= run;
+      untilSteerLoopNanos -= run;
+      untilEncoderSendsNanos -= run;
     }
-    loopsUntilEncoderSends--;
-    // The steering loop runs on what the absolute encoder sent, right or not.
-    double volts =
-        steering
-            ? Math.clamp(
-                steerKp * MathUtil.angleModulus(steerSetpointRad - heardSteerRadians)
-                    - steerKd * heardSteerRadPerSec,
-                -MAX_VOLTS,
-                MAX_VOLTS)
-            : 0.0;
-    steerPeakAmps = Math.max(steerPeakAmps, steerSim.run(volts, steerStatorLimitAmps, seconds));
   }
 
   /**

@@ -84,6 +84,38 @@ class ModuleIOSimTest {
   }
 
   /**
+   * The steering's loop runs every millisecond and its CANcoder sends every 10 ms by the time the
+   * module keeps, however the physics cuts it into sub-steps: a module turning a quarter turn in
+   * sub-steps of 0.5 or 1.5 ms is where it is in 4 ms ones, every 12 ms (where the three meet),
+   * within the closed form's rounding.
+   */
+  @Test
+  void theSteeringKeepsItsRatesWhateverTheSubSteps() {
+    double[] subSteps = {0.004, 0.0005, 0.0015};
+    double[][] angles = new double[subSteps.length][10];
+    for (int k = 0; k < subSteps.length; k++) {
+      ModuleIOSim module = module(40);
+      module.setSteerAngle(Rotation2d.CCW_90DEG);
+      for (int check = 0; check < 10; check++) {
+        for (int step = 0; step < Math.round(0.012 / subSteps[k]); step++) {
+          module.actuate(subSteps[k], new WheelDrive());
+        }
+        angles[k][check] = module.trueSteerAngle().getRadians();
+      }
+    }
+
+    assertThat(angles[0][9]).as("turning").isGreaterThan(1);
+    for (int check = 0; check < 10; check++) {
+      assertThat(angles[1][check])
+          .as("0.5 ms, %d", check)
+          .isCloseTo(angles[0][check], within(1e-9));
+      assertThat(angles[2][check])
+          .as("1.5 ms, %d", check)
+          .isCloseTo(angles[0][check], within(1e-9));
+    }
+  }
+
+  /**
    * How a tenth of a degree's error grows over 100 ms at this steerKp: the largest error in the
    * last 20 ms over the largest in the first 20. Small enough to stay under the current limit.
    */

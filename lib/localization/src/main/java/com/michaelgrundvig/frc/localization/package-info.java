@@ -48,7 +48,10 @@
  *       com.michaelgrundvig.frc.localization.VisionMeasurement}, or says why not; the estimator's
  *       {@link com.michaelgrundvig.frc.localization.VisionDecision} says what became of it. The
  *       service solves each image as the robot was when it was taken ({@link
- *       com.michaelgrundvig.frc.localization.CaptureContext}). {@link
+ *       com.michaelgrundvig.frc.localization.CaptureContext}), against the field's tag poses. The
+ *       robot program's {@code Vision} still holds a field model of its own, to place each tag it
+ *       saw for its camera checks, until venues (the architecture's migration step 5) make the
+ *       service the one owner of the tags' poses. {@link
  *       com.michaelgrundvig.frc.localization.MountCheck} judges, from where a camera's tags land,
  *       whether it still sits where its configuration says, and how much less to trust it if not; a
  *       {@link com.michaelgrundvig.frc.localization.TagAllowlist} keeps a task to the tags it

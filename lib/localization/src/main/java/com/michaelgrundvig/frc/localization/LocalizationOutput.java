@@ -10,9 +10,9 @@ import java.util.Objects;
  *
  * @param estimate the estimate, with its uncertainty, mode, and health
  * @param integrity how far each source is trusted
- * @param frames what became of each camera image given since the last update: those refused before
- *     they became measurements first, in the order they came; then the measurements, in the order
- *     the estimator decided them (those it couldn't apply, then the rest by capture time)
+ * @param frames what became of each camera image given since the last update: those refused or held
+ *     back before they became measurements first, in the order they came; then the measurements, in
+ *     the order the estimator decided them (those it couldn't apply, then the rest by capture time)
  * @param landmarks what became of each landmark, in the same order
  */
 @OutputRecord

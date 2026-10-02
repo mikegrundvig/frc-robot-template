@@ -85,9 +85,6 @@ public final class Localization implements AutoCloseable {
 
   private final LocalizationService service;
 
-  /** This loop: its time and whether enabled, given to the service at both ends of the loop. */
-  private LoopContext loop = new LoopContext(0, false);
-
   /** Why the estimate isn't good enough to score from; null when it is. */
   private @Nullable String notReadyToScore = "not started";
 
@@ -150,11 +147,10 @@ public final class Localization implements AutoCloseable {
    *     wheels can't see
    */
   public void periodic(DrivetrainReadings readings, boolean enabled) {
-    loop = new LoopContext(RobotController.getTime(), enabled);
-    service.drivetrain(readings, loop);
+    service.drivetrain(readings, new LoopContext(RobotController.getTime(), enabled));
     WheelTrust wheels = service.wheels();
     DriveConditions conditions = wheels.conditions();
-    checkOrientation(wheels, service.yawSource());
+    checkOrientation(wheels);
     logTerrain();
     checkImus();
     gyroDisconnected.set(!readings.gyro().usable() && !readings.backupImu().usable());
@@ -182,7 +178,7 @@ public final class Localization implements AutoCloseable {
    *     what became of each camera measurement, for the cameras' records and the World view
    */
   public LocalizationOutput update() {
-    LocalizationOutput output = service.update(loop);
+    LocalizationOutput output = service.update();
     List<String> landmarks = new ArrayList<>();
     for (LandmarkDecision decision : output.landmarks()) {
       landmarks.add(
@@ -332,7 +328,7 @@ public final class Localization implements AutoCloseable {
    * orientation than it's mounted with. Its pitch and roll can be right all the while (a Pigeon's
    * follow the mount pose saved on it), so only the accelerometer shows it.
    */
-  private void checkOrientation(WheelTrust wheels, YawSource source) {
+  private void checkOrientation(WheelTrust wheels) {
     boolean leaks = wheels.accelerometerLeaksGravity();
     if (leaks) {
       imuOrientation.setText(
@@ -340,7 +336,7 @@ public final class Localization implements AutoCloseable {
               Locale.ROOT,
               "The %s's accelerometer reads %.1f m/s² standing still, gravity's share: check its"
                   + " orientation in the robot's definition (docs/calibration.md)",
-              source == YawSource.BACKUP ? "backup IMU" : "gyro",
+              wheels.imu() == YawSource.BACKUP ? "backup IMU" : "gyro",
               wheels.accelerometerBiasMetersPerSecSq()));
     }
     imuOrientation.set(leaks);

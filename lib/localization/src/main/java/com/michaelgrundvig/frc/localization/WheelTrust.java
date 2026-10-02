@@ -8,6 +8,8 @@ import io.soabase.recordbuilder.core.RecordBuilder;
  * together over the floor (a wheel slipping against the others shows in the kinematics' residual
  * instead, {@link BodyMotion#residualMeters}), so this is one record for the whole drivetrain.
  *
+ * @param imu the IMU that said all this, the one that turns odometry this loop: the gyro, the
+ *     backup IMU while the gyro is lost, or none ({@link YawSource#WHEELS})
  * @param conditions what the estimator weighs each wheel step by: the robot's tilt, the ground's
  *     slope under it, a jolt's share of a collision, how fast the wheels may be sliding, and
  *     whether the robot is disabled
@@ -28,6 +30,7 @@ import io.soabase.recordbuilder.core.RecordBuilder;
  */
 @OutputRecord
 public record WheelTrust(
+    @RecordBuilder.Initializer(value = "IMU", source = WheelTrust.class) YawSource imu,
     @RecordBuilder.Initializer(value = "NORMAL", source = DriveConditions.class)
         DriveConditions conditions,
     double turnSlipMetersPerSecond,
@@ -37,7 +40,10 @@ public record WheelTrust(
     double unexplainedMetersPerSecSq,
     double accelerometerBiasMetersPerSecSq,
     boolean accelerometerLeaksGravity) {
-  /** Builds one by name: normal conditions, and nothing sliding, unless said. */
+  /** No IMU said anything: what a builder leaves the IMU as. */
+  public static final YawSource IMU = YawSource.WHEELS;
+
+  /** Builds one by name: no IMU, normal conditions, and nothing sliding, unless said. */
   public static WheelTrustBuilder builder() {
     return WheelTrustBuilder.builder();
   }

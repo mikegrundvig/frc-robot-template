@@ -3,11 +3,11 @@ package com.michaelgrundvig.frc.localization;
 import java.util.Locale;
 
 /**
- * What became of a camera's image or a landmark: accepted, or why not. Two places decide. The
- * {@link VisionPipeline} may throw an image out before it becomes a measurement, and the {@link
- * PoseEstimator} weighs each measurement and landmark against the estimate. Each verdict carries
- * its words, so the page and the log say it without anything reading a reason back out of a
- * sentence.
+ * What became of a camera's image or a landmark: accepted, or why not. Three places decide. The
+ * robot may hold an image back ({@link LocalizationService#hold}), the {@link VisionPipeline} may
+ * throw one out before it becomes a measurement, and the {@link PoseEstimator} weighs each
+ * measurement and landmark against the estimate. Each verdict carries its words, so the page and
+ * the log say it without anything reading a reason back out of a sentence.
  *
  * <p>A verdict's numbers (how far past the gate, how far away, how fast it turned) travel beside it
  * in the record that holds it; {@link #describe} puts them into its words, as the log has always
@@ -27,7 +27,8 @@ public enum Verdict {
   BEFORE_ODOMETRY("before odometry started", "before odometry started"),
 
   /** It was taken before the robot was last placed, or the estimate last recovered. */
-  BEFORE_RESET("before the robot was placed", "before the robot was last placed or recovered"),
+  BEFORE_RESET(
+      "before the robot was placed or recovered", "before the robot was last placed or recovered"),
 
   /** It was older than the history the estimator keeps to apply it in. */
   STALE("too late", "too late: older than the history kept"),
@@ -66,7 +67,13 @@ public enum Verdict {
   SOLVE_NOT_A_NUMBER("the solve isn't a number", "the solve isn't a number"),
 
   /** The solve put the robot off the floor: the value is how far, in meters. */
-  OFF_THE_FLOOR("off the floor", "the solve puts the robot %1$.2f m off the floor");
+  OFF_THE_FLOOR("off the floor", "the solve puts the robot %1$.2f m off the floor"),
+
+  /** Held back by the robot: its camera is being calibrated, from the others' pose. */
+  CALIBRATING("withheld while calibrating this camera", "withheld while calibrating this camera"),
+
+  /** Held back by the robot: autonomous just started, and the placed start is trusted. */
+  HELD("held, autonomous just started", "held, autonomous just started");
 
   /**
    * A number a verdict doesn't have, or a measurement that wasn't compared: what an output record's

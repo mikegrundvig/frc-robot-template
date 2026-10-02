@@ -22,9 +22,9 @@ import org.wpilib.math.geometry.Pose2d;
  * @param multiTag the verdict on the coprocessor's multi-tag solution, when the measurement was
  *     that solution; empty when it was solved another way, or not at all
  * @param tags the tags the verdict applies to, each with its own: those the measurement rested on,
- *     or every tag the image saw, if it was refused before becoming one
- * @param measured the image's measurement as the estimator weighed it; empty for an image refused
- *     before it got there
+ *     or every tag the image saw, if it was refused or held back before becoming one
+ * @param measured the image's measurement as the estimator weighed it; empty for an image refused,
+ *     or held back by the robot, before it got there
  */
 @OutputRecord
 public record FrameVerdict(
@@ -118,6 +118,20 @@ public record FrameVerdict(
                     .innovationMeters(decision.innovationMeters())
                     .chiSquared(decision.chiSquared())
                     .build()))
+        .build();
+  }
+
+  /** An image the robot held back, solved: every tag it saw, held. */
+  static FrameVerdict held(TagDetections image, Verdict why) {
+    List<TagVerdict> tags = new ArrayList<>(image.tags().size());
+    for (TagDetections.Tag tag : image.tags()) {
+      tags.add(TagVerdict.builder().tag(tag.id()).verdict(why).build());
+    }
+    return builder()
+        .camera(image.camera())
+        .captureNanos(image.timestampNanos())
+        .verdict(why)
+        .tags(tags)
         .build();
   }
 

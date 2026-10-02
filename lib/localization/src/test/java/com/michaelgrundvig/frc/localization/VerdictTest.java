@@ -71,6 +71,12 @@ class VerdictTest {
             -0.314, 0.25, String.format(Locale.ROOT, "a tag's height is off by %.2f m", -0.314)));
     BEFORE.put(
         Verdict.SOLVE_NOT_A_NUMBER, new Before(Double.NaN, Double.NaN, "the solve isn't a number"));
+    // The robot's own, which the cameras' log puts before the pipeline's outcome: "held, autonomous
+    // just started: heading-constrained: 2 tags at 3.1 m".
+    BEFORE.put(
+        Verdict.CALIBRATING,
+        new Before(Double.NaN, Double.NaN, "withheld while calibrating this camera"));
+    BEFORE.put(Verdict.HELD, new Before(Double.NaN, Double.NaN, "held, autonomous just started"));
     BEFORE.put(
         Verdict.OFF_THE_FLOOR,
         new Before(

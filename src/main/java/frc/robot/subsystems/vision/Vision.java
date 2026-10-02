@@ -8,6 +8,7 @@ import com.michaelgrundvig.frc.localization.MountCheck;
 import com.michaelgrundvig.frc.localization.TagAllowlist;
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.Timestamps;
+import com.michaelgrundvig.frc.localization.Verdict;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.VisionPipeline;
@@ -443,18 +444,19 @@ public final class Vision implements AutoCloseable {
     CaptureContext capture = localization.capture(frame.timestampNanos());
     TagAllowlist trusted = onlyTags();
     // A camera being calibrated, or autonomous just started: solved and logged, never applied.
-    boolean withheld = camera == calibrating || frame.timestampNanos() < holdUntilNanos;
+    Verdict held =
+        camera == calibrating
+            ? Verdict.CALIBRATING
+            : frame.timestampNanos() < holdUntilNanos ? Verdict.HELD : null;
     VisionResult result =
-        withheld
-            ? localization.solve(detections, trusted)
+        held != null
+            ? localization.hold(detections, trusted, held)
             : localization.camera(detections, trusted);
     VisionMeasurement measurement = result.measurement();
     if (measurement == null) {
       camera.leftOut(seen, result.outcome());
-    } else if (camera == calibrating) {
-      camera.leftOut(seen, "withheld while calibrating this camera: " + result.outcome());
-    } else if (withheld) {
-      camera.leftOut(seen, "held, autonomous just started: " + result.outcome());
+    } else if (held != null) {
+      camera.leftOut(seen, held.words() + ": " + result.outcome());
     } else {
       camera.outcome(result.outcome());
     }

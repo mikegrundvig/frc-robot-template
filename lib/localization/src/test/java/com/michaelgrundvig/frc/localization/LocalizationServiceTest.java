@@ -163,7 +163,7 @@ class LocalizationServiceTest {
       now = T0 + k * LOOP_NANOS;
       LoopContext loop = new LoopContext(now, true);
       localization.drivetrain(still(now, 0, 0), loop);
-      localization.update(loop);
+      localization.update();
     }
     return now;
   }
@@ -174,7 +174,7 @@ class LocalizationServiceTest {
     LoopContext loop = new LoopContext(now, true);
     localization.drivetrain(still(now, 0, 0), loop);
     during.run();
-    return localization.update(loop);
+    return localization.update();
   }
 
   /** The front camera's exact view of the hub's near face, from the robot, taken then. */
@@ -265,7 +265,7 @@ class LocalizationServiceTest {
               .velocities(new ChassisVelocities(5, 0, 0))
               .build(),
           loop);
-      localization.update(loop);
+      localization.update();
     }
 
     assertThat(localization.pose().getTranslation().getDistance(ROBOT.getTranslation()))
@@ -273,7 +273,10 @@ class LocalizationServiceTest {
     assertThat(localization.pose().getRotation()).isEqualTo(ROBOT.getRotation());
   }
 
-  /** An image held back is solved and said, and never moves the estimate. */
+  /**
+   * An image the robot holds back is solved and said, and never moves the estimate: the update says
+   * it was held.
+   */
   @Test
   void anImageSolvedButHeldBackIsNeverApplied() {
     LocalizationService localization = placed();
@@ -284,11 +287,21 @@ class LocalizationServiceTest {
         loop(
             localization,
             now + LOOP_NANOS,
-            () -> result[0] = localization.solve(hubFace(now), null));
+            () -> result[0] = localization.hold(hubFace(now), null, Verdict.HELD));
 
     assertThat(result[0].measurement()).isNotNull();
-    assertThat(output.frames()).isEmpty();
+    assertThat(output.frames())
+        .singleElement()
+        .satisfies(
+            held -> {
+              assertThat(held.verdict()).isEqualTo(Verdict.HELD);
+              assertThat(held.measured()).as("never weighed").isEmpty();
+              assertThat(held.tags()).extracting(TagVerdict::verdict).containsOnly(Verdict.HELD);
+            });
     assertThat(output.estimate().health().accepted()).isZero();
+    assertThatThrownBy(() -> localization.hold(hubFace(now), null, Verdict.GATED))
+        .as("the estimator's verdicts are its own")
+        .isInstanceOf(IllegalArgumentException.class);
   }
 
   /**
@@ -312,7 +325,7 @@ class LocalizationServiceTest {
         () -> {
           for (int k = 0; k < 5; k++) {
             asked.capture(now);
-            asked.solve(hubFace(now), null);
+            asked.hold(hubFace(now), null, Verdict.HELD);
           }
           asked.place(roughly);
           results[0] = asked.camera(hubFace(now));
@@ -478,7 +491,7 @@ class LocalizationServiceTest {
 
     LoopContext disabled = new LoopContext(now, false);
     localization.drivetrain(still(now, pitch, 0), disabled);
-    WheelTrust wheels = localization.update(disabled).integrity().wheels();
+    WheelTrust wheels = localization.update().integrity().wheels();
 
     assertThat(wheels.conditions().disabled()).isTrue();
     assertThat(wheels.conditions().tiltRadians()).isCloseTo(Math.abs(pitch), within(1e-9));
@@ -495,7 +508,7 @@ class LocalizationServiceTest {
     double pitch = Math.toRadians(-8);
     LoopContext loop = new LoopContext(tilted, true);
     localization.drivetrain(still(tilted, pitch, 0), loop);
-    localization.update(loop);
+    localization.update();
     long level = tilted + LOOP_NANOS;
     loop = new LoopContext(level, true);
     localization.drivetrain(still(level, 0, 0), loop);
@@ -616,7 +629,7 @@ class LocalizationServiceTest {
       if (seeing) {
         localization.camera(hubFace(robot.truth3d(), robot.now()));
       }
-      outputs.add(localization.update(loop));
+      outputs.add(localization.update());
     }
     return outputs;
   }
@@ -855,7 +868,7 @@ class LocalizationServiceTest {
           said.append(Fingerprint.of(localization.capture(taken)));
           said.append(Fingerprint.of(localization.camera(hubFace(robot.truth3d(), taken))));
         }
-        said.append(Fingerprint.of(localization.update(loop)));
+        said.append(Fingerprint.of(localization.update()));
         said.append(
             Fingerprint.of(
                 List.of(

@@ -116,6 +116,9 @@ public final class LocalizationService {
   /** What the IMU and the motors said about trusting the wheels this loop. */
   private DriveConditions conditions = DriveConditions.NORMAL;
 
+  /** The IMU the wheels were weighed by this loop: the gyro, the backup, or none. */
+  private YawSource imu = YawSource.WHEELS;
+
   /** How far the robot climbed along its way this loop, in radians. */
   private double climb;
 
@@ -134,7 +137,7 @@ public final class LocalizationService {
   /** What the robot last said of each camera's mount: its doubt, and the distance judged at. */
   private final Map<String, double[]> mountDoubts = new HashMap<>();
 
-  /** The images refused since the last update, before they became measurements, in order. */
+  /** The images refused or held since the last update, before they became measurements. */
   private final List<FrameVerdict> refused = new ArrayList<>();
 
   /** Half a second of the robot's attitude, for each image's capture time. */
@@ -272,6 +275,7 @@ public final class LocalizationService {
     ImuReadings gyro = readings.gyro();
     ImuReadings backup = readings.backupImu();
     Steps steps = steps(readings.wheels(), gyro, backup);
+    imu = steps.source();
     // One IMU says everything this loop: the one whose yaw turns odometry.
     attitude =
         switch (steps.source()) {
@@ -374,11 +378,28 @@ public final class LocalizationService {
   }
 
   /**
-   * What {@link #camera(TagDetections, TagAllowlist)} would make of an image, without applying it:
-   * for an image the robot holds back (from a camera being calibrated, or while autonomous starts),
-   * whose outcome is still logged.
+   * An image the robot holds back, from a camera being calibrated or while autonomous starts:
+   * solved as {@link #camera(TagDetections, TagAllowlist)} would, never applied, and among the next
+   * update's frames with why it was held, or why the pipeline refused it.
+   *
+   * @param why why it's held: {@link Verdict#CALIBRATING} or {@link Verdict#HELD}
+   * @return what the image made: a measurement, or why not, for the log
    */
-  public VisionResult solve(TagDetections frame, @Nullable TagAllowlist onlyTags) {
+  public VisionResult hold(TagDetections frame, @Nullable TagAllowlist onlyTags, Verdict why) {
+    if (why != Verdict.CALIBRATING && why != Verdict.HELD) {
+      throw new IllegalArgumentException(
+          "the robot holds an image back for its own reasons: " + why);
+    }
+    VisionResult result = solve(frame, onlyTags);
+    refused.add(
+        result.measurement() == null
+            ? FrameVerdict.refused(result)
+            : FrameVerdict.held(frame, why));
+    return result;
+  }
+
+  /** What an image makes, solved as the robot was when it was taken: nothing is kept. */
+  private VisionResult solve(TagDetections frame, @Nullable TagAllowlist onlyTags) {
     CameraConfig camera = cameras.get(frame.camera());
     if (camera == null) {
       throw new IllegalArgumentException(
@@ -421,11 +442,9 @@ public final class LocalizationService {
 
   /**
    * Applies the loop's measurements and landmarks, each at its capture time, and says what became
-   * of each. After the cameras; once a loop.
-   *
-   * @param loop the loop: the one {@link #drivetrain} was given
+   * of each. After the cameras; once a loop, closing the loop {@link #drivetrain} opened.
    */
-  public LocalizationOutput update(LoopContext loop) {
+  public LocalizationOutput update() {
     inLoop = false;
     List<VisionDecision> decisions = estimator.update();
     List<LandmarkDecision> landmarks = estimator.landmarkDecisions();
@@ -496,6 +515,7 @@ public final class LocalizationService {
   /** How far the wheels are trusted this loop, and why. */
   public WheelTrust wheels() {
     return WheelTrust.builder()
+        .imu(imu)
         .conditions(conditions)
         .turnSlipMetersPerSecond(slipCheck.turnSlipMetersPerSecond())
         .speedSlipMetersPerSecond(slipCheck.speedSlipMetersPerSecond())

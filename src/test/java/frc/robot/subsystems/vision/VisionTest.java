@@ -200,7 +200,7 @@ class VisionTest {
     LoopContext loop = new LoopContext(now, true);
     localization.drivetrain(tilted(now, pitch, roll), loop);
     vision.periodic(now);
-    List<FrameVerdict> frames = localization.update(loop).frames();
+    List<FrameVerdict> frames = localization.update().frames();
     vision.record(frames);
     return frames;
   }

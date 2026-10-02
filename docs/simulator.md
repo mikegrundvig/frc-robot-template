@@ -505,7 +505,8 @@ asserts today's number. It passes while the gap stays as recorded, and fails lou
 |---|---|---|
 | F = m a at the drive's stator limit, 30 and 60 A, from rest (`DynamicsTruthSimTest`) | within 1% of 4 Kt I G / (r (m + 4 J / r²)) | **known gap:** 2.25% short at either (4.35 against 4.45 m/s² at 30 A): the controller's limit holds only at the start of each 4 ms step |
 | Yaw against inertia: tangential pushes below slip | the configured yaw inertia within 2% | **known gap:** spins as 11.1 kg m² against 6.7, as if its mass sat at its wheels |
-| Momentum and energy: spinning and coasting free, braking, standing a minute, braked on a 15° ramp | 0.1%; no gain past 0.01 J a loop; under 1 mm and 0.01° | passes (the ramp only for want of a force: nothing pulls down a slope today) |
+| Momentum and energy: spinning and coasting free, braking, standing a minute, locked in an X on a 15° ramp | 0.1%; no gain past 0.01 J a loop; under 1 mm and 0.01° | passes (the ramp only for want of a force: nothing pulls down a slope today) |
+| Braked on a 15° ramp, its wheels straight: the creep its motors' back EMF allows, I = ω / (Kv R) holding the slope's pull | 0.210 m/s across the field, within 2% | **known gap:** stands still, as nothing pulls down a slope |
 | Coasting, wheels steered a quarter turn | energy never rises | **known gap:** rises 35 J back as the robot turns to follow its wheels |
 | A launch's energy: the motors' work (each wheel's at its own current) against kinetic energy, and friction where the wheels slip (each at its own load) | within 2% | **known gaps:** 3.5% short gripping (the step's limit, and the robot moving each step half a step behind its wheels), 31% short slipping (a slipping wheel still carries its share of the robot) |
 | Grip in 16 directions, on a slick tread (μ 0.5) where every wheel slips however weight transfer loads it (`TractionTruthSimTest`) | μ g within 3%, every direction within 5% | passes |

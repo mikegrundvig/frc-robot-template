@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 
+import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.simulation.KnownGap;
 import com.michaelgrundvig.frc.simulation.WheelTruth;
 import com.michaelgrundvig.frc.world.field.Bump;
@@ -339,23 +340,22 @@ class DynamicsTruthSimTest {
   }
 
   /**
-   * Braked on a 15° ramp, the robot creeps less than 1 mm and 0.01° in a minute: its tread (μ 1.2)
-   * holds far more than the slope's pull (tan 15°, 0.27 of its weight). Today's simulator feels no
-   * pull down the slope at all, so it passes for want of a force; an engine that feels gravity must
-   * pass it on its brakes and its grip.
+   * Its modules locked in an X (each wheel along its arm from the center) and its motors off, on a
+   * 15° ramp, the robot creeps less than 1 mm and 0.01° in a minute. No motion of the frame rolls
+   * all four wheels without sliding one across itself, so the slope's pull (sin 15°, 172 N) has to
+   * be held across the wheels, by their grip alone: about 61 N across each, against μ N of 165 N
+   * for the lightest (the uphill ones, weight transfer taking 23 N off each). Today's simulator
+   * feels no pull down the slope at all, so it passes for want of a force; an engine that feels
+   * gravity must pass it on its grip.
    */
   @Test
-  void brakedOnARampTheRobotStaysPut() {
-    double height = 1.0;
-    Bump ramp =
-        new Bump(
-            "A 15° ramp",
-            new Translation2d(5, -1),
-            new Translation2d(5, 9),
-            height,
-            2 * height / Math.tan(Math.toRadians(15)));
+  void lockedInAnXOnARampTheRobotStaysPut() {
     TruthRig rig = new TruthRig();
-    rig.simulation.setTerrain(new Terrain(List.of(ramp)));
+    rig.simulation.setTerrain(new Terrain(List.of(RAMP)));
+    for (int i = 0; i < 4; i++) {
+      rig.modules[i].setSteerAngle(rig.wheels[i].getAngle().orElseThrow());
+    }
+    rig.run(0.5); // the modules turn into the X, on the flat floor
     Pose2d start = new Pose2d(3.3, 4, Rotation2d.ZERO);
     rig.simulation.place(start);
     rig.driveVolts(0);
@@ -367,6 +367,47 @@ class DynamicsTruthSimTest {
         .isCloseTo(15, within(1e-6));
     assertCreptLessThanAMillimeter(rig, start);
   }
+
+  /**
+   * Facing up a 15° ramp, its wheels straight and its motors at 0 V, the robot creeps down it: a
+   * motor at 0 V brakes only through its back EMF, I = ω / (Kv R), so holding a quarter of the
+   * slope's pull (43 N a wheel, 16.7 A) takes its wheel turning at ω = I Kv R through its gearing.
+   * Once that speed settles (its time constant is 0.09 s), the robot creeps at 0.217 m/s along the
+   * slope, 0.210 m/s across the field: within 2%, over 2 s.
+   *
+   * <p>Today's simulator feels no pull down the slope, so it stands still.
+   */
+  @Test
+  @KnownGap("nothing pulls the robot down a slope")
+  void brakedOnARampWithItsWheelsStraightTheRobotCreepsDown() {
+    TruthRig rig = new TruthRig();
+    rig.simulation.setTerrain(new Terrain(List.of(RAMP)));
+    rig.simulation.place(new Pose2d(3.3, 4, Rotation2d.ZERO));
+    rig.driveVolts(0);
+    rig.run(1);
+
+    Translation2d from = rig.simulation.truePose().getTranslation();
+    rig.run(2);
+    double measured = (from.getX() - rig.simulation.truePose().getX()) / 2;
+
+    double slope = Math.toRadians(15);
+    double amps = rig.mass() * ImuReadings.STANDARD_GRAVITY * Math.sin(slope) / 4 / rig.force(1);
+    double motorSpeed = amps * rig.driveMotor().Kv * rig.driveMotor().R;
+    double physics = motorSpeed / rig.gearing() * rig.wheelRadius() * Math.cos(slope);
+    stillOpen("the creep down the ramp across the field, m/s", measured, physics, 0.02, 0, 1e-9);
+  }
+
+  /**
+   * A ramp rising 15° toward +x from x = 1.27 m to its crest at x = 5 m, across the field: the
+   * robot placed at x = 3.3 m stands wholly on the slope.
+   */
+  private static final Bump RAMP =
+      new Bump(
+          "A 15° ramp",
+          new Translation2d(5, -1),
+          new Translation2d(5, 9),
+          1.0,
+          2 * 1.0 / Math.tan(Math.toRadians(15)));
 
   private static void assertCreptLessThanAMillimeter(TruthRig rig, Pose2d start) {
     Pose2d end = rig.simulation.truePose();

@@ -111,8 +111,9 @@ each a known gap in the truth suite, with its number:
 - **A wheel leaving the ground:** the robot stands on the plane that best fits the ground under
   its four wheels, so crossing a bump at 45°, where a rigid frame rests on three wheels and the
   fourth hangs, each wheel sits a quarter of the ground's twist off it instead.
-- **Gravity along a slope:** nothing pulls the robot down a ramp, so braked on one it stays put
-  whatever its tread.
+- **Gravity along a slope:** nothing pulls the robot down a ramp, so braked on one with its wheels
+  straight it stays put, where a real one creeps down as fast as its motors' back EMF lets it hold
+  the slope (0.21 m/s on a 15° ramp).
 
 The steering turns a fixed load, 0.004 kg m² (Phoenix Tuner X's generated simulation value, as
 AdvantageKit's swerve templates use it; not measured). It assumes the module's turning parts and

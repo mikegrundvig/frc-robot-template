@@ -48,10 +48,10 @@ import org.gradle.work.DisableCachingByDefault;
  * fix {@code Robots.java}, or take the model's version with {@code -PdiscardToolEdits}. A plain
  * plugin's conflicts need no care: take either side, build, and commit what it writes.
  *
- * <p>It's up to date while the program's classes and the committed files are unchanged, so an
- * unchanged model costs nothing. The classes count without the build's stamp ({@code
- * BuildConstants}, which every build compiles anew with its time): only what the model is built
- * from.
+ * <p>It's up to date while the program's classes, its libraries (the writers' among them), and the
+ * committed files are unchanged, so an unchanged model costs nothing. The classes count without the
+ * build's stamp ({@code BuildConstants}, which every build compiles anew with its time): only what
+ * the model is built from.
  */
 @DisableCachingByDefault(because = "it writes committed files, which no cache should restore")
 public abstract class ToolConfigTask extends DefaultTask {
@@ -60,7 +60,10 @@ public abstract class ToolConfigTask extends DefaultTask {
   @PathSensitive(PathSensitivity.RELATIVE)
   public abstract ConfigurableFileCollection getProgram();
 
-  /** The libraries the program runs on: WPILib, the vendors', the template's own projects. */
+  /**
+   * The libraries the program runs on: WPILib, the vendors', the template's own projects. The
+   * writers are among them, in the world model's jar, so a change to a writer reruns it too.
+   */
   @Classpath
   public abstract ConfigurableFileCollection getLibraries();
 

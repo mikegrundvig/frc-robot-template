@@ -33,11 +33,14 @@ import org.gradle.jvm.toolchain.JavaToolchainService;
  * <p>Its task, {@code advantageScopeAssets}, runs the writer ({@code
  * com.michaelgrundvig.frc.world.bridges.AdvantageScopeAssets}) on the compiled program, which only
  * builds the robots' configuration records and writes files: no robot program, HAL, NetworkTables
- * or simulator. It's wired into {@code build}, never into {@code run} or {@code test}, so the
- * simulator and the edit-and-test loop never wait on it.
+ * or simulator. The writer is the world model's ({@code lib/world}) and the robots are the
+ * program's ({@code frc.robot.ToolRobots}), so it runs on the program's runtime classpath, which
+ * carries both: the program's classes, and the world model's jar among its libraries. It's wired
+ * into {@code build}, never into {@code run} or {@code test}, so the simulator and the
+ * edit-and-test loop never wait on it.
  */
 public final class AdvantageScopeAssetsPlugin implements Plugin<Project> {
-  /** The writer the task runs. */
+  /** The writer the task runs: the world model's, found on the program's runtime classpath. */
   static final String WRITER = "com.michaelgrundvig.frc.world.bridges.AdvantageScopeAssets";
 
   /**

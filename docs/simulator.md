@@ -103,8 +103,8 @@ ghost. Commit the folder with the change to `Robots.java` that made it.
   starts the robot program to draw it: it builds only the robots' configuration records, in a Java
   process of its own on the project's Java, with a 32 MB heap. It can't tell `Robots.java` from
   the rest of the program, so it runs again whenever the compiled program or its libraries change
-  (any change to the main code, or a vendordep): 0.3 s on the template's robot. With the code
-  unchanged it's skipped as up to date (0.025 s).
+  (any change to the main code, to a library in `lib/`, where the writer is, or to a vendordep):
+  0.3 s on the template's robot. With the code unchanged it's skipped as up to date (0.025 s).
 - **Don't edit the folder:** the next build writes over an edit, from `Robots.java`. Nobody edits
   these files with a tool, so the build simply keeps them in step: after a pull, a `clean`, or a
   merge alike. **A merge conflict in `ascope_assets/`:** take either side

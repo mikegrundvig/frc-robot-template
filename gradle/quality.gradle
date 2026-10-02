@@ -56,6 +56,16 @@ tasks.withType(JavaCompile).configureEach {
 // peaks near 80 MB for the robot's and 50 MB for Pitwall's. So the cap guards against a runaway;
 // it isn't what the tests need. A test that fails with "OutOfMemoryError: Java heap space" raises
 // the cap here.
+//
+// At most two test JVMs run at once in a build, however many tasks Gradle runs in parallel: the
+// robot program's simulation tests grow theirs to several GB, and a test JVM beside it for each
+// project would add up on a laptop.
+def testJvms = gradle.sharedServices.registerIfAbsent("testJvms", TestJvms) {
+    maxParallelUsages = 2
+}
+tasks.withType(Test).configureEach {
+    usesService(testJvms)
+}
 tasks.named("test") {
     maxHeapSize = "1536m"
     systemProperty "junit.jupiter.execution.timeout.default", "2 m"
@@ -269,3 +279,6 @@ tasks.register("ci") {
         dependsOn gradle.includedBuild("build-logic").task(":ci")
     }
 }
+
+/** Counts the test JVMs running at once, for Gradle to keep to its limit; it holds nothing. */
+abstract class TestJvms implements org.gradle.api.services.BuildService<org.gradle.api.services.BuildServiceParameters.None> {}

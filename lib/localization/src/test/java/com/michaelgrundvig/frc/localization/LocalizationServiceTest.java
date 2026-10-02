@@ -12,8 +12,10 @@ import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
+import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Symmetry;
+import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
@@ -22,8 +24,11 @@ import com.michaelgrundvig.frc.world.robot.Imus;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
@@ -558,40 +563,158 @@ class LocalizationServiceTest {
   }
 
   /**
-   * The same inputs, in the same order, give the same outputs, record for record: what a replay of
-   * a logged match relies on.
+   * The same inputs, in the same order, give the same outputs, to the last bit of every number:
+   * what a replay of a logged match relies on. The session drives, turns, crosses a bump, tilts,
+   * loses the gyro and then the backup IMU too, while the camera sends an image every other loop
+   * and the drive team places the robot once; everything the service says along the way is held to
+   * it, its outputs, each image's solve and capture, and every reading of its state.
    */
   @Test
   void theSameInputsGiveTheSameOutputs() {
-    assertThat(session()).isEqualTo(session());
+    String first = session();
+
+    assertThat(session()).isEqualTo(first);
   }
 
-  /** Standing, an image, a misread, a placement, a tilt: every output along the way. */
-  private static List<LocalizationOutput> session() {
-    LocalizationService localization = placed();
-    List<LocalizationOutput> outputs = new ArrayList<>();
-    long now = T0;
-    for (int k = 0; k < 30; k++) {
-      long then = now;
-      int step = k;
-      LoopContext loop = new LoopContext(now, k < 25);
-      localization.drivetrain(still(now, k >= 20 ? Math.toRadians(-6) : 0, 0), loop);
-      if (step == 10) {
-        localization.place(
-            new PoseReset(now, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "again"));
-      }
-      if (step % 3 == 0) {
-        localization.camera(hubFace(then - LOOP_NANOS));
-      }
-      if (step == 14) {
-        localization.camera(measured(then, ROBOT.plus(new Transform2d(1.5, 0, Rotation2d.ZERO))));
-      }
-      outputs.add(localization.update(loop));
-      now += LOOP_NANOS;
+  /** What the session compares by: every bit, where WPILib's geometry allows 1e-9. */
+  @Test
+  void aFingerprintTellsApartWhatWpilibCallsEqual() {
+    Pose2d pose = new Pose2d(1, 2, Rotation2d.ZERO);
+    Pose2d nearly = new Pose2d(1 + 1e-12, 2, Rotation2d.ZERO);
+
+    assertThat(nearly).isEqualTo(pose);
+    assertThat(Fingerprint.of(nearly)).isNotEqualTo(Fingerprint.of(pose));
+    assertThatThrownBy(() -> Fingerprint.of(new Object()))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  /** A bump across the robot's way, its crest a meter ahead. */
+  static final Bump BUMP =
+      new Bump(
+          "Test bump",
+          new Translation2d(ROBOT.getX() + 1.0, 6.0),
+          new Translation2d(ROBOT.getX() + 1.0, 2.0),
+          0.165,
+          1.0);
+
+  /** The robot placed in front of the hub, with the test bump ahead of it. */
+  private static LocalizationService beforeTheBump() {
+    return new LocalizationService(
+        new PoseEstimator(
+            EstimatorConfig.DEFAULTS,
+            FIELD::contains,
+            new PoseReset(0, ROBOT, PoseCovariance.fromStdDevs(0.05, 0.05, 0.01), "placed")),
+        new SwerveKinematicsModel(DEFINITION.moduleTranslations()),
+        FIELD,
+        new Terrain(List.of(BUMP)),
+        DEFINITION,
+        0.02);
+  }
+
+  /** The front camera's exact view of the hub's near face, from where the robot really is. */
+  private static TagDetections hubFace(Pose3d robot, long takenNanos) {
+    Pose3d cameraPose = robot.transformBy(FRONT.robotToCamera());
+    List<TagDetections.Tag> tags = new ArrayList<>();
+    for (int id : new int[] {25, 26}) {
+      Transform3d view = new Transform3d(cameraPose, FIELD.tag(id).orElseThrow());
+      tags.add(
+          new TagDetections.Tag(
+              id,
+              List.of(
+                  new Translation2d(600, 380),
+                  new Translation2d(680, 380),
+                  new Translation2d(680, 420),
+                  new Translation2d(600, 420)),
+              view,
+              Transform3d.ZERO,
+              0.05));
     }
-    assertThat(outputs.stream().mapToInt(output -> output.frames().size()).sum())
-        .as("the session weighed images")
-        .isGreaterThan(5);
-    return outputs;
+    return new TagDetections(takenNanos, "front", tags, null);
+  }
+
+  /** One leg of the session: how long, how fast, and what changes as it starts. */
+  private record Leg(int loops, ChassisVelocities velocity, Consumer<ScriptedDrivetrain> setUp) {}
+
+  /** The session, every number it said fingerprinted, loop by loop. */
+  private static String session() {
+    LocalizationService localization = beforeTheBump();
+    ScriptedDrivetrain robot =
+        new ScriptedDrivetrain(DEFINITION.moduleTranslations(), ROBOT, T0 - LOOP_NANOS, 0.3);
+    robot.bump = BUMP;
+    List<Leg> legs =
+        List.of(
+            new Leg(15, new ChassisVelocities(), drivetrain -> {}),
+            new Leg(60, new ChassisVelocities(1.5, 0, 0), drivetrain -> {}), // over the bump
+            new Leg(25, new ChassisVelocities(1.0, 0, 2.5), drivetrain -> {}), // turning
+            new Leg(
+                20,
+                new ChassisVelocities(1.0, 0.3, 0),
+                drivetrain -> drivetrain.pitch = Math.toRadians(-7)), // tilted
+            new Leg(
+                20,
+                new ChassisVelocities(0.5, 0, 0.5),
+                drivetrain -> {
+                  drivetrain.pitch = 0;
+                  drivetrain.gyroLost = true; // the backup stands in
+                }),
+            new Leg(
+                15,
+                new ChassisVelocities(0.5, 0, 0),
+                drivetrain -> drivetrain.backupLost = true), // the wheels alone
+            new Leg(
+                20,
+                new ChassisVelocities(),
+                drivetrain -> {
+                  drivetrain.gyroLost = false;
+                  drivetrain.backupLost = false;
+                }));
+    StringBuilder said = new StringBuilder();
+    Set<YawSource> sources = EnumSet.noneOf(YawSource.class);
+    int loops = 0;
+    for (Leg leg : legs) {
+      leg.setUp().accept(robot);
+      for (int k = 0; k < leg.loops(); k++, loops++) {
+        DrivetrainReadings readings = robot.loop(leg.velocity());
+        LoopContext loop = new LoopContext(robot.now(), loops < 160);
+        localization.drivetrain(readings, loop);
+        if (loops == 140) {
+          localization.place(
+              new PoseReset(
+                  robot.now(),
+                  robot.truth(),
+                  PoseCovariance.fromStdDevs(0.05, 0.05, 0.02),
+                  "placed again"));
+        }
+        if (loops % 2 == 0) {
+          long taken = robot.now();
+          said.append(Fingerprint.of(localization.capture(taken)));
+          said.append(Fingerprint.of(localization.camera(hubFace(robot.truth3d(), taken))));
+        }
+        said.append(Fingerprint.of(localization.update(loop)));
+        said.append(
+            Fingerprint.of(
+                List.of(
+                    localization.pose(),
+                    localization.pose3d(localization.pose()),
+                    localization.pitchRadians(),
+                    localization.rollRadians(),
+                    localization.yawSource(),
+                    localization.conditions(),
+                    localization.wheels(),
+                    localization.terrainPhase(),
+                    localization.terrainCrossings(),
+                    localization.climbRadians(),
+                    localization.crest(),
+                    localization.imuDisagreementRadians(),
+                    localization.imusDisagree(),
+                    localization.landmarksAccepted())));
+        said.append('\n');
+        sources.add(localization.yawSource());
+      }
+    }
+    assertThat(sources).as("every IMU, and none").containsExactlyInAnyOrder(YawSource.values());
+    assertThat(localization.terrainCrossings()).as("over the bump").isEqualTo(1);
+    assertThat(localization.landmarksAccepted()).as("its crest").isEqualTo(1);
+    return said.toString();
   }
 }

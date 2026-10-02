@@ -80,7 +80,11 @@ class CameraConfigTest {
     assertThat(change().name("a".repeat(CameraConfig.MAX_ID_LENGTH)).build().id())
         .hasSize(CameraConfig.MAX_ID_LENGTH);
     assertRejected(
-        "CameraConfig[" + "A".repeat(53) + "].name: must be at most 52 characters as an id",
+        "CameraConfig["
+            + "A".repeat(53)
+            + "].name: is too long as an id (\""
+            + "a".repeat(53)
+            + "\", 53 characters; at most 52): shorten it",
         () -> change().name("A".repeat(53)).build());
   }
 

@@ -66,13 +66,13 @@ public record RobotDefinition(
       shared.add(
           before.equals(camera.name())
               ? "two cameras are named " + camera.name()
-              : "cameras "
+              : "cameras \""
                   + before
-                  + " and "
+                  + "\" and \""
                   + camera.name()
-                  + " are one name as an id, "
+                  + "\" differ only in case or punctuation, so they're one id, \""
                   + camera.id()
-                  + ": name them apart");
+                  + "\": name them apart");
     }
     return shared.isEmpty() ? null : String.join("; ", shared);
   }

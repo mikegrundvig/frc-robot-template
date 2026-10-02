@@ -57,7 +57,8 @@ class RobotDefinitionTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> definition(cameras))
         .withMessageContaining(
-            "cameras Front Left and front-left are one name as an id, front-left: name them apart");
+            "cameras \"Front Left\" and \"front-left\" differ only in case or punctuation, so"
+                + " they're one id, \"front-left\": name them apart");
   }
 
   @Test

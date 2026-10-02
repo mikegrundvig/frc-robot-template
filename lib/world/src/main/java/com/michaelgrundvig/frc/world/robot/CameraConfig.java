@@ -92,16 +92,21 @@ public record CameraConfig(
         : cleaned;
   }
 
+  /**
+   * Why a name is too long as an id, read after the field it's in ({@code CameraConfig[...].name:
+   * is too long as an id ("...", 53 characters; at most 52): shorten it}), or null when it isn't.
+   */
   private static @Nullable String idTooLong(String name) {
     String id = id(name);
     return id.length() <= MAX_ID_LENGTH
         ? null
-        : "must be at most "
-            + MAX_ID_LENGTH
-            + " characters as an id, which the World view names what it draws for it by: "
+        : "is too long as an id (\""
             + id
-            + " is "
-            + id.length();
+            + "\", "
+            + id.length()
+            + " characters; at most "
+            + MAX_ID_LENGTH
+            + "): shorten it";
   }
 
   /** Where the lens sits, from the robot's origin. */

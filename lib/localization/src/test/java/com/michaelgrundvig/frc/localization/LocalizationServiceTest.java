@@ -576,6 +576,171 @@ class LocalizationServiceTest {
     assertThat(session()).isEqualTo(first);
   }
 
+  /**
+   * A camera whose mount is in doubt has its images widened by the doubt, as independent errors
+   * add: what the robot says of a mount reaches every image after it.
+   */
+  @Test
+  void aCamerasMountDoubtWidensItsImages() {
+    LocalizationService doubted = placed();
+    LocalizationService trusted = placed();
+    long now = standStill(doubted, 10);
+    standStill(trusted, 10);
+    doubted.mountDoubt("front", 0.2, 3.0);
+
+    VisionResult[] results = new VisionResult[2];
+    LocalizationOutput output =
+        loop(doubted, now + LOOP_NANOS, () -> results[0] = doubted.camera(hubFace(now)));
+    loop(trusted, now + LOOP_NANOS, () -> results[1] = trusted.camera(hubFace(now)));
+
+    PoseCovariance wide = Objects.requireNonNull(results[0].measurement()).covariance();
+    PoseCovariance narrow = Objects.requireNonNull(results[1].measurement()).covariance();
+    assertThat(wide.xx()).isCloseTo(narrow.xx() + 0.2 * 0.2, within(1e-12));
+    assertThat(wide.yy()).isCloseTo(narrow.yy() + 0.2 * 0.2, within(1e-12));
+    assertThat(output.integrity().cameras().get("front"))
+        .isEqualTo(CameraTrust.builder().mountDoubtMeters(0.2).mountDistanceMeters(3.0).build());
+  }
+
+  /** The scripted robot's loops, each taken by the service: what each update said. */
+  private static List<LocalizationOutput> drive(
+      LocalizationService localization,
+      ScriptedDrivetrain robot,
+      int loops,
+      ChassisVelocities velocity,
+      boolean seeing) {
+    List<LocalizationOutput> outputs = new ArrayList<>();
+    for (int k = 0; k < loops; k++) {
+      DrivetrainReadings readings = robot.loop(velocity);
+      LoopContext loop = new LoopContext(robot.now(), true);
+      localization.drivetrain(readings, loop);
+      if (seeing) {
+        localization.camera(hubFace(robot.truth3d(), robot.now()));
+      }
+      outputs.add(localization.update(loop));
+    }
+    return outputs;
+  }
+
+  private static ScriptedDrivetrain scripted() {
+    return new ScriptedDrivetrain(DEFINITION.moduleTranslations(), ROBOT, T0 - LOOP_NANOS, 0.3);
+  }
+
+  /**
+   * The gyro turns odometry while it answers; lost, the backup IMU stands in, on its own zero,
+   * without that taken as a turn; with both lost the wheels turn it, and the estimate says the gyro
+   * is lost; back, the gyro takes over again.
+   */
+  @Test
+  void theGyroThenTheBackupThenTheWheelsTurnOdometry() {
+    LocalizationService localization = placed();
+    ScriptedDrivetrain robot = scripted();
+    ChassisVelocities turning = new ChassisVelocities(0.5, 0, 0.5);
+    drive(localization, robot, 20, turning, false);
+    assertThat(localization.yawSource()).isEqualTo(YawSource.GYRO);
+
+    robot.gyroLost = true;
+    LocalizationOutput backup = drive(localization, robot, 20, turning, false).getLast();
+
+    assertThat(localization.yawSource()).isEqualTo(YawSource.BACKUP);
+    assertThat(backup.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(headingError(localization, robot)).as("degrees").isLessThan(0.5);
+
+    robot.backupLost = true;
+    LocalizationOutput wheels = drive(localization, robot, 10, turning, false).getLast();
+
+    assertThat(localization.yawSource()).isEqualTo(YawSource.WHEELS);
+    assertThat(wheels.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(localization.pitchRadians()).as("no IMU, no tilt").isZero();
+
+    robot.gyroLost = false;
+    robot.backupLost = false;
+    drive(localization, robot, 5, turning, false);
+
+    assertThat(localization.yawSource()).isEqualTo(YawSource.GYRO);
+    assertThat(headingError(localization, robot)).as("degrees").isLessThan(1);
+  }
+
+  private static double headingError(LocalizationService localization, ScriptedDrivetrain robot) {
+    return Math.abs(
+        localization.pose().getRotation().minus(robot.truth().getRotation()).getDegrees());
+  }
+
+  /**
+   * Wheels that turn the robot while the gyro says it doesn't are sliding: the slip check says so,
+   * and the estimate grows less sure of where the robot is than a twin's whose wheels grip.
+   */
+  @Test
+  void wheelsSlidingWhileDrivingAreTrustedLess() {
+    LocalizationService slipping = placed();
+    LocalizationService gripping = placed();
+    ScriptedDrivetrain sliding = scripted();
+    ScriptedDrivetrain rolling = scripted();
+    sliding.gyroFrozen = true;
+    ChassisVelocities turning = new ChassisVelocities(1.0, 0, 2.0);
+
+    LocalizationOutput slid = drive(slipping, sliding, 50, turning, false).getLast();
+    LocalizationOutput rolled = drive(gripping, rolling, 50, turning, false).getLast();
+
+    assertThat(slipping.wheels().turnSlipMetersPerSecond()).isPositive();
+    assertThat(slid.integrity().wheels().conditions().slipMetersPerSecond()).isPositive();
+    assertThat(gripping.wheels().turnSlipMetersPerSecond()).isZero();
+    assertThat(slid.estimate().covariance().largestPositionStdDev())
+        .isGreaterThan(2 * rolled.estimate().covariance().largestPositionStdDev());
+  }
+
+  /**
+   * Over a bump, the IMU's pitch says the robot climbed, passed the crest and came down: the crest
+   * is a landmark, weighed at the update, across the bump's crest line.
+   */
+  @Test
+  void aCrestCrossedBecomesALandmark() {
+    LocalizationService localization = beforeTheBump();
+    ScriptedDrivetrain robot = scripted();
+    robot.bump = BUMP;
+
+    List<LocalizationOutput> outputs =
+        drive(localization, robot, 70, new ChassisVelocities(1.5, 0, 0), false);
+
+    List<LandmarkDecision> landmarks =
+        outputs.stream().flatMap(output -> output.landmarks().stream()).toList();
+    assertThat(landmarks).hasSize(1);
+    LandmarkDecision crest = landmarks.get(0);
+    assertThat(crest.verdict()).isEqualTo(Verdict.ACCEPTED);
+    assertThat(crest.landmark().name()).isEqualTo("Test bump");
+    assertThat(crest.innovationMeters())
+        .as("odometry on the ramps, short of the truth")
+        .isLessThan(0.05);
+    assertThat(localization.terrainCrossings()).isEqualTo(1);
+    assertThat(localization.landmarksAccepted()).isEqualTo(1);
+    assertThat(BUMP.acrossOffset(robot.truth().getTranslation()))
+        .as("past the bump")
+        .isGreaterThan(0.5);
+  }
+
+  /**
+   * A camera that goes silent leaves the estimate on odometry: tracking while it sees, dead
+   * reckoning a second after its last image, and not good enough to score from.
+   */
+  @Test
+  void aCameraGoingSilentLeavesTheEstimateDeadReckoning() {
+    LocalizationService localization = placed();
+    ScriptedDrivetrain robot = scripted();
+
+    LocalizationOutput seeing =
+        drive(localization, robot, 25, new ChassisVelocities(), true).getLast();
+    assertThat(seeing.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.TRACKING);
+    assertThat(seeing.frames()).hasSize(1);
+
+    List<LocalizationOutput> silent =
+        drive(localization, robot, 60, new ChassisVelocities(), false);
+
+    assertThat(silent).allSatisfy(output -> assertThat(output.frames()).isEmpty());
+    LocalizationEstimate estimate = silent.getLast().estimate();
+    assertThat(estimate.mode()).isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
+    assertThat(estimate.health().visionAgeSeconds()).isGreaterThan(1);
+    assertThat(LocalizationGate.SCORING.whyNot(estimate)).isEqualTo("no camera measurement lately");
+  }
+
   /** What the session compares by: every bit, where WPILib's geometry allows 1e-9. */
   @Test
   void aFingerprintTellsApartWhatWpilibCallsEqual() {

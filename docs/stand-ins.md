@@ -85,7 +85,8 @@ each a known gap in the truth suite, with its number:
   robot's would, and push and pull the chassis between them at up to the grip, shuddering at the
   steering's 100 Hz as the modules re-steer. And a robot whose motors push harder than the grip
   (a stator limit of 120 A, 17 m/s²) speeds up at 11.8 m/s² while its wheels spin up past it,
-  all alike: a launch that slips, which only the accelerometer can see. No one wheel slips on
+  all alike, where a real one's rear wheels grip under weight transfer and it speeds up at 11.3:
+  a launch that slips, which only the accelerometer can see. No one wheel slips on
   its own: that's a fault to make by hand (a module Spinning).
   Its IMUs read as a Pigeon 2's do on the season-worn robot (`SensorErrors.AccelErrors`), so the
   slip check sees what a real accelerometer would: its noise, bias, range, and its filter and

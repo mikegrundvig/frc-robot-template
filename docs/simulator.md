@@ -508,7 +508,7 @@ asserts today's number. It passes while the gap stays as recorded, and fails lou
 | Momentum and energy: spinning and coasting free, braking, standing a minute, braked on a 15° ramp | 0.1%; no gain past 0.01 J a loop; under 1 mm and 0.01° | passes (the ramp only for want of a force: nothing pulls down a slope today) |
 | Coasting, wheels steered a quarter turn | energy never rises | **known gap:** rises 35 J back as the robot turns to follow its wheels |
 | A launch's energy: the motors' work against kinetic energy, and friction where the wheels slip | within 2% | **known gaps:** 3.5% short gripping (the step's limit, and the robot moving each step half a step behind its wheels), 34% short slipping (a slipping wheel still carries its share of the robot) |
-| Grip in 16 directions (`TractionTruthSimTest`) | μ g within 3%, every direction within 5% | passes |
+| Grip in 16 directions, on a slick tread (μ 0.5) where every wheel slips however weight transfer loads it (`TractionTruthSimTest`) | μ g within 3%, every direction within 5% | passes |
 | Each wheel's slip onset against μ times its own load, and the loads under weight transfer | within 3% | **known gaps:** every wheel slips at once, at 209 N, against 123 N for the front ones; every wheel carries a quarter of the weight |
 | Three wheels holding the robot straight against one pointed 10° off | under 1 mm and 0.05° a second | **known gap:** turns 4.8° a second, as the best fit of the four |
 | Lift-off at a crest, square and at 45° (`TerrainTruthTest`, in the library) | three touch and one hangs by the ground's twist, within 2 mm, in 99% of places | square passes; at 45°, **known gap:** every wheel a quarter of the twist off the ground |

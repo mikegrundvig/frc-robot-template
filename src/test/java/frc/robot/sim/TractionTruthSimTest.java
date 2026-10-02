@@ -35,17 +35,32 @@ class TractionTruthSimTest {
       Robots.SIM.definition().drivetrain().modules().wheelCoefficientOfFriction();
 
   /**
-   * Pushed past its grip (120 A against μ 1.2) in each of 16 directions, the robot speeds up at μ
-   * g, the most its tread holds with every wheel slipping, whatever the direction: within 3% of μ
-   * g, and every direction within 5% of the others. A friction pyramid (Coulomb friction along and
-   * across each wheel, apart) would give up to 41% more at 45°.
+   * A slick tread, μ 0.5, on which every wheel slips even as loaded as weight transfer makes any of
+   * them here: the most loaded, the trailing one at 45° (m g / 4 + √2 m a h / L, 291 N at a = μ g),
+   * holds 146 N, where its motor pushes 309 N at 120 A.
+   */
+  private static final double SLICK = 0.5;
+
+  /**
+   * Pushed past its grip (120 A on a slick tread, μ 0.5) in each of 16 directions, the robot speeds
+   * up at μ g, whatever the direction: within 3% of μ g, and every direction within 5% of the
+   * others. With every wheel slipping, the floor pushes back with μ times the whole weight, however
+   * weight transfer shares it out, along the way the wheels point and without turning the robot:
+   * the loads shift in proportion to where each wheel sits, so their pushes' moments about the
+   * center cancel. A friction pyramid (Coulomb friction along and across each wheel, apart) would
+   * give up to 41% more at 45°.
+   *
+   * <p>Not on the template's tread, μ 1.2: there weight transfer loads the rear wheels (at an
+   * angle, the outside ones) past what their motors push at 120 A, so those grip, and a correct
+   * engine speeds the robot up straight ahead at 11.27 m/s², (2 F + μ m g / 2) / (m + 2 J / r² + μ
+   * m h / L) with F a motor's push, below μ g's 11.77.
    */
   @Test
   void pastItsGripTheRobotSpeedsUpAtMuGInEveryDirection() {
     List<Double> accelerations = new ArrayList<>();
     for (int k = 0; k < 16; k++) {
       Rotation2d direction = Rotation2d.fromDegrees(22.5 * k);
-      TruthRig rig = new TruthRig();
+      TruthRig rig = new TruthRig(SLICK);
       rig.steer(direction);
       rig.run(0.5);
       rig.limitDrives(120);
@@ -61,7 +76,7 @@ class TractionTruthSimTest {
           .isCloseTo(0, within(0.5));
     }
 
-    double gripLimit = MU * ImuReadings.STANDARD_GRAVITY;
+    double gripLimit = SLICK * ImuReadings.STANDARD_GRAVITY;
     double least = accelerations.stream().mapToDouble(Double::doubleValue).min().orElseThrow();
     double most = accelerations.stream().mapToDouble(Double::doubleValue).max().orElseThrow();
     assertThat(accelerations)

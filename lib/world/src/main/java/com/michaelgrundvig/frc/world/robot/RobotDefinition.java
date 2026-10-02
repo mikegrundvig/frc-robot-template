@@ -5,9 +5,9 @@ import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Translation2d;
 
@@ -51,14 +51,28 @@ public record RobotDefinition(
     return drivetrain.moduleTranslations(body);
   }
 
-  /** The names two cameras share, or null if none do. */
+  /**
+   * The names two cameras share, or null if none do: as written, or as ids ({@link
+   * CameraConfig#id()}), where "Front Left" and "front-left" are one.
+   */
   private static @Nullable String sharedNames(List<CameraConfig> cameras) {
-    Set<String> names = new HashSet<>();
+    Map<String, String> names = new HashMap<>();
     List<String> shared = new ArrayList<>();
     for (CameraConfig camera : cameras) {
-      if (!names.add(camera.name())) {
-        shared.add("two cameras are named " + camera.name());
+      String before = names.putIfAbsent(camera.id(), camera.name());
+      if (before == null) {
+        continue;
       }
+      shared.add(
+          before.equals(camera.name())
+              ? "two cameras are named " + camera.name()
+              : "cameras \""
+                  + before
+                  + "\" and \""
+                  + camera.name()
+                  + "\" differ only in case or punctuation, so they're one id, \""
+                  + camera.id()
+                  + "\": name them apart");
     }
     return shared.isEmpty() ? null : String.join("; ", shared);
   }

@@ -76,7 +76,9 @@ public final class Notices {
             shown.put(name, each);
           }
         });
-    section = shown;
+    if (!shown.equals(section)) {
+      section = shown; // else the same map, so the page's comparison stops at it
+    }
   }
 
   /** The notices with something to say, as of the last read: {@code {name: {"text", "level"}}}. */

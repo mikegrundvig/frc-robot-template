@@ -5,6 +5,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import com.michaelgrundvig.frc.pitwall.push.Event;
 import com.michaelgrundvig.frc.pitwall.push.Stream;
+import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.pitwall.simulator.DriverStationState;
 import com.michaelgrundvig.frc.pitwall.simulator.JoystickInput;
@@ -26,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -62,7 +64,15 @@ import org.wpilib.hardware.hal.RobotMode;
  *       changes: a {@code snapshot} first, then {@code patch} events (JSON merge patches) and the
  *       run's {@code samples}; a {@code heartbeat} after 5 s with nothing else to say. A page
  *       reconnecting names the stream it had ({@code ?replaces=id}), which closes; with eight open,
- *       the one that wrote least lately makes way. See {@link Broadcaster}.
+ *       the one that wrote least lately makes way. A page names the views it shows ({@code
+ *       ?views=world}), and only then is sent their part of the state (a scene's moving parts),
+ *       starting with a {@code replace} event holding all of it. See {@link Broadcaster}.
+ *   <li>{@code PUT /api/views}: {@code {"views": ["world"]}}, the views the page shows now, naming
+ *       its stream; 204.
+ *   <li>{@code GET /api/scenes/<id>/inspect/<shape>}: what a click on a scene's shape says, {@code
+ *       {"scene", "shape", "title", "details": [{"label", "value"}], "actions"}}, the actions as
+ *       {@code /api/actions} gives them; 404 when nothing is known of it now. See {@link
+ *       com.michaelgrundvig.frc.pitwall.scene.Scenes}.
  *   <li>{@code GET /api/status}: the status items, read by the next loop, {@code [{"name",
  *       "value"}]}; 503 when the loop doesn't get to it within a second.
  *   <li>{@code GET /api/actions}: every action and where it stands, {@code [{"name", "phase",
@@ -172,7 +182,8 @@ public final class PitwallServer implements AutoCloseable {
    * 5803, AdvantageScope Lite on 5808, and NetworkTables on 5810, and Elastic's docs have teams
    * serve layouts from the robot program on 5800. Pitwall is locked while the field is connected,
    * so it doesn't need the range. If something on your robot already uses this port, pass another
-   * to {@link #startOrExplain}.
+   * to {@link #startOrExplain}, or name it in the {@code pitwall.port} system property, which
+   * {@link Pitwall#start(String)} reads.
    */
   public static final int PORT = 5820;
 
@@ -191,10 +202,17 @@ public final class PitwallServer implements AutoCloseable {
 
   /**
    * Third-party files the page loads from here, as the robot has no internet at an event: uPlot,
-   * which draws the experiments' plots. Each is served if it's bundled.
+   * which draws the experiments' plots, and three.js, which draws the scenes (the World view loads
+   * it only when it's first shown). Each is served if it's bundled; three.js is taken out of its
+   * WebJar as Pitwall builds (pitwall/build.gradle).
    */
   private static final Map<String, String> BUNDLED =
-      Map.of("/uPlot.iife.min.js", "text/javascript", "/uPlot.min.css", "text/css");
+      Map.of(
+          "/uPlot.iife.min.js", "text/javascript",
+          "/uPlot.min.css", "text/css",
+          "/three/three.module.min.js", "text/javascript",
+          "/three/three.core.min.js", "text/javascript",
+          "/three/OrbitControls.js", "text/javascript");
 
   /**
    * The page's own files besides index.html: a script module for its core and one for each view,
@@ -415,6 +433,19 @@ public final class PitwallServer implements AutoCloseable {
               + Devices.NAME.pattern()
               + ")|log|log\\.txt)");
 
+  /** A scene's names, as {@link com.michaelgrundvig.frc.pitwall.scene.Scene} allows them. */
+  private static final String SCENE_NAMES = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+
+  /** What a view is named: a scene's id. */
+  private static final Pattern SCENE_NAME = Pattern.compile(SCENE_NAMES);
+
+  /** A click on a scene's shape: the scene's id, then the shape's. */
+  private static final Pattern INSPECT_ROUTE =
+      Pattern.compile("/api/scenes/(" + SCENE_NAMES + ")/inspect/(" + SCENE_NAMES + ")");
+
+  /** The most views a page may say it shows at once. */
+  private static final int MAX_VIEWS = 8;
+
   /** The most pages of a device's log one text download gathers, and the most text. */
   static final int MAX_LOG_PAGES = 100;
 
@@ -466,6 +497,7 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/run", List.of("GET")),
             Map.entry("/api/heartbeat", List.of("POST")),
             Map.entry("/api/devices", List.of("GET")),
+            Map.entry("/api/views", List.of("PUT")),
             Map.entry("/api/simulator", List.of("GET", "PATCH")),
             Map.entry("/api/simulator/step", List.of("POST")),
             Map.entry("/api/simulator/stop", List.of("POST")),
@@ -473,7 +505,10 @@ public final class PitwallServer implements AutoCloseable {
             Map.entry("/api/simulator/faults", List.of("POST", "DELETE")),
             Map.entry("/api/simulator/scenarios", List.of("POST")),
             Map.entry("/uPlot.iife.min.js", List.of("GET")),
-            Map.entry("/uPlot.min.css", List.of("GET")));
+            Map.entry("/uPlot.min.css", List.of("GET")),
+            Map.entry("/three/three.module.min.js", List.of("GET")),
+            Map.entry("/three/three.core.min.js", List.of("GET")),
+            Map.entry("/three/OrbitControls.js", List.of("GET")));
 
     private final Page state;
     private final Status status;
@@ -535,7 +570,9 @@ public final class PitwallServer implements AutoCloseable {
           }
           List<String> allowed = METHODS.get(path);
           if (allowed == null
-              && (PAGE_FILE.matcher(path).matches() || DEVICE_ROUTE.matcher(path).matches())) {
+              && (PAGE_FILE.matcher(path).matches()
+                  || DEVICE_ROUTE.matcher(path).matches()
+                  || INSPECT_ROUTE.matcher(path).matches())) {
             allowed = List.of("GET");
           }
           if (allowed == null) {
@@ -569,6 +606,7 @@ public final class PitwallServer implements AutoCloseable {
             case "GET /api/run" -> sendJson(exchange, 200, run(true));
             case "POST /api/heartbeat" -> send(exchange, 204, "text/plain", "");
             case "GET /api/devices" -> sendJson(exchange, 200, state.devices().view());
+            case "PUT /api/views" -> putViews(exchange);
             case "GET /api/simulator" -> sendJson(exchange, 200, simulatorView());
             case "PATCH /api/simulator" -> patchSimulator(exchange);
             case "POST /api/simulator/step" ->
@@ -579,11 +617,19 @@ public final class PitwallServer implements AutoCloseable {
             case "DELETE /api/simulator/faults" ->
                 answer(exchange, simulator().requestUndoAll(), this::componentsView);
             case "POST /api/simulator/scenarios" -> postScenario(exchange);
-            case "GET /uPlot.iife.min.js", "GET /uPlot.min.css" -> sendBundled(exchange, path);
+            case "GET /uPlot.iife.min.js",
+                "GET /uPlot.min.css",
+                "GET /three/three.module.min.js",
+                "GET /three/three.core.min.js",
+                "GET /three/OrbitControls.js" ->
+                sendBundled(exchange, path);
             default -> {
               Matcher device = DEVICE_ROUTE.matcher(path);
+              Matcher inspect = INSPECT_ROUTE.matcher(path);
               if (device.matches()) {
                 device(exchange, device);
+              } else if (inspect.matches()) {
+                inspect(exchange, inspect.group(1), inspect.group(2));
               } else if (PAGE_FILE.matcher(path).matches()) {
                 sendPageFile(exchange, path);
               } else {
@@ -714,19 +760,105 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     /**
+     * Says which views a page shows, for the parts of the state sent only to the pages that show
+     * them (a scene's moving parts): {@code {"views": ["world"]}}, naming the page's stream in
+     * {@code Pitwall-Stream}. 204 at once; the next loop sends what a newly shown view needs.
+     */
+    private void putViews(HttpExchange exchange) throws IOException {
+      Map<String, @Nullable Object> body = readObject(exchange);
+      if (body.size() != 1 || !(body.get("views") instanceof List<?> named)) {
+        throw new Problem(400, "Views", "Send {\"views\": [view, ...]}");
+      }
+      Set<String> views = views(named);
+      String stream = exchange.getRequestHeaders().getFirst(STREAM);
+      if (stream == null || stream.isBlank()) {
+        throw new Problem(
+            400,
+            "No stream",
+            "Name the page's event stream (" + STREAM + ") whose views these are");
+      }
+      if (!broadcaster.show(stream, views)) {
+        throw new Problem(404, "No such stream", "No event stream " + stream + " is open");
+      }
+      send(exchange, 204, "text/plain", "");
+    }
+
+    /** Views a page names, each a scene's name, a few at most. */
+    private static Set<String> views(List<?> named) {
+      if (named.size() > MAX_VIEWS) {
+        throw new Problem(400, "Too many views", "A page shows " + MAX_VIEWS + " views at most");
+      }
+      Set<String> views = new LinkedHashSet<>();
+      for (Object view : named) {
+        if (!(view instanceof String name) || !SCENE_NAME.matcher(name).matches()) {
+          throw new Problem(400, "Not a view", "A view is named by a scene's id: " + view);
+        }
+        views.add(name);
+      }
+      return views;
+    }
+
+    /**
+     * What a click on a scene's shape says, from what the robot loop last published: {@code
+     * {"scene", "shape", "title", "details": [{"label", "value"}], "actions": [action]}}, each
+     * action as {@code /api/actions} gives it (one that isn't an action is left out). 404 when
+     * there's nothing to say: no such scene, or a shape gone for more than two seconds.
+     */
+    private void inspect(HttpExchange exchange, String scene, String shape) throws IOException {
+      if (!state.scenes().has(scene)) {
+        throw new Problem(404, "No such scene", "There is no scene " + scene);
+      }
+      Optional<Inspection> said;
+      try {
+        said = state.scenes().inspect(scene, shape);
+      } catch (RuntimeException e) {
+        throw new Problem(500, "Couldn't inspect", shape + ": " + e);
+      }
+      if (said.isEmpty()) {
+        throw new Problem(
+            404,
+            "Nothing to say",
+            "Nothing is known of " + shape + " now: what moves is kept for two seconds");
+      }
+      Inspection inspection = said.get();
+      List<Object> details = new ArrayList<>();
+      for (Inspection.Detail detail : inspection.details()) {
+        Map<String, Object> shown = new LinkedHashMap<>();
+        shown.put("label", detail.label());
+        shown.put("value", detail.value());
+        details.add(shown);
+      }
+      List<Object> offered = new ArrayList<>();
+      List<Object> all = actionStates();
+      for (String name : inspection.actions()) {
+        for (Object action : all) {
+          if (action instanceof Map<?, ?> each && name.equals(each.get("name"))) {
+            offered.add(action);
+          }
+        }
+      }
+      Map<String, Object> shown = new LinkedHashMap<>();
+      shown.put("scene", scene);
+      shown.put("shape", shape);
+      shown.put("title", inspection.title());
+      shown.put("details", details);
+      shown.put("actions", offered);
+      sendJson(exchange, 200, shown);
+    }
+
+    /**
      * Streams the page's state until the page goes away: events as the robot loop sends them, and a
      * heartbeat whenever it has been quiet for {@link #IDLE}. A write that fails means the page has
      * gone, and ends the stream.
      */
     private void stream(HttpExchange exchange) throws IOException {
-      String query = exchange.getRequestURI().getQuery();
-      String replaces =
-          query != null && query.startsWith("replaces=")
-              ? query.substring("replaces=".length())
-              : null;
+      Map<String, String> asked = query(exchange.getRequestURI().getRawQuery());
+      String replaces = asked.get("replaces");
+      String shown = asked.getOrDefault("views", "");
+      Set<String> views = views(shown.isEmpty() ? List.of() : List.of(shown.split(",")));
       Stream stream =
           broadcaster
-              .open(replaces)
+              .open(replaces, views)
               .orElseThrow(() -> new Problem(503, "Stopping", "Pitwall is stopping"));
       String why = "the page went away";
       try {

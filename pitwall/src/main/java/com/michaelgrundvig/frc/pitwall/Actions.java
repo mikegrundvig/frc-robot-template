@@ -308,7 +308,11 @@ public final class Actions {
     for (int i = 0; i < inputs.kinds.length; i++) {
       results.add(apply(ActionInputs.Kind.valueOf(inputs.kinds[i]), inputs.names[i]));
     }
-    view = snapshot();
+    // The same list while nothing changed, so the page's comparison stops at it.
+    List<State> now = snapshot();
+    if (!now.equals(view)) {
+      view = now;
+    }
     // Only now, so whoever is waiting sees the state their request left. In replay, no one is.
     for (int i = 0; i < outcomes.size() && i < results.size(); i++) {
       outcomes.get(i).complete(results.get(i));

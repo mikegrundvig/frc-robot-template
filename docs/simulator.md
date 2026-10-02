@@ -4,7 +4,8 @@
 simulated world (`frc.robot.sim`): a drivetrain that really moves, as heavy as the robot's
 configuration says, cameras that render what they'd see, and sensors that err as a season-worn
 robot's do. AdvantageScope shows the field, the robot, and the truth beside the estimate
-([below](#see-it-in-advantagescope)).
+([below](#see-it-in-advantagescope)), and so does Pitwall's
+[World view](#seeing-it-the-world-view).
 
 Pitwall's page drives the simulator from its *Sim* view (http://localhost:5820/#sim): the Driver
 Station, joysticks from the keyboard or a gamepad, pausing and stepping, Stop, and failing the
@@ -18,6 +19,7 @@ API (http://localhost:5820/api/simulator), below, which anything else that speak
 | Disabled, with no alliance station, like a real robot | `./gradlew run -PstartDisabled` |
 | In a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the scenarios | `./gradlew scenarios` |
+| Beside another simulator, with Pitwall on another port (a page open on 5820 would drive whichever answers there) | `./gradlew run -Ppitwall.port=5920` |
 
 **WPILib's simulator GUI is off unless you ask for it** with `-Pgui` (and `-Pgui=false` is the
 default spelled out). *Sim* does its job. A real Driver Station can connect to the simulator
@@ -405,3 +407,14 @@ reader is free.
 
 **Changes show a loop later:** the robot program sees a Driver Station change as its next loop
 begins, as with a real Driver Station; *Sim* shows the simulator's answer.
+
+## Seeing it: the *World* view
+
+Pitwall's *World* view (http://localhost:5820/#world) draws what the robot program believes, beside
+what the simulator knows: the robot where localization puts it, its uncertainty as a dashed
+ellipse, and the truth as a dashed ghost, so the gap a fault opens shows as it opens. Each camera's
+sight lines to the tags it saw are solid where the estimator accepted the measurement and dashed
+where it refused it; a click on one says why (the verdict, the innovation, χ², the distance), and
+*Hold* freezes the drawing so a line that came and went can still be clicked. *Follow* keeps the
+robot in view; *Top* is the map, *3D* turns around it. The same view works on a robot, without the
+truth. How it's built, and how to add to it: [pitwall/README.md](../pitwall/README.md).

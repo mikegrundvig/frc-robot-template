@@ -322,7 +322,11 @@ public final class TunableTee implements TunableBackend {
     if (replaying) {
       applyLogged(inputs.paths, inputs.values);
     }
-    view = snapshot();
+    // The same list while nothing changed, so the page's comparison stops at it.
+    List<Listed> now = snapshot();
+    if (!now.equals(view)) {
+      view = now;
+    }
     for (int i = 0; i < outcomes.size(); i++) {
       requests.get(i).outcome().complete(outcomes.get(i));
     }

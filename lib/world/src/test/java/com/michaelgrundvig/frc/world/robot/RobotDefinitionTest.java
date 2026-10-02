@@ -50,6 +50,18 @@ class RobotDefinitionTest {
   }
 
   @Test
+  void cameraNamesMustBeUniqueAsIdsToo() {
+    var cameras =
+        List.of(camera("Front Left", inches(10, 0, 8)), camera("front-left", inches(-10, 0, 8)));
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> definition(cameras))
+        .withMessageContaining(
+            "cameras \"Front Left\" and \"front-left\" differ only in case or punctuation, so"
+                + " they're one id, \"front-left\": name them apart");
+  }
+
+  @Test
   void camerasMustBeOnTheRobot() {
     // 10 m ahead: the kind of mistake made by typing inches where meters belong.
     var cameras = List.of(camera("front", new Translation3d(10, 0, 0.2)));

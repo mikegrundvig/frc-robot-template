@@ -21,6 +21,7 @@ import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.hardware.imu.OnboardIMU;
@@ -40,6 +41,19 @@ class ArchitectureTest {
   private static final String[] VENDOR_LIBRARIES = {
     "com.ctre..", "org.photonvision..", "com.revrobotics..", "com.studica.."
   };
+
+  /**
+   * The world's model: the field and the robot as configured, and the validation kit they're built
+   * with (ADR 0015). Not its bridges, which write it out for other tools.
+   */
+  private static final String[] WORLD_MODEL = {
+    "com.michaelgrundvig.frc.world.config..",
+    "com.michaelgrundvig.frc.world.field..",
+    "com.michaelgrundvig.frc.world.robot.."
+  };
+
+  /** Localization (ADR 0015). */
+  private static final String[] LOCALIZATION = {"com.michaelgrundvig.frc.localization.."};
 
   /**
    * The robot program's own components (its loop timing, its wiring), which only it reads, beside
@@ -140,10 +154,37 @@ class ArchitectureTest {
   }
 
   @Test
+  void viewsReadTheModelAndLocalizationAndDrawThroughPitwallsScenes() {
+    classes()
+        .that()
+        .resideInAPackage("frc.robot.views..")
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(
+                Stream.of(
+                        Stream.of(
+                            "frc.robot.views..",
+                            "com.michaelgrundvig.frc.pitwall.scene..",
+                            "java..",
+                            "org.wpilib.math..",
+                            "org.wpilib.units..",
+                            "org.jspecify.."),
+                        Stream.of(WORLD_MODEL),
+                        Stream.of(LOCALIZATION))
+                    .flatMap(packages -> packages)
+                    .toArray(String[]::new)))
+        .because(
+            "a view draws what the world's model and localization say, through Pitwall's scenes"
+                + " alone: no mechanism, hardware, robot state or simulator, and none of the rest"
+                + " of Pitwall, so it moves with the libraries it reads")
+        .check(PRODUCTION_CODE);
+  }
+
+  @Test
   void theSimulatorStaysOutOfTheRobotsCode() {
     noClasses()
         .that()
-        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..")
+        .resideInAnyPackage("frc.robot.lib..", "frc.robot.subsystems..", "frc.robot.views..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot.sim..")
@@ -163,7 +204,8 @@ class ArchitectureTest {
             "frc.robot.commands..",
             "frc.robot.dashboard..",
             "frc.robot.game..",
-            "frc.robot.sim..")
+            "frc.robot.sim..",
+            "frc.robot.views..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot")

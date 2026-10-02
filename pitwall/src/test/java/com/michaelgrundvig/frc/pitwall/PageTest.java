@@ -54,6 +54,47 @@ class PageTest {
     assertThat(page.sections().get("robot")).containsEntry("mode", "Utility, enabled");
   }
 
+  /**
+   * A section that hasn't changed is handed over as the same map, so comparing it with what was
+   * sent stops there; one that has is built again.
+   */
+  @Test
+  void aSectionThatHasntChangedIsTheSameMap() {
+    actions.add(
+        "Home",
+        new Actions.Routine() {
+          @Override
+          public @Nullable String start() {
+            return null;
+          }
+
+          @Override
+          public boolean isRunning() {
+            return false;
+          }
+
+          @Override
+          public void cancel() {}
+        });
+    actions.periodic(new Actions.Gate(true, true, false));
+    tunables.update();
+    Map<String, Map<String, Object>> first = page.sections();
+
+    actions.periodic(new Actions.Gate(true, true, false));
+    tunables.update();
+    Map<String, Map<String, Object>> again = page.sections();
+    for (String section : new String[] {"robot", "units", "actions", "tuning", "wpilibTunables"}) {
+      assertThat(again.get(section)).as(section).isSameAs(first.get(section));
+    }
+
+    mode.set("Utility, enabled");
+    actions.periodic(new Actions.Gate(false, true, false));
+    Map<String, Map<String, Object>> changed = page.sections();
+    assertThat(changed.get("robot")).isNotSameAs(first.get("robot"));
+    assertThat(changed.get("actions")).isNotSameAs(first.get("actions"));
+    assertThat(changed.get("robot")).containsEntry("mode", "Utility, enabled");
+  }
+
   /** The page draws a value's limits and checks an edit against them before sending it. */
   @Test
   void eachValueCarriesItsLimitsAsNumbersAndAnOpenEndHasNone() {

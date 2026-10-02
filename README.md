@@ -91,6 +91,17 @@ Also built in:
     and stepping, Stop, and failing the simulated robot's parts while it runs, which the GUI can't
     do: a camera unplugged or knocked, the gyro frozen, a module's encoder gone stale, the robot
     hit. Each is an API too. See [docs/simulator.md](docs/simulator.md).
+  - **World**: the robot's world in 3D, from above or around, drawn from the code's own beliefs:
+    the field and its tags, the robot where localization believes it is with its wheels and
+    cameras as configured (a camera's wedge pointing the wrong way is a typo in `Robots.java`,
+    found at a glance), how sure the estimate is, and each camera's sight lines to the tags it
+    saw, solid where the estimator accepted the measurement and dashed where it refused it. A
+    click on one says why, and offers the camera's calibration; *Hold* freezes the drawing so a
+    fleeting one can be clicked. In the simulator the truth stands beside the estimate as a
+    dashed ghost. The robot program contributes it as data (`frc.robot.views.world`), Pitwall
+    draws it (three.js, served from the robot), and only a page showing it is sent what moves;
+    a still robot sends nothing. Any robot program can add its own scene:
+    [pitwall/README.md](pitwall/README.md).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
   - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim, in the
@@ -169,7 +180,8 @@ Also built in:
   the errors a season-worn robot has (worn tread, encoder zeros a little off, gyro scale, drift, and
   noise; `SensorErrors`), so odometry drifts as a real robot's does, and a wheel can be made to slip
   or the robot shoved. The field view shows the robot where it believes it is and a "Truth" where
-  it is; AdvantageScope gets `Sim/PoseErrorMeters`. Localization is tested against that gap, not
+  it is, and so does Pitwall's World view, as a dashed ghost; AdvantageScope gets
+  `Sim/PoseErrorMeters`. Localization is tested against that gap, not
   against a perfect world: on a 15-second drive, odometry alone ends 12 cm off, and with a camera
   the estimate stays within 3.4 cm.
 - **Named scenarios for the simulator:** a fault in the robot's sensors or something that happens
@@ -217,13 +229,14 @@ Also built in:
 | `frc.robot.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `frc.robot.game` | The game: the field the robot plays on, 2026's (`Rebuilt`) until [kickoff](docs/kickoff.md), with its starts, targets, and zones written for the blue alliance. |
 | `frc.robot.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
+| `frc.robot.views` | What the robot program shows on Pitwall beyond status and actions: `world`, the World view's scene (the field, the robot as localization believes it is, its cameras' sight lines and their verdicts). Data only; Pitwall draws it. |
 | `frc.robot.sim` | The simulated world: the drivetrain's physics, sensors that err as a season-worn robot's do, what can fail while it runs (`Faults`, for Pitwall's simulator controls), and the named scenarios (`Scenarios`). Only the simulator builds it. |
 | `frc.robot.lib` | The robot program's own components, unit-tested and free of robot code (enforced): loop timing (`timing`) and the devices' wiring (`wiring`). |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
 | `lib/world/` | The world model, a Gradle project of its own (`com.michaelgrundvig.frc.world`), read by everything that needs to know the field or the robot: the validation kit every configuration record is built with (`config`), the field model and its frames (`field`), the robot's definition, its body, drivetrain, cameras, and IMUs (`robot`), and the writers that give other tools what they say, such as AdvantageScope's robot assets (`bridges`). It reads only WPILib's math, units, and field layouts, so Gradle keeps the robot program, the simulator, and Pitwall out of its reach. |
 | `lib/localization/` | Localization, a Gradle project of its own (`com.michaelgrundvig.frc.localization`): the pose estimator and everything that feeds it (its package documentation is a reading map), and the calibration math (`calibration`). It reads the world model and nothing else of the robot's, so its tests run in milliseconds without the simulator. |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`); whether the pose estimator's uncertainty tells the truth ([docs/testing.md](docs/testing.md#is-the-estimator-honest-the-consistency-study), `./gradlew consistencyStudy`). |
-| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, and live tuning. Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
+| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, live tuning, and the World view's scenes ([pitwall/README.md](pitwall/README.md)). Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `coprocessor/`, `coprocessors/` | The vision coprocessors: what they share with the robot program (the table, the health agent's API, settings in Git), the agent, and the PhotonVision version lock (`coprocessor/README.md`); the team's table and each computer's settings. |
 | `layouts/` | Dashboard layouts: the drive team's, for Elastic, and AdvantageScope's, for the simulator and its logs. |
 | `ascope_assets/` | AdvantageScope's robot models, generated from `Robots.java` by the build: point AdvantageScope's *Use Custom Assets Folder* here. Don't edit them. |
@@ -242,8 +255,9 @@ WPILib contributors). Their licenses are in [`licenses/`](licenses/).
 The libraries the robot program uses come under their own licenses. Only one is in this
 repository: uPlot, the plotting library Pitwall's page loads from the robot (no internet at an
 event), whose license is in [`licenses/`](licenses/). Gradle downloads the rest, so sharing the
-source shares none of them. A built robot program (the jar `deploy` sends) contains them all, so
-share source, never built jars:
+source shares none of them; three.js, which draws Pitwall's World view, is one, and its license is
+in [`licenses/`](licenses/) too, since its files go into Pitwall's jar for the page to load. A
+built robot program (the jar `deploy` sends) contains them all, so share source, never built jars:
 
 | Library | License |
 |---|---|
@@ -251,5 +265,6 @@ share source, never built jars:
 | AdvantageKit | BSD 3-Clause |
 | PhotonLib | MIT |
 | uPlot 1.6.32, in `pitwall/` | MIT |
+| three.js 0.181.1, three of its files in Pitwall's jar | MIT |
 | PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
 | CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |

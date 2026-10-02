@@ -25,12 +25,65 @@ let lastRequest = 0;
 let retry = null;
 
 /**
- * Calls {@code listener(patch, snapshot)} after each snapshot and patch: the patch is what changed
- * (the whole document for a snapshot), so a view redraws only that.
+ * Calls {@code listener(patch, snapshot, replaced)} after each snapshot and patch: the patch is what
+ * changed (the whole document for a snapshot), so a view redraws only that. {@code replaced} is true
+ * when a part of the document was put in place whole (a scene's state, as a page starts showing it):
+ * the patch then holds all of that part, and what it doesn't hold is gone.
  */
 export function onChange(listener) {
   changeListeners.push(listener);
 }
+
+/**
+ * The views this page shows that the robot sends only to pages showing them (a scene's id), and
+ * whether the tab is on screen: a hidden tab shows nothing, so the robot sends it none of them.
+ */
+let views = [];
+
+/**
+ * Says which of those views this page shows now: the robot starts sending what they need, and stops
+ * sending what they don't. Kept across reconnecting.
+ */
+export function showViews(shown) {
+  views = [...shown];
+  sendViews();
+}
+
+function shownViews() {
+  return document.hidden ? [] : views;
+}
+
+let viewsSent = null; // as the robot last heard them for this page's stream; null for not known
+let viewsSending = false; // a PUT of them is on its way
+
+/**
+ * Tells the robot the views shown, one request at a time: two on their way at once could land in
+ * either order, and a quick World, Pit, World could leave the robot holding none. Whatever changes
+ * while one is on its way goes when it's answered, the latest only.
+ */
+function sendViews() {
+  if (viewsSending) return;
+  const now = shownViews().join(",");
+  if (!robot.stream || now === viewsSent) return;
+  viewsSent = now;
+  viewsSending = true;
+  const stream = robot.stream;
+  api("PUT", "/api/views", { views: shownViews() })
+    .then((response) => {
+      // Refused: a stream just replaced, whose snapshot says them again.
+      if (!response.ok && robot.stream === stream) viewsSent = null;
+    })
+    .catch(() => {
+      if (robot.stream === stream) viewsSent = null;
+    })
+    .finally(() => {
+      viewsSending = false;
+      // Sent, or the stream was replaced meanwhile: the views may have changed since.
+      if (viewsSent !== null || robot.stream !== stream) sendViews();
+    });
+}
+
+document.addEventListener("visibilitychange", sendViews);
 
 /** Calls {@code listener(trace, fromStart)} with a run's samples as they arrive. */
 export function onSamples(listener) {
@@ -62,12 +115,17 @@ export function connect() {
   if (source) source.close();
   // Reconnecting, it names the stream it had, which the robot then closes rather than keep a place
   // for it until a write to it fails.
-  source = new EventSource(robot.stream
-    ? "/api/events?replaces=" + encodeURIComponent(robot.stream) : "/api/events");
+  const asked = [];
+  if (robot.stream) asked.push("replaces=" + encodeURIComponent(robot.stream));
+  if (shownViews().length) asked.push("views=" + shownViews().map(encodeURIComponent).join(","));
+  source = new EventSource("/api/events" + (asked.length ? "?" + asked.join("&") : ""));
+  const asking = shownViews().join(",");
   opened = Date.now();
   source.addEventListener("snapshot", (event) => {
     const snapshot = JSON.parse(event.data);
     robot.stream = snapshot.stream;
+    viewsSent = asking; // what the address asked for, unless they changed while it opened
+    sendViews();
     robot.doc = snapshot.document;
     robot.stopped = false; // a robot program is running again
     heard();
@@ -80,6 +138,24 @@ export function connect() {
     const patch = JSON.parse(event.data);
     robot.doc = merge(robot.doc, patch);
     tell(changeListeners, patch, false);
+  });
+  // A part of the document put in place whole: a scene's state, when this page starts showing it.
+  source.addEventListener("replace", (event) => {
+    heard();
+    if (robot.doc === null) return;
+    const { at, value } = JSON.parse(event.data);
+    if (!Array.isArray(at) || at.length === 0 || at.includes("__proto__")) return;
+    let parent = robot.doc;
+    for (const key of at.slice(0, -1)) {
+      if (parent[key] === null || typeof parent[key] !== "object") parent[key] = {};
+      parent = parent[key];
+    }
+    parent[at[at.length - 1]] = value;
+    const patch = {};
+    let into = patch;
+    for (const key of at.slice(0, -1)) into = into[key] = {};
+    into[at[at.length - 1]] = value;
+    tell(changeListeners, patch, false, true);
   });
   source.addEventListener("samples", (event) => {
     heard();

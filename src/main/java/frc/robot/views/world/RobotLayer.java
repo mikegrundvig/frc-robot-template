@@ -10,12 +10,14 @@ import com.michaelgrundvig.frc.pitwall.scene.Style;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
@@ -24,8 +26,11 @@ import org.wpilib.math.kinematics.SwerveModuleVelocity;
  * The robot where localization believes it is, as its configuration describes it: its frame and
  * bumpers with an arrow out the front; each wheel at its module, turned to its measured angle, with
  * an arrow where it's driving; each camera at its exact mount, an arrow along its optical axis and
- * the first meter of its view, named off the robot. A click on a camera says how it's mounted,
- * offers its calibration, and shows its full view ({@link CameraViews}) until the details close.
+ * the first meter of its view, named off the robot; and the gyro's IMU, a small block where its
+ * mount puts it, turned as it's mounted, with an arrow along its own x axis. A click on a camera
+ * says how it's mounted, offers its calibration, and shows its full view ({@link CameraViews})
+ * until the details close; a click on the IMU says how it's mounted and whether its accelerometer
+ * has been checked.
  */
 final class RobotLayer implements Layer {
   /** The robot's frame on the page: the frame the page's Follow follows. */
@@ -36,6 +41,17 @@ final class RobotLayer implements Layer {
 
   /** How far above the floor bumpers ride. */
   private static final double BUMPER_CLEARANCE = 0.02;
+
+  /** The gyro's IMU on the page: its frame, turned as it's mounted. */
+  private static final String IMU = "imu.gyro";
+
+  /** The IMU's block: about a Pigeon 2's, and AdvantageScope's. */
+  private static final double IMU_SIZE = 0.05;
+
+  private static final double IMU_THICKNESS = 0.02;
+
+  /** The arrow along the IMU's own x axis, which shows how it's turned. */
+  private static final double IMU_ARROW = 0.1;
 
   /** A swerve wheel's width, about. */
   private static final double WHEEL_WIDTH = 0.038;
@@ -83,6 +99,7 @@ final class RobotLayer implements Layer {
   private final double radius;
 
   private final List<CameraConfig> cameras;
+  private final ImuMount gyro;
   private final WorldView.Readings readings;
   private final Function<String, Optional<String>> cameraAction;
   private final Translation2d[] modules;
@@ -101,6 +118,7 @@ final class RobotLayer implements Layer {
     body = robot.body();
     radius = robot.drivetrain().modules().wheelRadius().in(Meters);
     cameras = List.copyOf(robot.cameras());
+    gyro = robot.imus().gyro();
     this.readings = readings;
     this.cameraAction = cameraAction;
     modules = robot.moduleTranslations();
@@ -189,6 +207,17 @@ final class RobotLayer implements Layer {
           .text(camera.name())
           .at(label.getX(), label.getY(), label.getZ());
     }
+    scene.frame(IMU, FRAME, new Transform3d(gyro.position(), gyro.orientation()));
+    scene
+        .box(IMU + ".block", IMU)
+        .size(IMU_SIZE, IMU_SIZE, IMU_THICKNESS)
+        .style(Style.ACCENT)
+        .inspect(() -> WorldView.imu("Gyro IMU", gyro));
+    scene
+        .arrow(IMU + ".x", IMU)
+        .to(IMU_ARROW, 0, 0)
+        .style(Style.ACCENT)
+        .inspect(() -> WorldView.imu("Gyro IMU", gyro));
   }
 
   /**

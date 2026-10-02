@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Scene;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.List;
 import java.util.Locale;
@@ -21,11 +22,11 @@ import org.wpilib.math.kinematics.SwerveModuleVelocity;
 
 /**
  * The robot's world on Pitwall's World view: the field it plays on, the robot where localization
- * believes it is, its wheels and cameras as configured, how sure the estimate is, and each camera's
- * sight lines to the tags it saw, solid where the estimator accepted the measurement and dashed
- * where it refused it. A click on a sight line says why; a click on a camera says how it's mounted,
- * and shows its full view, which the "Camera views" layer shows for every camera. In the simulator,
- * the simulator's truth stands beside the estimate as a dashed ghost.
+ * believes it is, its wheels, cameras and gyro as configured, how sure the estimate is, and each
+ * camera's sight lines to the tags it saw, solid where the estimator accepted the measurement and
+ * dashed where it refused it. A click on a sight line says why; a click on a camera says how it's
+ * mounted, and shows its full view, which the "Camera views" layer shows for every camera. In the
+ * simulator, the simulator's truth stands beside the estimate as a dashed ghost.
  *
  * <p>It draws the code's own beliefs, not a log: a camera's wedge pointing the wrong way is a typo
  * in {@code Robots.java}, found at a glance. Pitwall draws it; this only says what's there.
@@ -136,6 +137,33 @@ public final class WorldView {
             .detail("From", "the robot's configuration, in Robots.java");
     Optional<String> calibrate = cameraAction.apply(camera.name());
     return calibrate.isPresent() ? said.action(calibrate.get()) : said;
+  }
+
+  /** What a click on an IMU says: where it's mounted, how it's turned, and its check. */
+  static Inspection imu(String title, ImuMount imu) {
+    return Inspection.of(title)
+        .detail(
+            "Mounted",
+            String.format(
+                Locale.ROOT,
+                "%.3f m forward, %.3f m left, %.3f m up",
+                imu.forward().in(Meters),
+                imu.left().in(Meters),
+                imu.up().in(Meters)))
+        .detail(
+            "Turned",
+            String.format(
+                Locale.ROOT,
+                "roll %.1f°, pitch %.1f°, yaw %.1f° from level with its x forward",
+                Math.toDegrees(imu.orientation().getX()),
+                Math.toDegrees(imu.orientation().getY()),
+                Math.toDegrees(imu.orientation().getZ())))
+        .detail(
+            "Accelerometer",
+            imu.accelerometerChecked()
+                ? "checked: reads along the robot's axes"
+                : "not yet checked (docs/calibration.md)")
+        .detail("From", "the robot's configuration, in Robots.java");
   }
 
   /** A tag's frame on the page. */

@@ -128,6 +128,7 @@ class WorldViewTest {
         .contains("\"camera-views\":{\"title\":\"Camera views\",\"shown\":false")
         .contains("\"camera.front-left.view\"", "\"range\":[0,7]")
         .contains("\"wheel.back-right\"", "\"length\":\"speed.back-right\"")
+        .contains("\"imu.gyro\":{\"parent\":\"robot\",\"pose\":", "\"imu.gyro.block\"")
         .contains("\"radii\":[\"uncertainty.major\",\"uncertainty.minor\"]")
         .contains("\"truth.robot\"", "\"style\":\"truth dashed\"")
         .contains("\"sight-lines\":{\"title\":\"Sight lines (dashed: rejected)\"");
@@ -221,6 +222,21 @@ class WorldViewTest {
 
     estimate = estimate(estimate.pose(), LocalizationEstimate.Mode.LOST);
     assertThat(loop(feed)).contains("\"styles\":{\"uncertainty.ellipse\":\"bad dashed\"}");
+  }
+
+  /** The gyro's IMU is drawn where its mount puts it, and a click on it says so. */
+  @Test
+  void aClickOnTheGyroSaysWhereItsMountedAndWhetherItsAccelerometerIsChecked() {
+    world(false);
+
+    Inspection gyro = scenes.inspect(WorldView.ID, "imu.gyro.block").orElseThrow();
+    assertThat(gyro.title()).isEqualTo("Gyro IMU");
+    assertThat(gyro.details())
+        .extracting(Inspection.Detail::value)
+        .contains(
+            "0.000 m forward, 0.000 m left, 0.076 m up",
+            "roll 0.0°, pitch 0.0°, yaw 0.0° from level with its x forward",
+            "checked: reads along the robot's axes");
   }
 
   @Test

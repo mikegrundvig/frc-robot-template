@@ -127,7 +127,8 @@ class ScenariosTest {
     Scenarios.addTo(components, world);
 
     assertThat(components.scenarioView().keySet())
-        .doesNotContain("camera-low", "camera-turned", "camera-late", "camera-frozen")
+        .doesNotContain(
+            "camera-low", "camera-turned", "camera-late", "camera-clock-off", "camera-frozen")
         .contains("collision", "gyro-unplugged");
   }
 

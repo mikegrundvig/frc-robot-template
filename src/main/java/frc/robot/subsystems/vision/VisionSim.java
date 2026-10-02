@@ -90,6 +90,9 @@ public final class VisionSim implements AutoCloseable {
 
   private final Map<String, Added> byName = new LinkedHashMap<>();
 
+  /** How far each camera's clock is off the robot's, by name, in nanoseconds: none, unless set. */
+  private final Map<String, Long> clockOffsets = new LinkedHashMap<>();
+
   /** The field's tags as the cameras see them, by ID, and where each was as the world was built. */
   private final Map<Integer, VisionTargetSim> tags = new LinkedHashMap<>();
 
@@ -257,6 +260,19 @@ public final class VisionSim implements AutoCloseable {
     added.simulated().prop.setAvgLatencyMs(added.latencyMillis() + extraMillis);
   }
 
+  /**
+   * Sets a camera's clock this far off the robot's, from now on: each image is stamped this much
+   * later than it was taken (earlier, if negative), as a coprocessor whose time sync is off stamps
+   * it, though it arrives when it would have. Unlike {@link #addLatency}, the stamps are wrong.
+   *
+   * @param millis zero for a clock that agrees with the robot's
+   * @throws IllegalArgumentException if no camera has this name
+   */
+  public void offsetClock(String camera, double millis) {
+    added(camera);
+    clockOffsets.put(camera, Math.round(millis * 1e6));
+  }
+
   private Added added(String camera) {
     Added added = byName.get(camera);
     if (added == null) {
@@ -330,7 +346,8 @@ public final class VisionSim implements AutoCloseable {
       Pose3d robot = truths.getSample(taken).orElse(truth);
       Pose3d from = robot.plus(world.getRobotToCamera(camera, taken).orElseThrow());
       PhotonPipelineResult image = camera.process(latencyMillis, from, targets);
-      image.metadata.captureTimestampNanos = takenNanos;
+      image.metadata.captureTimestampNanos =
+          takenNanos + clockOffsets.getOrDefault(camera.getCamera().getName(), 0L);
       image.metadata.publishTimestampNanos = arrivedNanos;
       camera.submitProcessedFrame(image, arrivedNanos);
     }

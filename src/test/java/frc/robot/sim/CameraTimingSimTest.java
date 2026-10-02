@@ -1,8 +1,11 @@
 package frc.robot.sim;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.localization.TagSolver;
+import com.michaelgrundvig.frc.pitwall.simulator.Components;
+import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
@@ -10,6 +13,7 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.vision.CameraIO;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.geometry.Pose2d;
@@ -22,7 +26,9 @@ import org.wpilib.system.RobotController;
  * The simulated cameras stamp each image when it was taken, as a real camera's time sync does.
  * PhotonVision's own simulation renders an image as of when it fell due but stamps it as of the
  * loop that renders it, up to a loop later; while the robot turns, every image would then put it
- * where it was a little earlier, the same way, as if the heading were off ({@code VisionSim}).
+ * where it was a little earlier, the same way, as if the heading were off ({@code VisionSim}). A
+ * camera whose clock is off stamps them off by as much: the truth suite's check that the stamps are
+ * right is also the check that the clock-offset fault makes them wrong by exactly that.
  */
 @SimulationTest
 @ExtendWith(RobotSim.class)
@@ -40,46 +46,81 @@ class CameraTimingSimTest {
 
   @Test
   void eachImageShowsTheRobotWhereItWasAtTheImagesStamp() {
-    try (SimulatedWorld world =
-        new SimulatedWorld(
-            RobotSim.FIELD,
-            Robots.SIM.definition().drivetrain(),
-            Robots.SIM.definition().body(),
-            Robots.SIM.definition().cameras(),
-            SensorErrors.NONE)) {
-      world.place(START);
-      CameraIO[] cameras = world.cameras();
-      for (int i = 0; i < RobotLoop.loops(1.0); i++) {
-        step(world, START);
-        for (CameraIO camera : cameras) {
-          read(camera);
-        }
-      }
-      long setOff = RobotController.getTime();
-      List<Double> along = new ArrayList<>();
-      for (int i = 0; i < RobotLoop.loops(0.5); i++) {
-        step(world, carried(RobotController.getTime() + PERIOD_NANOS - setOff));
-        for (int c = 0; c < cameras.length; c++) {
-          Transform3d mount = Robots.SIM.definition().cameras().get(c).robotToCamera();
-          for (CameraIO.Frame frame : read(cameras[c]).frames) {
-            if (!frame.hasMultiTag() || frame.timestampNanos() < setOff) {
-              continue;
-            }
-            Transform3d seen = frame.multiTagFieldToCamera();
-            Pose3d robot =
-                TagSolver.robotFromCamera(
-                    new Pose3d(seen.getTranslation(), seen.getRotation()), mount);
-            along.add(robot.getX() - carried(frame.timestampNanos() - setOff).getX());
-          }
-        }
-      }
+    try (SimulatedWorld world = world()) {
+      double mean = meanAheadOfItsStamp(world);
 
-      assertThat(along).as("images with several tags while carried").hasSizeGreaterThan(20);
-      double mean = along.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
       // Stamped up to a loop late, the robot would be about 1.5 to 2 cm behind where its stamp
       // says.
       assertThat(Math.abs(mean)).as("meters behind or ahead, on average").isLessThan(0.004);
     }
+  }
+
+  /**
+   * A camera whose clock is 20 ms off the robot's stamps each image 20 ms after it was taken: each
+   * shows the robot where it was 20 ms before its stamp says, 4 cm behind at 2 m/s.
+   */
+  @Test
+  void aCameraWithItsClockOffStampsEachImageThatMuchOff() {
+    try (SimulatedWorld world = world()) {
+      Components components = new Components(said -> {});
+      world.addTo(components);
+      for (String camera : world.cameraNames()) {
+        assertThat(
+                components.apply(
+                    Setting.of(
+                        Faults.camera(camera), Faults.CLOCK_OFFSET, Map.of(Faults.OFFSET, 20.0))))
+            .isNull();
+      }
+
+      double mean = meanAheadOfItsStamp(world);
+
+      assertThat(mean).as("meters ahead of where the stamp says").isCloseTo(-0.04, within(0.004));
+    }
+  }
+
+  private static SimulatedWorld world() {
+    return new SimulatedWorld(
+        RobotSim.FIELD,
+        Robots.SIM.definition().drivetrain(),
+        Robots.SIM.definition().body(),
+        Robots.SIM.definition().cameras(),
+        SensorErrors.NONE);
+  }
+
+  /**
+   * Carries the robot along the field at {@link #SPEED}, and returns how far ahead of where it was
+   * at each image's stamp each image puts it, on average, in meters: from the cameras' multi-tag
+   * solves.
+   */
+  private static double meanAheadOfItsStamp(SimulatedWorld world) {
+    world.place(START);
+    CameraIO[] cameras = world.cameras();
+    for (int i = 0; i < RobotLoop.loops(1.0); i++) {
+      step(world, START);
+      for (CameraIO camera : cameras) {
+        read(camera);
+      }
+    }
+    long setOff = RobotController.getTime();
+    List<Double> along = new ArrayList<>();
+    for (int i = 0; i < RobotLoop.loops(0.5); i++) {
+      step(world, carried(RobotController.getTime() + PERIOD_NANOS - setOff));
+      for (int c = 0; c < cameras.length; c++) {
+        Transform3d mount = Robots.SIM.definition().cameras().get(c).robotToCamera();
+        for (CameraIO.Frame frame : read(cameras[c]).frames) {
+          if (!frame.hasMultiTag() || frame.timestampNanos() < setOff) {
+            continue;
+          }
+          Transform3d seen = frame.multiTagFieldToCamera();
+          Pose3d robot =
+              TagSolver.robotFromCamera(
+                  new Pose3d(seen.getTranslation(), seen.getRotation()), mount);
+          along.add(robot.getX() - carried(frame.timestampNanos() - setOff).getX());
+        }
+      }
+    }
+    assertThat(along).as("images with several tags while carried").hasSizeGreaterThan(20);
+    return along.stream().mapToDouble(Double::doubleValue).average().orElseThrow();
   }
 
   private static final long PERIOD_NANOS = Math.round(RobotLoop.PERIOD_SECONDS * 1e9);

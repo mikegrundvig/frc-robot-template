@@ -1,6 +1,7 @@
 package frc.robot.sim;
 
 import static frc.robot.sim.Faults.BACKUP_IMU;
+import static frc.robot.sim.Faults.CLOCK_OFFSET;
 import static frc.robot.sim.Faults.DRIFT;
 import static frc.robot.sim.Faults.ERRORS;
 import static frc.robot.sim.Faults.EXTRA;
@@ -86,6 +87,17 @@ public final class Scenarios {
                       + " arrive past the margin allowed, and are left out.")
               .sensorFaults(
                   world -> List.of(Setting.of(firstCamera(world), LATE, Map.of(EXTRA, 150.0))))
+              .events(Scenario.NOTHING)
+              .build(),
+          Scenario.builder()
+              .name("camera-clock-off")
+              .description(
+                  "The robot's first camera's clock 20 ms off the robot's: its images arrive on"
+                      + " time but are stamped 20 ms after they were taken, so each shows the robot"
+                      + " where it was a loop before its stamp says.")
+              .sensorFaults(
+                  world ->
+                      List.of(Setting.of(firstCamera(world), CLOCK_OFFSET, Map.of(OFFSET, 20.0))))
               .events(Scenario.NOTHING)
               .build(),
           Scenario.builder()

@@ -242,6 +242,7 @@ it finds out from its sensors, as on a robot.
 | | Moved on its mount, from where it was mounted | lasts | forward, left, up (in) |
 | | Turned on its mount | lasts | roll, pitch, yaw (°) |
 | | Late: images arrive later than its configuration says, still stamped when taken | lasts | extra latency (ms) |
+| | Clock offset: its clock off the robot's, so each image arrives on time but is stamped that much after it was taken (before, if negative): the stamps are wrong | lasts | offset (ms) |
 | Gyro, and the backup IMU | Unplugged | lasts | |
 | | Frozen: the same yaw every time | lasts | |
 | | Errors: its scale, drift, and noise from now on, carrying on from what it reads | lasts | scale, drift (°/min), noise (°) |

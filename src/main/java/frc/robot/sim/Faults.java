@@ -53,6 +53,7 @@ public final class Faults {
   public static final String MOVED = "Moved on its mount";
   public static final String TURNED = "Turned on its mount";
   public static final String LATE = "Late";
+  public static final String CLOCK_OFFSET = "Clock offset";
   public static final String ERRORS = "Errors";
   public static final String RESET = "Reset";
   public static final String STALE = "Stale encoder";
@@ -102,6 +103,9 @@ public final class Faults {
 
   /** How far short of a bump's ramp the robot is set down, from its center: clear of the ramp. */
   static final double BUMP_CLEARANCE_METERS = 1.0;
+
+  /** The farthest the page may set a camera's clock off the robot's, either way, in ms. */
+  private static final double CLOCK_OFFSET_MILLIS = 100;
 
   /** The farthest the page may knock a camera, or push the robot, in one go. */
   private static final double MOUNT_INCHES = 12;
@@ -307,6 +311,16 @@ public final class Faults {
             .isOn(camera::isLate)
             .apply(values -> camera.delay(values.get(EXTRA)))
             .undo("Back to its usual latency.", () -> camera.delay(0))
+            .build(),
+        Fault.lasting(CLOCK_OFFSET)
+            .does(
+                "Its clock is this far off the robot's, as a coprocessor whose time sync failed:"
+                    + " each image arrives on time, but is stamped this much later than it was taken"
+                    + " (earlier, if negative). Unlike Late, the stamps are wrong.")
+            .parameter(OFFSET, "ms", Limits.between(-CLOCK_OFFSET_MILLIS, CLOCK_OFFSET_MILLIS), 10)
+            .isOn(camera::hasClockOffset)
+            .apply(values -> camera.offsetClock(values.get(OFFSET)))
+            .undo("Its clock agrees with the robot's again.", () -> camera.offsetClock(0))
             .build());
   }
 

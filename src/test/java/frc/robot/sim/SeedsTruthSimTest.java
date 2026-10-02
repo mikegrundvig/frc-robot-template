@@ -15,6 +15,7 @@ import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -73,28 +74,44 @@ class SeedsTruthSimTest {
 
   /**
    * Streams from seeds of their own draw uncorrelated numbers: the first 10,000 normal draws of
-   * every pair a world's seeds give (neighbors included, a seed and the next), correlated within
-   * three standard errors, 3 / √n.
+   * every pair of a world's streams (neighbors included, a seed and the next), correlated within
+   * three standard errors, 3 / √n. Every stream counts by its name, so two that share a seed are
+   * compared too, and caught: they draw the same numbers. Today seed 1's first two cameras share
+   * the seeds of its gyro and its gyro's accelerometer, and draw exactly what those do.
    */
   @Test
+  @KnownGap("each stream is an offset from the world's seed, not drawn from the seed and its name")
   void streamsFromTheirOwnSeedsAreUncorrelated() {
     int n = 10_000;
+    List<String> names = new ArrayList<>();
     List<double[]> draws = new ArrayList<>();
-    for (long seed : new java.util.TreeSet<>(streams(1).values())) {
-      Random random = new Random(seed);
+    for (Map.Entry<String, Long> stream : streams(1).entrySet()) {
+      Random random = new Random(stream.getValue());
       double[] values = new double[n];
       for (int i = 0; i < n; i++) {
         values[i] = random.nextGaussian();
       }
+      names.add(stream.getKey());
       draws.add(values);
     }
+    List<String> correlated = new ArrayList<>();
     for (int a = 0; a < draws.size(); a++) {
       for (int b = a + 1; b < draws.size(); b++) {
-        assertThat(Math.abs(correlation(draws.get(a), draws.get(b))))
-            .as("streams %d and %d", a, b)
-            .isLessThan(3 / Math.sqrt(n));
+        double r = correlation(draws.get(a), draws.get(b));
+        if (!(Math.abs(r) < 3 / Math.sqrt(n))) {
+          correlated.add(
+              names.get(a) + " and " + names.get(b) + String.format(Locale.ROOT, ", %.3f", r));
+        }
       }
     }
+
+    stillOpen(
+        "every pair of streams uncorrelated",
+        correlated.isEmpty(),
+        correlated.equals(
+            List.of(
+                "gyro and first camera, 1.000", "gyro's accelerometer and second camera, 1.000")),
+        "correlated: " + correlated);
   }
 
   /**

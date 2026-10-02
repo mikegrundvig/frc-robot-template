@@ -14,12 +14,25 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * The recipe hash covers what builds the agent, and nothing outside it may change the agent: its
- * build applies only files the recipe covers, and the robot's build files (which the recipe leaves
- * out, so a GradleRIO update doesn't ask for a new image) configure no other project.
+ * The recipe hash covers what makes the agent's jar, and nothing outside it may change the jar: the
+ * jar's rules are in {@code coprocessor/agent/jar.gradle}, which the recipe covers, and not in the
+ * agent's build file, which it leaves out; the coprocessor projects' builds apply only files the
+ * recipe covers, and the checks every project applies; and the robot's build files (which the
+ * recipe leaves out too, so a GradleRIO update doesn't ask for a new image) configure no other
+ * project.
  */
 class RecipeBoundaryTest {
   private static final Path PROJECT = Path.of(System.getProperty("frc.projectDir", "../.."));
+
+  /**
+   * Applied by every project, the coprocessor projects too, and left out of the recipe: checks
+   * (static analysis, formatting, tests, coverage) that change nothing a project compiles to.
+   */
+  private static final String CHECKS = "gradle/quality.gradle";
+
+  /** What configures a jar. */
+  private static final Pattern JAR =
+      Pattern.compile("tasks\\.named\\(\"jar\"\\)|tasks\\.jar\\b|^jar\\s*\\{|withType\\(Jar\\)");
 
   private static final Pattern APPLY_FROM =
       Pattern.compile("apply from:\\s*(?:rootProject\\.file\\()?\"([^\"]+)\"");
@@ -47,11 +60,26 @@ class RecipeBoundaryTest {
         List.of("coprocessor/agent/build.gradle", "coprocessor/common/build.gradle")) {
       for (String line : code(PROJECT.resolve(build))) {
         Matcher applied = APPLY_FROM.matcher(line);
-        if (applied.find()) {
+        if (applied.find() && !applied.group(1).equals(CHECKS)) {
           assertThat(RecipeHash.PATHS)
               .as("%s applies %s, which the recipe hash doesn't cover", build, applied.group(1))
               .contains(applied.group(1));
         }
+      }
+    }
+  }
+
+  @Test
+  void theAgentsJarIsMadeOnlyByFilesTheRecipeCovers() throws IOException {
+    assertThat(RecipeHash.PATHS).contains("coprocessor/agent/jar.gradle");
+    for (String build :
+        List.of("coprocessor/agent/build.gradle", "coprocessor/common/build.gradle", CHECKS)) {
+      for (String line : code(PROJECT.resolve(build))) {
+        assertThat(JAR.matcher(line).find())
+            .as(
+                "%s configures a jar, which belongs in coprocessor/agent/jar.gradle: %s",
+                build, line)
+            .isFalse();
       }
     }
   }
@@ -64,7 +92,7 @@ class RecipeBoundaryTest {
     try (Stream<Path> gradle = Files.list(PROJECT.resolve("gradle"))) {
       gradle
           .filter(file -> file.getFileName().toString().endsWith(".gradle"))
-          .filter(file -> !RecipeHash.PATHS.contains("gradle/" + file.getFileName()))
+          .filter(file -> !("gradle/" + file.getFileName()).equals(CHECKS))
           .forEach(files::add);
     }
     for (Path file : files) {

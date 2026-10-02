@@ -9,12 +9,13 @@ and nothing depends on a particular editor.
 ## The commands
 
 Run these from the repository folder. They work as written in PowerShell, Git Bash, macOS, and
-Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`).
+Linux; in the Windows Command Prompt, leave off the `./` (`gradlew ci`), and the single quotes
+around a pattern (`gradlew test -Pquick --continuous --tests *Arm*`).
 
 | Job | Command |
 |---|---|
 | Every check CI runs; run it before pushing | `./gradlew ci` |
-| Rerun the tests on every save | `./gradlew test -Pquick --continuous` |
+| Rerun the tests you're working on, on every save ([the fast loop](testing.md#the-fast-loop)) | `./gradlew test -Pquick --continuous --tests '*Arm*'` |
 | Run one test class ([more on tests](testing.md)) | `./gradlew test --tests frc.robot.ArchitectureTest` |
 | Start the simulator, driven from Pitwall's Sim view at http://localhost:5820/#sim ([more](simulator.md)) | `./gradlew run` |
 | Start it with WPILib's simulator GUI too, enabled and drivable from its keyboard | `./gradlew run -Pgui` |
@@ -36,9 +37,12 @@ for a debugger before it starts, and takes one from any device on the robot's ne
 debugger attaches, the robot does nothing, and after a brownout or a power cycle it waits again.
 When you're done, deploy again without `-PdebugMode`, and never take a debug deploy onto the field.
 
-Gradle's configuration cache is off until GradleRIO supports it. Turn it on for yourself with
-`--configuration-cache` (`./gradlew ci --configuration-cache`), for anything but GradleRIO's own
-tasks (`run`, `deploy`, `vendordep`), which fail with it.
+Gradle's configuration cache, its build cache, and parallel builds are on for every build
+(`gradle.properties`). A build that runs one of GradleRIO's own tasks (`run`, `deploy`,
+`vendordep`, WPILib's tools) goes without the configuration cache, which they don't support yet,
+and says so in its last line: `Configuration cache disabled because incompatible task was found.`,
+or `incompatible tasks were found.` when there are several, as in a deploy. For `run` it comes
+after the simulator stops. That's expected; the build is otherwise as it always was.
 
 ## IntelliJ IDEA
 

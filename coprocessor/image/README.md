@@ -154,11 +154,12 @@ release job, so anyone can check an image was built by this workflow from this r
 **The recipe hash** says what a common image is made from, so the robot can tell a coprocessor
 flashed from another recipe (`coprocessor/README.md`). It's computed one way, by the build, for the
 robot and the images alike: `./gradlew -q coprocessorRecipeHash` prints it and writes it to
-`build/coprocessor/recipe-hash.txt`. It covers this folder, the agent and the shared code with
-their build files, the lock, `gradle/quality.gradle`, and the versions of the libraries the agent
-runs with; not documentation or tests. The robot's own build files (`build.gradle`,
-`settings.gradle`, the Gradle wrapper) are left out by design, so a WPILib or Gradle update doesn't
-ask for an image that would be the same. `test/recipe_test.sh` checks that everything the image
+`build/coprocessor/recipe-hash.txt`. It covers this folder, the agent's and the shared code's
+sources, the agent's unit and the rules its jar is made by (`coprocessor/agent/jar.gradle`), the
+lock, and the versions of the libraries the agent runs with; not documentation or tests. Build
+files are left out by design, the robot's (`build.gradle`, `settings.gradle`, the Gradle wrapper)
+and the coprocessor projects' own with the checks they apply, so a WPILib or Gradle update, or a
+change to how the tests run, doesn't ask for an image that would be the same. `test/recipe_test.sh` checks that everything the image
 scripts read from the repository is covered.
 
 GitHub's arm64 runners are free for **public** repositories only. A private repository's builds

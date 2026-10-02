@@ -40,6 +40,15 @@ merged when `./gradlew ci` passes and the robot drives.
    - PhotonLib: the coprocessors must run the same PhotonVision version as the library.
 6. **Build:** `./gradlew ci`, and fix what moved. Prereleases rename and move APIs; the release
    notes say where.
+   - **Gradle's configuration cache** (`gradle.properties`) can't hold most of GradleRIO's tasks,
+     so `build.gradle` marks them incompatible (and `run`, and deploy's `coprocessorCheck`), and a
+     build that runs one goes without the cache. Three are kept under it, since `ci` and the tests
+     run them: `extractReleaseNative`, `extractDebugNative`, and `downloadDepsPreemptively` (the
+     list `cacheable` in `build.gradle`). If a new GradleRIO breaks one of them under the cache
+     (`ci` fails storing or loading it, naming the task), take the task off the list. If `ci` ends
+     with *Configuration cache disabled because incompatible tasks were found.*, a new GradleRIO
+     task is in its graph: when it works under the cache, add it to the list; until then `ci`
+     works, just without the cache.
 7. **Drive it:** `./gradlew run`, open the Pitwall page's Sim view (http://localhost:5820/#sim),
    switch on driving with the keyboard, press Enable (it starts disabled), and drive around.
 8. **Update the docs:** `docs/stand-ins.md` (a stand-in may now have its real library, and a

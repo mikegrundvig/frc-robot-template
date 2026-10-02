@@ -322,10 +322,10 @@ robot program, documentation, tests), which would otherwise fail every deploy un
 nobody needs was flashed. It's the SHA-256, in lowercase hex, of:
 
 1. the lines `git -c core.quotePath=true ls-tree -r --full-tree HEAD --` prints for
-   `coprocessor/image`, `coprocessor/agent`, `coprocessor/common`, `coprocessor/photonvision.lock`,
-   and `gradle/quality.gradle` (the one build file the agent's build applies), leaving out
-   documentation (`*.md`), tests (`coprocessor/image/test/`, `src/test/`, `src/testFixtures/`), and
-   coverage floors; then
+   `coprocessor/image`, the agent's and the shared code's sources (`coprocessor/agent/src/main`,
+   `coprocessor/common/src/main`), the agent's systemd unit, the rules its jar is made by
+   (`coprocessor/agent/jar.gradle`), and `coprocessor/photonvision.lock`, leaving out
+   documentation (`*.md`) and the image scripts' tests (`coprocessor/image/test/`); then
 2. a line `runtime <group>:<name>:<version>` for each library on the agent's runtime classpath,
    sorted, so a new sqlite-jdbc is a new image (and a new WPILib, which the agent doesn't run,
    isn't).
@@ -339,9 +339,12 @@ unknown rather than wrong.
 One implementation computes it, in the build: `./gradlew coprocessorRecipeHash` prints it (only it,
 with `-q`) and writes it to `build/coprocessor/recipe-hash.txt`, and the compiled table uses the
 same code. The image workflow runs that task, so the robot and the images never disagree on it.
-The agent's and the shared code's builds are self-contained: the robot's build files configure no
-other project, and the agent's build applies only files the hash covers (`RecipeBoundaryTest`
-checks both), so nothing the hash leaves out can change the agent's jar. `CoprocessorBuild` runs
+The coprocessor projects' own build files are left out, and so are the checks every project
+applies (`gradle/quality.gradle`): their tests, static analysis, and coverage don't change what the
+image installs, so a change to them, a faster test run, doesn't ask for a new image. Nothing the
+hash leaves out can change the agent's jar: the jar's rules are in `jar.gradle` alone, the agent's
+and the shared code's builds apply no other file but the checks, and the robot's build files
+configure no other project (`RecipeBoundaryTest` checks all three). `CoprocessorBuild` runs
 these tasks with the code the robot and the agents run.
 
 ## Tests

@@ -104,6 +104,10 @@ wpi.java.configureTestTasks(test)
 
 tasks.named("test") {
     useJUnitPlatform()
+    // A fresh test JVM every 20 test classes. The simulation tests' native memory (PhotonVision's
+    // camera simulation, WPILib's HAL) isn't on the heap the cap in gradle/quality.gradle limits:
+    // one JVM running them all grows to 5 to 6.5 GB, where a fresh one now and then stays near 3.
+    forkEvery = 20
     // Tests run in the build folder, so what simulated devices and logs write (CTRE's ctre_sim/,
     // for one) stays out of the project. A test finds project files through frc.projectDir.
     def work = layout.buildDirectory.dir("test-work")
@@ -111,9 +115,9 @@ tasks.named("test") {
     systemProperty "frc.projectDir", projectDir.absolutePath
     // Project files the tests check against the code, declared so Gradle knows the tests depend
     // on them: the values register (ValuesRegisterTest), the drive team's dashboard
-    // (DashboardLayoutTest), and AdvantageScope's layout (AdvantageScopeLayoutTest). Today the
-    // tests rerun on every build anyway, since BuildConstants compiles in the build's time; an
-    // undeclared file would let Gradle skip them once it doesn't.
+    // (DashboardLayoutTest), and AdvantageScope's layout (AdvantageScopeLayoutTest). A quick build
+    // (-Pquick) skips tests whose inputs haven't changed, so an undeclared file would let a change
+    // to it pass untested.
     inputs.file("docs/values.md").withPropertyName("valuesRegister")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file("layouts/elastic-layout.json").withPropertyName("dashboardLayout")
@@ -125,6 +129,13 @@ tasks.named("test") {
     inputs.files(fileTree("ascope_assets")).withPropertyName("advantageScopeAssets")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     mustRunAfter tasks.matching { it.name == "advantageScopeAssets" }
+    // GOLDEN_UPDATE=1 has EstimatorGoldenSimTest record its recording again, in src/test/resources,
+    // which Gradle doesn't know the tests write: so with it, the tests always run, and never come
+    // from the build cache, whatever ran before.
+    def goldenUpdate = providers.environmentVariable("GOLDEN_UPDATE").orElse("")
+    inputs.property("goldenUpdate", goldenUpdate)
+    outputs.upToDateWhen { goldenUpdate.get() != "1" }
+    outputs.doNotCacheIf("GOLDEN_UPDATE rewrites src/test/resources") { goldenUpdate.get() == "1" }
     doFirst { work.get().asFile.mkdirs() }
     // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
     // coverage report to count: the program's startup runs nowhere else.
@@ -158,6 +169,36 @@ tasks.withType(JavaCompile).configureEach {
 // their annotation's name.
 tasks.named("compileJava") {
     options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
+}
+
+// Gradle's configuration cache (gradle.properties) can't hold GradleRIO's own tasks yet: the
+// simulator's run, deploy, vendordep, and WPILib's tools. A build that runs one goes without it, as
+// every build used to. Marking them incompatible is enough for that; Gradle's internal
+// ConfigurationCacheDegradation, where it's there as today, also keeps the problems the cache finds
+// in them out of the output, so the build says so in a line. Should it change or go, the build
+// works as before and lists them.
+def withoutConfigurationCache = { Task task, String why ->
+    task.notCompatibleWithConfigurationCache(why)
+    try {
+        def degrade = Class.forName("org.gradle.api.internal.ConfigurationCacheDegradation").methods.find {
+            it.name == "requireDegradation" && it.parameterCount == 2 && it.parameterTypes[1] == String
+        }
+        degrade?.invoke(null, task, why)
+    } catch (Exception | LinkageError ignored) {
+        // Marked incompatible above, which is all a build needs.
+    }
+}
+// GradleRIO's tasks that building and testing use work with it. Deploy's first step, which asks
+// the coprocessors, goes without it as deploy does: it reads the team number GradleRIO stores.
+def cacheable = [
+    "extractReleaseNative",
+    "extractDebugNative",
+    "downloadDepsPreemptively"
+]
+tasks.configureEach { task ->
+    if (task.name in ["run", "coprocessorCheck"] || (task.class.name.startsWith("org.wpilib.") && !(task.name in cacheable))) {
+        withoutConfigurationCache(task, "GradleRIO's state can't be kept in the configuration cache")
+    }
 }
 
 // Nothing reaches a robot without a team number, or without passing every check.

@@ -78,9 +78,13 @@ class RecipeHashTest {
   private void aRepository() throws Exception {
     write("coprocessor/image/provision.sh", "#!/bin/sh\n");
     write("coprocessor/agent/coprocessor-agent.service", "[Service]\n");
+    write("coprocessor/agent/jar.gradle", "// the jar\n");
+    write("coprocessor/agent/src/main/java/Agent.java", "class Agent {}\n");
     write("coprocessor/photonvision.lock", "{}\n");
-    write("gradle/quality.gradle", "// checks\n");
     // Not the recipe:
+    write("gradle/quality.gradle", "// checks\n");
+    write("coprocessor/agent/build.gradle", "plugins { id 'java' }\n");
+    write("coprocessor/common/build.gradle", "plugins { id 'java-library' }\n");
     write("coprocessor/README.md", "docs\n");
     write("coprocessor/image/README.md", "docs\n");
     write("coprocessor/image/test/provision_test.sh", "test\n");
@@ -112,14 +116,17 @@ class RecipeHashTest {
                 + blob("[Service]\n")
                 + "\tcoprocessor/agent/coprocessor-agent.service\n"
                 + "100644 blob "
+                + blob("// the jar\n")
+                + "\tcoprocessor/agent/jar.gradle\n"
+                + "100644 blob "
+                + blob("class Agent {}\n")
+                + "\tcoprocessor/agent/src/main/java/Agent.java\n"
+                + "100644 blob "
                 + blob("#!/bin/sh\n")
                 + "\tcoprocessor/image/provision.sh\n"
                 + "100644 blob "
                 + blob("{}\n")
                 + "\tcoprocessor/photonvision.lock\n"
-                + "100644 blob "
-                + blob("// checks\n")
-                + "\tgradle/quality.gradle\n"
                 + "runtime org.jspecify:jspecify:1.0.1\n"
                 + "runtime org.xerial:sqlite-jdbc:3.53.4.0\n");
     RecipeHash.Result result = RecipeHash.of(root, LIBRARIES);
@@ -139,6 +146,10 @@ class RecipeHashTest {
     commit("gradle/wrapper/gradle-wrapper.properties", "distributionUrl=y\n");
     commit("coprocessor/image/README.md", "more docs\n");
     commit("coprocessor/agent/src/test/java/ATest.java", "class ATest { int x; }\n");
+    // The coprocessor projects' own build files, and the checks they apply: the same jar.
+    commit("coprocessor/agent/build.gradle", "test { maxParallelForks = 2 }\n");
+    commit("coprocessor/common/build.gradle", "test { forkEvery = 5 }\n");
+    commit("gradle/quality.gradle", "// stricter checks\n");
     assertThat(RecipeHash.of(root, LIBRARIES).hash()).isEqualTo(hash);
     // Uncommitted changes don't count: an image is built from a commit.
     write("coprocessor/image/provision.sh", "#!/bin/sh\necho uncommitted\n");
@@ -153,8 +164,11 @@ class RecipeHashTest {
     commit("coprocessor/agent/coprocessor-agent.service", "[Service]\nNice=10\n");
     String unit = RecipeHash.of(root, LIBRARIES).hash();
     assertThat(unit).isNotEqualTo(hash);
-    commit("gradle/quality.gradle", "// stricter checks\n");
-    assertThat(RecipeHash.of(root, LIBRARIES).hash()).isNotEqualTo(unit);
+    commit("coprocessor/agent/jar.gradle", "// the jar, smaller\n");
+    String jar = RecipeHash.of(root, LIBRARIES).hash();
+    assertThat(jar).isNotEqualTo(unit);
+    commit("coprocessor/common/src/main/java/Shared.java", "class Shared { int x; }\n");
+    assertThat(RecipeHash.of(root, LIBRARIES).hash()).isNotEqualTo(jar);
   }
 
   @Test

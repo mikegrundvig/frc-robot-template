@@ -4,9 +4,10 @@
 //   ./gradlew ci                               every check CI runs; run it before pushing
 //   ./gradlew test -Pquick --continuous        fast edit-test loop (skips the CI-only work)
 
-// Quick mode skips the work only CI needs (static analysis, auto-formatting, the coverage report),
-// which costs seconds on every save, and the slow tests (@SimulationTest, @EndToEndTest) unless
-// --tests names what to run. `ci` still enforces all of it, and refuses to run in quick mode.
+// Quick mode skips the work only CI needs (static analysis, auto-formatting, coverage, and the
+// build's time in BuildConstants), which costs seconds on every save, and the slow tests
+// (@SimulationTest, @EndToEndTest) unless --tests names what to run (docs/testing.md, the fast
+// loop). `ci` still enforces all of it, and refuses to run in quick mode.
 def quick = project.hasProperty("quick")
 def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
 
@@ -45,9 +46,10 @@ tasks.withType(JavaCompile).configureEach {
     }
 }
 
-// Tests produce a coverage report (JaCoCo), except in quick mode. None may run past two minutes
-// (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test fails
-// instead of hanging the build.
+// Tests produce a coverage report (JaCoCo), except in quick mode, which runs them without JaCoCo's
+// agent (it instruments every class as it loads) and checks no coverage. None may run past two
+// minutes (JUnit's default timeout; a test that needs longer says so with @Timeout): a hung test
+// fails instead of hanging the build.
 //
 // Each project's tests may use up to 1.5 GB of memory, on every computer. Left to itself, Java
 // takes up to a quarter of the computer's memory, so a runaway test could take 2 GB on one laptop
@@ -55,6 +57,22 @@ tasks.withType(JavaCompile).configureEach {
 // peaks near 80 MB for the robot's and 50 MB for Pitwall's. So the cap guards against a runaway;
 // it isn't what the tests need. A test that fails with "OutOfMemoryError: Java heap space" raises
 // the cap here.
+//
+// At most two test JVMs run at once in a build, however many tasks Gradle runs in parallel: the
+// robot program's simulation tests grow theirs to a few GB, and a test JVM beside it for each
+// project would add up on a laptop. On a computer with 8 GB, make it one: testJvms=1 in the
+// gradle.properties of your Gradle user home, or -PtestJvms=1 (docs/testing.md, memory). Not
+// counted: build-logic's TestKit builds, and the robot programs ReplayEndToEndTest starts.
+def testJvmsAsked = (project.findProperty("testJvms") ?: "2").toString()
+if (!(testJvmsAsked.isInteger() && testJvmsAsked.toInteger() >= 1)) {
+    throw new GradleException("testJvms is how many test JVMs may run at once, 1 or more, not ${testJvmsAsked}")
+}
+def testJvms = gradle.sharedServices.registerIfAbsent("testJvms", TestJvms) {
+    maxParallelUsages = testJvmsAsked.toInteger()
+}
+tasks.withType(Test).configureEach {
+    usesService(testJvms)
+}
 tasks.named("test") {
     maxHeapSize = "1536m"
     systemProperty "junit.jupiter.execution.timeout.default", "2 m"
@@ -63,6 +81,7 @@ tasks.named("test") {
             excludeTags "simulation", "end-to-end"
         }
     }
+    extensions.getByType(JacocoTaskExtension).enabled = !quick
     if (!quick) {
         finalizedBy "jacocoTestReport"
     }
@@ -109,6 +128,7 @@ jacoco {
 }
 tasks.named("jacocoTestReport") {
     dependsOn "test"
+    onlyIf("-Pquick measures no coverage") { !quick }
     reports {
         xml.required = true
         html.required = true
@@ -130,6 +150,7 @@ def coverageCheck = tasks.register("coverageCheck") {
     group = "verification"
     description = "Fail if test coverage drops below coverage-floor.properties."
     dependsOn "jacocoTestReport"
+    onlyIf("-Pquick measures no coverage") { !quick }
     def report = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
     def floorFile = file("coverage-floor.properties")
     inputs.file(floorFile)
@@ -265,3 +286,6 @@ tasks.register("ci") {
         dependsOn gradle.includedBuild("build-logic").task(":ci")
     }
 }
+
+/** Counts the test JVMs running at once, for Gradle to keep to its limit; it holds nothing. */
+abstract class TestJvms implements org.gradle.api.services.BuildService<org.gradle.api.services.BuildServiceParameters.None> {}

@@ -107,12 +107,12 @@ final class ModuleIOTalonFX implements ModuleIO {
   ModuleIOTalonFX(
       SwerveWiring.ModuleWiring wiring,
       CANBus bus,
-      DrivetrainGeometry.Modules hardware,
+      DrivetrainGeometry.ModuleType hardware,
       double couplingRatio,
       PhoenixOdometryThread odometry) {
     drive = new TalonFX(wiring.driveId(), bus);
     steer = new TalonFX(wiring.steerId(), bus);
-    CANcoder encoder = new CANcoder(wiring.encoderId(), bus);
+    CANcoder encoder = new CANcoder(wiring.encoderId().orElseThrow(), bus);
     driveGearing = hardware.driveGearing().ratio();
     this.couplingRatio = couplingRatio;
     wheelRadiusMeters = hardware.wheelRadius().in(Meters);
@@ -127,7 +127,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     encoderConfig.MagnetSensor.AbsoluteSensorDiscontinuityPoint = 0.5;
     if (!tryUntilOk(
         () -> encoder.getConfigurator().apply(encoderConfig, STARTUP_TIMEOUT_SECONDS))) {
-      unconfigured.add("CANcoder " + wiring.encoderId());
+      unconfigured.add("CANcoder " + wiring.encoderId().orElseThrow());
     }
 
     // The drive reports and controls wheel rotations. Gains and limits come in configure().
@@ -141,7 +141,7 @@ final class ModuleIOTalonFX implements ModuleIO {
     steerConfig.MotorOutput.NeutralMode = NeutralModeValue.Brake;
     steerConfig.MotorOutput.Inverted = direction(wiring.steerInverted());
     steerConfig.Feedback.FeedbackSensorSource = FeedbackSensorSourceValue.RemoteCANcoder;
-    steerConfig.Feedback.FeedbackRemoteSensorID = wiring.encoderId();
+    steerConfig.Feedback.FeedbackRemoteSensorID = wiring.encoderId().orElseThrow();
     steerConfig.Feedback.RotorToSensorRatio = hardware.steerGearing().ratio();
     steerConfig.Feedback.SensorToMechanismRatio = 1;
     steerConfig.ClosedLoopGeneral.ContinuousWrap = true;

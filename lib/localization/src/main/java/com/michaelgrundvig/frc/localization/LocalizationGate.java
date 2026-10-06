@@ -11,7 +11,7 @@ import org.jspecify.annotations.Nullable;
  * Whether an estimate is good enough to act on where precision matters: scoring, aiming, a final
  * approach. A precise-looking pose from dead reckoning, or one the cameras just disagreed with, is
  * not one to shoot from. 254 gated their scoring on vision within 0.5 s and agreeing within 0.2 m;
- * 1678 and 6328 would not shoot while tilted.
+ * Top teams would not shoot while tilted.
  *
  * <p>Commands ask {@link #whyNot} before committing, and show the reason to the drive team when the
  * answer is no.
@@ -29,7 +29,7 @@ public record LocalizationGate(
     double maxDisagreementMeters,
     double maxPositionStdDevMeters,
     double maxTiltDegrees) {
-  /** For scoring: 254's thresholds, and level. */
+  /** For scoring: a top team's thresholds, and level. */
   public static final LocalizationGate SCORING =
       builder()
           .maxVisionAgeSeconds(0.5)

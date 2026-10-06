@@ -3,26 +3,39 @@ package frc.robot.views.world;
 import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Layer;
 import com.michaelgrundvig.frc.pitwall.scene.SceneBuilder;
-import com.michaelgrundvig.frc.world.field.Bump;
+import com.michaelgrundvig.frc.pitwall.scene.Shape;
+import com.michaelgrundvig.frc.world.field.Crossing;
 import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Surface;
+import com.michaelgrundvig.frc.world.field.Tag;
+import com.michaelgrundvig.frc.world.physical.TriangleMesh;
+import com.michaelgrundvig.frc.world.physical.Vector3;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.function.Supplier;
 import org.wpilib.math.geometry.Pose3d;
-import org.wpilib.math.geometry.Translation2d;
 
 /**
- * The field as the field model has it: its walls, its bumps, and its AprilTags where the layout
- * puts them, each with its number. Nothing here moves.
+ * The field as the field model has it: its walls, its raised ground (bumps, ramps, platforms), and
+ * its AprilTags where the layout puts them, each with its number. Nothing here moves.
  */
 final class FieldLayer implements Layer {
   /** An AprilTag's printed square, as FRC's 36h11 tags are: 6.5 in. */
   private static final double TAG_SIZE = 0.1651;
 
-  private final FieldModel field;
+  private final Supplier<FieldModel> active;
 
-  FieldLayer(FieldModel field) {
-    this.field = field;
+  /**
+   * @param active the field the robot believes it plays on: the selected venue's, once there is one
+   */
+  FieldLayer(Supplier<FieldModel> active) {
+    this.active = active;
+  }
+
+  /** The field in use: a new one (a venue selected) is described again. */
+  @Override
+  public Object configuration() {
+    return active.get();
   }
 
   @Override
@@ -37,6 +50,7 @@ final class FieldLayer implements Layer {
 
   @Override
   public void describe(SceneBuilder scene) {
+    FieldModel field = active.get();
     double length = field.length();
     double width = field.width();
     scene
@@ -52,13 +66,13 @@ final class FieldLayer implements Layer {
         .point(length, width, 0)
         .point(0, width, 0)
         .closed();
-    List<Bump> bumps = field.terrain().bumps();
-    for (int i = 0; i < bumps.size(); i++) {
-      bump(scene, "bump." + i, bumps.get(i));
+    List<Surface> surfaces = field.terrain().surfaces();
+    for (int i = 0; i < surfaces.size(); i++) {
+      surface(scene, "surface." + i, surfaces.get(i));
     }
-    for (Map.Entry<Integer, Pose3d> tag : field.tags().entrySet()) {
-      int id = tag.getKey();
-      Pose3d pose = tag.getValue();
+    for (Tag tag : field.tags().values()) {
+      int id = tag.id();
+      Pose3d pose = tag.pose();
       String frame = WorldView.tagFrame(id);
       scene.frame(frame, SceneBuilder.ROOT, pose);
       // The tag's x points out of its face: its square stands in the y-z plane.
@@ -71,34 +85,37 @@ final class FieldLayer implements Layer {
     }
   }
 
-  /** A bump: a ridge along its crest, with a ramp down to the floor on each side. */
-  private static void bump(SceneBuilder scene, String id, Bump bump) {
-    Translation2d across = new Translation2d(bump.depthMeters() / 2, bump.across());
-    Translation2d start = bump.crestStart();
-    Translation2d end = bump.crestEnd();
-    double height = bump.heightMeters();
-    scene
-        .mesh(id, SceneBuilder.ROOT)
-        .vertex(start.getX() - across.getX(), start.getY() - across.getY(), 0) // 0
-        .vertex(start.getX() + across.getX(), start.getY() + across.getY(), 0) // 1
-        .vertex(start.getX(), start.getY(), height) // 2
-        .vertex(end.getX() - across.getX(), end.getY() - across.getY(), 0) // 3
-        .vertex(end.getX() + across.getX(), end.getY() + across.getY(), 0) // 4
-        .vertex(end.getX(), end.getY(), height) // 5
-        .triangle(0, 3, 5)
-        .triangle(0, 5, 2)
-        .triangle(1, 2, 5)
-        .triangle(1, 5, 4)
-        .triangle(0, 2, 1)
-        .triangle(3, 4, 5)
-        .inspect(
-            () ->
-                Inspection.of(bump.name())
-                    .detail("Height", WorldView.meters(bump.heightMeters()))
-                    .detail(
-                        "Ramps",
-                        String.format(Locale.ROOT, "%.1f°", Math.toDegrees(bump.slopeRadians())))
-                    .detail("Crest", WorldView.meters(bump.length()) + " long"));
+  /** Raised ground, as its triangles: a bump's ridge, a ramp, a platform and its ramps. */
+  private static void surface(SceneBuilder scene, String id, Surface surface) {
+    TriangleMesh mesh = surface.mesh();
+    Shape.Mesh shape = scene.mesh(id, SceneBuilder.ROOT);
+    for (Vector3 corner : mesh.corners()) {
+      shape.vertex(corner.x(), corner.y(), corner.z());
+    }
+    for (TriangleMesh.Triangle triangle : mesh.triangles()) {
+      shape.triangle(triangle.a(), triangle.b(), triangle.c());
+    }
+    shape.inspect(() -> inspection(surface));
+  }
+
+  /** How high it stands, how steep its slopes are, and how long each line it can be crossed at. */
+  private static Inspection inspection(Surface surface) {
+    double height = surface.mesh().corners().stream().mapToDouble(Vector3::z).max().orElse(0);
+    Inspection inspection =
+        Inspection.of(surface.name()).detail("Height", WorldView.meters(height));
+    if (surface.steepestSlopeRadians() > 0) {
+      inspection =
+          inspection.detail(
+              "Ramps",
+              String.format(Locale.ROOT, "%.1f°", Math.toDegrees(surface.steepestSlopeRadians())));
+    }
+    for (Crossing crossing : surface.crossings()) {
+      inspection =
+          inspection.detail(
+              crossing.kind() == Crossing.Kind.CREST ? "Crest" : "Top",
+              WorldView.meters(crossing.length()) + " long");
+    }
+    return inspection;
   }
 
   private static Inspection tag(int id, Pose3d pose) {

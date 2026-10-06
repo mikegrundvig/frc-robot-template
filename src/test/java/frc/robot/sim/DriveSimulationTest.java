@@ -222,7 +222,7 @@ class DriveSimulationTest {
     robot.run(robot.drive.driveForward(1.0, 0.8), 1.0);
 
     double moved = robot.simulation.truePose().getX() - start.getX();
-    double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
+    double radius = Robots.SIM.definition().drivetrain().module(0).wheelRadius().in(Meters);
     double rolled = (robot.drive.wheelRotationsRadians()[0] - wheelBefore) * radius;
     assertThat(moved).isGreaterThan(0.5);
     assertThat(rolled).isCloseTo(moved * Math.hypot(1, 0.25), within(0.01));
@@ -251,7 +251,7 @@ class DriveSimulationTest {
 
   /** The four drive motors' push at their stator limit, in newtons. */
   private static double limitForceNewtons() {
-    DrivetrainGeometry.Modules modules = Robots.SIM.definition().drivetrain().modules();
+    DrivetrainGeometry.ModuleType modules = Robots.SIM.definition().drivetrain().module(0);
     DCMotor motor = modules.driveMotor().model();
     return 4
         * motor.Kt
@@ -262,7 +262,7 @@ class DriveSimulationTest {
 
   /** The robot's mass with its wheels' own inertia as mass at their treads, in kilograms. */
   private static double effectiveKilograms(double kilograms) {
-    DrivetrainGeometry.Modules modules = Robots.SIM.definition().drivetrain().modules();
+    DrivetrainGeometry.ModuleType modules = Robots.SIM.definition().drivetrain().module(0);
     double radius = modules.wheelRadius().in(Meters);
     return kilograms + 4 * modules.driveInertia().in(KilogramSquareMeters) / (radius * radius);
   }
@@ -272,8 +272,9 @@ class DriveSimulationTest {
    * average acceleration over 0.3 s, in m/s², while every motor stays at its stator limit.
    */
   private static double accelerationFromRest(double kilograms) {
+    Body weighed = Robots.SIM.definition().body();
     Body body =
-        BodyBuilder.builder(Robots.SIM.definition().body()).mass(Kilograms.of(kilograms)).build();
+        BodyBuilder.builder(weighed).weight(Body.Weight.weighed(Kilograms.of(kilograms))).build();
     DrivetrainControl drivetrain = Robots.SIM.drivetrain();
     DriveSimulation simulation =
         new DriveSimulation(body, Robots.SIM.definition().drivetrain(), SensorErrors.NONE);

@@ -190,7 +190,7 @@ class SeedsTruthSimTest {
     TruthRig rig =
         new TruthRig(
             Robots.SIM.definition().body(),
-            Robots.SIM.definition().drivetrain().modules().wheelCoefficientOfFriction(),
+            Robots.SIM.definition().drivetrain().wheelCoefficientOfFriction(),
             errors);
     List<Long> bits = new ArrayList<>();
     for (int loop = 0; loop < 150; loop++) {

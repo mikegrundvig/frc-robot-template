@@ -85,7 +85,7 @@ class DriveBasicsTest {
     Pose3d[] wheels = harness.drive.modulePoses();
 
     Translation2d[] corners = Robots.SIM.definition().moduleTranslations();
-    double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
+    double radius = Robots.SIM.definition().drivetrain().module(0).wheelRadius().in(Meters);
     assertEquals(4, wheels.length);
     for (int i = 0; i < 4; i++) {
       assertEquals(corners[i].getX(), wheels[i].getX(), 1e-9, "module " + i + " forward");

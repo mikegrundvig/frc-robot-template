@@ -8,7 +8,9 @@ import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
+import com.michaelgrundvig.frc.world.physical.Inertia;
 import java.util.List;
+import java.util.Optional;
 import org.wpilib.math.geometry.Translation3d;
 
 /**
@@ -24,10 +26,15 @@ public final class ConfigFixtures {
         .frameLength(Inches.of(28))
         .frameWidth(Inches.of(24))
         .height(Inches.of(30))
-        .bumperThickness(Inches.of(3.5))
-        .mass(Kilograms.of(60))
-        .yawMomentOfInertia(KilogramSquareMeters.of(6))
-        .cgHeight(Meters.of(0.2))
+        .bumperEnds(Inches.of(3.5))
+        .bumperSides(Inches.of(3.5))
+        .bumperBottom(Inches.of(2.5))
+        .bumperTop(Inches.of(5.75))
+        .weight(Body.Weight.weighed(Kilograms.of(60)))
+        .cg(new Translation3d(0, 0, 0.2))
+        .inertia(
+            Body.Turning.tensor(
+                Inertia.builder().ixx(6).iyy(6).izz(6).ixy(0).ixz(0).iyz(0).build()))
         .build();
   }
 
@@ -37,8 +44,8 @@ public final class ConfigFixtures {
   }
 
   /** Kraken X60 drive at 6.75:1 on 2 in radius wheels: 4.73 m/s free speed. */
-  public static DrivetrainGeometry.Modules modules() {
-    return DrivetrainGeometry.Modules.builder()
+  public static DrivetrainGeometry.ModuleType modules() {
+    return DrivetrainGeometry.ModuleType.builder()
         .driveMotor(Motor.KRAKEN_X60)
         .steerMotor(Motor.KRAKEN_X44)
         .wheelRadius(Inches.of(2))
@@ -47,12 +54,13 @@ public final class ConfigFixtures {
         .wheelCoefficientOfFriction(1.2)
         .driveInertia(KilogramSquareMeters.of(0.001))
         .steerInertia(KilogramSquareMeters.of(0.004))
+        .couplingRatio(0)
         .build();
   }
 
   /** Wheels 2.625 in in from the frame's edges. */
   public static DrivetrainGeometry drivetrain() {
-    return DrivetrainGeometry.builder().modules(modules()).wheelInset(Inches.of(2.625)).build();
+    return DrivetrainGeometry.inset(modules(), body(), Inches.of(2.625));
   }
 
   /** A 1280 x 800 camera with an 80 degree field of view. */
@@ -60,7 +68,8 @@ public final class ConfigFixtures {
     return CameraConfig.Sensor.builder()
         .widthPixels(1280)
         .heightPixels(800)
-        .diagonalFieldOfView(Degrees.of(80))
+        .fieldOfView(Degrees.of(80))
+        .fieldOfViewAcross(CameraConfig.Across.DIAGONAL)
         .frameRate(Hertz.of(30))
         .latency(Milliseconds.of(30))
         .sightRange(Meters.of(7))
@@ -79,6 +88,7 @@ public final class ConfigFixtures {
         .yaw(Degrees.of(0))
         .sensor(sensor())
         .noiseScale(1.0)
+        .joint(Optional.empty())
         .build();
   }
 
@@ -90,6 +100,12 @@ public final class ConfigFixtures {
         .drivetrain(drivetrain())
         .cameras(cameras)
         .imus(Imus.UNCHECKED)
+        .joints(List.of())
+        .couplings(List.of())
+        .drives(List.of())
+        .sensors(List.of())
+        .configurations(List.of())
+        .interlocks(List.of())
         .build();
   }
 }

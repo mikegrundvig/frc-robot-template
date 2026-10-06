@@ -298,6 +298,9 @@ table { border-collapse: collapse; }
 .dstate { margin-left: auto; font-size: var(--body); font-weight: 600; }
 .device .slist li { grid-template-columns: 26px minmax(80px, 8em) minmax(0, 1fr); }
 .device .acts { margin-top: 10px; }
+.dchoices:empty { display: none; }
+.dchoice { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; margin-top: 10px; }
+.dchoice select { max-width: 100%; }
 a.button { display: inline-flex; align-items: center; min-height: var(--row); padding: var(--s1) var(--s3);
            border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface);
            color: var(--text); text-decoration: none; }

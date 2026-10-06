@@ -97,7 +97,17 @@ public final class VisionSim implements AutoCloseable {
    * it's mounted now, which its images are taken from.
    */
   private record Added(
-      PhotonCameraSim simulated, Transform3d configured, double latencyMillis, Transform3d mount) {}
+      PhotonCameraSim simulated,
+      Transform3d configured,
+      double latencyMillis,
+      Transform3d mountError,
+      Transform3d mount) {}
+
+  /**
+   * Where each camera on a joint was carried, by name, over the history kept, for the moment each
+   * image is taken: on the configured mount's place, before its mount error.
+   */
+  private final Map<String, TimeInterpolatableBuffer<Pose3d>> carried = new LinkedHashMap<>();
 
   private final Map<String, Added> byName = new LinkedHashMap<>();
 
@@ -231,13 +241,19 @@ public final class VisionSim implements AutoCloseable {
             layout);
     // Tags farther than the camera's sight range are not detected: small in the image, and noisy.
     simulated.setMaxSightRange(config.sensor().sightRange().in(Meters));
+    // No video: PhotonVision renders a raw and a processed frame of every image by default, native
+    // memory freed only when the collector gets to it (a study's process grew past 4 GB). Nothing
+    // here views them, and what the camera detects doesn't depend on them.
+    simulated.enableRawStream(false);
+    simulated.enableProcessedStream(false);
     Transform3d configured = config.robotToCamera();
     Transform3d mount = mounted(configured, mountError);
     world.addCamera(simulated, mount);
     cameras.add(simulated);
     byName.put(
         config.name(),
-        new Added(simulated, configured, config.sensor().latency().in(Milliseconds), mount));
+        new Added(
+            simulated, configured, config.sensor().latency().in(Milliseconds), mountError, mount));
     return io;
   }
 
@@ -254,7 +270,24 @@ public final class VisionSim implements AutoCloseable {
     Transform3d mount = mounted(added.configured(), mountError);
     world.adjustCamera(added.simulated(), mount);
     byName.put(
-        camera, new Added(added.simulated(), added.configured(), added.latencyMillis(), mount));
+        camera,
+        new Added(added.simulated(), added.configured(), added.latencyMillis(), mountError, mount));
+  }
+
+  /**
+   * Where a camera on a joint is now, in the robot's frame, as the joint has carried it: images
+   * taken from now on see from there, with its mount error. Call once per loop, before {@link
+   * #update}.
+   *
+   * @throws IllegalArgumentException if no camera has this name
+   */
+  public void carry(String camera, Transform3d mount) {
+    added(camera);
+    carried
+        .computeIfAbsent(camera, name -> TimeInterpolatableBuffer.createBuffer(HISTORY_SECONDS))
+        .addSample(
+            sinceStart(RobotController.getMonotonicTime()),
+            new Pose3d(mount.getTranslation(), mount.getRotation()));
   }
 
   /**
@@ -354,7 +387,7 @@ public final class VisionSim implements AutoCloseable {
       double latencyMillis = camera.prop.estLatencyMs();
       long takenNanos = arrivedNanos - Math.round(latencyMillis * 1e6);
       Pose3d robot = truths.getSample(sinceStart(takenNanos)).orElse(truth);
-      Pose3d from = robot.plus(added.getValue().mount());
+      Pose3d from = robot.plus(mountAt(added.getKey(), added.getValue(), takenNanos));
       PhotonPipelineResult image = camera.process(latencyMillis, from, targets);
       image.metadata.captureTimestampNanos =
           takenNanos + clockOffsets.getOrDefault(added.getKey(), 0L);
@@ -363,6 +396,22 @@ public final class VisionSim implements AutoCloseable {
     }
     // Every image due is taken, so PhotonVision's own update only keeps its record of the robot.
     world.update(truth);
+  }
+
+  /**
+   * Where a camera was on the robot when an image was taken: carried by its joint, if it rides one.
+   */
+  private Transform3d mountAt(String camera, Added added, long takenNanos) {
+    TimeInterpolatableBuffer<Pose3d> joint = carried.get(camera);
+    if (joint == null) {
+      return added.mount();
+    }
+    return joint
+        .getSample(sinceStart(takenNanos))
+        .map(
+            at ->
+                mounted(new Transform3d(at.getTranslation(), at.getRotation()), added.mountError()))
+        .orElse(added.mount());
   }
 
   /** How long after this world began a moment on the robot's clock was, in seconds. */

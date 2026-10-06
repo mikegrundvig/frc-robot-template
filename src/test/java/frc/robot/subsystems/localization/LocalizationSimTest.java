@@ -11,7 +11,6 @@ import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.localization.SlipCheck;
-import com.michaelgrundvig.frc.localization.TerrainCrossing;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.YawSource;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
@@ -31,6 +30,7 @@ import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -301,37 +301,6 @@ class LocalizationSimTest {
     return most;
   }
 
-  /** Over a bump, nose up then nose down: the drivetrain follows the crossing from its IMU. */
-  @Test
-  void theDrivetrainFollowsTheRobotOverABump() {
-    DriveSimHarness robot = robot(SensorErrors.NONE);
-    robot.drive(0.6, 0.5, 0, 0); // 1.1 m/s ahead
-    List<TerrainCrossing.Phase> phases =
-        new ArrayList<>(List.of(robot.localization.terrainPhase()));
-    robot.eachLoop(
-        () -> {
-          TerrainCrossing.Phase now = robot.localization.terrainPhase();
-          if (phases.isEmpty() || phases.get(phases.size() - 1) != now) {
-            phases.add(now);
-          }
-        });
-
-    robot.simulation.tilt(Math.toRadians(-15), 0); // nose up
-    robot.drive(0.3, 0.5, 0, 0);
-    robot.simulation.tilt(Math.toRadians(15), 0); // over the crest, nose down
-    robot.drive(0.3, 0.5, 0, 0);
-    robot.simulation.tilt(0, 0);
-    robot.drive(0.3, 0.5, 0, 0);
-
-    assertThat(phases)
-        .containsExactly(
-            TerrainCrossing.Phase.LEVEL,
-            TerrainCrossing.Phase.CLIMBING,
-            TerrainCrossing.Phase.DESCENDING,
-            TerrainCrossing.Phase.LEVEL);
-    assertThat(robot.localization.terrainCrossings()).isEqualTo(1);
-  }
-
   /** Drives the route with the gyro unplugged a second in; returns the heading error at the end. */
   private static double loseTheGyro(DriveSimHarness robot, boolean backupToo) {
     robot.drive(1.0, 0.5, 0, 0.3);
@@ -562,13 +531,13 @@ class LocalizationSimTest {
             .accelerometerChecked(false)
             .build();
     ImuMount backup =
-        ImuMountBuilder.builder(Robots.SIM.definition().imus().backup())
+        ImuMountBuilder.builder(Robots.SIM.definition().imus().backup().orElseThrow())
             .accelerometerChecked(false)
             .build();
     return RobotConfigBuilder.builder(Robots.SIM)
         .definition(
             RobotDefinitionBuilder.builder(Robots.SIM.definition())
-                .imus(Imus.builder().gyro(gyro).backup(backup).build())
+                .imus(Imus.builder().gyro(gyro).backup(Optional.of(backup)).build())
                 .build())
         .build();
   }
@@ -816,11 +785,7 @@ class LocalizationSimTest {
     DriveSimHarness robot = robot(SensorErrors.NONE);
     FakeCamera camera = camera(robot);
     SwerveDriveKinematics kinematics =
-        new SwerveDriveKinematics(
-            Robots.SIM
-                .definition()
-                .drivetrain()
-                .moduleTranslations(Robots.SIM.definition().body()));
+        new SwerveDriveKinematics(Robots.SIM.definition().drivetrain().moduleTranslations());
     SwerveDrivePoseEstimator wpilib =
         new SwerveDrivePoseEstimator(
             kinematics, robot.drive.gyroYaw(), robot.drive.modulePositions(), Pose2d.ZERO);

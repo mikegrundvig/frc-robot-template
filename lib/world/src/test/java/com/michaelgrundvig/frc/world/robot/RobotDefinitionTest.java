@@ -1,6 +1,5 @@
 package com.michaelgrundvig.frc.world.robot;
 
-import static com.michaelgrundvig.frc.world.robot.ConfigFixtures.body;
 import static com.michaelgrundvig.frc.world.robot.ConfigFixtures.camera;
 import static com.michaelgrundvig.frc.world.robot.ConfigFixtures.definition;
 import static com.michaelgrundvig.frc.world.robot.ConfigFixtures.drivetrain;
@@ -10,6 +9,7 @@ import static org.wpilib.units.Units.Inches;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation3d;
@@ -17,19 +17,20 @@ import org.wpilib.math.geometry.Translation3d;
 /** A robot's parts are checked against each other when the definition is written down. */
 class RobotDefinitionTest {
   @Test
-  void wheelPositionsComeFromTheFrameAndDrivetrain() {
+  void wheelPositionsComeFromTheDrivetrain() {
     assertThat(definition(List.of()).moduleTranslations())
-        .containsExactly(drivetrain().moduleTranslations(body()));
+        .containsExactly(drivetrain().moduleTranslations());
   }
 
   @Test
   void theWheelsMustFitTheFrame() {
-    var tooDeep = DrivetrainGeometryBuilder.builder(drivetrain()).wheelInset(Inches.of(14)).build();
+    var tooWide =
+        DrivetrainGeometry.uniform(ConfigFixtures.modules(), Inches.of(11), Inches.of(13));
 
     assertThatIllegalArgumentException()
         .isThrownBy(
-            () -> RobotDefinitionBuilder.builder(definition(List.of())).drivetrain(tooDeep).build())
-        .withMessageStartingWith("RobotDefinition[test].drivetrain.wheelInset");
+            () -> RobotDefinitionBuilder.builder(definition(List.of())).drivetrain(tooWide).build())
+        .withMessageStartingWith("RobotDefinition[test].drivetrain.corners");
   }
 
   /** A robot has a name, which every message about its definition starts with. */
@@ -85,7 +86,7 @@ class RobotDefinitionTest {
         .isThrownBy(
             () ->
                 RobotDefinitionBuilder.builder(robot)
-                    .imus(ImusBuilder.builder(Imus.UNCHECKED).backup(high).build())
+                    .imus(ImusBuilder.builder(Imus.UNCHECKED).backup(Optional.of(high)).build())
                     .build())
         .withMessageContaining("the backup IMU is outside the robot");
     assertThatIllegalArgumentException()
@@ -95,6 +96,14 @@ class RobotDefinitionTest {
                     .imus(ImusBuilder.builder(Imus.UNCHECKED).gyro(behind).build())
                     .build())
         .withMessageContaining("the gyro is outside the robot");
+    assertThat(
+            RobotDefinitionBuilder.builder(robot)
+                .imus(ImusBuilder.builder(Imus.UNCHECKED).backup(Optional.empty()).build())
+                .build()
+                .imus()
+                .backup())
+        .as("a roboRIO robot has no backup IMU")
+        .isEmpty();
   }
 
   @Test

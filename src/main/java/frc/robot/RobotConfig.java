@@ -1,12 +1,22 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import frc.robot.lib.wiring.CanIds;
+import frc.robot.lib.wiring.MechanismWiring;
+import frc.robot.lib.wiring.SensorWiring;
 import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.subsystems.drive.DrivetrainControl;
+import frc.robot.subsystems.mechanisms.JointSetup;
+import frc.robot.subsystems.mechanisms.Joints;
+import frc.robot.subsystems.mechanisms.Sensors;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -27,6 +37,11 @@ import java.util.Optional;
  * @param vision how far the cameras' images are trusted, and which are left out: the thresholds and
  *     uncertainties, some tunable live
  * @param estimator how the pose estimator weighs odometry, the gyro, and the cameras
+ * @param joints each joint its motors drive, as this program drives it: its control, and its wiring
+ *     on a robot. One for every such joint in the definition, from which the template builds its
+ *     mechanism; none for the drivetrain's, which is driven above
+ * @param sensors where each of the definition's switches and rangefinders is connected, on a robot:
+ *     none for one that only runs in the simulator
  */
 @ConfigRecord
 public record RobotConfig(
@@ -34,12 +49,30 @@ public record RobotConfig(
     DrivetrainControl drivetrain,
     Optional<SwerveWiring> drivetrainWiring,
     VisionConfig vision,
-    EstimatorConfig estimator) {
+    EstimatorConfig estimator,
+    List<JointSetup> joints,
+    List<SensorWiring> sensors) {
   public RobotConfig {
+    joints = List.copyOf(joints);
+    sensors = List.copyOf(sensors);
+    List<JointSetup> setups = joints;
+    List<SensorWiring> sensorWiring = sensors;
     Checks.on(RobotConfig.class, definition.name())
         .check(
             "drivetrain.limits.maxLinearSpeed",
             () -> drivetrain.whyTooFastFor(definition.drivetrain()))
+        .check(
+            "drivetrainWiring",
+            () ->
+                drivetrainWiring
+                    .map(wiring -> DrivetrainControl.whyNotDriven(definition.drivetrain(), wiring))
+                    .orElse(null))
+        .check("joints", () -> JointSetup.problems(definition, setups))
+        .check("joints", () -> CanIds.twice(drivetrainWiring, wired(setups)))
+        .check("sensors", () -> CanIds.sensorsTwice(drivetrainWiring, wired(setups), sensorWiring))
+        .check("sensors", () -> Sensors.wiringProblems(definition, wired(setups), sensorWiring))
+        .check("definition", () -> LocalizationService.problems(definition))
+        .check("definition.interlocks", () -> Joints.unenforceable(definition))
         .orThrow();
   }
 
@@ -51,5 +84,14 @@ public record RobotConfig(
   /** Which robot this is, as its logs name it: its definition's name. */
   public String name() {
     return definition.name();
+  }
+
+  /** Each wired joint's wiring, by its label. */
+  private static Map<String, MechanismWiring> wired(List<JointSetup> setups) {
+    Map<String, MechanismWiring> wired = new LinkedHashMap<>();
+    for (JointSetup setup : setups) {
+      setup.wiring().ifPresent(wiring -> wired.put(setup.joint().label(), wiring));
+    }
+    return wired;
   }
 }

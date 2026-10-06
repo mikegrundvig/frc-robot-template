@@ -86,7 +86,9 @@ class FieldGridTest {
 
   @Test
   void aRobotTooBigForTheFieldIsRefused() {
-    Body huge = BodyBuilder.builder(BODY).frameWidth(Meters.of(9)).build();
+    // Its yaw the box's too: the template's 6.7 kg m² can't stand beside a 9 m robot's roll.
+    Body huge =
+        BodyBuilder.builder(BODY).frameWidth(Meters.of(9)).inertia(Body.Turning.BOX).build();
 
     assertThatThrownBy(() -> new FieldGrid(WALL, huge, 0.5, 8, Weights.NONE, 1))
         .hasMessageContaining("doesn't fit");

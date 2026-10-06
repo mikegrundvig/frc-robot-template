@@ -383,7 +383,7 @@ class FaultsTest {
   void aSpinningWheelCountsTravelTheFloorNeverSawUntilItGrips() {
     SimulatedWorld world = world();
     ModuleIO module = world.drivetrainHardware().modules().get(2);
-    double radius = Robots.SIM.definition().drivetrain().modules().wheelRadius().in(Meters);
+    double radius = Robots.SIM.definition().drivetrain().module(0).wheelRadius().in(Meters);
     double before = read(module).drivePositionRad;
 
     apply(FaultCatalog.module(2), FaultCatalog.SPINNING, Map.of(FaultCatalog.SPEED, 0.5));

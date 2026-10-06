@@ -4,8 +4,10 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Radians;
 
+import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -32,7 +34,7 @@ import org.wpilib.math.geometry.Translation3d;
  * <ul>
  *   <li>the frame, a see-through box at the frame's length and width, from the bumpers' bottom to
  *       the robot's height, so what's inside it shows;
- *   <li>the bumpers, a ring as thick as they are, filling the rules' bumper zone;
+ *   <li>the bumpers, a ring as thick as they are, from their bottom to their top;
  *   <li>an arrow on the frame's top pointing forward;
  *   <li>each camera, a small box at its lens with an arrow along its optical axis, and its field of
  *       view, a see-through pyramid out to its sight range;
@@ -43,11 +45,11 @@ import org.wpilib.math.geometry.Translation3d;
  * </ul>
  *
  * <p><b>What it drops</b> ({@link #DROPPED}; a test pins the list): everything that isn't drawn.
- * The mass, its inertia and the center of gravity; the drivetrain's motors, gearing, grip and
- * inertias; each camera's noise, frame rate and latency. How the drivetrain is driven (its limits
- * and gains), the robot's vision and estimator settings, its wiring, the backup IMU, and the gyro's
- * orientation and accelerometer check never reach it. The fields of view are fixed to the frame, so
- * a camera that rode on a mechanism would need its cone posed with it; none can yet.
+ * The mass, its inertia and the center of gravity; the drivetrain's motors, gearing, coupling, grip
+ * and inertias; each camera's noise, frame rate and latency; a camera that rides a mechanism, whose
+ * cone would need posing with its joint. The mechanisms themselves aren't drawn yet. How the
+ * drivetrain is driven (its limits and gains), the robot's vision and estimator settings, its
+ * wiring, the backup IMU, and the gyro's orientation and accelerometer check never reach it.
  *
  * <p><b>Two models a robot.</b> {@code Robot_<name>/} is the robot with its cameras' fields of
  * view; {@code Robot_<name>_NoCones/} is the same without them, for a second copy drawn beside it
@@ -80,10 +82,14 @@ public final class AdvantageScopeAssets {
           "Body.frameLength",
           "Body.frameWidth",
           "Body.height",
-          "Body.bumperThickness",
-          "DrivetrainGeometry.modules",
-          "DrivetrainGeometry.wheelInset",
-          "DrivetrainGeometry.Modules.wheelRadius",
+          "Body.bumperEnds",
+          "Body.bumperSides",
+          "Body.bumperBottom",
+          "Body.bumperTop",
+          "DrivetrainGeometry.corners",
+          "DrivetrainGeometry.Corner.module",
+          "DrivetrainGeometry.Corner.position",
+          "DrivetrainGeometry.ModuleType.wheelRadius",
           "CameraConfig.name",
           "CameraConfig.forward",
           "CameraConfig.left",
@@ -94,23 +100,26 @@ public final class AdvantageScopeAssets {
           "CameraConfig.sensor",
           "CameraConfig.Sensor.widthPixels",
           "CameraConfig.Sensor.heightPixels",
-          "CameraConfig.Sensor.diagonalFieldOfView",
+          "CameraConfig.Sensor.fieldOfView",
+          "CameraConfig.Sensor.fieldOfViewAcross",
           "CameraConfig.Sensor.sightRange");
 
   /** The configuration values the model leaves out: AdvantageScope has no place for them. */
   public static final List<String> DROPPED =
       List.of(
-          "Body.mass",
-          "Body.yawMomentOfInertia",
-          "Body.cgHeight",
-          "DrivetrainGeometry.Modules.driveMotor",
-          "DrivetrainGeometry.Modules.steerMotor",
-          "DrivetrainGeometry.Modules.driveGearing",
-          "DrivetrainGeometry.Modules.steerGearing",
-          "DrivetrainGeometry.Modules.wheelCoefficientOfFriction",
-          "DrivetrainGeometry.Modules.driveInertia",
-          "DrivetrainGeometry.Modules.steerInertia",
+          "Body.weight",
+          "Body.cg",
+          "Body.inertia",
+          "DrivetrainGeometry.ModuleType.driveMotor",
+          "DrivetrainGeometry.ModuleType.steerMotor",
+          "DrivetrainGeometry.ModuleType.driveGearing",
+          "DrivetrainGeometry.ModuleType.steerGearing",
+          "DrivetrainGeometry.ModuleType.wheelCoefficientOfFriction",
+          "DrivetrainGeometry.ModuleType.driveInertia",
+          "DrivetrainGeometry.ModuleType.steerInertia",
+          "DrivetrainGeometry.ModuleType.couplingRatio",
           "CameraConfig.noiseScale",
+          "CameraConfig.joint",
           "CameraConfig.Sensor.frameRate",
           "CameraConfig.Sensor.latency");
 
@@ -120,16 +129,6 @@ public final class AdvantageScopeAssets {
    * front (+z, now -y) to +x.
    */
   static final List<Map<String, Object>> GLTF_TO_ROBOT = List.of(turn("x", 90), turn("z", 90));
-
-  private static final double INCH = 0.0254;
-
-  /**
-   * The rules' bumper zone, which bumpers must fill: from 2.5 in to 5.75 in above the floor (the
-   * 2026 manual's R405). The next season's manual replaces it at kickoff.
-   */
-  static final double BUMPER_BOTTOM_METERS = 2.5 * INCH;
-
-  static final double BUMPER_TOP_METERS = 5.75 * INCH;
 
   /** A wheel is drawn this wide for its radius: a 4 in wheel 1.5 in wide, as typical. */
   private static final double WHEEL_WIDTH_PER_RADIUS = 0.75;
@@ -297,14 +296,15 @@ public final class AdvantageScopeAssets {
     config.put("position", List.of(0.0, 0.0, 0.0));
     List<Object> cameras = new ArrayList<>();
     if (withCones) {
-      for (CameraConfig camera : robot.cameras()) {
+      for (CameraConfig camera : onChassis(robot)) {
         cameras.add(camera(camera));
       }
     }
     config.put("cameras", cameras);
     List<Object> components = new ArrayList<>();
-    double radius = robot.drivetrain().modules().wheelRadius().in(Meters);
-    for (Translation2d wheel : robot.drivetrain().moduleTranslations(robot.body())) {
+    for (DrivetrainGeometry.Corner corner : robot.drivetrain().corners()) {
+      Translation2d wheel = corner.position();
+      double radius = corner.module().wheelRadius().in(Meters);
       Map<String, Object> component = new LinkedHashMap<>();
       component.put("zeroedRotations", GLTF_TO_ROBOT);
       component.put("zeroedPosition", List.of(-wheel.getX(), -wheel.getY(), -radius));
@@ -368,22 +368,23 @@ public final class AdvantageScopeAssets {
     double length = body.frameLength().in(Meters);
     double width = body.frameWidth().in(Meters);
     double height = body.height().in(Meters);
-    double bumper = body.bumperThickness().in(Meters);
+    double ends = body.bumperEnds().in(Meters);
+    double sides = body.bumperSides().in(Meters);
+    double low = body.bumperBottom().in(Meters);
+    double high = body.bumperTop().in(Meters);
     List<Mesh> meshes = new ArrayList<>();
 
     Mesh frame = new Mesh("frame", FRAME);
-    if (height > BUMPER_BOTTOM_METERS) {
+    if (height > low) {
       frame.box(
           Frame.ROBOT,
-          new Vector3(-length / 2, -width / 2, BUMPER_BOTTOM_METERS),
+          new Vector3(-length / 2, -width / 2, low),
           new Vector3(length / 2, width / 2, height));
     }
     meshes.add(frame);
 
-    double outsideX = length / 2 + bumper;
-    double outsideY = width / 2 + bumper;
-    double low = BUMPER_BOTTOM_METERS;
-    double high = BUMPER_TOP_METERS;
+    double outsideX = length / 2 + ends;
+    double outsideY = width / 2 + sides;
     meshes.add(
         new Mesh("bumpers", BUMPERS)
             .box(
@@ -424,7 +425,7 @@ public final class AdvantageScopeAssets {
               meshes.add(new Mesh("imu", IMU).box(at, half.times(-1), half));
             });
 
-    for (CameraConfig camera : robot.cameras()) {
+    for (CameraConfig camera : onChassis(robot)) {
       Frame lens = lens(camera);
       double shaft = CAMERA_ARROW_METERS * 0.7;
       double head = 0.02;
@@ -449,10 +450,10 @@ public final class AdvantageScopeAssets {
    * forward. A model of its own each, for AdvantageScope to turn.
    */
   static List<Mesh[]> wheels(RobotDescription robot) {
-    double radius = robot.drivetrain().modules().wheelRadius().in(Meters);
-    Translation2d[] places = robot.drivetrain().moduleTranslations(robot.body());
+    Translation2d[] places = robot.drivetrain().moduleTranslations();
     List<Mesh[]> wheels = new ArrayList<>();
     for (int i = 0; i < places.length; i++) {
+      double radius = robot.drivetrain().module(i).wheelRadius().in(Meters);
       Frame at = Frame.at(new Vector3(places[i].getX(), places[i].getY(), radius));
       String name = i < WHEELS.size() ? WHEELS.get(i) : "module " + i;
       wheels.add(
@@ -475,12 +476,20 @@ public final class AdvantageScopeAssets {
   }
 
   /**
+   * The cameras fixed to the chassis: a camera that rides a mechanism moves with its joint, which a
+   * model drawn once can't follow, so it's left out.
+   */
+  private static List<CameraConfig> onChassis(RobotDescription robot) {
+    return robot.cameras().stream().filter(camera -> camera.joint().isEmpty()).toList();
+  }
+
+  /**
    * Each camera's field of view: a pyramid from its lens out to its sight range along its optical
    * axis, as wide and tall as the image sees there.
    */
   static List<Mesh> cones(RobotDescription robot) {
     List<Mesh> cones = new ArrayList<>();
-    for (CameraConfig camera : robot.cameras()) {
+    for (CameraConfig camera : onChassis(robot)) {
       CameraConfig.Sensor sensor = camera.sensor();
       double reach = sensor.sightRange().in(Meters);
       double across = reach * StrictMath.tan(halfAngle(sensor, sensor.widthPixels()));

@@ -32,4 +32,9 @@ public record Gearing(double ratio, double efficiency) {
   public static GearingBuilder.RatioStage builder() {
     return GearingBuilder.builder();
   }
+
+  /** A reduction whose losses aren't measured yet: {@code Gearing.of(25)}, losing nothing. */
+  public static Gearing of(double ratio) {
+    return builder().ratio(ratio).efficiency(1.0).build();
+  }
 }

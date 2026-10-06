@@ -22,8 +22,8 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  *     far it may have put their travel off) counts as suspect travel: 1 counts all of it
  * @param tiltStartDegrees below this tilt the wheels are trusted fully
  * @param tiltZeroDegrees at and above this tilt the wheels' travel counts for nothing: a robot
- *     climbing a bump or a ramp has wheels in the air (6328 scaled to zero at 25 degrees). Between
- *     the two, their travel counts for less, and the share left out counts as suspect.
+ *     climbing a bump or a ramp has wheels in the air (a top team scaled to zero at 25 degrees).
+ *     Between the two, their travel counts for less, and the share left out counts as suspect.
  * @param slipCorrelationSeconds how long slip keeps its direction. Suspect travel within this time
  *     adds up before it's squared: a slip that builds one way for a quarter second grows the
  *     uncertainty as one error, not as many small ones that would average out.
@@ -79,8 +79,6 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  *     Mahalanobis distance may not exceed this (13.8 passes 99.9% of good measurements, 2 degrees
  *     of freedom)
  * @param gateChiSquaredPose the same for a measurement with heading (16.3: 99.9%, 3 degrees)
- * @param gateChiSquaredAxis the same for a landmark, which measures one axis (10.8: 99.9%, 1
- *     degree)
  * @param recoveryMeasurements how many rejected measurements must agree with each other, within the
  *     recovery window, before odometry is judged wrong and the estimate jumps to them
  * @param recoveryWindowSeconds how recent those rejected measurements must be
@@ -124,7 +122,6 @@ public record EstimatorConfig(
     double disagreementWindowSeconds,
     double gateChiSquaredPosition,
     double gateChiSquaredPose,
-    double gateChiSquaredAxis,
     int recoveryMeasurements,
     double recoveryWindowSeconds,
     double recoveryAgreementMeters,
@@ -163,7 +160,6 @@ public record EstimatorConfig(
           .disagreementWindowSeconds(0.5)
           .gateChiSquaredPosition(13.816)
           .gateChiSquaredPose(16.266)
-          .gateChiSquaredAxis(10.828)
           .recoveryMeasurements(3)
           .recoveryWindowSeconds(1.0)
           .recoveryAgreementMeters(0.25)
@@ -203,7 +199,6 @@ public record EstimatorConfig(
         .field("disagreementWindowSeconds", disagreementWindowSeconds, positive())
         .field("gateChiSquaredPosition", gateChiSquaredPosition, positive())
         .field("gateChiSquaredPose", gateChiSquaredPose, positive())
-        .field("gateChiSquaredAxis", gateChiSquaredAxis, positive())
         .field("recoveryMeasurements", recoveryMeasurements, atLeast(2))
         .field("recoveryWindowSeconds", recoveryWindowSeconds, positive())
         .field("recoveryAgreementMeters", recoveryAgreementMeters, nonNegative())

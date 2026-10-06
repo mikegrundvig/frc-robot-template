@@ -4,19 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import com.michaelgrundvig.frc.world.physical.Polygon2d;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.shape.Rectangle2d;
 
 class ZoneTest {
   private final FieldModel field = TestFields.model();
 
   /** The blue alliance's end of the field, 3 m deep. */
-  private final Rectangle2d blueEnd =
-      new Rectangle2d(new Translation2d(0, 0), new Translation2d(3, 8));
+  private final Polygon2d blueEnd =
+      Polygon2d.rectangle(new Translation2d(0, 0), new Translation2d(3, 8));
 
   private final Zone ours = Zone.ours("Alliance zone", blueEnd);
 
@@ -36,7 +36,7 @@ class ZoneTest {
   @Test
   void aZoneOnBothHalvesIsEachAreaAndItsImage() {
     Zone trench =
-        Zone.both("Trench", new Rectangle2d(new Translation2d(4, 7), new Translation2d(5, 8)));
+        Zone.both("Trench", Polygon2d.rectangle(new Translation2d(5, 8), new Translation2d(4, 7)));
 
     assertThat(trench.areas(field, Alliance.BLUE)).hasSize(2);
     for (Alliance alliance : Alliance.values()) {
@@ -73,18 +73,59 @@ class ZoneTest {
   @Test
   void aPathCanCutThroughATurnedArea() {
     // A 1 m square turned 45°: a diamond reaching 0.71 m from its center along each axis.
-    Rectangle2d diamond = new Rectangle2d(new Pose2d(8, 4, Rotation2d.fromDegrees(45)), 1, 1);
+    Zone diamond =
+        Zone.ours(
+            "Diamond", Polygon2d.rectangle(new Pose2d(8, 4, Rotation2d.fromDegrees(45)), 1, 1));
 
-    assertThat(Zone.crosses(diamond, new Translation2d(7, 4), new Translation2d(9, 4))).isTrue();
-    assertThat(Zone.crosses(diamond, new Translation2d(7, 4.8), new Translation2d(9, 4.8)))
+    assertThat(reaches(diamond, new Translation2d(7, 4), new Translation2d(9, 4))).isTrue();
+    assertThat(reaches(diamond, new Translation2d(7, 4.8), new Translation2d(9, 4.8)))
         .as("passes above its top corner")
         .isFalse();
-    assertThat(Zone.crosses(diamond, new Translation2d(8, 2), new Translation2d(8, 3.2)))
+    assertThat(reaches(diamond, new Translation2d(8, 2), new Translation2d(8, 3.2)))
         .as("stops short")
         .isFalse();
-    assertThat(Zone.crosses(diamond, new Translation2d(7, 4.8), new Translation2d(7, 5.8)))
+    assertThat(reaches(diamond, new Translation2d(7, 4.8), new Translation2d(7, 5.8)))
         .as("beside it, straight up")
         .isFalse();
+    assertThat(reaches(diamond, new Translation2d(8, 2), new Translation2d(8, 3.3)))
+        .as("just reaching its bottom corner")
+        .isTrue();
+  }
+
+  /**
+   * A zone needn't be a rectangle: an L-shaped one (a corner cut out of a rectangle, as 2024's
+   * starting zone is by the source zone) holds what's in the L, not what's in the cut.
+   */
+  @Test
+  void aZoneCanBeAnyOutline() {
+    Zone corner =
+        Zone.ours(
+            "Corner",
+            new Polygon2d(
+                List.of(
+                    new Translation2d(0, 0),
+                    new Translation2d(3, 0),
+                    new Translation2d(3, 1),
+                    new Translation2d(1, 1),
+                    new Translation2d(1, 3),
+                    new Translation2d(0, 3))));
+    Translation2d cut = new Translation2d(2, 2);
+
+    assertThat(corner.contains(field, Alliance.BLUE, new Translation2d(0.5, 2.5))).isTrue();
+    assertThat(corner.contains(field, Alliance.BLUE, cut)).isFalse();
+    assertThat(corner.distance(field, Alliance.BLUE, cut)).isCloseTo(1, within(1e-12));
+    assertThat(corner.contains(field, Alliance.RED, new Translation2d(15.5, 5.5))).isTrue();
+    assertThat(corner.contains(field, Alliance.RED, new Translation2d(14, 6))).isFalse();
+    assertThat(corner.reachedWithin(field, Alliance.BLUE, cut, new Translation2d(0, -2), 0.4))
+        .as("down into the L")
+        .isFalse();
+    assertThat(corner.reachedWithin(field, Alliance.BLUE, cut, new Translation2d(0, -2), 0.5))
+        .isTrue();
+  }
+
+  /** Whether a robot heading in a straight line from one point reaches another, within a second. */
+  private boolean reaches(Zone zone, Translation2d from, Translation2d to) {
+    return zone.reachedWithin(field, Alliance.BLUE, from, to.minus(from), 1);
   }
 
   @Test

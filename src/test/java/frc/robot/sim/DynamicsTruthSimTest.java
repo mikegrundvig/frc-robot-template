@@ -297,7 +297,7 @@ class DynamicsTruthSimTest {
 
   /** The template's tread: 1.2. */
   private static final double MU =
-      Robots.SIM.definition().drivetrain().modules().wheelCoefficientOfFriction();
+      Robots.SIM.definition().drivetrain().wheelCoefficientOfFriction();
 
   /**
    * One wheel as the physics has it now: its turn, its drive's current, its load, where its tread

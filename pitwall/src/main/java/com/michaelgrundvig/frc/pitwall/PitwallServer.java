@@ -422,14 +422,19 @@ public final class PitwallServer implements AutoCloseable {
   private static final String SIMULATOR = "/api/simulator";
 
   /**
-   * A device's routes: a download by its id, and its log as a page or as text. Names as {@link
-   * Devices#NAME} allows them, so no request can name anything else.
+   * A device's routes: a download by its id, its log as a page or as text (GET), and a file sent to
+   * it or a choice made on its card (POST). Names as {@link Devices#NAME} allows them, so no
+   * request can name anything else.
    */
   private static final Pattern DEVICE_ROUTE =
       Pattern.compile(
           "/api/devices/("
               + Devices.NAME.pattern()
               + ")/(downloads/("
+              + Devices.NAME.pattern()
+              + ")|uploads/("
+              + Devices.NAME.pattern()
+              + ")|choices/("
               + Devices.NAME.pattern()
               + ")|log|log\\.txt)");
 
@@ -569,10 +574,13 @@ public final class PitwallServer implements AutoCloseable {
                 404, "Not found", "There is no simulator here: a robot has no simulator controls");
           }
           List<String> allowed = METHODS.get(path);
+          Matcher deviceRoute = DEVICE_ROUTE.matcher(path);
+          if (allowed == null && deviceRoute.matches()) {
+            boolean change = deviceRoute.group(4) != null || deviceRoute.group(5) != null;
+            allowed = List.of(change ? "POST" : "GET");
+          }
           if (allowed == null
-              && (PAGE_FILE.matcher(path).matches()
-                  || DEVICE_ROUTE.matcher(path).matches()
-                  || INSPECT_ROUTE.matcher(path).matches())) {
+              && (PAGE_FILE.matcher(path).matches() || INSPECT_ROUTE.matcher(path).matches())) {
             allowed = List.of("GET");
           }
           if (allowed == null) {
@@ -1005,6 +1013,12 @@ public final class PitwallServer implements AutoCloseable {
               .devices()
               .named(name)
               .orElseThrow(() -> new Problem(404, "No device", "There is no device named " + name));
+      String uploadId = route.group(4);
+      String choiceId = route.group(5);
+      if (uploadId != null || choiceId != null) {
+        deviceChange(exchange, name, device, uploadId, choiceId);
+        return;
+      }
       String what = route.group(2);
       String id = route.group(3);
       Devices.Download download = null;
@@ -1053,6 +1067,62 @@ public final class PitwallServer implements AutoCloseable {
       } finally {
         deviceRequests.release();
       }
+    }
+
+    /**
+     * A file sent to a device, or a choice made on its card: taken by the robot's own handler, on
+     * this thread, never the robot loop. Never while the field system is connected.
+     */
+    private void deviceChange(
+        HttpExchange exchange,
+        String name,
+        Devices.Device device,
+        @Nullable String uploadId,
+        @Nullable String choiceId)
+        throws IOException {
+      if (tuning.isFieldConnected()) {
+        throw new Problem(
+            409,
+            "On the field",
+            "Changes to devices wait until the field system disconnects: the match has the robot");
+      }
+      String message;
+      try {
+        if (uploadId != null) {
+          Devices.Upload upload =
+              device
+                  .upload(uploadId)
+                  .orElseThrow(
+                      () ->
+                          new Problem(
+                              404, "No upload", name + " takes no upload named " + uploadId));
+          byte[] body;
+          try (InputStream in = exchange.getRequestBody()) {
+            body = in.readNBytes(MAX_BODY_BYTES + 1);
+          }
+          if (body.length > MAX_BODY_BYTES) {
+            throw new Problem(413, "Too large", "A file sent to a device is at most 64 KB");
+          }
+          message = upload.accept().accept(body);
+        } else {
+          String id = Objects.requireNonNull(choiceId);
+          Devices.Choose choose =
+              device
+                  .chooser(id)
+                  .orElseThrow(
+                      () -> new Problem(404, "No choice", name + " has no choice named " + id));
+          Object value = readObject(exchange).get("value");
+          if (!(value instanceof String chosen)) {
+            throw new Problem(400, "No value", "A choice is sent as {\"value\": \"...\"}");
+          }
+          message = choose.choose(chosen);
+        }
+      } catch (Devices.Refused refused) {
+        throw new Problem(422, "Refused", String.valueOf(refused.getMessage()));
+      } catch (IOException e) {
+        throw new Problem(500, "Failed", name + ": " + e.getMessage());
+      }
+      sendJson(exchange, 200, Map.of("message", message));
     }
 
     /**

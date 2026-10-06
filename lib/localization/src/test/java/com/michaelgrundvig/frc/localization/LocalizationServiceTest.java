@@ -16,27 +16,41 @@ import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Symmetry;
 import com.michaelgrundvig.frc.world.field.Terrain;
+import com.michaelgrundvig.frc.world.physical.Inertia;
+import com.michaelgrundvig.frc.world.physical.MassProperties;
+import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Imus;
+import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.wpilib.fields.Field;
+import org.wpilib.fields.FieldTag;
 import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 
 /**
@@ -73,45 +87,61 @@ class LocalizationServiceTest {
               CameraConfig.Sensor.builder()
                   .widthPixels(1280)
                   .heightPixels(800)
-                  .diagonalFieldOfView(Degrees.of(80))
+                  .fieldOfView(Degrees.of(80))
+                  .fieldOfViewAcross(CameraConfig.Across.DIAGONAL)
                   .frameRate(Hertz.of(30))
                   .latency(Milliseconds.of(30))
                   .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
+          .joint(Optional.empty())
+          .build();
+
+  /** A 28 x 24 in frame, 60 kg. */
+  private static final Body BODY =
+      Body.builder()
+          .frameLength(Inches.of(28))
+          .frameWidth(Inches.of(24))
+          .height(Inches.of(30))
+          .bumperEnds(Inches.of(3.5))
+          .bumperSides(Inches.of(3.5))
+          .bumperBottom(Inches.of(2.5))
+          .bumperTop(Inches.of(5.75))
+          .weight(Body.Weight.weighed(Kilograms.of(60)))
+          .cg(new Translation3d(0, 0, 0.2))
+          .inertia(
+              Body.Turning.tensor(
+                  Inertia.builder().ixx(6).iyy(6).izz(6).ixy(0).ixz(0).iyz(0).build()))
           .build();
 
   /** A 28 x 24 in swerve robot with the front camera, its IMUs not yet measured. */
   private static final RobotDefinition DEFINITION =
       RobotDefinition.builder()
           .name("test")
-          .body(
-              Body.builder()
-                  .frameLength(Inches.of(28))
-                  .frameWidth(Inches.of(24))
-                  .height(Inches.of(30))
-                  .bumperThickness(Inches.of(3.5))
-                  .mass(Kilograms.of(60))
-                  .yawMomentOfInertia(KilogramSquareMeters.of(6))
-                  .cgHeight(Meters.of(0.2))
-                  .build())
+          .body(BODY)
           .drivetrain(
-              DrivetrainGeometry.builder()
-                  .modules(
-                      DrivetrainGeometry.Modules.builder()
-                          .driveMotor(Motor.KRAKEN_X60)
-                          .steerMotor(Motor.KRAKEN_X44)
-                          .wheelRadius(Inches.of(2))
-                          .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
-                          .steerGearing(Gearing.builder().ratio(12.8).efficiency(1.0).build())
-                          .wheelCoefficientOfFriction(1.2)
-                          .driveInertia(KilogramSquareMeters.of(0.001))
-                          .steerInertia(KilogramSquareMeters.of(0.004))
-                          .build())
-                  .wheelInset(Inches.of(2.625))
-                  .build())
+              DrivetrainGeometry.inset(
+                  DrivetrainGeometry.ModuleType.builder()
+                      .driveMotor(Motor.KRAKEN_X60)
+                      .steerMotor(Motor.KRAKEN_X44)
+                      .wheelRadius(Inches.of(2))
+                      .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
+                      .steerGearing(Gearing.builder().ratio(12.8).efficiency(1.0).build())
+                      .wheelCoefficientOfFriction(1.2)
+                      .driveInertia(KilogramSquareMeters.of(0.001))
+                      .steerInertia(KilogramSquareMeters.of(0.004))
+                      .couplingRatio(0)
+                      .build(),
+                  BODY,
+                  Inches.of(2.625)))
           .cameras(List.of(FRONT))
           .imus(Imus.UNCHECKED)
+          .joints(List.of())
+          .couplings(List.of())
+          .drives(List.of())
+          .sensors(List.of())
+          .configurations(List.of())
+          .interlocks(List.of())
           .build();
 
   /** Localization with the robot placed in front of the hub, to 5 cm and half a degree. */
@@ -121,6 +151,16 @@ class LocalizationServiceTest {
 
   /** The same, with another drivetrain's wheels. */
   private static LocalizationService placed(DriveKinematicsModel kinematics) {
+    return placed(kinematics, DEFINITION);
+  }
+
+  /** The same, for another robot of the test's drivetrain. */
+  private static LocalizationService placed(RobotDefinition robot) {
+    return placed(new SwerveKinematicsModel(robot.moduleTranslations()), robot);
+  }
+
+  private static LocalizationService placed(
+      DriveKinematicsModel kinematics, RobotDefinition robot) {
     return new LocalizationService(
         new PoseEstimator(
             EstimatorConfig.DEFAULTS,
@@ -130,8 +170,65 @@ class LocalizationServiceTest {
         kinematics,
         FIELD,
         FIELD.terrain(),
-        DEFINITION,
+        robot,
         0.02);
+  }
+
+  /** A turret carrying a camera: it turns about the robot's up, 10 cm above its center. */
+  private static final Joint.Revolute TURRET =
+      Joint.Revolute.builder()
+          .label("turret")
+          .parent(Part.CHASSIS)
+          .origin(new Transform3d(0, 0, 0.1, Rotation3d.ZERO))
+          .axis(new Vector3(0, 0, 1))
+          .range(Optional.empty())
+          .reference(0)
+          .link(Link.builder().label("turret").mass(MassProperties.NONE).shapes(List.of()).build())
+          .positions(List.of())
+          .outputs(List.of())
+          .build();
+
+  /**
+   * A camera on a joint is solved from where its joint had carried it when the image was taken: a
+   * turret turned 25° puts the camera elsewhere, and its image says where the robot is only through
+   * that. Never told where the turret is, localization takes it to be at its reference, and solves
+   * the same image as if the camera faced forward.
+   */
+  @Test
+  void aCameraOnAJointIsSolvedFromWhereItsJointCarriedIt() {
+    CameraConfig riding =
+        CameraConfigBuilder.builder(FRONT).name("turret").joint(Optional.of(TURRET)).build();
+    RobotDefinition turreted =
+        RobotDefinitionBuilder.builder(DEFINITION)
+            .joints(List.of(TURRET))
+            .cameras(List.of(FRONT, riding))
+            .build();
+    double turned = Math.toRadians(25);
+    Pose3d mount = turreted.math().cameraPose(riding, Map.of(TURRET, turned));
+
+    LocalizationService following = placed(turreted);
+    long now = standStill(following, 10);
+    following.joints(now - LOOP_NANOS, Map.of(TURRET, 0.0));
+    following.joints(now + LOOP_NANOS, Map.of(TURRET, 2 * turned));
+    TagDetections seen =
+        hubFace(new Pose3d(ROBOT), new Transform3d(Pose3d.ZERO, mount), "turret", now);
+    VisionResult[] result = new VisionResult[1];
+    loop(following, now + LOOP_NANOS, () -> result[0] = following.camera(seen));
+
+    LocalizationService notFollowing = placed(turreted);
+    standStill(notFollowing, 10);
+    VisionResult[] unfollowed = new VisionResult[1];
+    loop(notFollowing, now + LOOP_NANOS, () -> unfollowed[0] = notFollowing.camera(seen));
+
+    VisionMeasurement measured = Objects.requireNonNull(result[0].measurement());
+    assertThat(measured.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .as("halfway between the readings either side of the image, the turret at 25°")
+        .isLessThan(1e-6);
+    VisionMeasurement wrong = unfollowed[0].measurement();
+    if (wrong != null) {
+      assertThat(wrong.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+          .isGreaterThan(0.1);
+    }
   }
 
   /** The drivetrain standing still at a moment, its gyro tilted as given. */
@@ -243,6 +340,56 @@ class LocalizationServiceTest {
                   .isEqualTo(EstimatorConfig.DEFAULTS.gateChiSquaredPosition());
             });
     assertThat(output.estimate().health().accepted()).isEqualTo(1);
+  }
+
+  /**
+   * A venue moves the tags images are solved against: surveyed 5 cm farther down the field, the
+   * hub's face puts the robot 5 cm farther down too, from the same image.
+   */
+  @Test
+  void aVenueMovesTheTagsImagesAreSolvedAgainst() {
+    LocalizationService localization = placed();
+    long now = standStill(localization, 10);
+    List<FieldTag> surveyed = new ArrayList<>();
+    for (FieldTag tag : FIELD.toField().getTags()) {
+      Pose3d pose = tag.getPose();
+      surveyed.add(
+          tag.getID() == 25 || tag.getID() == 26
+              ? new FieldTag(
+                  tag.getID(),
+                  new Pose3d(pose.getX() + 0.05, pose.getY(), pose.getZ(), pose.getRotation()))
+              : tag);
+    }
+    localization.venue(
+        new FieldModel(
+            new Field("Surveyed", "", "", null, FIELD.length(), FIELD.width(), "frc", surveyed),
+            Symmetry.ROTATED,
+            List.of(),
+            List.of(),
+            List.of()));
+
+    VisionResult[] result = new VisionResult[1];
+    LocalizationOutput output =
+        loop(localization, now + LOOP_NANOS, () -> result[0] = localization.camera(hubFace(now)));
+
+    Pose2d solved = output.frames().get(0).measured().orElseThrow().pose();
+    assertThat(solved.getX()).isCloseTo(ROBOT.getX() + 0.05, within(1e-6));
+    assertThat(solved.getY()).isCloseTo(ROBOT.getY(), within(1e-6));
+  }
+
+  @Test
+  void aVenueMustHaveTheFieldsTags() {
+    LocalizationService localization = placed();
+    List<FieldTag> fewer = new ArrayList<>(FIELD.toField().getTags());
+    fewer.remove(0);
+    FieldModel other =
+        new FieldModel(
+            new Field("Other", "", "", null, FIELD.length(), FIELD.width(), "frc", fewer),
+            Symmetry.ROTATED,
+            List.of(),
+            List.of(),
+            List.of());
+    assertThatThrownBy(() -> localization.venue(other)).hasMessageContaining("Other has others");
   }
 
   /**
@@ -446,7 +593,7 @@ class LocalizationServiceTest {
    * keeps its repeated errors apart, which it does for eight cameras and no more.
    */
   @Test
-  void integritySaysHowFarEachCameraIsTrusted() {
+  void trustSaysHowFarEachCameraIsTrusted() {
     LocalizationService localization = placed();
     long now = standStill(localization, 10);
     localization.mountDoubt("front", 0.04, 3.0);
@@ -469,19 +616,17 @@ class LocalizationServiceTest {
               }
             });
 
-    Integrity integrity = output.integrity();
-    assertThat(integrity.cameras())
+    Trust trust = output.trust();
+    assertThat(trust.cameras())
         .containsEntry(
             "front", CameraTrust.builder().mountDoubtMeters(0.04).mountDistanceMeters(3.0).build());
-    assertThat(integrity.cameras())
+    assertThat(trust.cameras())
         .containsEntry("camera 8", CameraTrust.builder().build())
         .containsEntry("camera 9", CameraTrust.builder().keptApart(false).build());
-    assertThat(integrity.cameras().keySet())
+    assertThat(trust.cameras().keySet())
         .as("as the estimator first heard from each, then the robot's others")
         .endsWith("camera 9", "front");
-    assertThat(integrity.protection()).isEmpty();
-    assertThat(integrity.excludedTags()).isEmpty();
-    assertThat(integrity.tagsWithoutPlaces()).as("every tag on the field's layout").isEmpty();
+    assertThat(trust.tagsWithoutPlaces()).as("every tag on the field's layout").isEmpty();
   }
 
   /**
@@ -489,7 +634,7 @@ class LocalizationServiceTest {
    * estimator can't keep its placement apart, takes each image's as new, and says so.
    */
   @Test
-  void integritySaysWhichTagsAreOffTheLayout() {
+  void trustSaysWhichTagsAreOffTheLayout() {
     LocalizationService localization = placed();
     long now = standStill(localization, 10);
     int offTheLayout =
@@ -511,19 +656,19 @@ class LocalizationServiceTest {
                         VisionMeasurement.Solver.EXTERNAL)));
 
     assertThat(output.frames().get(0).accepted()).isTrue();
-    assertThat(output.integrity().tagsWithoutPlaces()).containsExactly(offTheLayout);
+    assertThat(output.trust().tagsWithoutPlaces()).containsExactly(offTheLayout);
   }
 
   /** The wheels' trust: what the IMU says of them, and that a disabled robot may be carried. */
   @Test
-  void integritySaysHowFarTheWheelsAreTrusted() {
+  void trustSaysHowFarTheWheelsAreTrusted() {
     LocalizationService localization = placed();
     long now = standStill(localization, 10) + LOOP_NANOS;
     double pitch = Math.toRadians(-12);
 
     LoopContext disabled = new LoopContext(now, false);
     localization.drivetrain(still(now, pitch, 0), disabled);
-    WheelTrust wheels = localization.update().integrity().wheels();
+    WheelTrust wheels = localization.update().trust().wheels();
 
     assertThat(wheels.conditions().disabled()).isTrue();
     assertThat(wheels.conditions().tiltRadians()).isCloseTo(Math.abs(pitch), within(1e-9));
@@ -555,27 +700,6 @@ class LocalizationServiceTest {
         .isNull();
   }
 
-  /** A landmark the robot crossed is weighed at the update, and counted. */
-  @Test
-  void aLandmarkIsWeighedAndCounted() {
-    LocalizationService localization = placed();
-    long now = standStill(localization, 10);
-
-    LocalizationOutput output =
-        loop(
-            localization,
-            now + LOOP_NANOS,
-            () ->
-                localization.landmark(
-                    new LandmarkEvent(
-                        now, "crest", ROBOT.getTranslation(), Rotation2d.ZERO, 0.05)));
-
-    assertThat(output.landmarks())
-        .extracting(LandmarkDecision::verdict)
-        .containsExactly(Verdict.ACCEPTED);
-    assertThat(localization.landmarksAccepted()).isEqualTo(1);
-  }
-
   @Test
   void anImageFromACameraTheRobotDoesntHaveIsAnError() {
     LocalizationService localization = placed();
@@ -585,13 +709,10 @@ class LocalizationServiceTest {
         .hasMessageContaining("back");
   }
 
-  /** A loop happens at a time on the robot's clock; a protection level is a distance. */
+  /** A loop happens at a time on the robot's clock. */
   @Test
   void itsRecordsRefuseWhatTheyCantBe() {
     assertThatThrownBy(() -> new LoopContext(-1, true))
-        .isInstanceOf(IllegalArgumentException.class);
-    assertThat(new ProtectionLevel(0.07).meters()).isEqualTo(0.07);
-    assertThatThrownBy(() -> new ProtectionLevel(Double.NaN))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(
             () ->
@@ -642,7 +763,7 @@ class LocalizationServiceTest {
     PoseCovariance narrow = Objects.requireNonNull(results[1].measurement()).covariance();
     assertThat(wide.xx()).isCloseTo(narrow.xx() + 0.2 * 0.2, within(1e-12));
     assertThat(wide.yy()).isCloseTo(narrow.yy() + 0.2 * 0.2, within(1e-12));
-    assertThat(output.integrity().cameras().get("front"))
+    assertThat(output.trust().cameras().get("front"))
         .isEqualTo(CameraTrust.builder().mountDoubtMeters(0.2).mountDistanceMeters(3.0).build());
   }
 
@@ -727,39 +848,10 @@ class LocalizationServiceTest {
     LocalizationOutput rolled = drive(gripping, rolling, 50, turning, false).getLast();
 
     assertThat(slipping.wheels().turnSlipMetersPerSecond()).isPositive();
-    assertThat(slid.integrity().wheels().conditions().slipMetersPerSecond()).isPositive();
+    assertThat(slid.trust().wheels().conditions().slipMetersPerSecond()).isPositive();
     assertThat(gripping.wheels().turnSlipMetersPerSecond()).isZero();
     assertThat(slid.estimate().covariance().largestPositionStdDev())
         .isGreaterThan(2 * rolled.estimate().covariance().largestPositionStdDev());
-  }
-
-  /**
-   * Over a bump, the IMU's pitch says the robot climbed, passed the crest and came down: the crest
-   * is a landmark, weighed at the update, across the bump's crest line.
-   */
-  @Test
-  void aCrestCrossedBecomesALandmark() {
-    LocalizationService localization = beforeTheBump();
-    ScriptedDrivetrain robot = scripted();
-    robot.bump = BUMP;
-
-    List<LocalizationOutput> outputs =
-        drive(localization, robot, 70, new ChassisVelocities(1.5, 0, 0), false);
-
-    List<LandmarkDecision> landmarks =
-        outputs.stream().flatMap(output -> output.landmarks().stream()).toList();
-    assertThat(landmarks).hasSize(1);
-    LandmarkDecision crest = landmarks.get(0);
-    assertThat(crest.verdict()).isEqualTo(Verdict.ACCEPTED);
-    assertThat(crest.landmark().name()).isEqualTo("Test bump");
-    assertThat(crest.innovationMeters())
-        .as("odometry on the ramps, short of the truth")
-        .isLessThan(0.05);
-    assertThat(localization.terrainCrossings()).isEqualTo(1);
-    assertThat(localization.landmarksAccepted()).isEqualTo(1);
-    assertThat(BUMP.acrossOffset(robot.truth().getTranslation()))
-        .as("past the bump")
-        .isGreaterThan(0.5);
   }
 
   /**
@@ -824,7 +916,13 @@ class LocalizationServiceTest {
 
   /** The front camera's exact view of the hub's near face, from where the robot really is. */
   private static TagDetections hubFace(Pose3d robot, long takenNanos) {
-    Pose3d cameraPose = robot.transformBy(FRONT.robotToCamera());
+    return hubFace(robot, FRONT.robotToCamera(), "front", takenNanos);
+  }
+
+  /** A camera's exact view of the hub's near face, from where it really is on the robot. */
+  private static TagDetections hubFace(
+      Pose3d robot, Transform3d mount, String camera, long takenNanos) {
+    Pose3d cameraPose = robot.transformBy(mount);
     List<TagDetections.Tag> tags = new ArrayList<>();
     for (int id : new int[] {25, 26}) {
       Transform3d view = new Transform3d(cameraPose, FIELD.tag(id).orElseThrow());
@@ -840,7 +938,7 @@ class LocalizationServiceTest {
               Transform3d.ZERO,
               0.05));
     }
-    return new TagDetections(takenNanos, "front", tags, null);
+    return new TagDetections(takenNanos, camera, tags, null);
   }
 
   /** One leg of the session: how long, how fast, and what changes as it starts. */
@@ -912,20 +1010,13 @@ class LocalizationServiceTest {
                     localization.yawSource(),
                     localization.conditions(),
                     localization.wheels(),
-                    localization.terrainPhase(),
-                    localization.terrainCrossings(),
-                    localization.climbRadians(),
-                    localization.crest(),
                     localization.imuDisagreementRadians(),
-                    localization.imusDisagree(),
-                    localization.landmarksAccepted())));
+                    localization.imusDisagree())));
         said.append('\n');
         sources.add(localization.yawSource());
       }
     }
     assertThat(sources).as("every IMU, and none").containsExactlyInAnyOrder(YawSource.values());
-    assertThat(localization.terrainCrossings()).as("over the bump").isEqualTo(1);
-    assertThat(localization.landmarksAccepted()).as("its crest").isEqualTo(1);
     return said.toString();
   }
 }

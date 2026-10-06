@@ -10,7 +10,7 @@ import org.wpilib.math.geometry.Pose2d;
 /**
  * What became of one camera image in an update: as a whole, by the coprocessor's multi-tag
  * solution, and by tag. Every image localization was given is one, whether the estimator weighed
- * its measurement or it was refused before it became one. Logs, the pit's page, and the integrity
+ * its measurement or it was refused before it became one. Logs, the pit's page, and the trust
  * checks read these, so none of them reaches into the estimator.
  *
  * @param camera the camera's name, as in the robot's definition

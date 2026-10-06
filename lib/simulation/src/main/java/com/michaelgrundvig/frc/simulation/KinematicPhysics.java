@@ -35,8 +35,8 @@ import org.wpilib.math.util.Nat;
  * <ul>
  *   <li>Each drive motor turns its wheel's share of the robot's configured mass ({@code
  *       Body.mass}), (m / N) r² at the configured radius, plus the wheel's own moving parts ({@code
- *       DrivetrainGeometry.Modules.driveInertia}), at the voltage its controller asks for, held to
- *       its current limit at the wheel's speed as the step starts and held through the step, as
+ *       DrivetrainGeometry.ModuleType.driveInertia}), at the voltage its controller asks for, held
+ *       to its current limit at the wheel's speed as the step starts and held through the step, as
  *       WPILib's {@code DCMotorSim} holds a voltage. So the robot speeds up as F = m a, short of it
  *       by the current falling within each step at the controller's limit.
  *   <li>The robot moves by the one rigid motion that best fits every wheel's travel (each wheel's
@@ -63,7 +63,7 @@ public final class KinematicPhysics implements Physics {
   private final WheelDrive[] drives;
   private final Translation2d[] moduleLocations;
   private final RigidFit fit;
-  private final double configuredRadiusMeters;
+  private final double[] configuredRadiusMeters;
 
   /** Each wheel's load: an equal share of the robot's weight. */
   private final double loadNewtons;
@@ -116,37 +116,39 @@ public final class KinematicPhysics implements Physics {
    * On flat ground until given its terrain ({@link Disturbance.Ground}), standing at the field's
    * origin.
    *
-   * @param body the robot's frame, which places the wheels, and its mass, which they carry
-   * @param drivetrain the drivetrain as defined: its modules' motors, gearing, and radius
+   * @param body the robot's mass, which the wheels carry
+   * @param drivetrain the drivetrain as defined: where its wheels are, and each module's motors,
+   *     gearing, and radius
    * @param wheelRadiusScale each wheel's true radius over the configured one, as built
    */
   public KinematicPhysics(Body body, DrivetrainGeometry drivetrain, List<Double> wheelRadiusScale) {
-    DrivetrainGeometry.Modules config = drivetrain.modules();
-    moduleLocations = drivetrain.moduleTranslations(body);
+    moduleLocations = drivetrain.moduleTranslations();
     fit = new RigidFit(moduleLocations);
     planeFit(moduleLocations, planeFit);
-    configuredRadiusMeters = config.wheelRadius().in(Meters);
     int count = moduleLocations.length;
+    configuredRadiusMeters = new double[count];
     double carriedKilograms = body.mass().in(Kilograms) / count;
-    double inertia =
-        driveInertiaKgM2(
-            carriedKilograms,
-            configuredRadiusMeters,
-            config.driveInertia().in(KilogramSquareMeters));
     wheels = new Wheel[count];
     drives = new WheelDrive[count];
     for (int i = 0; i < count; i++) {
+      DrivetrainGeometry.ModuleType module = drivetrain.module(i);
+      configuredRadiusMeters[i] = module.wheelRadius().in(Meters);
+      double inertia =
+          driveInertiaKgM2(
+              carriedKilograms,
+              configuredRadiusMeters[i],
+              module.driveInertia().in(KilogramSquareMeters));
       wheels[i] =
           new Wheel(
               i,
-              config.drive().model(),
+              module.driveMotors().model(module.driveGearing().efficiency()),
               inertia,
-              config.drive().gearing().ratio(),
-              configuredRadiusMeters * wheelRadiusScale.get(i));
+              module.driveGearing().ratio(),
+              configuredRadiusMeters[i] * wheelRadiusScale.get(i));
       drives[i] = new WheelDrive();
     }
     loadNewtons = body.mass().in(Kilograms) * STANDARD_GRAVITY / count;
-    gripLimit = config.wheelCoefficientOfFriction() * STANDARD_GRAVITY;
+    gripLimit = drivetrain.wheelCoefficientOfFriction() * STANDARD_GRAVITY;
     lastDistances = new double[count];
     lastAngles = new double[count];
     rollAlong();
@@ -248,7 +250,7 @@ public final class KinematicPhysics implements Physics {
       }
       case Disturbance.Grip slick -> grip = slick.share();
       case Disturbance.TreadWorn worn -> {
-        wheels[worn.wheel()].radiusMeters = configuredRadiusMeters * worn.scale();
+        wheels[worn.wheel()].radiusMeters = configuredRadiusMeters[worn.wheel()] * worn.scale();
         // The wheels' travel so far was at the old radius: start counting again from here.
         rollAlong();
       }

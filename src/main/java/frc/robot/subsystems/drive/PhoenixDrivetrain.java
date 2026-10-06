@@ -4,15 +4,16 @@ import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.MechanismWiring;
 import frc.robot.lib.wiring.SwerveWiring;
 import java.util.concurrent.locks.Lock;
 import org.wpilib.math.geometry.Rotation3d;
 
 /**
- * The drivetrain's hardware on CTRE devices: four modules, each a TalonFX driving the wheel, a
- * TalonFX turning it, and a CANcoder reading its angle; a Pigeon 2; and the thread that reads them
- * at 250 Hz for odometry. Built on the robot from its wiring; the simulator and replay never touch
- * it.
+ * The drivetrain's hardware: four modules, each a TalonFX driving the wheel, a TalonFX turning it,
+ * and a CANcoder reading its angle, or REV's SPARKs ({@link ModuleIOSpark}); a Pigeon 2; and the
+ * thread that reads the CTRE devices at 250 Hz for odometry. Built on the robot from its wiring;
+ * the simulator and replay never touch it.
  *
  * <p>Needs Phoenix 6 26.70 or later on the devices (firmware 26.70) for WPILib 2027 alpha 7.
  *
@@ -41,17 +42,25 @@ public final class PhoenixDrivetrain implements AutoCloseable {
    * Configures every device (waiting for each, at startup) and starts reading them.
    *
    * @param wiring where the devices are, and how the encoders read
-   * @param hardware the modules' gearing and wheels
+   * @param drivetrain each corner's module: its gearing and wheel
    * @param gyroOrientation how the Pigeon 2 is turned on the robot, from the robot's definition
    */
   public PhoenixDrivetrain(
-      SwerveWiring wiring, DrivetrainGeometry.Modules hardware, Rotation3d gyroOrientation) {
+      SwerveWiring wiring, DrivetrainGeometry drivetrain, Rotation3d gyroOrientation) {
     SignalLogger.enableAutoLogging(false);
     CANBus bus = bus(wiring.canBus());
     for (int i = 0; i < 4; i++) {
+      DrivetrainGeometry.ModuleType hardware = drivetrain.module(i);
+      SwerveWiring.ModuleWiring module = wiring.modules().get(i);
       modules[i] =
-          new ModuleIOTalonFX(
-              wiring.modules().get(i), bus, hardware, wiring.couplingRatio(), odometry);
+          wiring.driveController() == MechanismWiring.Controller.TALON_FX
+              ? new ModuleIOTalonFX(module, bus, hardware, hardware.couplingRatio(), odometry)
+              : new ModuleIOSpark(
+                  module,
+                  ((CanBus.Port) wiring.canBus()).port(),
+                  wiring.driveController(),
+                  wiring.steerController(),
+                  hardware);
     }
     gyro =
         new GyroIOPigeon2(wiring.gyroId(), bus, wiring.gyroYawScale(), gyroOrientation, odometry);

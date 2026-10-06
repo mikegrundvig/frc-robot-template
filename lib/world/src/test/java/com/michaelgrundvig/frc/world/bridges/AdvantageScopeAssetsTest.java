@@ -233,8 +233,8 @@ class AdvantageScopeAssetsTest {
   @Test
   void eachWheelGoesWhereItsLoggedPosePutsIt() {
     Map<String, Object> config = config("Robot_test");
-    Translation2d[] places = ROBOT.drivetrain().moduleTranslations(ROBOT.body());
-    double radius = ROBOT.drivetrain().modules().wheelRadius().in(Meters);
+    Translation2d[] places = ROBOT.drivetrain().moduleTranslations();
+    double radius = ROBOT.drivetrain().module(0).wheelRadius().in(Meters);
 
     for (int i = 0; i < 4; i++) {
       GlbReader wheel = GlbReader.read(file("Robot_test/model_" + i + ".glb"));
@@ -267,7 +267,7 @@ class AdvantageScopeAssetsTest {
   @Test
   void aWheelWithoutALoggedPoseStandsAtItsModule() {
     Rotation3d toRobot = rotations(config("Robot_test").get("rotations"));
-    Translation2d place = ROBOT.drivetrain().moduleTranslations(ROBOT.body())[1];
+    Translation2d place = ROBOT.drivetrain().moduleTranslations()[1];
 
     Translation3d center =
         centroid(
@@ -311,17 +311,19 @@ class AdvantageScopeAssetsTest {
   void everyValueItReadsIsDrawnOrDropped() {
     assertThat(AdvantageScopeAssets.DROPPED)
         .containsExactly(
-            "Body.mass",
-            "Body.yawMomentOfInertia",
-            "Body.cgHeight",
-            "DrivetrainGeometry.Modules.driveMotor",
-            "DrivetrainGeometry.Modules.steerMotor",
-            "DrivetrainGeometry.Modules.driveGearing",
-            "DrivetrainGeometry.Modules.steerGearing",
-            "DrivetrainGeometry.Modules.wheelCoefficientOfFriction",
-            "DrivetrainGeometry.Modules.driveInertia",
-            "DrivetrainGeometry.Modules.steerInertia",
+            "Body.weight",
+            "Body.cg",
+            "Body.inertia",
+            "DrivetrainGeometry.ModuleType.driveMotor",
+            "DrivetrainGeometry.ModuleType.steerMotor",
+            "DrivetrainGeometry.ModuleType.driveGearing",
+            "DrivetrainGeometry.ModuleType.steerGearing",
+            "DrivetrainGeometry.ModuleType.wheelCoefficientOfFriction",
+            "DrivetrainGeometry.ModuleType.driveInertia",
+            "DrivetrainGeometry.ModuleType.steerInertia",
+            "DrivetrainGeometry.ModuleType.couplingRatio",
             "CameraConfig.noiseScale",
+            "CameraConfig.joint",
             "CameraConfig.Sensor.frameRate",
             "CameraConfig.Sensor.latency");
     Set<String> values = new TreeSet<>();
@@ -329,7 +331,8 @@ class AdvantageScopeAssetsTest {
         List.of(
             Body.class,
             DrivetrainGeometry.class,
-            DrivetrainGeometry.Modules.class,
+            DrivetrainGeometry.Corner.class,
+            DrivetrainGeometry.ModuleType.class,
             CameraConfig.class,
             CameraConfig.Sensor.class)) {
       String name =

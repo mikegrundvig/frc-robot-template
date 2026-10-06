@@ -1,7 +1,6 @@
 package frc.robot.lib.wiring;
 
 import static com.michaelgrundvig.frc.world.config.Rules.between;
-import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.size;
 import static org.wpilib.units.Units.Rotations;
 
@@ -10,6 +9,8 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.hardware.imu.OnboardIMU;
@@ -22,16 +23,17 @@ import org.wpilib.units.measure.Angle;
  * is rebuilt, so measure them again then.
  *
  * <p>Phoenix Tuner X's swerve generator reports every value here for a CTRE drivetrain; copy them
- * across as it gives them.
+ * across as it gives them. Its coupling ratio is the module's gearing, so it goes in the robot's
+ * definition ({@code DrivetrainGeometry.ModuleType.couplingRatio}). A REV drivetrain (MAXSwerve,
+ * say) has SPARKs and each module's absolute encoder on its steering SPARK's data port.
  *
  * @param canBus the bus every drivetrain device is on
+ * @param driveController what the drive motors are on: a TalonFX, or a SPARK MAX or SPARK Flex
+ * @param steerController what the steering motors are on, as the drive's; on a SPARK, each module's
+ *     absolute encoder is on its data port
  * @param gyroId the Pigeon 2's CAN ID
  * @param gyroYawScale the gyro's readings times this are the true rotation: 1 until the gyro scale
  *     procedure measures it (docs/calibration.md)
- * @param couplingRatio how many rotations the drive motor turns for each full turn of the module,
- *     with the wheel held still: turning an MK4-style module turns its wheel through the bevel
- *     gear, which the drive encoder would otherwise count as travel. Zero for modules without
- *     coupling.
  * @param modules front left, front right, back left, back right
  * @param systemcoreMount how Systemcore itself is mounted, for its onboard IMU, the backup to the
  *     gyro: flat, or on edge along its long side (landscape) or short side (portrait). WPILib takes
@@ -42,18 +44,21 @@ import org.wpilib.units.measure.Angle;
 @ConfigRecord
 public record SwerveWiring(
     CanBus canBus,
+    MechanismWiring.Controller driveController,
+    MechanismWiring.Controller steerController,
     int gyroId,
     double gyroYawScale,
-    double couplingRatio,
     List<ModuleWiring> modules,
     OnboardIMU.MountOrientation systemcoreMount) {
   public SwerveWiring {
     Checks.on(SwerveWiring.class)
         .field("gyroId", gyroId, between(0, 62)) // a CAN ID
         .field("gyroYawScale", gyroYawScale, between(0.9, 1.1)) // off by more is a broken gyro
-        .field("couplingRatio", couplingRatio, nonNegative())
         .field("modules", modules, size(4))
-        .field("modules", modules, SwerveWiring::sharedIds)
+        .field("driveController", driveController, SwerveWiring::notSwerve)
+        .field("steerController", steerController, SwerveWiring::notSwerve)
+        .check("modules", () -> encoders(steerController, modules))
+        .check("modules", () -> sharedIds(driveController, steerController, modules))
         .orThrow();
   }
 
@@ -68,20 +73,22 @@ public record SwerveWiring(
    *
    * @param driveId the drive motor controller's CAN ID
    * @param steerId the steering motor controller's CAN ID
-   * @param encoderId the CANcoder's CAN ID
-   * @param encoderOffset added to the CANcoder's reading so that it reads zero with the wheel
-   *     pointing straight ahead: Phoenix Tuner X's swerve generator reports it for each module
+   * @param encoderId the CANcoder's CAN ID; empty for an absolute encoder on the steering SPARK's
+   *     data port
+   * @param encoderOffset added to the absolute encoder's reading so that it reads zero with the
+   *     wheel pointing straight ahead: Phoenix Tuner X's swerve generator reports it for each
+   *     module
    * @param driveInverted whether the drive motor turns clockwise, seen from its shaft, to drive
    *     forward
    * @param steerInverted whether the steering motor turns clockwise to turn the module
    *     counterclockwise
-   * @param encoderInverted whether the CANcoder counts clockwise
+   * @param encoderInverted whether the absolute encoder counts clockwise
    */
   @ConfigRecord
   public record ModuleWiring(
       int driveId,
       int steerId,
-      int encoderId,
+      Optional<Integer> encoderId,
       Angle encoderOffset,
       boolean driveInverted,
       boolean steerInverted,
@@ -90,7 +97,10 @@ public record SwerveWiring(
       Checks.on(ModuleWiring.class)
           .field("driveId", driveId, between(0, 62))
           .field("steerId", steerId, between(0, 62))
-          .field("encoderId", encoderId, between(0, 62))
+          .field(
+              "encoderId",
+              encoderId,
+              id -> id.isPresent() ? between(0, 62).whyNot((double) id.get()) : null)
           .field("encoderOffset", encoderOffset, between(Rotations.of(-1), Rotations.of(1)))
           .orThrow();
     }
@@ -101,23 +111,59 @@ public record SwerveWiring(
     }
   }
 
+  /** Why a controller can't run a swerve module yet, or null when it can. */
+  private static @Nullable String notSwerve(MechanismWiring.Controller controller) {
+    return controller == MechanismWiring.Controller.TALON_FXS
+        ? "a TalonFXS doesn't run a swerve module in the template yet"
+        : null;
+  }
+
   /**
-   * Which CAN IDs two motor controllers, or two encoders, share, or null if none do. Devices of
-   * different kinds may share an ID; two of one kind on one bus may not.
+   * Why the modules' encoders don't fit their steering, or null when they do: a TalonFX steers by a
+   * CANcoder; a SPARK by the encoder on its data port, with no CANcoder.
    */
-  private static @Nullable String sharedIds(List<ModuleWiring> modules) {
-    Set<Integer> motorControllers = new HashSet<>();
-    Set<Integer> encoders = new HashSet<>();
+  private static @Nullable String encoders(
+      MechanismWiring.Controller steer, List<ModuleWiring> modules) {
+    boolean spark = steer != MechanismWiring.Controller.TALON_FX;
+    for (ModuleWiring module : modules) {
+      if (spark && module.encoderId().isPresent()) {
+        return "a SPARK steers by the absolute encoder on its data port, so its module names no"
+            + " CANcoder";
+      }
+      if (!spark && module.encoderId().isEmpty()) {
+        return "a TalonFX steers by a CANcoder: give each module its CANcoder's ID";
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Which CAN IDs two devices of one kind share, or null if none do: two TalonFXs, two SPARKs, or
+   * two CANcoders. Devices of different kinds may share an ID.
+   */
+  private static @Nullable String sharedIds(
+      MechanismWiring.Controller drive,
+      MechanismWiring.Controller steer,
+      List<ModuleWiring> modules) {
+    Set<String> seen = new HashSet<>();
     List<String> shared = new ArrayList<>();
     for (ModuleWiring module : modules) {
-      for (int id : List.of(module.driveId(), module.steerId())) {
-        if (!motorControllers.add(id)) {
-          shared.add("CAN ID " + id + " is used by two motor controllers");
+      for (var device :
+          List.of(
+              Map.entry(drive.kind(), module.driveId()),
+              Map.entry(steer.kind(), module.steerId()))) {
+        if (!seen.add(device.getKey() + device.getValue())) {
+          shared.add("CAN ID " + device.getValue() + " is used by two " + device.getKey() + "s");
         }
       }
-      if (!encoders.add(module.encoderId())) {
-        shared.add("CAN ID " + module.encoderId() + " is used by two encoders");
-      }
+      module
+          .encoderId()
+          .ifPresent(
+              id -> {
+                if (!seen.add("CANcoder" + id)) {
+                  shared.add("CAN ID " + id + " is used by two CANcoders");
+                }
+              });
     }
     return shared.isEmpty() ? null : String.join("; ", shared);
   }

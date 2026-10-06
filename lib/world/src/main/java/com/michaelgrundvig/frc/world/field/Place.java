@@ -9,8 +9,8 @@ import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
 
 /**
- * A named place on the field, written as if the robot were on the blue alliance: a start position,
- * a target, a spot to line up on. {@link #on} gives it for either alliance.
+ * A named place on the field's floor, written as if the robot were on the blue alliance: a start
+ * position, a spot to line up on. {@link #on} gives it for either alliance.
  *
  * <p>Places near AprilTags are best derived from them ({@link #between}, {@link #facing}): each
  * alliance's is then found from that alliance's own tags, as the layout measured them, instead of

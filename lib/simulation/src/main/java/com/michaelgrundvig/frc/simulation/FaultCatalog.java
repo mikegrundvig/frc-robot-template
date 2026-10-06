@@ -49,14 +49,6 @@ public final class FaultCatalog {
   public static final String PLACED = "Placed";
   public static final String TO_A_BUMP = "Carried to a bump";
   public static final String TAG_MOVED = "Tag moved";
-  public static final String UNREACHABLE = "Unreachable";
-  public static final String WRONG_VERSION = "Wrong version";
-  public static final String HOT = "Hot";
-  public static final String CAMERA_UNPLUGGED = "Camera unplugged";
-  public static final String PHOTONVISION_RESTARTS = "PhotonVision restarts";
-  public static final String DUPLICATED = "Duplicated address";
-  public static final String SETTINGS_CHANGED = "Settings changed";
-  public static final String IGNORES_POWER_DOWN = "Ignores power-down";
 
   // Their parameters, as the scenarios give them.
   public static final String FORWARD = "Forward";
@@ -78,8 +70,6 @@ public final class FaultCatalog {
   public static final String Y = "Y";
   public static final String HEADING = "Heading";
   public static final String TAG = "Tag";
-  public static final String BELOW_TRIP = "Below its trip point";
-  public static final String CAMERA = "Camera";
 
   /** The farthest a camera may be knocked, or a tag moved, in one go, in inches. */
   private static final double MOUNT_INCHES = 12;
@@ -102,11 +92,6 @@ public final class FaultCatalog {
   /** A camera's name: {@code "Camera front-left"}. */
   public static String camera(String name) {
     return "Camera " + name;
-  }
-
-  /** A coprocessor's name: {@code "Coprocessor vision-front"}. */
-  public static String coprocessor(String name) {
-    return "Coprocessor " + name;
   }
 
   /**
@@ -450,77 +435,6 @@ public final class FaultCatalog {
           parameter(X, "in", -MOUNT_INCHES, MOUNT_INCHES, 4),
           parameter(Y, "in", -MOUNT_INCHES, MOUNT_INCHES, 0),
           parameter(UP, "in", -MOUNT_INCHES, MOUNT_INCHES, 0));
-    }
-  }
-
-  /** A coprocessor's faults, as its health agent tells the robot of it. */
-  public static final class Coprocessor {
-    private Coprocessor() {}
-
-    /** The part's kind, on the page. */
-    public static final String KIND = "coprocessor";
-
-    public static final Fault UNREACHABLE =
-        lasting(
-            FaultCatalog.UNREACHABLE,
-            "Its health agent stops answering, as a coprocessor unplugged, off, or off the"
-                + " network: the robot's code finds it missing.",
-            "Answers again.");
-
-    public static final Fault HOT =
-        lasting(
-            FaultCatalog.HOT,
-            "Its big cores run this far below their trip point; at it or past it, the kernel caps"
-                + " their clock.",
-            "Back to its usual temperature.",
-            parameter(BELOW_TRIP, "°C", -10, 30, 2));
-
-    public static final Fault PHOTONVISION_RESTARTS =
-        event(
-            FaultCatalog.PHOTONVISION_RESTARTS,
-            "PhotonVision exits, and systemd restarts it: it's back after a few seconds.",
-            "Nothing undoes it: the count of restarts since boot stays, until it reboots.");
-
-    public static final Fault DUPLICATED =
-        lasting(
-            FaultCatalog.DUPLICATED,
-            "A second board with its image answers at its address too, the two taking turns, as a"
-                + " spare drive in another board would.",
-            "Only its own board answers.");
-
-    public static final Fault SETTINGS_CHANGED =
-        lasting(
-            FaultCatalog.SETTINGS_CHANGED,
-            "Its PhotonVision settings change from those it was stamped with, as calibrating or"
-                + " tuning in PhotonVision's own page does: they differ from Git's, if Git has"
-                + " any.",
-            "Back to its stamped settings.");
-
-    public static final Fault IGNORES_POWER_DOWN =
-        lasting(
-            FaultCatalog.IGNORES_POWER_DOWN,
-            "Its image is older than powering down from the robot: asked, its agent refuses (404),"
-                + " and it keeps running.",
-            "Powers down when asked.");
-
-    /** Its image carrying another PhotonVision than this build's: this one. */
-    public static Fault wrongVersion(String version) {
-      return lasting(
-          WRONG_VERSION,
-          "Its image carries PhotonVision "
-              + version
-              + ", as a board left on last season's image would, and it publishes that version.",
-          "Back to this build's image.");
-    }
-
-    /** One of its cameras unplugged, of this many, numbered from 1. */
-    public static Fault cameraUnplugged(int cameras) {
-      return lasting(
-          CAMERA_UNPLUGGED,
-          "One of its cameras, numbered from 1 in the table's order, is unplugged: its USB port is"
-              + " empty.",
-          "Plugs it back in.",
-          parameter(CAMERA, "", 1, cameras, 1));
     }
   }
 }

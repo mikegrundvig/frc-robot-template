@@ -314,8 +314,8 @@ class ArchitectureTest {
   }
 
   /**
-   * An output, too, is built by name, so the integrity line can add a value to one without breaking
-   * a caller: its builder leaves out what it isn't told.
+   * An output, too, is built by name, so a value can be added to one without breaking a caller: its
+   * builder leaves out what it isn't told.
    */
   @Test
   void outputsAreBuiltByName() {

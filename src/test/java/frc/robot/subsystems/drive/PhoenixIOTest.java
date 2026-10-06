@@ -19,6 +19,7 @@ import frc.robot.Robots;
 import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayDeque;
 import java.util.List;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.function.BooleanSupplier;
@@ -58,7 +59,7 @@ class PhoenixIOTest {
     return SwerveWiring.ModuleWiring.builder()
         .driveId(drive)
         .steerId(steer)
-        .encoderId(encoder)
+        .encoderId(Optional.of(encoder))
         .encoderOffset(Rotations.of(0))
         .driveInverted(false)
         .steerInverted(false)
@@ -82,10 +83,10 @@ class PhoenixIOTest {
   @Test
   void theWheelTurnsByItsGearingLessWhatTurningTheModulePutThere() throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(1, 2, 3), BUS, GEOMETRY.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(1, 2, 3), BUS, GEOMETRY.module(0), COUPLING, odometry);
     io.configure(DRIVETRAIN.gains(), DRIVETRAIN.limits());
     odometry.start();
-    double gearing = GEOMETRY.modules().driveGearing().ratio();
+    double gearing = GEOMETRY.module(0).driveGearing().ratio();
 
     new TalonFX(1, BUS).getSimState().setRawRotorPosition(2 * gearing); // two wheel turns' worth
     new CANcoder(3, BUS).getSimState().setRawPosition(0.25); // the module turned a quarter
@@ -135,7 +136,7 @@ class PhoenixIOTest {
   void theDriveMotorsSupplyLimitStepsDownAsConfiguredAtStartupAndWhenTuned()
       throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, GEOMETRY.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(11, 12, 13), BUS, GEOMETRY.module(0), COUPLING, odometry);
     TalonFX drive = new TalonFX(11, BUS);
 
     io.configure(DRIVETRAIN.gains(), stepDown(55, 35, 0.5));
@@ -160,7 +161,7 @@ class PhoenixIOTest {
   @Test
   void theSteeringHasNoSupplyLimitAndSoNoStepDown() throws InterruptedException {
     ModuleIOTalonFX io =
-        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, GEOMETRY.modules(), COUPLING, odometry);
+        new ModuleIOTalonFX(wiring(14, 15, 16), BUS, GEOMETRY.module(0), COUPLING, odometry);
     TalonFX steer = new TalonFX(15, BUS);
     CurrentLimitsConfigs read = new CurrentLimitsConfigs();
 

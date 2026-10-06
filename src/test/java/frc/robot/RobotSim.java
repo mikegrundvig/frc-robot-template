@@ -2,6 +2,7 @@ package frc.robot;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
@@ -13,6 +14,8 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.SimulatedWorld;
+import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.mechanisms.Joints;
 import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
@@ -131,7 +134,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     Pitwall page = Pitwall.start(robot.name(), 0);
     pitwall = page;
     loopHealth = health;
-    container = Robot.assemble(mode, scheduler(), robot, page, errors, health);
+    container = Robot.assemble(mode, scheduler(), robot, page, errors, health, null);
     return container;
   }
 
@@ -171,6 +174,21 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
    */
   public Components components() {
     return pitwall().simulator().orElseThrow().components();
+  }
+
+  /** The robot's driven joints, for a team's behavior to reach through its parts. */
+  public Joints joints() {
+    return robot().joints();
+  }
+
+  /** The robot's drivetrain. */
+  public Drive drive() {
+    return robot().drive();
+  }
+
+  /** Where the robot thinks it is, as of the last loop. */
+  public LocalizationEstimate estimate() {
+    return robot().estimate();
   }
 
   /** The robot's command scheduler. */

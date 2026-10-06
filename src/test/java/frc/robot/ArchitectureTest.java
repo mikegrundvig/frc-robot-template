@@ -6,23 +6,36 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.controls.Follower;
+import com.ctre.phoenix6.mechanisms.DifferentialMotorConstants;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import com.revrobotics.spark.ClosedLoopSlot;
+import com.revrobotics.spark.FeedbackSensor;
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaCodeUnit;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.domain.JavaField;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.domain.JavaModifier;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchCondition;
+import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.wpilib.driverstation.Alliance;
+import org.wpilib.driverstation.MatchState;
 import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.math.filter.Debouncer;
@@ -43,11 +56,13 @@ class ArchitectureTest {
   };
 
   /**
-   * The world's model: the field and the robot as configured, and the validation kit they're built
-   * with (ADR 0015). Not its bridges, which write it out for other tools.
+   * The world's model: the field and the robot as configured, the validation kit they're built
+   * with, and the physical values both are made of (ADR 0015). Not its bridges, which write it out
+   * for other tools.
    */
   private static final String[] WORLD_MODEL = {
     "com.michaelgrundvig.frc.world.config..",
+    "com.michaelgrundvig.frc.world.physical..",
     "com.michaelgrundvig.frc.world.field..",
     "com.michaelgrundvig.frc.world.robot.."
   };
@@ -58,13 +73,18 @@ class ArchitectureTest {
   /**
    * The robot program's own components (its loop timing, its wiring), which only it reads, beside
    * the libraries in lib/ (the world model, localization), whose boundaries Gradle keeps: neither
-   * depends on the robot program, so they can't reach it.
+   * depends on the robot program, so they can't reach it. The Phoenix helper has a rule of its own
+   * (below).
    */
   @Test
   void componentsNeverDependOnRobotCode() {
     classes()
         .that()
         .resideInAPackage("frc.robot.lib..")
+        .and()
+        .resideOutsideOfPackage("frc.robot.lib.phoenix..")
+        .and()
+        .resideOutsideOfPackage("frc.robot.lib.rev..")
         .should()
         .onlyDependOnClassesThat(
             resideInAnyPackage(
@@ -77,11 +97,85 @@ class ArchitectureTest {
                     "io.soabase.recordbuilder..",
                     // The validation kit, which every configuration record is built with.
                     "com.michaelgrundvig.frc.world.config..")
-                // Plain values from elsewhere in WPILib: the wiring's CAN port and mount.
-                .or(belongToAnyOf(CANPort.class, OnboardIMU.MountOrientation.class)))
+                // Plain values from elsewhere in WPILib: the wiring's CAN port and mount; and the
+                // catalog's motors, which the wiring's controllers drive.
+                .or(
+                    belongToAnyOf(
+                        CANPort.class,
+                        OnboardIMU.MountOrientation.class,
+                        com.michaelgrundvig.frc.world.robot.Motor.class)))
         .because(
             "components must work in any robot and be testable without one: no hardware, robot"
                 + " state, NetworkTables, telemetry, tunables, commands, or simulation inside")
+        .check(PRODUCTION_CODE);
+  }
+
+  /**
+   * The Phoenix helper turns the robot's definition, wiring and control into Phoenix's settings, so
+   * it reads the model and Phoenix's configuration classes, which other components may not. Never a
+   * device: it builds settings for the IO layer to apply, so it stays pure functions, tested
+   * without hardware.
+   */
+  @Test
+  void thePhoenixHelperBuildsSettingsAndNeverTouchesADevice() {
+    classes()
+        .that()
+        .resideInAPackage("frc.robot.lib.phoenix..")
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(
+                    "frc.robot.lib..",
+                    "java..",
+                    "org.wpilib.math..",
+                    "org.wpilib.units..",
+                    "org.jspecify..",
+                    "io.soabase.recordbuilder..",
+                    "com.michaelgrundvig.frc.world.config..",
+                    "com.michaelgrundvig.frc.world.physical..",
+                    "com.michaelgrundvig.frc.world.robot..",
+                    // Phoenix's settings: plain values, which the IO layer applies.
+                    "com.ctre.phoenix6.configs..",
+                    "com.ctre.phoenix6.signals..")
+                // A bus's name, a follower's request, and a differential's constants: values too.
+                .or(
+                    belongToAnyOf(
+                        CANBus.class,
+                        Follower.class,
+                        DifferentialMotorConstants.class,
+                        CANPort.class)))
+        .because(
+            "the helper is pure functions from the robot's definition, wiring and control to"
+                + " Phoenix's settings: devices, control requests other than a follower's, and the"
+                + " robot's state stay in the IO layer that applies them")
+        .check(PRODUCTION_CODE);
+  }
+
+  /**
+   * The REV helper carries the Phoenix helper's settings to a SPARK's, so it reads those and REV's
+   * configuration classes. Never a device, as the Phoenix helper never is.
+   */
+  @Test
+  void theRevHelperBuildsSettingsAndNeverTouchesADevice() {
+    classes()
+        .that()
+        .resideInAPackage("frc.robot.lib.rev..")
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(
+                    "frc.robot.lib..",
+                    "java..",
+                    "org.wpilib.math..",
+                    "org.wpilib.units..",
+                    "org.jspecify..",
+                    "com.michaelgrundvig.frc.world.robot..",
+                    "com.ctre.phoenix6.configs..",
+                    "com.ctre.phoenix6.signals..",
+                    // REV's settings: plain values, which the IO layer applies.
+                    "com.revrobotics.spark.config..")
+                .or(belongToAnyOf(ClosedLoopSlot.class, FeedbackSensor.class)))
+        .because(
+            "the helper is pure functions from the robot's definition, wiring and control to a"
+                + " SPARK's settings: devices and the robot's state stay in the IO layer")
         .check(PRODUCTION_CODE);
   }
 
@@ -115,6 +209,67 @@ class ArchitectureTest {
         .check(PRODUCTION_CODE);
   }
 
+  /**
+   * The alliance isn't known until the Driver Station connects, often after the program starts. A
+   * class that reads it as it loads, or an object as it's built, keeps that guess all match: the
+   * spectrum survey found teams whose red alliance aimed at blue's goal, patched by hand-editing
+   * the fallback before each event.
+   */
+  static final ArchRule ALLIANCE_READ_WHEN_NEEDED =
+      classes()
+          .should(neverReadTheAllianceAsTheyreBuilt())
+          .because(
+              "the alliance may not be known yet: read it when it's needed, as"
+                  + " RobotContainer.periodic does each loop, and hand it down");
+
+  @Test
+  void theAllianceIsReadWhenItsNeeded() {
+    ALLIANCE_READ_WHEN_NEEDED.check(PRODUCTION_CODE);
+  }
+
+  /**
+   * The rule catches a class that reads the alliance as it loads, and one that does as it's built.
+   */
+  @Test
+  void theAllianceRuleCatchesAGuessKeptFromTheStart() {
+    JavaClasses guessing =
+        new ClassFileImporter().importClasses(GuessesAtLoad.class, GuessesWhenBuilt.class);
+
+    assertThatThrownBy(() -> ALLIANCE_READ_WHEN_NEEDED.check(guessing))
+        .hasMessageContaining("GuessesAtLoad")
+        .hasMessageContaining("GuessesWhenBuilt");
+  }
+
+  /** Keeps the alliance from when the class loaded: a guess before the Driver Station connects. */
+  static final class GuessesAtLoad {
+    static final boolean RED =
+        MatchState.getAlliance().map(alliance -> alliance == Alliance.RED).orElse(false);
+  }
+
+  /** Keeps the alliance from when it was built. */
+  static final class GuessesWhenBuilt {
+    final boolean red =
+        MatchState.getAlliance().map(alliance -> alliance == Alliance.RED).orElse(false);
+  }
+
+  private static ArchCondition<JavaClass> neverReadTheAllianceAsTheyreBuilt() {
+    return new ArchCondition<>("never read the alliance as they load or are built") {
+      @Override
+      public void check(JavaClass item, ConditionEvents events) {
+        List<JavaCodeUnit> building = new ArrayList<>(item.getConstructors());
+        item.getStaticInitializer().ifPresent(building::add);
+        for (JavaCodeUnit unit : building) {
+          for (JavaMethodCall call : unit.getMethodCallsFromSelf()) {
+            if (call.getTargetOwner().isEquivalentTo(MatchState.class)
+                && call.getName().equals("getAlliance")) {
+              events.add(SimpleConditionEvent.violated(item, call.getDescription()));
+            }
+          }
+        }
+      }
+    };
+  }
+
   @Test
   void componentsHaveNoCycles() {
     slices()
@@ -129,7 +284,7 @@ class ArchitectureTest {
   void vendorLibrariesStayBehindIoInterfaces() {
     noClasses()
         .that()
-        .haveNameNotMatching(".*\\.(\\w+IO\\w+|Phoenix\\w*|\\w+Sim)(\\$.*)?")
+        .haveNameNotMatching(".*\\.(\\w+IO\\w+|Phoenix\\w*|Rev\\w*|\\w+Sim)(\\$.*)?")
         .should()
         .dependOnClassesThat()
         .resideInAnyPackage(VENDOR_LIBRARIES)

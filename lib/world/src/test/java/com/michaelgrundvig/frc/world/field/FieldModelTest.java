@@ -4,15 +4,18 @@ import static com.michaelgrundvig.frc.world.field.TestFields.assertPose;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.michaelgrundvig.frc.world.physical.Polygon2d;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.fields.FieldTag;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.shape.Rectangle2d;
 
 class FieldModelTest {
+  /** A square opening, a meter on a side. */
   private final FieldModel field = TestFields.model();
 
   @Test
@@ -38,9 +41,9 @@ class FieldModelTest {
 
   @Test
   void anAreaTurnsWithTheField() {
-    Rectangle2d blue = new Rectangle2d(new Translation2d(0, 0), new Translation2d(2, 3));
+    Polygon2d blue = Polygon2d.rectangle(new Translation2d(0, 0), new Translation2d(2, 3));
 
-    Rectangle2d red = field.forAlliance(Alliance.RED, blue);
+    Polygon2d red = field.forAlliance(Alliance.RED, blue);
 
     assertThat(field.forAlliance(Alliance.BLUE, blue)).isSameAs(blue);
     assertThat(red.contains(new Translation2d(15, 6))).isTrue();
@@ -110,7 +113,7 @@ class FieldModelTest {
   @Test
   void namesAreUnique() {
     Place start = Place.at("Center", Pose2d.ZERO);
-    Zone zone = Zone.ours("Zone", new Rectangle2d(Pose2d.ZERO, 1, 1));
+    Zone zone = Zone.ours("Zone", Polygon2d.rectangle(new Pose2d(1, 1, Rotation2d.ZERO), 1, 1));
 
     assertThatThrownBy(() -> TestFields.model(List.of(start), List.of(start), List.of()))
         .hasMessage("two places are named Center");
@@ -120,10 +123,20 @@ class FieldModelTest {
 
   @Test
   void aZoneOffTheFieldFails() {
-    Zone zone = Zone.ours("Parking lot", new Rectangle2d(new Pose2d(-5, 4, Rotation2d.ZERO), 1, 1));
+    Zone zone =
+        Zone.ours("Parking lot", Polygon2d.rectangle(new Pose2d(-5, 4, Rotation2d.ZERO), 1, 1));
 
     assertThatThrownBy(() -> TestFields.model(List.of(), List.of(), List.of(zone)))
         .hasMessage("Parking lot: an area is off the field");
+  }
+
+  @Test
+  void aPoseIn3dTurnsWithTheField() {
+    Pose3d blue = new Pose3d(1, 2, 1.5, new Rotation3d(0, 0.2, 0.5));
+
+    assertThat(field.forAlliance(Alliance.BLUE, blue)).isSameAs(blue);
+    assertThat(field.forAlliance(Alliance.RED, blue))
+        .isEqualTo(Symmetry.ROTATED.apply(blue, TestFields.LENGTH, TestFields.WIDTH));
   }
 
   @Test
@@ -140,12 +153,27 @@ class FieldModelTest {
   void itKeepsItsStartsPlacesAndZones() {
     Place start = Place.at("Center", new Pose2d(1, 4, Rotation2d.ZERO));
     Place hub = Place.between("Hub", 2, 3);
-    Zone zone = Zone.ours("Zone", new Rectangle2d(new Pose2d(1, 4, Rotation2d.ZERO), 1, 1));
+    Zone zone = Zone.ours("Zone", Polygon2d.rectangle(new Pose2d(1, 4, Rotation2d.ZERO), 1, 1));
 
     var model = TestFields.model(List.of(start), List.of(hub), List.of(zone));
 
     assertThat(model.starts()).containsExactly(start);
     assertThat(model.places()).containsExactly(hub);
     assertThat(model.zones()).containsExactly(zone);
+  }
+
+  @Test
+  void theBuilderNamesEachListAndLeavesOutWhatIsntGiven() {
+    Place start = Place.at("Center", new Pose2d(1, 4, Rotation2d.ZERO));
+
+    FieldModel model =
+        FieldModel.builder(TagLayout.of(TestFields.layout()), Symmetry.ROTATED)
+            .starts(List.of(start))
+            .build();
+
+    assertThat(model.starts()).containsExactly(start);
+    assertThat(model.places()).isEmpty();
+    assertThat(model.zones()).isEmpty();
+    assertThat(model.terrain().surfaces()).isEmpty();
   }
 }

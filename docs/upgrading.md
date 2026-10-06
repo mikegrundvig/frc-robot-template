@@ -13,7 +13,7 @@ merged when `./gradlew ci` passes and the robot drives.
 | WPILib itself, through GradleRIO (the HAL, NetworkTables, the simulator, and the rest) | `gradle/libs.versions.toml`: `gradlerio` |
 | Gradle | `gradle/wrapper/gradle-wrapper.properties`: `distributionUrl` and `distributionSha256Sum` |
 | The WPILib year that editors' WPILib tools use | `.wpilib/wpilib_preferences.json`: `projectYear` |
-| Vendor libraries: AdvantageKit, Commands v3, Phoenix 6, PhotonLib | `vendordeps/*.json` |
+| Vendor libraries: AdvantageKit, Commands v3, Phoenix 6, PhotonLib, REVLib | `vendordeps/*.json` |
 | What waits on a library's release | `docs/stand-ins.md` |
 | The version the README names | `README.md`, its status note |
 
@@ -41,7 +41,7 @@ merged when `./gradlew ci` passes and the robot drives.
 6. **Build:** `./gradlew ci`, and fix what moved. Prereleases rename and move APIs; the release
    notes say where.
    - **Gradle's configuration cache** (`gradle.properties`) can't hold most of GradleRIO's tasks,
-     so `build.gradle` marks them incompatible (and `run`, and deploy's `coprocessorCheck`), and a
+     so `build.gradle` marks them incompatible (and `run`), and a
      build that runs one goes without the cache. Three are kept under it, since `ci` and the tests
      run them: `extractReleaseNative`, `extractDebugNative`, and `downloadDepsPreemptively` (the
      list `cacheable` in `build.gradle`). If a new GradleRIO breaks one of them under the cache

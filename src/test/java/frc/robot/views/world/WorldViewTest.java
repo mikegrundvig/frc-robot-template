@@ -15,7 +15,10 @@ import com.michaelgrundvig.frc.pitwall.scene.Inspection;
 import com.michaelgrundvig.frc.pitwall.scene.Scenes;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
+import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import io.avaje.jsonb.JsonType;
@@ -28,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
@@ -100,7 +104,7 @@ class WorldViewTest {
   private Feed world(boolean simulated) {
     scenes.add(
         WorldView.scene(
-            RobotSim.FIELD,
+            () -> RobotSim.FIELD,
             ROBOT,
             readings,
             simulated ? () -> new Pose3d(new Pose2d(3.05, 4, Rotation2d.fromDegrees(31))) : null,
@@ -120,7 +124,7 @@ class WorldViewTest {
 
     assertThat(described)
         .contains("\"focus\":\"robot\"")
-        .contains("\"walls\"", "\"bump.0\"", "\"tag.7\":{\"parent\":\"field\",\"pose\":")
+        .contains("\"walls\"", "\"surface.0\"", "\"tag.7\":{\"parent\":\"field\",\"pose\":")
         .contains("\"id\":\"tag.7.id\"", "\"text\":\"7\"")
         .contains("\"camera.front-left\":{\"parent\":\"robot\",\"pose\":")
         .contains(
@@ -242,10 +246,47 @@ class WorldViewTest {
         .extracting(Inspection.Detail::value)
         .contains("tracking");
     assertThat(scenes.inspect(WorldView.ID, "tag.7.square")).isPresent();
-    assertThat(scenes.inspect(WorldView.ID, "bump.0")).isPresent();
+    assertThat(scenes.inspect(WorldView.ID, "surface.0")).isPresent();
 
     estimate = estimate(estimate.pose(), LocalizationEstimate.Mode.LOST);
     assertThat(loop(feed)).contains("\"styles\":{\"uncertainty.ellipse\":\"bad dashed\"}");
+  }
+
+  /**
+   * A switch and a rangefinder are drawn where they're mounted, the rangefinder's cone out to its
+   * range, and a click on either says what it is and where, or that where isn't known.
+   */
+  @Test
+  void aClickOnASensorSaysWhatItIsAndWhere() {
+    RobotDefinition sensed =
+        RobotDefinitionBuilder.builder(ROBOT)
+            .sensors(
+                List.of(
+                    Sensor.Switch.beam("hopper beam", Part.CHASSIS)
+                        .at(new Pose3d(0.2, 0, 0.3, Rotation3d.ZERO)),
+                    Sensor.Rangefinder.builder()
+                        .label("floor range")
+                        .part(Part.CHASSIS)
+                        .pose(Optional.empty())
+                        .range(Meters.of(1.3))
+                        .fieldOfView(Degrees.of(27))
+                        .build()))
+            .build();
+    scenes.add(
+        WorldView.scene(() -> RobotSim.FIELD, sensed, readings, null, camera -> Optional.empty()));
+
+    assertThat(JSON.toJson(scenes.descriptions())).contains("\"sensor.1.cone\"");
+    Inspection beam = scenes.inspect(WorldView.ID, "sensor.0.block").orElseThrow();
+    assertThat(beam.title()).isEqualTo("hopper beam");
+    assertThat(beam.details())
+        .extracting(Inspection.Detail::value)
+        .contains(
+            "a beam break", "on chassis, 0.200 m forward, 0.000 m left, 0.300 m up of its origin");
+    assertThat(scenes.inspect(WorldView.ID, "sensor.1.cone").orElseThrow().details())
+        .extracting(Inspection.Detail::value)
+        .contains(
+            "a rangefinder: to 1.30 m, in a 27.0° cone",
+            "on chassis, where unknown: drawn at its origin");
   }
 
   /** The gyro's IMU is drawn where its mount puts it, and a click on it says so. */

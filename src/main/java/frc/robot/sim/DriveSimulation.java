@@ -79,7 +79,8 @@ public final class DriveSimulation {
    * @param drivetrain the drivetrain as defined: the code's belief about its modules
    * @param errors how the real wheels and sensors differ from the configuration
    * @param imus where the robot's definition mounts its IMUs: they really sit off that, and are
-   *     turned off it, by their accelerometers' errors
+   *     turned off it, by their accelerometers' errors. A robot without a backup IMU still has one
+   *     simulated, at the gyro's mount, which the world never hands its code
    */
   public DriveSimulation(Body body, DrivetrainGeometry drivetrain, SensorErrors errors, Imus imus) {
     physics = new KinematicPhysics(body, drivetrain, errors.wheelRadiusScale());
@@ -88,7 +89,7 @@ public final class DriveSimulation {
       // steering loop's millisecond (0, 2, 5 and 7 ms into its cycle, at 100 Hz).
       modules[i] =
           new ModuleIOSim(
-              drivetrain.modules(),
+              drivetrain.module(i),
               physics.wheel(i),
               Math.toRadians(errors.steerOffsetDegrees().get(i)),
               i / 4.0);
@@ -122,7 +123,7 @@ public final class DriveSimulation {
                 new AccelerometerModel(
                     chassis,
                     errors.backupAccelerometer(),
-                    imus.backup(),
+                    imus.backup().orElse(imus.gyro()),
                     Seeds.backupAccelerometer(errors.seed())),
                 Seeds.backupGyro(errors.seed())));
   }

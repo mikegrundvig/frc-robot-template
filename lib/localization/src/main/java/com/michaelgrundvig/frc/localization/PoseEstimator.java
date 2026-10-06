@@ -121,9 +121,7 @@ public final class PoseEstimator {
   private long lastResetNanos = Long.MIN_VALUE;
 
   private final List<VisionMeasurement> pending = new ArrayList<>();
-  private final List<LandmarkEvent> pendingLandmarks = new ArrayList<>();
-  private final List<LandmarkDecision> landmarkDecisions = new ArrayList<>();
-  private final List<Correction> applied = new ArrayList<>();
+  private final List<CameraCorrection> applied = new ArrayList<>();
   private final List<Agreement> agreements = new ArrayList<>();
   private long lastAcceptedNanos = Long.MIN_VALUE;
   private int consecutiveRejections;
@@ -132,17 +130,11 @@ public final class PoseEstimator {
   private int recoveries;
   private double lastInnovationMeters = Double.NaN;
 
-  /** A measurement the history applies at its time: a camera's, or a landmark. */
-  private sealed interface Correction permits CameraCorrection, LandmarkCorrection {
-    long time();
-  }
-
-  private record CameraCorrection(long time, VisionMeasurement measurement) implements Correction {}
-
-  private record LandmarkCorrection(long time, LandmarkEvent landmark) implements Correction {}
+  /** A camera's measurement the history applies at its time. */
+  private record CameraCorrection(long time, VisionMeasurement measurement) {}
 
   /** A correction to apply during a replay: a fresh one is gated, one applied before is not. */
-  private record Event(Correction correction, boolean fresh) {
+  private record Event(CameraCorrection correction, boolean fresh) {
     long time() {
       return correction.time();
     }
@@ -335,14 +327,6 @@ public final class PoseEstimator {
   }
 
   /**
-   * A landmark, to apply at the next {@link #update} at its time: an update along one axis, gated
-   * like a camera's measurement, and kept apart from the cameras' counts, agreement, and recovery.
-   */
-  public void addLandmark(LandmarkEvent landmark) {
-    pendingLandmarks.add(landmark);
-  }
-
-  /**
    * The cameras beyond the {@value PoseFilter#MAX_CAMERAS} whose repeated errors the estimator
    * keeps apart: each image's turn and shift are taken as new, so their images, averaged, grow
    * surer than they should. Empty unless a robot has more cameras than that.
@@ -370,11 +354,6 @@ public final class PoseEstimator {
     return List.copyOf(cameras);
   }
 
-  /** What the last {@link #update} did with each landmark, for the log. */
-  public List<LandmarkDecision> landmarkDecisions() {
-    return List.copyOf(landmarkDecisions);
-  }
-
   /**
    * Applies the measurements added since the last update, each at its capture time, and decides
    * whether odometry needs rescuing. Call it once per loop, after adding the loop's odometry and
@@ -384,7 +363,6 @@ public final class PoseEstimator {
    */
   public List<VisionDecision> update() {
     List<VisionDecision> decisions = new ArrayList<>();
-    landmarkDecisions.clear();
     List<VisionMeasurement> usable = new ArrayList<>();
     for (VisionMeasurement measurement : pending) {
       Verdict why = whyNotUsable(measurement);
@@ -396,19 +374,8 @@ public final class PoseEstimator {
       }
     }
     pending.clear();
-    List<LandmarkEvent> landmarks = new ArrayList<>();
-    for (LandmarkEvent landmark : pendingLandmarks) {
-      Verdict why = whyNotInHistory(landmark.timestampNanos());
-      if (why == null) {
-        landmarks.add(landmark);
-      } else {
-        landmarkDecisions.add(
-            new LandmarkDecision(landmark, why, Double.NaN, Double.NaN, Double.NaN));
-      }
-    }
-    pendingLandmarks.clear();
-    if (!usable.isEmpty() || !landmarks.isEmpty()) {
-      replay(usable, landmarks, decisions);
+    if (!usable.isEmpty()) {
+      replay(usable, decisions);
     }
     recoverIfTheCamerasAgree();
     applyMountDoubts();
@@ -586,23 +553,17 @@ public final class PoseEstimator {
    * Rewinds to just before the earliest new measurement and replays the history from there,
    * applying the new measurements and the ones applied before, in time order.
    */
-  private void replay(
-      List<VisionMeasurement> usable,
-      List<LandmarkEvent> landmarks,
-      List<VisionDecision> decisions) {
+  private void replay(List<VisionMeasurement> usable, List<VisionDecision> decisions) {
     long newest = history.newestTime();
     // A measurement stamped a little after the newest step is applied at the newest step.
     long earliest = newest;
     for (VisionMeasurement measurement : usable) {
       earliest = Math.min(earliest, measurement.timestampNanos());
     }
-    for (LandmarkEvent landmark : landmarks) {
-      earliest = Math.min(earliest, landmark.timestampNanos());
-    }
     int start = history.lastStepBefore(earliest);
     long startTime = history.time(start);
     List<Event> events = new ArrayList<>();
-    for (Correction done : applied) {
+    for (CameraCorrection done : applied) {
       if (done.time() > startTime) {
         events.add(new Event(done, false));
       }
@@ -612,11 +573,6 @@ public final class PoseEstimator {
           new Event(
               new CameraCorrection(Math.min(measurement.timestampNanos(), newest), measurement),
               true));
-    }
-    for (LandmarkEvent landmark : landmarks) {
-      events.add(
-          new Event(
-              new LandmarkCorrection(Math.min(landmark.timestampNanos(), newest), landmark), true));
     }
     events.sort(Comparator.comparingLong(Event::time));
     applied.removeIf(done -> done.time() > startTime);
@@ -645,10 +601,7 @@ public final class PoseEstimator {
   }
 
   private void apply(Event event, double yawThen, List<VisionDecision> decisions) {
-    switch (event.correction()) {
-      case CameraCorrection camera -> applyCamera(camera, event.fresh(), yawThen, decisions);
-      case LandmarkCorrection landmark -> applyLandmark(landmark, event.fresh());
-    }
+    applyCamera(event.correction(), event.fresh(), yawThen, decisions);
   }
 
   /** Gates a fresh camera measurement, then applies it as a Kalman update; applies an old one. */
@@ -709,36 +662,6 @@ public final class PoseEstimator {
     decisions.add(
         new VisionDecision(measurement, Verdict.ACCEPTED, innovation.meters(), chiSquared, gate));
     return true;
-  }
-
-  /**
-   * A landmark, as a Kalman update along one axis: it moves the estimate across the line, and
-   * leaves it alone along it. Gated like a camera's measurement, but none of the cameras' records
-   * change: a landmark is no camera, and one axis says nothing about the rest.
-   */
-  private void applyLandmark(LandmarkCorrection correction, boolean fresh) {
-    LandmarkEvent landmark = correction.landmark();
-    PoseFilter.AxisInnovation innovation = filter.innovationAlong(landmark);
-    if (innovation == null) {
-      return;
-    }
-    if (fresh) {
-      double chiSquared = innovation.chiSquared();
-      double gate = config.gateChiSquaredAxis();
-      boolean passes = chiSquared <= gate;
-      landmarkDecisions.add(
-          new LandmarkDecision(
-              landmark,
-              passes ? Verdict.ACCEPTED : Verdict.GATED,
-              Math.abs(innovation.meters()),
-              chiSquared,
-              gate));
-      if (!passes) {
-        return;
-      }
-    }
-    filter.correct(innovation);
-    applied.add(correction);
   }
 
   /**

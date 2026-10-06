@@ -83,12 +83,14 @@ class VisionTest {
               CameraConfig.Sensor.builder()
                   .widthPixels(1280)
                   .heightPixels(800)
-                  .diagonalFieldOfView(Degrees.of(80))
+                  .fieldOfView(Degrees.of(80))
+                  .fieldOfViewAcross(CameraConfig.Across.DIAGONAL)
                   .frameRate(Hertz.of(30))
                   .latency(Milliseconds.of(30))
                   .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
+          .joint(Optional.empty())
           .build();
 
   /** A camera that reports whatever the test scripts. */
@@ -502,6 +504,7 @@ class VisionTest {
             .yaw(Degrees.of(0))
             .sensor(camera.sensor())
             .noiseScale(1.0)
+            .joint(Optional.empty())
             .build();
     io.see(T0 + 200_000_000L, reallyHigher);
 

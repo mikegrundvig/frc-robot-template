@@ -59,7 +59,8 @@ public final class SimulatedRobot implements AutoCloseable {
     // Made after the Driver Station's data is reset, which clears a gamepad's axes.
     driver = new GamepadSim(0);
     pitwall = Pitwall.start(robot.name(), 0);
-    container = Robot.assemble(Constants.Mode.SIM, scheduler, robot, pitwall, errors, loopHealth);
+    container =
+        Robot.assemble(Constants.Mode.SIM, scheduler, robot, pitwall, errors, loopHealth, null);
   }
 
   /** One robot loop: the clock moves a loop's time, the robot runs its loop, tunables update. */

@@ -40,8 +40,9 @@ class RobotTuningTest {
   void theListOfTuningsHasEveryOne() {
     var tunings = RobotContainer.tunings(Robots.SIM);
 
+    // The drivetrain's and vision's, and one for each driven joint.
     assertThat(tunings.all())
-        .hasSize(RobotContainer.Tunings.class.getRecordComponents().length)
+        .hasSize(2 + tunings.joints().size())
         .doesNotHaveDuplicates()
         .extracting(LiveConfig::name)
         .doesNotHaveDuplicates();

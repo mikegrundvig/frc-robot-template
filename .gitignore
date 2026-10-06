@@ -35,6 +35,3 @@ hs_err_pid*
 replay_pid*
 *.class
 
-# Coprocessor settings backups carry each file's hash beside the settings folder, for checking
-# the backup unzipped whole (coprocessor/README.md); the settings themselves are committed.
-coprocessors/*/settings.sha256

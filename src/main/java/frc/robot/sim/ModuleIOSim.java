@@ -15,7 +15,6 @@ import com.michaelgrundvig.frc.simulation.Physics;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.simulation.WheelDrive;
 import com.michaelgrundvig.frc.simulation.WheelTruth;
-import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DrivetrainControl;
@@ -32,13 +31,13 @@ import org.wpilib.math.util.MathUtil;
  * wheel's true speed, and hands it on with its stator current limit, which the physics holds the
  * motor to; the steering's runs its loop and turns the module in closed form ({@link
  * CurrentLimitedMotorSim}); the physics turns the wheel and moves the robot. The motors and their
- * gearing are the robot's definition's ({@code DrivetrainGeometry.Modules}). Its absolute encoder
- * can read off true ({@link SensorErrors}), and its zero can be knocked further off while it runs.
- * Its encoders' readings can go stale: the wheel turns on, and what the robot's code reads stops
- * changing, as signals that stop arriving do. Both motors' stator current limits are modeled: the
- * drive's caps the torque that accelerates the robot and says when a wheel is at the edge of its
- * grip, and the steering's caps how hard the module turns and stops. The battery holds 12 V, and
- * the drive's supply current limit, with Phoenix's step-down from it ({@code
+ * gearing are the robot's definition's ({@code DrivetrainGeometry.ModuleType}). Its absolute
+ * encoder can read off true ({@link SensorErrors}), and its zero can be knocked further off while
+ * it runs. Its encoders' readings can go stale: the wheel turns on, and what the robot's code reads
+ * stops changing, as signals that stop arriving do. Both motors' stator current limits are modeled:
+ * the drive's caps the torque that accelerates the robot and says when a wheel is at the edge of
+ * its grip, and the steering's caps how hard the module turns and stops. The battery holds 12 V,
+ * and the drive's supply current limit, with Phoenix's step-down from it ({@code
  * DrivetrainControl.Limits.driveSupplyLowerCurrent}), isn't modeled: the supply current it reports
  * is what the motor would draw from a steady 12 V with no supply limit. So this tests the code
  * rather than the robot's power; docs/stand-ins.md says when that matters.
@@ -168,18 +167,17 @@ final class ModuleIOSim implements ModuleIO {
    *     CANcoder sends on its own clock
    */
   ModuleIOSim(
-      DrivetrainGeometry.Modules modules,
+      DrivetrainGeometry.ModuleType modules,
       WheelTruth wheel,
       double steerOffsetRadians,
       double encoderPhase) {
-    Actuator.Motors steer = modules.steer();
     this.wheel = wheel;
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     steerSim =
         new CurrentLimitedMotorSim(
-            steer.model(),
+            modules.steerMotors().model(modules.steerGearing().efficiency()),
             modules.steerInertia().in(KilogramSquareMeters),
-            steer.gearing().ratio());
+            modules.steerGearing().ratio());
     this.steerOffsetRadians = steerOffsetRadians;
     builtSteerOffsetRadians = steerOffsetRadians;
     heardSteerRadians = measuredSteerRadians();

@@ -3,11 +3,11 @@ package com.michaelgrundvig.frc.localization;
 import java.util.Locale;
 
 /**
- * What became of a camera's image or a landmark: accepted, or why not. Three places decide. The
- * robot may hold an image back ({@link LocalizationService#hold}), the {@link VisionPipeline} may
- * throw one out before it becomes a measurement, and the {@link PoseEstimator} weighs each
- * measurement and landmark against the estimate. Each verdict carries its words, so the page and
- * the log say it without anything reading a reason back out of a sentence.
+ * What became of a camera's image: accepted, or why not. Three places decide. The robot may hold an
+ * image back ({@link LocalizationService#hold}), the {@link VisionPipeline} may throw one out
+ * before it becomes a measurement, and the {@link PoseEstimator} weighs each measurement against
+ * the estimate. Each verdict carries its words, so the page and the log say it without anything
+ * reading a reason back out of a sentence.
  *
  * <p>A verdict's numbers (how far past the gate, how far away, how fast it turned) travel beside it
  * in the record that holds it; {@link #describe} puts them into its words, as the log has always

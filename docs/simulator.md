@@ -263,23 +263,8 @@ nothing undoes it. The robot's code is never told: it finds out from its sensors
 | | Placed, as the drive team carries it | happens | x, y (m), heading (°) |
 | | Carried to the nearest bump, facing across it | happens | |
 | Field | Tag moved: one tag, from where the field was built; moving another puts it back. The robot's code and the cameras' multi-tag solves still believe the layout | lasts | tag (its ID), x, y, up (in), in the field's frame |
-| Each coprocessor (`Coprocessor vision-front`), its simulated health agent | Unreachable: its agent stops answering, as one off or off the network | lasts | |
-| | Wrong version: its image carries another PhotonVision (`v2026.3.4`), which it publishes too | lasts | |
-| | Hot: its big cores this far below their trip point (85 °C); at it or past it, their clock is capped | lasts | below its trip point (°C) |
-| | Camera unplugged: one of its cameras, by its number in the table | lasts | camera (from 1) |
-| | PhotonVision restarts: systemd restarts it, back after a few seconds; the count stays until it reboots | happens | |
-| | Duplicated address: a second board with its image answers too, by turns | lasts | |
-| | Settings changed: its PhotonVision settings differ from those it was stamped with, as tuning in its UI does | lasts | |
-| | Ignores power-down: its image predates powering down from the robot, so its agent refuses (404) and it keeps running | lasts | |
 
-Carrying the robot to a bump is declared only on a field with bumps, and a coprocessor for each
-computer in the table compiled into the program (`coprocessors/coprocessors.yaml`); a computer
-with no cameras in the table has no camera to unplug. A simulated coprocessor answers as a healthy
-board running this build's image would, once a second on the robot's clock, through the same
-records a real agent's answer is read into, so its card and alerts on the robot are the real ones
-([the coprocessors](coprocessors.md)) Asked to power down (Pit's *Power down coprocessors*), it halts three seconds
-later and stays halted, unreachable on both its ports, until the simulator starts again, as a real
-board stays off until its power is cycled. A world can also be built
+Carrying the robot to a bump is declared only on a field with bumps. A world can also be built
 with its tags a little off the layout (`SensorErrors.tagErrors`), as the consistency study builds
 it; undoing a moved tag puts it back there.
 
@@ -298,7 +283,8 @@ and a scenario for it, when the simulator can make it.
 - The battery sagging: the simulated world models no battery.
 - A camera's axes swapped in the configuration, the wrong field variant, or one camera with the
   wrong tag layout.
-- Ramp crossings: the terrain has bumps only.
+- Ramp and platform crossings: the field model describes ramps and platforms, but 2026's field
+  has bumps only, so nothing has checked the simulator or localization on one.
 
 ## Scenarios
 

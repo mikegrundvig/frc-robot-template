@@ -38,7 +38,9 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  * into {@code Robots}, and the robot is redeployed.
  */
 public final class Calibration {
-  /** Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (6328). */
+  /**
+   * Spinning for the wheel radius: slowly, so the wheels roll rather than scrub (a top team's way).
+   */
   private static final double WHEEL_SPIN_RADIANS_PER_SECOND = 0.5;
 
   private static final double WHEEL_SPIN_RAMP = 0.25;
@@ -138,10 +140,13 @@ public final class Calibration {
         .add(
             format("Check the IMU reads level (%.0f s, on a level floor)", LEVEL_SECONDS),
             Actions.command(() -> scheduler, this::level));
+    // A camera on a joint isn't calibrated here: where it is is its joint's.
     for (CameraConfig camera : cameras) {
-      actions.add(
-          cameraMountAction(camera.name()),
-          Actions.command(() -> scheduler, () -> cameraMount(camera.name())));
+      if (camera.joint().isEmpty()) {
+        actions.add(
+            cameraMountAction(camera.name()),
+            Actions.command(() -> scheduler, () -> cameraMount(camera.name())));
+      }
     }
   }
 
@@ -183,7 +188,7 @@ public final class Calibration {
                 spin.update(drive.gyroYaw().getRadians(), drive.wheelRotationsRadians());
               }
               stop(coroutine);
-              double configured = drivetrain.modules().wheelRadius().in(Inches);
+              double configured = drivetrain.module(0).wheelRadius().in(Inches);
               double measured = Meters.of(spin.radiusMeters()).in(Inches);
               double[] wheels = spin.radiiMeters();
               report(
@@ -298,9 +303,10 @@ public final class Calibration {
   public Command cameraMount(String name) {
     CameraConfig camera =
         cameras.stream()
-            .filter(each -> each.name().equals(name))
+            .filter(each -> each.name().equals(name) && each.joint().isEmpty())
             .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("no camera named " + name));
+            .orElseThrow(
+                () -> new IllegalArgumentException("no camera on the chassis named " + name));
     return Command.noRequirements(
             coroutine -> {
               CameraMountCalibration mount = new CameraMountCalibration(camera.robotToCamera());

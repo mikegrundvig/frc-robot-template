@@ -11,8 +11,8 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
 
 /**
- * Over REBUILT's bump with no cameras: the terrain tilts the simulated robot, odometry counts the
- * wheels' travel along the ramps instead of throwing it away, and the crest becomes a landmark.
+ * Over REBUILT's bump with no cameras: the terrain tilts the simulated robot, and odometry counts
+ * the wheels' travel along the ramps instead of throwing it away.
  */
 @SimulationTest
 class TerrainSimTest {
@@ -60,16 +60,6 @@ class TerrainSimTest {
     crossTheBump(Transform2d.ZERO);
 
     assertThat(sim.simulation().truePose().getX()).as("over the bump").isGreaterThan(5.2);
-    assertThat(sim.robot().localization().terrainCrossings()).isEqualTo(1);
     assertThat(error()).as("after crossing, no cameras").isLessThan(0.03);
-  }
-
-  /** Knocked back 30 cm before the bump: with no cameras, only the crest can say where it is. */
-  @Test
-  void theCrestPutsAKnockedRobotBackOnTheLine() {
-    crossTheBump(new Transform2d(-0.3, 0, Rotation2d.ZERO));
-
-    assertThat(sim.robot().localization().landmarksAccepted()).isEqualTo(1);
-    assertThat(error()).as("after the crest, no cameras").isLessThan(0.05);
   }
 }

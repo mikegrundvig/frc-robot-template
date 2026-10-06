@@ -1,8 +1,6 @@
 package frc.robot.sim;
 
 import static com.michaelgrundvig.frc.simulation.FaultCatalog.BACKUP_IMU;
-import static com.michaelgrundvig.frc.simulation.FaultCatalog.BELOW_TRIP;
-import static com.michaelgrundvig.frc.simulation.FaultCatalog.CAMERA;
 import static com.michaelgrundvig.frc.simulation.FaultCatalog.DRIFT;
 import static com.michaelgrundvig.frc.simulation.FaultCatalog.EXTRA;
 import static com.michaelgrundvig.frc.simulation.FaultCatalog.FIELD;
@@ -36,8 +34,8 @@ import com.michaelgrundvig.frc.pitwall.simulator.Fault;
 import com.michaelgrundvig.frc.pitwall.simulator.Values;
 import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
-import com.michaelgrundvig.frc.world.field.Bump;
-import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
+import com.michaelgrundvig.frc.world.field.Crossing;
+import com.michaelgrundvig.frc.world.field.Surface;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -55,9 +53,9 @@ import org.wpilib.math.geometry.Translation3d;
  * The simulated world's faults, declared to Pitwall's simulator controls: each fault in the
  * simulation's catalog ({@link FaultCatalog}, which says what each is and what it takes) bound to
  * the part it fails, here, where the parts are: each camera, the gyro, the backup IMU, each module,
- * the robot itself, the field's tags, and each coprocessor. The page lists them, applies them, and
- * undoes them; the scenarios ({@link Scenarios}) are made of them. The robot's code is never told:
- * it has to find out from its sensors.
+ * the robot itself, and the field's tags. The page lists them, applies them, and undoes them; the
+ * scenarios ({@link Scenarios}) are made of them. The robot's code is never told: it has to find
+ * out from its sensors.
  *
  * <p>A fault that lasts (a camera unplugged) says whether it's on by asking the world, and undoing
  * it puts the part back as the world was built: a season-worn robot's sensors ({@link
@@ -84,9 +82,6 @@ public final class Faults {
     components.add(robot(world));
     if (!world.vision().tagIds().isEmpty()) {
       components.add(field(world.vision()));
-    }
-    for (CoprocessorIOSim coprocessor : world.coprocessorSims()) {
-      components.add(coprocessor(coprocessor));
     }
   }
 
@@ -118,69 +113,6 @@ public final class Faults {
           parameter.initial());
     }
     return builder;
-  }
-
-  /** A coprocessor, as its health agent tells the robot of it. */
-  private static Component coprocessor(CoprocessorIOSim coprocessor) {
-    List<Fault> faults = new ArrayList<>();
-    faults.add(
-        lasting(
-            FaultCatalog.Coprocessor.UNREACHABLE,
-            coprocessor::isUnreachable,
-            values -> coprocessor.unreachable(true),
-            () -> coprocessor.unreachable(false)));
-    faults.add(
-        lasting(
-            FaultCatalog.Coprocessor.wrongVersion(CoprocessorIOSim.OTHER_VERSION),
-            coprocessor::hasWrongVersion,
-            values -> coprocessor.wrongVersion(true),
-            () -> coprocessor.wrongVersion(false)));
-    faults.add(
-        lasting(
-            FaultCatalog.Coprocessor.HOT,
-            coprocessor::isHot,
-            values -> coprocessor.heat(values.get(BELOW_TRIP)),
-            () -> coprocessor.heat(Double.NaN)));
-    if (coprocessor.cameraCount() > 0) {
-      faults.add(
-          lasting(
-              FaultCatalog.Coprocessor.cameraUnplugged(coprocessor.cameraCount()),
-              coprocessor::isCameraUnplugged,
-              values -> coprocessor.unplugCamera(cameraIndex(values.get(CAMERA))),
-              () -> coprocessor.unplugCamera(-1)));
-    }
-    faults.add(
-        event(
-            FaultCatalog.Coprocessor.PHOTONVISION_RESTARTS,
-            values -> coprocessor.restartPhotonVision()));
-    faults.add(
-        lasting(
-            FaultCatalog.Coprocessor.DUPLICATED,
-            coprocessor::hasTwoBoards,
-            values -> coprocessor.twoBoards(true),
-            () -> coprocessor.twoBoards(false)));
-    faults.add(
-        lasting(
-            FaultCatalog.Coprocessor.SETTINGS_CHANGED,
-            coprocessor::hasSettingsChanged,
-            values -> coprocessor.settingsChanged(true),
-            () -> coprocessor.settingsChanged(false)));
-    faults.add(
-        lasting(
-            FaultCatalog.Coprocessor.IGNORES_POWER_DOWN,
-            coprocessor::isIgnoringPowerDown,
-            values -> coprocessor.ignoresPowerDown(true),
-            () -> coprocessor.ignoresPowerDown(false)));
-    return new Component(
-        FaultCatalog.coprocessor(coprocessor.name()), FaultCatalog.Coprocessor.KIND, faults);
-  }
-
-  /** A camera's number, from 1, as an index from 0. */
-  private static int cameraIndex(double number) {
-    if (number != Math.rint(number)) {
-      throw new IllegalArgumentException("a camera's number is a whole number, not " + number);
-    }
-    return (int) number - 1;
   }
 
   private static Component camera(CameraIOSim camera) {
@@ -368,9 +300,9 @@ public final class Faults {
     return (int) id;
   }
 
-  /** Whether the field the world was built on has bumps, to carry the robot to. */
+  /** Whether the field the world was built on has bumps (crests), to carry the robot to. */
   static boolean hasBumps(SimulatedWorld world) {
-    return !world.drivetrain().terrain().bumps().isEmpty();
+    return !crests(world).isEmpty();
   }
 
   private static Pose2d placed(Values values) {
@@ -380,29 +312,48 @@ public final class Faults {
   /**
    * Puts the robot down short of the bump nearest it, on the side it's on, facing across the crest:
    * the drive team carrying it there. Its wheels don't turn, so odometry doesn't see the move; its
-   * gyro feels any turn.
+   * gyro feels any turn. A bump is any surface's crest, where the ground falls away on both sides.
    *
    * @throws IllegalStateException on a field without bumps
    */
   static void beforeTheNearestBump(SimulatedWorld world) {
     Translation2d robot = world.truePose().getTranslation();
-    Bump bump =
-        world.drivetrain().terrain().bumps().stream()
-            .min(Comparator.comparingDouble(each -> middle(each).getDistance(robot)))
+    Crest nearest =
+        crests(world).stream()
+            .min(Comparator.comparingDouble(each -> each.line().middle().getDistance(robot)))
             .orElseThrow(
                 () ->
                     new IllegalStateException(
                         "carrying the robot to a bump needs a field with bumps, and this one has"
                             + " none"));
-    boolean onTheAcrossSide = bump.acrossOffset(robot) >= 0;
-    double out = bump.depthMeters() / 2 + BUMP_CLEARANCE_METERS;
-    Rotation2d across = bump.across();
-    Translation2d spot = middle(bump).plus(new Translation2d(onTheAcrossSide ? out : -out, across));
+    Crossing crest = nearest.line();
+    boolean onTheAcrossSide = crest.acrossOffset(robot) >= 0;
+    Rotation2d across = crest.across();
+    // From the crest's middle to its surface's edge on the robot's side, then clear of it.
+    double out =
+        nearest
+                .surface()
+                .footprint()
+                .reach(crest.middle(), onTheAcrossSide ? across : across.plus(Rotation2d.PI))
+            + BUMP_CLEARANCE_METERS;
+    Translation2d spot =
+        crest.middle().plus(new Translation2d(onTheAcrossSide ? out : -out, across));
     world.place(new Pose2d(spot, onTheAcrossSide ? across.plus(Rotation2d.PI) : across));
   }
 
-  /** The middle of a bump's crest. */
-  private static Translation2d middle(Bump bump) {
-    return bump.crestStart().interpolate(bump.crestEnd(), 0.5);
+  /** A crest, and the surface it's on. */
+  private record Crest(Surface surface, Crossing line) {}
+
+  /** Every crest on the field the world was built on. */
+  private static List<Crest> crests(SimulatedWorld world) {
+    List<Crest> crests = new ArrayList<>();
+    for (Surface surface : world.drivetrain().terrain().surfaces()) {
+      for (Crossing crossing : surface.crossings()) {
+        if (crossing.kind() == Crossing.Kind.CREST) {
+          crests.add(new Crest(surface, crossing));
+        }
+      }
+    }
+    return crests;
   }
 }

@@ -42,7 +42,7 @@ class ModuleIOSimTest {
 
   /** A module as configured, with the steering's current limit tuned to this. */
   private static ModuleIOSim module(double steerLimitAmps) {
-    ModuleIOSim module = new ModuleIOSim(GEOMETRY.modules(), wheel(), 0, 0);
+    ModuleIOSim module = new ModuleIOSim(GEOMETRY.module(0), wheel(), 0, 0);
     module.configure(
         DRIVETRAIN.gains(),
         DrivetrainControlLimitsBuilder.builder(DRIVETRAIN.limits())
@@ -120,7 +120,7 @@ class ModuleIOSimTest {
    * last 20 ms over the largest in the first 20. Small enough to stay under the current limit.
    */
   private static double growth(double steerKp) {
-    ModuleIOSim module = new ModuleIOSim(GEOMETRY.modules(), wheel(), 0, 0);
+    ModuleIOSim module = new ModuleIOSim(GEOMETRY.module(0), wheel(), 0, 0);
     module.configure(
         DrivetrainControlGainsBuilder.builder(DRIVETRAIN.gains()).steerKp(steerKp).build(),
         DRIVETRAIN.limits());

@@ -17,6 +17,7 @@ import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The season's field model checked against WPILib's tag layouts. A wrong field model is wrong for
@@ -96,6 +97,52 @@ class RebuiltTest {
     assertThat(field.places()).containsExactly(Rebuilt.HUB, Rebuilt.TOWER);
     assertThat(field.zones()).containsExactly(Rebuilt.ALLIANCE_ZONE, Rebuilt.TRENCH);
     assertThat(field.name()).isEqualTo("2026 FRC Rebuilt Welded");
+  }
+
+  @Test
+  void theBumpsCrestAtTheManualsHeightInHdpe() {
+    double offset = Rebuilt.HUB_SIZE / 2 + Rebuilt.BUMP_WIDTH / 2;
+    for (double y : new double[] {field.width() / 2 - offset, field.width() / 2 + offset}) {
+      assertThat(height(Rebuilt.HUB_X, y)).isCloseTo(Rebuilt.BUMP_HEIGHT, within(1e-9));
+      assertThat(redHeight(Rebuilt.HUB_X, y)).isCloseTo(Rebuilt.BUMP_HEIGHT, within(1e-9));
+    }
+    assertThat(field.terrain().surfaces())
+        .filteredOn(surface -> surface.name().contains("bump"))
+        .hasSize(4)
+        .allSatisfy(bump -> assertThat(bump.material()).isEqualTo(Rebuilt.HDPE));
+  }
+
+  @Test
+  void theTowerBaseAndTheDepotsBarriersAreLowStepsOnBothHalves() {
+    double barrier = Rebuilt.DEPOT_DEPTH - Rebuilt.BARRIER_WIDTH / 2;
+    double sideBarrier = Rebuilt.DEPOT_Y + Rebuilt.DEPOT_WIDTH / 2 - Rebuilt.BARRIER_WIDTH / 2;
+    double[][] steps = {
+      {Rebuilt.BASE_DEPTH / 2, Rebuilt.TOWER_Y, Rebuilt.BASE_HEIGHT},
+      {barrier, Rebuilt.DEPOT_Y, Rebuilt.BARRIER_HEIGHT},
+      {Rebuilt.DEPOT_DEPTH / 2, sideBarrier, Rebuilt.BARRIER_HEIGHT},
+      {Rebuilt.DEPOT_DEPTH / 2, Rebuilt.DEPOT_Y, 0},
+      {Rebuilt.BASE_DEPTH + 0.01, Rebuilt.TOWER_Y, 0},
+    };
+    for (double[] step : steps) {
+      assertThat(height(step[0], step[1])).isCloseTo(step[2], within(1e-9));
+      assertThat(redHeight(step[0], step[1])).isCloseTo(step[2], within(1e-9));
+    }
+  }
+
+  /** The ground's height on blue's half. */
+  private double height(double x, double y) {
+    return field.terrain().heightAt(new Translation2d(x, y));
+  }
+
+  /** The ground's height at the same spot on red's half: blue's turned half a turn. */
+  private double redHeight(double x, double y) {
+    return field.terrain().heightAt(red(new Translation3d(x, y, 0)).toTranslation2d());
+  }
+
+  /** A point on blue's half, turned half a turn onto red's. */
+  private Translation3d red(Translation3d blue) {
+    return new Translation3d(
+        field.length() - blue.getX(), field.width() - blue.getY(), blue.getZ());
   }
 
   /** The middle of the box around some tags, on the floor. */

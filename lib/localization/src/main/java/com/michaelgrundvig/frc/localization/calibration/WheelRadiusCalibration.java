@@ -4,10 +4,10 @@ import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.util.MathUtil;
 
 /**
- * The wheels' radius, from spinning in place against the gyro (6328's procedure). Turning in place,
- * every wheel rolls along a circle around the robot's center: when the robot turns θ, a wheel d
- * from the center rolls θ·d, and the wheel radius is that distance over the wheel's own rotation.
- * Tread wears, so the radius shrinks through a season: measure again before each event.
+ * The wheels' radius, from spinning in place against the gyro (a top team's procedure). Turning in
+ * place, every wheel rolls along a circle around the robot's center: when the robot turns θ, a
+ * wheel d from the center rolls θ·d, and the wheel radius is that distance over the wheel's own
+ * rotation. Tread wears, so the radius shrinks through a season: measure again before each event.
  *
  * <p>The gyro is the reference, so its scale error carries straight into the result (0.3% high
  * reads a 0.3% larger radius): calibrate the gyro's scale first. Spin slowly, so the wheels roll

@@ -77,6 +77,9 @@ class DevicesApiTest {
   private volatile boolean busy;
   private final AtomicBoolean fieldConnected = new AtomicBoolean();
 
+  /** What the venue stand-in has chosen, by its option's value. */
+  private volatile String chosenVenue = "official";
+
   /** Holds the slow download until a test lets it go. */
   private volatile CountDownLatch slow = new CountDownLatch(0);
 
@@ -102,7 +105,26 @@ class DevicesApiTest {
                 "vision-back", "Coprocessor", () -> new Card("Missing", Level.PROBLEM, List.of())))
         .add(
             Device.named("endless", "Coprocessor", () -> new Card("Present", Level.OK, List.of()))
-                .log(DevicesApiTest::endless));
+                .log(DevicesApiTest::endless))
+        .add(
+            Device.named(
+                    "venue",
+                    "Field",
+                    () ->
+                        new Card(
+                            "In use",
+                            Level.OK,
+                            List.of(),
+                            List.of(
+                                new Devices.Choice(
+                                    "venue",
+                                    "Venue",
+                                    List.of(
+                                        new Devices.Option("official", "Official layout"),
+                                        new Devices.Option("practice", "Practice field")),
+                                    chosenVenue))))
+                .upload("survey", "Upload venue", DevicesApiTest::survey)
+                .choose("venue", this::chooseVenue));
     server.start();
     loop.scheduleAtFixedRate(
         () -> {
@@ -164,6 +186,23 @@ class DevicesApiTest {
       throw new IOException(e);
     }
     return Devices.File.of("slow.zip", "application/zip", new byte[] {1});
+  }
+
+  /** Takes a survey unless it says "bad", which it refuses saying why. */
+  private static String survey(byte[] body) throws IOException {
+    String text = new String(body, java.nio.charset.StandardCharsets.UTF_8);
+    if (text.equals("bad")) {
+      throw new Devices.Refused("tag 26 sits 0.500 m from its official place");
+    }
+    return "Saved " + text;
+  }
+
+  private String chooseVenue(String value) throws IOException {
+    if (!value.equals("official") && !value.equals("practice")) {
+      throw new Devices.Refused("there is no venue " + value);
+    }
+    chosenVenue = value;
+    return "Chose " + value;
   }
 
   /** A log that never ends, a page every 20 ms. */
@@ -442,6 +481,106 @@ class DevicesApiTest {
     assertThat(text.body())
         .startsWith("1 s info kernel: more\n")
         .endsWith("-- cut off here: gathering it took 0.5 s. Read on in the page's log viewer.\n");
+  }
+
+  private HttpResponse<String> post(String path, HttpRequest.BodyPublisher body, String type)
+      throws Exception {
+    return client.send(
+        request(path).header("Content-Type", type).POST(body).build(),
+        HttpResponse.BodyHandlers.ofString());
+  }
+
+  @Test
+  void aFileSentToADeviceIsTakenOrRefusedSayingWhy() throws Exception {
+    HttpResponse<String> taken =
+        post(
+            "/api/devices/venue/uploads/survey",
+            HttpRequest.BodyPublishers.ofString("good"),
+            "application/octet-stream");
+    assertThat(taken.statusCode()).isEqualTo(200);
+    assertThat(taken.body()).contains("Saved good");
+
+    HttpResponse<String> refused =
+        post(
+            "/api/devices/venue/uploads/survey",
+            HttpRequest.BodyPublishers.ofString("bad"),
+            "application/octet-stream");
+    assertThat(refused.statusCode()).isEqualTo(422);
+    assertThat(refused.body()).contains("tag 26 sits 0.500 m");
+  }
+
+  @Test
+  void aFileOverTheLimitIsRefusedUnread() throws Exception {
+    HttpResponse<String> big =
+        post(
+            "/api/devices/venue/uploads/survey",
+            HttpRequest.BodyPublishers.ofByteArray(new byte[64 * 1024 + 1]),
+            "application/octet-stream");
+    assertThat(big.statusCode()).isEqualTo(413);
+  }
+
+  @Test
+  void aChoiceShowsOnTheCardAndIsMadeThere() throws Exception {
+    assertThat(get("/api/devices").body())
+        .contains("\"choices\":[{\"id\":\"venue\",\"label\":\"Venue\"")
+        .contains("\"current\":\"official\"")
+        .contains("\"uploads\":[{\"id\":\"survey\",\"label\":\"Upload venue\"}]");
+    HttpResponse<String> chose =
+        post(
+            "/api/devices/venue/choices/venue",
+            HttpRequest.BodyPublishers.ofString("{\"value\": \"practice\"}"),
+            "application/merge-patch+json");
+    assertThat(chose.statusCode()).isEqualTo(200);
+    assertThat(chose.body()).contains("Chose practice");
+    // Cards are read at most once a second (Devices.INTERVAL): the choice shows at the next read.
+    long until = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+    while (!get("/api/devices").body().contains("\"current\":\"practice\"")
+        && System.nanoTime() < until) {
+      waitForTheLoop();
+    }
+    assertThat(get("/api/devices").body()).contains("\"current\":\"practice\"");
+
+    HttpResponse<String> refused =
+        post(
+            "/api/devices/venue/choices/venue",
+            HttpRequest.BodyPublishers.ofString("{\"value\": \"moon\"}"),
+            "application/merge-patch+json");
+    assertThat(refused.statusCode()).isEqualTo(422);
+    assertThat(refused.body()).contains("there is no venue moon");
+    chosenVenue = "official";
+  }
+
+  @Test
+  void changesToDevicesWaitWhileTheFieldIsConnected() throws Exception {
+    fieldConnected.set(true);
+    waitForTheLoop();
+    HttpResponse<String> response =
+        post(
+            "/api/devices/venue/uploads/survey",
+            HttpRequest.BodyPublishers.ofString("good"),
+            "application/octet-stream");
+    assertThat(response.statusCode()).isEqualTo(409);
+  }
+
+  @Test
+  void onlyThePageMayChangeADeviceAndOnlyByPost() throws Exception {
+    HttpResponse<String> noPage =
+        client.send(
+            HttpRequest.newBuilder(uri("/api/devices/venue/uploads/survey"))
+                .POST(HttpRequest.BodyPublishers.ofString("good"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(noPage.statusCode()).isEqualTo(400);
+    HttpResponse<String> got = get("/api/devices/venue/uploads/survey");
+    assertThat(got.statusCode()).isEqualTo(405);
+    assertThat(got.headers().firstValue("Allow")).contains("POST");
+    assertThat(
+            post(
+                    "/api/devices/venue/uploads/other",
+                    HttpRequest.BodyPublishers.ofString("x"),
+                    "application/octet-stream")
+                .statusCode())
+        .isEqualTo(404);
   }
 
   private HttpRequest.Builder request(String path) {

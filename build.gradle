@@ -86,6 +86,8 @@ dependencies {
     compileOnly libs.recordbuilder.core
     testCompileOnly libs.recordbuilder.core
     annotationProcessor libs.recordbuilder.processor
+    // The 2026 robots' fixtures declare a design's parts record as robot code does, built by name.
+    testAnnotationProcessor libs.recordbuilder.processor
 
     // Static analysis (gradle/quality.gradle).
     errorprone libs.errorprone.core
@@ -105,11 +107,17 @@ deployArtifact.configureApplication(application)
 wpi.java.configureApplication(application)
 wpi.java.configureTestTasks(test)
 
+// PhotonVision's camera simulation allocates OpenCV frames in native memory that only Java's
+// collector frees (each Mat's finalizer), so outside the heap a simulating process grows with how
+// seldom the collector runs: a study reached 4.8 GB resident on a 2 GB heap. A 32 MB young
+// generation runs it often enough to hold that near 1 GB, at the same speed (docs/testing.md).
+tasks.withType(Test).configureEach { jvmArgs "-Xmn32m" }
+tasks.withType(JavaExec).configureEach { jvmArgs "-Xmn32m" }
+
 tasks.named("test") {
     useJUnitPlatform()
-    // A fresh test JVM every 20 test classes. The simulation tests' native memory (PhotonVision's
-    // camera simulation, WPILib's HAL) isn't on the heap the cap in gradle/quality.gradle limits:
-    // one JVM running them all grows to 5 to 6.5 GB, where a fresh one now and then stays near 3.
+    // A fresh test JVM every 20 test classes: one JVM running them all took 265 s and peaked at
+    // 2.2 GB, eight fresh ones 124 s and 1.2 GB each (2026-10-02, with the young generation above).
     forkEvery = 20
     // Tests run in the build folder, so what simulated devices and logs write (CTRE's ctre_sim/,
     // for one) stays out of the project. A test finds project files through frc.projectDir.
@@ -191,15 +199,14 @@ def withoutConfigurationCache = { Task task, String why ->
         // Marked incompatible above, which is all a build needs.
     }
 }
-// GradleRIO's tasks that building and testing use work with it. Deploy's first step, which asks
-// the coprocessors, goes without it as deploy does: it reads the team number GradleRIO stores.
+// GradleRIO's tasks that building and testing use work with it.
 def cacheable = [
     "extractReleaseNative",
     "extractDebugNative",
     "downloadDepsPreemptively"
 ]
 tasks.configureEach { task ->
-    if (task.name in ["run", "coprocessorCheck"] || (task.class.name.startsWith("org.wpilib.") && !(task.name in cacheable))) {
+    if (task.name == "run" || (task.class.name.startsWith("org.wpilib.") && !(task.name in cacheable))) {
         withoutConfigurationCache(task, "GradleRIO's state can't be kept in the configuration cache")
     }
 }
@@ -216,26 +223,6 @@ gradle.taskGraph.whenReady { graph ->
 // Every check means ci: the robot program's and Pitwall's, which the robot runs too.
 tasks.matching { it.name == "deploy" }.configureEach {
     dependsOn "ci"
-    dependsOn "coprocessorCheck"
-}
-
-// Before a deploy, each coprocessor in the table is asked which image it runs, within a second
-// (frc.robot.subsystems.coprocessors.DeployCheck): one running another PhotonVision, recipe, name,
-// team, or address than this build's fails the deploy, as does one answering on PhotonVision's port
-// but not the agent's; one not answering only warns. -PskipCoprocessorCheck skips it, saying so.
-tasks.register("coprocessorCheck", JavaExec) {
-    group = "DeployUtils" // beside deploy
-    description = "Ask each coprocessor which image it runs, as deploy does first: -PskipCoprocessorCheck skips it."
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = "frc.robot.subsystems.coprocessors.DeployCheck"
-    args deploy.targets.systemcore.team.toString()
-    def skip = project.hasProperty("skipCoprocessorCheck")
-    onlyIf("-PskipCoprocessorCheck wasn't given") {
-        if (skip) {
-            logger.lifecycle("Coprocessor check skipped (-PskipCoprocessorCheck): the coprocessors' images weren't compared with this build")
-        }
-        !skip
-    }
 }
 
 // Store the team number: ./gradlew setTeamNumber -PteamNumber=NNNN
@@ -260,5 +247,3 @@ apply from: "gradle/quality.gradle"     // formatting, static analysis, coverage
 apply from: "gradle/build-info.gradle"  // git SHA and build time, logged by the robot at startup
 apply from: "gradle/simulation.gradle"  // simulator defaults for ./gradlew run
 apply from: "gradle/studies.gradle"     // simulation studies, such as camera placement
-apply from: "gradle/coprocessors.gradle" // the coprocessor table and the PhotonVision version lock
-apply from: "gradle/coprocessor-image.gradle"  // the coprocessor image scripts' tests

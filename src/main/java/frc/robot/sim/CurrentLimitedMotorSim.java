@@ -4,7 +4,7 @@ import org.wpilib.math.system.DCMotor;
 
 /**
  * A motor turning a load through its gearing, its motor controller holding the current through it
- * to a limit: a swerve module's steering.
+ * to a limit: a swerve module's steering, or one of the robot's joints, which gravity pulls on too.
  *
  * <p>Its motion is worked out exactly rather than stepped, because a steering motor is quick: with
  * the simulated inertia, its speed closes on the speed its voltage gives with a time constant under
@@ -18,6 +18,12 @@ import org.wpilib.math.system.DCMotor;
  * sixty times slower, and today's physics holds the limit at each step's start, so it falls a
  * little short of the limit within each step (the truth suite's F = m a gap).
  *
+ * <p>A torque from outside, gravity on a joint, is held steady through each step and adds to the
+ * motor's: below the limit it moves the speed the load closes on; at the limit it adds to the
+ * steady acceleration, and a motor held at its limit by more than it can lift stays there through
+ * the step. Taken at each step's start, it's exact for steps short against how fast the load's
+ * angle changes it: the simulator steps a joint every millisecond, as its motor controller runs.
+ *
  * <p>Friction is left out: a real module's wheel scrubs on the carpet as it turns, and its gearbox
  * drags, so a real one coasts less than this one. Both need measuring on a real module before they
  * belong here. Once measured, add them in {@link #run} as a steady torque against the motion: it
@@ -27,6 +33,7 @@ import org.wpilib.math.system.DCMotor;
 final class CurrentLimitedMotorSim {
   private final DCMotor motor;
   private final double gearing;
+  private final double inertia;
 
   /** The load's acceleration per amp through the motor, in radians per second squared. */
   private final double accelerationPerAmp;
@@ -39,15 +46,18 @@ final class CurrentLimitedMotorSim {
   private double positionRadians;
   private double velocityRadPerSec;
   private double appliedVolts;
+  private boolean coasting;
 
   /**
-   * @param motor the motor
-   * @param inertiaKgM2 the load's moment of inertia
-   * @param gearing motor rotations per rotation of the load
+   * @param motor the motor, or the motors turning the load together
+   * @param inertiaKgM2 the load's moment of inertia, or its mass for a load that slides
+   * @param gearing motor rotations per rotation of the load, or radians per meter of one that
+   *     slides
    */
   CurrentLimitedMotorSim(DCMotor motor, double inertiaKgM2, double gearing) {
     this.motor = motor;
     this.gearing = gearing;
+    this.inertia = inertiaKgM2;
     accelerationPerAmp = gearing * motor.Kt / inertiaKgM2;
     settlingRate = gearing * gearing * motor.Kt / (motor.Kv * motor.R * inertiaKgM2);
   }
@@ -63,15 +73,29 @@ final class CurrentLimitedMotorSim {
    *     since it only falls as the motor's speed catches up with its voltage
    */
   double run(double volts, double limitAmps, double seconds) {
+    return run(volts, limitAmps, 0, seconds);
+  }
+
+  /**
+   * Runs the motor for a time, as {@link #run(double, double, double)} does, with a torque from
+   * outside on the load the whole time.
+   *
+   * @param loadTorque the torque from outside, gravity's, in newton meters (newtons for a load that
+   *     slides), positive turning the load forward
+   * @return the current through the motor at the start, held to the limit
+   */
+  double run(double volts, double limitAmps, double loadTorque, double seconds) {
+    coasting = false;
+    double pulled = loadTorque / inertia;
     double amps = motor.getCurrent(velocityRadPerSec * gearing, volts);
     double remaining = seconds;
     if (Math.abs(amps) > limitAmps) {
       // At the limit: a steady torque, until the speed leaves no more than the limit's current.
       double limit = Math.copySign(limitAmps, amps);
-      double acceleration = limit * accelerationPerAmp;
+      double acceleration = limit * accelerationPerAmp + pulled;
       double releaseSpeed = (volts - limit * motor.R) * motor.Kv / gearing;
-      double atLimit =
-          Math.clamp((releaseSpeed - velocityRadPerSec) / acceleration, 0.0, remaining);
+      double toRelease = (releaseSpeed - velocityRadPerSec) / acceleration;
+      double atLimit = toRelease >= 0 ? Math.min(toRelease, remaining) : remaining;
       positionRadians += (velocityRadPerSec + acceleration * atLimit / 2) * atLimit;
       velocityRadPerSec += acceleration * atLimit;
       remaining -= atLimit;
@@ -80,14 +104,32 @@ final class CurrentLimitedMotorSim {
         return limitAmps;
       }
     }
-    // Below the limit: the speed closes on the voltage's free speed, exponentially.
-    double freeSpeed = volts * motor.Kv / gearing;
+    // Below the limit: the speed closes on the voltage's free speed, shifted by the load, exactly.
+    double freeSpeed = volts * motor.Kv / gearing + pulled / settlingRate;
     double decay = Math.exp(-settlingRate * remaining);
     positionRadians +=
         freeSpeed * remaining + (velocityRadPerSec - freeSpeed) * (1 - decay) / settlingRate;
     velocityRadPerSec = freeSpeed + (velocityRadPerSec - freeSpeed) * decay;
     appliedVolts = volts;
     return Math.min(Math.abs(amps), limitAmps);
+  }
+
+  /**
+   * Lets the load turn freely for a time, no current through the motor, as a motor controller in
+   * coast leaves it: only the torque from outside moves it.
+   */
+  void coast(double loadTorque, double seconds) {
+    double acceleration = loadTorque / inertia;
+    positionRadians += (velocityRadPerSec + acceleration * seconds / 2) * seconds;
+    velocityRadPerSec += acceleration * seconds;
+    coasting = true;
+    appliedVolts = 0;
+  }
+
+  /** Puts the load at a position and speed: against a hard stop, where it's held still. */
+  void place(double position, double velocity) {
+    positionRadians = position;
+    velocityRadPerSec = velocity;
   }
 
   /** The load's angle, in radians from where it started. */
@@ -105,8 +147,8 @@ final class CurrentLimitedMotorSim {
     return appliedVolts;
   }
 
-  /** The current through the motor now, in amps. */
+  /** The current through the motor now, in amps: none while it coasts. */
   double currentAmps() {
-    return motor.getCurrent(velocityRadPerSec * gearing, appliedVolts);
+    return coasting ? 0 : motor.getCurrent(velocityRadPerSec * gearing, appliedVolts);
   }
 }

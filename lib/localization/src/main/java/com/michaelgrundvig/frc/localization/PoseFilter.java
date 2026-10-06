@@ -5,7 +5,6 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.util.MathUtil;
 
 /**
@@ -244,28 +243,6 @@ final class PoseFilter {
       return Math.hypot(x, y);
     }
   }
-
-  /**
-   * How far a landmark is from the estimate, along its one axis.
-   *
-   * @param meters the innovation along the axis
-   * @param variance its variance, estimate and landmark together
-   * @param chiSquared its squared distance under that variance
-   * @param acrossX the direction across the landmark's line, that it measures along, x
-   * @param acrossY and y
-   * @param ph0 how x relates to the measurement: P H^T's first row
-   * @param ph1 how y does
-   * @param ph2 how the heading offset does
-   */
-  record AxisInnovation(
-      double meters,
-      double variance,
-      double chiSquared,
-      double acrossX,
-      double acrossY,
-      double ph0,
-      double ph1,
-      double ph2) {}
 
   double x() {
     return x;
@@ -666,50 +643,6 @@ final class PoseFilter {
           change += gain[i * 3 + r] * hRelated[r * considered + k];
         }
         related[i * considered + k] -= change;
-      }
-    }
-  }
-
-  /**
-   * A landmark's innovation along its one axis: it measures the estimate across its line, and says
-   * nothing along it.
-   *
-   * @return null if the variance across the line is degenerate
-   */
-  @Nullable AxisInnovation innovationAlong(LandmarkEvent landmark) {
-    double nx = landmark.across().getCos();
-    double ny = landmark.across().getSin();
-    double innovation = -landmark.offset(new Translation2d(x, y));
-    // With H = [nx, ny, 0]: P H^T, then S = H P H^T + R.
-    double ph0 = covariance[0] * nx + covariance[1] * ny;
-    double ph1 = covariance[3] * nx + covariance[4] * ny;
-    double ph2 = covariance[6] * nx + covariance[7] * ny;
-    double s = nx * ph0 + ny * ph1 + landmark.stdDevMeters() * landmark.stdDevMeters();
-    if (!(s > 0)) {
-      return null;
-    }
-    return new AxisInnovation(innovation, s, innovation * innovation / s, nx, ny, ph0, ph1, ph2);
-  }
-
-  /** Applies a landmark, as a Kalman update along its one axis. */
-  void correct(AxisInnovation innovation) {
-    double s = innovation.variance();
-    double[] k = {innovation.ph0() / s, innovation.ph1() / s, innovation.ph2() / s};
-    x += k[0] * innovation.meters();
-    y += k[1] * innovation.meters();
-    offset += k[2] * innovation.meters();
-    // P = P - K H P, and H P is (P H^T) transposed: K K^T S.
-    for (int row = 0; row < 3; row++) {
-      for (int column = 0; column < 3; column++) {
-        covariance[row * 3 + column] -= k[row] * k[column] * s;
-      }
-    }
-    symmetrize();
-    for (int c = 0; c < considered; c++) {
-      double across =
-          innovation.acrossX() * related[c] + innovation.acrossY() * related[considered + c];
-      for (int row = 0; row < 3; row++) {
-        related[row * considered + c] -= k[row] * across;
       }
     }
   }

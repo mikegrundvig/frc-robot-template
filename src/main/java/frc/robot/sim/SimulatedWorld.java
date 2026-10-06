@@ -1,7 +1,5 @@
 package frc.robot.sim;
 
-import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
-import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
@@ -10,28 +8,29 @@ import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Imus;
+import com.michaelgrundvig.frc.world.robot.RobotMath;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.subsystems.coprocessors.CoprocessorIO;
-import frc.robot.subsystems.coprocessors.CoprocessorIOSim;
-import frc.robot.subsystems.coprocessors.Coprocessors;
-import frc.robot.subsystems.coprocessors.PhotonVisionIO;
-import frc.robot.subsystems.coprocessors.PhotonVisionIOSim;
 import frc.robot.subsystems.drive.DriveHardware;
+import frc.robot.subsystems.drive.GyroIO;
+import frc.robot.subsystems.mechanisms.JointIO;
+import frc.robot.subsystems.mechanisms.JointSetup;
+import frc.robot.subsystems.mechanisms.SensorIO;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Transform3d;
 
 /**
  * The world the simulated robot drives in: the drivetrain's physics, which knows where the robot
- * really is, and PhotonVision's simulated cameras, rendering what they'd see from there. The
- * robot's code sees it only through its IO interfaces ({@link #drivetrainHardware}, {@link
- * #cameras}, {@link #coprocessors}), as it would see real hardware.
+ * really is, its joints' ({@link JointSimulation}), and PhotonVision's simulated cameras, rendering
+ * what they'd see from there. The robot's code sees it only through its IO interfaces ({@link
+ * #drivetrainHardware}, {@link #joint}, {@link #cameras}), as it would see real hardware.
  *
  * <p>The robot's wheels and sensors differ from its configuration as a real robot's do ({@link
  * SensorErrors}), so its estimate drifts from the truth, and localization is tested against that
@@ -44,11 +43,21 @@ import org.wpilib.math.geometry.Transform3d;
 public final class SimulatedWorld implements AutoCloseable {
   private final FieldModel field;
   private final DriveSimulation drivetrain;
+
+  /** Whether the robot's definition has a backup IMU, which the world then hands its code. */
+  private final boolean hasBackupImu;
+
   private final VisionSim vision;
   private final CameraIOSim[] cameras;
 
-  /** The coprocessors' simulated health agents, once the robot asks for them. */
-  private final List<CoprocessorIOSim> coprocessors = new ArrayList<>();
+  /** The cameras that ride on joints, which move with them. */
+  private final List<CameraConfig> camerasOnJoints;
+
+  /** The robot's driven joints, once the robot asks for the first: none without mechanisms. */
+  private @Nullable JointSimulation joints;
+
+  /** The robot's switches and rangefinders, once the robot asks for the first: none without. */
+  private @Nullable SensorSimulation sensors;
 
   /**
    * @param field the field, with its tags and terrain
@@ -83,11 +92,13 @@ public final class SimulatedWorld implements AutoCloseable {
       SensorErrors errors) {
     this.field = field;
     this.drivetrain = new DriveSimulation(body, drivetrain, errors, imus);
+    this.hasBackupImu = imus.backup().isPresent();
     this.drivetrain.setTerrain(field.terrain());
     // Each camera's noise from its own stream of the seed (Seeds).
     vision =
         new VisionSim(field, errors.tagErrors(), camera -> Seeds.camera(errors.seed(), camera));
     this.cameras = new CameraIOSim[cameras.size()];
+    camerasOnJoints = cameras.stream().filter(camera -> camera.joint().isPresent()).toList();
     for (int i = 0; i < cameras.size(); i++) {
       CameraConfig camera = cameras.get(i);
       Transform3d mountError = errors.cameraMountError(camera.name());
@@ -105,12 +116,15 @@ public final class SimulatedWorld implements AutoCloseable {
     Faults.declare(this, components);
   }
 
-  /** The drivetrain's simulated modules and IMUs, for the drivetrain to read. */
+  /**
+   * The drivetrain's simulated modules and IMUs, for the drivetrain to read: no backup IMU for a
+   * robot whose definition has none.
+   */
   public DriveHardware drivetrainHardware() {
     return DriveHardware.builder()
         .modules(List.of(drivetrain.modules()))
         .gyro(drivetrain.gyro())
-        .backupImu(drivetrain.backupGyro())
+        .backupImu(hasBackupImu ? drivetrain.backupGyro() : new GyroIO() {})
         .odometryLock(new ReentrantLock())
         .build();
   }
@@ -121,29 +135,40 @@ public final class SimulatedWorld implements AutoCloseable {
   }
 
   /**
-   * The coprocessors' simulated health agents, one for each computer in the table, in its order:
-   * made the first time they're asked for, and the same ones after.
+   * A driven joint's simulated motor controller, for its mechanism to read and drive.
    *
-   * @param table the table of coprocessors compiled into the program
-   * @param settings how often they're asked
+   * @param math what the robot's definition derives: the same for every joint asked for
    */
-  public CoprocessorIO[] coprocessors(CompiledTable table, Coprocessors.Settings settings) {
-    if (coprocessors.isEmpty()) {
-      for (Computer computer : table.table().computers()) {
-        coprocessors.add(new CoprocessorIOSim(table, computer, settings));
-      }
+  public JointIO joint(RobotMath math, JointSetup setup) {
+    JointSimulation simulation = joints;
+    if (simulation == null) {
+      simulation = new JointSimulation(math);
+      joints = simulation;
     }
-    return coprocessors.toArray(CoprocessorIO[]::new);
+    return simulation.add(setup);
   }
 
-  /** PhotonVision's version, as the simulated coprocessors publish it. */
-  public PhotonVisionIO photonVision() {
-    return new PhotonVisionIOSim(coprocessors);
+  /**
+   * A switch's or a rangefinder's simulated device, for the robot to read: asked for after the
+   * joints, whose positions a limit switch reads.
+   */
+  public SensorIO sensor(Sensor.Placed sensor) {
+    SensorSimulation simulation = sensors;
+    if (simulation == null) {
+      simulation = new SensorSimulation(joints);
+      sensors = simulation;
+    }
+    return simulation.add(sensor);
   }
 
-  /** The coprocessors' simulated agents, for their faults. */
-  List<CoprocessorIOSim> coprocessorSims() {
-    return List.copyOf(coprocessors);
+  /** The robot's switches and rangefinders, as a test sets them, or null for a robot without. */
+  public @Nullable SensorSimulation sensors() {
+    return sensors;
+  }
+
+  /** The robot's driven joints' physics, or null for a robot without them. */
+  public @Nullable JointSimulation joints() {
+    return joints;
   }
 
   /** The cameras' names, in the robot's configured order. */
@@ -177,10 +202,14 @@ public final class SimulatedWorld implements AutoCloseable {
    */
   public void step(long nowNanos) {
     drivetrain.step(RobotLoop.PERIOD_SECONDS, nowNanos);
-    vision.update(drivetrain.truePose3d());
-    for (CoprocessorIOSim coprocessor : coprocessors) {
-      coprocessor.step(nowNanos);
+    JointSimulation simulation = joints;
+    if (simulation != null) {
+      simulation.step(RobotLoop.PERIOD_SECONDS);
+      for (CameraConfig camera : camerasOnJoints) {
+        vision.carry(camera.name(), simulation.cameraMount(camera));
+      }
     }
+    vision.update(drivetrain.truePose3d());
   }
 
   /** Where the robot really is. */

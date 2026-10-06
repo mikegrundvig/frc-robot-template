@@ -12,11 +12,15 @@ import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotMath;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
@@ -27,10 +31,11 @@ import org.wpilib.math.kinematics.SwerveModuleVelocity;
  * bumpers with an arrow out the front; each wheel at its module, turned to its measured angle, with
  * an arrow where it's driving; each camera at its exact mount, an arrow along its optical axis and
  * the first meter of its view, named off the robot; and the gyro's IMU, a small block where its
- * mount puts it, turned as it's mounted, with an arrow along its own x axis. A click on a camera
- * says how it's mounted, offers its calibration, and shows its full view ({@link CameraViews})
- * until the details close; a click on the IMU says how it's mounted and whether its accelerometer
- * has been checked.
+ * mount puts it, turned as it's mounted, with an arrow along its own x axis; and each switch and
+ * rangefinder where it's mounted, a small block, a rangefinder's cone out to its range. A click on
+ * a camera says how it's mounted, offers its calibration, and shows its full view ({@link
+ * CameraViews}) until the details close; a click on the IMU says how it's mounted and whether its
+ * accelerometer has been checked; a click on a sensor says what it is and where.
  */
 final class RobotLayer implements Layer {
   /** The robot's frame on the page: the frame the page's Follow follows. */
@@ -52,6 +57,9 @@ final class RobotLayer implements Layer {
 
   /** The arrow along the IMU's own x axis, which shows how it's turned. */
   private static final double IMU_ARROW = 0.1;
+
+  /** A switch's or a rangefinder's block: about a CANrange's, or a limit switch's. */
+  private static final double SENSOR_SIZE = 0.03;
 
   /** A swerve wheel's width, about. */
   private static final double WHEEL_WIDTH = 0.038;
@@ -95,10 +103,20 @@ final class RobotLayer implements Layer {
   private final FieldModel field;
   private final Body body;
 
-  /** The wheels' radius, in meters. */
-  private final double radius;
+  /** Each wheel's radius, in meters. */
+  private final double[] radii;
 
   private final List<CameraConfig> cameras;
+
+  /** Each camera's mount on the robot, in the cameras' order: on a joint, as the joint rests. */
+  private final Transform3d[] mounts;
+
+  /** The switches and rangefinders. */
+  private final List<Sensor.Placed> sensors;
+
+  /** Each one's mount on the robot, in their order: on a joint, as the joint rests. */
+  private final Transform3d[] sensorMounts;
+
   private final ImuMount gyro;
   private final WorldView.Readings readings;
   private final Function<String, Optional<String>> cameraAction;
@@ -116,8 +134,28 @@ final class RobotLayer implements Layer {
       Function<String, Optional<String>> cameraAction) {
     this.field = field;
     body = robot.body();
-    radius = robot.drivetrain().modules().wheelRadius().in(Meters);
+    radii = new double[robot.drivetrain().corners().size()];
+    for (int i = 0; i < radii.length; i++) {
+      radii[i] = robot.drivetrain().module(i).wheelRadius().in(Meters);
+    }
     cameras = List.copyOf(robot.cameras());
+    // A camera on a joint is drawn where its joint rests: the view doesn't follow the joints yet.
+    RobotMath math = robot.math();
+    mounts = new Transform3d[cameras.size()];
+    for (int i = 0; i < cameras.size(); i++) {
+      Pose3d resting = math.cameraPose(cameras.get(i), Map.of());
+      mounts[i] = new Transform3d(resting.getTranslation(), resting.getRotation());
+    }
+    sensors =
+        robot.sensors().stream()
+            .filter(Sensor.Placed.class::isInstance)
+            .map(Sensor.Placed.class::cast)
+            .toList();
+    sensorMounts = new Transform3d[sensors.size()];
+    for (int i = 0; i < sensors.size(); i++) {
+      Pose3d resting = math.sensorPose(sensors.get(i), Map.of());
+      sensorMounts[i] = new Transform3d(resting.getTranslation(), resting.getRotation());
+    }
     gyro = robot.imus().gyro();
     this.readings = readings;
     this.cameraAction = cameraAction;
@@ -165,6 +203,7 @@ final class RobotLayer implements Layer {
     for (int i = 0; i < moduleFrames.length; i++) {
       String module = WorldView.MODULES.get(i);
       String frame = moduleFrames[i];
+      double radius = radii[i];
       scene
           .frame(frame, FRAME, modules[i].getX(), modules[i].getY(), 0, 0, 0, 0)
           .deadband(frame, WHEEL_DEADBAND_METERS, STEER_DEADBAND_RADIANS)
@@ -187,7 +226,7 @@ final class RobotLayer implements Layer {
       CameraConfig camera = cameras.get(i);
       String frame = WorldView.cameraFrame(camera.id());
       String fullView = CameraViews.view(camera);
-      scene.frame(frame, FRAME, camera.robotToCamera());
+      scene.frame(frame, FRAME, mounts[i]);
       scene
           .arrow(frame + ".axis", frame)
           .to(CAMERA_ARROW, 0, 0)
@@ -206,6 +245,24 @@ final class RobotLayer implements Layer {
           .label(frame + ".name", FRAME)
           .text(camera.name())
           .at(label.getX(), label.getY(), label.getZ());
+    }
+    for (int i = 0; i < sensors.size(); i++) {
+      Sensor.Placed sensor = sensors.get(i);
+      String frame = "sensor." + i;
+      scene.frame(frame, FRAME, sensorMounts[i]);
+      scene
+          .box(frame + ".block", frame)
+          .size(SENSOR_SIZE, SENSOR_SIZE, SENSOR_SIZE)
+          .style(Style.ACCENT)
+          .inspect(() -> WorldView.sensor(sensor));
+      if (sensor instanceof Sensor.Rangefinder rangefinder) {
+        double cone = rangefinder.fieldOfView().in(Radians);
+        scene
+            .frustum(frame + ".cone", frame)
+            .fov(cone, cone)
+            .range(0, rangefinder.range().in(Meters))
+            .inspect(() -> WorldView.sensor(sensor));
+      }
     }
     scene.frame(IMU, FRAME, new Transform3d(gyro.position(), gyro.orientation()));
     scene

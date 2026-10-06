@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.world.field;
 
+import com.michaelgrundvig.frc.world.physical.Polygon2d;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -14,17 +15,22 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.shape.Rectangle2d;
 
 /**
  * One season's field: its size, AprilTags, and symmetry, the start positions, places, and zones
- * robot code refers to, and the terrain robots drive over. Built once at startup from a tag layout
- * (WPILib's for the season, or one measured at an event) and never changed after. Every place and
- * zone is checked against the layout as the model is built, so a wrong tag number fails at startup,
- * and first in the tests.
+ * robot code refers to, and the terrain robots drive over. Built once at startup ({@link #builder})
+ * from the field's tags (WPILib's official layout, or a venue's survey of it) and never changed
+ * after. Everything is checked against the tags as the model is built, so a wrong tag number fails
+ * at startup, and first in the tests.
  *
  * <p>Everything is written for the blue alliance, and {@link #forAlliance} is the one conversion to
- * red (see the package documentation).
+ * red (see the package documentation). Tags pair with their partners on the other half by their
+ * official poses, which the symmetry turns; where a survey found them never changes which tag plays
+ * which part.
+ *
+ * <p>The model names the two copies of a surface written for blue's half "(blue)" and "(red)": for
+ * the half each is on, not for whose it is. Whose something is lives on the places and zones robot
+ * code asks about ({@link Zone#ours}), which say it whichever half they're on.
  */
 public final class FieldModel {
   /**
@@ -41,7 +47,7 @@ public final class FieldModel {
   private final double length;
   private final double width;
   private final Symmetry symmetry;
-  private final Map<Integer, Pose3d> tags;
+  private final Map<Integer, Tag> tags;
   private final Map<Integer, Integer> partners;
   private final List<Place> starts;
   private final List<Place> places;
@@ -49,10 +55,12 @@ public final class FieldModel {
   private final Terrain terrain;
 
   /**
+   * A field on a WPILib layout, its tags as it gives them, with no terrain.
+   *
    * @param layout the field's size and AprilTags; the model keeps its own copy
    * @param symmetry how red's half relates to blue's
    * @param starts where robots start a match
-   * @param places other named places: targets, scoring and loading spots
+   * @param places other named places on the floor: spots to line up on, to score or load from
    * @param zones named areas of the field
    * @throws IllegalArgumentException if a place or zone doesn't fit the layout (a tag that isn't in
    *     it, or has no partner on the other half), or two share a name
@@ -63,9 +71,11 @@ public final class FieldModel {
   }
 
   /**
-   * @param bumps the bumps on the blue alliance's half, each named as blue's drivers would ("Left
-   *     bump"): the model adds each one's partner on red's half, and names them "(blue)" and
-   *     "(red)"
+   * A field on a WPILib layout, its tags as it gives them, with its terrain.
+   *
+   * @param surfaces the raised ground on the blue alliance's half, each named as blue's drivers
+   *     would ("Left bump"): the model adds each one's partner on red's half, and names them
+   *     "(blue)" and "(red)" for the half each is on
    */
   public FieldModel(
       Field layout,
@@ -73,30 +83,99 @@ public final class FieldModel {
       List<Place> starts,
       List<Place> places,
       List<Zone> zones,
-      List<Bump> bumps) {
-    name = layout.getName();
-    length = layout.getFieldLength();
-    width = layout.getFieldWidth();
-    this.symmetry = symmetry;
-    Map<Integer, Pose3d> byId = new LinkedHashMap<>();
-    for (FieldTag tag : layout.getTags()) {
-      byId.put(tag.getID(), tag.getPose());
+      List<? extends Surface> surfaces) {
+    this(
+        builder(TagLayout.of(layout), symmetry)
+            .starts(starts)
+            .places(places)
+            .zones(zones)
+            .surfaces(surfaces));
+  }
+
+  /**
+   * Starts describing the field on its tags: the official layout's, or a venue's ({@link
+   * Venue#tagLayout}). Everything else is named as it's given, and anything left out is none.
+   *
+   * @param layout the field's size and tags
+   * @param symmetry how red's half relates to blue's
+   */
+  public static Builder builder(TagLayout layout, Symmetry symmetry) {
+    return new Builder(layout, symmetry);
+  }
+
+  /** A field being described, each list named as it's given. */
+  public static final class Builder {
+    private final TagLayout layout;
+    private final Symmetry symmetry;
+    private List<Place> starts = List.of();
+    private List<Place> places = List.of();
+    private List<Zone> zones = List.of();
+    private List<? extends Surface> surfaces = List.of();
+
+    private Builder(TagLayout layout, Symmetry symmetry) {
+      this.layout = layout;
+      this.symmetry = symmetry;
+    }
+
+    /** Where robots start a match. */
+    public Builder starts(List<Place> starts) {
+      this.starts = List.copyOf(starts);
+      return this;
+    }
+
+    /** Other named places on the floor: spots to line up on, to score or load from. */
+    public Builder places(List<Place> places) {
+      this.places = List.copyOf(places);
+      return this;
+    }
+
+    /** Named areas of the field. */
+    public Builder zones(List<Zone> zones) {
+      this.zones = List.copyOf(zones);
+      return this;
+    }
+
+    /**
+     * The raised ground on the blue alliance's half, each named as blue's drivers would ("Left
+     * bump"): the model adds each one's partner on red's half, and names them "(blue)" and "(red)"
+     * for the half each is on, with their crossings.
+     */
+    public Builder surfaces(List<? extends Surface> surfaces) {
+      this.surfaces = List.copyOf(surfaces);
+      return this;
+    }
+
+    /**
+     * The field, checked.
+     *
+     * @throws IllegalArgumentException if anything doesn't fit the tags or the field (a tag that
+     *     isn't in it, or has no partner on the other half; a surface or zone off the field), or
+     *     two share a name
+     */
+    public FieldModel build() {
+      return new FieldModel(this);
+    }
+  }
+
+  private FieldModel(Builder field) {
+    TagLayout layout = field.layout;
+    name = layout.name();
+    length = layout.lengthMeters();
+    width = layout.widthMeters();
+    symmetry = field.symmetry;
+    Map<Integer, Tag> byId = new LinkedHashMap<>();
+    for (Tag tag : layout.tags()) {
+      byId.put(tag.id(), tag);
     }
     tags = Collections.unmodifiableMap(byId);
     partners = pairTags();
-    this.starts = List.copyOf(starts);
-    this.places = List.copyOf(places);
-    this.zones = List.copyOf(zones);
-    List<Bump> both = new ArrayList<>();
-    for (Bump bump : bumps) {
-      both.add(
-          new Bump(
-              bump.name() + " (blue)",
-              bump.crestStart(),
-              bump.crestEnd(),
-              bump.heightMeters(),
-              bump.depthMeters()));
-      both.add(bump.image(bump.name() + " (red)", symmetry, length, width));
+    starts = field.starts;
+    places = field.places;
+    zones = field.zones;
+    List<Surface> both = new ArrayList<>();
+    for (Surface surface : field.surfaces) {
+      both.add(renamed(surface, " (blue)"));
+      both.add(renamed(symmetry.apply(surface, length, width), " (red)"));
     }
     terrain = new Terrain(both);
     check();
@@ -121,23 +200,30 @@ public final class FieldModel {
     return symmetry;
   }
 
-  /** Every tag's pose, by ID, in the field frame. */
-  public Map<Integer, Pose3d> tags() {
+  /**
+   * Every tag, by ID: where the official layout puts it, where a survey found it, and how sure we
+   * are.
+   */
+  public Map<Integer, Tag> tags() {
     return tags;
   }
 
-  /** The layout as WPILib's {@link Field}, for tools that take one, such as a vision simulation. */
+  /**
+   * The tags where they are, as WPILib's {@link Field}, for tools that take one, such as a vision
+   * simulation: each as surveyed, if it was.
+   */
   public Field toField() {
     List<FieldTag> list = new ArrayList<>();
-    for (Map.Entry<Integer, Pose3d> tag : tags.entrySet()) {
-      list.add(new FieldTag(tag.getKey(), tag.getValue()));
+    for (Tag tag : tags.values()) {
+      list.add(new FieldTag(tag.id(), tag.pose()));
     }
     return new Field(name, "", "", null, length, width, "frc", list);
   }
 
-  /** A tag's pose, if the layout has it. */
+  /** Where a tag is, in the field frame, if the field has it: as surveyed, if it was. */
   public Optional<Pose3d> tag(int id) {
-    return Optional.ofNullable(tags.get(id));
+    Tag tag = tags.get(id);
+    return tag == null ? Optional.empty() : Optional.of(tag.pose());
   }
 
   /** Where robots start a match, in the order they were given. */
@@ -154,7 +240,7 @@ public final class FieldModel {
     return zones;
   }
 
-  /** The bumps robots drive over, on both halves of the field. */
+  /** The raised ground robots drive over, on both halves of the field. */
   public Terrain terrain() {
     return terrain;
   }
@@ -167,17 +253,22 @@ public final class FieldModel {
     return alliance == Alliance.BLUE ? blue : symmetry.apply(blue, length, width);
   }
 
+  /**
+   * A pose in 3D written for the blue alliance, for an alliance: its image under the field's
+   * symmetry for red ({@link Symmetry#apply(Pose3d, double, double)}).
+   */
+  public Pose3d forAlliance(Alliance alliance, Pose3d blue) {
+    return alliance == Alliance.BLUE ? blue : symmetry.apply(blue, length, width);
+  }
+
   /** A point written for the blue alliance, for an alliance. */
   public Translation2d forAlliance(Alliance alliance, Translation2d blue) {
     return alliance == Alliance.BLUE ? blue : symmetry.apply(blue, length, width);
   }
 
   /** An area written for the blue alliance, for an alliance. */
-  public Rectangle2d forAlliance(Alliance alliance, Rectangle2d blue) {
-    return alliance == Alliance.BLUE
-        ? blue
-        : new Rectangle2d(
-            forAlliance(alliance, blue.getCenter()), blue.getXWidth(), blue.getYWidth());
+  public Polygon2d forAlliance(Alliance alliance, Polygon2d blue) {
+    return alliance == Alliance.BLUE ? blue : symmetry.apply(blue, length, width);
   }
 
   /**
@@ -212,15 +303,16 @@ public final class FieldModel {
 
   /** On the floor, where {@link #tagFor} puts a blue tag for an alliance. */
   Pose2d tagPose(Alliance alliance, int blueTag) {
-    return pose(tagFor(alliance, blueTag)).toPose2d();
+    return tagPose3d(alliance, blueTag).toPose2d();
+  }
+
+  /** Where {@link #tagFor} puts a blue tag for an alliance: as surveyed, if it was. */
+  Pose3d tagPose3d(Alliance alliance, int blueTag) {
+    return pose(tagFor(alliance, blueTag));
   }
 
   private Pose3d pose(int tag) {
-    Pose3d pose = tags.get(tag);
-    if (pose == null) {
-      throw new IllegalArgumentException("the layout has no tag " + tag);
-    }
-    return pose;
+    return tag(tag).orElseThrow(() -> new IllegalArgumentException("the layout has no tag " + tag));
   }
 
   /** Whether a point is on the field, within the walls. */
@@ -232,14 +324,14 @@ public final class FieldModel {
   }
 
   /**
-   * How far the layout is from the declared symmetry: the largest distance between a tag's image
-   * and the nearest tag facing the same way, in meters. Near zero when the field has the symmetry;
-   * worth a test, since every place on the red alliance depends on it.
+   * How far the official layout is from the declared symmetry: the largest distance between a tag's
+   * image and the nearest tag facing the same way, in meters. Near zero when the field has the
+   * symmetry; worth a test, since every place on the red alliance depends on it.
    */
   public double symmetryError() {
     double worst = 0;
-    for (Pose3d tag : tags.values()) {
-      Pose2d image = symmetry.apply(tag.toPose2d(), length, width);
+    for (Tag tag : tags.values()) {
+      Pose2d image = symmetry.apply(tag.nominal().toPose2d(), length, width);
       worst =
           Math.max(
               worst,
@@ -249,40 +341,103 @@ public final class FieldModel {
   }
 
   /**
-   * Each tag's partner: the tag where the symmetry puts it, facing the way the symmetry turns it.
+   * Each tag's partner: the tag where the symmetry puts it, facing the way the symmetry turns it,
+   * both as the official layout has them.
    */
   private Map<Integer, Integer> pairTags() {
     Map<Integer, Integer> pairs = new LinkedHashMap<>();
-    for (Map.Entry<Integer, Pose3d> tag : tags.entrySet()) {
-      Pose2d image = symmetry.apply(tag.getValue().toPose2d(), length, width);
+    for (Tag tag : tags.values()) {
+      Pose2d image = symmetry.apply(tag.nominal().toPose2d(), length, width);
       nearestFacing(image)
           .filter(id -> distance(id, image) <= PARTNER_DISTANCE_METERS)
-          .ifPresent(id -> pairs.put(tag.getKey(), id));
+          .ifPresent(id -> pairs.put(tag.id(), id));
     }
     return Collections.unmodifiableMap(pairs);
   }
 
-  /** The nearest tag facing within {@link #PARTNER_ANGLE_RADIANS} of the pose's heading. */
+  /**
+   * The nearest tag facing within {@link #PARTNER_ANGLE_RADIANS} of the pose's heading, as the
+   * official layout has it.
+   */
   private Optional<Integer> nearestFacing(Pose2d pose) {
     Integer nearest = null;
     double best = Double.POSITIVE_INFINITY;
-    for (Map.Entry<Integer, Pose3d> tag : tags.entrySet()) {
-      Pose2d other = tag.getValue().toPose2d();
+    for (Tag tag : tags.values()) {
+      Pose2d other = tag.nominal().toPose2d();
       double turn = Math.abs(other.getRotation().minus(pose.getRotation()).getRadians());
       double distance = other.getTranslation().getDistance(pose.getTranslation());
       if (turn <= PARTNER_ANGLE_RADIANS && distance < best) {
-        nearest = tag.getKey();
+        nearest = tag.id();
         best = distance;
       }
     }
     return Optional.ofNullable(nearest);
   }
 
+  /** How far a tag's official pose is from a pose, on the floor. */
   private double distance(int tag, Pose2d pose) {
-    return pose(tag).toPose2d().getTranslation().getDistance(pose.getTranslation());
+    return nominal(tag).toPose2d().getTranslation().getDistance(pose.getTranslation());
   }
 
-  /** Every place resolves for both alliances, and names are unique. */
+  private Pose3d nominal(int tag) {
+    Tag known = tags.get(tag);
+    if (known == null) {
+      throw new IllegalArgumentException("the layout has no tag " + tag);
+    }
+    return known.nominal();
+  }
+
+  /**
+   * A surface under its name with a suffix, its crossings too: a mesh's are named in it, and the
+   * others' are named for the surface, so they follow.
+   */
+  private static Surface renamed(Surface surface, String suffix) {
+    String renamed = surface.name() + suffix;
+    return switch (surface) {
+      case Bump bump ->
+          new Bump(
+              renamed,
+              bump.crestStart(),
+              bump.crestEnd(),
+              bump.heightMeters(),
+              bump.depthMeters(),
+              bump.material());
+      case Ramp ramp ->
+          new Ramp(
+              renamed,
+              ramp.foot(),
+              ramp.top(),
+              ramp.widthMeters(),
+              ramp.heightMeters(),
+              ramp.material());
+      case Platform platform ->
+          new Platform(
+              renamed,
+              platform.top(),
+              platform.heightMeters(),
+              platform.sides(),
+              platform.material());
+      case MeshSurface mesh ->
+          new MeshSurface(
+              renamed,
+              mesh.mesh(),
+              mesh.crossings().stream()
+                  .map(
+                      crossing ->
+                          new Crossing(
+                              crossing.name() + suffix,
+                              crossing.start(),
+                              crossing.end(),
+                              crossing.kind()))
+                  .toList(),
+              mesh.material());
+    };
+  }
+
+  /**
+   * Every place resolves for both alliances, the zones and terrain are on the field, and names are
+   * unique.
+   */
   private void check() {
     List<Place> named = new ArrayList<>(starts);
     named.addAll(places);
@@ -304,19 +459,23 @@ public final class FieldModel {
       if (!zoneNames.add(zone.name())) {
         throw new IllegalArgumentException("two zones are named " + zone.name());
       }
-      for (Rectangle2d area : zone.blueAreas()) {
-        if (!contains(area.getCenter().getTranslation())) {
+      for (Polygon2d area : zone.blueAreas()) {
+        if (!contains(area.centroid())) {
           throw new IllegalArgumentException(zone.name() + ": an area is off the field");
         }
       }
     }
-    Set<String> bumpNames = new HashSet<>();
-    for (Bump bump : terrain.bumps()) {
-      if (!bumpNames.add(bump.name())) {
-        throw new IllegalArgumentException("two bumps are named " + bump.name());
+    Set<String> surfaceNames = new HashSet<>();
+    for (Surface surface : terrain.surfaces()) {
+      if (!surfaceNames.add(surface.name())) {
+        throw new IllegalArgumentException("two surfaces are named " + surface.name());
       }
-      if (!contains(bump.crestStart()) || !contains(bump.crestEnd())) {
-        throw new IllegalArgumentException(bump.name() + ": its crest runs off the field");
+      boolean on = contains(surface.footprint().centroid());
+      for (Crossing crossing : surface.crossings()) {
+        on &= contains(crossing.start()) && contains(crossing.end());
+      }
+      if (!on) {
+        throw new IllegalArgumentException(surface.name() + ": it runs off the field");
       }
     }
   }

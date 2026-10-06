@@ -157,8 +157,8 @@ pieces, or charts. AdvantageScope does those.
 The template contributes its world from `frc.robot.views.world` (`WorldView.scene`, added in
 `RobotContainer.addTo`), and `./gradlew run` shows it at http://localhost:5820/#world:
 
-- **Field:** the field model's walls and carpet, its bumps, and its AprilTags where the layout puts
-  them, each with its number.
+- **Field:** the field model's walls and carpet, its raised ground (bumps, ramps, platforms), and
+  its AprilTags where the layout puts them, each with its number.
 - **Robot:** at the localization estimate, on the ground under it and tilted as its IMU says, as
   its `RobotDefinition` describes it: its frame and bumpers from `Body` with an arrow out the
   front; each wheel at its module, turned to its measured angle, with an arrow as far as it will go

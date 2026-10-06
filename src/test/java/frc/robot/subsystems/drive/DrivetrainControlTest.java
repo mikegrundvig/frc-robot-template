@@ -6,12 +6,25 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryCornerBuilder;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import frc.robot.Robots;
+import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.MechanismWiring;
+import frc.robot.lib.wiring.SwerveWiring;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
+import org.wpilib.hardware.bus.CANPort;
+import org.wpilib.hardware.imu.OnboardIMU;
 
 class DrivetrainControlTest {
   @Test
@@ -157,5 +170,64 @@ class DrivetrainControlTest {
 
   private static void assertRejected(String field, ThrowingCallable build) {
     assertThatIllegalArgumentException().isThrownBy(build).withMessageStartingWith(field);
+  }
+
+  /**
+   * A drivetrain's wiring must drive its definition's motors: REV's MAXSwerve, a Vortex driving and
+   * a NEO 550 steering, on SPARKs; the template's own Krakens on TalonFXs, and not the other way
+   * round.
+   */
+  @Test
+  void aSwervesWiringMustDriveItsMotors() {
+    DrivetrainGeometry ours = Robots.SIM.definition().drivetrain();
+    DrivetrainGeometry.ModuleType maxSwerve =
+        DrivetrainGeometryModuleTypeBuilder.builder(ours.corners().get(0).module())
+            .driveMotor(Motor.NEO_VORTEX)
+            .steerMotor(Motor.NEO_550)
+            .build();
+    DrivetrainGeometry rev =
+        new DrivetrainGeometry(
+            ours.corners().stream()
+                .map(
+                    corner ->
+                        DrivetrainGeometryCornerBuilder.builder(corner).module(maxSwerve).build())
+                .toList());
+    SwerveWiring talons =
+        wiring(MechanismWiring.Controller.TALON_FX, MechanismWiring.Controller.TALON_FX, true);
+    SwerveWiring sparks =
+        wiring(MechanismWiring.Controller.SPARK_FLEX, MechanismWiring.Controller.SPARK_MAX, false);
+
+    assertThat(DrivetrainControl.whyNotDriven(ours, talons)).isNull();
+    assertThat(DrivetrainControl.whyNotDriven(rev, sparks)).isNull();
+    assertThat(DrivetrainControl.whyNotDriven(rev, talons))
+        .isEqualTo(
+            "the drivetrain's wiring: its drive's NEO Vortex isn't driven by a TalonFX; its"
+                + " steering's NEO 550 isn't driven by a TalonFX");
+  }
+
+  private static SwerveWiring wiring(
+      MechanismWiring.Controller drive, MechanismWiring.Controller steer, boolean cancoders) {
+    List<SwerveWiring.ModuleWiring> modules = new ArrayList<>();
+    for (int i = 0; i < 4; i++) {
+      modules.add(
+          SwerveWiring.ModuleWiring.builder()
+              .driveId(1 + 2 * i)
+              .steerId(2 + 2 * i)
+              .encoderId(cancoders ? Optional.of(20 + i) : Optional.empty())
+              .encoderOffset(Rotations.of(0))
+              .driveInverted(false)
+              .steerInverted(true)
+              .encoderInverted(false)
+              .build());
+    }
+    return SwerveWiring.builder()
+        .canBus(CanBus.port(CANPort.CAN_S0))
+        .driveController(drive)
+        .steerController(steer)
+        .gyroId(30)
+        .gyroYawScale(1.0)
+        .modules(modules)
+        .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
+        .build();
   }
 }

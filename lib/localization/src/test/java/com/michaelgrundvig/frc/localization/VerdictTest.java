@@ -9,13 +9,11 @@ import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.geometry.Translation2d;
 
 /**
  * Every reason the estimator and the vision pipeline gave in words before {@link Verdict}, word for
- * word: the cameras' logs (their decisions, and the reasons beside refused tags) and the landmarks'
- * keep the same strings, so old logs and new read alike.
+ * word: the cameras' logs (their decisions, and the reasons beside refused tags) keep the same
+ * strings, so old logs and new read alike.
  */
 class VerdictTest {
   /** A verdict's numbers, and the words the code wrote by hand for them before. */
@@ -128,13 +126,7 @@ class VerdictTest {
             List.of(7),
             VisionMeasurement.Solver.SINGLE_TAG);
     VisionDecision gated = new VisionDecision(measurement, Verdict.GATED, 0.8, 45.2, 13.8);
-    LandmarkDecision accepted =
-        new LandmarkDecision(
-            new LandmarkEvent(1, "crest", Translation2d.ZERO, Rotation2d.ZERO, 0.05),
-            Verdict.ACCEPTED,
-            0.01,
-            0.2,
-            10.8);
+    VisionDecision accepted = new VisionDecision(measurement, Verdict.ACCEPTED, 0.01, 0.2, 13.8);
 
     assertThat(gated.accepted()).isFalse();
     assertThat(gated.reason()).isEqualTo("gate: 45.2 > 13.8");

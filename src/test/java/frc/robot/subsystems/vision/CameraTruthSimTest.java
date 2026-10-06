@@ -10,6 +10,7 @@ import static org.wpilib.units.Units.Milliseconds;
 import com.michaelgrundvig.frc.simulation.Consistency;
 import com.michaelgrundvig.frc.simulation.KnownGap;
 import com.michaelgrundvig.frc.simulation.Seeds;
+import com.michaelgrundvig.frc.world.field.Tag;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
@@ -193,13 +194,14 @@ class CameraTruthSimTest {
   /** What every camera sees from here, noise off, over half a second: each tag once. */
   private static List<Seen> render(Pose3d robot) {
     List<Seen> seen = new ArrayList<>();
-    Map<Integer, Pose3d> tags = RobotSim.FIELD.tags();
+    Map<Integer, Tag> tags = RobotSim.FIELD.tags();
     for (CameraConfig config : CAMERAS) {
       List<PhotonPipelineResult> results = run(config, robot, 0.5, VisionSim.Noise.NONE);
       for (PhotonPipelineResult result : results.subList(results.size() - 1, results.size())) {
         for (PhotonTrackedTarget target : result.getTargets()) {
           seen.add(
-              new Seen(config, Objects.requireNonNull(tags.get(target.getFiducialId())), target));
+              new Seen(
+                  config, Objects.requireNonNull(tags.get(target.getFiducialId())).pose(), target));
         }
       }
     }

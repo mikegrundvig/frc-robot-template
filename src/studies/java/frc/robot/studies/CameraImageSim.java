@@ -7,7 +7,6 @@ import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.opencv.core.Point;
 import org.photonvision.estimation.CameraTargetRelation;
@@ -118,12 +117,9 @@ final class CameraImageSim {
     cy = intrinsics.get(1, 2);
     halfWidthDegrees = camera.getHorizFOV().getDegrees() / 2;
     halfHeightDegrees = camera.getVertFOV().getDegrees() / 2;
-    for (Map.Entry<Integer, Pose3d> tag : field.tags().entrySet()) {
+    for (var tag : field.tags().values()) {
       tags.add(
-          new Tag(
-              tag.getKey(),
-              tag.getValue(),
-              TargetModel.kAprilTag36h11.getFieldVertices(tag.getValue())));
+          new Tag(tag.id(), tag.pose(), TargetModel.kAprilTag36h11.getFieldVertices(tag.pose())));
     }
   }
 

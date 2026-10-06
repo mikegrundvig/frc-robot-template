@@ -93,4 +93,64 @@ class CurrentLimitedMotorSimTest {
     assertThat(motor.currentAmps()).as("near full speed").isBetween(0.0, 5.0);
     assertThat(motor.appliedVolts()).isEqualTo(12);
   }
+
+  /**
+   * Below the limit, a steady torque on the load is the same as the voltage that would drive its
+   * current through the windings: gravity on a joint moves it exactly as WPILib's model does with
+   * that voltage added.
+   */
+  @Test
+  void aSteadyLoadIsTheVoltageItsCurrentWouldTake() {
+    double torque = -0.6; // newton meters at the load: gravity on a light arm
+    double asVolts = torque / (GEARING * MOTOR.Kt) * MOTOR.R;
+    CurrentLimitedMotorSim loaded = new CurrentLimitedMotorSim(MOTOR, INERTIA_KG_M2, GEARING);
+
+    for (double volts : new double[] {12, -6, 3, 0}) {
+      loaded.run(volts, Double.POSITIVE_INFINITY, torque, 0.004);
+      motor.run(volts + asVolts, Double.POSITIVE_INFINITY, 0.004);
+
+      assertThat(loaded.positionRadians()).isCloseTo(motor.positionRadians(), within(1e-9));
+      assertThat(loaded.velocityRadPerSec()).isCloseTo(motor.velocityRadPerSec(), within(1e-9));
+    }
+  }
+
+  @Test
+  void atItsLimitALoadAddsToTheSteadyTorque() {
+    double torque = -0.6;
+
+    motor.run(12, 40, torque, 0.002);
+
+    assertThat(motor.velocityRadPerSec())
+        .isCloseTo((ACCELERATION_AT_40_AMPS + torque / INERTIA_KG_M2) * 0.002, within(1e-9));
+  }
+
+  /** A load more than the limit can hold: the motor pushes at its limit and still loses. */
+  @Test
+  void aLoadTheLimitCantHoldWins() {
+    double torque = -2 * 40 * MOTOR.Kt * GEARING; // twice what 40 A gives at the load
+
+    double amps = motor.run(12, 40, torque, 0.02);
+
+    assertThat(amps).isEqualTo(40);
+    assertThat(motor.velocityRadPerSec())
+        .isCloseTo((ACCELERATION_AT_40_AMPS + torque / INERTIA_KG_M2) * 0.02, within(1e-9));
+    assertThat(motor.velocityRadPerSec()).isNegative();
+  }
+
+  /** Coasting, no current flows: only the load moves it, as a body falling. */
+  @Test
+  void coastingOnlyTheLoadMovesIt() {
+    motor.run(12, Double.POSITIVE_INFINITY, 0.05);
+    double speed = motor.velocityRadPerSec();
+    double position = motor.positionRadians();
+
+    motor.coast(-0.6, 0.02);
+
+    double acceleration = -0.6 / INERTIA_KG_M2;
+    assertThat(motor.velocityRadPerSec()).isCloseTo(speed + acceleration * 0.02, within(1e-9));
+    assertThat(motor.positionRadians())
+        .isCloseTo(position + speed * 0.02 + acceleration * 0.02 * 0.02 / 2, within(1e-9));
+    assertThat(motor.currentAmps()).isZero();
+    assertThat(motor.appliedVolts()).isZero();
+  }
 }

@@ -18,8 +18,14 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SimulatedWorld;
+import frc.robot.venues.VenueIO;
+import frc.robot.venues.VenueIODisk;
+import frc.robot.venues.VenuePit;
+import frc.robot.venues.VenueStore;
+import frc.robot.venues.Venues;
 import java.io.File;
 import java.lang.management.ManagementFactory;
+import java.nio.file.Path;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.LogFileUtil;
@@ -34,6 +40,7 @@ import org.wpilib.driverstation.RobotState;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.simulation.DriverStationSim;
+import org.wpilib.system.Filesystem;
 import org.wpilib.util.Alert;
 
 /** The robot program: logging setup, then the command scheduler every loop. */
@@ -93,6 +100,22 @@ public class Robot extends LoggedRobot {
 
   /** Whether the loop keeps up, and its log with it. */
   private final LoopHealth loopHealth = new LoopHealth();
+
+  /**
+   * Where venues are kept: the robot's disk on a robot, and in the simulator its own under {@code
+   * build/venues/}. None in a replay, which takes the venue from the log; nor in tests, which use
+   * the official layout unless they say otherwise.
+   */
+  static @Nullable VenueStore venueStore(Constants.Mode mode) {
+    if (mode == Constants.Mode.REPLAY) {
+      return null;
+    }
+    Path stored =
+        mode == Constants.Mode.REAL
+            ? VenueStore.ROBOT_FOLDER
+            : Filesystem.getOperatingDirectory().toPath().resolve("build/venues");
+    return new VenueStore(stored, Filesystem.getDeployDirectory().toPath().resolve("venues"));
+  }
 
   /** A debug deploy ({@code deploy -PdebugMode}) waits for a debugger every time it starts. */
   private final Alert debugDeploy =
@@ -163,7 +186,8 @@ public class Robot extends LoggedRobot {
             robot,
             pitwall,
             SensorErrors.TYPICAL,
-            loopHealth);
+            loopHealth,
+            venueStore(Constants.currentMode));
     // The scenario's sensor faults, through the simulator's controls (where the page shows them,
     // and can undo them) before the first loop; its events once the robot is enabled.
     pendingEvents =
@@ -239,16 +263,24 @@ public class Robot extends LoggedRobot {
       RobotConfig robot,
       Pitwall pitwall,
       SensorErrors simulatedErrors,
-      LoopHealth loopHealth) {
+      LoopHealth loopHealth,
+      @Nullable VenueStore venueStore) {
+    Venues.Game game = Rebuilt.venues(robot.definition().body());
+    VenueIODisk disk = venueStore != null ? new VenueIODisk(venueStore) : null;
+    Venues venues = new Venues(game, disk != null ? disk : new VenueIO() {});
     RobotContainer container =
         new RobotContainer(
             mode,
             scheduler,
             robot,
             Rebuilt.field(robot.definition().body()),
+            venues,
             simulatedErrors,
             loopHealth);
     container.addTo(pitwall);
+    if (venueStore != null && disk != null) {
+      pitwall.devices().add(VenuePit.device(venueStore, disk, venues, game));
+    }
     return container;
   }
 
@@ -273,8 +305,9 @@ public class Robot extends LoggedRobot {
   }
 
   /**
-   * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, then the
-   * command scheduler, each timed. Tests run the robot with this too ({@code RobotSim}).
+   * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, the command
+   * scheduler, then what the commands asked of the joints, each timed. Tests run the robot with
+   * this too ({@code RobotSim}).
    */
   static void loop(
       Pitwall pitwall, RobotContainer container, Scheduler scheduler, LoopHealth loopHealth) {
@@ -284,6 +317,8 @@ public class Robot extends LoggedRobot {
     container.periodic();
     scheduler.run();
     loopHealth.monitor().mark("Commands", System.nanoTime());
+    container.afterCommands();
+    loopHealth.monitor().mark("Outputs", System.nanoTime());
     loopHealth.finish(System.nanoTime(), Logger.getReceiverQueueFault());
   }
 

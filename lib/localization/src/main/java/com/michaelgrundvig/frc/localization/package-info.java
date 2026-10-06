@@ -9,13 +9,13 @@
  * <ul>
  *   <li><b>The service:</b> {@link com.michaelgrundvig.frc.localization.LocalizationService} is
  *       localization as the robot program uses it, one loop at a time: the drivetrain's readings
- *       ({@link com.michaelgrundvig.frc.localization.DrivetrainReadings}), each camera image, a
- *       placement, and landmarks in, stamped with their times, and each loop's {@link
+ *       ({@link com.michaelgrundvig.frc.localization.DrivetrainReadings}), each camera image, and a
+ *       placement in, stamped with their times, and each loop's {@link
  *       com.michaelgrundvig.frc.localization.LocalizationOutput} out. The loop's time comes in a
  *       {@link com.michaelgrundvig.frc.localization.LoopContext}. The robot program's {@code
  *       Localization} only feeds it, logs it, and raises its alerts.
  *   <li><b>What it says:</b> the estimate; how far each source is trusted ({@link
- *       com.michaelgrundvig.frc.localization.Integrity}: each camera's {@link
+ *       com.michaelgrundvig.frc.localization.Trust}: each camera's {@link
  *       com.michaelgrundvig.frc.localization.CameraTrust}, the wheels' {@link
  *       com.michaelgrundvig.frc.localization.WheelTrust}); and what became of each camera image, by
  *       tag ({@link com.michaelgrundvig.frc.localization.FrameVerdict}, {@link
@@ -56,9 +56,6 @@
  *       whether it still sits where its configuration says, and how much less to trust it if not; a
  *       {@link com.michaelgrundvig.frc.localization.TagAllowlist} keeps a task to the tags it
  *       trusts.
- *   <li><b>Landmarks:</b> {@link com.michaelgrundvig.frc.localization.CrestLandmarks} turns a
- *       bump's crest, crossed, into a {@link com.michaelgrundvig.frc.localization.LandmarkEvent}: a
- *       one-axis fix.
  * </ul>
  *
  * <p>Conventions:

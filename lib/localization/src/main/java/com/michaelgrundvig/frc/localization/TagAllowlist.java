@@ -11,14 +11,14 @@ import java.util.stream.Collectors;
  * centimeters from the layout's numbers and from each other, and what the robot needs is to be
  * right relative to the target's own tags, not an average with tags across the field.
  *
- * <p>Others did the same more loosely. 254 (2025) kept one fixed list, the reef's tags, for its
- * single-tag fixes; and while its auto-align drove to a branch, it took a camera's whole solution
- * only if the branch's tag was among those it used. 5000 (2026) gave its drivers a "hub tags only"
- * switch. This is stricter than 254's: an image is solved from the trusted tags alone, and the
- * vision software's multi-tag solution is used only if it used no others. The cost is heading:
- * while a task runs, an image that also saw other tags corrects only position, from the trusted
- * tags each on its own, and a robot not yet placed solves the trusted ones without the others'
- * help.
+ * <p>Others did the same more loosely. A top team (2025) kept one fixed list, the reef's tags, for
+ * its single-tag fixes; and while its auto-align drove to a branch, it took a camera's whole
+ * solution only if the branch's tag was among those it used. 5000 (2026) gave its drivers a "hub
+ * tags only" switch. This is stricter than theirs: an image is solved from the trusted tags alone,
+ * and the vision software's multi-tag solution is used only if it used no others. The cost is
+ * heading: while a task runs, an image that also saw other tags corrects only position, from the
+ * trusted tags each on its own, and a robot not yet placed solves the trusted ones without the
+ * others' help.
  *
  * <p>Name the tags through the field model rather than by number, so the task works on any field
  * and for either alliance: a task lining up on a place takes the place's tags with {@code

@@ -28,16 +28,7 @@ class FaultCatalogTest {
             FaultCatalog.Robot.SLIPPING,
             FaultCatalog.Robot.placed(16.5, 8.1),
             FaultCatalog.Robot.TO_A_BUMP),
-        List.of(FaultCatalog.Field.tagMoved(1, 32, 26)),
-        List.of(
-            FaultCatalog.Coprocessor.UNREACHABLE,
-            FaultCatalog.Coprocessor.wrongVersion("v2026.3.4"),
-            FaultCatalog.Coprocessor.HOT,
-            FaultCatalog.Coprocessor.cameraUnplugged(2),
-            FaultCatalog.Coprocessor.PHOTONVISION_RESTARTS,
-            FaultCatalog.Coprocessor.DUPLICATED,
-            FaultCatalog.Coprocessor.SETTINGS_CHANGED,
-            FaultCatalog.Coprocessor.IGNORES_POWER_DOWN));
+        List.of(FaultCatalog.Field.tagMoved(1, 32, 26)));
   }
 
   @Test
@@ -89,15 +80,11 @@ class FaultCatalogTest {
     assertThat(placed.parameter(FaultCatalog.Y).initial()).isEqualTo(4.05);
     assertThat(FaultCatalog.Field.tagMoved(1, 32, 26).parameter(FaultCatalog.TAG).initial())
         .isEqualTo(26);
-    assertThat(FaultCatalog.Coprocessor.cameraUnplugged(3).parameter(FaultCatalog.CAMERA).max())
-        .isEqualTo(3);
-    assertThat(FaultCatalog.Coprocessor.wrongVersion("v9").does()).contains("PhotonVision v9");
   }
 
   @Test
   void partsAreNamedForThePage() {
     assertThat(FaultCatalog.camera("front-left")).isEqualTo("Camera front-left");
-    assertThat(FaultCatalog.coprocessor("vision-front")).isEqualTo("Coprocessor vision-front");
     assertThat(FaultCatalog.module(2)).isEqualTo("Back left module");
   }
 

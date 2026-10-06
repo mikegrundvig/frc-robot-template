@@ -79,8 +79,10 @@ builds share it. Run it before pushing, not on every save.
 
 Each project's tests run in a Java process (a JVM) of their own, with up to 1.5 GB of heap. The
 robot program's simulation tests use more outside the heap (PhotonVision's camera simulation,
-WPILib's native libraries), so its tests start a fresh JVM every 20 test classes, which keeps one
-near 3 GB where a single JVM running them all reached 5 to 6.5 GB. Projects build in parallel, and
+WPILib's native libraries); a small young generation keeps that in check ([the consistency
+study](#is-the-estimator-honest-the-consistency-study), *Memory*). Its tests also start a fresh JVM every 20 test classes,
+which is faster as well as smaller: 124 s with each JVM near 1.2 GB, against 265 s and 2.2 GB for
+one JVM running them all (2026-10-02). Projects build in parallel, and
 at most two test JVMs run at once, the robot program's and another project's. On a computer with 8
 GB, make it one: put `testJvms=1` in the `gradle.properties` of your Gradle user home (`~/.gradle/`
 on macOS and Linux, `%USERPROFILE%\.gradle\` on Windows), or pass `-PtestJvms=1` to one build. The
@@ -208,11 +210,25 @@ limit, and any later bound on its error all trust that number. A claim of 3 mm w
 10 cm off is worse than no claim at all. The simulator knows where the robot really is, so it can
 check: `./gradlew consistencyStudy` drives the whole simulated robot through ten runs, twelve
 seeds of each, and compares every loop's estimate with the truth (`frc.robot.studies`:
-`ConsistencyStudy`, `ConsistencyRuns`, `Consistency`). It takes about seven minutes, one robot at a
-time (WPILib's simulation is one per program). The report is in `build/studies/consistency/`. The
-study's memory grows with the images its cameras simulate, outside its heap, by about 50 MB each
-time a run drives the route four times: twelve seeds peak near 7.5 GB, so run fifty as several
-studies (`--seed=1 --seeds=13`, `--seed=14`, and on), not one.
+`ConsistencyStudy`, `ConsistencyRuns`, `Consistency`), one robot at a time (WPILib's simulation is
+one per program). The report is in `build/studies/consistency/`.
+
+**Memory.** PhotonVision's camera simulation allocates its frames in native memory, which only
+Java's garbage collector frees. Two settings keep that in check:
+- **The simulated cameras render no video** (`VisionSim`). Their raw and processed streams are off,
+  and what they detect doesn't depend on them.
+- **The build gives every test and simulating process a 32 MB young generation** (`-Xmn32m`,
+  `build.gradle`), so the collector runs often enough to free those frames.
+
+Measured on three driving runs at twelve seeds (2026-10-02):
+
+| | Wall time | Peak memory |
+|---|---|---|
+| Before | 145 s | 4.8 GB |
+| With video off | 40 s | 4.8 GB |
+| With both | 38 s | 1.0 GB |
+
+Every loop came out bit-identical (fingerprint `26ff4b4fd6ee4fc1`).
 
 The runs, on the simulator's season-worn robot (`SensorErrors.TYPICAL`) with four cameras:
 
@@ -585,7 +601,7 @@ degrees of freedom, before and after: under `every`, a single tag's position 0.1
 before and 0.06 to 0.13 after, several tags' 0.36 to 0.83 and 0.10 to 0.59, a multi-tag heading
 (given its position) 0.39 to 0.92 of 1 and 0.17 to 0.62. An error of a centimeter or two in each
 fix hides inside the noise model's spread; only taken as new in each of hundreds of fixes does it
-make the heading sure. (The study's routes cross no bump, so no landmark is applied.)
+make the heading sure.
 
 Nor was it what was first suspected. The tags' errors, the same for every camera that sees a tag:
 taking them away didn't lower the heading NEES (above), and with a noise model half as wide

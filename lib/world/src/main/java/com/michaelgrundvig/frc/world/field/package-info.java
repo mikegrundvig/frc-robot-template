@@ -1,6 +1,7 @@
 /**
  * The field model: the field's size, AprilTags, and symmetry, the places and zones robot code
- * refers to by name, and the one conversion between the alliances.
+ * refers to by name, the raised ground robots drive over, and the one conversion between the
+ * alliances.
  *
  * <p>Frames, written down once:
  *
@@ -16,9 +17,17 @@
  *       alliance's, and is the only place that knows how: no other code flips coordinates.
  * </ul>
  *
- * <p>Places near AprilTags are derived from the tags of the alliance they are for (the hub between
- * two of its tags, a spot facing a tag), so a layout measured at an event corrects both alliances'
- * places at once.
+ * <p>Places and targets near AprilTags are derived from the tags of the alliance they are for (the
+ * hub between two of its tags, a spot facing a tag, a speaker's mouth above its tag), so a layout
+ * measured at an event corrects both alliances' at once.
+ *
+ * <p>A tag is known twice: where the official layout puts it, and where a venue's survey found it
+ * ({@link com.michaelgrundvig.frc.world.field.Tag}). The symmetry turns only the first, with the
+ * rest of the nominal geometry; a survey is a measurement, taken where each tag stands.
+ *
+ * <p>The ground is the floor, raised where a {@link com.michaelgrundvig.frc.world.field.Surface}
+ * is: a bump, a ramp, a platform, or a mesh from CAD, each described exactly twice over, as heights
+ * and as triangles.
  */
 @NullMarked
 package com.michaelgrundvig.frc.world.field;

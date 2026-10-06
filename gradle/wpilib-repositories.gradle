@@ -4,7 +4,7 @@
 // Those servers may serve only the FRC libraries, as GradleRIO filters them for the robot program;
 // all else, the compiler's plugins included, comes from Maven Central alone.
 
-def frcGroups = /(org\.wpilib|edu\.wpi\.first|com\.ctre\.phoenix6|org\.photonvision|org\.littletonrobotics)(\..*)?/
+def frcGroups = /(org\.wpilib|edu\.wpi\.first|com\.ctre\.phoenix6|com\.revrobotics|org\.photonvision|org\.littletonrobotics)(\..*)?/
 def centralHost = ~/repo1?\.maven(\.apache)?\.org/
 rootProject.repositories.withType(MavenArtifactRepository).each { source ->
     if (source.url.host != null && source.url.host ==~ centralHost) {

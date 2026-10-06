@@ -25,7 +25,7 @@ at events. ([Characterization's safety rules](characterization.md#safety-first) 
 
 Two more have nothing to run on the page: [the robot's mass, center of gravity, and
 inertia](#the-robots-mass-center-of-gravity-and-inertia), measured by hand, and [a terrain
-crossing](#a-terrain-crossing), read from a log. Put what they find in `Robots.java` the same way,
+crossing](#tilt-on-a-bump), read from a log. Put what they find in `Robots.java` the same way,
 with the date: `.mass(Pounds.of(131.2)) // measured YYYY-MM-DD` ([docs/values.md](values.md) says
 how every value is measured, and where each belongs).
 
@@ -133,7 +133,7 @@ When: once for each gyro, and after replacing or remounting one.
 
 Clear a circle around the robot. It spins twice in place, slowly so the wheels roll instead of
 scrubbing, and compares how far the gyro says it turned with how far the wheels turned: a wheel
-that rolls around a circle of known size tells its own radius (6328's procedure). The report gives
+that rolls around a circle of known size tells its own radius (a top team's procedure). The report gives
 the radius and each wheel's own; one wheel far from the rest is worn differently or slipping.
 
 The result is a radius for the drivetrain: `.wheelRadius(Inches.of(1.974))`. Tread wears, and the
@@ -160,6 +160,11 @@ apart.
 
 When: after mounting, bumping, or remounting a camera, and whenever the robot says a camera is out
 of calibration.
+
+A camera on a joint, a turret's say, has no action here, and the robot doesn't judge its mount:
+where it is depends on the joint, so its mount is measured from the joint's frame in CAD, and the
+joint's own position does the rest. Localization solves each of its images from where the joint had
+carried it when the image was taken.
 
 ### How the robot notices a camera that moved
 
@@ -210,8 +215,10 @@ too: recalibrate the one farthest off first, and the other comes back with it.
 
 *By hand, with nothing to run.*
 
-These set the robot's body: `Body.mass`, `Body.cgHeight`, and `Body.yawMomentOfInertia`. Measure
-with the bumpers and battery on, the robot powered off. No Systemcore needed.
+These set the robot's body's mass (`Body.weight`, `Body.Weight.weighed`, until then the season's
+most), where its center of gravity is (`Body.cg`), and its inertia (`Body.inertia`, until then a
+box's). Measure with the bumpers and battery on, every mechanism stowed
+at its reference, the robot powered off. No Systemcore needed.
 
 **Safety:** a robot weighs as much as a person. Lift it with two people, one at each end, knees
 bent; chock every wheel on the scales and blocks, front and back, so nothing rolls; and keep hands
@@ -250,19 +257,17 @@ body will.
 
 When: once the robot is built, and after a big change.
 
-## A terrain crossing
+## Tilt on a bump
 
 *From a log of driving over a bump, with nothing to run.*
 
-How the robot's IMU reads crossing a bump or a ramp: how far past the ramp's slope it tilts
-(bumpers, suspension, the IMU's mount), and how closely the moment the IMU says it crossed the
-crest matches where the robot was. It checks the terrain thresholds (`TerrainCrossing.Settings`)
-and the tilts at which the estimator trusts the wheels less (`EstimatorConfig.tiltStartDegrees`
-and `tiltZeroDegrees`), and sets the slope margin and the crest's spread in `LocalizationService`
-(3° and 5 cm today).
+How far past the ramp's slope the robot's IMU tilts crossing a bump or a ramp (bumpers,
+suspension, the IMU's mount). It checks the tilts at which the estimator trusts the wheels less
+(`EstimatorConfig.tiltStartDegrees` and `tiltZeroDegrees`), and sets the slope margin in
+`LocalizationService` (3° today).
 
 You need the robot running its program on its Systemcore, and a bump or ramp built to the field's
-drawings, on field carpet, with tags in the cameras' view of it.
+drawings, on field carpet.
 
 **Safety:** it drives at match speed over a bump: the driving rules above, with nobody near the
 bump, since a robot crossing at an angle can tip.
@@ -271,22 +276,10 @@ bump, since a robot crossing at an angle can tip.
    each, logging every run.
 2. Again at 30° and at 60° from straight across, and backward.
 
-Then, from the logs:
-
-- **The slope margin:** the most `Localization/TiltDegrees` read on the bump, less the ramp's
-  slope. The margin should be above it.
-- **The thresholds:** in each run, `Localization/ClimbDegrees` should pass `steepDegrees` going up
-  and coming down, `Localization/Terrain` should go from climbing to descending to level, and
-  `Localization/TerrainCrossings` should count each crossing once, and never in flat driving.
-- **The crest's spread:** each crossing logs the crest time (`Localization/CrestSeconds`). Where was
-  the robot's center then, across the crest? To see it from the cameras alone, replay the log with
-  the crest's spread in `LocalizationService` set far larger (a meter), so the cameras place the
-  robot and the crest barely moves it. The standard deviation of the robot's distances from the
-  crest line, at the crest times, is the spread.
-
-Every crossing should be counted and none in flat driving, the tilt past the slope within a few
-degrees, and the crest within a few centimeters at every speed. If fast crossings read differently
-from slow ones, the robot's bumpers or suspension are moving the IMU more than the ground is.
+Then, from the logs: the most `Localization/TiltDegrees` read on the bump, less the ramp's slope,
+is the tilt past the slope; the margin should be above it, by a few degrees. If fast crossings read
+differently from slow ones, the robot's bumpers or suspension are moving the IMU more than the
+ground is.
 
 When: once the robot's bumpers, suspension, and IMU mount are final, and at kickoff, when the new
 field's bumps and ramps are known.

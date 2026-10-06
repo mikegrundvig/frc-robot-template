@@ -218,7 +218,10 @@ export function api(method, path, body, more = {}) {
   lastRequest = Date.now();
   const headers = { "Pitwall-Stream": robot.stream };
   const options = { method, headers, ...more };
-  if (body !== undefined) {
+  if (body instanceof Blob) {
+    headers["Content-Type"] = "application/octet-stream"; // a file, sent as it is
+    options.body = body;
+  } else if (body !== undefined) {
     headers["Content-Type"] = "application/merge-patch+json";
     options.body = JSON.stringify(body);
   }

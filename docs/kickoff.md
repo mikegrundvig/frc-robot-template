@@ -27,12 +27,11 @@ and last season's becomes a test fixture.
 3. **Use it:** change the one line in `Robot.java` that builds the field.
 
 4. **Test it,** as `RebuiltTest` tests last season's: the symmetry against the tags, the places
-   where the manual puts them, the zones where the field's elements are.
+   where the manual puts them, the zones where the manual draws them.
 
 5. **Recheck the rules' numbers.** Every row of [docs/values.md](values.md) whose source is
    "rules" (the frame, its height, the bumpers, the mass) comes from last season's manual. Check
-   each against the new one, and update `Robots.java` and the row. Set the terrain thresholds
-   (`TerrainCrossing.Settings`) from the new field's ramps too.
+   each against the new one, and update `Robots.java` and the row.
 
 6. **Run `./gradlew ci`.**
 

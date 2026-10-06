@@ -3,7 +3,6 @@ package frc.robot.subsystems.localization;
 import com.michaelgrundvig.frc.localization.CameraTrust;
 import com.michaelgrundvig.frc.localization.DriveConditions;
 import com.michaelgrundvig.frc.localization.DrivetrainReadings;
-import com.michaelgrundvig.frc.localization.LandmarkDecision;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.localization.LocalizationOutput;
@@ -11,8 +10,6 @@ import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.LoopContext;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.PoseReset;
-import com.michaelgrundvig.frc.localization.TerrainCrossing;
-import com.michaelgrundvig.frc.localization.Timestamps;
 import com.michaelgrundvig.frc.localization.WheelTrust;
 import com.michaelgrundvig.frc.localization.YawSource;
 import java.util.ArrayList;
@@ -158,7 +155,6 @@ public final class Localization implements AutoCloseable {
     WheelTrust wheels = service.wheels();
     DriveConditions conditions = wheels.conditions();
     checkOrientation(wheels);
-    logTerrain();
     checkImus();
     gyroDisconnected.set(!readings.gyro().usable() && !readings.backupImu().usable());
     usingBackup.set(!readings.gyro().usable() && readings.backupImu().usable());
@@ -186,21 +182,9 @@ public final class Localization implements AutoCloseable {
    */
   public LocalizationOutput update() {
     LocalizationOutput output = service.update();
-    List<String> landmarks = new ArrayList<>();
-    for (LandmarkDecision decision : output.landmarks()) {
-      landmarks.add(
-          String.format(
-              Locale.ROOT,
-              "%s: %s, %.2f m across",
-              decision.landmark().name(),
-              decision.reason(),
-              decision.innovationMeters()));
-    }
-    Logger.recordOutput("Localization/Landmarks", landmarks.toArray(String[]::new));
-    Logger.recordOutput("Localization/LandmarksAccepted", service.landmarksAccepted());
     notReadyToScore = LocalizationGate.SCORING.whyNot(output.estimate());
     List<String> beyond = new ArrayList<>();
-    for (Map.Entry<String, CameraTrust> camera : output.integrity().cameras().entrySet()) {
+    for (Map.Entry<String, CameraTrust> camera : output.trust().cameras().entrySet()) {
       if (!camera.getValue().keptApart()) {
         beyond.add(camera.getKey());
       }
@@ -213,7 +197,7 @@ public final class Localization implements AutoCloseable {
               + " more than they know");
     }
     camerasWithoutPlaces.set(!beyond.isEmpty());
-    Set<Integer> offTheLayout = output.integrity().tagsWithoutPlaces();
+    Set<Integer> offTheLayout = output.trust().tagsWithoutPlaces();
     if (!offTheLayout.isEmpty()) {
       tagsWithoutPlaces.setText(
           "Measurements from tags the field's layout doesn't have: "
@@ -320,24 +304,6 @@ public final class Localization implements AutoCloseable {
     return service.conditions();
   }
 
-  /** Where the robot is on raised terrain: level, climbing, or descending. */
-  public TerrainCrossing.Phase terrainPhase() {
-    return service.terrainPhase();
-  }
-
-  /**
-   * How many times the robot has crossed raised terrain: up, over, down, and level again. An auto
-   * that drives over a bump waits for this to count up.
-   */
-  public int terrainCrossings() {
-    return service.terrainCrossings();
-  }
-
-  /** How many crests the estimator has taken as landmarks since the robot started. */
-  public int landmarksAccepted() {
-    return service.landmarksAccepted();
-  }
-
   /**
    * Says when the accelerometer of the IMU that turns odometry reads, standing still, past any bias
    * a part has: gravity's share, leaking in because the robot's definition gives the IMU another
@@ -356,19 +322,6 @@ public final class Localization implements AutoCloseable {
               wheels.accelerometerBiasMetersPerSecSq()));
     }
     imuOrientation.set(leaks);
-  }
-
-  /** Logs the robot's crossing of raised terrain this loop, and a crest it passed. */
-  private void logTerrain() {
-    service
-        .crest()
-        .ifPresent(
-            crest ->
-                Logger.recordOutput(
-                    "Localization/CrestSeconds", Timestamps.toSeconds(crest.timestampNanos())));
-    Logger.recordOutput("Localization/ClimbDegrees", Math.toDegrees(service.climbRadians()));
-    Logger.recordOutput("Localization/Terrain", service.terrainPhase().name());
-    Logger.recordOutput("Localization/TerrainCrossings", service.terrainCrossings());
   }
 
   /**

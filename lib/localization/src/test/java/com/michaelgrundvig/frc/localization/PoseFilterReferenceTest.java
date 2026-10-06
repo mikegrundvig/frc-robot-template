@@ -244,20 +244,6 @@ class PoseFilterReferenceTest {
     joseph(gain, h, r, innovation);
   }
 
-  private void landmark(LandmarkEvent landmark) {
-    double[][] h = new double[1][N];
-    h[0][0] = landmark.across().getCos();
-    h[0][1] = landmark.across().getSin();
-    double[][] r = {{landmark.stdDevMeters() * landmark.stdDevMeters()}};
-    double[][] gain =
-        multiply(
-            multiply(p, transpose(h)), inverse(add(multiply(multiply(h, p), transpose(h)), r)));
-    for (int i = 3; i < N; i++) {
-      gain[i][0] = 0;
-    }
-    joseph(gain, h, r, new double[] {-landmark.offset(new Translation2d(mean[0], mean[1]))});
-  }
-
   /** x += K ν, and P = (I - K H) P (I - K H)ᵀ + K R Kᵀ: right for any gain. */
   private void joseph(double[][] gain, double[][] h, double[][] r, double[] innovation) {
     for (int i = 0; i < 3; i++) {
@@ -414,20 +400,6 @@ class PoseFilterReferenceTest {
           }
           filter.correct(innovation);
           camera(measurement, yawThen, camera, tags);
-        } else if (u < 0.94) {
-          LandmarkEvent event =
-              new LandmarkEvent(
-                  1,
-                  "bump",
-                  new Translation2d(filter.x() + 0.02, filter.y()),
-                  new Rotation2d(6 * random.nextDouble()),
-                  logUniform(random, 0.005, 0.1));
-          PoseFilter.AxisInnovation innovation = filter.innovationAlong(event);
-          if (innovation == null) {
-            continue;
-          }
-          filter.correct(innovation);
-          landmark(event);
         } else if (u < 0.95) {
           double variance = logUniform(random, 1e-4, 1);
           boolean withHeading = random.nextBoolean();

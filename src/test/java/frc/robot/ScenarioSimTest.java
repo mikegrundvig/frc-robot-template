@@ -91,7 +91,8 @@ class ScenarioSimTest {
     sim.driver().notifyNewData();
     sim.run(4.0);
 
-    assertThat(sim.robot().localization().terrainCrossings()).isEqualTo(1);
+    assertThat(sim.simulation().truePose().getX()).as("over the bump").isGreaterThan(5.2);
+    assertThat(error()).as("still found, after the crossing").isLessThan(0.05);
   }
 
   private double error() {

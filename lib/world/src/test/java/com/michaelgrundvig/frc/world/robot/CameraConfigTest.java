@@ -11,6 +11,7 @@ import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
+import static org.wpilib.units.Units.Radians;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
@@ -93,16 +94,37 @@ class CameraConfigTest {
     assertThatNoException().isThrownBy(() -> changeSensor().latency(Milliseconds.of(0)).build());
   }
 
+  /**
+   * A Limelight 4 sees 82° across its 1280 x 800 image, as its datasheet and teams give it: 91.4°
+   * across the diagonal, through a lens with square pixels. A diagonal one is as given.
+   */
+  @Test
+  void aHorizontalFieldOfViewIsWiderAcrossTheDiagonal() {
+    CameraConfig.Sensor horizontal =
+        changeSensor()
+            .fieldOfView(Degrees.of(82))
+            .fieldOfViewAcross(CameraConfig.Across.HORIZONTAL)
+            .build();
+    double diagonal = Math.hypot(1280, 800);
+    double expected = 2 * Math.atan(Math.tan(Math.toRadians(41)) * diagonal / 1280);
+
+    assertThat(horizontal.diagonalFieldOfView().in(Radians)).isCloseTo(expected, within(1e-12));
+    assertThat(horizontal.diagonalFieldOfView().in(Degrees)).isCloseTo(91.43, within(0.01));
+    // Back across its width, through the diagonal, it's what was given.
+    double half =
+        Math.atan(Math.tan(horizontal.diagonalFieldOfView().in(Radians) / 2) * 1280 / diagonal);
+    assertThat(Math.toDegrees(2 * half)).isCloseTo(82, within(1e-9));
+    assertThat(sensor().diagonalFieldOfView()).isEqualTo(sensor().fieldOfView());
+  }
+
   @Test
   void rejectsAnImpossibleSensor() {
     assertRejected("Sensor.widthPixels", () -> changeSensor().widthPixels(0).build());
     assertRejected("Sensor.heightPixels", () -> changeSensor().heightPixels(-800).build());
+    assertRejected("Sensor.fieldOfView", () -> changeSensor().fieldOfView(Degrees.of(0)).build());
     assertRejected(
-        "Sensor.diagonalFieldOfView",
-        () -> changeSensor().diagonalFieldOfView(Degrees.of(0)).build());
-    assertRejected(
-        "Sensor.diagonalFieldOfView: 180 ° must be below 180 °",
-        () -> changeSensor().diagonalFieldOfView(Degrees.of(180)).build());
+        "Sensor.fieldOfView: 180 ° must be below 180 °",
+        () -> changeSensor().fieldOfView(Degrees.of(180)).build());
     assertRejected("Sensor.frameRate", () -> changeSensor().frameRate(Hertz.of(0)).build());
     assertRejected("Sensor.latency", () -> changeSensor().latency(Milliseconds.of(-1)).build());
     assertRejected("Sensor.sightRange", () -> changeSensor().sightRange(Meters.of(0)).build());

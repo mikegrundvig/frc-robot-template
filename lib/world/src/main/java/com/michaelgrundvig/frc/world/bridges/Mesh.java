@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.world.bridges;
 
+import com.michaelgrundvig.frc.world.physical.Vector3;
 import java.util.Arrays;
 import java.util.List;
 

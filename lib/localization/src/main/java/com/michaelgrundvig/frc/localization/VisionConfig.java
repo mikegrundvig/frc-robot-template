@@ -18,14 +18,14 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  * @param maxDistanceMeters results from tags farther than this, on average, are thrown out: the
  *     noise grows with distance squared
  * @param maxYawRateRadiansPerSecond results taken while the robot turned faster than this, lately,
- *     are thrown out: motion blur and rolling shutter (254: 5 rad/s over the last 0.3 s)
+ *     are thrown out: motion blur and rolling shutter (a top team's: 5 rad/s over the last 0.3 s)
  * @param linearStdDevBaseline position uncertainty in meters for one tag at one meter (2026: 0.02)
  * @param angularStdDevBaseline heading uncertainty in radians for one tag at one meter, used only
  *     when a result may correct heading (2026: 0.03)
  * @param distanceExponent uncertainty grows with the tags' distance to this power (2026: 2; teams
  *     used 2 to 4, so fit it)
  * @param headingConstrainedFactor how much less uncertain a position is when the gyro's heading
- *     fixes the orientation (6328's factor for the same idea: 0.5)
+ *     fixes the orientation (a top team's factor for the same idea: 0.5)
  * @param speedStdDevFactor uncertainty grows by this fraction per meter per second of robot speed
  * @param yawRateStdDevFactor and by this fraction per radian per second of turning
  * @param maxHeadingStdDevToConstrain the gyro's heading is used to solve only while the estimate is

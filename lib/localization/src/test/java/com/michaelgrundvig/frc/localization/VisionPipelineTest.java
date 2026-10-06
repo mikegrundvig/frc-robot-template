@@ -15,6 +15,7 @@ import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.wpilib.fields.Fields;
@@ -58,12 +59,14 @@ class VisionPipelineTest {
             CameraConfig.Sensor.builder()
                 .widthPixels(1280)
                 .heightPixels(800)
-                .diagonalFieldOfView(Degrees.of(80))
+                .fieldOfView(Degrees.of(80))
+                .fieldOfViewAcross(CameraConfig.Across.DIAGONAL)
                 .frameRate(Hertz.of(30))
                 .latency(Milliseconds.of(30))
                 .sightRange(Meters.of(7))
                 .build())
         .noiseScale(noiseScale)
+        .joint(Optional.empty())
         .build();
   }
 

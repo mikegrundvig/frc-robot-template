@@ -5,7 +5,9 @@ import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.Imus;
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotMath;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -13,11 +15,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.util.MathUtil;
@@ -25,8 +29,8 @@ import org.wpilib.math.util.MathUtil;
 /**
  * Where the robot is: localization as one service, told what the robot's sensors read and asked
  * what it makes of them. It owns the {@link PoseEstimator} and everything around it: which IMU
- * turns odometry, how far the wheels are trusted, the robot's crossings of raised terrain and the
- * crests it takes as landmarks, and solving each camera image as the robot was when it was taken.
+ * turns odometry, how far the wheels are trusted, and solving each camera image as the robot was
+ * when it was taken.
  *
  * <p>Each loop, on the robot loop's thread, in this order:
  *
@@ -56,22 +60,13 @@ public final class LocalizationService {
   private static final double MOVING = 0.25;
 
   /**
-   * On a known bump, a tilt up to this much steeper than its ramps is still the ground's: bumpers,
-   * suspension, and the IMU's mount.
+   * On known raised ground, a tilt up to this much steeper than its slopes is still the ground's:
+   * bumpers, suspension, and the IMU's mount.
    */
   private static final double GROUND_SLOPE_MARGIN = Math.toRadians(3);
 
-  /** How far off a bump's footprint the estimate may put the robot and still be on it. */
+  /** How far off a surface's footprint the estimate may put the robot and still be on it. */
   private static final double MAX_GROUND_REACH_METERS = 1.0;
-
-  /**
-   * A crest places the robot's center within about this far across it: a guess, to measure on a
-   * real robot (docs/calibration.md, a terrain crossing).
-   */
-  private static final double CREST_SPREAD_METERS = 0.05;
-
-  /** A crest is taken for a bump only when the estimate is within this far of it. */
-  private static final double CREST_REACH_METERS = 1.0;
 
   /** How far back "lately" reaches, for how fast the robot has turned: 254 used 0.3 s. */
   private static final double RECENT_TURNING_SECONDS = 0.3;
@@ -83,15 +78,11 @@ public final class LocalizationService {
   private final DriveKinematicsModel kinematics;
   private final Terrain ground;
   private final double wheelReach;
-  private final CrestLandmarks crestLandmarks;
   private final YawTrack gyroYaws = new YawTrack();
   private final YawTrack backupYaws = new YawTrack();
 
   /** The gyro and the backup IMU should turn alike. */
   private final ImuCrossCheck crossCheck = new ImuCrossCheck(ImuCrossCheck.Settings.DEFAULTS);
-
-  /** Crossings of raised terrain, from the IMU. */
-  private final TerrainCrossing terrain = new TerrainCrossing(TerrainCrossing.Settings.DEFAULTS);
 
   /** The wheels against the IMU: whether they slide over the floor together. */
   private final SlipCheck slipCheck;
@@ -120,18 +111,12 @@ public final class LocalizationService {
   /** The IMU the wheels were weighed by this loop: the gyro, the backup, or none. */
   private YawSource imu = YawSource.WHEELS;
 
-  /** How far the robot climbed along its way this loop, in radians. */
-  private double climb;
-
-  /** The crest the robot crossed this loop, if it crossed one. */
-  private Optional<TerrainCrossing.Crest> crest = Optional.empty();
-
   private LocalizationEstimate estimate;
-  private int landmarksAccepted;
 
-  // The cameras: each one's mount and the field's tags to solve its images with, and how far the
-  // pit has tuned them to be trusted.
-  private final VisionPipeline pipeline;
+  // The cameras: each one's mount and the field's tags to solve its images with (the venue's, once
+  // one is selected), and how far the pit has tuned them to be trusted.
+  private VisionPipeline pipeline;
+  private final Set<Integer> tagIds;
   private final Map<String, CameraConfig> cameras = new LinkedHashMap<>();
   private VisionConfig vision = VisionConfig.DEFAULTS;
 
@@ -143,6 +128,12 @@ public final class LocalizationService {
 
   /** Half a second of the robot's attitude, for each image's capture time. */
   private final AttitudeHistory attitudes;
+
+  /** What the robot is, for where a camera on a joint was. */
+  private final RobotMath math;
+
+  /** Half a second of the joints' positions, for where a camera on one was at its capture time. */
+  private final JointHistory jointPositions;
 
   /** How fast the robot turned in each of the latest loops, for how fast it has turned lately. */
   private final double[] recentYawRates;
@@ -204,10 +195,10 @@ public final class LocalizationService {
    * @param estimator the pose estimator, which this owns from now on
    * @param kinematics how the drivetrain's wheels move the robot
    * @param field the field whose tags images are solved against
-   * @param terrain the ground the robot drives on: a tilt it explains keeps the wheels trusted, and
-   *     its crests are landmarks
+   * @param terrain the ground the robot drives on: a tilt it explains keeps the wheels trusted
    * @param robot what the robot is: its wheels, its IMUs, and its cameras' mounts
    * @param loopSeconds how long one robot loop is
+   * @throws IllegalArgumentException for a robot it can't take ({@link #problems})
    */
   public LocalizationService(
       PoseEstimator estimator,
@@ -219,6 +210,10 @@ public final class LocalizationService {
     if (!(loopSeconds > 0) || Double.isInfinite(loopSeconds)) {
       throw new IllegalArgumentException("a loop takes some time: " + loopSeconds);
     }
+    String refused = problems(robot);
+    if (refused != null) {
+      throw new IllegalArgumentException(refused);
+    }
     this.estimator = estimator;
     this.kinematics = kinematics;
     // How far the wheels reach from the robot's center, for the slip check and the ground under it.
@@ -229,23 +224,60 @@ public final class LocalizationService {
     }
     wheelReach = reach;
     ground = terrain;
-    crestLandmarks = new CrestLandmarks(terrain, CREST_SPREAD_METERS, CREST_REACH_METERS);
     imus = robot.imus();
     slipCheck =
         new SlipCheck(
             SlipCheck.Settings.DEFAULTS,
             reach,
-            robot.drivetrain().modules().wheelCoefficientOfFriction()
-                * ImuReadings.STANDARD_GRAVITY);
+            robot.drivetrain().wheelCoefficientOfFriction() * ImuReadings.STANDARD_GRAVITY);
     pipeline = new VisionPipeline(field);
+    tagIds = Set.copyOf(field.tags().keySet());
     for (CameraConfig camera : robot.cameras()) {
       cameras.put(camera.name(), camera);
     }
     attitudes = new AttitudeHistory(loops(ATTITUDE_SECONDS, loopSeconds));
+    math = robot.math();
+    jointPositions = new JointHistory(math.references(), loops(ATTITUDE_SECONDS, loopSeconds));
     recentYawRates = new double[loops(RECENT_TURNING_SECONDS, loopSeconds)];
     estimate = estimator.estimate();
     motion =
         new Motion(estimate.fieldVelocity().getNorm(), 0, estimate.covariance().headingStdDev());
+  }
+
+  /**
+   * Why localization can't take a robot, or null when it can: treads said to grip harder than the
+   * slip check can tell from a collision. A robot's configuration asks this as it's built, before
+   * anything of the robot is made.
+   */
+  public static @Nullable String problems(RobotDefinition robot) {
+    List<String> problems = new ArrayList<>();
+    double grip = robot.drivetrain().wheelCoefficientOfFriction();
+    double most = SlipCheck.Settings.DEFAULTS.joltMetersPerSecSq() / ImuReadings.STANDARD_GRAVITY;
+    if (!(grip < most)) {
+      problems.add(
+          String.format(
+              "the treads' grip, %.3g, is more than tread has: the slip check tells a slide from a"
+                  + " collision only under %.3g. Give the tread's own, about 1.0 worn and 1.3"
+                  + " new; a path planner's friction is a tuning value, not the tread's",
+              grip, most));
+    }
+    return problems.isEmpty() ? null : String.join("; ", problems);
+  }
+
+  /**
+   * Solves images against a venue's tags from now on: the field as surveyed, its tags where the
+   * survey found them. The estimate carries on as it was; a venue changes where the tags are, not
+   * where the robot is. The caller changes it only while the robot is disabled.
+   *
+   * @param venue the same field, with the same tags, surveyed
+   * @throws IllegalArgumentException if its tags aren't the ones the estimator keeps apart
+   */
+  public void venue(FieldModel venue) {
+    if (!venue.tags().keySet().equals(tagIds)) {
+      throw new IllegalArgumentException(
+          "a venue has the field's tags, surveyed: " + venue.name() + " has others");
+    }
+    pipeline = new VisionPipeline(venue);
   }
 
   /**
@@ -269,8 +301,7 @@ public final class LocalizationService {
    * One loop of the drivetrain's readings: after it reads its sensors, and before the cameras.
    * Picks what turns odometry (the gyro, the backup IMU while the gyro is lost, or the wheels),
    * weighs the wheels by what the IMU says (a tilt, a jolt, the wheels sliding: {@link SlipCheck}),
-   * feeds every wheel reading to the estimator, follows the robot over raised terrain, and takes a
-   * crest it crossed as a landmark.
+   * and feeds every wheel reading to the estimator.
    */
   public void drivetrain(DrivetrainReadings readings, LoopContext loop) {
     ImuReadings gyro = readings.gyro();
@@ -290,7 +321,6 @@ public final class LocalizationService {
     for (Step step : steps.steps()) {
       estimator.addOdometry(step.timestampNanos(), step.motion(), step.yaw(), steps.source());
     }
-    watchTerrain(readings.velocities(), loop.nowNanos());
     checkImus(gyro, backup, loop.nowNanos());
     estimate = estimator.estimate();
     // The loop's images are solved as the robot is now: its attitude and turning, recorded once a
@@ -323,11 +353,6 @@ public final class LocalizationService {
     if (inLoop) {
       takeMotion();
     }
-  }
-
-  /** A landmark the robot crossed, applied at its time on the next {@link #update}. */
-  public void landmark(LandmarkEvent event) {
-    estimator.addLandmark(event);
   }
 
   /**
@@ -410,6 +435,7 @@ public final class LocalizationService {
     return pipeline.process(
         frame,
         camera,
+        mount(camera, frame.timestampNanos()),
         capture(frame.timestampNanos()),
         vision,
         new VisionPipeline.Trust(doubt == null ? 0 : doubt[0], onlyTags));
@@ -421,6 +447,28 @@ public final class LocalizationService {
    */
   public void camera(VisionMeasurement measurement) {
     estimator.addVision(measurement);
+  }
+
+  /**
+   * The joints' positions as the robot read them, each loop: where a camera on a joint is when its
+   * image was taken. A robot whose cameras are all on the chassis needs none; before the first,
+   * each joint is at its reference.
+   *
+   * @param timestampNanos when they were read, on the robot's clock
+   * @param positions each driven joint's position, in its units; a joint not named stays where it
+   *     was
+   */
+  public void joints(long timestampNanos, Map<Joint, Double> positions) {
+    jointPositions.add(timestampNanos, positions);
+  }
+
+  /** Where a camera was on the robot at a moment: on a joint, where the joint had carried it. */
+  private Transform3d mount(CameraConfig camera, long timestampNanos) {
+    if (camera.joint().isEmpty()) {
+      return camera.robotToCamera();
+    }
+    Pose3d pose = math.cameraPose(camera, jointPositions.at(timestampNanos));
+    return new Transform3d(pose.getTranslation(), pose.getRotation());
   }
 
   /**
@@ -442,16 +490,12 @@ public final class LocalizationService {
   }
 
   /**
-   * Applies the loop's measurements and landmarks, each at its capture time, and says what became
-   * of each. After the cameras; once a loop, closing the loop {@link #drivetrain} opened.
+   * Applies the loop's measurements, each at its capture time, and says what became of each. After
+   * the cameras; once a loop, closing the loop {@link #drivetrain} opened.
    */
   public LocalizationOutput update() {
     inLoop = false;
     List<VisionDecision> decisions = estimator.update();
-    List<LandmarkDecision> landmarks = estimator.landmarkDecisions();
-    for (LandmarkDecision decision : landmarks) {
-      landmarksAccepted += decision.accepted() ? 1 : 0;
-    }
     estimate = estimator.estimate();
     List<FrameVerdict> frames = new ArrayList<>(refused.size() + decisions.size());
     frames.addAll(refused);
@@ -459,12 +503,7 @@ public final class LocalizationService {
     for (VisionDecision decision : decisions) {
       frames.add(FrameVerdict.of(decision));
     }
-    return LocalizationOutput.builder()
-        .estimate(estimate)
-        .integrity(integrity())
-        .frames(frames)
-        .landmarks(landmarks)
-        .build();
+    return LocalizationOutput.builder().estimate(estimate).trust(trust()).frames(frames).build();
   }
 
   /** Where the robot is: cheap, for driving every loop. */
@@ -528,29 +567,6 @@ public final class LocalizationService {
         .build();
   }
 
-  /** Where the robot is on raised terrain: level, climbing, or descending. */
-  public TerrainCrossing.Phase terrainPhase() {
-    return terrain.phase();
-  }
-
-  /**
-   * How many times the robot has crossed raised terrain: up, over, down, and level again. An auto
-   * that drives over a bump waits for this to count up.
-   */
-  public int terrainCrossings() {
-    return terrain.crossings();
-  }
-
-  /** How far the robot climbed along the way it moved this loop: zero standing still. */
-  public double climbRadians() {
-    return climb;
-  }
-
-  /** The crest of raised terrain the robot crossed this loop, if it crossed one. */
-  public Optional<TerrainCrossing.Crest> crest() {
-    return crest;
-  }
-
   /** How far the gyro and the backup IMU have turned apart lately, while both report. */
   public double imuDisagreementRadians() {
     return crossCheck.disagreementRadians();
@@ -562,11 +578,6 @@ public final class LocalizationService {
    */
   public boolean imusDisagree() {
     return crossCheck.disagrees();
-  }
-
-  /** How many crests the estimator has taken as landmarks since the robot started. */
-  public int landmarksAccepted() {
-    return landmarksAccepted;
   }
 
   /**
@@ -592,7 +603,7 @@ public final class LocalizationService {
    * How far each source is trusted: each camera the estimator has heard from, in the order it first
    * did, then the robot's others; and the wheels.
    */
-  private Integrity integrity() {
+  private Trust trust() {
     Map<String, CameraTrust> trust = new LinkedHashMap<>();
     List<String> beyond = estimator.camerasWithoutPlaces();
     for (String camera : estimator.cameras()) {
@@ -604,7 +615,7 @@ public final class LocalizationService {
     for (String camera : mountDoubts.keySet()) {
       trust.putIfAbsent(camera, trust(camera, true));
     }
-    return Integrity.builder()
+    return Trust.builder()
         .cameras(trust)
         .wheels(wheels())
         .tagsWithoutPlaces(new LinkedHashSet<>(estimator.tagsWithoutPlaces()))
@@ -662,7 +673,10 @@ public final class LocalizationService {
       for (Step step : loop) {
         wheelTurn += step.motion().dthetaRadians();
       }
-      ImuMount mount = source == YawSource.GYRO ? imus.gyro() : imus.backup();
+      // A backup's readings with none defined come from an IMU nobody placed: at the center, as a
+      // new robot's start.
+      ImuMount mount =
+          source == YawSource.GYRO ? imus.gyro() : imus.backup().orElse(ImuMount.UNCHECKED);
       slipCheck.update(
           new SlipCheck.Sample(
               Timestamps.toSeconds(last.timestampNanos() - lastStepNanos),
@@ -707,19 +721,19 @@ public final class LocalizationService {
   }
 
   /**
-   * How much of a tilt the ground explains: on a known bump (where the estimate puts the robot,
-   * give or take its wheels' reach and the estimate's doubt), up to its ramps' slope; none on flat
-   * ground.
+   * How much of a tilt the ground explains: on known raised ground (where the estimate puts the
+   * robot, give or take its wheels' reach and the estimate's doubt), up to its steepest slope; none
+   * on flat ground.
    */
   private double groundSlope(double tilt) {
-    if (ground.bumps().isEmpty() || tilt == 0) {
+    if (ground.surfaces().isEmpty() || tilt == 0) {
       return 0;
     }
     double doubt = 2 * estimator.estimate().covariance().largestPositionStdDev();
     double reach = Math.min(MAX_GROUND_REACH_METERS, wheelReach + doubt);
     return ground
         .under(pose().getTranslation(), reach)
-        .map(bump -> Math.min(tilt, bump.slopeRadians() + GROUND_SLOPE_MARGIN))
+        .map(surface -> Math.min(tilt, surface.steepestSlopeRadians() + GROUND_SLOPE_MARGIN))
         .orElse(0.0);
   }
 
@@ -775,25 +789,6 @@ public final class LocalizationService {
       values[i] = imu.yawsRadians().get(i);
     }
     yaws.update(times, values);
-  }
-
-  /**
-   * Follows the robot over raised terrain (the slope along the way it moves, and its tilt), and
-   * takes a crest it passed as a landmark: the robot was on the bump's crest line then.
-   */
-  private void watchTerrain(ChassisVelocities moving, long nowNanos) {
-    boolean still = Math.hypot(moving.vx, moving.vy) < MOVING;
-    double way = Math.atan2(moving.vy, moving.vx);
-    climb = still ? 0 : TerrainCrossing.climb(pitchRadians(), rollRadians(), way);
-    double fieldWay = still ? Double.NaN : way + pose().getRotation().getRadians();
-    terrain.update(nowNanos, climb, conditions.tiltRadians(), fieldWay);
-    crest = terrain.crest();
-    crest.ifPresent(
-        crossed ->
-            estimator
-                .poseAt(crossed.timestampNanos())
-                .flatMap(then -> crestLandmarks.landmark(crossed, then.getTranslation()))
-                .ifPresent(estimator::addLandmark));
   }
 
   /**

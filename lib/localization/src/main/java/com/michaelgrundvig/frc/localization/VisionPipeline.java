@@ -70,10 +70,11 @@ public final class VisionPipeline {
     }
   }
 
-  /** One image, and what it's solved with. */
+  /** One image, and what it's solved with: its camera's mount on the robot as it was taken. */
   private record Image(
       TagDetections seen,
       CameraConfig camera,
+      Transform3d mount,
       CaptureContext robot,
       VisionConfig config,
       double mountDoubtMeters) {
@@ -90,16 +91,32 @@ public final class VisionPipeline {
     }
   }
 
-  /** What to make of one image. */
+  /** What to make of one image from a camera on the chassis, where its configuration mounts it. */
   public VisionResult process(
       TagDetections seen,
       CameraConfig camera,
       CaptureContext robot,
       VisionConfig config,
       Trust trust) {
+    return process(seen, camera, camera.robotToCamera(), robot, config, trust);
+  }
+
+  /**
+   * What to make of one image, its camera where it was on the robot as the image was taken: on a
+   * joint, where the joint had carried it.
+   *
+   * @param mount the camera's pose in the robot's frame as the image was taken
+   */
+  public VisionResult process(
+      TagDetections seen,
+      CameraConfig camera,
+      Transform3d mount,
+      CaptureContext robot,
+      VisionConfig config,
+      Trust trust) {
     TagAllowlist onlyTags = trust.onlyTags();
     if (onlyTags == null) {
-      return solve(new Image(seen, camera, robot, config, trust.mountDoubtMeters()));
+      return solve(new Image(seen, camera, mount, robot, config, trust.mountDoubtMeters()));
     }
     TagDetections trusted = trusted(seen, onlyTags);
     if (trusted.tags().isEmpty() && !seen.tags().isEmpty()) {
@@ -113,7 +130,7 @@ public final class VisionPipeline {
           Double.NaN,
           Double.NaN);
     }
-    return solve(new Image(trusted, camera, robot, config, trust.mountDoubtMeters()));
+    return solve(new Image(trusted, camera, mount, robot, config, trust.mountDoubtMeters()));
   }
 
   /**
@@ -173,7 +190,7 @@ public final class VisionPipeline {
               new Pose3d(
                   multiTag.fieldToCamera().getTranslation(),
                   multiTag.fieldToCamera().getRotation()),
-              image.camera().robotToCamera());
+              image.mount());
       return fullPose(image, pose, known, distance, VisionMeasurement.Solver.MULTI_TAG);
     }
     TagDetections.Tag clearest = known.get(0);
@@ -193,9 +210,7 @@ public final class VisionPipeline {
     }
     Pose3d pose =
         TagSolver.robotFromTag(
-            field.tag(clearest.id()).orElseThrow(),
-            clearest.bestCameraToTag(),
-            image.camera().robotToCamera());
+            field.tag(clearest.id()).orElseThrow(), clearest.bestCameraToTag(), image.mount());
     return fullPose(
         image,
         pose,
@@ -210,7 +225,7 @@ public final class VisionPipeline {
     CameraConfig camera = image.camera();
     CaptureContext robot = image.robot();
     VisionConfig config = image.config();
-    Transform3d robotToCamera = camera.robotToCamera();
+    Transform3d robotToCamera = image.mount();
     Rotation3d attitude =
         new Rotation3d(robot.rollRadians(), robot.pitchRadians(), heading.getRadians());
     double sumX = 0;

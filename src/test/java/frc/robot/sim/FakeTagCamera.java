@@ -5,11 +5,11 @@ import static org.wpilib.units.Units.Radians;
 
 import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Tag;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Transform3d;
@@ -87,14 +87,14 @@ public final class FakeTagCamera {
     double halfView = camera.sensor().diagonalFieldOfView().in(Radians) / 2;
     double range = camera.sensor().sightRange().in(Meters);
     List<TagDetections.Tag> tags = new ArrayList<>();
-    for (Map.Entry<Integer, Pose3d> tag : field.tags().entrySet()) {
-      Transform3d view = new Transform3d(cameraPose, tag.getValue());
+    for (Tag tag : field.tags().values()) {
+      Transform3d view = new Transform3d(cameraPose, tag.pose());
       double distance = view.getTranslation().getNorm();
       boolean inView =
           view.getX() > 0
               && distance <= range
               && Math.atan2(Math.hypot(view.getY(), view.getZ()), view.getX()) <= halfView;
-      boolean facing = new Transform3d(tag.getValue(), cameraPose).getX() > 0;
+      boolean facing = new Transform3d(tag.pose(), cameraPose).getX() > 0;
       if (!inView || !facing) {
         continue;
       }
@@ -108,7 +108,7 @@ public final class FakeTagCamera {
                           spread * noise.nextGaussian(),
                           spread * noise.nextGaussian())),
               view.getRotation());
-      tags.add(new TagDetections.Tag(tag.getKey(), CORNERS, seen, Transform3d.ZERO, AMBIGUITY));
+      tags.add(new TagDetections.Tag(tag.id(), CORNERS, seen, Transform3d.ZERO, AMBIGUITY));
     }
     TagDetections.MultiTag multiTag = null;
     if (tags.size() >= 2) {

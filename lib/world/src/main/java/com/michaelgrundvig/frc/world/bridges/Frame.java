@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.world.bridges;
 
+import com.michaelgrundvig.frc.world.physical.Vector3;
+
 /**
  * Where a shape is drawn: its own axes, turned and moved into the robot's frame. A shape is written
  * in its frame's coordinates (a camera's arrow along its frame's x, its optical axis), and the

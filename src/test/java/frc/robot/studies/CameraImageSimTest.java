@@ -71,7 +71,8 @@ class CameraImageSimTest {
     FIELD
         .tags()
         .forEach(
-            (id, pose) -> targets.add(new VisionTargetSim(pose, TargetModel.kAprilTag36h11, id)));
+            (id, tag) ->
+                targets.add(new VisionTargetSim(tag.pose(), TargetModel.kAprilTag36h11, id)));
     try (PhotonCamera camera = new PhotonCamera("camera-study-check")) {
       PhotonCameraSim photonVision =
           new PhotonCameraSim(camera, VisionSim.properties(SENSOR, 0), FIELD.toField());

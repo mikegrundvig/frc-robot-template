@@ -5,12 +5,14 @@ import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import java.util.List;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.system.DCMotor;
 
 /**
@@ -24,31 +26,36 @@ final class TestRobot {
           .frameLength(Inches.of(27.5))
           .frameWidth(Inches.of(27.5))
           .height(Inches.of(30))
-          .bumperThickness(Inches.of(3.5))
-          .mass(Kilograms.of(68))
-          .yawMomentOfInertia(KilogramSquareMeters.of(6.7))
-          .cgHeight(Meters.of(0.15))
+          .bumperEnds(Inches.of(3.5))
+          .bumperSides(Inches.of(3.5))
+          .bumperBottom(Inches.of(2.5))
+          .bumperTop(Inches.of(5.75))
+          .weight(Body.Weight.weighed(Kilograms.of(68)))
+          .cg(new Translation3d(0, 0, 0.15))
+          .inertia(
+              Body.Turning.tensor(
+                  Inertia.builder().ixx(6.7).iyy(6.7).izz(6.7).ixy(0).ixz(0).iyz(0).build()))
           .build();
 
   static final DrivetrainGeometry DRIVETRAIN =
-      DrivetrainGeometry.builder()
-          .modules(
-              DrivetrainGeometry.Modules.builder()
-                  .driveMotor(Motor.KRAKEN_X60)
-                  .steerMotor(Motor.KRAKEN_X60)
-                  .wheelRadius(Inches.of(2))
-                  .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
-                  .steerGearing(Gearing.builder().ratio(150.0 / 7).efficiency(1.0).build())
-                  .wheelCoefficientOfFriction(1.2)
-                  .driveInertia(KilogramSquareMeters.of(0.001))
-                  .steerInertia(KilogramSquareMeters.of(0.004))
-                  .build())
-          .wheelInset(Inches.of(2.625))
-          .build();
+      DrivetrainGeometry.inset(
+          DrivetrainGeometry.ModuleType.builder()
+              .driveMotor(Motor.KRAKEN_X60)
+              .steerMotor(Motor.KRAKEN_X60)
+              .wheelRadius(Inches.of(2))
+              .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
+              .steerGearing(Gearing.builder().ratio(150.0 / 7).efficiency(1.0).build())
+              .wheelCoefficientOfFriction(1.2)
+              .driveInertia(KilogramSquareMeters.of(0.001))
+              .steerInertia(KilogramSquareMeters.of(0.004))
+              .couplingRatio(0)
+              .build(),
+          BODY,
+          Inches.of(2.625));
 
-  static final double RADIUS = DRIVETRAIN.modules().wheelRadius().in(Meters);
-  static final DCMotor MOTOR = DRIVETRAIN.modules().driveMotor().model();
-  static final double GEARING = DRIVETRAIN.modules().driveGearing().ratio();
+  static final double RADIUS = DRIVETRAIN.module(0).wheelRadius().in(Meters);
+  static final DCMotor MOTOR = DRIVETRAIN.module(0).driveMotor().model();
+  static final double GEARING = DRIVETRAIN.module(0).driveGearing().ratio();
 
   private TestRobot() {}
 
@@ -59,7 +66,7 @@ final class TestRobot {
 
   /** Where each wheel sits, from the robot's center. */
   static Translation2d[] wheels() {
-    return DRIVETRAIN.moduleTranslations(BODY);
+    return DRIVETRAIN.moduleTranslations();
   }
 
   /**

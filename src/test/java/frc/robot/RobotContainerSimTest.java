@@ -16,6 +16,7 @@ import com.michaelgrundvig.frc.world.field.Placement;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.MechanismWiring;
 import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.sim.DriveSimulation;
 import java.util.List;
@@ -363,7 +364,7 @@ class RobotContainerSimTest {
           SwerveWiring.ModuleWiring.builder()
               .driveId(40 + 3 * i)
               .steerId(41 + 3 * i)
-              .encoderId(42 + 3 * i)
+              .encoderId(Optional.of(42 + 3 * i))
               .encoderOffset(Rotations.of(0))
               .driveInverted(false)
               .steerInverted(true)
@@ -376,9 +377,10 @@ class RobotContainerSimTest {
                 Optional.of(
                     SwerveWiring.builder()
                         .canBus(CanBus.canivore("drivetrain"))
+                        .driveController(MechanismWiring.Controller.TALON_FX)
+                        .steerController(MechanismWiring.Controller.TALON_FX)
                         .gyroId(52)
                         .gyroYawScale(1.0)
-                        .couplingRatio(3.5)
                         .modules(List.of(modules))
                         .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
                         .build()))

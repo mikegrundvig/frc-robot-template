@@ -78,8 +78,8 @@ public class Drive implements Mechanism, AutoCloseable {
   /** Where each wheel touches the floor, from the robot's center. */
   private final Translation2d[] moduleTranslations;
 
-  /** The wheels' radius, as built: their centers are this far above the floor. */
-  private final double wheelRadiusMeters;
+  /** Each wheel's radius, as built: its center is this far above the floor. */
+  private final double[] wheelRadiusMeters;
 
   /** The wheels' poses as last logged, reused loop after loop. */
   private final Pose3d[] modulePoses = new Pose3d[4];
@@ -158,12 +158,15 @@ public class Drive implements Mechanism, AutoCloseable {
     DrivetrainControl initial = config.get();
     for (int i = 0; i < 4; i++) {
       modules[i] =
-          new Module(hardware.modules().get(i), i, robot.drivetrain().modules().wheelRadius());
+          new Module(hardware.modules().get(i), i, robot.drivetrain().module(i).wheelRadius());
     }
     applied = initial;
     apply(initial);
     moduleTranslations = robot.moduleTranslations();
-    wheelRadiusMeters = robot.drivetrain().modules().wheelRadius().in(Meters);
+    wheelRadiusMeters = new double[4];
+    for (int i = 0; i < 4; i++) {
+      wheelRadiusMeters[i] = robot.drivetrain().module(i).wheelRadius().in(Meters);
+    }
     kinematics = new SwerveDriveKinematics(moduleTranslations);
     readings =
         DrivetrainReadings.builder()
@@ -281,7 +284,7 @@ public class Drive implements Mechanism, AutoCloseable {
       if (angle != posedAngles[i]) {
         Translation2d at = moduleTranslations[i];
         modulePoses[i] =
-            new Pose3d(at.getX(), at.getY(), wheelRadiusMeters, new Rotation3d(0, 0, angle));
+            new Pose3d(at.getX(), at.getY(), wheelRadiusMeters[i], new Rotation3d(0, 0, angle));
         posedAngles[i] = angle;
       }
     }

@@ -9,7 +9,8 @@ import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryBuilder;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModulesBuilder;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryCornerBuilder;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.ImusBuilder;
 import frc.robot.Robots;
@@ -17,6 +18,8 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.DrivetrainControlLimitsBuilder;
 import frc.robot.subsystems.drive.ModuleIO;
+import java.util.ArrayList;
+import java.util.List;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.system.DCMotor;
@@ -40,7 +43,7 @@ final class TruthRig {
 
   /** The template's robot, its sensors exact. */
   TruthRig() {
-    this(Robots.SIM.definition().drivetrain().modules().wheelCoefficientOfFriction());
+    this(Robots.SIM.definition().drivetrain().wheelCoefficientOfFriction());
   }
 
   /** The template's robot on a tread with this grip, its sensors exact. */
@@ -56,13 +59,17 @@ final class TruthRig {
   TruthRig(Body body, double frictionCoefficient, SensorErrors errors, ImuMount gyro) {
     this.body = body;
     DrivetrainGeometry template = Robots.SIM.definition().drivetrain();
-    drivetrain =
-        DrivetrainGeometryBuilder.builder(template)
-            .modules(
-                DrivetrainGeometryModulesBuilder.builder(template.modules())
-                    .wheelCoefficientOfFriction(frictionCoefficient)
-                    .build())
-            .build();
+    List<DrivetrainGeometry.Corner> corners = new ArrayList<>();
+    for (DrivetrainGeometry.Corner corner : template.corners()) {
+      corners.add(
+          DrivetrainGeometryCornerBuilder.builder(corner)
+              .module(
+                  DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
+                      .wheelCoefficientOfFriction(frictionCoefficient)
+                      .build())
+              .build());
+    }
+    drivetrain = DrivetrainGeometryBuilder.builder(template).corners(corners).build();
     simulation =
         new DriveSimulation(
             body,
@@ -70,7 +77,7 @@ final class TruthRig {
             errors,
             ImusBuilder.builder(Robots.SIM.definition().imus()).gyro(gyro).build());
     modules = simulation.modules();
-    wheels = drivetrain.moduleTranslations(body);
+    wheels = drivetrain.moduleTranslations();
     limitDrives(control.limits().driveStatorCurrent().in(Amps));
   }
 
@@ -131,19 +138,19 @@ final class TruthRig {
   }
 
   double wheelRadius() {
-    return drivetrain.modules().wheelRadius().in(Meters);
+    return drivetrain.module(0).wheelRadius().in(Meters);
   }
 
   double wheelInertia() {
-    return drivetrain.modules().driveInertia().in(KilogramSquareMeters);
+    return drivetrain.module(0).driveInertia().in(KilogramSquareMeters);
   }
 
   double gearing() {
-    return drivetrain.modules().driveGearing().ratio();
+    return drivetrain.module(0).driveGearing().ratio();
   }
 
   DCMotor driveMotor() {
-    return drivetrain.modules().driveMotor().model();
+    return drivetrain.module(0).driveMotor().model();
   }
 
   /** A drive motor's push on the floor at this current, through its gearing, in newtons. */

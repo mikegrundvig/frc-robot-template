@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.NewtonMeters;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Volts;
@@ -126,6 +127,7 @@ class MotorTest {
         .stallCurrent(Amps.of(100))
         .freeCurrent(Amps.of(2))
         .freeSpeed(RPM.of(10000))
+        .rotorInertia(KilogramSquareMeters.of(1e-5))
         .build();
   }
 

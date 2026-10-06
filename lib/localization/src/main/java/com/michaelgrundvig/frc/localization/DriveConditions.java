@@ -25,7 +25,7 @@ package com.michaelgrundvig.frc.localization;
  *     stop for it, and an infinite doubt would leave the estimate nothing to stand on.
  * @param disabled whether the robot is disabled, when people pick it up and carry it where its
  *     wheels can't see: the position's uncertainty grows with time, so the cameras lead until it's
- *     enabled (254 trusted vision loosely while disabled, tightly once enabled)
+ *     enabled (a top team trusted vision loosely while disabled, tightly once enabled)
  */
 public record DriveConditions(
     double tiltRadians,

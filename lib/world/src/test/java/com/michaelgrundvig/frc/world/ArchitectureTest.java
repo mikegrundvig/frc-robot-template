@@ -62,7 +62,13 @@ class ArchitectureTest {
   /** The validation kit: how a record checks its values. Every description builds on it. */
   private static final String KIT = "com.michaelgrundvig.frc.world.config..";
 
-  /** The field: its tags, places, zones, and terrain. */
+  /**
+   * What the field and the robot are both made of: mass, inertia, materials and shapes, and the
+   * geometry they're written in.
+   */
+  private static final String PHYSICAL = "com.michaelgrundvig.frc.world.physical..";
+
+  /** The field: its tags, places, zones, terrain, and elements. */
   private static final String FIELD = "com.michaelgrundvig.frc.world.field..";
 
   /** The robot's definition: what the robot is, from its frame to its sensors' mounts. */
@@ -105,14 +111,28 @@ class ArchitectureTest {
   }
 
   @Test
-  void theFieldSeesOnlyTheKit() {
+  void thePhysicalValuesSeeOnlyTheKit() {
+    classes()
+        .that()
+        .resideInAPackage(PHYSICAL)
+        .should()
+        .onlyDependOnClassesThat(
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH).or(resideInAnyPackage(KIT, PHYSICAL)))
+        .because(
+            "the field and the robot's definition are both made of mass, shapes and materials, and"
+                + " the writers draw them, so these can't need any of them")
+        .check(WORLD);
+  }
+
+  @Test
+  void theFieldSeesOnlyTheKitAndThePhysicalValues() {
     classes()
         .that()
         .resideInAPackage(FIELD)
         .should()
         .onlyDependOnClassesThat(
             resideInAnyPackage(PLAIN_JAVA_AND_MATH)
-                .or(resideInAnyPackage(KIT, FIELD, "org.wpilib.fields..")))
+                .or(resideInAnyPackage(KIT, PHYSICAL, FIELD, "org.wpilib.fields..")))
         .because(
             "the field is the same whatever robot plays on it, so it knows nothing of the robot's"
                 + " definition, as the definition knows nothing of the field")
@@ -120,13 +140,14 @@ class ArchitectureTest {
   }
 
   @Test
-  void theRobotsDefinitionSeesOnlyTheKit() {
+  void theRobotsDefinitionSeesOnlyTheKitAndThePhysicalValues() {
     classes()
         .that()
         .resideInAPackage(DEFINITION)
         .should()
         .onlyDependOnClassesThat(
-            resideInAnyPackage(PLAIN_JAVA_AND_MATH).or(resideInAnyPackage(KIT, DEFINITION)))
+            resideInAnyPackage(PLAIN_JAVA_AND_MATH)
+                .or(resideInAnyPackage(KIT, PHYSICAL, DEFINITION)))
         .because(
             "what the robot is doesn't depend on the field it plays on, nor on what reads it:"
                 + " localization, the simulator, and the views all read the definition")
@@ -142,7 +163,7 @@ class ArchitectureTest {
   void theFieldAndTheDefinitionNeverSeeTheWriters() {
     noClasses()
         .that()
-        .resideInAnyPackage(KIT, FIELD, DEFINITION)
+        .resideInAnyPackage(KIT, PHYSICAL, FIELD, DEFINITION)
         .should()
         .dependOnClassesThat()
         .resideInAPackage(BRIDGES)

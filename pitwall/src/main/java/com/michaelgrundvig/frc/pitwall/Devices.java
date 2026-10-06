@@ -78,10 +78,93 @@ public final class Devices {
    * @param state a word or two for whether it's there: "Present", "Missing", "Two answer"
    * @param level how the device stands as a whole
    * @param lines what the card says, in order
+   * @param choices what the card offers to choose among, as of now, each answered by the device's
+   *     {@link Device#choose} of the same id
    */
-  public record Card(String state, Level level, List<Line> lines) {
+  public record Card(String state, Level level, List<Line> lines, List<Choice> choices) {
     public Card {
       lines = List.copyOf(lines);
+      choices = List.copyOf(choices);
+    }
+
+    /** A card with nothing to choose. */
+    public Card(String state, Level level, List<Line> lines) {
+      this(state, level, lines, List.of());
+    }
+  }
+
+  /**
+   * Something a card offers to choose, with what's chosen now: the venue the robot plays on, say.
+   *
+   * @param id which of the device's choosers answers it: lowercase letters, digits, and hyphens
+   * @param label what the page calls it, such as "Venue"
+   * @param options what may be chosen, in order
+   * @param current the option chosen now, by its value
+   */
+  public record Choice(String id, String label, List<Option> options, String current) {
+    public Choice {
+      if (!NAME.matcher(id).matches()) {
+        throw new IllegalArgumentException(
+            "a choice's id is lowercase letters, digits, and hyphens: " + id);
+      }
+      options = List.copyOf(options);
+    }
+  }
+
+  /**
+   * One option of a choice.
+   *
+   * @param value what's sent back when it's chosen
+   * @param label what the page shows
+   */
+  public record Option(String value, String label) {}
+
+  /**
+   * A file the page sends a device: a venue's survey, say, checked by the robot before it keeps it.
+   *
+   * @param id its id in the page's addresses: lowercase letters, digits, and hyphens
+   * @param label the button's words, such as "Upload venue"
+   * @param accept takes the file
+   */
+  public record Upload(String id, String label, Accept accept) {
+    public Upload {
+      if (!NAME.matcher(id).matches()) {
+        throw new IllegalArgumentException(
+            "an upload's id is lowercase letters, digits, and hyphens: " + id);
+      }
+    }
+  }
+
+  /** Takes a file the page sends, on Pitwall's server threads, never in the robot loop. */
+  @FunctionalInterface
+  public interface Accept {
+    /**
+     * @param body the file, at most 64 KB
+     * @return what the page says it did, such as "Saved Practice field, October"
+     * @throws Refused saying why the file isn't taken: every problem, in words for the pit
+     * @throws IOException if taking it failed
+     */
+    String accept(byte[] body) throws IOException;
+  }
+
+  /** Takes a choice the page makes, on Pitwall's server threads, never in the robot loop. */
+  @FunctionalInterface
+  public interface Choose {
+    /**
+     * @param value the chosen option's value
+     * @return what the page says it did
+     * @throws Refused saying why not
+     * @throws IOException if choosing failed
+     */
+    String choose(String value) throws IOException;
+  }
+
+  /** A file or a choice the device won't take, and why: the page is answered 422 with the why. */
+  public static final class Refused extends IOException {
+    private static final long serialVersionUID = 1;
+
+    public Refused(String why) {
+      super(why);
     }
   }
 
@@ -280,6 +363,8 @@ public final class Devices {
     private final Supplier<Card> card;
     private final List<Link> links = new ArrayList<>();
     private final List<Download> downloads = new ArrayList<>();
+    private final List<Upload> uploads = new ArrayList<>();
+    private final Map<String, Choose> choosers = new LinkedHashMap<>();
     private @Nullable Log log;
     private boolean added;
 
@@ -322,6 +407,33 @@ public final class Devices {
       return this;
     }
 
+    /** Adds a file the page can send it: the page's button, and what takes the file. */
+    public Device upload(String id, String label, Accept accept) {
+      unchanged();
+      Upload upload = new Upload(id, label, accept);
+      if (uploads.stream().anyMatch(u -> u.id().equals(id))) {
+        throw new IllegalArgumentException(name + " has two uploads named " + id);
+      }
+      uploads.add(upload);
+      return this;
+    }
+
+    /**
+     * Answers the card's choice with this id: its options and what's chosen come from the card, as
+     * of each read, and the page's choice comes here.
+     */
+    public Device choose(String id, Choose choose) {
+      unchanged();
+      if (!NAME.matcher(id).matches()) {
+        throw new IllegalArgumentException(
+            "a choice's id is lowercase letters, digits, and hyphens: " + id);
+      }
+      if (choosers.putIfAbsent(id, choose) != null) {
+        throw new IllegalArgumentException(name + " has two choosers named " + id);
+      }
+      return this;
+    }
+
     /** Gives it a log the page can read, a page at a time, and download. */
     public Device log(Log log) {
       unchanged();
@@ -356,6 +468,20 @@ public final class Devices {
     /** Its download with this id, if it has one. */
     public Optional<Download> download(String id) {
       return downloads.stream().filter(d -> d.id().equals(id)).findFirst();
+    }
+
+    public List<Upload> uploads() {
+      return List.copyOf(uploads);
+    }
+
+    /** Its upload with this id, if it has one. */
+    public Optional<Upload> upload(String id) {
+      return uploads.stream().filter(u -> u.id().equals(id)).findFirst();
+    }
+
+    /** What answers its card's choice with this id, if anything does. */
+    public Optional<Choose> chooser(String id) {
+      return Optional.ofNullable(choosers.get(id));
     }
 
     /** Its log, if it has one. */
@@ -436,7 +562,8 @@ public final class Devices {
   /**
    * The devices as of the last read, for the event stream: {@code {name: {"kind", "state", "level",
    * "lines": [{"label", "value", "level"}], "links": [{"label", "url"}], "downloads": [{"id",
-   * "label"}], "log"}}}, levels in lowercase.
+   * "label"}], "uploads": [{"id", "label"}], "choices": [{"id", "label", "options": [{"value",
+   * "label"}], "current"}], "log"}}}, levels in lowercase.
    */
   Map<String, Object> view() {
     return section;
@@ -485,6 +612,34 @@ public final class Devices {
       downloads.add(each);
     }
     shown.put("downloads", downloads);
+    List<Object> uploads = new ArrayList<>();
+    for (Upload upload : device.uploads) {
+      Map<String, Object> each = new LinkedHashMap<>();
+      each.put("id", upload.id());
+      each.put("label", upload.label());
+      uploads.add(each);
+    }
+    shown.put("uploads", uploads);
+    List<Object> choices = new ArrayList<>();
+    for (Choice choice : card.choices()) {
+      if (!device.choosers.containsKey(choice.id())) {
+        continue; // nothing would answer it
+      }
+      Map<String, Object> each = new LinkedHashMap<>();
+      each.put("id", choice.id());
+      each.put("label", choice.label());
+      List<Object> options = new ArrayList<>();
+      for (Option option : choice.options()) {
+        Map<String, Object> shownOption = new LinkedHashMap<>();
+        shownOption.put("value", option.value());
+        shownOption.put("label", option.label());
+        options.add(shownOption);
+      }
+      each.put("options", options);
+      each.put("current", choice.current());
+      choices.add(each);
+    }
+    shown.put("choices", choices);
     shown.put("log", device.log != null);
     return shown;
   }

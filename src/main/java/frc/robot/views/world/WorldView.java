@@ -11,6 +11,7 @@ import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -76,13 +77,14 @@ public final class WorldView {
   /**
    * The world as a scene for Pitwall: {@code pitwall.scenes().add(WorldView.scene(...))}.
    *
+   * @param field the field the robot believes it plays on: the selected venue's, once there is one
    * @param robot what the robot is: its frame, wheels, cameras and IMUs, where each is mounted
    * @param truth where the robot really is, in the simulator; null elsewhere
    * @param cameraAction the Pitwall action that calibrates a camera's mount, by the camera's name,
    *     to end a camera's or a sight line's details in
    */
   public static Scene scene(
-      FieldModel field,
+      Supplier<FieldModel> field,
       RobotDefinition robot,
       Readings readings,
       @Nullable Supplier<Pose3d> truth,
@@ -90,7 +92,7 @@ public final class WorldView {
     Scene scene =
         Scene.named(ID, "World")
             .layer(new FieldLayer(field))
-            .layer(new RobotLayer(field, robot, readings, cameraAction))
+            .layer(new RobotLayer(field.get(), robot, readings, cameraAction))
             .layer(new CameraViews(robot.cameras(), cameraAction), Scene.Visibility.OFF)
             .layer(new Uncertainty(readings))
             .layer(new SightLines(field, robot.cameras(), readings, cameraAction));
@@ -167,6 +169,51 @@ public final class WorldView {
                 ? "checked: reads along the robot's axes"
                 : "not yet checked (docs/calibration.md)")
         .detail("From", "the robot's configuration, in Robots.java");
+  }
+
+  /** A switch's or a rangefinder's details: what it is, and where. */
+  static Inspection sensor(Sensor.Placed sensor) {
+    String is =
+        switch (sensor) {
+          case Sensor.Switch onSwitch ->
+              switch (onSwitch.kind()) {
+                case Sensor.Switch.Limit limit ->
+                    String.format(
+                        Locale.ROOT,
+                        "a limit switch at %s's %s end%s",
+                        limit.joint().label(),
+                        limit.end() == Sensor.Switch.Limit.End.LOWER ? "lower" : "upper",
+                        limit
+                            .position()
+                            .map(at -> String.format(Locale.ROOT, ", at %.3f", at))
+                            .orElse(", where unknown"));
+                case Sensor.Switch.Beam beam -> "a beam break";
+                case Sensor.Switch.Contact contact -> "a switch";
+              };
+          case Sensor.Rangefinder rangefinder ->
+              String.format(
+                  Locale.ROOT,
+                  "a rangefinder: to %.2f m, in a %.1f° cone",
+                  rangefinder.range().in(Meters),
+                  rangefinder.fieldOfView().in(Degrees));
+        };
+    String mounted =
+        sensor
+            .pose()
+            .map(
+                pose ->
+                    String.format(
+                        Locale.ROOT,
+                        "on %s, %.3f m forward, %.3f m left, %.3f m up of its origin",
+                        sensor.part().label(),
+                        pose.getX(),
+                        pose.getY(),
+                        pose.getZ()))
+            .orElse("on " + sensor.part().label() + ", where unknown: drawn at its origin");
+    return Inspection.of(sensor.label())
+        .detail("Is", is)
+        .detail("Mounted", mounted)
+        .detail("From", "the robot's definition, in Robots.java");
   }
 
   /** A tag's frame on the page. */

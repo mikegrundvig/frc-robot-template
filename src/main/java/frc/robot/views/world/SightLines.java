@@ -78,7 +78,7 @@ final class SightLines implements Layer {
     }
   }
 
-  private final FieldModel field;
+  private final Supplier<FieldModel> field;
 
   /** The cameras, by name: what their measurements say. */
   private final Map<String, CameraConfig> cameras;
@@ -95,7 +95,7 @@ final class SightLines implements Layer {
   private List<FrameVerdict> lastFrames = List.of();
 
   SightLines(
-      FieldModel field,
+      Supplier<FieldModel> field,
       List<CameraConfig> cameras,
       WorldView.Readings readings,
       Function<String, Optional<String>> cameraAction) {
@@ -185,7 +185,7 @@ final class SightLines implements Layer {
         sights.computeIfAbsent(camera.name(), name -> new HashMap<>());
     if (!byTag.containsKey(tag)) {
       Sight sight =
-          field.tag(tag).isPresent()
+          field.get().tag(tag).isPresent()
               ? new Sight(new Line(camera, tag, true), new Line(camera, tag, false))
               : null;
       byTag.put(tag, sight);
@@ -208,7 +208,7 @@ final class SightLines implements Layer {
       return Inspection.of(line.camera + " → tag " + line.tag).detail("Verdict", "not measured");
     }
     Pose2d measured = measurement.pose();
-    Optional<Pose3d> tag = field.tag(line.tag);
+    Optional<Pose3d> tag = field.get().tag(line.tag);
     Inspection said =
         Inspection.of(line.camera + " → tag " + line.tag)
             .detail("Verdict", verdict.accepted() ? "accepted" : "rejected: " + verdict.reason())

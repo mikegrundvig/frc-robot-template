@@ -3,8 +3,6 @@ package frc.robot;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Seconds;
 
-import com.michaelgrundvig.frc.coprocessor.table.CompiledTable;
-import com.michaelgrundvig.frc.coprocessor.table.Computer;
 import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.LocalizationService;
@@ -26,38 +24,50 @@ import com.michaelgrundvig.frc.world.field.Placement;
 import com.michaelgrundvig.frc.world.field.Zone;
 import com.michaelgrundvig.frc.world.field.ZoneTrigger;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotMath;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
+import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
+import frc.robot.lib.wiring.SensorWiring;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SimulatedWorld;
-import frc.robot.subsystems.coprocessors.CoprocessorIO;
-import frc.robot.subsystems.coprocessors.CoprocessorIOHttp;
-import frc.robot.subsystems.coprocessors.Coprocessors;
-import frc.robot.subsystems.coprocessors.PhotonVisionIO;
-import frc.robot.subsystems.coprocessors.PhotonVisionIONetworkTables;
-import frc.robot.subsystems.coprocessors.PowerButtonIO;
-import frc.robot.subsystems.coprocessors.PowerButtonIODigitalInput;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.DrivetrainControl;
+import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.localization.Localization;
+import frc.robot.subsystems.mechanisms.JointIO;
+import frc.robot.subsystems.mechanisms.JointIOSpark;
+import frc.robot.subsystems.mechanisms.JointIOTalon;
+import frc.robot.subsystems.mechanisms.JointMechanism;
+import frc.robot.subsystems.mechanisms.JointSetup;
+import frc.robot.subsystems.mechanisms.Joints;
+import frc.robot.subsystems.mechanisms.SensorIO;
+import frc.robot.subsystems.mechanisms.SensorIOCanRange;
+import frc.robot.subsystems.mechanisms.SensorIOCandi;
+import frc.robot.subsystems.mechanisms.SensorIOPort;
+import frc.robot.subsystems.mechanisms.Sensors;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
+import frc.robot.venues.Venues;
 import frc.robot.views.world.WorldView;
 import java.time.Duration;
 import java.time.LocalDate;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
@@ -66,6 +76,7 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.button.CommandGamepad;
+import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
@@ -73,7 +84,6 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
-import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
 import org.wpilib.telemetry.Telemetry;
@@ -114,24 +124,41 @@ public final class RobotContainer implements AutoCloseable {
    *
    * @param drivetrain the drivetrain's gains and limits ({@link Drive#tuning})
    * @param vision how far the cameras are trusted ({@link Vision#tuning})
+   * @param joints each driven joint's gains and current limits, by its label ({@link
+   *     JointMechanism#tuning})
    */
-  record Tunings(LiveConfig<DrivetrainControl> drivetrain, LiveConfig<VisionConfig> vision) {
+  record Tunings(
+      LiveConfig<DrivetrainControl> drivetrain,
+      LiveConfig<VisionConfig> vision,
+      Map<String, LiveConfig<MechanismControl>> joints) {
     /** Every one. */
     List<LiveConfig<?>> all() {
-      return List.of(drivetrain, vision);
+      List<LiveConfig<?>> all = new ArrayList<>(List.of(drivetrain, vision));
+      all.addAll(joints.values());
+      return List.copyOf(all);
     }
   }
 
   /** Each mechanism's tuning, starting from a robot's committed configuration. */
   static Tunings tunings(RobotConfig robot) {
-    return new Tunings(Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()));
+    Map<String, LiveConfig<MechanismControl>> joints = new LinkedHashMap<>();
+    for (JointSetup setup : robot.joints()) {
+      String label = setup.joint().label();
+      joints.put(label, JointMechanism.tuning(label, setup.control()));
+    }
+    return new Tunings(
+        Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()), Map.copyOf(joints));
   }
 
   /** The drivetrain's and vision's configurations as the pit tunes them. */
   private final LiveConfig<DrivetrainControl> drivetrainTuning;
 
   private final LiveConfig<VisionConfig> visionTuning;
-  private final FieldModel field;
+
+  /** The field the robot believes it plays on: the official layout, or the venue selected. */
+  private FieldModel field;
+
+  private final Venues venues;
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
   /** The simulator's field view: the robot, its start, and the field's places. Null in a robot. */
@@ -149,8 +176,34 @@ public final class RobotContainer implements AutoCloseable {
   private final RobotDefinition robotDefinition;
 
   private final Drive drive;
+
+  /** Every driven joint's mechanism, and the joints without wiring on a robot. */
+  private final Joints joints;
+
+  /** Whether a camera rides on a joint, so localization needs the joints' positions. */
+  private final boolean camerasOnJoints;
+
+  private final Alert jointsUnwired;
+
+  /** Sensors with no wiring on a robot: nothing waiting on them holds. */
+  private final Alert sensorsUnwired;
+
+  /** Sensors that stopped answering, named: their conditions hold neither way. */
+  private final Alert sensorsLost;
+
+  /** Limit switches that disagree with where their joints are: each said, with what to check. */
+  private final Alert sensorsDoubted;
+
+  /** What the limit switches were doubted for as of the last loop, as the alert says. */
+  private List<String> doubted = List.of();
+
+  /** The sensors lost as of the last loop, as the alert names them. */
+  private List<String> lost = List.of();
+
+  /** The sensors with no wiring on a robot: said once, by their own alert, not as lost. */
+  private final List<String> unwiredSensors = new ArrayList<>();
+
   private final Vision vision;
-  private final Coprocessors coprocessors;
   private final Calibration calibration;
   private final CommandGamepad driver;
   private final Alert noHardware =
@@ -195,7 +248,8 @@ public final class RobotContainer implements AutoCloseable {
    *
    * @param scheduler runs every command: the controls', and the Pitwall page's actions
    * @param robot the robot: its frame, wiring, and cameras
-   * @param field the field the robot plays on
+   * @param field the field the robot plays on, with its official layout
+   * @param venues the venue the pit selected, which takes the field's place while disabled
    * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
    *     configuration ({@link SensorErrors#TYPICAL} makes its estimated pose drift from the truth
    *     as a real robot's does)
@@ -207,6 +261,7 @@ public final class RobotContainer implements AutoCloseable {
       Scheduler scheduler,
       RobotConfig robot,
       FieldModel field,
+      Venues venues,
       SensorErrors simulatedErrors,
       LoopHealth loopHealth) {
     // What the pit can tune, published where dashboards and the Pitwall page find it; the
@@ -216,12 +271,16 @@ public final class RobotContainer implements AutoCloseable {
     TunableRegistry.publish("Drive/config", drivetrainTuning);
     visionTuning = tunings.vision();
     TunableRegistry.publish("Vision/config", visionTuning);
+    tunings
+        .joints()
+        .forEach((label, tuning) -> TunableRegistry.publish("Joints/" + label + "/config", tuning));
     // The rules across mechanisms: checked on every change the pit makes, and here, as committed,
     // so a configuration that breaks one stops the program with every rule it breaks.
     ConfigRules rules = new ConfigRules();
     RobotDefinition definition = robot.definition();
     RobotRules.register(rules, definition, drivetrainTuning, visionTuning);
     rules.checkCommitted();
+    reportDoubts(definition, mode);
     Supplier<DrivetrainControl> drivetrain = drivetrainTuning::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
@@ -229,6 +288,7 @@ public final class RobotContainer implements AutoCloseable {
     List<CameraConfig> cameras = definition.cameras();
     robotDefinition = definition;
     this.field = field;
+    this.venues = venues;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
     }
@@ -253,7 +313,7 @@ public final class RobotContainer implements AutoCloseable {
       PhoenixDrivetrain phoenix =
           new PhoenixDrivetrain(
               robot.drivetrainWiring().get(),
-              definition.drivetrain().modules(),
+              definition.drivetrain(),
               definition.imus().gyro().orientation());
       hardware = phoenix;
       driveHardware =
@@ -261,9 +321,15 @@ public final class RobotContainer implements AutoCloseable {
               .modules(List.of(phoenix.modules()))
               .gyro(phoenix.gyro())
               .backupImu(
-                  new GyroIOSystemcore(
-                      robot.drivetrainWiring().get().systemcoreMount(),
-                      definition.imus().backup().orientation()))
+                  definition
+                      .imus()
+                      .backup()
+                      .<GyroIO>map(
+                          backup ->
+                              new GyroIOSystemcore(
+                                  robot.drivetrainWiring().get().systemcoreMount(),
+                                  backup.orientation()))
+                      .orElseGet(() -> new GyroIO() {}))
               .odometryLock(phoenix.odometryLock())
               .build();
     } else {
@@ -292,6 +358,73 @@ public final class RobotContainer implements AutoCloseable {
       world.place(middle);
     }
 
+    // Every driven joint, a v3 mechanism the template builds from the definition and the joint's
+    // setup: on its motor controllers, the simulator's, or none (a replay reads the log, and a
+    // joint without wiring stays still rather than guess at motors, and says so).
+    RobotMath math = definition.math();
+    SimulatedWorld simulated = world;
+    List<String> unwired = new ArrayList<>();
+    camerasOnJoints = definition.cameras().stream().anyMatch(camera -> camera.joint().isPresent());
+    joints =
+        new Joints(
+            definition,
+            robot.joints(),
+            setup -> Objects.requireNonNull(tunings.joints().get(setup.joint().label()))::get,
+            setup -> {
+              if (simulated != null) {
+                return simulated.joint(math, setup);
+              }
+              if (mode == Constants.Mode.REAL && setup.wiring().isPresent()) {
+                switch (setup.wiring().get().controller()) {
+                  case TALON_FX, TALON_FXS -> {
+                    return new JointIOTalon(
+                        math, setup, Sensors.pins(definition, robot.sensors(), setup));
+                  }
+                  case SPARK_MAX, SPARK_FLEX -> {
+                    return new JointIOSpark(
+                        math, setup, Sensors.pins(definition, robot.sensors(), setup));
+                  }
+                }
+              } else if (mode == Constants.Mode.REAL) {
+                unwired.add(setup.joint().label());
+              }
+              return new JointIO() {};
+            },
+            sensor -> {
+              if (simulated != null) {
+                return simulated.sensor(sensor);
+              }
+              if (mode == Constants.Mode.REAL) {
+                SensorIO io = sensorIo(robot, sensor);
+                if (io != null) {
+                  return io;
+                }
+                unwiredSensors.add(sensor.label());
+              }
+              return new SensorIO() {};
+            },
+            scheduler);
+    jointsUnwired =
+        new Alert(
+            "Joints",
+            "unwired",
+            "No wiring for "
+                + String.join(", ", unwired)
+                + ", so they stay still. Add it to the robot's entry in Robots.",
+            Alert.Level.HIGH);
+    jointsUnwired.set(!unwired.isEmpty());
+    this.sensorsUnwired =
+        new Alert(
+            "Sensors",
+            "unwired",
+            "No wiring for "
+                + String.join(", ", unwiredSensors)
+                + ", so nothing waiting on them holds. Add it to the robot's entry in Robots.",
+            Alert.Level.HIGH);
+    this.sensorsUnwired.set(!unwiredSensors.isEmpty());
+    sensorsLost = new Alert("Sensors", "lost", "", Alert.Level.HIGH);
+    sensorsDoubted = new Alert("Sensors", "doubted", "", Alert.Level.HIGH);
+
     // Cameras: PhotonVision on the robot, its simulation in the simulator, the log in a replay.
     CameraIO[] cameraIOs = new CameraIO[cameras.size()];
     if (world != null) {
@@ -307,41 +440,6 @@ public final class RobotContainer implements AutoCloseable {
     vision =
         new Vision(
             cameras, cameraIOs, localization.service(), field, visionTuning::get, () -> alliance);
-    // The vision coprocessors' health agents: over the network on a robot, simulated in the
-    // simulator, the log in a replay. Each is asked on a thread of its own; the loop never waits.
-    // A robot watches none of the template's example table's (team 0): they'd all read missing.
-    CompiledTable table = Coprocessors.compiledTable();
-    Coprocessors.Settings coprocessorSettings = Coprocessors.Settings.DEFAULTS;
-    boolean watchNone = world == null && Coprocessors.isExample(table);
-    CoprocessorIO[] coprocessorIOs =
-        new CoprocessorIO[watchNone ? 0 : table.table().computers().size()];
-    PhotonVisionIO photonVision;
-    if (world != null) {
-      coprocessorIOs = world.coprocessors(table, coprocessorSettings);
-      photonVision = world.photonVision();
-    } else if (mode == Constants.Mode.REAL) {
-      for (int i = 0; i < coprocessorIOs.length; i++) {
-        Computer computer = table.table().computers().get(i);
-        coprocessorIOs[i] =
-            new CoprocessorIOHttp(
-                computer.name(),
-                table.table().ip(computer),
-                computer.agentPort(),
-                coprocessorSettings,
-                RobotController::getTime);
-      }
-      photonVision = new PhotonVisionIONetworkTables(NetworkTableInstance.getDefault());
-    } else {
-      Arrays.fill(coprocessorIOs, new CoprocessorIO() {});
-      photonVision = new PhotonVisionIO() {};
-    }
-    // A button that powers the coprocessors down, on a robot whose settings wire one.
-    PowerButtonIO powerButton =
-        mode == Constants.Mode.REAL && coprocessorSettings.powerDownButton() >= 0
-            ? new PowerButtonIODigitalInput(coprocessorSettings.powerDownButton())
-            : new PowerButtonIO() {};
-    coprocessors =
-        new Coprocessors(table, coprocessorIOs, photonVision, powerButton, coprocessorSettings);
     calibration =
         new Calibration(
             drive,
@@ -390,6 +488,9 @@ public final class RobotContainer implements AutoCloseable {
    */
   public void periodic() {
     boolean enabled = RobotState.isEnabled();
+    // The venue first: a selection the pit made takes effect at the start of a loop, while
+    // disabled.
+    venues.update(!enabled, RobotState.isFMSAttached()).ifPresent(this::venue);
     alliance = MatchState.getAlliance().map(RobotContainer::alliance);
     location = MatchState.getLocation();
     Optional<Place> chosen = chosenStart();
@@ -420,6 +521,31 @@ public final class RobotContainer implements AutoCloseable {
 
     drive.periodic(enabled);
     loop.mark("Drive", System.nanoTime());
+    long read = RobotController.getTime();
+    joints.read(read, enabled);
+    if (camerasOnJoints) {
+      // Where each camera on a joint is, for the images it takes.
+      localization.service().joints(read, joints.positions());
+    }
+    List<String> nowLost = new ArrayList<>(joints.sensors().lost());
+    nowLost.removeAll(unwiredSensors);
+    if (!nowLost.equals(lost)) {
+      lost = nowLost;
+      sensorsLost.setText(
+          String.join(", ", lost)
+              + (lost.size() == 1 ? " is" : " are")
+              + " lost: nothing waiting on "
+              + (lost.size() == 1 ? "it" : "them")
+              + " holds. Check the wiring and the CAN bus.");
+      sensorsLost.set(!lost.isEmpty());
+    }
+    List<String> nowDoubted = joints.switchDoubts();
+    if (!nowDoubted.equals(doubted)) {
+      doubted = nowDoubted;
+      sensorsDoubted.setText(String.join("; ", doubted));
+      sensorsDoubted.set(!doubted.isEmpty());
+    }
+    loop.mark("Joints", System.nanoTime());
     localization.periodic(drive.readings(), enabled);
     // Told where it is after odometry, so a turn made in placing it isn't counted twice.
     String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
@@ -429,8 +555,6 @@ public final class RobotContainer implements AutoCloseable {
     frames = localization.update().frames();
     vision.record(frames);
     loop.mark("Localization", System.nanoTime());
-    coprocessors.periodic(RobotController.getTime(), enabled);
-    loop.mark("Coprocessors", System.nanoTime());
     Pose2d pose = localization.pose();
     placement =
         Placement.check(
@@ -449,9 +573,67 @@ public final class RobotContainer implements AutoCloseable {
     loop.mark("Dashboard", System.nanoTime());
   }
 
+  /**
+   * What happens after the command scheduler, each loop: each joint does what its commands asked of
+   * it this loop, or its idle.
+   */
+  public void afterCommands() {
+    joints.write();
+  }
+
+  /**
+   * A sensor's hardware on a robot, from its wiring, or null when it has none. A switch on a motor
+   * controller's limit input is read by its joint's controller, with the joint.
+   */
+  private static @Nullable SensorIO sensorIo(RobotConfig robot, Sensor.Placed sensor) {
+    for (SensorWiring wiring : robot.sensors()) {
+      if (!wiring.sensor().equals(sensor.label())) {
+        continue;
+      }
+      if (wiring instanceof SensorWiring.OfSwitch onSwitch) {
+        return switch (onSwitch.input()) {
+          case SensorWiring.Port port -> new SensorIOPort(port.port(), onSwitch.polarity());
+          case SensorWiring.Candi candi -> new SensorIOCandi(onSwitch, candi);
+          case SensorWiring.CanRange range -> null;
+          case SensorWiring.ControllerLimit limit ->
+              SensorIO.onPin(limit.joint(), limit.direction());
+        };
+      }
+      if (wiring.input() instanceof SensorWiring.CanRange range
+          && sensor instanceof Sensor.Rangefinder rangefinder) {
+        return new SensorIOCanRange(rangefinder, range);
+      }
+    }
+    return null;
+  }
+
   /** One line for the pit: how long loops take, and whether they keep up. */
   String loopStatus() {
     return loopHealth.describe();
+  }
+
+  /**
+   * What's doubtful or unknown in the robot's definition: allowed, but said once at startup, in the
+   * log ({@code Robot/DefinitionDoubts}) and, on a robot, on the Driver Station's console, so
+   * nobody has to run a test to read it.
+   */
+  private static void reportDoubts(RobotDefinition definition, Constants.Mode mode) {
+    List<String> doubts = new ArrayList<>(definition.notes());
+    for (RobotDefinition.Missing missing : definition.missing()) {
+      doubts.add("not known: " + missing);
+    }
+    for (Configuration configuration : definition.configurations()) {
+      String cantRun = Joints.cantRun(definition, configuration);
+      if (cantRun != null) {
+        doubts.add(cantRun);
+      }
+    }
+    Logger.recordOutput("Robot/DefinitionDoubts", doubts.toArray(String[]::new));
+    if (mode == Constants.Mode.REAL) {
+      for (String doubt : doubts) {
+        DriverStationErrors.reportWarning(definition.name() + ": " + doubt, false);
+      }
+    }
   }
 
   /**
@@ -505,6 +687,16 @@ public final class RobotContainer implements AutoCloseable {
       }
       Telemetry.log("Field", fieldView);
     }
+  }
+
+  /**
+   * Plays on a venue from now on: localization solves images against its tags, the cameras' mount
+   * checks judge against them, and places derived from tags move with them.
+   */
+  private void venue(FieldModel venue) {
+    field = venue;
+    localization.service().venue(venue);
+    vision.venue(venue);
   }
 
   /**
@@ -574,10 +766,6 @@ public final class RobotContainer implements AutoCloseable {
     return vision;
   }
 
-  Coprocessors coprocessors() {
-    return coprocessors;
-  }
-
   Localization localization() {
     return localization;
   }
@@ -632,7 +820,6 @@ public final class RobotContainer implements AutoCloseable {
               });
     }
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
-    coprocessors.addTo(pitwall);
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .experiments()
@@ -643,7 +830,7 @@ public final class RobotContainer implements AutoCloseable {
         .scenes()
         .add(
             WorldView.scene(
-                field,
+                () -> field,
                 robotDefinition,
                 worldReadings(),
                 sim != null ? () -> sim.drivetrain().truePose3d() : null,
@@ -654,6 +841,7 @@ public final class RobotContainer implements AutoCloseable {
         .status()
         .add("Loop", this::loopStatus, STATUS_INTERVAL)
         .add("Alliance", this::allianceStation)
+        .add("Venue", venues::active)
         .add("Placement", () -> placement.describe(), STATUS_INTERVAL)
         .add("Localization", this::localizationStatus, STATUS_INTERVAL)
         .add("Scoring", this::scoring)
@@ -663,6 +851,11 @@ public final class RobotContainer implements AutoCloseable {
 
   Drive drive() {
     return drive;
+  }
+
+  /** Every driven joint's mechanism, for behavior code to look up through the robot's parts. */
+  Joints joints() {
+    return joints;
   }
 
   /** What the World view reads each loop while a page shows it: localization's and the wheels'. */
@@ -724,11 +917,15 @@ public final class RobotContainer implements AutoCloseable {
     drive.close();
     localization.close();
     noHardware.close();
+    jointsUnwired.close();
+    sensorsUnwired.close();
+    sensorsLost.close();
+    sensorsDoubted.close();
     allianceUnknown.close();
     offField.close();
+    venues.close();
     loopHealth.close();
     vision.close();
-    coprocessors.close();
     if (world != null) {
       world.close();
     }

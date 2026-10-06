@@ -32,7 +32,7 @@ import org.wpilib.math.geometry.Translation2d;
 class TractionTruthSimTest {
   /** The template's tread: 1.2. */
   private static final double MU =
-      Robots.SIM.definition().drivetrain().modules().wheelCoefficientOfFriction();
+      Robots.SIM.definition().drivetrain().wheelCoefficientOfFriction();
 
   /**
    * A slick tread, μ 0.5, on which every wheel slips even as loaded as weight transfer makes any of

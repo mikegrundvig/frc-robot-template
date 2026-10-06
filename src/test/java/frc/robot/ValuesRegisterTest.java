@@ -5,12 +5,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.ValuesRegister.CodeRecord;
 import frc.robot.ValuesRegister.Committed;
 import frc.robot.ValuesRegister.Component;
 import frc.robot.ValuesRegister.Knob;
 import frc.robot.ValuesRegister.Switch;
+import frc.robot.game.Rebuilt;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,18 +73,23 @@ class ValuesRegisterTest {
             "SensorErrors.TYPICAL's accelerometer", SensorErrors.TYPICAL.accelerometer()));
     RobotDefinition definition = robot.definition();
     committed.put("Body", new Committed("Robots.SIM's body", definition.body()));
+    committed.put("Body.Weight", new Committed("Robots.SIM's weight", definition.body().weight()));
+    committed.put(
+        "Body.Turning.Yaw",
+        new Committed("Robots.SIM's yaw inertia", (Body.Turning.Yaw) definition.body().inertia()));
+    committed.put("SeasonLimits", new Committed("Rebuilt.LIMITS", Rebuilt.LIMITS));
     committed.put(
         "DrivetrainGeometry", new Committed("Robots.SIM's drivetrain", definition.drivetrain()));
     committed.put(
-        "DrivetrainGeometry.Modules",
-        new Committed("Robots.SIM's modules", definition.drivetrain().modules()));
+        "DrivetrainGeometry.ModuleType",
+        new Committed("Robots.SIM's modules", definition.drivetrain().module(0)));
     committed.put(
         "Motor",
-        new Committed("Robots.SIM's drive motor", definition.drivetrain().modules().driveMotor()));
+        new Committed("Robots.SIM's drive motor", definition.drivetrain().module(0).driveMotor()));
     committed.put(
         "Gearing",
         new Committed(
-            "Robots.SIM's drive gearing", definition.drivetrain().modules().driveGearing()));
+            "Robots.SIM's drive gearing", definition.drivetrain().module(0).driveGearing()));
     committed.put(
         "DrivetrainControl.Limits",
         new Committed("Robots.SIM's limits", robot.drivetrain().limits()));
@@ -110,8 +119,7 @@ class ValuesRegisterTest {
   void theStartingValuesAreTheOnesTheTemplateShips() throws IOException {
     Map<String, Committed> committed = committed();
 
-    assertThat(committed)
-        .containsKeys("VisionConfig", "EstimatorConfig", "TerrainCrossing.Settings");
+    assertThat(committed).containsKeys("VisionConfig", "EstimatorConfig");
     assertThat(register().startingValueProblems(committed)).isEmpty();
   }
 
@@ -171,6 +179,9 @@ class ValuesRegisterTest {
   /** The arm's gains as it ships them. */
   record ArmGains(double kP, double kD) {}
 
+  /** A design's parts, by name: what the register leaves out. */
+  record ArmParts(Joint.Revolute arm, Configuration stowed) {}
+
   private static final String ARM_REGISTER =
       """
       # Values
@@ -192,7 +203,7 @@ class ValuesRegisterTest {
       | Value | Kind | Template's starting value | Source | How to measure it, or why |
       |---|---|---|---|---|
       | `kP` | chosen | 2 | simulation | Why: it holds. |
-      | `kD` | chosen | 0.1 | top team (254) | Why: it damps. |
+      | `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |
 
       ## Tuning limits
 
@@ -279,7 +290,8 @@ class ValuesRegisterTest {
   @Test
   void aValueMissingFromItsRecordsTableSaysWhichAndWhere() {
     String register =
-        ARM_REGISTER.replace("| `kD` | chosen | 0.1 | top team (254) | Why: it damps. |\n", "");
+        ARM_REGISTER.replace(
+            "| `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |\n", "");
 
     assertThat(problems(register))
         .containsExactly(
@@ -314,14 +326,16 @@ class ValuesRegisterTest {
     String register =
         ARM_REGISTER
             .replace("| `kP` | chosen | 2 | simulation |", "| `kP` | tuned | 2 | simulation |")
-            .replace("| `kD` | chosen | 0.1 | top team (254) |", "| `kD` | chosen | 0.1 | 254 |")
+            .replace(
+                "| `kD` | chosen | 0.1 | top team (a 2025 robot) |",
+                "| `kD` | chosen | 0.1 | a 2025 robot |")
             .replace("| `gains.kP` | 0 to 10 | guess |", "| `gains.kP` | 0 to 10 | |");
 
     assertThat(problems(register))
         .containsExactly(
             "docs/values.md line 19: Arm.Gains.kP's kind is \"tuned\": it must be one of"
                 + " calibrated, characterized, chosen, as built",
-            "docs/values.md line 20: Arm.Gains.kD's source is \"254\": it must start with one of"
+            "docs/values.md line 20: Arm.Gains.kD's source is \"a 2025 robot\": it must start with one of"
                 + " measured, 2026 code, top team, datasheet, rules, math, simulation, guess,"
                 + " unknown, none, with any detail after it in parentheses",
             "docs/values.md line 28: the arm tuning's gains.kP's source is \"\": it must start"
@@ -495,8 +509,8 @@ class ValuesRegisterTest {
   void aValueListedTwiceSaysWhere() {
     String register =
         ARM_REGISTER.replace(
-            "| `kD` | chosen | 0.1 | top team (254) | Why: it damps. |",
-            "| `kD` | chosen | 0.1 | top team (254) | Why: it damps. |\n"
+            "| `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |",
+            "| `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |\n"
                 + "| `kD` | chosen | 0.2 | guess | Why: again. |");
 
     assertThat(problems(register))
@@ -585,5 +599,12 @@ class ValuesRegisterTest {
         .contains(
             "docs/values.md line 13: a row must start with a name in backticks, like"
                 + " `frameLength`, not \"length\"");
+  }
+
+  /** A parts record holds names, each part's values in its own section, so it needs none. */
+  @Test
+  void aPartsRecordNeedsNoSection() {
+    assertThat(ValuesRegister.isPartsRecord(ArmParts.class)).isTrue();
+    assertThat(ValuesRegister.isPartsRecord(ArmGains.class)).isFalse();
   }
 }

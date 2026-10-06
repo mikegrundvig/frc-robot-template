@@ -64,7 +64,7 @@ import org.wpilib.util.Alert;
  * blinded by stage lights), and how long to hold the cameras back when autonomous starts.
  *
  * <p>A task lining up on a target can trust only that target's tags while it runs ({@link
- * #trustingOnly}), as 254's auto-align did.
+ * #trustingOnly}), as a top team's auto-align did.
  */
 public final class Vision implements AutoCloseable {
   /** The share of measurements accepted is shown to this many percent. */
@@ -75,7 +75,7 @@ public final class Vision implements AutoCloseable {
 
   private final List<Camera> cameras;
   private final LocalizationService localization;
-  private final FieldModel field;
+  private FieldModel field;
   private final Supplier<VisionConfig> settings;
 
   /** The robot's pose is good enough to calibrate a camera against: within 5 cm. */
@@ -117,8 +117,8 @@ public final class Vision implements AutoCloseable {
 
   /**
    * How long to hold the cameras' measurements back when autonomous starts, trusting the placed
-   * start while the robot launches: 6328 held theirs 2 s. Off by default: the estimator gates every
-   * measurement against the placed start anyway.
+   * start while the robot launches: a top team held theirs 2 s. Off by default: the estimator gates
+   * every measurement against the placed start anyway.
    */
   private final TunableDouble autoStartHoldSeconds =
       TunableDouble.createConfig(0.0, Limits.between(0, MAX_HOLD_SECONDS).config());
@@ -464,7 +464,8 @@ public final class Vision implements AutoCloseable {
     if (collecting != null && measurement != null && measurement.covariance().hasHeading()) {
       collecting.add(measurement.pose().getRotation());
     }
-    if (then != null) {
+    // A camera on a joint isn't judged by its mount, nor calibrated: where it is is its joint's.
+    if (then != null && camera.config.joint().isEmpty()) {
       // On raised terrain, the robot stands as high as the ground under it.
       Pose3d robotThen =
           new Pose3d(
@@ -550,6 +551,14 @@ public final class Vision implements AutoCloseable {
     for (Camera camera : cameras) {
       camera.record(frames, current.mountToleranceMeters(), field::tag);
     }
+  }
+
+  /**
+   * The venue the pit selected, its tags where a survey found them: mount checks judge against it
+   * from now on. Only while disabled, as {@code RobotContainer} calls it.
+   */
+  public void venue(FieldModel venue) {
+    field = venue;
   }
 
   /**

@@ -166,41 +166,88 @@ The values that move the robot most, and are least known today:
 
 `frc.robot.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
 what the robot is (its definition, which names it), and how this program drives it, wires it, and
-judges what its sensors say.
+judges what its sensors say, its driven joints' among them ([`JointSetup`](#jointsetup)), and where
+its switches and rangefinders are connected ([a sensor's wiring](#a-sensors-wiring)).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `sensors` | as built | none (the template's robot has no sensors) | none | Where each of the definition's switches and rangefinders is connected on this robot: [`SensorWiring.OfSwitch`](#sensorwiringofswitch) and [`SensorWiring.OfRangefinder`](#sensorwiringofrangefinder). None for one that only runs in the simulator. |
 
 ### `RobotDefinition`
 
 `com.michaelgrundvig.frc.world.robot.RobotDefinition`: what the robot is, read by localization, the
 simulator, and the views (`RobotConfig.definition`). Its values are records with sections of their
-own: the body, the drivetrain as built, the cameras, and the IMUs. It checks them against each
-other: the wheels inside the frame, every camera and IMU inside the robot. Mechanisms' joints join
-it with the first mechanism that describes one.
+own: the body, the drivetrain as built, the cameras, the IMUs, and the mechanisms' drives
+([mechanisms](#mechanisms)), and its named places, configurations and interlocks ([named
+places](#named-places-configurations-and-interlocks)). It checks them against each other: the wheels
+inside the frame, every camera and IMU inside the robot, every joint a drive, coupling, sensor,
+camera, configuration, group, or interlock names among its joints, what's left of the body once the links
+come off still a body, and every interlock obeyed. The template's robot has no mechanisms.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `name` | chosen | `sim` | none | Which robot this is, as its logs and its checks' messages name it (`RobotDefinition[sim].cameras: ...`). One per robot; keep it. |
+| `joints` | as built | none (the template's robot has no mechanisms) | none | The mechanisms' joints, each after the one it rides on, as `Robots.java` declares them: [`Joint.Revolute`](#jointrevolute) and [`Joint.Prismatic`](#jointprismatic). The drivetrain's modules aren't among them: they're derived from it (`DrivetrainGeometry.joints`). |
+| `couplings` | as built | none (as `joints`) | none | Joints that move with another, with no drive of their own: [`Coupling.Linear`](#couplinglinear) and [`Coupling.Curve`](#couplingcurve). |
+| `sensors` | as built | none (as `joints`) | none | What reads the joints and what they carry: [`Sensor.Encoder`](#sensorencoder), [`Sensor.Switch`](#sensorswitch) and [`Sensor.Rangefinder`](#sensorrangefinder). |
+| `interlocks` | chosen | none (as `joints`) | none | What one joint may do by where another is, enforced beneath every command: [`Interlock.RunsOnlyWhen`](#interlockrunsonlywhen) and [`Interlock.KeepsOut`](#interlockkeepsout). Its configurations have a section of their own ([`Configuration`](#configuration)). |
 
 ### `Body`
 
 `com.michaelgrundvig.frc.world.robot.Body`: the frame, bumpers, and mass. Per robot, in `Robots`.
 The template's robot is the largest and heaviest the 2026 rules allowed, with the best case center
-of gravity.
+of gravity. Its weight is the robot as weighed, every joint at its reference, with a section of its
+own ([`Body.Weight`](#bodyweight)), and until it's weighed, the most the season allows; its inertia
+is CAD's whole tensor, its yaw alone, or neither, a solid box of its mass, bumpers and height
+supplying what isn't given. The definition takes its mechanisms' links from it, and what's left is the chassis.
+Either default is in the robot's missing-data report (`RobotDefinition.missing`).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `frameLength` | as built | 27.5 in | rules (2026: the largest square within R104's 110 in perimeter) | From CAD; check with a tape across the outside of the frame. |
 | `frameWidth` | as built | 27.5 in | rules (2026, as `frameLength`) | As `frameLength`, side to side. |
 | `height` | as built | 30 in | rules (2026: R104's starting height) | From CAD: the tallest point in the starting configuration. |
-| `bumperThickness` | as built | 4 in | rules (2026: R403's most) | From the outside of the frame to the outside of the bumper, cover on. |
-| `mass` | calibrated | 149.5 lb | rules (2026: 135 lb with bumpers, R408, and a 14.5 lb battery, R601) | [Weigh it](calibration.md#the-robots-mass-center-of-gravity-and-inertia), bumpers and battery on; again after big changes. The simulator's drive carries it, a quarter on each wheel, so it sets how fast the simulated robot speeds up and how long its drive motors stay at their current limit. |
-| `yawMomentOfInertia` | calibrated | 6.7 kg m² | guess (typical) | [From CAD, or SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). Nothing reads it yet: the simulator spins the robot as if its mass sat at its wheels, about 11 kg m² for the template's ([stand-ins](stand-ins.md)); a simulator that models the robot as one body will. |
-| `cgHeight` | calibrated | 0.15 m | guess (best case: centered and low) | [From CAD, or a tilt test](calibration.md#the-robots-mass-center-of-gravity-and-inertia). With the tread's friction it sets where the wheels slip, so the drive's current limit. Nothing reads it yet. |
+| `bumperEnds` | as built | 4 in | rules (2026: R403's most) | From the outside of the frame to the outside of the bumper, cover on, at the front and the back. |
+| `bumperSides` | as built | 4 in | rules (2026: R403's most) | As `bumperEnds`, at the left and the right. The same as at the ends, often; bumpers square around a frame that isn't are thicker on its shorter sides. |
+| `bumperBottom` | as built | 2.5 in | rules (2026: the bottom of R405's bumper zone) | From CAD, or a tape with the robot on flat carpet: the floor to the bumpers' bottom edge. AdvantageScope's schematic robot draws its bumpers from it, and the season's bumper zone is checked against it. |
+| `bumperTop` | as built | 5.75 in | rules (2026: the top of R405's bumper zone) | As `bumperBottom`, to their top edge. No higher than the robot. |
+| `inertia` | calibrated | its yaw alone, 6.7 kg m² (pitch and roll the box's) | guess (typical) | How hard the robot is to turn, about its center of mass: CAD's whole tensor ([`Body.Turning.Tensor`](#bodyturningtensor)), its yaw alone ([`Body.Turning.Yaw`](#bodyturningyaw)), as PathPlanner's or Choreo's robot MOI, CAD, or [SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia) gives it, or nothing known (`Body.Turning.BOX`). What isn't given, a solid box of the robot's mass, bumpers and height supplies, and the missing-data report says which. A given yaw must stand beside the box's pitch and roll, each of the three at most the sum of the other two, or the definition refuses it: give the whole tensor then. |
+| `cg` | calibrated | centered, 0.15 m up | guess (best case: centered and low) | CAD's mass-properties report, or [the two scales](calibration.md#the-robots-mass-center-of-gravity-and-inertia) for how far forward and the tilt test for its height, every joint at its reference. With the tread's friction, its height sets where the wheels slip, so the drive's current limit. |
+
+### `Body.Weight`
+
+`com.michaelgrundvig.frc.world.robot.Body.Weight`: what the whole robot weighs, bumpers and battery
+on: on a scale (`Body.Weight.weighed`), or until it's weighed, the most the season allows with a
+battery, which its limits give (`Rebuilt.LIMITS.unweighed()`).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `mass` | calibrated | 149.5 lb | rules (2026: 135 lb with bumpers, R408, and a 14.5 lb battery, R601) | [Weigh the robot](calibration.md#the-robots-mass-center-of-gravity-and-inertia), bumpers and battery on, every joint at its reference; again after big changes. The simulator's drive carries it, a quarter on each wheel, so it sets how fast the simulated robot speeds up and how long its drive motors stay at their current limit. Its links' masses together must leave some of it for the chassis. |
+| `weighed` | calibrated | false (not weighed: the season's most) | rules (2026, as `mass`) | Whether `mass` is the robot on a scale. Until it is, the missing-data report says the mass is the season's. |
+
+### `Body.Turning.Tensor`
+
+`com.michaelgrundvig.frc.world.robot.Body.Turning.Tensor`: the robot's whole inertia tensor, from
+CAD's mass-properties report, about its center of mass along the robot's axes. Its inertia has a
+section of its own ([`Inertia`](#inertia)). The template's robot gives its yaw alone.
+
+### `Body.Turning.Yaw`
+
+`com.michaelgrundvig.frc.world.robot.Body.Turning.Yaw`: the robot's yaw inertia alone, what most
+teams know: a solid box of the robot's mass, bumpers and height supplies the pitch and roll, and
+no products of inertia.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `yaw` | calibrated | 6.7 kg m² | guess (typical) | CAD, or [SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia); PathPlanner's and Choreo's robot MOI is often an estimate. Nothing reads the robot's yet: the simulator spins it as if its mass sat at its wheels, about 11 kg m² for the template's ([stand-ins](stand-ins.md)); a simulator that models the robot as one body will. |
 
 ### `Imus`
 
 `com.michaelgrundvig.frc.world.robot.Imus`: the robot's IMUs, each where it's mounted
-(`RobotDefinition.imus`): the gyro (the Pigeon 2) and the backup (Systemcore's own). Its values are
-mounts, with a section of their own.
+(`RobotDefinition.imus`): the gyro (the Pigeon 2) and, if the robot has one, the backup
+(Systemcore's own, or a second Pigeon). A roboRIO robot has none: its code then reads no backup,
+and with the gyro lost, the heading rests on the wheels. Its values are mounts, with a section of
+their own.
 
 ### `ImuMount`
 
@@ -224,26 +271,36 @@ at the center, level, and unchecked.
 ### `DrivetrainGeometry`
 
 `com.michaelgrundvig.frc.world.robot.DrivetrainGeometry`: the swerve drivetrain as built
-(`RobotDefinition.drivetrain`). Per robot, in `Robots`. How it's driven, its limits and gains, is
-[`DrivetrainControl`](#drivetraincontrol).
+(`RobotDefinition.drivetrain`): its four corners, front left, front right, back left, back right,
+each with a section of its own. Per robot, in `Robots`. How it's driven, its limits and gains, is
+[`DrivetrainControl`](#drivetraincontrol). The same module at every corner is the usual drivetrain:
+`DrivetrainGeometry.uniform` places them as Phoenix Tuner X's swerve project gives their positions,
+and `DrivetrainGeometry.inset` in from the frame's edges, as the template's robot does, 2.625 in
+(SDS MK4i's footprint drawing).
+
+### `DrivetrainGeometry.Corner`
+
+One corner's module: its type, with a section of its own, and where its wheel sits.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `wheelInset` | as built | 2.625 in | datasheet (SDS MK4i's footprint) | The module's footprint drawing, or CAD: from the outside of the frame to the wheel's center. |
+| `position` | as built | ±11.125 in forward, ±11.125 in left | datasheet (SDS MK4i's footprint: 2.625 in in from the frame's edges) | Phoenix Tuner X's swerve generator, or CAD: where the wheel touches the floor, from the robot's center. Each in its own quarter: front left ahead and left of the center. Inside the frame. |
 
-### `DrivetrainGeometry.Modules`
+### `DrivetrainGeometry.ModuleType`
 
-The module hardware, the same at every corner: a Kraken X60 driving each wheel and another turning
+A type of module, the same wherever one sits: a Kraken X60 driving each wheel and another turning
 each module (`driveMotor`, `steerMotor`; an `_FOC` model only with a Phoenix Pro license), each
 through its gearing (`driveGearing`, `steerGearing`), with sections of their own:
-[`Motor`](#motor) and [`Gearing`](#gearing).
+[`Motor`](#motor) and [`Gearing`](#gearing). The template's robot has one type at every corner; a
+drivetrain that mixes them, MK5i in front and MK5n behind, say, gives each corner its own.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `wheelRadius` | calibrated | 2 in | datasheet (a 4 in wheel) | [The wheel radius](calibration.md#the-wheel-radius), before each event: tread wears. The simulator's drive motors feel the robot's mass through it. |
-| `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread. The simulator's grip; with `cgHeight`, it sets the drive's current limit. |
-| `driveInertia` | characterized | 0.001 kg m² | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. The drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of `Body.mass` at `wheelRadius`. About 2% of what the template's robot puts on each wheel, so a rough number costs little. The simulator turns it. |
+| `wheelCoefficientOfFriction` | characterized | 1.2 | guess (tread on carpet: about 1.0 worn, 1.3 new) | [Tread friction](characterization.md#tread-friction): a pull test, new and worn tread. The simulator's grip; with the center of gravity's height (`MassProperties.cg`), it sets the drive's current limit. |
+| `driveInertia` | characterized | 0.001 kg m² | guess (a 4 in wheel, about 0.0004, and a Kraken X60's rotor through 6.75:1, about 0.0006: the rotor's inertia isn't published) | [Feedforward](characterization.md#feedforward): SysId on one module lifted off the floor. The drive's own moving parts (wheel, gears, and the motor's rotor through them), as inertia at the wheel, on top of its share of the robot's mass at `wheelRadius`. About 2% of what the template's robot puts on each wheel, so a rough number costs little. The simulator turns it. |
 | `steerInertia` | characterized | 0.004 kg m² | datasheet (Phoenix Tuner X's generated simulation value, as AdvantageKit's swerve templates use it) | [Feedforward](characterization.md#feedforward): SysId on one module's steering. The simulator's steering turns it, so it sets how fast the steering turns at its current limit, and how high its gains can go. What it assumes is in [stand-ins](stand-ins.md). |
+| `couplingRatio` | as built | 50/14 (3.571) | datasheet (Phoenix Tuner X's swerve generator, for the MK4i, as 2611's 2024 code had it) | Tuner X's swerve generator, or the module's datasheet: drive motor turns per turn of the module, the wheel held still. Zero for a module without the coupling. Each drive motor's transmission turns the module through it as well as the wheel (`DrivetrainGeometry.joints`), and Phoenix's drivetrain takes it off the drive's reading. It's the module's gearing, so it's here, not in the wiring. |
 
 ### `Motor`
 
@@ -260,6 +317,7 @@ steers with Kraken X60s; the starting values are its.
 | `stallCurrent` | characterized | 366 A | datasheet (WPILib's `DCMotor`, from CTRE's) | As `stallTorque`: the current then. |
 | `freeCurrent` | characterized | 2 A | datasheet (WPILib's `DCMotor`, from CTRE's) | The datasheet, or the motor spinning freely on the bench: the current with nothing on its shaft. |
 | `freeSpeed` | characterized | 6000 rpm (628.3 rad/s) | datasheet (WPILib's `DCMotor`, from CTRE's) | As `freeCurrent`: its speed then. |
+| `rotorInertia` | characterized | 0.000013 kg m² | guess (neither CTRE nor REV publishes it: each preset's is estimated from its rotor's size, as the world model audit's M21 does) | The vendor's number if it ever publishes one; otherwise SysId on the bare motor, free on the bench: its acceleration per volt. A gearbox multiplies it by its ratio squared, so it matters most behind a big reduction: at 50:1 a Kraken X60's is about 0.03 kg m² at the arm. |
 
 ### `Gearing`
 
@@ -274,10 +332,11 @@ steering's.
 
 ### `Actuator.Motors`
 
-`com.michaelgrundvig.frc.world.robot.Actuator.Motors`: one or more identical motors driving one
-thing through one gearing. Its motor and gearing have sections of their own. The template's
-drivetrain derives one for each module's drive and steering (`DrivetrainGeometry.Modules.drive()`,
-`steer()`), which the simulator turns its wheels with.
+`com.michaelgrundvig.frc.world.robot.Actuator.Motors`: one or more identical motors working
+together, only what makes the force: what stands between them and a joint is the drive's
+transmission ([mechanisms](#mechanisms)). Its motor has a section of its own. The template's
+drivetrain derives one for each module's drive and steering (`DrivetrainGeometry.ModuleType.driveMotors()`,
+`steerMotors()`), each through its gearing, which the simulator turns its wheels with.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -316,7 +375,7 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `driveKs` | characterized | 0 V | simulation (the simulator's wheels have no friction) | [Feedforward](characterization.md#feedforward), per drivetrain design: robots built alike share it. |
-| `driveKv` | characterized | 2.54 V/(m/s) | math (ideal: nominal voltage over free speed, `Modules.idealDriveKv()`) | [Feedforward](characterization.md#feedforward), per drivetrain design. A real drivetrain's is a little higher. |
+| `driveKv` | characterized | 2.54 V/(m/s) | math (ideal: nominal voltage over free speed, `ModuleType.idealDriveKv()`) | [Feedforward](characterization.md#feedforward), per drivetrain design. A real drivetrain's is a little higher. |
 | `driveKp` | chosen | 2.0 V/(m/s) | simulation | Why: corrects what feedforward misses. Tune it live after kS and kV: raise it until speeds track their setpoints, and back off at the first buzz. |
 | `steerKp` | chosen | 16 V/rad | 2026 code (kP 100 V/rot, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. The steering's loop sees a new angle only when the CANcoder sends one, every 10 ms, so it overshoots from about 40 and buzzes past about 77 (at `steerKd` 0.08, in the simulator). |
 | `steerKd` | chosen | 0.08 V/(rad/s) | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. Too much buzzes too, since it damps on a speed up to 10 ms old: past about 0.2 at `steerKp` 50, in the simulator. |
@@ -326,14 +385,17 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 
 `frc.robot.lib.wiring.SwerveWiring`: where the drivetrain's devices are on the CAN bus, and how they
 read. Per robot, in `Robots`. Phoenix Tuner X's swerve generator reports every value here; copy them
-across. The template's robot runs only in simulation and has no wiring, so nothing is set today.
+across. Its coupling ratio is the module's gearing, so it goes in the definition
+(`DrivetrainGeometry.ModuleType.couplingRatio`). The template's robot runs only in simulation and has
+no wiring, so nothing is set today.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `canBus` | as built | none | none | Tuner X: Systemcore's port, or the CANivore's name. |
+| `canBus` | as built | none | none | Tuner X: Systemcore's port, or the CANivore's name. SPARKs are on Systemcore's own port. |
+| `driveController` | as built | none | none | What the drive motors are on: `TALON_FX` (a Kraken or Falcon), or `SPARK_MAX` or `SPARK_FLEX` (REV's MAXSwerve, say). The robot refuses one that can't drive the definition's motor. |
+| `steerController` | as built | none | none | What the steering motors are on, as the drive's. On a SPARK, each module's absolute encoder is on its data port. |
 | `gyroId` | as built | none | none | Tuner X: the Pigeon 2's CAN ID. |
 | `gyroYawScale` | calibrated | none (1 until measured) | none | [The gyro's scale](calibration.md#the-gyros-scale), once per gyro, and after replacing or remounting it. |
-| `couplingRatio` | as built | none | none | Tuner X's swerve generator, or the module's datasheet: drive motor turns per turn of the module, wheel held still. |
 | `systemcoreMount` | as built | none | none | How Systemcore is mounted: flat, or on an edge. WPILib takes its yaw about the axis this says is up. How the board is turned on the robot is its `ImuMount` (`Imus.backup`). Check the backup IMU's pitch and roll against the Pigeon's as the robot tilts: how Systemcore's IMU reads on each mount is still to confirm on a real one. |
 
 ### `SwerveWiring.ModuleWiring`
@@ -342,10 +404,10 @@ One module's devices.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `driveId` | as built | none | none | Tuner X. |
-| `steerId` | as built | none | none | Tuner X. |
-| `encoderId` | as built | none | none | Tuner X. |
-| `encoderOffset` | calibrated | none | none | Tuner X's swerve generator, with the wheels straight ahead; again whenever a module is rebuilt. |
+| `driveId` | as built | none | none | Tuner X, or REV's Hardware Client for a SPARK. |
+| `steerId` | as built | none | none | Tuner X, or REV's Hardware Client. |
+| `encoderId` | as built | none | none | Tuner X: the CANcoder's ID. Empty for a SPARK's steering, whose encoder is on its data port. |
+| `encoderOffset` | calibrated | none | none | Tuner X's swerve generator, with the wheels straight ahead; again whenever a module is rebuilt. On REV's modules: with the wheels straight ahead, read each steering SPARK's absolute encoder in REV's Hardware Client, and negate it. |
 | `driveInverted` | as built | none | none | Tuner X's swerve generator. |
 | `steerInverted` | as built | none | none | Tuner X's swerve generator. |
 | `encoderInverted` | as built | none | none | Tuner X's swerve generator. |
@@ -367,6 +429,7 @@ One module's devices.
 | `tiltUp` | calibrated | 8.2° to 12.5° | 2026 code (a 2026 robot's cameras) | As `forward`. |
 | `yaw` | calibrated | ±23.2° in front, 181° behind | 2026 code (a 2026 robot's cameras) | As `forward`. |
 | `noiseScale` | calibrated | 1 | guess (every camera typical) | How much noisier this camera is than the typical one, whose noise [camera noise](characterization.md#camera-noise) measured: its logged tag residual (`Vision/<camera>/MeanTagResidualMeters`) over the other cameras', once every mount is calibrated. |
+| `joint` | as built | none (all four ride the chassis) | none | What the camera rides on, if not the chassis: a joint, whose link it's mounted to. Its mount (`forward` to `yaw`) is then in that joint's frame, from CAD. It must sit on the link's shapes (within 10 cm), and inside the robot with the joint at its reference. Localization reads only the chassis's cameras yet. |
 
 ### `CameraConfig.Sensor`
 
@@ -377,10 +440,600 @@ that use it. The simulator builds its cameras from it.
 |---|---|---|---|---|
 | `widthPixels` | as built | 1280 | guess (a typical AprilTag camera) | The resolution the pipeline runs at, in PhotonVision. |
 | `heightPixels` | as built | 800 | guess (a typical AprilTag camera) | As `widthPixels`. |
-| `diagonalFieldOfView` | characterized | 80° | guess (typical) | PhotonVision's lens calibration, at the resolution the robot runs, reports it. |
+| `fieldOfView` | characterized | 80° | guess (typical) | The angle the camera sees across its image, as `fieldOfViewAcross` says: PhotonVision's lens calibration, at the resolution the robot runs, reports the diagonal one; a camera's datasheet, and most teams' code, the horizontal one. The simulator's cameras and the views take the diagonal, worked out from a horizontal one through a lens with square pixels. |
+| `fieldOfViewAcross` | as built | diagonal | none (as `fieldOfView`, a diagonal one) | Which way `fieldOfView` is across the image: `HORIZONTAL` for a datasheet's or a Limelight's, `DIAGONAL` for PhotonVision's calibration. |
 | `frameRate` | characterized | 30 Hz | guess | [Coprocessor capacity](characterization.md#vision-coprocessor-capacity): results per second, with as many cameras as one coprocessor carries on the robot. |
 | `latency` | characterized | 30 ms | guess | [Camera latency](characterization.md#camera-latency-and-time-sync): from the image's capture to its result reaching the robot, with as many cameras as one coprocessor carries on the robot ([coprocessor capacity](characterization.md#vision-coprocessor-capacity)). |
 | `sightRange` | characterized | 7 m | guess (the simulator's since the template began) | [Camera noise](characterization.md#camera-noise): the farthest a tag is found in most images. The simulator's cameras find tags no farther, and AdvantageScope's schematic robot draws each camera's field of view out to it. |
+
+## Mechanisms
+
+A mechanism is joints, each carrying a link, on the chassis or on another joint; drives that move
+them; couplings that move one joint with another; and sensors that read them. Each refers to the
+parts it names by the part itself, never by a label, so a reference can't name something that isn't
+there; the definition checks only that every joint referred to is one of its own. Labels are for
+logs, writers, and messages, unique within the robot. What robot code needs from a mechanism
+(Phoenix's ratios, an absolute encoder's discontinuity point, the gravity offset, ideal gains to
+start tuning from) is derived from it (`RobotMath`), not entered. The template's robot has none,
+so nothing here has a starting value: a mechanism's numbers come from CAD and its parts' datasheets
+as it joins `Robots.java`.
+
+### `Joint.Revolute`
+
+`com.michaelgrundvig.frc.world.robot.Joint.Revolute`: a joint that turns, in radians. Its range
+and its link have sections of their own ([`Range`](#range), [`Link`](#link)).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | What logs, writers, and messages call it: `arm`, `front-left steer`. Unique among the robot's joints. |
+| `parent` | as built | none (as `label`) | none | What it turns on: the chassis (`Part.CHASSIS`), or another joint, standing for that joint's link. A joint is built after its parent, so joints never loop. |
+| `origin` | as built | none (as `label`) | none | From CAD: where its axis sits in its parent's frame, and how its own frame is turned there, with the joint at 0. Position 0 is wherever CAD draws it; the gravity offset Phoenix wants is derived from it (`RobotMath.gravityOffset`), not entered. |
+| `axis` | as built | none (as `label`) | none | From CAD: the axis it turns about, in its own frame. A position grows turning right-handed about it, so pick its sign for the direction the motors' positive voltage turns it. Any length: only its direction counts. |
+| `reference` | as built | none (as `label`) | none | Where it sits as the robot is weighed and starts a match: its stowed position, inside its range. The body's mass properties are the robot with every joint here, and the season's starting limits are checked here. |
+
+### `Joint.Prismatic`
+
+`com.michaelgrundvig.frc.world.robot.Joint.Prismatic`: a joint that slides, in meters: an
+elevator's stage, a telescope. Its range and its link have sections of their own.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | As a revolute joint's: `elevator`, `carriage`. |
+| `parent` | as built | none (as `label`) | none | As a revolute joint's. |
+| `origin` | as built | none (as `label`) | none | From CAD: where its link sits on its parent with the joint at 0, its lowest or most retracted usually. |
+| `axis` | as built | none (as `label`) | none | From CAD: the direction it slides as its position grows, in its own frame. Any length. |
+| `reference` | as built | none (as `label`) | none | As a revolute joint's: where it sits stowed, in meters. |
+
+### `Range`
+
+`com.michaelgrundvig.frc.world.robot.Range`: how far a joint moves, from its 0, unwrapped: a
+turret's may span more than a turn. A joint that turns freely, a wheel or a turret on a slip ring,
+has none.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `lower` | as built | none (the template's robot has no mechanisms) | none | From CAD, then by moving the mechanism to its hard stop: where it stops, in radians or meters. The soft limit inside it is the mechanism's own. |
+| `upper` | as built | none (as `lower`) | none | As `lower`, the other way. |
+
+### `Link`
+
+`com.michaelgrundvig.frc.world.robot.Link`: what a joint carries, in the joint's frame: its mass
+properties ([`MassProperties`](#massproperties)) and its shapes.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | What logs and writers call it: `arm`, `carriage`. Unique among the robot's links. |
+| `shapes` | as built | none (as `label`) | none | From CAD, simplified by hand to boxes ([`Shape.Box`](#shapebox)) in the joint's frame. They're what reaches out and up, for the season's limits, and what a camera on the link sits on. None for a link nothing needs the shape of. |
+
+### `Coupling.Linear`
+
+`com.michaelgrundvig.frc.world.robot.Coupling.Linear`: a joint that moves in proportion to
+another, with no drive of its own: a cascade elevator's upper stage. A joint follows one other at
+most.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `leader` | as built | none (the template's robot has no mechanisms) | none | The joint that moves it. |
+| `follower` | as built | none (as `leader`) | none | The joint it moves. Its reference must be where the coupling puts it, with the leader at its own. |
+| `ratio` | as built | none (as `leader`) | none | From CAD: how far the follower moves for each of the leader's units: 2 for a cascade's carriage, which rides its stage's rigging. |
+| `offset` | as built | none (as `leader`) | none | Where the follower is with the leader at 0. Usually 0. |
+
+### `Coupling.Curve`
+
+`com.michaelgrundvig.frc.world.robot.Coupling.Curve`: a joint that moves with another along a
+curve: a linkage, or a hopper's wall that folds with its floor.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `leader` | as built | none (the template's robot has no mechanisms) | none | As a linear coupling's. |
+| `follower` | as built | none (as `leader`) | none | As a linear coupling's. |
+| `table` | as built | none (as `leader`) | none | From CAD, swept through the leader's range: the leader's position against the follower's, the leader's rising, straight between points and held past the ends. More points where it bends. |
+
+### `Drive`
+
+`com.michaelgrundvig.frc.world.robot.Drive`: what moves a mechanism: an actuator, through a
+transmission, each with sections of their own. Motors turn a shaft, so they go through gearing, a
+drum, or combined terms; a linear servo pushes along a line, so it pushes between two
+points.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | What logs and messages call it: `arm`, `front-left drive`. Unique among the robot's drives. |
+| `actuator` | as built | none (as `label`) | none | What makes the force: [`Actuator.Motors`](#actuatormotors) or a [servo](#actuatorservo). |
+| `transmission` | as built | none (as `label`) | none | How the force reaches the joints: [`Transmission.Geared`](#transmissiongeared), [`Transmission.Drum`](#transmissiondrum), [`Transmission.Combined`](#transmissioncombined), or [`Transmission.Between`](#transmissionbetween). |
+
+### `Actuator.Servo`
+
+`com.michaelgrundvig.frc.world.robot.Actuator.Servo`: a servo on PWM, a linear servo between two
+points or a hobby servo's shaft, with its own loop and nothing reading back where it is. Robot code
+tells it a share of its travel (`Servo.command`), from the drive's coordinate at the position it
+wants (`RobotMath.coordinate`), as WPILib's `Servo.set` takes it.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `from` | as built | none (the template's robot has no mechanisms) | none | The datasheet: its length eye to eye fully retracted, at its shortest pulse, in meters; or its shaft's angle there, in radians. |
+| `to` | as built | none (as `from`) | none | As `from`, fully extended, at its longest pulse: closed length plus stroke. |
+| `force` | as built | none (as `from`) | none | The datasheet: the most it pushes, in newtons, or turns, in newton meters. |
+| `speed` | as built | none (as `from`) | none | The datasheet: how fast it moves with nothing on it, in meters or radians a second. |
+
+### `Transmission.Geared`
+
+`com.michaelgrundvig.frc.world.robot.Transmission.Geared`: motors turning a revolute joint
+through gearing. Its joint and its gearing have sections of their own ([`Gearing`](#gearing)).
+`Joint.Revolute.motors(motor, count, gearing)` writes a drive with one.
+
+### `Transmission.Drum`
+
+`com.michaelgrundvig.frc.world.robot.Transmission.Drum`: motors driving a prismatic joint through
+gearing and a drum, sprocket, or pulley: an elevator. Its joint and its gearing have sections of
+their own. `Joint.Prismatic.motors(motor, count, gearing, pitchRadius)` writes a drive with one.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `pitchRadius` | as built | none (the template's robot has no mechanisms) | none | The sprocket's or pulley's datasheet: half its pitch diameter, where the chain, belt, or rope runs. |
+
+### `Transmission.Combined`
+
+`com.michaelgrundvig.frc.world.robot.Transmission.Combined`: motors that turn more than one joint at
+once, each by its own ratio ([`Transmission.Term`](#transmissionterm)): a differential wrist, or a
+swerve module's drive motor, which turns its wheel and, through the coupling, its steering too.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `efficiency` | characterized | none (the template's robot has no mechanisms; its swerve modules' derived ones take their drive gearing's) | none | As [`Gearing.efficiency`](#gearing): the share of the motors' torque that reaches the joints. |
+
+### `Transmission.Term`
+
+`com.michaelgrundvig.frc.world.robot.Transmission.Term`: one joint a combined transmission turns, or
+an encoder reads.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | as built | none (the template's robot has no mechanisms) | none | A joint the motors turn, or the encoder reads. Each joint once. |
+| `ratio` | as built | none (as `joint`) | none | From CAD: the motors' turns, or the encoder's, for each turn of the joint, the others held still: an encoder's is Phoenix's `SensorToMechanismRatio`, 1 on the joint's shaft, 92/18 on an 18 tooth gear against a turret's 92 tooth ring. A differential wrist's two motors: the same ratio on its pitch, opposite ones on its roll. For a prismatic joint, per turn of the drum, sprocket or pinion its `pitchRadius` names, as a drum's gearing is; for one an encoder reads straight off the slide, with none, per meter. |
+| `pitchRadius` | as built | none (as `joint`) | none | A prismatic joint's drum, sprocket or pinion, as [`Transmission.Drum.pitchRadius`](#transmissiondrum): half its pitch diameter, from its datasheet. Motors always slide a joint through one, so a combined transmission's prismatic term names it, and the Phoenix helper reads the joint in its turns. Empty for a revolute joint. |
+
+### `Transmission.Between`
+
+`com.michaelgrundvig.frc.world.robot.Transmission.Between`: a force along the line between two
+points, each on the chassis or a joint's link: a linear servo, eye to eye. How hard it
+turns a joint changes as the joint moves, and is worked out from where the points are.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `a` | as built | none (the template's robot has no mechanisms) | none | What one end is mounted on: the chassis, or a joint, standing for its link. |
+| `onA` | as built | none (as `a`) | none | From CAD: where that end's pivot is, in that part's frame. |
+| `b` | as built | none (as `a`) | none | As `a`, the other end, on a different part. Positive force pushes the ends apart. |
+| `onB` | as built | none (as `a`) | none | As `onA`, the other end. |
+
+### `Sensor.Encoder`
+
+`com.michaelgrundvig.frc.world.robot.Sensor.Encoder`: an encoder reading a joint, or a sum of
+joints on a shaft several turn, as a differential's motor's rotor reads its two sides. Its terms
+are [`Transmission.Term`](#transmissionterm)s, as a combined transmission's are. A motor's own
+rotor isn't written: its drive implies it (`Drive.rotor()`), never absolute.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | What logs and messages call it: `turret-18t`. Unique among the robot's sensors. |
+| `absolute` | as built | none (as `label`) | none | Whether it knows where it is at power on: a CANcoder, or a through-bore's absolute output. An absolute one reads one joint. A joint's absolute encoders must tell its whole range apart, alone or, geared nearly alike, as a pair decoded by their difference, which the definition checks (`RobotMath.absoluteSpan`); where the decoder's window sits is derived (`RobotMath.absoluteWindow`), and Phoenix's discontinuity point for one (`RobotMath.discontinuityPoint`). |
+| `countsPerTurn` | as built | none (as `label`) | none | The encoder's datasheet: how many readings its turn has, 4096 for a CANcoder. An absolute encoder needs its own: whether a pair can pick each other's turn depends on it. Zero when nothing reads it, as for a motor's rotor. |
+### `Sensor.Switch`
+
+`com.michaelgrundvig.frc.world.robot.Sensor.Switch`: a two-state sensor, tripped or clear: a limit
+switch, a beam break, or a switch nothing the model describes closes. Tripped is actuated (pressed,
+its beam blocked), whatever its wiring's polarity. What it means to the robot is a condition over it
+(`tripped()`, `clear()`), never part of the switch.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | As an encoder's: `claw beam`. |
+| `part` | as built | none (as `label`) | none | What it's mounted on: the chassis, or a joint's link. A limit switch's is its joint's parent, which the joint presses it against. |
+| `pose` | as built | none (as `label`) | none | From CAD, where it sits in its part's frame, x along its beam or its actuator; optional, since a team rarely knows it, and only the simulator and the 3D view use it. Unknown, it's at the part's origin, and the missing-data report says so. |
+| `kind` | as built | none (as `label`) | none | What kind of switch: [`Sensor.Switch.Limit`](#sensorswitchlimit), or `Beam` (a beam break, through-beam or reflective) or `Contact` (a button, a cage sensor), which have no values. |
+
+### `Sensor.Switch.Limit`
+
+A limit switch: one a joint's link presses, or a magnet on it passes, at one end of its travel.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | as built | none (the template's robot has no mechanisms) | none | The joint it reads. |
+| `position` | calibrated | none (as `joint`) | none | Where the joint is as it trips, inside its range: move the mechanism slowly onto it and read the joint's encoder; again after the switch is moved or bent. Optional: unknown, the switch can stop the joint but not home it, and the missing-data report says so. |
+| `end` | as built | none (as `joint`) | none | Which end of the joint's travel it's at: `LOWER` trips at or below its position, `UPPER` at or above. |
+
+### `Sensor.Rangefinder`
+
+`com.michaelgrundvig.frc.world.robot.Sensor.Rangefinder`: a distance along its axis, from its mount
+on a part: a CANrange, a LaserCAN, an analog ultrasonic. Used as "is something there", it's still a
+rangefinder: the threshold is a condition (`nearerThan`, `fartherThan`).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `label` | chosen | none (the template's robot has no mechanisms) | none | As an encoder's: `hopper range`. |
+| `part` | as built | none (as `label`) | none | As a switch's. |
+| `pose` | as built | none (as `label`) | none | As a switch's, x along its axis. |
+| `range` | as built | none (as `label`) | none | The datasheet: the farthest it reads, for a CANrange 1 m in its short-range mode and 3 m in its long-range one (CTRE's CANrange User's Guide). A condition's distance must be inside it. |
+| `fieldOfView` | as built | none (as `label`) | none | The datasheet: its cone's full angle; a CANrange's is set from 6.75 to 27 degrees, across and up and down apart: give the wider. |
+
+## Named places, configurations and interlocks
+
+A joint names the places it goes and what it runs at ([`Position`](#position),
+[`Output`](#output), its `positions` and `outputs`), and the robot names its configurations (several
+joints, each at a named place) and its interlocks (what one joint may do by where another is), in its
+definition. They're facts about the robot, read by everything that reads it: robot code moves to
+them by name, Pitwall offers them, logs show them. What to do with them is the robot program's own
+code. Each reference is the joint itself; the names are the joint's own (`PIVOT.at("out")`,
+`PIVOT.past("run")`), checked as they're written. The definition checks them all when it's built:
+each position inside its joint's range, each output within what the joint's motors can do (a speed
+within `RobotMath.freeSpeed`, refused above it and noted above nine tenths of it,
+`RobotDefinition.notes`; a voltage within their nominal voltage),
+every configuration obeying every interlock with the joints it doesn't name at their references, the
+robot obeying them as it starts, no two joints holding each other, and no named place the interlocks
+leave unreachable; the season's extension limit is checked at each configuration (`SeasonLimits`).
+The template's robot has no mechanisms, so nothing here has a starting value.
+
+A robot design's parts record, the joints and configurations its code names (`@ConfigRecord record
+Parts(...)`, beside its robots in `Robots.java`), needs no section here: its values are names, and
+each part's values are already in its own section.
+
+### `Position`
+
+`com.michaelgrundvig.frc.world.robot.Position`: a place a joint goes, by name, in the joint's units:
+`Position.degrees("out", 130)`, `Position.of("clear", Inches.of(20))`.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | chosen | none (the template's robot has no mechanisms) | none | What code, logs and Pitwall call it: `out`, `clear`. Unique among its joint's positions and outputs. |
+| `kind` | as built | none (as `name`) | none | `ANGLE` for a joint that turns, `LENGTH` for one that slides: set by how it's written (`Position.degrees`, or `Position.of` with an angle or a distance). The joint refuses a position of the other kind, so a slide's inches never land on a pivot as radians. |
+| `value` | chosen | none (as `name`) | none | Why: where the mechanism does a job, inside the joint's range: from CAD first, then moved to where it works on the robot (Pitwall tunes it live, and prints the line to commit). Check: the joint's logged position as it does the job; change it when that's off, never to make an interlock or a check pass. |
+
+### `Output`
+
+`com.michaelgrundvig.frc.world.robot.Output`: what a joint is run at, by name, of one of three kinds,
+as teams run their rollers: a velocity in the joint's units per second (`Output.rpm("intaking",
+2000)`, the roller's turns a minute, not its motor's), a voltage (`Output.volts("pushing", 6)`), or a
+duty cycle (`Output.dutyCycle("eject", -0.8)`). Every joint also has `stopped`, built in: its motors
+at neutral, braking or coasting as its control says.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | chosen | none (the template's robot has no mechanisms) | none | What code, logs and Pitwall call it: `intaking`, `feeding`. Unique among its joint's positions and outputs, and never `stopped`, which every joint has. |
+| `kind` | chosen | none (as `name`) | none | Why: how the job runs the joint. `VELOCITY` holds a speed under load with a velocity loop, and needs its kV and kP tuned; `VOLTAGE` gives the same push whatever the battery does, and its speed falls under load; `DUTY_CYCLE` is a share of whatever the battery has, so it sags with it. |
+| `value` | chosen | none (as `name`) | none | Why: how hard the job wants it; negative runs it backward. A velocity within what the joint's motors turn it at (the definition refuses one above its free speed, naming both, and notes one above 90% of it, which a velocity loop can't hold under load); a voltage within the motors' nominal 12 V; a duty cycle from -1 to 1. Check: the joint's logged velocity, voltage and current while it runs; a velocity that never gets there is asking too much. |
+
+### `Configuration`
+
+`com.michaelgrundvig.frc.world.robot.Configuration`: several joints at named places, by a name of
+their own, such as "stowed", "amp" or "feeding" (`RobotDefinition.configurations`). It names only
+the joints it sets, each once, at one of its positions or outputs ([`Condition.At`](#conditionat));
+those joints are what a command moving to it requires.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | chosen | none (the template's robot has no mechanisms) | none | What code, logs and Pitwall call it: `stowed`, `amp`. Unique among the robot's configurations. |
+
+### `Condition.At`
+
+`com.michaelgrundvig.frc.world.robot.Condition.At`: a joint at one of its named positions or outputs,
+written `ARM.at("level")`: what a configuration is made of, and an interlock's condition at a position.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
+| `name` | chosen | none (as `joint`) | none | One of its positions or outputs, by name, or `stopped`, which every joint has. |
+
+### `Condition.Past`
+
+`com.michaelgrundvig.frc.world.robot.Condition.Past`: a joint past one of its named positions,
+written `PIVOT.past("run")`: the position lies between the joint's reference and where it is, so it
+holds from the position on, away from the reference, whichever way the joint moves.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
+| `position` | chosen | none (as `joint`) | none | One of its positions, other than its reference. |
+
+### `Condition.Before`
+
+`com.michaelgrundvig.frc.world.robot.Condition.Before`: a joint not yet past one of its named
+positions, on its reference's side, written `ELEVATOR.before("clear")`.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
+| `position` | chosen | none (as `joint`) | none | One of its positions, other than its reference. |
+
+### `Condition.Between`
+
+`com.michaelgrundvig.frc.world.robot.Condition.Between`: a joint between two of its named positions,
+both included, written `PIVOT.between("run", "out")`.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
+| `from` | chosen | none (as `joint`) | none | One of its positions. |
+| `to` | chosen | none (as `joint`) | none | Another; either way round. |
+
+### `Interlock.RunsOnlyWhen`
+
+`com.michaelgrundvig.frc.world.robot.Interlock.RunsOnlyWhen`: a joint that moves only while another is
+somewhere, written `Interlock.that(INTAKE).runsOnlyWhen(PIVOT.past("run"))`: while the condition
+doesn't hold, a joint held to a position stays where it is and one run at a speed stops, each going
+on when it holds again.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | Why: the joint that breaks something run at the wrong time: a roller that would chew the bumper stowed. |
+| `condition` | chosen | none (as `joint`) | none | Why: where another joint must be first: [`Condition.Past`](#conditionpast), [`Condition.Before`](#conditionbefore), [`Condition.Between`](#conditionbetween), or [`Condition.At`](#conditionat) a position; or what a sensor must read (`tripped()`, `clear()`, `nearerThan`, `fartherThan`), which holds it while the sensor is lost. Check: a log of the interlock holding the joint (its `HeldBy`) while nothing was at risk says it's too tight. |
+
+### `Interlock.KeepsOut`
+
+`com.michaelgrundvig.frc.world.robot.Interlock.KeepsOut`: a joint kept out of a region of its travel while
+another is somewhere, written `Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.before("clear"))`:
+its target is held at the region's edge until the condition clears. The region is a
+[`Range`](#range) in the joint's units, part of its range and not all of it.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | Why: the joint that would hit something in that region: an arm swinging through the bumper. |
+| `condition` | chosen | none (as `joint`) | none | Why: where the other joint is while the region is closed: an elevator too low to clear. From CAD, with a margin for the joint's stopping distance. Or what a sensor reads while it's closed (a reef nearer than a distance, a coral not in the claw); a lost sensor keeps it closed. |
+
+## A mechanism's wiring and control
+
+A mechanism on Phoenix devices is described once, in the definition above, and its TalonFX's and
+CANcoder's settings come out of it (`frc.robot.lib.phoenix.PhoenixMechanism`): its ratios, its
+encoder's discontinuity point, its gravity type and offset, and the feedforward gains it seeds. Two
+records hold what the definition doesn't: how the mechanism is wired, and how it's driven. Phoenix's
+units for each joint (a revolute joint's rotations, a prismatic joint's drum's rotations) are fixed
+in `PhoenixUnits`; these records are in the joint's own units, radians or meters. The template's
+robot has no mechanisms, so nothing here has a starting value.
+
+### `MechanismWiring`
+
+`frc.robot.lib.wiring.MechanismWiring`: where one mechanism's devices are, per robot, in `Robots`:
+its drive's motors, the leader first, as many as the drive's `Actuator.Motors.count`, which the
+helper checks ([`MechanismWiring.Motor`](#mechanismwiringmotor)); and its CANcoder, if it has one,
+the definition's absolute encoder on its joint ([`MechanismWiring.Cancoder`](#mechanismwiringcancoder)),
+or that encoder on a SPARK's data port.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `canBus` | as built | none (the template's robot has no mechanisms) | none | Tuner X: Systemcore's port, or the CANivore's name. Every device of the mechanism is on it. |
+| `controller` | as built | none (as `canBus`) | none | What the motors are on: `TALON_FX` (in a Kraken or a Falcon), `SPARK_MAX` or `SPARK_FLEX` (REV's), or `TALON_FXS` (a Minion, or REV's motors by their connector). The robot refuses a motor its controller can't drive. |
+
+### `MechanismWiring.Motor`
+
+One motor controller.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `id` | as built | none (the template's robot has no mechanisms) | none | Tuner X, or REV's Hardware Client for a SPARK. |
+| `clockwise` | as built | none (as `id`) | none | Drive the joint forward (its positive direction in the definition) by hand or at a low voltage in Tuner X, and watch the motor's shaft end: clockwise or not. The helper sets each motor's `Inverted` from it, and each follower's alignment from whether it turns the leader's way. |
+
+### `MechanismWiring.DataPortEncoder`
+
+An absolute encoder on the leading SPARK's data port, such as REV's Through Bore Encoder: read once
+at startup to tell the motor where the joint is.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `offset` | calibrated | none (the template's robot has no mechanisms) | none | Put the joint at its zero (the pose its origin gives in CAD), read the encoder's absolute position in REV's Hardware Client with no offset, and negate it; again whenever the encoder moves. |
+| `reversed` | as built | none (as `offset`) | none | Move the joint forward and watch the encoder's reading in REV's Hardware Client: true if it falls. |
+
+### `MechanismWiring.Cancoder`
+
+The mechanism's CANcoder.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `id` | as built | none (the template's robot has no mechanisms) | none | Tuner X. |
+| `offset` | calibrated | none (as `id`) | none | Put the joint at its zero (the pose its origin gives in CAD), read the CANcoder's absolute position in Tuner X with no offset, and negate it; again whenever the encoder or its magnet moves. The discontinuity point is derived, never set. |
+| `clockwise` | as built | none (as `id`) | none | Move the joint forward and watch the CANcoder from its LED side: clockwise or not, so its reading grows with the joint. |
+| `feedback` | chosen | none (as `id`) | none | What the TalonFX reads its position from: `ROTOR` (the CANcoder read only by code, at boot), `REMOTE` (no license), or `FUSED` or `SYNC` (Phoenix Pro). `FUSED` keeps the rotor's rate with the CANcoder's position, and is the best where it's licensed. |
+
+### `MechanismControl`
+
+`frc.robot.lib.phoenix.MechanismControl`: how one mechanism is driven, per robot, in `Robots`. Its
+gains, soft limits, profile and current limits have sections of their own. `position(kP)` and
+`velocity(kP)` start one from the defaults: the feedforward seeded, no profile, the default current
+limits, braking; `withProfile`, `withKd`, `withSoftLimits`, `withStatorLimit`, `withHoming` and
+`coasting` change one value each.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `neutralMode` | chosen | none (the template's robot has no mechanisms) | none | Why: `BRAKE` holds an arm or an elevator where it stops; `COAST` lets a flywheel or a roller spin down. |
+| `homing` | chosen | none (as `neutralMode`) | none | Why: how a joint read by its motor alone finds where it is once the robot is on. Empty for a joint with an absolute encoder, which the definition must have on it; any other joint held at positions names its recipe: `Homing.toHardStop(Stop.LOWER)` pushes it into a stop on the first enable, and `Homing.assumeAtReference()` trusts that it was stowed by hand at power on. A roller has none. |
+
+### `MechanismControl.Gains`
+
+The slot's gains, in volts per the joint's units (radians or meters). kV, kA and kG are seeded from
+the definition until tuned (`RobotMath.idealGains`); a tuned one always wins, and the helper notes
+a kV or kG more than twice, or less than half, the ideal, naming the two frames when it looks like a
+unit slip.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `kP` | chosen | none (the template's robot has no mechanisms) | none | Why: corrects what feedforward misses. Tune it live after the feedforward: raise it until the joint reaches its setpoints quickly, and back off at overshoot or buzzing. |
+| `kI` | chosen | none (as `kP`) | none | Why: removes an error that stays. Usually 0: a steady error is a missing kG or kS. |
+| `kD` | chosen | none (as `kP`) | none | Why: damps overshoot. Raise it if the joint overshoots its setpoints. |
+| `kS` | characterized | none (as `kP`) | none | [Feedforward](characterization.md#feedforward): SysId's kS. The definition has no friction, so there's no seed. |
+| `kV` | characterized | none (seeded from the definition) | math (seeded: the motors' nominal voltage over the joint's free speed) | [Feedforward](characterization.md#feedforward): SysId's kV, in the joint's units: SysId run on Phoenix's signals gives it per rotation, so divide a revolute joint's by 2π (`PhoenixUnits.gainFromPhoenix`). |
+| `kA` | characterized | none (seeded from the definition) | math (seeded: what the joint moves and its motors' rotors, through the gearing) | As `kV`. The seed is low when a link has no mass or inertia (`RobotDefinition.missing`). |
+| `kG` | characterized | none (seeded from the definition) | math (seeded: the links' weight at its worst) | As `kV`: positive to hold the joint up. Phoenix's gravity type and an arm's offset come from the definition, never entered. |
+
+### `MechanismControl.Bands`
+
+How near a target a joint must come to be there (`enter`), and how far it may then stray and still
+be (`stay`): a move arrives inside `enter`, and a joint's gates (`isAt`, `isAtGoal`) hold until it's
+past `stay`. For a joint held at positions, in radians or meters; for a roller, shares of the speed
+it's asked for. Empty for the template's: 2° and 4°, 1 cm and 2 cm, or 3% and 6% of a speed.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `enter` | chosen | none (the template's robot has no mechanisms; empty is 2°, 1 cm or 3%) | none | Why: as tight as the mechanism needs to be to do its job there, and no tighter than it can settle: watch `Joints/<label>/At` and the error in a log of a few moves. |
+| `stay` | chosen | none (as `enter`; empty is twice it) | none | Why: wide enough that the reading's noise and a flywheel's dip as a shot leaves don't flicker the gate. At least `enter`. |
+
+### `MechanismControl.Homing.ToHardStop`
+
+A joint pushed into one of its hard stops on the first enable: found once it has moved slower than
+2% of its free speed for a quarter of a second, and faulted if it hasn't by the timeout. Its
+position there is the stop's, the end of its range in the definition.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `stop` | chosen | none (the template's robot has no mechanisms) | none | Why: the stop it can reach safely from anywhere, usually the one gravity helps toward: an elevator's bottom. |
+| `volts` | chosen | none (as `stop`; `toHardStop` gives 2 V) | none | Why: enough to move it from anywhere, against gravity if the stop is above, and gentle on the stop. Too few and it may not move at all, which reads as finding the stop: check on the robot that it moves. |
+| `timeout` | chosen | none (as `stop`; `toHardStop` gives 3 s) | none | Why: longer than its slowest trip to the stop at `volts`, from its far end. |
+
+### `MechanismControl.Homing.ToSwitch`
+
+A joint driven toward its limit switch at one end on the first enable: home the loop the switch
+trips, at the switch's position in the definition, taken in the middle of that loop's travel; and
+faulted if it hasn't tripped by the timeout. One that starts on its switch backs off until it
+clears first, so it's home where the switch trips.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `end` | chosen | none (the template's robot has no mechanisms) | none | Why: which end's limit switch: the definition's limit switch on the joint at that end, whose position must be known. |
+| `volts` | chosen | none (as `end`; `toSwitch` gives 2 V) | none | Why: enough to move it from anywhere, and, backing off, away from the switch, against gravity if that's up. It's home within half the joint's travel in a loop at this speed: slower is closer. Check on the robot that it moves both ways. |
+| `timeout` | chosen | none (as `end`; `toSwitch` gives 3 s) | none | Why: longer than its slowest trip to the switch at `volts`, from its far end. |
+
+### `MechanismControl.SoftLimits`
+
+Where the motor controller stops driving the joint, in radians or meters, inside the joint's hard
+stops, which the helper checks.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `lower` | chosen | none (the template's robot has no mechanisms) | none | Why: keeps the motors from driving the joint into its stop. A little inside the hard stop, by what the mechanism coasts past at speed. |
+| `upper` | chosen | none (as `lower`) | none | As `lower`, the other end. |
+
+### `MechanismControl.Profile`
+
+Motion Magic's limits, in radians or meters per second (and squared, and cubed). The helper refuses
+a cruise above the joint's free speed (`RobotMath.freeSpeed`).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `cruiseVelocity` | chosen | none (the template's robot has no mechanisms) | none | Why: the fastest the profile moves the joint. Under its free speed, with room for a sagging battery: a joint that lags its profile at cruise in the logs is asked too much. |
+| `acceleration` | chosen | none (as `cruiseVelocity`) | none | Why: how hard the profile pushes. Raise it until the joint lags its profile or the current limit holds it. |
+| `jerk` | chosen | none (as `cruiseVelocity`) | none | Why: softens the profile's corners. 0 for none. |
+
+### `MechanismControl.CurrentLimits`
+
+Each motor's current limits, all set where they show, as the drivetrain's are
+([`DrivetrainControl.Limits`](#drivetraincontrollimits)).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `stator` | chosen | 40 A (`CurrentLimits.DEFAULTS`, which `position` and `velocity` start from) | guess | Why: caps the motor's torque, and its heat. Enough to move the mechanism at its fastest, and no more: raise it for a mechanism that stalls short of its target. |
+| `supply` | chosen | 60 A | guess | Why: caps what the motor draws from the battery, in bursts. |
+| `supplyLower` | chosen | 40 A | guess | Why: the supply limit after `supplyLowerTime`: no more than the motor's breaker's rating. |
+| `supplyLowerTime` | chosen | 1 s | guess | Why: how long the motor may draw `supply`: well short of its breaker's trip. |
+
+### `JointSetup`
+
+`frc.robot.subsystems.mechanisms.JointSetup`: one driven joint as this program drives it, per robot, in
+`Robots` (`RobotConfig.joints`): its control and its wiring, beside the joint itself. The template
+builds the joint's mechanism from it, one for every joint the definition's motors drive, and the
+robot's configuration refuses a joint left out, set up twice, or one the template doesn't drive yet
+(a differential, a servo's, one that follows another). It checks the control against
+the joint: its soft limits inside the joint's hard stops, and every named position inside its soft
+limits, where the joint is driven. The template's robot has no mechanisms, so nothing here has a
+starting value.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | as built | none (the template's robot has no mechanisms) | none | The joint, from the robot's definition: the same object, never its label. Its control ([`MechanismControl`](#mechanismcontrol)) and wiring ([`MechanismWiring`](#mechanismwiring)) have sections of their own. |
+
+## A sensor's wiring
+
+Where each of the definition's switches and rangefinders is connected, per robot, in `Robots`
+(`RobotConfig.sensors`): one record per sensor, by its label, none for one that only runs in the
+simulator. The robot refuses a wiring for a sensor it doesn't have or of the wrong kind, a sensor
+wired twice, two sensors on one input, a controller's limit input on a joint that isn't wired or
+whose controller has none, a joint's limit switch on another joint's controller, and a
+CANdi's or CANrange's CAN ID another of its kind has. The template's robot has no sensors, so
+nothing here has a starting value.
+
+### `SensorWiring.OfSwitch`
+
+`frc.robot.lib.wiring.SensorWiring.OfSwitch`: where a switch is connected, and which raw signal
+means tripped.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `sensor` | as built | none (the template's robot has no sensors) | none | The switch's label in the definition. |
+| `input` | as built | none (as `sensor`) | none | Where it's connected: a Systemcore port ([`SensorWiring.Port`](#sensorwiringport)), a CANdi's input ([`SensorWiring.Candi`](#sensorwiringcandi)), or a motor controller's limit input ([`SensorWiring.ControllerLimit`](#sensorwiringcontrollerlimit)). With six Systemcore ports, the CAN and SPARK inputs are most of the room. |
+| `polarity` | as built | none (as `sensor`) | none | `NORMALLY_OPEN` or `NORMALLY_CLOSED`, from the switch's datasheet and how it's wired (for a banner sensor, light-on or dark-on): actuate it by hand and watch the raw input. Normally closed reads tripped with its wire cut, so its motor stops: the one to choose for a limit switch. |
+
+### `SensorWiring.OfRangefinder`
+
+`frc.robot.lib.wiring.SensorWiring.OfRangefinder`: where a rangefinder is connected.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `sensor` | as built | none (the template's robot has no sensors) | none | The rangefinder's label in the definition. |
+| `input` | as built | none (as `sensor`) | none | A CANrange ([`SensorWiring.CanRange`](#sensorwiringcanrange)). An analog rangefinder on a Systemcore port needs its volts for each meter, which the wiring doesn't hold yet. |
+
+### `SensorWiring.Port`
+
+One of Systemcore's own I/O ports, set as what its sensor needs (alpha spec: six).
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `port` | as built | none (the template's robot has no sensors) | none | The port's number on the case, 0 to 5. |
+
+### `SensorWiring.Candi`
+
+One of a CANdi's two inputs: CTRE's CAN input board, which a TalonFX can read as its hardware limit.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `bus` | as built | none (the template's robot has no sensors) | none | Tuner X: Systemcore's port, or the CANivore's name. |
+| `id` | as built | none (as `bus`) | none | Tuner X. Both its inputs share it: one device. |
+| `input` | as built | none (as `bus`) | none | 1 or 2: the connector it's on, S1 or S2. |
+
+### `SensorWiring.CanRange`
+
+A CANrange: CTRE's CAN rangefinder.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `bus` | as built | none (the template's robot has no sensors) | none | As a CANdi's. |
+| `id` | as built | none (as `bus`) | none | Tuner X. |
+
+### `SensorWiring.ControllerLimit`
+
+A limit input on a joint's leading motor controller, which can stop its motor by itself: a SPARK's,
+a TalonFXS's, or a Falcon 500's TalonFX's. A Kraken's TalonFX has none (CTRE's Talon FX docs): its
+switch goes on a CANdi.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | as built | none (the template's robot has no sensors) | none | The joint's label: it must be wired, on a controller that has limit inputs. A joint's limit switch goes on its own joint's controller, which stops its motor on it by itself; anything else on an input is read, never stopped on. |
+| `direction` | as built | none (as `joint`) | none | `FORWARD` or `REVERSE`: the pin it's on, as the controller labels them. Whether a SPARK's forward pin still stops its forward with the motor inverted is unconfirmed (open question M22), so the robot doesn't yet check a limit switch's pin against its end. |
+
+## The season
+
+### `SeasonLimits`
+
+`frc.robot.game.SeasonLimits`: what the game manual allows a robot to be. One per season, in its
+game class (`Rebuilt.LIMITS`); every robot's definition is checked against it in the tests
+(`SeasonLimitsTest`), at its references, and a mechanism's guard can ask how far the robot would
+reach at a set of positions (`whyTooFar`). The next season's manual replaces every number at
+kickoff.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `framePerimeter` | as built | 110 in | rules (2026: R104) | The game manual. |
+| `startingHeight` | as built | 30 in | rules (2026: R104) | The game manual: the tallest a robot may start. |
+| `extension` | as built | 12 in | guess (2024's limit; 2026's isn't checked yet) | The game manual: how far beyond its frame perimeter a robot may reach during a match. |
+| `bumperZoneBottom` | as built | 2.5 in | rules (2026: R405) | The game manual: the lowest the bumpers may sit. |
+| `bumperZoneTop` | as built | 5.75 in | rules (2026: R405) | The game manual: the highest they may reach. |
+| `weight` | as built | 135 lb | rules (2026: R408, with bumpers) | The game manual: the most a robot may weigh without its battery. |
+| `battery` | as built | 14.5 lb | rules (2026: R601's battery, as `Robots` weighs it) | A battery on a scale, with its leads: what the robot's weighed mass includes and the weight leaves out. |
 
 ## Localization
 
@@ -396,11 +1049,11 @@ it, is in `Vision/<camera>/Outcomes`; the estimator's verdict in `Vision/<camera
 | `maxAmbiguity` | chosen | 0.2 | 2026 code (254 used 0.19) | Why: a single tag above it fits two poses about equally well, and the wrong one is far off. Change if "ambiguous single tag" throws out results that agreed with the estimate, or single tags under it are then rejected by the gate. |
 | `maxHeightErrorMeters` | chosen | 0.2 m | 2026 code | Why: the robot is on the floor, and tags are where the field says; a solve that misses either by 20 cm is a misread. Check the "off the floor" and "height is off" outcomes against the other cameras. |
 | `maxDistanceMeters` | chosen | 6 m | guess | Why: noise grows with distance squared, and beyond some distance a result adds more doubt than it removes. Set it from [camera noise](characterization.md#camera-noise): where a tag's noise passes what odometry drifts in a second or two. Check the "too far" outcomes. |
-| `maxYawRateRadiansPerSecond` | chosen | 5 rad/s | top team (254: 5 rad/s over the last 0.3 s) | Why: motion blur, rolling shutter, and a capture time a little off all grow with turning. Check: images just under it should pass the gate as often as the robot's still ones. |
+| `maxYawRateRadiansPerSecond` | chosen | 5 rad/s | top team (5 rad/s over the last 0.3 s) | Why: motion blur, rolling shutter, and a capture time a little off all grow with turning. Check: images just under it should pass the gate as often as the robot's still ones. |
 | `linearStdDevBaseline` | characterized | 0.02 m | 2026 code | [Camera noise](characterization.md#camera-noise): position error for one tag at 1 m. Check: in clean driving, the gate should reject about 1 in 1000 measurements; far more and this is too small. |
 | `angularStdDevBaseline` | characterized | 0.03 rad | 2026 code | [Camera noise](characterization.md#camera-noise): heading error for one tag at 1 m. |
 | `distanceExponent` | characterized | 2 | 2026 code (teams used 2 to 4) | [Camera noise](characterization.md#camera-noise): how fast the error grows with distance. |
-| `headingConstrainedFactor` | characterized | 0.5 | top team (6328's factor for the same idea) | [Camera noise](characterization.md#camera-noise): how much less a position solved with the gyro's heading scatters. |
+| `headingConstrainedFactor` | characterized | 0.5 | top team (its factor for the same idea) | [Camera noise](characterization.md#camera-noise): how much less a position solved with the gyro's heading scatters. |
 | `speedStdDevFactor` | characterized | 0.25 per m/s of speed | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
 | `yawRateStdDevFactor` | characterized | 0.5 per rad/s of turning | unknown (the template credits top teams, none by name) | [Camera noise, while moving](characterization.md#while-moving). |
 | `maxHeadingStdDevToConstrain` | chosen | 5° (0.087 rad) | unknown (the template credits top teams, none by name) | Why: a heading-constrained solve is only as good as the heading it's given; until the estimate knows its heading this well (a robot not yet placed), full solves find it. Check how soon after placing the robot its outcomes say "heading-constrained". |
@@ -435,11 +1088,11 @@ together, the χ² gate's number): it should average 2 for a position, 3 with a 
 | `translationStdDevPerRadian` | characterized | 0.02 m | guess | [Odometry error](characterization.md#odometry-error): spinning in place. |
 | `residualScale` | chosen | 1 | math (the residual is already how far the wheels' disagreement may have put their travel off: one wheel of four slipping puts it off by a quarter of its slip, and the residual says that much, within a tenth; two slipping together put it off by about twice what it says, 2.2 times on a square, so a pair is doubted about half as far as it put the estimate off, a [known limit](testing.md#what-it-proves-and-what-it-doesnt)) | Why: all of what the disagreement may have put the travel off counts as suspect. Lower it if the uncertainty balloons in clean driving (`Localization/ResidualMeters` high, the cameras finding little to correct). In the simulator, whose wheels each carry their own share of the robot and can't drag each other into line, a hard change of direction sets them apart for half a second or more, and the estimate doubts them by tens of centimeters there: on a robot, wheels set apart that far are scrubbing over the carpet. |
 | `tiltStartDegrees` | chosen | 5° | guess | Why: a small tilt is carpet and bumpers, not wheels off the floor. Check: `Localization/TiltDegrees` stays under it in flat driving. |
-| `tiltZeroDegrees` | chosen | 25° | top team (6328) | Why: by this tilt, some wheels are off the floor. Check with a [terrain crossing](calibration.md#a-terrain-crossing). |
+| `tiltZeroDegrees` | chosen | 25° | top team | Why: by this tilt, some wheels are off the floor. Check with [tilt on a bump](calibration.md#tilt-on-a-bump). |
 | `slipCorrelationSeconds` | chosen | 0.5 s | guess | Why: a slip (a push, a launch) keeps its direction for a while, so its errors add up rather than average out. Check: after a push or a launch, the cameras' correction should fall inside the uncertainty the estimate claimed (`PositionStdDevMeters`). Lengthen it if corrections often land outside; shorten it if they're always far inside. |
 | `collisionStdDevMeters` | chosen | 0.25 m | guess | Why: a hit moves the robot further than its wheels see. A jolt past the grip and short of a whole collision adds its share of this (`DriveConditions.collisionShare`). Check: after logged hits (`Localization/CollisionShare`), how far the cameras moved the estimate; it should cover the largest. |
 | `collisionWindowSeconds` | chosen | 0.25 s | guess | Why: one hit jolts for several loops; count it once. Check: one hit's jolts span less than it. |
-| `handlingStdDevPerSqrtSecond` | chosen | 0.02 m | guess (the idea: 254's loose trust while disabled) | Why: a disabled robot gets carried, and its wheels can't tell, so the cameras should lead. Check: placed and disabled, the estimate settles on the cameras before the match. |
+| `handlingStdDevPerSqrtSecond` | chosen | 0.02 m | guess (the idea: a top team's loose trust while disabled) | Why: a disabled robot gets carried, and its wheels can't tell, so the cameras should lead. Check: placed and disabled, the estimate settles on the cameras before the match. |
 | `headingDriftDegreesPerMinute` | characterized | 0.5° | guess | [Gyro drift and noise](characterization.md#gyro-drift-and-noise): the gyro's worst drift, standing still. |
 | `headingStdDevDegreesPerTurn` | characterized | 1° | guess (an uncalibrated gyro's scale is off by a few tenths of a percent: the simulator's season-worn one reads 0.3% high, 1.1° a turn; the consistency study draws the gyro's scale from this, so it can't say what it should be) | [The gyro's scale, repeated](characterization.md#repeatability-of-the-gyros-scale): how far its scale may still be off after calibrating it; until it's calibrated, how far an uncalibrated one may be. The estimator takes it as the same error every turn, so five turns are five times as far off: lower it once calibrated. |
 | `backupHeadingStdDevDegreesPerTurn` | characterized | 2° | guess (an uncalibrated IMU: the simulator's season-worn backup reads 0.5% high, 1.8° a turn) | [The backup IMU's scale](characterization.md#repeatability-of-the-gyros-scale), from the gyro-scale procedure's spins. The procedure calibrates the gyro alone: lowering `headingStdDevDegreesPerTurn` after it leaves this as it is. |
@@ -452,13 +1105,12 @@ together, the χ² gate's number): it should average 2 for a position, 3 with a 
 | `headingCorrection` | chosen | HEADING_MEASUREMENTS | guess (the gyro owns heading, as the design proposes) | Why: what may correct the heading beside the gyro: measurements with a heading of their own only; those, with a camera's mount doubt added to what it repeats; or every fix, a full update. All three are honest on a calibrated robot in the simulator. Every fix is more accurate in heading after turns (0.2° off, against 0.7° to 1.4°), but it leans on the cameras' capture times while the robot turns: check them to within about 2 ms ([camera latency and time sync](characterization.md#camera-latency-and-time-sync)) before choosing it. None lets the mount check single out a camera turned on its mount: under every fix it blames the healthy neighbour more. The [consistency study](testing.md#three-ways-to-correct-the-heading) compares them (`--heading=`); the team chooses. |
 | `cameraShiftCorrelationMeters` | chosen | 1 m | guess | Why: about a meter on, a camera sees other tags, or the same ones from another angle, and what its multi-tag headings share (`cameraShiftStdDevDegrees`) is mostly new. Its shift on its mount and each tag's placement don't change, and aren't let go. Check in the consistency study: lengthen it if the driving runs' heading NEES sits above its band, shorten it if well below. |
 | `cameraShiftCorrelationDegrees` | chosen | 45° | guess | Why: as `cameraShiftCorrelationMeters`, for turning: an eighth of a turn brings other tags into view. |
-| `historySeconds` | chosen | 1.5 s | guess (254 kept 1 s) | Why: a camera measurement must arrive within it to be applied; several times any camera's [latency](characterization.md#camera-latency-and-time-sync). Check for "too late" in `Decisions`. |
+| `historySeconds` | chosen | 1.5 s | guess (a top team kept 1 s) | Why: a camera measurement must arrive within it to be applied; several times any camera's [latency](characterization.md#camera-latency-and-time-sync). Check for "too late" in `Decisions`. |
 | `futureToleranceSeconds` | chosen | 0.05 s | guess | Why: clocks differ a little, but a measurement stamped this far past the newest odometry has a wrong capture time. Check for "from the future" in `Decisions` ([time sync](characterization.md#camera-latency-and-time-sync)). |
 | `visionTimeoutSeconds` | chosen | 1 s | guess | Why: after a second without an accepted measurement, the estimate is dead reckoning, and says so. Check: `Localization/Mode` reads DEAD_RECKONING only where the cameras are really blind. |
 | `disagreementWindowSeconds` | chosen | 0.5 s | guess | Why: how far back "lately" reaches for `RecentDisagreementMeters`, which the scoring gate reads. Lengthen it if `NotReadyBecause` flickers on one stray measurement; shorten it if the robot stays not ready long after the cameras agree again. |
 | `gateChiSquaredPosition` | chosen | 13.816 | math (chi-squared, 2 degrees of freedom: 99.9% of good measurements pass) | Why: rejects measurements its noise model says are almost certainly wrong. A good noise model rejects about 1 in 1000 good measurements; far more "gate:" rejections in clean driving mean the uncertainties are too small, not that the gate is too tight. |
 | `gateChiSquaredPose` | chosen | 16.266 | math (3 degrees of freedom, 99.9%) | As `gateChiSquaredPosition`, for a measurement with heading. |
-| `gateChiSquaredAxis` | chosen | 10.828 | math (1 degree of freedom, 99.9%) | As `gateChiSquaredPosition`, for a landmark. |
 | `recoveryMeasurements` | chosen | 3 | guess | Why: three rejected measurements that agree with each other outvote odometry; with fewer, one bad camera could. Check: `Localization/Recoveries` counts only real knocks (a hit, a push, a bad placement). |
 | `recoveryWindowSeconds` | chosen | 1 s | guess | Why: those measurements must be recent, so they describe the same moment. As `recoveryMeasurements`. |
 | `recoveryAgreementMeters` | chosen | 0.25 m | guess | Why: measurements this close agree, given camera noise at range. Keep it above the noise at the distances the cameras see tags. |
@@ -477,10 +1129,10 @@ while the estimate is off.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `maxVisionAgeSeconds` | chosen | 0.5 s | top team (254) | Why: odometry drifts after the cameras last checked it. Change if `NotReadyBecause` blames an old measurement while the robot is lined up with tags in view (the cameras are slower than it), or shots taken just under it miss. |
-| `maxDisagreementMeters` | chosen | 0.2 m | top team (254) | Why: cameras that just disagreed by more haven't settled the estimate. Lower it toward the task's tolerance once [camera noise](characterization.md#camera-noise) says the cameras do better. |
+| `maxVisionAgeSeconds` | chosen | 0.5 s | top team | Why: odometry drifts after the cameras last checked it. Change if `NotReadyBecause` blames an old measurement while the robot is lined up with tags in view (the cameras are slower than it), or shots taken just under it miss. |
+| `maxDisagreementMeters` | chosen | 0.2 m | top team | Why: cameras that just disagreed by more haven't settled the estimate. Lower it toward the task's tolerance once [camera noise](characterization.md#camera-noise) says the cameras do better. |
 | `maxPositionStdDevMeters` | chosen | 0.15 m | guess | Why: the scoring task's tolerance. Set it from the game: how far off a shot or a placement may land. |
-| `maxTiltDegrees` | chosen | 5° | guess (the idea: 1678 and 6328 wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
+| `maxTiltDegrees` | chosen | 5° | guess (the idea: top teams wouldn't shoot tilted) | Why: a tilted robot aims off, and its cameras solve worse. Change if shots taken just under it miss, or the robot reads over it on level floor. |
 
 ### `SlipCheck.Settings`
 
@@ -526,45 +1178,6 @@ for a real fault.
 | `windowSeconds` | chosen | 1 s | guess | Why: long enough to see two IMUs turn apart, short enough to catch a frozen one in a second. Change if a frozen gyro (the `gyro-frozen` scenario) takes too long to flag, or hard turns set off the alert. |
 | `toleranceDegrees` | chosen | 3° | guess | Why: above what the two drift and scatter apart in the window ([gyro drift and noise](characterization.md#gyro-drift-and-noise), for both). Change if the alert comes on in normal driving. |
 | `scaleTolerance` | chosen | 0.05 | guess | Why: above the two IMUs' difference in scale; the gyro's is calibrated, the backup's isn't ([the backup's scale](characterization.md#repeatability-of-the-gyros-scale)). Change if fast spins set off the alert with both IMUs healthy. |
-
-### `TerrainCrossing.Settings`
-
-`com.michaelgrundvig.frc.localization.TerrainCrossing.Settings`: what counts as climbing, level, and
-one feature; the robot uses `Settings.DEFAULTS`. Check them with a [terrain
-crossing](calibration.md#a-terrain-crossing) on a real robot, and set them again at kickoff from the
-new field's ramps.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `steepDegrees` | chosen | 10° | top team (1678) | Why: under the ramps' slope (2026's: 15°), over anything flat driving reads. Lower it if `TerrainCrossings` misses a crossing; raise it if it counts one in flat driving. |
-| `levelDegrees` | chosen | 5° | top team (1678) | Why: what a flat floor reads, bumpers and carpet included. Raise it if the robot never reads level after a crossing. |
-| `levelSeconds` | chosen | 0.1 s | guess | Why: five loops level is off the feature, not a wobble on its top. Lengthen it if a wobble on a feature's top ends a crossing early. |
-| `topSeconds` | chosen | 1.5 s | guess | Why: time to cross a feature's flat top; longer is two features, or a stop on top. Lengthen it if a wide feature's crossing isn't counted. |
-
-## The coprocessors
-
-### `Coprocessors.Settings`
-
-`frc.robot.subsystems.coprocessors.Coprocessors.Settings`: how the robot asks its vision
-coprocessors' health agents how they are, and when it raises alerts about them; the robot uses
-`Settings.DEFAULTS`. Each coprocessor's answers are logged under `Coprocessors/<name>`
-([the coprocessors](coprocessors.md)).
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `pollPeriodSeconds` | chosen | 1 s | guess | Why: what the agent reports (heat, load, cameras, restarts) changes over seconds, and an answer is 3 to 4 KB, so once a second is fresh enough for the pit and nothing to the network. Lower it only if an alert must come sooner. |
-| `connectTimeoutSeconds` | chosen | 0.25 s | guess | Why: on the robot's own network a connection takes milliseconds; a quarter second is far past that, and fails a poll to a coprocessor that's gone well inside the period. Check: `Coprocessors/<name>/Error` never says "connect timed out" while the coprocessor is up. |
-| `answerTimeoutSeconds` | chosen | 0.5 s | guess | Why: the agent answers from what it has already read; half a second covers a busy board, and with the connect timeout fits in the period, so a slow poll never delays the next. Check: `Coprocessors/<name>/Error` never says "Read timed out" while the coprocessor is up. |
-| `staleAfterSeconds` | chosen | 3 s | guess | Why: three polls without an answer: one lost answer isn't a coprocessor missing, and one that's gone shows within seconds. Raise it if the missing alert flickers on a healthy robot (`Coprocessors/<name>/AgeSeconds` past it). |
-| `hotMarginCelsius` | chosen | 5 °C | guess | Why: a board this close to a zone's first passive trip point (its first trip point of any kind when it has no passive one) is about to slow its big cores, and PhotonVision with them. Check it against [coprocessor capacity](characterization.md#vision-coprocessor-capacity)'s ten minutes at full load, as mounted: the hottest zone (`Coprocessors/<name>/ZoneCelsius` against `ZoneTripCelsius`) should stay outside it. |
-| `hotClearMarginCelsius` | chosen | 2 °C | guess | Why: a hot board stays hot until it's this much clearer of its trip point than the margin, so one hovering at the margin doesn't flicker the alert on and off. Raise it if the hot alert still flickers on a board as mounted. |
-| `hotHoldSeconds` | chosen | 10 s | guess | Why: and until this long after its last answer within that, so a board cooling for a moment between loads isn't called cool. |
-| `turnsWindowSeconds` | chosen | 60 s | guess | Why: two boards at one address answer by turns as the robot's address table flips between them, which can take tens of seconds; a minute catches that. A board replaced by another never gives way to it again, so no window mistakes a swap for two boards. |
-| `downloadTimeoutSeconds` | chosen | 10 s | guess | Why: a settings backup, calibrations included, is a few megabytes, seconds over the robot's network. Raise it if a backup from Pitwall times out on a healthy coprocessor. |
-| `powerDownTimeoutSeconds` | chosen | 30 s | guess | Why: a board that hasn't taken the request is asked again each poll for this long, and one not gone after it is named in a high alert: switching the robot off then is the hard power cut powering down avoids. The agent gives PhotonVision up to two minutes to stop, so a slow stop can outlast it (the alert then says the board accepted, and is still answering). Check how long *Power down coprocessors* takes on the real boards, and keep this well above it. |
-| `haltedAfterSeconds` | chosen | 180 s | guess | Why: a halted board stays off while it has power, so a robot left on a few minutes after its coprocessors powered down has no vision until its power is cycled; the page says so instead of "Safe to switch off". |
-| `powerDownButton` | as built | -1 (none) | none | Which of Systemcore's digital inputs (0 to 31 allowed) a power-down button is wired to: a push button to ground, read pressed when the input reads false (pulled up, unverified on Systemcore's SmartIO). -1 for no button. It works only once it has read released, so a button stuck, shorted, or unwired reading pressed from the start does nothing, and a medium alert says to check its wiring. |
-| `powerDownButtonHoldSeconds` | chosen | 1 s | guess | Why: long enough that brushing the button does nothing, short enough to hold deliberately. It acts only while the robot is disabled and off the field, as Pitwall's action does. |
 
 ## The simulator
 
@@ -613,12 +1226,79 @@ feels the robot's true motion where it sits, gravity's share as it tilts, and a 
 | `sampleHz` | chosen | 100 Hz | datasheet (`GyroIOPigeon2` asks for the accelerometer at 100 Hz, the CAN FD default in Phoenix 6's documentation) | How often the code asks for it. |
 | `filterSeconds` | characterized | 0.016 s | guess (CTRE doesn't publish the filter; sampled at 100 Hz, an accelerometer needs a low-pass under 50 Hz, and this is 10 Hz. At 5 ms the simulated robot's 100 Hz steering jolts, read once a loop, alias into a slide of up to 0.8 m/s spinning while driving; at 16 ms, 0.16) | A Pigeon 2 spinning in place, logged at its fastest: how much of the steering's 100 Hz shudder its readings still show. |
 
+## Mass, shapes, and materials
+
+What the field and the robot are both made of (`com.michaelgrundvig.frc.world.physical`): how much a
+part weighs and how hard it is to turn, its shape, and its material. The template's robot's body
+holds the one starting value, its mass properties. Nothing else in the robot holds one yet: a
+mechanism's links' mass properties and shapes come from `Robots.java` as its joints join the
+definition.
+
+### `MassProperties`
+
+`com.michaelgrundvig.frc.world.physical.MassProperties`: a part's mass, where it's centered, and how
+hard it is to turn, in the part's own frame: a link's, in its joint's (`Link.mass`). Its inertia has
+a section of its own. What nobody has given is none, `MassProperties.NONE`: zero mass at the
+joint, turning freely, never a guess. Its joint then has no gravity to hold and its kA seeds from
+its motors' rotors alone; the robot's missing-data report lists it. The template's robot has no
+links.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `mass` | calibrated | none (the template's robot has no mechanisms) | none | CAD's mass-properties report, checked on a scale where the part comes off. Zero until then. The links' masses together are part of the robot's, and must leave some for the chassis. |
+| `cg` | calibrated | none (as `mass`) | none | CAD's mass-properties report, in the joint's frame. It sets what the joint's motors hold against gravity (`RobotMath.gravityTorque`). At the joint's origin until then. |
+
+### `Inertia`
+
+`com.michaelgrundvig.frc.world.physical.Inertia`: a part's inertia tensor about its center of mass,
+along its frame's axes, in kg m², as the tensor's own entries (a product of inertia is minus the
+integral). A link's is zero until CAD gives it (`Inertia.ZERO`), and the robot's body's, a
+whole tensor from CAD (`Body.Turning.tensor`). `Inertia.box` is the model's stand-in for what
+isn't given: a solid box of the part's size, its mass spread evenly, which a robot isn't, so it's
+a guess, flagged in the missing-data report. The template's robot gives none: its yaw alone.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `ixx` | calibrated | none (the template's robot gives its yaw alone) | none | CAD's mass-properties report, about the center of mass in the part's frame. A whole robot's roll: what a tip resists. |
+| `iyy` | calibrated | none (as `ixx`) | none | As `ixx`, about y: a whole robot's pitch. |
+| `izz` | calibrated | none (as `ixx`) | none | As `ixx`, about z: a whole robot's yaw, which it may give alone (`Body.Turning.Yaw`). |
+| `ixy` | as built | none (as `ixx`) | none | As `ixx`: the tensor's entry for x and y. Check the CAD program's sign: some report the integral, which this is minus. Zero for a part symmetric across either axis. |
+| `ixz` | as built | none (as `ixx`) | none | As `ixy`, for x and z. |
+| `iyz` | as built | none (as `ixx`) | none | As `ixy`, for y and z. |
+
+### `Material`
+
+`com.michaelgrundvig.frc.world.physical.Material`: what something is made of, by name. Raised ground
+is the field's carpet (`Material.CARPET`) unless it says otherwise. How two materials grip and
+bounce comes later, with the simulator's contacts, per pair.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `name` | as built | carpet (`Material.CARPET`) | none | What it's called, the same everywhere: two parts named alike are made of the same stuff. |
+
+### `Shape.Box`
+
+`com.michaelgrundvig.frc.world.physical.Shape.Box`: a box, centered on its pose, in its owner's
+frame (a link's). Its material has a section of its own.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `pose` | as built | none (nothing holds one yet) | none | From CAD, or the game manual's drawings: its center, and how it's turned. |
+| `size` | as built | none (nothing holds one yet) | none | As `pose`: its length, width, and height along its own axes. Simplified by hand: what a robot runs into and a camera can't see through. |
+
 ## Tuning limits
 
 How far the pit may take each value a mechanism tunes live, declared with the value in the
 mechanism's `tuning`, and listed together in `RobotContainer.tunings`. All are chosen: wide enough to tune in, narrow enough that a slip of a finger
 can't hurt the robot. The record's own checks still apply inside them. Change a limit when tuning on
 a robot keeps wanting to go past it, after asking why.
+
+Each driven joint has a tuning of its own, named for it (`JointMechanism.tuning`), with limits that
+follow its committed values, since its units are its own: `gains.kP` and `gains.kD` from 0 to ten
+times what's committed (at least 1), `gains.kS` from 0 to 2 V, `currentLimits.stator` from 5 A to
+120 A and `currentLimits.supply` from 5 A to 80 A, each widened to take in what's committed. Its
+motor controller takes a change on the next loop. Its feedforward, profile and named positions
+aren't tunable yet.
 
 ### `drivetrain` tuning
 
@@ -678,7 +1358,7 @@ with `<camera>` in its path.
 
 | Switch | Limits | Template's starting value | Source | Why |
 |---|---|---|---|---|
-| `Vision/autoStartHoldSeconds` | 0 to 30 s | 0 s | guess (6328 held theirs 2 s) | Why: holds the cameras' measurements back as autonomous starts, trusting the placed start while the robot launches. Off, since the estimator gates every measurement against the placed start anyway; 30 s is longer than any autonomous period has been. Turn it on if logs show the cameras pulling the estimate off its start in autonomous's first seconds. |
+| `Vision/autoStartHoldSeconds` | 0 to 30 s | 0 s | guess (a top team held theirs 2 s) | Why: holds the cameras' measurements back as autonomous starts, trusting the placed start while the robot launches. Off, since the estimator gates every measurement against the placed start anyway; 30 s is longer than any autonomous period has been. Turn it on if logs show the cameras pulling the estimate off its start in autonomous's first seconds. |
 | `Vision/<camera>/enabled` | on or off | on | none | Why: leaves one camera out, fogged over, knocked loose, or blinded by lights, while the others carry on. |
 
 ## The camera study's assumptions
@@ -727,20 +1407,15 @@ code's choices, explained beside them.
 
 | Where | Number | Kind | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `AdvantageScopeAssets`: where the schematic robot's bumpers are drawn | 2.5 to 5.75 in above the floor | as built | rules (2026 R405, the bumper zone they must fill) | Where the robot's bumpers really sit. Only AdvantageScope's drawing reads it; it becomes configuration if anything else ever does. |
 | `VisionSim`: tag corner noise | 0.25 px average, 0.08 px spread | characterized | datasheet (PhotonVision's simulation example) | [Camera noise](characterization.md#camera-noise): how far the corners scatter, standing still. |
 | `VisionSim`: latency's spread | 5 ms | characterized | datasheet (PhotonVision's simulation example) | [Camera latency](characterization.md#camera-latency-and-time-sync). |
 | `PhoenixDrivetrain`: how often each module's CANcoder sends its position and velocity (the simulator's steering hears it as often) | 100 Hz | chosen | datasheet (Phoenix 6's default for a CANcoder's position) | Why: without Phoenix Pro, the steering's loop sees a new angle only this often, which sets how high its gains can go. Faster allows higher gains, for more traffic on the CAN bus: check the bus's load before raising it. Check that a robot's CANcoders send this often: Phoenix Tuner X's plot of a CANcoder's position shows a new sample every 10 ms, and in a log of a module turning, its odometry angles (`Drive/Module<name>/OdometrySteerAnglesRad`) change only every 10 ms, the same angle two or three readings running. |
 | `ModuleIOSim`: how often the steering's motor controller runs its loop | 1 ms | as built | datasheet (CTRE's Phoenix 6 documentation: a TalonFX's closed loop runs at 1 kHz) | A fact of the motor controller. |
 | `ModuleIOSim`: the battery's voltage, which no simulated motor gets more of | 12 V | characterized | datasheet (WPILib's simulated battery, which its `DCMotorSim` held each motor to) | [Battery internal resistance](characterization.md#battery-internal-resistance): a real battery sags under the drive's load, which the simulator leaves out ([stand-ins](stand-ins.md#the-simulators-physics)). |
-| `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot: bumpers, suspension, and the IMU's mount. |
-| `Localization`: how closely a crest places the robot | 5 cm | calibrated | guess | [A terrain crossing](calibration.md#a-terrain-crossing), on a real robot. |
-| `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team (254) | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
+| `Localization`: a tilt past a bump's slope still counted as the ground | 3° | calibrated | guess | [Tilt on a bump](calibration.md#tilt-on-a-bump), on a real robot: bumpers, suspension, and the IMU's mount. |
+| `Vision`: how far back "lately" reaches for turning | 0.3 s | chosen | top team | Why: an image taken just after a fast turn is still blurred, and its capture time matters most. |
 | `Vision`: how many of a camera's latest tags its mount is judged by | 500 | chosen | simulation (a knock putting tags 6 cm off alerts after 417 tags, 10 cm after 251) | Why: enough for noise and the estimate's own error to average out, few enough that a knock shows within seconds of seeing tags. Check: after a real knock, how long until the alert. |
 | `Vision`: how recently another camera must have agreed for a camera's tags to count toward its mount | 2 s | chosen | simulation (half a second left out cameras facing other ways, which see tags at other moments) | Why: the other cameras hold the pose a camera is judged against. |
-| `CoprocessorIOSim`: where the simulated board's zones trip | 85 °C | characterized | datasheet (mainline Linux's RK3588 device tree) | The real boards' trip points are read at run time by their agents, since the vendor kernel's may differ; the simulator only needs a plausible one. |
-| `AgentHttp`: how long to wait before asking a busy agent (503) once more | what its `Retry-After` says, at most 2 s | chosen | datasheet (the agent's `Retry-After: 1`) | Why: the agent is busy with one journal or settings request at a time; a second later it's free. Longer would hold the page's request (and a Pitwall slot) for nothing. |
-| `DeployCheck`: how long each coprocessor has to connect, and to answer with its stamp, before a deploy, and how long before it's asked once more | 1 s, and 2 s | chosen | guess | Why: on the robot's network a stamp takes milliseconds, and a coprocessor that isn't there shouldn't hold a deploy up long; one restarting answers two seconds on. A coprocessor that never answers holds the deploy about 8 s: a second to connect and one to answer, a second on PhotonVision's port, then the same again after 2 s. One whose agent is busy (503) is asked once more the same way, and left unchecked if it still is. |
 
 ## Records that aren't configuration
 

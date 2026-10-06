@@ -8,6 +8,7 @@ import com.michaelgrundvig.frc.world.field.Symmetry;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import frc.robot.Robots;
 import java.util.List;
+import java.util.Optional;
 import org.wpilib.fields.Field;
 import org.wpilib.fields.FieldTag;
 import org.wpilib.math.geometry.Pose2d;
@@ -66,6 +67,7 @@ final class StudyFixtures {
         .yaw(Degrees.of(yawDegrees))
         .sensor(SENSOR)
         .noiseScale(1)
+        .joint(Optional.empty())
         .build();
   }
 

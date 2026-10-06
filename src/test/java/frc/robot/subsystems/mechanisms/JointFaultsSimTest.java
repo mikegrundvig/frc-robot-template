@@ -6,6 +6,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.RobotSim;
+import frc.robot.behavior.Outcome;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.JointSimulation;
 import java.util.function.BooleanSupplier;
@@ -103,7 +104,7 @@ class JointFaultsSimTest {
     scheduler.schedule(out);
     loopUntil(() -> out.outcome().isPresent());
 
-    assertThat(out.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(out.outcome()).contains(Outcome.REFUSED);
     assertThat(out.reason())
         .isEqualTo("pivot → out: REFUSED: pivot isn't answering: its motor controllers are silent");
   }
@@ -122,7 +123,7 @@ class JointFaultsSimTest {
     loopUntil(() -> out.outcome().isPresent());
 
     assertThat(pivot.state()).isEqualTo(JointMechanism.State.FAULTED);
-    assertThat(out.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(out.outcome()).contains(Outcome.REFUSED);
     assertThat(out.reason())
         .isEqualTo(
             "pivot → out: REFUSED: pivot's motor 11 didn't take its settings: check its CAN ID and"
@@ -140,7 +141,7 @@ class JointFaultsSimTest {
     pivotIo.silent = true;
     loopUntil(() -> out.outcome().isPresent());
 
-    assertThat(out.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(out.outcome()).contains(Outcome.REFUSED);
     assertThat(out.reason())
         .isEqualTo(
             "pivot → out: REFUSED: can't go on: pivot isn't answering: its motor controllers are"
@@ -165,6 +166,6 @@ class JointFaultsSimTest {
       none.write();
     }
 
-    assertThat(out.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(out.outcome()).contains(Outcome.REFUSED);
   }
 }

@@ -69,15 +69,20 @@ class TurretCameraSimTest {
   }
 
   /**
-   * Measured 2026-10-05: 2.7 cm at worst while driving, 1.6 cm stopped, 141 images accepted and
-   * none rejected. Solved as if the camera never turned, the same drive passes 15 cm.
+   * Measured 2026-10-06, the sweep timed from the test's start: 1.9 cm at worst while driving, 1.8
+   * cm stopped, 127 images accepted and none rejected, the same every run. (Timed on the robot's
+   * clock, which carries on from earlier tests, its phase changed with what ran before: 98 to 141
+   * images.) Solved as if the camera never turned, the same drive passes 15 cm.
    */
   @Test
   void theTurretsCameraHoldsTheEstimateAsTheTurretSweeps() {
     sim.build(ROBOT, SensorErrors.TYPICAL);
     sim.run(1.0);
     RobotSim.setEnabled(true);
-    // Side to side, 40° each way, every four seconds.
+    // Side to side, 40° each way, every four seconds, from now: the robot's clock carries on from
+    // whatever ran before in this JVM, and a sweep on it would point the camera differently each
+    // time, seeing more tags one run and fewer the next.
+    long start = RobotController.getTime();
     sim.scheduler()
         .schedule(
             sim.joints()
@@ -86,7 +91,8 @@ class TurretCameraSimTest {
                     () ->
                         Radians.of(
                             Math.toRadians(40)
-                                * Math.sin(2 * Math.PI * RobotController.getTime() / 4e9))));
+                                * Math.sin(
+                                    2 * Math.PI * (RobotController.getTime() - start) / 4e9))));
     JointSimulation truth = Objects.requireNonNull(sim.world().joints());
 
     double worst = 0;

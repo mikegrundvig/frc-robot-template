@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import frc.robot.behavior.Gate;
 import frc.robot.lib.phoenix.MechanismControl;
 import java.util.ArrayList;
 import java.util.HashMap;

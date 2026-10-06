@@ -25,6 +25,7 @@ import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotSim;
+import frc.robot.behavior.Outcome;
 import frc.robot.sim.JointsSimHarness;
 import java.util.ArrayList;
 import java.util.List;
@@ -74,7 +75,7 @@ class JointMovesSimTest {
 
     double took = runToEnd(out, 3);
 
-    assertThat(out.outcome()).contains(Move.Outcome.ARRIVED);
+    assertThat(out.outcome()).contains(Outcome.ARRIVED);
     assertThat(out.arrived()).isTrue();
     assertThat(out.reason()).matches("pivot → out: ARRIVED in 0\\.\\d\\d s");
     assertThat(pivot.lastOutcome()).isEqualTo(out.reason());
@@ -105,7 +106,7 @@ class JointMovesSimTest {
     runToEnd(tooFar, 1);
     sim.run(0.5);
 
-    assertThat(tooFar.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(tooFar.outcome()).contains(Outcome.REFUSED);
     assertThat(tooFar.reason())
         .isEqualTo("pivot → 140.0°: REFUSED: 140.0° is outside pivot's limits, 0.0° to 135.0°");
     assertThat(pivotDegrees()).as("it holds where it was").isCloseTo(1.5, within(1.0));
@@ -127,7 +128,7 @@ class JointMovesSimTest {
     stuck.scheduler.schedule(clear);
     double took = stuck.runUntil(() -> clear.outcome().isPresent(), 3);
 
-    assertThat(clear.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(clear.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(clear.reason())
         .isEqualTo("elevator → clear: TIMED_OUT after 1.66 s, elevator at 0.000 m (0.00 in)");
     assertThat(took).isCloseTo(1.68, within(0.001));
@@ -140,7 +141,7 @@ class JointMovesSimTest {
 
     double took = runToEnd(out, 2);
 
-    assertThat(out.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(out.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(out.reason()).startsWith("pivot → out: TIMED_OUT after 0.20 s, pivot at ");
     assertThat(took).isCloseTo(0.22, within(0.001));
   }
@@ -169,7 +170,7 @@ class JointMovesSimTest {
             },
             3);
 
-    assertThat(out.outcome()).contains(Move.Outcome.CANCELED);
+    assertThat(out.outcome()).contains(Outcome.CANCELED);
     assertThat(out.reason()).startsWith("pivot → out: CANCELED after 0.30 s, pivot at ");
     assertThat(in.arrived()).isTrue();
     assertThat(took).isLessThan(1);
@@ -198,7 +199,7 @@ class JointMovesSimTest {
 
     sim.run(2);
 
-    assertThat(out.outcome()).contains(Move.Outcome.CANCELED);
+    assertThat(out.outcome()).contains(Outcome.CANCELED);
     assertThat(Math.toDegrees(pivot.goal())).isBetween(40.0, 125.0);
     assertThat(sim.simulation.position(PIVOT)).isCloseTo(pivot.goal(), within(Math.toRadians(2)));
   }
@@ -226,7 +227,7 @@ class JointMovesSimTest {
     sim.run(1);
 
     assertThat(running).isCloseTo(RPM.of(1500).baseUnitMagnitude(), within(0.03 * 157.08));
-    assertThat(intaking.outcome()).contains(Move.Outcome.CANCELED);
+    assertThat(intaking.outcome()).contains(Outcome.CANCELED);
     assertThat(intaking.reason()).isEqualTo("roller: intaking: CANCELED after 0.98 s");
     assertThat(sim.simulation.velocity(ROLLER)).isCloseTo(0, within(0.5));
   }
@@ -262,7 +263,7 @@ class JointMovesSimTest {
 
     double took = runToEnd(never, 5);
 
-    assertThat(never.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(never.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(never.reason()).isEqualTo("roller: intaking until: TIMED_OUT after 3.00 s");
     assertThat(took).isCloseTo(3.02, within(0.001));
   }
@@ -321,7 +322,7 @@ class JointMovesSimTest {
 
     runToEnd(wrong, 1);
 
-    assertThat(wrong.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(wrong.outcome()).contains(Outcome.REFUSED);
     assertThat(wrong.reason())
         .isEqualTo(
             "pivot follows: REFUSED: pivot can't follow 1.0 Meter: it takes an angle or an angular"
@@ -387,7 +388,7 @@ class JointMovesSimTest {
 
     sim.scheduler.schedule(out);
     sim.loop();
-    Optional<Move.Outcome> running = out.outcome();
+    Optional<Outcome> running = out.outcome();
     sim.runUntil(() -> out.outcome().isPresent(), 3);
 
     assertThat(running).as("no outcome while it runs").isEmpty();
@@ -478,7 +479,7 @@ class JointMovesSimTest {
     assertThat(Joints.cantRun(withHatch, open))
         .isEqualTo("open can't run: hatch has no mechanism: nothing drives it");
     assertThat(Joints.cantRun(withHatch, INTAKING)).isNull();
-    assertThat(opening.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(opening.outcome()).contains(Outcome.REFUSED);
     assertThat(opening.reason())
         .isEqualTo("→ open: REFUSED: hatch has no mechanism: nothing drives it");
     assertThat(opening.requirements()).containsExactly(hatched.joints.of(PIVOT));

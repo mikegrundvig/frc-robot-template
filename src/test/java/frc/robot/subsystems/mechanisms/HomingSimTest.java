@@ -15,6 +15,8 @@ import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotSim;
+import frc.robot.behavior.Gate;
+import frc.robot.behavior.Outcome;
 import frc.robot.lib.phoenix.MechanismControl.Homing;
 import frc.robot.sim.JointsSimHarness;
 import java.util.ArrayList;
@@ -113,7 +115,7 @@ class HomingSimTest {
     double took = sim.runUntil(() -> home.outcome().isPresent(), 2);
 
     String why = "elevator's homing found no stop in 0.3 s, pushing toward its lower one";
-    assertThat(clear.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(clear.outcome()).contains(Outcome.REFUSED);
     assertThat(clear.reason()).isEqualTo("elevator → clear: REFUSED: " + why);
     assertThat(home.arrived()).isTrue();
     assertThat(took).isCloseTo(0.30, within(0.03));

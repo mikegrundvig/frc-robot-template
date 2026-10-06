@@ -15,6 +15,7 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.RobotSim;
+import frc.robot.behavior.Gate;
 import frc.robot.sim.JointsSimHarness;
 import java.util.List;
 import java.util.Optional;

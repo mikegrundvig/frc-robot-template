@@ -14,6 +14,8 @@ import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import frc.robot.behavior.Gate;
+import frc.robot.behavior.Outcome;
 import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.lib.wiring.SensorWiring;
@@ -493,7 +495,7 @@ public final class JointMechanism implements Mechanism {
 
   /**
    * Moves to one of its named positions at its cruise, profiled from where it is, and ends when it
-   * gets there ({@link Move.Outcome#ARRIVED}) or its deadline passes: twice the profile's time from
+   * gets there ({@link Outcome#ARRIVED}) or its deadline passes: twice the profile's time from
    * where it starts, plus half a second, unless {@link Move#within} says otherwise.
    *
    * @throws IllegalArgumentException if it has no position by the name
@@ -503,7 +505,7 @@ public final class JointMechanism implements Mechanism {
   }
 
   /**
-   * Moves to a computed angle, as {@link #goTo(String)} does: {@link Move.Outcome#REFUSED} if it's
+   * Moves to a computed angle, as {@link #goTo(String)} does: {@link Outcome#REFUSED} if it's
    * outside the joint's limits, its soft limits or else its range.
    *
    * @throws IllegalArgumentException if the joint slides
@@ -516,8 +518,8 @@ public final class JointMechanism implements Mechanism {
   }
 
   /**
-   * Moves to a computed distance, as {@link #goTo(String)} does: {@link Move.Outcome#REFUSED} if
-   * it's outside the joint's limits.
+   * Moves to a computed distance, as {@link #goTo(String)} does: {@link Outcome#REFUSED} if it's
+   * outside the joint's limits.
    *
    * @throws IllegalArgumentException if the joint turns
    */
@@ -533,7 +535,7 @@ public final class JointMechanism implements Mechanism {
    * profiled toward wherever it is now and held inside the joint's limits, or a speed, on the
    * velocity loop. {@code hood.follow(() -> Degrees.of(HOOD_AT_METERS.get(distance())))}, {@code
    * shooter.follow(() -> RPM.of(speedFor(distance())))}. A target of the wrong kind for the joint
-   * ends it {@link Move.Outcome#REFUSED}.
+   * ends it {@link Outcome#REFUSED}.
    */
   public Move follow(Supplier<? extends Measure<?>> target) {
     return Move.follow(this, target);
@@ -556,8 +558,8 @@ public final class JointMechanism implements Mechanism {
 
   /**
    * Runs it at one of its named outputs until a condition holds, which it ends on: {@link
-   * Move.Outcome#ARRIVED}, or {@link Move.Outcome#TIMED_OUT} after 3 s unless {@link Move#within}
-   * says otherwise. {@code roller.runUntil("intaking", coralIn)}. A {@link Gate} names it ("roller:
+   * Outcome#ARRIVED}, or {@link Outcome#TIMED_OUT} after 3 s unless {@link Move#within} says
+   * otherwise. {@code roller.runUntil("intaking", coralIn)}. A {@link Gate} names it ("roller:
    * intaking until coral in claw") and, timed out, says why it never held ("coral in claw is false:
    * claw beam lost").
    *
@@ -568,9 +570,9 @@ public final class JointMechanism implements Mechanism {
   }
 
   /**
-   * Homes it again by its recipe, owning it meanwhile: {@link Move.Outcome#ARRIVED} once it knows
-   * where it is, {@link Move.Outcome#REFUSED} if its homing fails. A joint with an absolute
-   * encoder, one stowed by hand, or a roller is home already.
+   * Homes it again by its recipe, owning it meanwhile: {@link Outcome#ARRIVED} once it knows where
+   * it is, {@link Outcome#REFUSED} if its homing fails. A joint with an absolute encoder, one
+   * stowed by hand, or a roller is home already.
    */
   public Move home() {
     return Move.home(this);

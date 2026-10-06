@@ -2,12 +2,14 @@ package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.robot.Actuator;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import java.util.List;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.SwerveModulePosition;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
-import org.wpilib.units.measure.Distance;
 
 /** One swerve module: converts wheel radians to meters and runs module setpoints. */
 public class Module {
@@ -23,10 +25,24 @@ public class Module {
   private double driveKs;
   private double driveKv;
 
-  Module(ModuleIO io, int index, Distance wheelRadius) {
+  /**
+   * The drive motors' volts for each newton the wheel pushes the robot with, above what the speed
+   * takes: the current that torque needs, through the gearing, across the motors' resistance.
+   */
+  private final double voltsPerNewton;
+
+  Module(ModuleIO io, int index, DrivetrainGeometry.ModuleType type) {
     this.io = io;
     this.name = NAMES.get(index);
-    this.wheelRadiusMeters = wheelRadius.in(Meters);
+    this.wheelRadiusMeters = type.wheelRadius().in(Meters);
+    Actuator.Motors motors = type.driveMotors();
+    voltsPerNewton =
+        wheelRadiusMeters
+            * motors.motor().model().R
+            / (type.driveGearing().ratio()
+                * type.driveGearing().efficiency()
+                * motors.count()
+                * motors.motor().model().Kt);
   }
 
   /** Takes new gains and limits: the feedforward here, the rest on the motor controllers. */
@@ -48,6 +64,15 @@ public class Module {
 
   /** Drive toward a setpoint. Returns the setpoint actually sent (optimized and cosine-scaled). */
   SwerveModuleVelocity runSetpoint(SwerveModuleVelocity desired) {
+    return runSetpoint(desired, Translation2d.ZERO);
+  }
+
+  /**
+   * The same, the wheel also pushing the robot with a force, robot-relative, in newtons: what an
+   * acceleration asks of it. The part along the wheel adds its volts to the feedforward, so the
+   * wheel speeds up with the robot rather than trailing it.
+   */
+  SwerveModuleVelocity runSetpoint(SwerveModuleVelocity desired, Translation2d force) {
     Rotation2d current = inputs.steerAngle;
     SwerveModuleVelocity target =
         Math.abs(desired.velocity) < STEER_HOLD_SPEED_MPS
@@ -57,7 +82,9 @@ public class Module {
             : desired.optimize(current).cosineScale(current);
 
     double velocity = target.velocity;
-    double feedforward = driveKs * Math.signum(velocity) + driveKv * velocity;
+    double along = force.getX() * target.angle.getCos() + force.getY() * target.angle.getSin();
+    double feedforward =
+        driveKs * Math.signum(velocity) + driveKv * velocity + voltsPerNewton * along;
     io.setDriveVelocity(velocity / wheelRadiusMeters, feedforward);
     io.setSteerAngle(target.angle);
     return target;

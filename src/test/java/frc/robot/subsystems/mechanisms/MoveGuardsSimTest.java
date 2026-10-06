@@ -8,6 +8,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import frc.robot.RobotSim;
+import frc.robot.behavior.Gate;
+import frc.robot.behavior.Outcome;
 import frc.robot.sim.JointsSimHarness;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +29,7 @@ class MoveGuardsSimTest {
 
     sim.run(out, 0.5);
 
-    assertThat(out.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(out.outcome()).contains(Outcome.REFUSED);
     assertThat(out.reason()).isEqualTo("pivot → out: REFUSED: intake clear is false");
     assertThat(Math.toDegrees(sim.simulation.position(PIVOT))).isCloseTo(1.5, within(1.0));
   }
@@ -60,7 +62,7 @@ class MoveGuardsSimTest {
     sim.run(0.5);
 
     assertThat(feeding).isGreaterThan(100);
-    assertThat(feed.outcome()).contains(Move.Outcome.CANCELED);
+    assertThat(feed.outcome()).contains(Outcome.CANCELED);
     assertThat(feed.reason())
         .startsWith("roller: intaking: CANCELED after 0.5")
         .endsWith(": ready to shoot is false: shooter at goal");
@@ -73,7 +75,7 @@ class MoveGuardsSimTest {
 
     sim.run(feed, 0.2);
 
-    assertThat(feed.outcome()).contains(Move.Outcome.REFUSED);
+    assertThat(feed.outcome()).contains(Outcome.REFUSED);
     assertThat(feed.reason()).isEqualTo("roller: intaking: REFUSED: intake clear is false");
   }
 
@@ -88,6 +90,6 @@ class MoveGuardsSimTest {
     sim.run(0.1);
 
     assertThat(out.name()).isEqualTo("pivot → out at 50%");
-    assertThat(out.outcome()).contains(Move.Outcome.CANCELED);
+    assertThat(out.outcome()).contains(Outcome.CANCELED);
   }
 }

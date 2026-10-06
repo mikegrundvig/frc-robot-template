@@ -239,7 +239,7 @@ no products of inertia.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `yaw` | calibrated | 6.7 kg m² | guess (typical) | CAD, or [SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia); PathPlanner's and Choreo's robot MOI is often an estimate. Nothing reads the robot's yet: the simulator spins it as if its mass sat at its wheels, about 11 kg m² for the template's ([stand-ins](stand-ins.md)); a simulator that models the robot as one body will. |
+| `yaw` | calibrated | 6.7 kg m² | guess (typical) | CAD, or [SysId's rotation test](calibration.md#the-robots-mass-center-of-gravity-and-inertia); PathPlanner's and Choreo's robot MOI is often an estimate. The [drive's moves](driving.md) read it: how fast they turn the robot, and the volts each wheel is given to turn it. The simulator doesn't yet: it spins the robot as if its mass sat at its wheels, about 11 kg m² for the template's ([stand-ins](stand-ins.md)); a simulator that models the robot as one body will. |
 
 ### `Imus`
 
@@ -380,6 +380,8 @@ each module's speed against its setpoint (`Drive/ModuleVelocities` against
 | `steerKp` | chosen | 16 V/rad | 2026 code (kP 100 V/rot, converted) | Why: turns the module to its angle quickly. Tune it live: raise it until a new angle is reached quickly, and back off at overshoot or buzzing. The steering's loop sees a new angle only when the CANcoder sends one, every 10 ms, so it overshoots from about 40 and buzzes past about 77 (at `steerKd` 0.08, in the simulator). |
 | `steerKd` | chosen | 0.08 V/(rad/s) | 2026 code (kD 0.5, converted) | Why: damps the steering's overshoot. Raise it if the module overshoots its angle. Too much buzzes too, since it damps on a speed up to 10 ms old: past about 0.2 at `steerKp` 50, in the simulator. |
 | `skewLookahead` | chosen | 0.03 s | guess | Why: while the robot spins, its wheels reach their angles late, so a field-relative drive aims at the heading this far ahead. Drive straight while spinning, and tune until the path stays straight. Change it if the path curves the way the robot spins. |
+| `headingKp` | chosen | 5 | guess | Why: how hard a [drive move](driving.md) (`turnTo`, `goTo`, `follow`) turns the robot back onto its path's heading, in radians a second for each radian off. Its path turns at half the turning acceleration the robot's model allows, from its motors at the stator limit, its tread and its yaw inertia, and each wheel is given the volts its share of that acceleration takes, so most of a turn is the path's own. Turn a quarter turn and watch `Drive/Outcome`: raise it if turns settle slowly short of their heading, lower it if they overshoot and swing back. |
+| `translationKp` | chosen | 3 | guess | Why: how hard a [drive move](driving.md) (`goTo`, `follow`) drives the robot back onto its path's position, in meters a second for each meter off, its path planned at half the acceleration the robot's model allows. Go 2 m and watch `Drive/Outcome` and how far the robot strays from the straight line: raise it if it settles slowly short, lower it if it overshoots or weaves. |
 
 ### `SwerveWiring`
 

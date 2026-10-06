@@ -121,11 +121,15 @@ class DrivetrainControlTest {
                     .steerKp(0)
                     .steerKd(0)
                     .skewLookahead(Seconds.of(0))
+                    .headingKp(0)
+                    .translationKp(0)
                     .build());
     assertRejected("Gains.driveKs", () -> changeGains().driveKs(-0.1).build());
     assertRejected("Gains.driveKv", () -> changeGains().driveKv(Double.NaN).build());
     assertRejected("Gains.driveKp", () -> changeGains().driveKp(-1).build());
     assertRejected("Gains.steerKp", () -> changeGains().steerKp(-1).build());
+    assertRejected("Gains.headingKp", () -> changeGains().headingKp(-1).build());
+    assertRejected("Gains.translationKp", () -> changeGains().translationKp(-1).build());
     assertRejected("Gains.steerKd", () -> changeGains().steerKd(-1).build());
     assertRejected(
         "Gains.skewLookahead", () -> changeGains().skewLookahead(Seconds.of(-0.01)).build());
@@ -153,6 +157,8 @@ class DrivetrainControlTest {
         .steerKp(16.0)
         .steerKd(0.08)
         .skewLookahead(Seconds.of(0.03))
+        .headingKp(5.0)
+        .translationKp(3.0)
         .build();
   }
 

@@ -414,9 +414,11 @@ joint carries, gravity on it, and its hard stops. Behavior can be tested without
 
 - **The whole robot:** `RobotSim` runs it, drivetrain and gamepads included ([testing](testing.md)).
 
-`src/test/java/frc/robot/robots2026/` has six real 2026 robots described this way. One of them runs
-end to end in the simulator, gamepads, interlock, gates and auto included (`Team2611Actions` and
+`src/test/java/frc/robot/robots2026/` has a real 2026 robot described this way. It runs end to end
+in the simulator, gamepads, interlock, gates and auto included (`Team2611Actions` and
 `Team2611RobotSimTest`).
+
+The drivetrain has moves too: [driving](driving.md).
 
 ## Not yet
 
@@ -427,5 +429,3 @@ end to end in the simulator, gamepads, interlock, gates and auto included (`Team
 - **A bench bypass for interlocks.** It waits for a pit mode.
 - **Moving between configurations by a route,** such as first raising the arm so the elevator can
   drop. Until then, write the two steps.
-- **Aiming the drivetrain, and following paths,** belong to the drive. The path tool is still to be
-  chosen.

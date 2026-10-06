@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import frc.robot.behavior.Gate;
 import frc.robot.lib.wiring.ControllerPins;
 import frc.robot.lib.wiring.MechanismWiring;
 import frc.robot.lib.wiring.SensorWiring;

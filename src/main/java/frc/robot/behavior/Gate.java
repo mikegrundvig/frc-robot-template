@@ -1,4 +1,4 @@
-package frc.robot.subsystems.mechanisms;
+package frc.robot.behavior;
 
 import static org.wpilib.units.Units.Seconds;
 
@@ -32,7 +32,7 @@ import org.wpilib.units.measure.Time;
  */
 public final class Gate extends Trigger {
   /** What a gate works out each loop. */
-  interface Logic {
+  public interface Logic {
     /** Whether it holds now; when not, the names of the terms that don't, added to {@code why}. */
     boolean holds(List<String> why);
   }
@@ -60,7 +60,11 @@ public final class Gate extends Trigger {
 
   private String[] shown = new String[0];
 
-  Gate(Scheduler scheduler, String name, Logic logic) {
+  /**
+   * A gate whose logic names what keeps it false: what a mechanism's or a sensor's gate is built
+   * from.
+   */
+  public Gate(Scheduler scheduler, String name, Logic logic) {
     this(scheduler, name, logic, new Value());
   }
 
@@ -191,7 +195,7 @@ public final class Gate extends Trigger {
   }
 
   /** Why it's false, as a reason reads: "ready to shoot is false: aimed"; or "ready to shoot". */
-  String why() {
+  public String why() {
     return blocking.isEmpty()
         ? name + " is false"
         : name + " is false: " + String.join(", ", blocking);

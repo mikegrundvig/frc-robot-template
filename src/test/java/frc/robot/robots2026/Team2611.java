@@ -440,6 +440,8 @@ final class Team2611 {
                           .steerKp(16.0)
                           .steerKd(0.08)
                           .skewLookahead(Seconds.of(0.03))
+                          .headingKp(5.0)
+                          .translationKp(3.0)
                           .build())
                   .build())
           .drivetrainWiring(Optional.empty())

@@ -4,7 +4,7 @@ import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Seconds;
 
-import frc.robot.subsystems.mechanisms.Gate;
+import frc.robot.behavior.Gate;
 import frc.robot.subsystems.mechanisms.JointMechanism;
 import frc.robot.subsystems.mechanisms.Joints;
 import java.util.function.DoubleSupplier;

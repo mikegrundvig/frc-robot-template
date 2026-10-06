@@ -244,7 +244,7 @@ Also built in:
 | `sim/` | WPILib's simulator GUI's default settings, used on the first `./gradlew run -Pgui`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `AGENTS.md` | Instructions for coding agents, which `CLAUDE.md` points Claude Code to: what's different from older FRC code, how to check work, and where the guides are. |
-| `docs/` | Guides: [mechanisms](docs/mechanisms.md), [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), [venues](docs/venues.md), and the [stand-ins](docs/stand-ins.md). |
+| `docs/` | Guides: [mechanisms](docs/mechanisms.md), [driving](docs/driving.md), [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), [venues](docs/venues.md), and the [stand-ins](docs/stand-ins.md). |
 | `gradle/` | The build's supporting rules: `quality.gradle` (checks, for every project), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), `wpilib-repositories.gradle` (where the projects beside the robot program find WPILib), and the version catalog. |
 
 ## License

@@ -4,15 +4,22 @@ import static com.michaelgrundvig.frc.world.config.Rules.atMost;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
+import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.KilogramSquareMeters;
+import static org.wpilib.units.Units.Kilograms;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.lib.wiring.CanBus;
 import frc.robot.lib.wiring.MechanismWiring;
 import frc.robot.lib.wiring.SwerveWiring;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.AngularVelocity;
@@ -163,6 +170,8 @@ public record DrivetrainControl(Limits limits, Gains gains) {
    * @param steerKd volts per radian per second
    * @param skewLookahead field-relative commands use the heading the robot will have this far
    *     ahead, because the wheels take time to turn while the robot spins
+   * @param headingKp how hard a drive move turns the robot back onto its profile's heading: radians
+   *     a second for each radian it's off
    */
   @ConfigRecord
   public record Gains(
@@ -171,7 +180,9 @@ public record DrivetrainControl(Limits limits, Gains gains) {
       double driveKp,
       double steerKp,
       double steerKd,
-      Time skewLookahead) {
+      Time skewLookahead,
+      double headingKp,
+      double translationKp) {
     public Gains {
       Checks.on(Gains.class)
           .field("driveKs", driveKs, nonNegative())
@@ -180,6 +191,8 @@ public record DrivetrainControl(Limits limits, Gains gains) {
           .field("steerKp", steerKp, nonNegative())
           .field("steerKd", steerKd, nonNegative())
           .field("skewLookahead", skewLookahead, nonNegative())
+          .field("headingKp", headingKp, nonNegative())
+          .field("translationKp", translationKp, nonNegative())
           .orThrow();
     }
 
@@ -188,4 +201,44 @@ public record DrivetrainControl(Limits limits, Gains gains) {
       return DrivetrainControlGainsBuilder.builder();
     }
   }
+
+  /**
+   * How fast the robot can speed up, and spin up, by its own model: each wheel pushes with the
+   * lesser of its motors at the drive's stator current limit, through its gearing, and its tread's
+   * grip on its share of the robot's weight; that, over the robot's mass, and its yaw inertia about
+   * the wheels, is what the drivetrain can do. Drive moves are profiled under it.
+   *
+   * @param linear in meters a second squared
+   * @param angular in radians a second squared
+   */
+  public record Accelerations(double linear, double angular) {}
+
+  /** The robot's accelerations by its model, with this drivetrain's current limit. */
+  public static Accelerations accelerations(RobotDefinition robot, DrivetrainControl control) {
+    List<DrivetrainGeometry.Corner> corners = robot.drivetrain().corners();
+    double mass = robot.body().mass().in(Kilograms);
+    double amps = control.limits().driveStatorCurrent().in(Amps);
+    double force = 0;
+    double torque = 0;
+    for (DrivetrainGeometry.Corner corner : corners) {
+      DrivetrainGeometry.ModuleType module = corner.module();
+      Actuator.Motors motors = module.driveMotors();
+      double pushed =
+          motors.count()
+              * motors.motor().model().Kt
+              * amps
+              * module.driveGearing().ratio()
+              * module.driveGearing().efficiency()
+              / module.wheelRadius().in(Meters);
+      double gripped = module.wheelCoefficientOfFriction() * mass * GRAVITY / corners.size();
+      double wheel = Math.min(pushed, gripped);
+      force += wheel;
+      torque += wheel * corner.position().getNorm();
+    }
+    return new Accelerations(
+        force / mass, torque / robot.body().yawMomentOfInertia().in(KilogramSquareMeters));
+  }
+
+  /** Standard gravity, in meters a second squared. */
+  private static final double GRAVITY = 9.80665;
 }

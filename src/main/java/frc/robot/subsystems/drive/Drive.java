@@ -2,6 +2,8 @@ package frc.robot.subsystems.drive;
 
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.KilogramSquareMeters;
+import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Radians;
@@ -21,6 +23,7 @@ import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.Lock;
+import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 import org.littletonrobotics.junction.Logger;
@@ -32,6 +35,7 @@ import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.kinematics.ChassisAccelerations;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveDriveKinematics;
 import org.wpilib.math.kinematics.SwerveModulePosition;
@@ -66,6 +70,18 @@ public class Drive implements Mechanism, AutoCloseable {
   private static final List<String> WHEELS =
       List.of("Front left", "Front right", "Back left", "Back right");
 
+  /** No acceleration: plain velocity driving. */
+  private static final ChassisAccelerations NO_ACCELERATION = new ChassisAccelerations();
+
+  /**
+   * The robot's mass and yaw inertia, and its wheels' squared distances from the center, summed.
+   */
+  private final double massKilograms;
+
+  private final double yawInertia;
+  private final double spread;
+
+  private final RobotDefinition robot;
   private final Supplier<DrivetrainControl> config;
   private final Scheduler scheduler;
   private final GyroIO gyroIO;
@@ -150,6 +166,7 @@ public class Drive implements Mechanism, AutoCloseable {
       Scheduler scheduler,
       Supplier<Pose2d> pose) {
     this.config = config;
+    this.robot = robot;
     this.scheduler = scheduler;
     this.gyroIO = hardware.gyro();
     this.backupImuIO = hardware.backupImu();
@@ -157,12 +174,18 @@ public class Drive implements Mechanism, AutoCloseable {
     this.odometryLock = hardware.odometryLock();
     DrivetrainControl initial = config.get();
     for (int i = 0; i < 4; i++) {
-      modules[i] =
-          new Module(hardware.modules().get(i), i, robot.drivetrain().module(i).wheelRadius());
+      modules[i] = new Module(hardware.modules().get(i), i, robot.drivetrain().module(i));
     }
     applied = initial;
     apply(initial);
     moduleTranslations = robot.moduleTranslations();
+    massKilograms = robot.body().mass().in(Kilograms);
+    yawInertia = robot.body().yawMomentOfInertia().in(KilogramSquareMeters);
+    double sum = 0;
+    for (Translation2d at : moduleTranslations) {
+      sum += at.getSquaredNorm();
+    }
+    spread = sum;
     wheelRadiusMeters = new double[4];
     for (int i = 0; i < 4; i++) {
       wheelRadiusMeters[i] = robot.drivetrain().module(i).wheelRadius().in(Meters);
@@ -199,6 +222,7 @@ public class Drive implements Mechanism, AutoCloseable {
               module + " swerve module not configured",
               Alert.Level.HIGH);
     }
+    Trajectories.warmUp();
   }
 
   @Override
@@ -357,8 +381,73 @@ public class Drive implements Mechanism, AutoCloseable {
     applied = drivetrain;
   }
 
+  /**
+   * Drives at robot-relative velocities until a condition holds, which it ends on: {@code
+   * drive.runUntil(new ChassisVelocities(1.5, 0, 0), bumped)}. ARRIVED, or TIMED_OUT after 3 s
+   * unless {@link DriveMove#within} says otherwise, saying why a gate never opened.
+   */
+  public DriveMove runUntil(ChassisVelocities robotRelative, BooleanSupplier condition) {
+    return DriveMove.runUntil(this, robotRelative, condition);
+  }
+
+  /**
+   * Turns where it stands to a field heading, the nearer way round, profiled under the robot's own
+   * turning acceleration: ARRIVED inside 2°, nearly still, for 40 ms.
+   */
+  public DriveMove turnTo(Rotation2d heading) {
+    return DriveMove.turnTo(this, heading);
+  }
+
+  /**
+   * Goes to a field pose in a straight line, turning on the way, profiled under the robot's own
+   * accelerations: ARRIVED within 2 cm and 2°, nearly still, for 40 ms.
+   */
+  public DriveMove goTo(Pose2d pose) {
+    return DriveMove.goTo(this, pose);
+  }
+
+  /**
+   * Drives a smooth path from where it is through keyframes, stopping at the last, under the
+   * robot's own accelerations, turning to each keyframe's heading after it passes the one before:
+   * ARRIVED at the last within 2 cm and 2°, nearly still, for 40 ms. {@link DriveMove#at} opens as
+   * it passes a named one.
+   *
+   * <pre>{@code
+   * DriveMove leg = drive.follow(
+   *     Keyframe.at(new Pose2d(3, 1, Rotation2d.ZERO)),
+   *     Keyframe.at(new Pose2d(5, 2, Rotation2d.fromDegrees(90))).named("pickup"),
+   *     Keyframe.at(new Pose2d(7, 2, Rotation2d.fromDegrees(180))));
+   * }</pre>
+   *
+   * @throws IllegalArgumentException with no keyframes, or two of one name
+   */
+  public DriveMove follow(Keyframe... keyframes) {
+    return DriveMove.follow(this, List.of(keyframes));
+  }
+
+  /** How it's driven now, as tuned. */
+  DrivetrainControl control() {
+    return config.get();
+  }
+
+  /** How fast it can speed up and spin up, by the robot's model and its current limit now. */
+  DrivetrainControl.Accelerations accelerations() {
+    return DrivetrainControl.accelerations(robot, config.get());
+  }
+
   /** Drive at robot-relative velocities (m/s, m/s, rad/s). Call every loop while driving. */
   public void runVelocity(ChassisVelocities robotRelative) {
+    runVelocity(robotRelative, NO_ACCELERATION);
+  }
+
+  /**
+   * Drive at robot-relative velocities while speeding up or turning up at robot-relative
+   * accelerations (m/s², m/s², rad/s²), as a profile asks: each wheel pushes its share of the
+   * robot's mass times the acceleration, and of its yaw inertia times the turning one, spread by
+   * its distance from the center, and its motors are given the volts that takes, from the model, so
+   * the robot follows the profile rather than trailing it. Call every loop while driving.
+   */
+  public void runVelocity(ChassisVelocities robotRelative, ChassisAccelerations acceleration) {
     // Correct for the robot rotating during the loop's step, which otherwise makes it drift
     // sideways while spinning and driving at the same time.
     ChassisVelocities discrete = robotRelative.discretize(RobotLoop.PERIOD_SECONDS);
@@ -366,8 +455,16 @@ public class Drive implements Mechanism, AutoCloseable {
         SwerveDriveKinematics.desaturateWheelVelocities(
             kinematics.toSwerveModuleVelocities(discrete), maxLinearSpeedMps);
     SwerveModuleVelocity[] sent = new SwerveModuleVelocity[4];
-    for (int i = 0; i < 4; i++) {
-      sent[i] = modules[i].runSetpoint(setpoints[i]);
+    int count = modules.length;
+    for (int i = 0; i < count; i++) {
+      Translation2d at = moduleTranslations[i];
+      Translation2d force =
+          new Translation2d(
+              massKilograms * acceleration.ax / count
+                  - yawInertia * acceleration.alpha * at.getY() / spread,
+              massKilograms * acceleration.ay / count
+                  + yawInertia * acceleration.alpha * at.getX() / spread);
+      sent[i] = modules[i].runSetpoint(setpoints[i], force);
     }
     Logger.recordOutput("Drive/Setpoints", setpoints);
     Logger.recordOutput("Drive/SetpointsOptimized", sent);

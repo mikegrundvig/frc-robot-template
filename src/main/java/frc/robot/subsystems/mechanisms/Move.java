@@ -5,6 +5,8 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Output;
+import frc.robot.behavior.Gate;
+import frc.robot.behavior.Outcome;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -59,18 +61,6 @@ import org.wpilib.units.measure.Time;
  * outcome is its latest run's. Its requirements are exactly the joints it moves.
  */
 public final class Move implements Command {
-  /** How a move ended. */
-  public enum Outcome {
-    /** It got there: inside the joint's band for 40 ms, or its condition held. */
-    ARRIVED,
-    /** Its deadline passed first. */
-    TIMED_OUT,
-    /** Another command took a joint it requires, its binding released, or its gate fell. */
-    CANCELED,
-    /** It wouldn't start, or couldn't go on. */
-    REFUSED
-  }
-
   /** What a move does. */
   private enum Kind {
     /** To targets, ending when every joint is there. */

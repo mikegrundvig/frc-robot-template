@@ -22,6 +22,7 @@ import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotSim;
+import frc.robot.behavior.Outcome;
 import frc.robot.sim.JointsSimHarness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -125,7 +126,7 @@ class InterlocksSimTest {
 
     sim.runUntil(() -> out.outcome().isPresent(), 3);
 
-    assertThat(out.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(out.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(out.reason())
         .startsWith("pivot → out: TIMED_OUT after 1.6")
         .endsWith(", held: pivot keeps out of 40° to 80° while elevator before clear");
@@ -146,7 +147,7 @@ class InterlocksSimTest {
     sim.scheduler.schedule(in);
     sim.runUntil(() -> in.outcome().isPresent(), 2);
 
-    assertThat(deeper.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(deeper.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(afterDeeper).isCloseTo(60, within(1.5));
     assertThat(in.arrived()).isTrue();
   }
@@ -179,7 +180,7 @@ class InterlocksSimTest {
 
     assertThat(furthest).as("it overshot the edge into the region").isGreaterThan(41);
     assertThat(furthest).as("and never crossed it").isLessThan(80);
-    assertThat(out.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(out.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(out.reason())
         .endsWith("held: pivot keeps out of 40° to 80° while elevator before clear");
   }

@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.RobotSim;
+import frc.robot.behavior.Outcome;
 import frc.robot.sim.JointsSimHarness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,7 @@ class LimitStopSimTest {
     sim.scheduler.schedule(back);
     sim.runUntil(() -> back.outcome().isPresent(), 5);
 
-    assertThat(back.outcome()).contains(Move.Outcome.TIMED_OUT);
+    assertThat(back.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(back.reason()).contains("held: turret right tripped");
     assertThat(turretDegrees()).as("stopped past 90°, braking").isBetween(90.0, 100.0);
 

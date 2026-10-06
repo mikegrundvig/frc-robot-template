@@ -10,6 +10,7 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 
 import frc.robot.RobotSim;
+import frc.robot.behavior.Gate;
 import frc.robot.sim.JointsSimHarness;
 import java.util.ArrayList;
 import java.util.List;

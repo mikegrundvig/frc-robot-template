@@ -1,8 +1,6 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
-import com.michaelgrundvig.frc.world.robot.Configuration;
-import com.michaelgrundvig.frc.world.robot.Joint;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import java.lang.reflect.Field;
@@ -1004,9 +1002,6 @@ final class ValuesRegister {
     List<CodeRecord> records = new ArrayList<>();
     for (String className : classNames) {
       Class<?> type = load(className);
-      if (isPartsRecord(type)) {
-        continue;
-      }
       List<Component> components = new ArrayList<>();
       for (RecordComponent component : recordComponents(type)) {
         components.add(new Component(component.getName(), held(component.getGenericType(), names)));
@@ -1017,28 +1012,11 @@ final class ValuesRegister {
   }
 
   /**
-   * {@code frc.robot.subsystems.drive.DrivetrainControl$Limits} is {@code
+   * {@code com.michaelgrundvig.frc.world.robot.DrivetrainControl$Limits} is {@code
    * DrivetrainControl.Limits}.
    */
   static String registerName(String className) {
     return className.substring(className.lastIndexOf('.') + 1).replace('$', '.');
-  }
-
-  /**
-   * Whether a record is a robot design's parts record: every value a joint or a configuration it
-   * names. Its values are names, already registered in their own sections, so it needs none.
-   */
-  static boolean isPartsRecord(Class<?> type) {
-    if (!type.isRecord() || type.getRecordComponents().length == 0) {
-      return false;
-    }
-    for (RecordComponent component : type.getRecordComponents()) {
-      Class<?> held = component.getType();
-      if (!Joint.class.isAssignableFrom(held) && !Configuration.class.isAssignableFrom(held)) {
-        return false;
-      }
-    }
-    return true;
   }
 
   private static Class<?> load(String className) {

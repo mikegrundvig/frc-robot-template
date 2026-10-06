@@ -21,7 +21,7 @@ class GyroIOSystemcoreTest {
   @Test
   void itReportsOneReadingALoopAndCountsAsConnected() {
     RobotSim.setEnabled(false);
-    GyroIOSystemcore flat = new GyroIOSystemcore(OnboardIMU.MountOrientation.FLAT, Rotation3d.ZERO);
+    GyroIOSystemcore flat = new GyroIOSystemcore(Rotation3d.ZERO);
     GyroIOInputsAutoLogged inputs = new GyroIOInputsAutoLogged();
 
     flat.updateInputs(inputs);
@@ -62,8 +62,7 @@ class GyroIOSystemcoreTest {
   void aTurnedBoardsTiltIsTheRobotsAboutItsOwnAxes() {
     OnboardIMUSim.setAngleX(Math.toRadians(-15));
     OnboardIMUSim.setAngleY(0);
-    GyroIOSystemcore turned =
-        new GyroIOSystemcore(OnboardIMU.MountOrientation.FLAT, new Rotation3d(0, 0, Math.PI / 2));
+    GyroIOSystemcore turned = new GyroIOSystemcore(new Rotation3d(0, 0, Math.PI / 2));
     GyroIOInputsAutoLogged inputs = new GyroIOInputsAutoLogged();
 
     turned.updateInputs(inputs);
@@ -71,5 +70,23 @@ class GyroIOSystemcoreTest {
 
     assertThat(Math.toDegrees(inputs.pitchRad)).as("nose up").isCloseTo(-15, within(1e-9));
     assertThat(Math.toDegrees(inputs.rollRad)).isCloseTo(0, within(1e-9));
+  }
+
+  /**
+   * How it's mounted follows from how the board is turned on the robot: flat, face up or face down;
+   * stood on its long side, landscape; stood on its short side, portrait.
+   */
+  @Test
+  void itsMountFollowsFromHowTheBoardIsTurned() {
+    assertThat(GyroIOSystemcore.mount(Rotation3d.ZERO)).isEqualTo(OnboardIMU.MountOrientation.FLAT);
+    assertThat(GyroIOSystemcore.mount(new Rotation3d(Math.PI, 0, Math.PI / 2)))
+        .as("upside down, turned")
+        .isEqualTo(OnboardIMU.MountOrientation.FLAT);
+    assertThat(GyroIOSystemcore.mount(new Rotation3d(Math.PI / 2, 0, 0)))
+        .as("rolled onto its long side")
+        .isEqualTo(OnboardIMU.MountOrientation.LANDSCAPE);
+    assertThat(GyroIOSystemcore.mount(new Rotation3d(0, Math.PI / 2, 0)))
+        .as("pitched onto its short side")
+        .isEqualTo(OnboardIMU.MountOrientation.PORTRAIT);
   }
 }

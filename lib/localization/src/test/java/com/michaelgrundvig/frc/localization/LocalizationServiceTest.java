@@ -22,6 +22,7 @@ import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Imus;
@@ -186,6 +187,7 @@ class LocalizationServiceTest {
           .link(Link.builder().label("turret").mass(MassProperties.NONE).shapes(List.of()).build())
           .positions(List.of())
           .outputs(List.of())
+          .driven(Driven.NONE)
           .build();
 
   /**

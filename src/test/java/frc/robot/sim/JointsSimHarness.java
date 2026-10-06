@@ -1,8 +1,8 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotSim;
-import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.mechanisms.JointSetup;
 import frc.robot.subsystems.mechanisms.Joints;
@@ -28,6 +28,11 @@ public final class JointsSimHarness {
   private boolean enabled = true;
 
   /** The robot's joints, enabled, each where its definition says it rests. */
+  /** The definition's joints, each set up from its block. */
+  public JointsSimHarness(RobotDefinition definition) {
+    this(definition, JointSetup.all(definition));
+  }
+
   public JointsSimHarness(RobotDefinition definition, List<JointSetup> setups) {
     this(definition, setups, setup -> setup::control);
   }
@@ -39,7 +44,15 @@ public final class JointsSimHarness {
       Function<JointSetup, Supplier<MechanismControl>> tuned) {
     simulation = new JointSimulation(definition.math());
     sensors = new SensorSimulation(simulation);
-    joints = new Joints(definition, setups, tuned, simulation::add, sensors::add, scheduler);
+    joints =
+        new Joints(
+            definition,
+            setups,
+            tuned,
+            simulation::add,
+            simulation::absoluteEncoder,
+            sensors::add,
+            scheduler);
   }
 
   /** Enables the joints, or disables them, from the next loop. */

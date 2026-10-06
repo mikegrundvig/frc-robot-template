@@ -1,4 +1,4 @@
-package frc.robot.lib.wiring;
+package com.michaelgrundvig.frc.world.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -8,7 +8,6 @@ import static org.wpilib.units.Units.Rotations;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
 
 /** A mechanism's wiring is checked when it's written down, not when the mechanism won't move. */
 class MechanismWiringTest {
@@ -18,7 +17,7 @@ class MechanismWiringTest {
 
   private static MechanismWiring wiring(List<MechanismWiring.Motor> motors) {
     return MechanismWiring.builder()
-        .canBus(CanBus.port(CANPort.CAN_S0))
+        .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
         .controller(MechanismWiring.Controller.TALON_FX)
         .motors(motors)
         .cancoder(Optional.empty())

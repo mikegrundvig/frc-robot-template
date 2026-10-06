@@ -1,9 +1,12 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR_CLEAR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.homed;
 import static frc.robot.subsystems.mechanisms.JointFixtures.setup;
@@ -12,12 +15,12 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Interlock;
+import com.michaelgrundvig.frc.world.robot.MechanismControl.Homing;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotSim;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
-import frc.robot.lib.phoenix.MechanismControl.Homing;
 import frc.robot.sim.JointsSimHarness;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,7 +55,7 @@ class HomingSimTest {
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     Gate ready = elevator.isReady();
     sim.simulation.powerOnAt(ELEVATOR, 0.3);
-    Move clear = elevator.goTo("clear");
+    Move clear = elevator.goTo(ELEVATOR_CLEAR);
 
     sim.scheduler.schedule(clear);
     sim.loop();
@@ -77,7 +80,7 @@ class HomingSimTest {
         new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, Homing.toHardStop(Homing.Stop.LOWER)));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     sim.setEnabled(false);
-    Move clear = elevator.goTo("clear");
+    Move clear = elevator.goTo(ELEVATOR_CLEAR);
     sim.scheduler.schedule(clear);
 
     sim.run(1);
@@ -106,7 +109,7 @@ class HomingSimTest {
     sim.simulation.powerOnAt(ELEVATOR, 1.1);
 
     sim.run(0.5);
-    Move clear = elevator.goTo("clear");
+    Move clear = elevator.goTo(ELEVATOR_CLEAR);
     sim.scheduler.schedule(clear);
     sim.runUntil(() -> clear.outcome().isPresent(), 1);
     sim.simulation.place(ELEVATOR, 0); // lowered by hand
@@ -140,14 +143,14 @@ class HomingSimTest {
   void anInterlockOnAJointNotYetHomedHoldsFailSafe() {
     RobotDefinition guarded =
         RobotDefinitionBuilder.builder(ROBOT)
-            .interlocks(List.of(Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past("run"))))
+            .interlocks(List.of(Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_RUN))))
             .build();
     JointsSimHarness sim =
         new JointsSimHarness(guarded, homing(PIVOT_SETUP, Homing.toHardStop(Homing.Stop.UPPER)));
     JointMechanism pivot = sim.joints.of(PIVOT);
     JointMechanism roller = sim.joints.of(ROLLER);
     sim.simulation.powerOnAt(PIVOT, Math.toRadians(120));
-    sim.scheduler.schedule(roller.run("intaking"));
+    sim.scheduler.schedule(roller.run(ROLLER_INTAKING));
 
     sim.run(0.1);
     JointMechanism.State homing = pivot.state();

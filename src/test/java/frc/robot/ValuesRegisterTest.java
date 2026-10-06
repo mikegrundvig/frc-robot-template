@@ -6,8 +6,6 @@ import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.Body;
-import com.michaelgrundvig.frc.world.robot.Configuration;
-import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.ValuesRegister.CodeRecord;
 import frc.robot.ValuesRegister.Committed;
@@ -132,9 +130,9 @@ class ValuesRegisterTest {
         .contains("ImuReadings") // listed in the register as not configuration
         .doesNotHaveDuplicates();
     assertThat(record("RobotConfig").components())
-        .contains(
-            new Component("definition", "RobotDefinition"),
-            new Component("drivetrainWiring", "SwerveWiring")); // in an Optional
+        .contains(new Component("definition", "RobotDefinition"));
+    assertThat(record("DrivetrainGeometry").components())
+        .contains(new Component("wiring", "SwerveWiring")); // in an Optional
     assertThat(record("RobotDefinition").components())
         .contains(
             new Component("name", null),
@@ -148,7 +146,9 @@ class ValuesRegisterTest {
 
   @Test
   void nestedRecordsAreNamedWithTheirOuterRecord() {
-    assertThat(ValuesRegister.registerName("frc.robot.subsystems.drive.DrivetrainControl$Limits"))
+    assertThat(
+            ValuesRegister.registerName(
+                "com.michaelgrundvig.frc.world.robot.DrivetrainControl$Limits"))
         .isEqualTo("DrivetrainControl.Limits");
     assertThat(record("SensorErrors.GyroErrors").className())
         .isEqualTo("com.michaelgrundvig.frc.simulation.SensorErrors$GyroErrors");
@@ -178,9 +178,6 @@ class ValuesRegisterTest {
 
   /** The arm's gains as it ships them. */
   record ArmGains(double kP, double kD) {}
-
-  /** A design's parts, by name: what the register leaves out. */
-  record ArmParts(Joint.Revolute arm, Configuration stowed) {}
 
   private static final String ARM_REGISTER =
       """
@@ -599,12 +596,5 @@ class ValuesRegisterTest {
         .contains(
             "docs/values.md line 13: a row must start with a name in backticks, like"
                 + " `frameLength`, not \"length\"");
-  }
-
-  /** A parts record holds names, each part's values in its own section, so it needs none. */
-  @Test
-  void aPartsRecordNeedsNoSection() {
-    assertThat(ValuesRegister.isPartsRecord(ArmParts.class)).isTrue();
-    assertThat(ValuesRegister.isPartsRecord(ArmGains.class)).isFalse();
   }
 }

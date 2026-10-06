@@ -1,6 +1,5 @@
 package frc.robot.robots2026;
 
-import static frc.robot.robots2026.Team2611.PARTS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
@@ -20,20 +19,20 @@ import org.wpilib.command3.Trigger;
  * 6a5da76 runs the roller once the pivot is past 110° only in auto (RobotContainer.java:143 vs
  * :216-218), and its readiness check gates nothing in teleop (:220-223). Here the guard is the
  * definition's interlock, beneath every command, and feeding goes through a gate. Each reaches its
- * joints through the design's parts. A test fixture, not 2026 play.
+ * joints by the design's own constants. A test fixture, not 2026 play.
  */
 @ExtendWith(RobotSim.class)
 class Team2611BehaviorSimTest {
-  private final JointsSimHarness sim = new JointsSimHarness(Team2611.ROBOT, Team2611.JOINTS);
-  private final JointMechanism pivot = sim.joints.of(PARTS.pivot());
-  private final JointMechanism roller = sim.joints.of(PARTS.intake());
-  private final JointMechanism fullSend = sim.joints.of(PARTS.fullSend());
+  private final JointsSimHarness sim = new JointsSimHarness(Team2611.ROBOT);
+  private final JointMechanism pivot = sim.joints.of(Team2611.PIVOT);
+  private final JointMechanism roller = sim.joints.of(Team2611.INTAKE);
+  private final JointMechanism fullSend = sim.joints.of(Team2611.FULL_SEND);
 
   /** The heading error the drive's aiming controller would report, in degrees. */
   private final double[] headingError = {0};
 
   private final Team2611Actions actions =
-      new Team2611Actions(sim.joints, PARTS, sim.scheduler, () -> headingError[0]);
+      new Team2611Actions(sim.joints, sim.scheduler, () -> headingError[0]);
 
   private final boolean[] held = {false};
 
@@ -55,10 +54,10 @@ class Team2611BehaviorSimTest {
         heldBy = roller.heldBy();
       }
       if (Double.isNaN(passedRun)
-          && Math.toDegrees(sim.simulation.position(PARTS.pivot())) >= 110) {
+          && Math.toDegrees(sim.simulation.position(Team2611.PIVOT)) >= 110) {
         passedRun = t;
       }
-      if (Double.isNaN(spun) && Math.abs(sim.simulation.velocity(PARTS.intake())) > 1) {
+      if (Double.isNaN(spun) && Math.abs(sim.simulation.velocity(Team2611.INTAKE)) > 1) {
         spun = t;
       }
     }
@@ -75,9 +74,9 @@ class Team2611BehaviorSimTest {
         .isGreaterThan(intaking.passedRun());
     assertThat(intaking.heldBy()).isEqualTo("intake runs only when pivot past run");
     assertThat(roller.heldBy()).isEmpty();
-    assertThat(Math.toDegrees(sim.simulation.position(PARTS.pivot()))).isCloseTo(130, within(2.0));
+    assertThat(Math.toDegrees(sim.simulation.position(Team2611.PIVOT))).isCloseTo(130, within(2.0));
     assertThat(pivot.lastOutcome()).matches("pivot → out: ARRIVED in 0\\.\\d\\d s");
-    assertThat(sim.simulation.velocity(PARTS.intake()))
+    assertThat(sim.simulation.velocity(Team2611.INTAKE))
         .as("2000 rpm is the roller's free speed: it closes on it")
         .isCloseTo(
             RPM.of(2000).baseUnitMagnitude(), within(0.05 * RPM.of(2000).baseUnitMagnitude()));
@@ -92,8 +91,8 @@ class Team2611BehaviorSimTest {
     sim.run(1);
 
     assertThat(roller.lastOutcome()).startsWith("intake: intaking: CANCELED after ");
-    assertThat(sim.simulation.velocity(PARTS.intake())).isCloseTo(0, within(1.0));
-    assertThat(Math.toDegrees(sim.simulation.position(PARTS.pivot()))).isCloseTo(130, within(2.0));
+    assertThat(sim.simulation.velocity(Team2611.INTAKE)).isCloseTo(0, within(1.0));
+    assertThat(Math.toDegrees(sim.simulation.position(Team2611.PIVOT))).isCloseTo(130, within(2.0));
     assertThat(Math.toDegrees(pivot.goal())).isCloseTo(130, within(1e-9));
   }
 
@@ -106,15 +105,15 @@ class Team2611BehaviorSimTest {
   void shootingFeedsOnlyWhileReadyAndSaysWhyItPaused() {
     sim.scheduler.schedule(actions.shoot());
     sim.run(1.5);
-    double feeding = sim.simulation.velocity(PARTS.fullSend());
-    double shooterSpeed = sim.simulation.velocity(PARTS.shooter());
+    double feeding = sim.simulation.velocity(Team2611.FULL_SEND);
+    double shooterSpeed = sim.simulation.velocity(Team2611.SHOOTER);
 
     headingError[0] = 10;
     sim.run(0.06);
-    double ridingOut = sim.simulation.velocity(PARTS.fullSend());
+    double ridingOut = sim.simulation.velocity(Team2611.FULL_SEND);
     List<String> blocking = actions.readyToShoot().blocking();
     sim.run(0.5);
-    double paused = sim.simulation.velocity(PARTS.fullSend());
+    double paused = sim.simulation.velocity(Team2611.FULL_SEND);
     String why = fullSend.lastOutcome();
 
     headingError[0] = 1;
@@ -129,14 +128,14 @@ class Team2611BehaviorSimTest {
     assertThat(why)
         .startsWith("at feeding: CANCELED after ")
         .endsWith(": ready to shoot is false: aimed");
-    assertThat(sim.simulation.velocity(PARTS.fullSend()))
+    assertThat(sim.simulation.velocity(Team2611.FULL_SEND))
         .as("aimed again: feeding again")
         .isCloseTo(feedSpeed, within(0.03 * feedSpeed));
   }
 
   @Test
   void theHoodsServosArentDrivenByTheTemplateYet() {
-    assertThatThrownBy(() -> sim.joints.of(PARTS.hood()))
+    assertThatThrownBy(() -> sim.joints.of(Team2611.HOOD))
         .hasMessage(
             "hood has no mechanism: it's moved by hood left and hood right, and the template drives"
                 + " only motors turning a shaft so far");

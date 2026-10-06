@@ -30,7 +30,6 @@ final class Team2611Actions {
   static final double SHOT_RPM = 3000;
 
   private final Joints joints;
-  private final Team2611.Parts parts;
   private final JointMechanism pivot;
   private final JointMechanism roller;
   private final JointMechanism shooter;
@@ -40,13 +39,11 @@ final class Team2611Actions {
    * @param scheduler the robot's command scheduler, which works out the gates
    * @param aimError how far off aim the robot is, in degrees: the aiming controller's own error
    */
-  Team2611Actions(
-      Joints joints, Team2611.Parts parts, Scheduler scheduler, DoubleSupplier aimError) {
+  Team2611Actions(Joints joints, Scheduler scheduler, DoubleSupplier aimError) {
     this.joints = joints;
-    this.parts = parts;
-    pivot = joints.of(parts.pivot());
-    roller = joints.of(parts.intake());
-    shooter = joints.of(parts.shooter());
+    pivot = joints.of(Team2611.PIVOT);
+    roller = joints.of(Team2611.INTAKE);
+    shooter = joints.of(Team2611.SHOOTER);
     readyToShoot =
         Gate.all(
                 "ready to shoot",
@@ -65,21 +62,21 @@ final class Team2611Actions {
     return Command.requiring(pivot, roller)
         .executing(
             co -> {
-              co.fork(pivot.goTo("out"));
-              co.await(roller.run("intaking"));
+              co.fork(pivot.goTo(Team2611.PIVOT_OUT));
+              co.await(roller.run(Team2611.INTAKING));
             })
         .named("Intake");
   }
 
   /** Spin up and stay up; feed whenever ready to shoot, and pause when not. */
   Command shoot() {
-    return Command.requiring(shooter, joints.of(parts.fullSend()), joints.of(parts.transition()))
+    return Command.requiring(shooter, joints.of(Team2611.FULL_SEND), joints.of(Team2611.TRANSITION))
         .executing(
             co -> {
               co.fork(shooter.follow(() -> RPM.of(SHOT_RPM)));
               while (true) {
                 co.waitUntil(readyToShoot);
-                co.await(joints.run(parts.feeding()).onlyWhile(readyToShoot));
+                co.await(joints.run(Team2611.FEEDING).onlyWhile(readyToShoot));
               }
             })
         .named("Shoot");
@@ -94,7 +91,8 @@ final class Team2611Actions {
   Command leftDouble(Function<String, Command> path) {
     return Command.noRequirements(
             co -> {
-              co.await(pivot.goTo("out")); // ARRIVED, or TIMED_OUT and logged: never stalls
+              co.await(
+                  pivot.goTo(Team2611.PIVOT_OUT)); // ARRIVED, or TIMED_OUT and logged: never stalls
               co.awaitAny(path.apply("EXP Left 1"), intake());
               co.awaitAny(path.apply("EXP Left 2"), intake());
               co.await(shoot().withTimeout(Seconds.of(3)));
@@ -110,11 +108,13 @@ final class Team2611Actions {
    */
   void bind(CommandGamepad driver, CommandGamepad operator) {
     operator.rightTrigger().whileTrue(intake());
-    operator.leftTrigger().whileTrue(roller.run("outtaking")); // the interlock applies here too
-    operator.faceDown().onTrue(pivot.goTo("out"));
-    operator.faceRight().onTrue(pivot.goTo("in"));
+    operator
+        .leftTrigger()
+        .whileTrue(roller.run(Team2611.OUTTAKING)); // the interlock applies here too
+    operator.faceDown().onTrue(pivot.goTo(Team2611.PIVOT_OUT));
+    operator.faceRight().onTrue(pivot.goTo(Team2611.PIVOT_IN));
     driver.leftBumper().whileTrue(shoot());
-    driver.rightTrigger().whileTrue(joints.run(parts.feeding()));
-    driver.rightBumper().whileTrue(joints.run(parts.unjamming()));
+    driver.rightTrigger().whileTrue(joints.run(Team2611.FEEDING));
+    driver.rightBumper().whileTrue(joints.run(Team2611.UNJAMMING));
   }
 }

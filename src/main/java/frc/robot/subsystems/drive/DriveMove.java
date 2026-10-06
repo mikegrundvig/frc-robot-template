@@ -4,6 +4,7 @@ import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
 import frc.robot.lib.timing.RobotLoop;

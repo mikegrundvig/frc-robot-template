@@ -1,6 +1,5 @@
 package frc.robot.robots2026;
 
-import static frc.robot.robots2026.Team2611.PARTS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Inches;
@@ -65,11 +64,11 @@ class Team2611RobotSimTest {
   void build() {
     sim.build(Team2611.CONFIG, SensorErrors.NONE);
     operator = new GamepadSim(1);
-    actions = new Team2611Actions(sim.joints(), PARTS, sim.scheduler(), this::aimError);
+    actions = new Team2611Actions(sim.joints(), sim.scheduler(), this::aimError);
     actions.bind(new CommandGamepad(sim.scheduler(), 0), new CommandGamepad(sim.scheduler(), 1));
-    pivot = sim.joints().of(PARTS.pivot());
-    roller = sim.joints().of(PARTS.intake());
-    fullSend = sim.joints().of(PARTS.fullSend());
+    pivot = sim.joints().of(Team2611.PIVOT);
+    roller = sim.joints().of(Team2611.INTAKE);
+    fullSend = sim.joints().of(Team2611.FULL_SEND);
     truth = Objects.requireNonNull(sim.world().joints());
   }
 
@@ -89,8 +88,8 @@ class Team2611RobotSimTest {
   private void run(double seconds) {
     for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       sim.loop();
-      double speed = Math.abs(truth.velocity(PARTS.intake()));
-      if (Math.toDegrees(truth.position(PARTS.pivot())) < 110 && speed > rollerWas + 0.5) {
+      double speed = Math.abs(truth.velocity(Team2611.INTAKE));
+      if (Math.toDegrees(truth.position(Team2611.PIVOT)) < 110 && speed > rollerWas + 0.5) {
         ruleBroken = true;
       }
       rollerWas = speed;
@@ -117,14 +116,14 @@ class Team2611RobotSimTest {
     run(0.1);
     String held = roller.heldBy();
     run(1.4);
-    double intaking = rpm(PARTS.intake());
+    double intaking = rpm(Team2611.INTAKE);
     press(() -> operator.setRightTriggerAxis(0));
     run(1);
 
     assertThat(held).isEqualTo("intake runs only when pivot past run");
     assertThat(intaking).as("near 2000 rpm, its free speed").isGreaterThan(1900);
-    assertThat(Math.abs(rpm(PARTS.intake()))).as("let go: stopped").isLessThan(10);
-    assertThat(Math.toDegrees(truth.position(PARTS.pivot())))
+    assertThat(Math.abs(rpm(Team2611.INTAKE))).as("let go: stopped").isLessThan(10);
+    assertThat(Math.toDegrees(truth.position(Team2611.PIVOT)))
         .as("and held out")
         .isCloseTo(130, within(2.0));
     assertThat(ruleBroken).isFalse();
@@ -140,7 +139,7 @@ class Team2611RobotSimTest {
     run(1);
 
     assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot past run");
-    assertThat(Math.abs(rpm(PARTS.intake()))).isLessThan(10);
+    assertThat(Math.abs(rpm(Team2611.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }
 
@@ -154,14 +153,14 @@ class Team2611RobotSimTest {
     run(0.1);
     press(() -> operator.setFaceDownButton(false));
     run(1.5);
-    double out = Math.toDegrees(truth.position(PARTS.pivot()));
+    double out = Math.toDegrees(truth.position(Team2611.PIVOT));
     press(() -> operator.setFaceRightButton(true));
     run(0.1);
     press(() -> operator.setFaceRightButton(false));
     run(1.5);
 
     assertThat(out).isCloseTo(130, within(2.0));
-    assertThat(Math.toDegrees(truth.position(PARTS.pivot()))).isCloseTo(1.5, within(2.0));
+    assertThat(Math.toDegrees(truth.position(Team2611.PIVOT))).isCloseTo(1.5, within(2.0));
     assertThat(pivot.lastOutcome()).startsWith("pivot → in: ARRIVED in ");
   }
 
@@ -177,25 +176,25 @@ class Team2611RobotSimTest {
 
     press(() -> sim.driver().setLeftBumperButton(true));
     run(1);
-    double unaimed = rpm(PARTS.fullSend());
+    double unaimed = rpm(Team2611.FULL_SEND);
     var blocking = actions.readyToShoot().blocking();
-    double shooter = rpm(PARTS.shooter());
+    double shooter = rpm(Team2611.SHOOTER);
     press(() -> sim.driver().setRightX(0.5));
     for (int i = 0; i < RobotLoop.loops(4) && Math.abs(aimError()) > 1.5; i++) {
       run(0.02);
     }
     press(() -> sim.driver().setRightX(0));
     run(1);
-    double aimed = rpm(PARTS.fullSend());
+    double aimed = rpm(Team2611.FULL_SEND);
     press(() -> sim.driver().setRightX(0.5));
     run(0.4);
     press(() -> sim.driver().setRightX(0));
     run(0.5);
-    double turnedAway = rpm(PARTS.fullSend());
+    double turnedAway = rpm(Team2611.FULL_SEND);
     String why = fullSend.lastOutcome();
     press(() -> sim.driver().setRightTriggerAxis(1));
     run(1);
-    double overridden = rpm(PARTS.fullSend());
+    double overridden = rpm(Team2611.FULL_SEND);
 
     assertThat(shooter).isCloseTo(Team2611Actions.SHOT_RPM, within(0.03 * 3000));
     assertThat(unaimed).isCloseTo(0, within(5.0));
@@ -216,7 +215,7 @@ class Team2611RobotSimTest {
    */
   @Test
   void leftDoubleRunsItsStepsInsideAuto() {
-    Team2611Actions auto = new Team2611Actions(sim.joints(), PARTS, sim.scheduler(), () -> 0);
+    Team2611Actions auto = new Team2611Actions(sim.joints(), sim.scheduler(), () -> 0);
     Function<String, Command> path =
         name ->
             sim.drive()
@@ -238,14 +237,14 @@ class Team2611RobotSimTest {
     run(1.0); // the pivot out: 0.6 s or so
     String deployed = pivot.lastOutcome();
     run(2.0); // along the first path, the intake running
-    double alongFirst = rpm(PARTS.intake());
+    double alongFirst = rpm(Team2611.INTAKE);
     run(4.0); // t = 7 s: the shot, after both paths (4.7 s of them, and the pivot's)
-    double shooting = rpm(PARTS.fullSend());
+    double shooting = rpm(Team2611.FULL_SEND);
     run(4.0); // t = 11 s: along the third path, the shot done
-    double alongThird = rpm(PARTS.intake());
-    double betweenShots = rpm(PARTS.fullSend());
+    double alongThird = rpm(Team2611.INTAKE);
+    double betweenShots = rpm(Team2611.FULL_SEND);
     run(6.0); // t = 17 s: the last shot, until auto ends
-    double lastShot = rpm(PARTS.fullSend());
+    double lastShot = rpm(Team2611.FULL_SEND);
 
     assertThat(deployed).matches("pivot → out: ARRIVED in 0\\.\\d\\d s");
     assertThat(alongFirst).isGreaterThan(1900);

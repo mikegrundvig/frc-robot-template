@@ -1,6 +1,7 @@
-package frc.robot.lib.wiring;
+package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.between;
+import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.world.config.Checks;
@@ -127,6 +128,20 @@ public record MechanismWiring(
      * The kind of device it is on the bus, which two can't share an ID within: REV's two SPARKs are
      * one.
      */
+    /**
+     * This kind of controller on Systemcore's first CAN port, at an ID: {@code TALON_FX.can(32)},
+     * its motor turning counterclockwise for positive, seen facing its shaft, until {@link
+     * Device#clockwise} says otherwise.
+     */
+    public Device can(int id) {
+      return can(CanBus.SYSTEMCORE, id);
+    }
+
+    /** This kind of controller on a CAN bus, at an ID: {@code TALON_FX.can(CANIVORE, 23)}. */
+    public Device can(CanBus bus, int id) {
+      return new Device(this, bus, id, false);
+    }
+
     public String kind() {
       return switch (this) {
         case TALON_FX -> "TalonFX";
@@ -145,6 +160,26 @@ public record MechanismWiring(
    *     inverted}. For a differential, as the joint both motors move together (its average axis)
    *     moves forward.
    */
+  /**
+   * One motor's controller, as a joint's block names it: its kind, its bus and ID, and which way
+   * its motor turns for positive. {@code TALON_FX.can(32).clockwise()}.
+   *
+   * @param controller what it is
+   * @param bus the CAN bus it's on
+   * @param id its CAN ID
+   * @param turnsClockwise whether its motor turns clockwise for positive, seen facing its shaft
+   */
+  public record Device(Controller controller, CanBus bus, int id, boolean turnsClockwise) {
+    public Device {
+      Checks.on(Device.class).field("id", id, between(0, 62)).orThrow();
+    }
+
+    /** The same controller, its motor turning clockwise for positive, seen facing its shaft. */
+    public Device clockwise() {
+      return new Device(controller, bus, id, true);
+    }
+  }
+
   @ConfigRecord
   public record Motor(int id, boolean clockwise) {
     public Motor {
@@ -185,6 +220,8 @@ public record MechanismWiring(
   /**
    * An absolute encoder plugged into the leading motor controller's data port, as REV's Through
    * Bore Encoder is into a SPARK's: read once at startup, to tell the motor where the joint is.
+   * From a team's REVLib code, whose {@code zeroOffset} is the raw reading at zero before
+   * inverting: an offset of {@code -zeroOffset}, or {@code +zeroOffset} reversed.
    *
    * @param offset added to its reading, in turns, so it reads zero with the joint at zero: measured
    *     per install, and again whenever the encoder is moved
@@ -206,6 +243,102 @@ public record MechanismWiring(
     /** Its reading in turns, from what the controller reads raw, from 0 to 1. */
     public double turns(double raw) {
       return (reversed ? -raw : raw) + offset.in(Rotations);
+    }
+  }
+
+  /**
+   * An absolute encoder plugged into one of Systemcore's own ports, read by the robot, not by a
+   * motor controller: a REV Through Bore Encoder's duty-cycle output, or an analog encoder or
+   * potentiometer. The robot tells the motor where the joint is from its first good reading.
+   *
+   * @param port the Systemcore port it's on, 0 to 5
+   * @param signal how it reports where it is: a duty cycle, or a voltage
+   * @param turnsPerRange how many of its turns its signal's full range covers: 1 for an encoder
+   *     that wraps each turn, ten for a ten-turn potentiometer
+   * @param offset added to its reading, in its turns, so it reads zero with the joint at zero:
+   *     measured per install, and again whenever the encoder is moved
+   * @param reversed whether its reading falls as the joint moves forward
+   */
+  @ConfigRecord
+  public record PortEncoder(
+      int port, Signal signal, double turnsPerRange, Angle offset, boolean reversed) {
+    public PortEncoder {
+      Checks.on(PortEncoder.class)
+          .field("port", port, between(0, 5))
+          .field("turnsPerRange", turnsPerRange, positive())
+          .check(
+              "offset",
+              () ->
+                  Math.abs(offset.in(Rotations)) <= turnsPerRange
+                      ? null
+                      : offset.in(Rotations)
+                          + " turns is more than its range, "
+                          + turnsPerRange
+                          + " turns, either way")
+          .orThrow();
+    }
+
+    /** How a port encoder reports where it is. */
+    public enum Signal {
+      /** A pulse's share of its period, as a REV Through Bore's absolute output. */
+      DUTY_CYCLE,
+      /** A voltage's share of the port's range, as an analog encoder or a potentiometer. */
+      ANALOG
+    }
+
+    /** A duty-cycle encoder on a Systemcore port, one turn its full range: {@code dutyCycle(1)}. */
+    public static PortEncoder dutyCycle(int port) {
+      return MechanismWiringPortEncoderBuilder.builder()
+          .port(port)
+          .signal(Signal.DUTY_CYCLE)
+          .turnsPerRange(1)
+          .offset(Rotations.of(0))
+          .reversed(false)
+          .build();
+    }
+
+    /**
+     * An analog encoder or potentiometer on a Systemcore port, its full voltage range this many of
+     * its turns: {@code analog(2, 10)}, a ten-turn potentiometer.
+     */
+    public static PortEncoder analog(int port, double turnsPerRange) {
+      return MechanismWiringPortEncoderBuilder.builder()
+          .port(port)
+          .signal(Signal.ANALOG)
+          .turnsPerRange(turnsPerRange)
+          .offset(Rotations.of(0))
+          .reversed(false)
+          .build();
+    }
+
+    /** The same encoder, its reading offset so it reads zero with the joint at zero. */
+    public PortEncoder offset(Angle offset) {
+      return MechanismWiringPortEncoderBuilder.builder(this).offset(offset).build();
+    }
+
+    /**
+     * The same encoder, inverted, as WPILib's {@code setInverted(true)}: its reading falls as the
+     * joint moves forward.
+     */
+    public PortEncoder inverted() {
+      return MechanismWiringPortEncoderBuilder.builder(this).reversed(true).build();
+    }
+
+    /**
+     * Its reading as the joint's absolute encoder in the robot's definition has it, from what the
+     * port reads raw, its signal's share of its range from 0 to 1: in turns of its signal, its full
+     * range one turn, its direction and offset applied. A duty-cycle encoder's turn of signal is
+     * its own turn; a ten-turn potentiometer's is ten of its own, so its sensor is geared a tenth
+     * as much ({@code Driven.AbsoluteEncoder}).
+     */
+    public double read(double raw) {
+      return (reversed ? -raw : raw) + offset.in(Rotations) / turnsPerRange;
+    }
+
+    /** What the port reads raw for a reading: {@link #read}'s inverse, from 0 to 1. */
+    public double raw(double reading) {
+      double share = (reversed ? -1 : 1) * (reading - offset.in(Rotations) / turnsPerRange);
+      return share - Math.floor(share);
     }
   }
 

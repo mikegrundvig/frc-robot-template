@@ -16,21 +16,21 @@ import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.hardware.TalonFXS;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.lib.phoenix.MechanismControlBuilder;
-import frc.robot.lib.phoenix.MechanismControlGainsBuilder;
 import frc.robot.lib.phoenix.PhoenixMechanism;
-import frc.robot.lib.wiring.CanBus;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.MechanismWiringBuilder;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
@@ -203,7 +203,7 @@ class JointIOTalonTest {
 
   @Test
   void onlyAnFocMotorRunsWithFoc() {
-    Drive foc = PIVOT.motors(Motor.KRAKEN_X60_FOC, 1, JointFixtures.gearing(25));
+    Drive foc = JointFixtures.motors(PIVOT, Motor.KRAKEN_X60_FOC, 1, JointFixtures.gearing(25));
 
     assertThat(JointIOTalon.foc(PIVOT_MOTOR)).isFalse();
     assertThat(JointIOTalon.foc(foc)).isTrue();
@@ -280,7 +280,7 @@ class JointIOTalonTest {
         RobotDefinitionBuilder.builder(ROBOT)
             .drives(
                 List.of(
-                    PIVOT.motors(Motor.NEO, 1, JointFixtures.gearing(25)),
+                    JointFixtures.motors(PIVOT, Motor.NEO, 1, JointFixtures.gearing(25)),
                     JointFixtures.ROLLER_MOTOR,
                     JointFixtures.ELEVATOR_MOTORS,
                     JointFixtures.TURRET_MOTOR))

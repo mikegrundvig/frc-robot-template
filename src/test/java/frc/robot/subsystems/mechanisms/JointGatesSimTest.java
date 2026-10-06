@@ -2,8 +2,13 @@ package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_PUSH;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_OUTTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -33,7 +38,7 @@ class JointGatesSimTest {
   /** Into 2° of "out" to be at it, and out past 4° to leave: the enter and stay bands. */
   @Test
   void isAtArrivesInsideTheEnterBandAndLeavesPastTheStayBand() {
-    Gate atOut = pivot.isAt("out");
+    Gate atOut = pivot.isAt(PIVOT_OUT);
     List<Boolean> seen = new ArrayList<>();
 
     for (double degrees : new double[] {127, 128.6, 127, 125.5, 128.6}) {
@@ -46,8 +51,8 @@ class JointGatesSimTest {
 
   @Test
   void isPastAndIsBetweenReadWhereTheJointIs() {
-    Gate past = pivot.isPast("run");
-    Gate between = pivot.isBetween("run", "out");
+    Gate past = pivot.isPast(PIVOT_RUN);
+    Gate between = pivot.isBetween(PIVOT_RUN, PIVOT_OUT);
     sim.loop();
     boolean[] stowed = {past.getAsBoolean(), between.getAsBoolean()};
 
@@ -66,7 +71,7 @@ class JointGatesSimTest {
     sim.run(0.1);
     boolean holding = atGoal.getAsBoolean();
 
-    sim.run(pivot.goTo("out"), 0.2);
+    sim.run(pivot.goTo(PIVOT_OUT), 0.2);
     boolean moving = atGoal.getAsBoolean();
     sim.run(1);
 
@@ -78,13 +83,13 @@ class JointGatesSimTest {
   @Test
   void aRollerIsAtGoalAtItsSpeedOrStopped() {
     Gate atGoal = roller.isAtGoal();
-    Gate atIntaking = roller.isAt("intaking");
+    Gate atIntaking = roller.isAt(ROLLER_INTAKING);
     sim.run(0.1);
     boolean[] stopped = {atGoal.getAsBoolean(), atIntaking.getAsBoolean()};
 
-    sim.run(roller.run("intaking"), 1);
+    sim.run(roller.run(ROLLER_INTAKING), 1);
     boolean[] intaking = {atGoal.getAsBoolean(), atIntaking.getAsBoolean()};
-    sim.run(roller.run("outtaking"), 1);
+    sim.run(roller.run(ROLLER_OUTTAKING), 1);
 
     assertThat(stopped).containsExactly(true, false);
     assertThat(intaking).containsExactly(true, true);
@@ -100,7 +105,7 @@ class JointGatesSimTest {
   @Test
   void aJointPushedIntoItsStopIsStalled() {
     Gate stalled = pivot.isStalled();
-    sim.run(pivot.run("push"), 0.2);
+    sim.run(pivot.run(PIVOT_PUSH), 0.2);
     boolean swinging = stalled.getAsBoolean();
 
     sim.run(1.5);

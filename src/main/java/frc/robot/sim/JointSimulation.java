@@ -1,14 +1,19 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
+import com.michaelgrundvig.frc.world.robot.Sensor;
+import frc.robot.subsystems.mechanisms.AbsoluteEncoderIO;
 import frc.robot.subsystems.mechanisms.JointIO;
 import frc.robot.subsystems.mechanisms.JointSetup;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Transform3d;
 
@@ -24,6 +29,7 @@ import org.wpilib.math.geometry.Transform3d;
 public final class JointSimulation {
   private final RobotMath math;
   private final List<JointIOSim> joints = new ArrayList<>();
+  private final Map<Joint, AbsoluteEncoderIOSim> encoders = new HashMap<>();
 
   /** Where each joint really is, as the step starts: what gravity is worked out from. */
   private final Map<Joint, Double> truth = new LinkedHashMap<>();
@@ -40,6 +46,29 @@ public final class JointSimulation {
     JointIOSim joint = new JointIOSim(math, setup);
     joints.add(joint);
     return joint;
+  }
+
+  /**
+   * A joint's absolute encoder, simulated, where the robot reads it itself: on a Systemcore port,
+   * or unwired ({@code JointSetup.readsAbsolute}). Asked for after the joint itself.
+   */
+  public AbsoluteEncoderIO absoluteEncoder(JointSetup setup) {
+    Joint joint = setup.joint();
+    Sensor.Encoder model = Objects.requireNonNull(JointSetup.absoluteEncoder(math, joint));
+    AbsoluteEncoderIOSim encoder =
+        new AbsoluteEncoderIOSim(
+            sim(joint),
+            model,
+            joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port).orElse(null));
+    encoders.put(joint, encoder);
+    return encoder;
+  }
+
+  /** Unplugs a joint's absolute encoder, or plugs it back in: it reads nothing while unplugged. */
+  public void unplug(Joint joint, boolean unplugged) {
+    Objects.requireNonNull(encoders.get(joint), joint.label() + " has no simulated encoder")
+            .connected =
+        !unplugged;
   }
 
   /** One loop: every joint runs for a time, with gravity where the joints stand as it starts. */

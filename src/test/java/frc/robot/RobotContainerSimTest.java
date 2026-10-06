@@ -13,11 +13,12 @@ import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Placement;
+import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SwerveWiring;
 import frc.robot.sim.DriveSimulation;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
-import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.telemetry.MockTelemetryBackend;
@@ -373,17 +373,22 @@ class RobotContainerSimTest {
     }
     RobotConfig wired =
         RobotConfigBuilder.builder(Robots.SIM)
-            .drivetrainWiring(
-                Optional.of(
-                    SwerveWiring.builder()
-                        .canBus(CanBus.canivore("drivetrain"))
-                        .driveController(MechanismWiring.Controller.TALON_FX)
-                        .steerController(MechanismWiring.Controller.TALON_FX)
-                        .gyroId(52)
-                        .gyroYawScale(1.0)
-                        .modules(List.of(modules))
-                        .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
-                        .build()))
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .drivetrain(
+                        Robots.SIM
+                            .definition()
+                            .drivetrain()
+                            .wired(
+                                SwerveWiring.builder()
+                                    .canBus(CanBus.canivore("drivetrain"))
+                                    .driveController(MechanismWiring.Controller.TALON_FX)
+                                    .steerController(MechanismWiring.Controller.TALON_FX)
+                                    .gyroId(52)
+                                    .gyroYawScale(1.0)
+                                    .modules(List.of(modules))
+                                    .build()))
+                    .build())
             .build();
     sim.build(Constants.Mode.REAL, wired, SensorErrors.NONE);
 

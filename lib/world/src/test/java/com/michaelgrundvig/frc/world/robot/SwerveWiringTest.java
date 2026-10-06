@@ -1,4 +1,4 @@
-package frc.robot.lib.wiring;
+package com.michaelgrundvig.frc.world.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -8,8 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
-import org.wpilib.hardware.imu.OnboardIMU;
 
 /** A drivetrain's wiring is checked when it's written down, not when the robot won't drive. */
 class SwerveWiringTest {
@@ -31,13 +29,12 @@ class SwerveWiringTest {
 
   private static SwerveWiring wiring(List<SwerveWiring.ModuleWiring> modules) {
     return SwerveWiring.builder()
-        .canBus(CanBus.port(CANPort.CAN_S0))
+        .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
         .driveController(MechanismWiring.Controller.TALON_FX)
         .steerController(MechanismWiring.Controller.TALON_FX)
         .gyroId(1)
         .gyroYawScale(1.0)
         .modules(modules)
-        .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
         .build();
   }
 
@@ -46,7 +43,7 @@ class SwerveWiringTest {
     SwerveWiring wiring = wiring(modules()); // encoder 1 and drive 1, gyro 1
 
     assertThat(wiring.modules()).hasSize(4);
-    assertThat(wiring.canBus()).isEqualTo(new CanBus.Port(CANPort.CAN_S0));
+    assertThat(wiring.canBus()).isEqualTo(new CanBus.Port(CanBus.Systemcore.CAN_S0));
   }
 
   @Test

@@ -9,7 +9,9 @@ import static org.wpilib.units.Units.Degrees;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Distance;
@@ -151,9 +153,17 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
    *     a beam's points, so none is needed: it's drawn at its part's origin, and the missing-data
    *     report says so
    * @param kind what trips it
+   * @param wiring where it's connected, and which raw signal means tripped; none for the simulator
+   *     alone
    */
   @ConfigRecord
-  record Switch(String label, Part part, Optional<Pose3d> pose, Kind kind) implements Placed {
+  record Switch(
+      String label,
+      Part part,
+      Optional<Pose3d> pose,
+      Kind kind,
+      Optional<SensorWiring.Connection> wiring)
+      implements Placed {
     public Switch {
       Checks.on(Switch.class, label).field("label", label, notBlank()).orThrow();
     }
@@ -181,6 +191,7 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
                   .position(Optional.of(position))
                   .end(end)
                   .build())
+          .wiring(Optional.empty())
           .build();
     }
 
@@ -199,12 +210,19 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
                   .position(Optional.empty())
                   .end(end)
                   .build())
+          .wiring(Optional.empty())
           .build();
     }
 
     /** A beam break, through-beam or reflective, on a part: tripped by something in its beam. */
     public static Switch beam(String label, Part part) {
-      return builder().label(label).part(part).pose(Optional.empty()).kind(new Beam()).build();
+      return builder()
+          .label(label)
+          .part(part)
+          .pose(Optional.empty())
+          .kind(new Beam())
+          .wiring(Optional.empty())
+          .build();
     }
 
     /**
@@ -212,12 +230,47 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
      * the model doesn't have.
      */
     public static Switch contact(String label, Part part) {
-      return builder().label(label).part(part).pose(Optional.empty()).kind(new Contact()).build();
+      return builder()
+          .label(label)
+          .part(part)
+          .pose(Optional.empty())
+          .kind(new Contact())
+          .wiring(Optional.empty())
+          .build();
     }
 
     /** The same switch, placed on its part: for the 3D view and the simulator. */
     public Switch at(Pose3d where) {
       return SensorSwitchBuilder.builder(this).pose(Optional.of(where)).build();
+    }
+
+    /**
+     * The same switch, connected: {@code Sensor.Switch.beam("claw beam", PIVOT).on(new
+     * SensorWiring.Candi(CAN, 30, 1), SensorWiring.Polarity.NORMALLY_OPEN)}. Unconnected, it runs
+     * in the simulator alone.
+     */
+    public Switch on(SensorWiring.Input input, SensorWiring.Polarity polarity) {
+      return on(new SensorWiring.Connection(input, polarity));
+    }
+
+    /** The same switch, connected. */
+    public Switch on(SensorWiring.Connection connection) {
+      return SensorSwitchBuilder.builder(this).wiring(Optional.of(connection)).build();
+    }
+
+    /** Equal to another switch the same in everything but its wiring. */
+    @Override
+    public boolean equals(@Nullable Object other) {
+      return other instanceof Switch that
+          && label.equals(that.label)
+          && part.equals(that.part)
+          && pose.equals(that.pose)
+          && kind.equals(that.kind);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(label, part, pose, kind);
     }
 
     /** Tripped: pressed, its beam blocked. */
@@ -287,10 +340,16 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
    * @param pose where on its part, looking along its x, if known, as a switch's
    * @param range the farthest it reads
    * @param fieldOfView how wide its cone is, across
+   * @param wiring the CANrange it is, or none for the simulator alone
    */
   @ConfigRecord
   record Rangefinder(
-      String label, Part part, Optional<Pose3d> pose, Distance range, Angle fieldOfView)
+      String label,
+      Part part,
+      Optional<Pose3d> pose,
+      Distance range,
+      Angle fieldOfView,
+      Optional<SensorWiring.CanRange> wiring)
       implements Placed {
     public Rangefinder {
       Checks.on(Rangefinder.class, label)
@@ -313,6 +372,48 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
     /** Nothing nearer than a distance. */
     public Condition.Farther fartherThan(Distance distance) {
       return new Condition.Farther(this, distance);
+    }
+
+    /**
+     * A rangefinder on a part, reading this far within a cone this wide: {@code
+     * Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))}, then {@code
+     * .at(pose)} where it's known and {@code .on(canRange)} once it's wired.
+     */
+    public static Rangefinder of(String label, Part part, Distance range, Angle fieldOfView) {
+      return builder()
+          .label(label)
+          .part(part)
+          .pose(Optional.empty())
+          .range(range)
+          .fieldOfView(fieldOfView)
+          .wiring(Optional.empty())
+          .build();
+    }
+
+    /** The same rangefinder, placed on its part, looking along its x. */
+    public Rangefinder at(Pose3d where) {
+      return SensorRangefinderBuilder.builder(this).pose(Optional.of(where)).build();
+    }
+
+    /** The same rangefinder, on a CANrange. Unconnected, it runs in the simulator alone. */
+    public Rangefinder on(SensorWiring.CanRange canRange) {
+      return SensorRangefinderBuilder.builder(this).wiring(Optional.of(canRange)).build();
+    }
+
+    /** Equal to another rangefinder the same in everything but its wiring. */
+    @Override
+    public boolean equals(@Nullable Object other) {
+      return other instanceof Rangefinder that
+          && label.equals(that.label)
+          && part.equals(that.part)
+          && pose.equals(that.pose)
+          && range.equals(that.range)
+          && fieldOfView.equals(that.fieldOfView);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(label, part, pose, range, fieldOfView);
     }
   }
 }

@@ -118,6 +118,8 @@ public final class AdvantageScopeAssets {
           "DrivetrainGeometry.ModuleType.driveInertia",
           "DrivetrainGeometry.ModuleType.steerInertia",
           "DrivetrainGeometry.ModuleType.couplingRatio",
+          "DrivetrainGeometry.wiring",
+          "DrivetrainGeometry.control",
           "CameraConfig.noiseScale",
           "CameraConfig.joint",
           "CameraConfig.Sensor.frameRate",

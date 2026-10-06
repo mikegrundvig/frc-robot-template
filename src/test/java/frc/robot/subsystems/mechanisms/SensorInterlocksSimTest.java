@@ -1,7 +1,9 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -39,6 +41,7 @@ class SensorInterlocksSimTest {
           .pose(Optional.empty())
           .range(Meters.of(1))
           .fieldOfView(Degrees.of(27))
+          .wiring(Optional.empty())
           .build();
 
   private static final RobotDefinition ROBOT =
@@ -59,7 +62,7 @@ class SensorInterlocksSimTest {
   /** The roller runs while the beam is clear, stops as it trips, and stops with it lost. */
   @Test
   void aRollerRunsOnlyWhileItsBeamIsClear() {
-    sim.scheduler.schedule(roller.run("intaking"));
+    sim.scheduler.schedule(roller.run(ROLLER_INTAKING));
     sim.run(1);
     double running = sim.simulation.velocity(ROLLER);
 
@@ -85,7 +88,7 @@ class SensorInterlocksSimTest {
   @Test
   void aPivotKeepsOutOfABandWhileSomethingIsNear() {
     sim.sensors.see(REEF, Meters.of(0.2));
-    Move out = pivot.goTo("out").within(Seconds.of(5));
+    Move out = pivot.goTo(PIVOT_OUT).within(Seconds.of(5));
     sim.scheduler.schedule(out);
     sim.run(1.5);
     double waiting = Math.toDegrees(sim.simulation.position(PIVOT));

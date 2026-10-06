@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.Part;
@@ -28,6 +29,7 @@ class JointHistoryTest {
         .link(Link.builder().label(label).mass(MassProperties.NONE).shapes(List.of()).build())
         .positions(List.of())
         .outputs(List.of())
+        .driven(Driven.NONE)
         .build();
   }
 

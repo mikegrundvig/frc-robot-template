@@ -37,7 +37,6 @@ import org.junit.jupiter.api.Test;
 import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.hardware.bus.CANPort;
-import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.math.filter.Debouncer;
 import org.wpilib.math.filter.EdgeCounterFilter;
 import org.wpilib.math.filter.SlewRateLimiter;
@@ -96,14 +95,11 @@ class ArchitectureTest {
                     // The annotations on generated configuration builders; nothing at run time.
                     "io.soabase.recordbuilder..",
                     // The validation kit, which every configuration record is built with.
-                    "com.michaelgrundvig.frc.world.config..")
-                // Plain values from elsewhere in WPILib: the wiring's CAN port and mount; and the
-                // catalog's motors, which the wiring's controllers drive.
-                .or(
-                    belongToAnyOf(
-                        CANPort.class,
-                        OnboardIMU.MountOrientation.class,
-                        com.michaelgrundvig.frc.world.robot.Motor.class)))
+                    "com.michaelgrundvig.frc.world.config..",
+                    // The robot's model, its wiring and control among it: plain records.
+                    "com.michaelgrundvig.frc.world.robot..")
+                // A plain value from elsewhere in WPILib: Systemcore's CAN ports, by its names.
+                .or(belongToAnyOf(CANPort.class)))
         .because(
             "components must work in any robot and be testable without one: no hardware, robot"
                 + " state, NetworkTables, telemetry, tunables, commands, or simulation inside")

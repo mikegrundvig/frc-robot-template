@@ -12,11 +12,11 @@ import com.ctre.phoenix6.hardware.CANrange;
 import com.ctre.phoenix6.signals.S1StateValue;
 import com.ctre.phoenix6.signals.S2StateValue;
 import com.ctre.phoenix6.signals.UpdateModeValue;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeAll;
@@ -167,6 +167,7 @@ class SensorIOTest {
         .pose(Optional.empty())
         .range(Meters.of(meters))
         .fieldOfView(Degrees.of(degrees))
+        .wiring(Optional.empty())
         .build();
   }
 }

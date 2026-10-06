@@ -1,5 +1,6 @@
 package frc.robot.lib.wiring;
 
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import java.util.Optional;
 
 /**

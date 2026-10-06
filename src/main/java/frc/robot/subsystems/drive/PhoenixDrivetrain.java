@@ -2,10 +2,11 @@ package frc.robot.subsystems.drive;
 
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SwerveWiring;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.SwerveWiring;
+import frc.robot.lib.wiring.CanPorts;
 import java.util.concurrent.locks.Lock;
 import org.wpilib.math.geometry.Rotation3d;
 
@@ -57,7 +58,7 @@ public final class PhoenixDrivetrain implements AutoCloseable {
               ? new ModuleIOTalonFX(module, bus, hardware, hardware.couplingRatio(), odometry)
               : new ModuleIOSpark(
                   module,
-                  ((CanBus.Port) wiring.canBus()).port(),
+                  CanPorts.of(((CanBus.Port) wiring.canBus()).port()),
                   wiring.driveController(),
                   wiring.steerController(),
                   hardware);
@@ -86,7 +87,7 @@ public final class PhoenixDrivetrain implements AutoCloseable {
 
   static CANBus bus(CanBus bus) {
     return switch (bus) {
-      case CanBus.Port port -> new CANBus(port.port());
+      case CanBus.Port port -> new CANBus(CanPorts.of(port.port()));
       case CanBus.Canivore canivore -> new CANBus(canivore.name());
     };
   }

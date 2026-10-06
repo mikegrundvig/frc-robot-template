@@ -8,9 +8,9 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
 import frc.robot.behavior.Gate;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

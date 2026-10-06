@@ -7,8 +7,8 @@ import com.ctre.phoenix6.signals.ForwardLimitSourceValue;
 import com.ctre.phoenix6.signals.ForwardLimitTypeValue;
 import com.ctre.phoenix6.signals.ReverseLimitSourceValue;
 import com.ctre.phoenix6.signals.ReverseLimitTypeValue;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.SensorWiring;
 import org.junit.jupiter.api.Test;
 
 /**

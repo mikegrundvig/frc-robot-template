@@ -1,5 +1,7 @@
 package frc.robot.subsystems.mechanisms;
 
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -7,8 +9,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.wpilib.units.Units.Amps;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import frc.robot.RobotSim;
-import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.sim.JointsSimHarness;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -35,8 +37,8 @@ class JointTuningSimTest {
   /** How long the pivot takes to swing out, from in. */
   private double swingOut(JointsSimHarness harness) {
     JointMechanism pivot = harness.joints.of(JointFixtures.PIVOT);
-    harness.run(pivot.goTo("in"), 2);
-    Move out = pivot.goTo("out");
+    harness.run(pivot.goTo(PIVOT_IN), 2);
+    Move out = pivot.goTo(PIVOT_OUT);
     harness.scheduler.schedule(out);
     return harness.runUntil(() -> out.outcome().isPresent(), 3);
   }

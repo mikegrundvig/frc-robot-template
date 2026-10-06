@@ -1,4 +1,4 @@
-package frc.robot.lib.wiring;
+package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.between;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
@@ -132,12 +132,43 @@ public sealed interface SensorWiring permits SensorWiring.OfSwitch, SensorWiring
     public ControllerLimit {
       Checks.on(ControllerLimit.class, joint).field("joint", joint, notBlank()).orThrow();
     }
+
+    /**
+     * A limit input on a joint's own leading controller, by the joint itself: {@code
+     * ControllerLimit.of(ROLLER, Direction.FORWARD)}, a beam on the roller's SPARK.
+     */
+    public static ControllerLimit of(Joint joint, Direction direction) {
+      return SensorWiringControllerLimitBuilder.builder()
+          .joint(joint.label())
+          .direction(direction)
+          .build();
+    }
   }
 
   /** Which of a motor controller's two limit inputs. */
   enum Direction {
     FORWARD,
     REVERSE
+  }
+
+  /**
+   * Where a switch is connected and which raw signal means tripped, as a switch carries it: {@code
+   * CLAW_BEAM.on(new SensorWiring.Candi(CAN, 30, 1), Polarity.NORMALLY_OPEN)}.
+   *
+   * @param input where it's connected
+   * @param polarity which raw signal means tripped
+   */
+  record Connection(Input input, Polarity polarity) {
+    public Connection {
+      Checks.on(Connection.class)
+          .check(
+              "input",
+              () ->
+                  input instanceof CanRange
+                      ? "a switch isn't on a CANrange: a CANrange is a rangefinder"
+                      : null)
+          .orThrow();
+    }
   }
 
   /**

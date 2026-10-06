@@ -12,10 +12,10 @@
  *   <li>the robot's definition, through its {@code RobotMath}: the joint, the drive that moves it,
  *       its encoder, and what's derived from them (ratios, the encoder's wrap, gravity, the ideal
  *       gains and the free speed);
- *   <li>the mechanism's wiring ({@link frc.robot.lib.wiring.MechanismWiring}): CAN IDs, which way
- *       each motor turns, the CANcoder's offset and direction;
- *   <li>its control ({@link frc.robot.lib.phoenix.MechanismControl}): gains, soft limits, Motion
- *       Magic's limits, current limits and neutral mode, in the joint's units.
+ *   <li>the mechanism's wiring ({@link com.michaelgrundvig.frc.world.robot.MechanismWiring}): CAN
+ *       IDs, which way each motor turns, the CANcoder's offset and direction;
+ *   <li>its control ({@link com.michaelgrundvig.frc.world.robot.MechanismControl}): gains, soft
+ *       limits, Motion Magic's limits, current limits and neutral mode, in the joint's units.
  * </ul>
  *
  * <p>The units are fixed in {@link frc.robot.lib.phoenix.PhoenixUnits}: a revolute joint's Phoenix

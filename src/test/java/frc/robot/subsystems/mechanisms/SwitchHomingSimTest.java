@@ -3,17 +3,18 @@ package frc.robot.subsystems.mechanisms;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_FRONT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.homed;
 import static frc.robot.subsystems.mechanisms.JointFixtures.setup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.world.robot.MechanismControl.Homing;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.RobotSim;
-import frc.robot.lib.phoenix.MechanismControl.Homing;
 import frc.robot.sim.JointsSimHarness;
 import java.util.ArrayList;
 import java.util.List;
@@ -77,7 +78,7 @@ class SwitchHomingSimTest {
     JointsSimHarness turretSim = new JointsSimHarness(TURRET_ROBOT, setups);
     JointMechanism turret = turretSim.joints.of(TURRET);
     turretSim.simulation.powerOnAt(TURRET, Math.toRadians(-40));
-    Move front = turret.goTo("front").within(Seconds.of(6));
+    Move front = turret.goTo(TURRET_FRONT).within(Seconds.of(6));
     turretSim.scheduler.schedule(front);
 
     turretSim.runUntil(() -> front.outcome().isPresent(), 8);

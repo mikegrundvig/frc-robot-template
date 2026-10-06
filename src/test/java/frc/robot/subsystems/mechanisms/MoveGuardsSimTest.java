@@ -1,8 +1,10 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -25,7 +27,7 @@ class MoveGuardsSimTest {
 
   @Test
   void onlyIfRefusesAMoveWhoseGateIsFalseAsItStarts() {
-    Move out = pivot.goTo("out").onlyIf(intakeClear);
+    Move out = pivot.goTo(PIVOT_OUT).onlyIf(intakeClear);
 
     sim.run(out, 0.5);
 
@@ -38,7 +40,7 @@ class MoveGuardsSimTest {
   @Test
   void onlyIfIsCheckedOnce() {
     clear[0] = true;
-    Move out = pivot.goTo("out").onlyIf(intakeClear);
+    Move out = pivot.goTo(PIVOT_OUT).onlyIf(intakeClear);
     sim.scheduler.schedule(out);
     sim.run(0.1);
 
@@ -54,7 +56,7 @@ class MoveGuardsSimTest {
     Gate atSpeed = Gate.of(sim.scheduler, "shooter at goal", () -> ready[0]);
     Gate readyToShoot = Gate.all("ready to shoot", atSpeed, intakeClear);
     clear[0] = true;
-    Move feed = roller.run("intaking").onlyWhile(readyToShoot);
+    Move feed = roller.run(ROLLER_INTAKING).onlyWhile(readyToShoot);
     sim.run(feed, 0.5);
     double feeding = sim.simulation.velocity(ROLLER);
 
@@ -71,7 +73,7 @@ class MoveGuardsSimTest {
 
   @Test
   void onlyWhileRefusesAMoveWhoseGateIsFalseToStartWith() {
-    Move feed = roller.run("intaking").onlyWhile(intakeClear);
+    Move feed = roller.run(ROLLER_INTAKING).onlyWhile(intakeClear);
 
     sim.run(feed, 0.2);
 
@@ -82,7 +84,7 @@ class MoveGuardsSimTest {
   @Test
   void guardsCarryThroughTheMovesOtherOptions() {
     clear[0] = true;
-    Move out = pivot.goTo("out").onlyWhile(intakeClear).at(0.5);
+    Move out = pivot.goTo(PIVOT_OUT).onlyWhile(intakeClear).at(0.5);
     sim.scheduler.schedule(out);
     sim.run(0.2);
 

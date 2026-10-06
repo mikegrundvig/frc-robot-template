@@ -6,9 +6,9 @@ import com.ctre.phoenix6.configs.DigitalInputsConfigs;
 import com.ctre.phoenix6.hardware.CANdi;
 import com.ctre.phoenix6.signals.S1CloseStateValue;
 import com.ctre.phoenix6.signals.S2CloseStateValue;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.lib.wiring.SensorWiring;
 import org.wpilib.math.filter.Debouncer;
 
 /**

@@ -16,6 +16,7 @@ import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.BodyBuilder;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Coupling;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Link;
@@ -164,8 +165,8 @@ class SeasonLimitsTest {
         RobotDefinitionBuilder.builder(withArm(arm))
             .configurations(
                 List.of(
-                    Configuration.of("flat", arm.at("flat")),
-                    Configuration.of("halfway", arm.at("halfway"))))
+                    Configuration.of("flat", arm.at(arm.position("flat"))),
+                    Configuration.of("halfway", arm.at(arm.position("halfway")))))
             .build();
 
     assertThat(Rebuilt.LIMITS.problems(robot))
@@ -220,6 +221,7 @@ class SeasonLimitsTest {
                 .build())
         .positions(List.of())
         .outputs(List.of())
+        .driven(Driven.NONE)
         .build();
   }
 }

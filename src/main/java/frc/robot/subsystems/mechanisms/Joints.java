@@ -4,11 +4,11 @@ import com.michaelgrundvig.frc.world.robot.Condition;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.behavior.Gate;
-import frc.robot.lib.phoenix.MechanismControl;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -24,13 +24,13 @@ import org.wpilib.command3.Scheduler;
 /**
  * Every driven joint of the robot, each a v3 {@link Mechanism} the template builds from the robot's
  * definition and the joint's setup ({@link JointMechanism}). The composition root builds it once;
- * behavior code looks its joints up through the robot's parts, never by a label:
+ * behavior code looks its joints up by the joints themselves, never by a label:
  *
  * <pre>{@code
- * JointMechanism pivot = joints.of(parts.pivot()), roller = joints.of(parts.roller());
- * joints.goTo(parts.amp())       // requires exactly the joints the configuration names
- * joints.run(parts.feeding())    // holds it, outputs included, until canceled
- * joints.isAt(parts.stowed())    // a gate: every joint at its place
+ * JointMechanism pivot = joints.of(PIVOT), roller = joints.of(ROLLER);
+ * joints.goTo(AMP)       // requires exactly the joints the configuration names
+ * joints.run(FEEDING)    // holds it, outputs included, until canceled
+ * joints.isAt(STOWED)    // a gate: every joint at its place
  * }</pre>
  *
  * <p>It enforces the definition's interlocks beneath every command, each on the joint it restricts
@@ -92,6 +92,25 @@ public final class Joints {
       Function<JointSetup, JointIO> io,
       Function<Sensor.Placed, SensorIO> sensorIo,
       Scheduler scheduler) {
+    this(definition, setups, tuned, io, setup -> new AbsoluteEncoderIO() {}, sensorIo, scheduler);
+  }
+
+  /**
+   * The same, with the absolute encoders the robot reads itself ({@link JointSetup#readsAbsolute}):
+   * each joint with one waits for its first reading, and tells its motor controller where it is
+   * from it.
+   *
+   * @param absoluteIo each such encoder's hardware: a Systemcore port, the simulator's, or none;
+   *     asked for after the joint's own
+   */
+  public Joints(
+      RobotDefinition definition,
+      List<JointSetup> setups,
+      Function<JointSetup, Supplier<MechanismControl>> tuned,
+      Function<JointSetup, JointIO> io,
+      Function<JointSetup, AbsoluteEncoderIO> absoluteIo,
+      Function<Sensor.Placed, SensorIO> sensorIo,
+      Scheduler scheduler) {
     String problems = JointSetup.problems(definition, setups);
     if (problems != null) {
       throw new IllegalArgumentException(problems);
@@ -109,6 +128,9 @@ public final class Joints {
         if (setup.joint().equals(joint)) {
           JointMechanism mechanism =
               new JointMechanism(math, setup, tuned.apply(setup), io.apply(setup), scheduler);
+          if (JointSetup.readsAbsolute(setup) != null) {
+            mechanism.seedFrom(absoluteIo.apply(setup));
+          }
           built.add(mechanism);
           byJoint.put(joint, mechanism);
         }
@@ -118,7 +140,7 @@ public final class Joints {
     sensors = new Sensors(definition, sensorIo, this::pinned, scheduler);
     for (JointMechanism joint : joints) {
       List<Sensor.Switch> limits = new ArrayList<>();
-      for (Sensor sensor : definition.sensors()) {
+      for (Sensor sensor : definition.math().sensors()) {
         if (sensor instanceof Sensor.Switch onSwitch
             && onSwitch.kind() instanceof Sensor.Switch.Limit limit
             && limit.joint().equals(joint.joint())) {
@@ -192,9 +214,8 @@ public final class Joints {
   }
 
   /**
-   * Several joints' mechanisms, as one requirement: {@code
-   * Command.requiring(joints.all(parts.pivot(), parts.roller()))}. The parts record names the
-   * joints a command drives together.
+   * Several joints' mechanisms, as one requirement: {@code Command.requiring(joints.all(PIVOT,
+   * ROLLER))}: the joints a command drives together.
    *
    * @throws IllegalArgumentException as {@link #of(Joint)} does, for any of them
    */
@@ -220,8 +241,8 @@ public final class Joints {
 
   /**
    * Holds a configuration's joints at their named places and outputs until canceled: {@code
-   * driver.rightTrigger().whileTrue(joints.run(parts.feeding()))}. Refused, as {@link
-   * #goTo(Configuration)} is, if it names a joint the template doesn't drive.
+   * driver.rightTrigger().whileTrue(joints.run(FEEDING))}. Refused, as {@link #goTo(Configuration)}
+   * is, if it names a joint the template doesn't drive.
    */
   public Move run(Configuration configuration) {
     return Move.configuration(
@@ -238,7 +259,9 @@ public final class Joints {
       JointMechanism mechanism = byJoint.get(target.joint());
       terms.add(
           mechanism != null
-              ? mechanism.isAt(target.name())
+              ? target.isOutput()
+                  ? mechanism.isAt(target.joint().output(target.name()))
+                  : mechanism.isAt(target.joint().position(target.name()))
               : Gate.of(scheduler, target.joint().label() + " driven", () -> false));
     }
     return Gate.all("at " + configuration.name(), terms.toArray(Gate[]::new));

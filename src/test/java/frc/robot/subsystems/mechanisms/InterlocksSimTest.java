@@ -1,9 +1,14 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR_CLEAR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
@@ -37,14 +42,14 @@ import org.wpilib.math.geometry.Translation3d;
 @ExtendWith(RobotSim.class)
 class InterlocksSimTest {
   static final Interlock ROLLER_ONLY_WHEN_OUT =
-      Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past("run"));
+      Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
 
   static final Interlock PIVOT_CLEARS_ELEVATOR =
-      Interlock.that(PIVOT).keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before("clear"));
+      Interlock.that(PIVOT).keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(ELEVATOR_CLEAR));
 
   /** The pivot out and the elevator clear: the order between them is the interlock's. */
   static final Configuration DEPLOYED =
-      Configuration.of("deployed", PIVOT.at("out"), ELEVATOR.at("clear"));
+      Configuration.of("deployed", PIVOT.at(PIVOT_OUT), ELEVATOR.at(ELEVATOR_CLEAR));
 
   static final RobotDefinition GUARDED =
       RobotDefinitionBuilder.builder(ROBOT)
@@ -67,7 +72,7 @@ class InterlocksSimTest {
    */
   @Test
   void theRollerWaitsForThePivotToPassRun() {
-    Move intaking = roller.run("intaking");
+    Move intaking = roller.run(ROLLER_INTAKING);
     sim.run(intaking, 0.5);
     double waiting = sim.simulation.velocity(ROLLER);
     String heldBy = roller.heldBy();
@@ -121,7 +126,7 @@ class InterlocksSimTest {
 
   @Test
   void heldPastItsDeadlineAMoveTimesOutAndSaysWhatHeldIt() {
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
     sim.scheduler.schedule(out);
 
     sim.runUntil(() -> out.outcome().isPresent(), 3);
@@ -143,7 +148,7 @@ class InterlocksSimTest {
     sim.runUntil(() -> deeper.outcome().isPresent(), 2);
     double afterDeeper = pivotDegrees();
 
-    Move in = pivot.goTo("in");
+    Move in = pivot.goTo(PIVOT_IN);
     sim.scheduler.schedule(in);
     sim.runUntil(() -> in.outcome().isPresent(), 2);
 
@@ -170,7 +175,7 @@ class InterlocksSimTest {
                 SETUPS.get(2),
                 SETUPS.get(3)));
     JointMechanism swung = swinging.joints.of(PIVOT);
-    Move out = swung.goTo("out");
+    Move out = swung.goTo(PIVOT_OUT);
     swinging.scheduler.schedule(out);
     double furthest = 0;
     for (int i = 0; i < 100; i++) {
@@ -197,7 +202,7 @@ class InterlocksSimTest {
         RobotDefinitionBuilder.builder(ROBOT)
             .joints(List.of(PIVOT, ROLLER, ELEVATOR, TURRET, hatch))
             .configurations(List.of())
-            .interlocks(List.of(Interlock.that(ROLLER).runsOnlyWhen(hatch.past("run"))))
+            .interlocks(List.of(Interlock.that(ROLLER).runsOnlyWhen(hatch.past(PIVOT_RUN))))
             .build();
 
     assertThatThrownBy(

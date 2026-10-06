@@ -3,8 +3,8 @@ package frc.robot;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import frc.robot.subsystems.drive.DrivetrainControl;
 
 /**
  * The rules across this robot's mechanisms: checks that read more than one mechanism's

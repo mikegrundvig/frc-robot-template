@@ -1,12 +1,20 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR_CLEAR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_PUSH;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_EJECTING;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_OUTTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_BACK;
 import static frc.robot.subsystems.mechanisms.JointFixtures.assumed;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.profile;
@@ -22,6 +30,7 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
+import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotSim;
@@ -71,7 +80,7 @@ class JointMovesSimTest {
 
   @Test
   void aMoveArrivesAndSaysSo() {
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
 
     double took = runToEnd(out, 3);
 
@@ -85,10 +94,10 @@ class JointMovesSimTest {
 
   @Test
   void aShareOfTheCruiseTakesAsLongAsItsProfile() {
-    double full = runToEnd(pivot.goTo("out"), 3);
-    sim.scheduler.schedule(pivot.goTo("in"));
+    double full = runToEnd(pivot.goTo(PIVOT_OUT), 3);
+    sim.scheduler.schedule(pivot.goTo(PIVOT_IN));
     sim.run(2);
-    Move half = pivot.goTo("out").at(0.5);
+    Move half = pivot.goTo(PIVOT_OUT).at(0.5);
 
     double slower = runToEnd(half, 3);
 
@@ -123,7 +132,7 @@ class JointMovesSimTest {
     weak.set(2, setup(ELEVATOR, assumed(control(60, 2, Optional.empty(), profile(1.2, 5), 1))));
     JointsSimHarness stuck = new JointsSimHarness(ROBOT, weak);
     JointMechanism lift = stuck.joints.of(ELEVATOR);
-    Move clear = lift.goTo("clear");
+    Move clear = lift.goTo(ELEVATOR_CLEAR);
 
     stuck.scheduler.schedule(clear);
     double took = stuck.runUntil(() -> clear.outcome().isPresent(), 3);
@@ -137,7 +146,7 @@ class JointMovesSimTest {
 
   @Test
   void aTighterDeadlineIsKept() {
-    Move out = pivot.goTo("out").within(Seconds.of(0.2));
+    Move out = pivot.goTo(PIVOT_OUT).within(Seconds.of(0.2));
 
     double took = runToEnd(out, 2);
 
@@ -153,9 +162,9 @@ class JointMovesSimTest {
    */
   @Test
   void anInterruptedMoveIsCanceledAndTheNextStartsFromWhereTheJointIs() {
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
     sim.run(out, 0.3);
-    Move in = pivot.goTo("in");
+    Move in = pivot.goTo(PIVOT_IN);
     sim.scheduler.schedule(in);
     sim.loop(); // it starts, from what the joint reads this loop
     double at = pivot.position();
@@ -183,7 +192,7 @@ class JointMovesSimTest {
 
   @Test
   void afterArrivingIdleHoldsTheTarget() {
-    runToEnd(pivot.goTo("out"), 3);
+    runToEnd(pivot.goTo(PIVOT_OUT), 3);
 
     sim.run(3);
 
@@ -193,7 +202,7 @@ class JointMovesSimTest {
 
   @Test
   void afterACancelIdleHoldsWhereTheJointStopped() {
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
     sim.run(out, 0.3);
     sim.scheduler.cancel(out);
 
@@ -206,7 +215,7 @@ class JointMovesSimTest {
 
   @Test
   void holdOwnsTheJointAndKeepsItsGoal() {
-    runToEnd(pivot.goTo("out"), 3);
+    runToEnd(pivot.goTo(PIVOT_OUT), 3);
     Move hold = pivot.hold();
 
     sim.run(hold, 2);
@@ -219,7 +228,7 @@ class JointMovesSimTest {
 
   @Test
   void aRollerRunsAtItsNamedSpeedAndStopsWhenIdle() {
-    Move intaking = roller.run("intaking");
+    Move intaking = roller.run(ROLLER_INTAKING);
     sim.run(intaking, 1);
     double running = sim.simulation.velocity(ROLLER);
 
@@ -235,9 +244,9 @@ class JointMovesSimTest {
   /** A voltage and a duty cycle: -6 V and half of 12 V backward turn it at half its free speed. */
   @Test
   void aVoltageAndADutyCycleAreOutputsToo() {
-    sim.run(roller.run("outtaking"), 1);
+    sim.run(roller.run(ROLLER_OUTTAKING), 1);
     double outtaking = sim.simulation.velocity(ROLLER);
-    sim.run(roller.run("ejecting"), 1);
+    sim.run(roller.run(ROLLER_EJECTING), 1);
     double ejecting = sim.simulation.velocity(ROLLER);
 
     assertThat(outtaking).isCloseTo(-0.5 * rollerFreeSpeed, within(0.01 * rollerFreeSpeed));
@@ -247,7 +256,8 @@ class JointMovesSimTest {
   @Test
   void runUntilArrivesWhenItsConditionHolds() {
     Move fast =
-        roller.runUntil("intaking", () -> roller.velocity() > RPM.of(1000).baseUnitMagnitude());
+        roller.runUntil(
+            ROLLER_INTAKING, () -> roller.velocity() > RPM.of(1000).baseUnitMagnitude());
 
     double took = runToEnd(fast, 2);
 
@@ -259,7 +269,7 @@ class JointMovesSimTest {
 
   @Test
   void runUntilTimesOutAfterThreeSeconds() {
-    Move never = roller.runUntil("intaking", () -> false);
+    Move never = roller.runUntil(ROLLER_INTAKING, () -> false);
 
     double took = runToEnd(never, 5);
 
@@ -316,6 +326,29 @@ class JointMovesSimTest {
         .isCloseTo(RPM.of(1000).baseUnitMagnitude(), within(0.03 * 104.72));
   }
 
+  /**
+   * A place or an output of another joint's is refused as the move starts, saying whose it is and
+   * what the joint has: a misspelling can't be written, and a mixed-up joint never moves.
+   */
+  @Test
+  void aPlaceOfAnotherJointsIsRefused() {
+    Move wrongPlace = pivot.goTo(ELEVATOR_CLEAR);
+    Move wrongOutput = roller.run(PIVOT_PUSH);
+
+    runToEnd(wrongPlace, 1);
+    runToEnd(wrongOutput, 1);
+
+    assertThat(wrongPlace.outcome()).contains(Outcome.REFUSED);
+    assertThat(wrongPlace.reason())
+        .isEqualTo(
+            "pivot → clear: REFUSED: pivot has no position clear at 0.4 m: it has in, run, out");
+    assertThat(wrongOutput.reason())
+        .isEqualTo(
+            "roller: push: REFUSED: roller has no output push: it has intaking, outtaking,"
+                + " ejecting, and stopped");
+    assertThat(sim.simulation.position(PIVOT)).isCloseTo(Math.toRadians(1.5), within(0.01));
+  }
+
   @Test
   void followRefusesATargetOfTheWrongKind() {
     Move wrong = pivot.follow(() -> Meters.of(1));
@@ -333,7 +366,7 @@ class JointMovesSimTest {
   @Test
   void aJointThatTurnsFreelyGoesTheShortWayRound() {
     sim.simulation.place(TURRET, Math.toRadians(-170));
-    Move back = turret.goTo("back");
+    Move back = turret.goTo(TURRET_BACK);
 
     double took = runToEnd(back, 4);
 
@@ -382,9 +415,9 @@ class JointMovesSimTest {
   /** The same move bound to a button runs again and again: each run starts afresh. */
   @Test
   void aMoveRunAgainStartsAfresh() {
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
     runToEnd(out, 3);
-    runToEnd(pivot.goTo("in"), 3);
+    runToEnd(pivot.goTo(PIVOT_IN), 3);
 
     sim.scheduler.schedule(out);
     sim.loop();
@@ -417,27 +450,25 @@ class JointMovesSimTest {
 
   @Test
   void movesNameTheirJointAndRequireIt() {
-    assertThat(pivot.goTo("out").requirements()).containsExactly(pivot);
+    assertThat(pivot.goTo(PIVOT_OUT).requirements()).containsExactly(pivot);
     assertThat(pivot.goTo(Degrees.of(45)).name()).isEqualTo("pivot → 45.0°");
     assertThat(elevator.goTo(Meters.of(0.25)).name()).isEqualTo("elevator → 0.250 m (9.84 in)");
-    assertThat(roller.run("intaking").name()).isEqualTo("roller: intaking");
-    assertThat(roller.run("stopped").name()).isEqualTo("roller: stopped");
+    assertThat(roller.run(ROLLER_INTAKING).name()).isEqualTo("roller: intaking");
+    assertThat(roller.run(Output.STOPPED).name()).isEqualTo("roller: stopped");
     assertThat(pivot.getName()).isEqualTo("pivot");
   }
 
   @Test
   void whatCantBeAskedIsRefusedWhenWritten() {
-    assertThatThrownBy(() -> pivot.goTo("nowhere")).isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(() -> roller.run("flying")).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> pivot.goTo(Meters.of(1)))
         .hasMessage("pivot turns: send it to an angle");
     assertThatThrownBy(() -> elevator.goTo(Degrees.of(1)))
         .hasMessage("elevator slides: send it to a distance");
-    assertThatThrownBy(() -> pivot.goTo("out").at(1.5))
+    assertThatThrownBy(() -> pivot.goTo(PIVOT_OUT).at(1.5))
         .hasMessage("pivot → out: a share of the cruise is above 0 and at most 1, not 1.5");
-    assertThatThrownBy(() -> roller.run("intaking").at(0.5))
+    assertThatThrownBy(() -> roller.run(ROLLER_INTAKING).at(0.5))
         .hasMessage("roller: intaking isn't a move to a place: it has no profile");
-    assertThatThrownBy(() -> roller.run("intaking").within(Seconds.of(1)))
+    assertThatThrownBy(() -> roller.run(ROLLER_INTAKING).within(Seconds.of(1)))
         .hasMessage(
             "roller: intaking never ends on its own, so it has no deadline: use withTimeout");
   }
@@ -463,7 +494,7 @@ class JointMovesSimTest {
             .origin(new Transform3d(new Translation3d(-0.2, 0, 0.3), Rotation3d.ZERO))
             .link(JointFixtures.link("hatch", 1, new Translation3d()))
             .build();
-    Configuration open = Configuration.of("open", PIVOT.at("out"), hatch.at("out"));
+    Configuration open = Configuration.of("open", PIVOT.at(PIVOT_OUT), hatch.at(PIVOT_OUT));
     RobotDefinition withHatch =
         RobotDefinitionBuilder.builder(ROBOT)
             .joints(List.of(PIVOT, ROLLER, ELEVATOR, TURRET, hatch))
@@ -496,7 +527,7 @@ class JointMovesSimTest {
             .origin(new Transform3d(new Translation3d(-0.2, 0, 0.3), Rotation3d.ZERO))
             .link(JointFixtures.link("hatch", 1, new Translation3d()))
             .build();
-    Configuration shut = Configuration.of("shut", hatch.at("in"));
+    Configuration shut = Configuration.of("shut", hatch.at(PIVOT_IN));
     RobotDefinition withHatch =
         RobotDefinitionBuilder.builder(ROBOT)
             .joints(List.of(PIVOT, ROLLER, ELEVATOR, TURRET, hatch))

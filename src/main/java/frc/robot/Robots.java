@@ -15,6 +15,7 @@ import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
@@ -22,7 +23,6 @@ import com.michaelgrundvig.frc.world.robot.Imus;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.game.Rebuilt;
-import frc.robot.subsystems.drive.DrivetrainControl;
 import java.util.List;
 import java.util.Optional;
 import org.wpilib.math.geometry.Rotation3d;
@@ -42,25 +42,34 @@ import org.wpilib.math.geometry.Translation3d;
  * .weight(Body.Weight.weighed(Pounds.of(131.2))) // measured YYYY-MM-DD: two scales, bumpers and
  * battery on}.
  *
- * <p>A robot's mechanisms name their places here too, as facts about the robot: each joint's
- * positions and outputs, the configurations the robot takes, and the interlocks between joints,
- * which hold beneath every command. The template's robot has none; an intake would read:
+ * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
+ * places and outputs, its motors and their wiring, its own sensors, and how the program drives it.
+ * The configurations the robot takes, and the interlocks between joints, which hold beneath every
+ * command, name the joints and their places. The template's robot has none; an intake would read:
  *
  * <pre>{@code
- * static final Joint.Revolute PIVOT = Joint.Revolute.builder()
- *     .label("pivot") ... .range(Optional.of(Range.degrees(0, 135))).reference(Math.toRadians(1.5))
- *     .link(...)
- *     .positions(List.of(
- *         Position.degrees("in", 1.5), Position.degrees("run", 110), Position.degrees("out", 130)))
- *     .outputs(List.of())
- *     .build();
- * static final Joint.Revolute ROLLER = ... .parent(PIVOT) ...
- *     .outputs(List.of(Output.rpm("intaking", 2000), Output.volts("outtaking", -4)))
- *     .build();
- * static final Configuration INTAKING =
- *     Configuration.of("intaking", PIVOT.at("out"), ROLLER.at("intaking"));
+ * static final Position PIVOT_IN = Position.degrees("in", 1.5);
+ * static final Position PIVOT_RUN = Position.degrees("run", 110);
+ * static final Position PIVOT_OUT = Position.degrees("out", 130);
+ *
+ * static final Joint.Revolute PIVOT =
+ *     Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
+ *         .range(Range.degrees(0, 135), PIVOT_IN)
+ *         .positions(PIVOT_IN, PIVOT_RUN, PIVOT_OUT)
+ *         .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32))
+ *         .control(MechanismControl.position(30).withProfile(8, 30));
+ *
+ * static final Output INTAKING = Output.rpm("intaking", 2000);
+ * static final Joint.Revolute ROLLER =
+ *     Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))
+ *         .outputs(INTAKING)
+ *         .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
+ *         .control(MechanismControl.velocity(0.02));
+ *
+ * static final Configuration INTAKE =
+ *     Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
  * static final Interlock ROLLER_ONLY_WHEN_OUT =
- *     Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past("run"));
+ *     Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
  * }</pre>
  *
  * <p>The definition refuses what can't be: a position outside its joint's range, a speed past what
@@ -70,14 +79,12 @@ import org.wpilib.math.geometry.Translation3d;
  * program says it at startup: in the log ({@code Robot/DefinitionDoubts}) and, on a robot, on the
  * Driver Station's console.
  *
- * <p>Name a design's parts once, in a record of its own beside its robots, built by name like any
- * configuration: {@code @ConfigRecord record Parts(Joint.Revolute pivot, Joint.Revolute roller,
- * Configuration intaking) {}}. Each robot of the design, the competition robot and the practice
- * robot, fills it with its own joints and configurations, and builds its definition from it, so the
- * robot's code reads {@code parts.pivot()} whichever robot it runs on: a part missing or misnamed
- * won't compile, and nothing is found by its label. 2611's 2026 robot shows it
- * (src/test/java/frc/robot/robots2026/Team2611.java), and docs/values.md says how to list the
- * record. docs/mechanisms.md says how to describe a mechanism, set it up, and use its commands.
+ * <p>Behavior code names the constants themselves: {@code joints.of(PIVOT)}, {@code
+ * pivot.goTo(PIVOT_OUT)}. A practice robot of the same design is the same definition with its
+ * differences, {@code COMPETITION.with(PIVOT.motor(Motor.KRAKEN_X60, Gearing.of(25),
+ * TALON_FX.can(33)))}: a joint wired or tuned otherwise is still the same joint, so the same code
+ * runs on either. 2611's 2026 robot shows it (src/test/java/frc/robot/robots2026/Team2611.java).
+ * docs/mechanisms.md says how to describe a mechanism and use its commands.
  */
 public final class Robots {
   private Robots() {}
@@ -132,10 +139,6 @@ public final class Robots {
           .couplingRatio(50.0 / 14.0)
           .build();
 
-  /** The modules sit on the corners, where MK4i wheels are 2.625 in in from the frame's edges. */
-  private static final DrivetrainGeometry DRIVETRAIN =
-      DrivetrainGeometry.inset(MODULES, BODY, Inches.of(2.625));
-
   /**
    * Drive stator limit 30 A. Under hard acceleration, weight shifts off the front wheels, and by a
    * simple weight-transfer estimate they start to slip near 47 A with this tread (friction 1.2;
@@ -181,6 +184,13 @@ public final class Robots {
                   .translationKp(3.0)
                   .build())
           .build();
+
+  /**
+   * The modules sit on the corners, where MK4i wheels are 2.625 in in from the frame's edges,
+   * driven as above. No wiring: on real hardware the drivetrain stays still and says so.
+   */
+  private static final DrivetrainGeometry DRIVETRAIN =
+      DrivetrainGeometry.inset(MODULES, BODY, Inches.of(2.625)).control(DRIVING);
 
   /**
    * A 1280 x 800 global-shutter camera with an 80 degree diagonal field of view, typical for
@@ -295,12 +305,8 @@ public final class Robots {
                   .configurations(List.of())
                   .interlocks(List.of())
                   .build())
-          .drivetrain(DRIVING)
-          .drivetrainWiring(Optional.empty())
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)
-          .joints(List.of())
-          .sensors(List.of())
           .build();
 
   /** Every robot the team has. Add each real robot as it is built and measured. */

@@ -23,11 +23,16 @@ import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Coupling;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Range;
@@ -35,14 +40,11 @@ import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.Transmission;
 import frc.robot.Robots;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.MechanismWiringBuilder;
+import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
@@ -94,6 +96,7 @@ class PhoenixMechanismTest {
           .link(weighed("carriage", 5, Translation3d.ZERO))
           .positions(List.of())
           .outputs(List.of())
+          .driven(Driven.NONE)
           .build();
 
   /** A turret, unweighed, on 340° of travel. */
@@ -118,12 +121,16 @@ class PhoenixMechanismTest {
           0,
           unseen("wheels"));
 
-  private static final Drive ARM_MOTORS = ARM.motors(Motor.KRAKEN_X60, 2, gearing(60));
-  private static final Drive WRIST_MOTOR = WRIST.motors(Motor.KRAKEN_X44, 1, gearing(30));
+  private static final Drive ARM_MOTORS =
+      JointFixtures.motors(ARM, Motor.KRAKEN_X60, 2, gearing(60));
+  private static final Drive WRIST_MOTOR =
+      JointFixtures.motors(WRIST, Motor.KRAKEN_X44, 1, gearing(30));
   private static final Drive ELEVATOR_MOTORS =
-      ELEVATOR.motors(Motor.KRAKEN_X60, 2, gearing(10), Meters.of(0.02));
-  private static final Drive TURRET_MOTOR = TURRET.motors(Motor.KRAKEN_X60, 1, gearing(50));
-  private static final Drive FLYWHEEL_MOTOR = FLYWHEEL.motors(Motor.KRAKEN_X60, 1, gearing(1));
+      JointFixtures.motors(ELEVATOR, Motor.KRAKEN_X60, 2, gearing(10), Meters.of(0.02));
+  private static final Drive TURRET_MOTOR =
+      JointFixtures.motors(TURRET, Motor.KRAKEN_X60, 1, gearing(50));
+  private static final Drive FLYWHEEL_MOTOR =
+      JointFixtures.motors(FLYWHEEL, Motor.KRAKEN_X60, 1, gearing(1));
 
   /** The turret's CANcoder, geared to turn back as the turret turns forward. */
   private static final Sensor.Encoder TURRET_CANCODER =
@@ -308,8 +315,9 @@ class PhoenixMechanismTest {
             .link(unseen("hook"))
             .positions(List.of())
             .outputs(List.of())
+            .driven(Driven.NONE)
             .build();
-    Drive slow = winch.motors(Motor.KRAKEN_X60, 1, gearing(100), Inches.of(0.25));
+    Drive slow = JointFixtures.motors(winch, Motor.KRAKEN_X60, 1, gearing(100), Inches.of(0.25));
     RobotMath robot = RobotMath.of(BODY, List.of(winch), List.of(), List.of(slow), List.of());
     double spool = TURN * 0.25 * 0.0254;
     double free = robot.freeSpeed(winch);
@@ -353,7 +361,7 @@ class PhoenixMechanismTest {
   /** Geared past 1000:1, a ratio Phoenix can't hold is refused. */
   @Test
   void aRatioPhoenixCantHoldIsRefused() {
-    Drive crawl = TURRET.motors(Motor.KRAKEN_X60, 1, gearing(1500));
+    Drive crawl = JointFixtures.motors(TURRET, Motor.KRAKEN_X60, 1, gearing(1500));
     RobotMath robot = RobotMath.of(BODY, List.of(TURRET), List.of(), List.of(crawl), List.of());
 
     assertThatIllegalArgumentException()
@@ -533,7 +541,7 @@ class PhoenixMechanismTest {
             Optional.of(Range.degrees(0, 90)),
             0,
             unseen("bare link"));
-    Drive motor = bare.motors(Motor.KRAKEN_X60, 1, gearing(40));
+    Drive motor = JointFixtures.motors(bare, Motor.KRAKEN_X60, 1, gearing(40));
     RobotMath robot = RobotMath.of(BODY, List.of(bare), List.of(), List.of(motor), List.of());
     PhoenixMechanism.Settings arm =
         PhoenixMechanism.configure(robot, bare, motor, wiring(1), control());
@@ -566,8 +574,9 @@ class PhoenixMechanismTest {
             .link(unseen("slide carriage"))
             .positions(List.of())
             .outputs(List.of())
+            .driven(Driven.NONE)
             .build();
-    Drive motor = slide.motors(Motor.KRAKEN_X60, 1, gearing(5), Meters.of(0.02));
+    Drive motor = JointFixtures.motors(slide, Motor.KRAKEN_X60, 1, gearing(5), Meters.of(0.02));
     RobotMath robot = RobotMath.of(BODY, List.of(slide), List.of(), List.of(motor), List.of());
 
     assertThat(PhoenixMechanism.configure(robot, slide, motor, wiring(1), control()).notes())
@@ -608,7 +617,7 @@ class PhoenixMechanismTest {
   @Test
   void anArmZeroedStraightUpSitsAtPhoenixsLimit() {
     Joint.Revolute upright = upright(0);
-    Drive motor = upright.motors(Motor.KRAKEN_X60, 1, gearing(25));
+    Drive motor = JointFixtures.motors(upright, Motor.KRAKEN_X60, 1, gearing(25));
     RobotMath robot = RobotMath.of(BODY, List.of(upright), List.of(), List.of(motor), List.of());
 
     PhoenixMechanism.Settings settings =
@@ -630,7 +639,7 @@ class PhoenixMechanismTest {
   @Test
   void anOffsetPastPhoenixsLimitIsRefused() {
     Joint.Revolute upright = upright(Math.toRadians(2));
-    Drive motor = upright.motors(Motor.KRAKEN_X60, 1, gearing(25));
+    Drive motor = JointFixtures.motors(upright, Motor.KRAKEN_X60, 1, gearing(25));
     RobotMath robot = RobotMath.of(BODY, List.of(upright), List.of(), List.of(motor), List.of());
 
     assertThatIllegalArgumentException()
@@ -654,7 +663,7 @@ class PhoenixMechanismTest {
             Optional.of(Range.degrees(-30, 90)),
             0,
             weighed("lowering link", 2, new Translation3d(0.3, 0, 0)));
-    Drive motor = lowering.motors(Motor.KRAKEN_X60, 1, gearing(25));
+    Drive motor = JointFixtures.motors(lowering, Motor.KRAKEN_X60, 1, gearing(25));
     RobotMath robot = RobotMath.of(BODY, List.of(lowering), List.of(), List.of(motor), List.of());
 
     assertThatIllegalArgumentException()
@@ -934,7 +943,8 @@ class PhoenixMechanismTest {
   @Test
   void aCanivoreIsPhoenixsBusByName() {
     assertThat(PhoenixMechanism.bus(CanBus.canivore("arm bus")).getName()).isEqualTo("arm bus");
-    assertThat(PhoenixMechanism.bus(CanBus.port(CANPort.CAN_S1)).getName()).isEqualTo("can_s1");
+    assertThat(PhoenixMechanism.bus(CanBus.port(CanBus.Systemcore.CAN_S1)).getName())
+        .isEqualTo("can_s1");
   }
 
   // ---- What the tests are built from ----
@@ -957,6 +967,7 @@ class PhoenixMechanismTest {
         .link(link)
         .positions(List.of())
         .outputs(List.of())
+        .driven(Driven.NONE)
         .build();
   }
 
@@ -1043,7 +1054,7 @@ class PhoenixMechanismTest {
 
   private static MechanismWiring wiring(MechanismWiring.Motor... motors) {
     return MechanismWiring.builder()
-        .canBus(CanBus.port(CANPort.CAN_S0))
+        .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
         .controller(MechanismWiring.Controller.TALON_FX)
         .motors(List.of(motors))
         .cancoder(Optional.empty())

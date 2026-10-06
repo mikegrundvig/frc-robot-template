@@ -25,26 +25,29 @@ import com.michaelgrundvig.frc.world.field.Zone;
 import com.michaelgrundvig.frc.world.field.ZoneTrigger;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Driven;
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
-import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.lib.wiring.SensorWiring;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
 import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveHardware;
-import frc.robot.subsystems.drive.DrivetrainControl;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.GyroIOSystemcore;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.localization.Localization;
+import frc.robot.subsystems.mechanisms.AbsoluteEncoderIO;
+import frc.robot.subsystems.mechanisms.AbsoluteEncoderIOPort;
 import frc.robot.subsystems.mechanisms.JointIO;
 import frc.robot.subsystems.mechanisms.JointIOSpark;
 import frc.robot.subsystems.mechanisms.JointIOTalon;
@@ -324,11 +327,7 @@ public final class RobotContainer implements AutoCloseable {
                   definition
                       .imus()
                       .backup()
-                      .<GyroIO>map(
-                          backup ->
-                              new GyroIOSystemcore(
-                                  robot.drivetrainWiring().get().systemcoreMount(),
-                                  backup.orientation()))
+                      .<GyroIO>map(backup -> new GyroIOSystemcore(backup.orientation()))
                       .orElseGet(() -> new GyroIO() {}))
               .odometryLock(phoenix.odometryLock())
               .build();
@@ -389,6 +388,16 @@ public final class RobotContainer implements AutoCloseable {
                 unwired.add(setup.joint().label());
               }
               return new JointIO() {};
+            },
+            setup -> {
+              if (simulated != null) {
+                return simulated.absoluteEncoder(setup);
+              }
+              var port =
+                  setup.joint().driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port);
+              return mode == Constants.Mode.REAL && port.isPresent()
+                  ? new AbsoluteEncoderIOPort(port.get())
+                  : new AbsoluteEncoderIO() {};
             },
             sensor -> {
               if (simulated != null) {
@@ -853,7 +862,7 @@ public final class RobotContainer implements AutoCloseable {
     return drive;
   }
 
-  /** Every driven joint's mechanism, for behavior code to look up through the robot's parts. */
+  /** Every driven joint's mechanism, for behavior code to look up by its joint. */
   Joints joints() {
     return joints;
   }

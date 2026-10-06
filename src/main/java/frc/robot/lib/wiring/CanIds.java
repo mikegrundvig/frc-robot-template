@@ -1,5 +1,9 @@
 package frc.robot.lib.wiring;
 
+import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
+import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

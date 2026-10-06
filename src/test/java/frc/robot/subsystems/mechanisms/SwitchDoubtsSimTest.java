@@ -1,14 +1,16 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
-import frc.robot.lib.wiring.SensorWiring;
 import frc.robot.sim.JointsSimHarness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -37,7 +39,7 @@ class SwitchDoubtsSimTest {
    */
   @Test
   void aCutNormallyClosedWireReadsTrippedFarFromItsSwitch() {
-    sim.run(pivot.goTo("out"), 1.5);
+    sim.run(pivot.goTo(PIVOT_OUT), 1.5);
     assertThat(sim.joints.switchDoubts()).as("whole, and clear out there").isEmpty();
 
     sim.sensors.cut(PIVOT_DOWN, SensorWiring.Polarity.NORMALLY_CLOSED);
@@ -50,7 +52,7 @@ class SwitchDoubtsSimTest {
         .containsExactly(
             "pivot down reads tripped with pivot at 130.0°, nowhere near where it trips, 30.0°: a"
                 + " cut wire, if it's normally closed, or a switch out of place");
-    Move in = pivot.goTo("in");
+    Move in = pivot.goTo(PIVOT_IN);
     sim.scheduler.schedule(in);
     sim.runUntil(() -> in.outcome().isPresent(), 3);
     assertThat(in.reason()).contains("held: pivot down tripped");

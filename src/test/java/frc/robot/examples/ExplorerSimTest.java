@@ -5,15 +5,14 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.Part;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotConfig;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.lib.wiring.SensorWiring;
 import frc.robot.sim.SensorSimulation;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,27 +31,19 @@ import org.wpilib.math.geometry.Transform2d;
  * the field's perimeter, which the test plays, solid, tripping the bumper as it meets a wall.
  */
 class ExplorerSimTest {
-  /** The bumper switch: a contact switch on the chassis. */
-  static final Sensor.Switch FRONT_BUMPER = Sensor.Switch.contact("front bumper", Part.CHASSIS);
+  /** The bumper switch: a contact switch on the chassis, on Systemcore's port 0. */
+  static final Sensor.Switch FRONT_BUMPER =
+      Sensor.Switch.contact("front bumper", Part.CHASSIS)
+          .on(new SensorWiring.Port(0), SensorWiring.Polarity.NORMALLY_OPEN);
 
-  /** The template's robot with the bumper switch, wired to Systemcore's port 0. */
+  /** The template's robot with the bumper switch. */
   static final RobotConfig ROBOT =
       RobotConfigBuilder.builder(Robots.SIM)
-          .definition(withBumper())
-          .sensors(
-              List.of(
-                  SensorWiring.OfSwitch.builder()
-                      .sensor("front bumper")
-                      .input(new SensorWiring.Port(0))
-                      .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-                      .build()))
+          .definition(
+              RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                  .sensors(List.of(FRONT_BUMPER))
+                  .build())
           .build();
-
-  private static RobotDefinition withBumper() {
-    return RobotDefinitionBuilder.builder(Robots.SIM.definition())
-        .sensors(List.of(FRONT_BUMPER))
-        .build();
-  }
 
   /** Half the bumpers' length and width, and the room's size. */
   private static final double REACH =

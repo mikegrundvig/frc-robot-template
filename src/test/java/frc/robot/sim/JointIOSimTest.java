@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.world.robot.Joint;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.lib.phoenix.MechanismControlBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import frc.robot.subsystems.mechanisms.JointIO;
 import java.util.Map;
 import java.util.Optional;

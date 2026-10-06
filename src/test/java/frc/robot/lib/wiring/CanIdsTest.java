@@ -3,20 +3,21 @@ package frc.robot.lib.wiring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Rotations;
 
+import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
-import org.wpilib.hardware.imu.OnboardIMU;
 
 /**
  * Two parts of the program on one motor: the survey found an intake and a roller each building CAN
  * ID 3 and both driving it every loop, which no command's requirements could sort out.
  */
 class CanIdsTest {
-  private static final CanBus BUS = CanBus.port(CANPort.CAN_S0);
+  private static final CanBus BUS = CanBus.port(CanBus.Systemcore.CAN_S0);
 
   private static MechanismWiring wiring(CanBus bus, int... ids) {
     return MechanismWiring.builder()
@@ -51,7 +52,6 @@ class CanIdsTest {
           .gyroId(1)
           .gyroYawScale(1.0)
           .modules(List.of(module(1, 2, 1), module(3, 4, 2), module(5, 6, 3), module(7, 8, 4)))
-          .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
           .build();
 
   @Test

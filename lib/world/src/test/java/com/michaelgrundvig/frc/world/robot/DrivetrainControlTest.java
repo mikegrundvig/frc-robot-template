@@ -1,32 +1,41 @@
-package frc.robot.subsystems.drive;
+package com.michaelgrundvig.frc.world.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryCornerBuilder;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
-import com.michaelgrundvig.frc.world.robot.Motor;
-import frc.robot.Robots;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SwerveWiring;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
-import org.wpilib.hardware.imu.OnboardIMU;
 
 class DrivetrainControlTest {
+  /** The template robot's drivetrain: SDS MK4i, L2, on Kraken X60s, 4 in wheels. */
+  private static final DrivetrainGeometry TEMPLATES =
+      DrivetrainGeometry.uniform(
+          DrivetrainGeometry.ModuleType.builder()
+              .driveMotor(Motor.KRAKEN_X60)
+              .steerMotor(Motor.KRAKEN_X60)
+              .wheelRadius(Inches.of(2))
+              .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
+              .steerGearing(Gearing.builder().ratio(150.0 / 7.0).efficiency(1.0).build())
+              .wheelCoefficientOfFriction(1.2)
+              .driveInertia(KilogramSquareMeters.of(0.001))
+              .steerInertia(KilogramSquareMeters.of(0.004))
+              .couplingRatio(50.0 / 14.0)
+              .build(),
+          Inches.of(10.375),
+          Inches.of(10.375));
+
   @Test
   void keepsItsSettings() {
     DrivetrainControl control = control();
@@ -55,7 +64,7 @@ class DrivetrainControlTest {
   /** The template's drivetrain reaches 4.73 m/s free: 4 m/s leaves room, 5 m/s doesn't. */
   @Test
   void topSpeedCannotExceedTheFreeSpeed() {
-    var drivetrain = Robots.SIM.definition().drivetrain();
+    var drivetrain = TEMPLATES;
     var tooFast =
         DrivetrainControlBuilder.builder(control())
             .limits(changeLimits().maxLinearSpeed(MetersPerSecond.of(5)).build())
@@ -185,19 +194,23 @@ class DrivetrainControlTest {
    */
   @Test
   void aSwervesWiringMustDriveItsMotors() {
-    DrivetrainGeometry ours = Robots.SIM.definition().drivetrain();
+    DrivetrainGeometry ours = TEMPLATES;
     DrivetrainGeometry.ModuleType maxSwerve =
         DrivetrainGeometryModuleTypeBuilder.builder(ours.corners().get(0).module())
             .driveMotor(Motor.NEO_VORTEX)
             .steerMotor(Motor.NEO_550)
             .build();
     DrivetrainGeometry rev =
-        new DrivetrainGeometry(
-            ours.corners().stream()
-                .map(
-                    corner ->
-                        DrivetrainGeometryCornerBuilder.builder(corner).module(maxSwerve).build())
-                .toList());
+        DrivetrainGeometryBuilder.builder(ours)
+            .corners(
+                ours.corners().stream()
+                    .map(
+                        corner ->
+                            DrivetrainGeometryCornerBuilder.builder(corner)
+                                .module(maxSwerve)
+                                .build())
+                    .toList())
+            .build();
     SwerveWiring talons =
         wiring(MechanismWiring.Controller.TALON_FX, MechanismWiring.Controller.TALON_FX, true);
     SwerveWiring sparks =
@@ -227,13 +240,12 @@ class DrivetrainControlTest {
               .build());
     }
     return SwerveWiring.builder()
-        .canBus(CanBus.port(CANPort.CAN_S0))
+        .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
         .driveController(drive)
         .steerController(steer)
         .gyroId(30)
         .gyroYawScale(1.0)
         .modules(modules)
-        .systemcoreMount(OnboardIMU.MountOrientation.FLAT)
         .build();
   }
 }

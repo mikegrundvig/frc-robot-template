@@ -158,12 +158,34 @@ public final class Move implements Command {
 
   // ---- Made by the joints ----
 
-  static Move goTo(JointMechanism joint, double position, @Nullable String named) {
+  /**
+   * @param refused why it can't run, or null: a position of another joint's
+   */
+  static Move goTo(
+      JointMechanism joint, double position, @Nullable String named, @Nullable String refused) {
     String where = named != null ? named : JointSetup.shown(joint.joint(), position);
-    return of(Kind.GO_TO, joint.getName() + " → " + where, new Leg(joint, null, position, named));
+    return new Move(
+        new Plan(
+            Kind.GO_TO,
+            joint.getName() + " → " + where,
+            1,
+            Double.NaN,
+            null,
+            null,
+            null,
+            null,
+            refused),
+        new Leg[] {new Leg(joint, null, position, named)});
   }
 
-  static Move run(JointMechanism joint, Output output, @Nullable BooleanSupplier until) {
+  /**
+   * @param refused why it can't run, or null: an output of another joint's
+   */
+  static Move run(
+      JointMechanism joint,
+      Output output,
+      @Nullable BooleanSupplier until,
+      @Nullable String refused) {
     Plan plan =
         new Plan(
             Kind.RUN,
@@ -177,7 +199,7 @@ public final class Move implements Command {
             null,
             null,
             null,
-            null);
+            refused);
     return new Move(plan, new Leg[] {new Leg(joint, output, Double.NaN, output.name())});
   }
 
@@ -315,7 +337,7 @@ public final class Move implements Command {
   /**
    * The same move, for only as long as a gate holds: checked every loop, it ends {@link
    * Outcome#CANCELED} when the gate falls, with the gate's reason, and is refused if it doesn't
-   * hold to start with. {@code joints.run(parts.feeding()).onlyWhile(readyToShoot)}.
+   * hold to start with. {@code joints.run(FEEDING).onlyWhile(readyToShoot)}.
    */
   public Move onlyWhile(Gate gate) {
     return new Move(
@@ -453,7 +475,7 @@ public final class Move implements Command {
     }
     if (kind == Kind.HOME) {
       JointMechanism joint = legs[0].joint;
-      if (!joint.homesToAStop()) {
+      if (!joint.homesToAStop() && !joint.homesByEncoder()) {
         end(Outcome.ARRIVED, null);
         return false;
       }

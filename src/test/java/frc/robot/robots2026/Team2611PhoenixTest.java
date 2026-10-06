@@ -30,11 +30,12 @@ import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Link;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.phoenix.PhoenixMechanism;
-import frc.robot.lib.wiring.MechanismWiring;
+import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Translation3d;
@@ -61,11 +62,11 @@ class Team2611PhoenixTest {
     record Mechanism(Joint joint, Drive drive, double theirs) {}
     for (Mechanism each :
         List.of(
-            new Mechanism(PIVOT, Team2611.PIVOT_MOTOR, 1 / (1.0 / 25.0)),
-            new Mechanism(Team2611.INTAKE, Team2611.INTAKE_MOTOR, 1 / (1.0 / 3.0)),
-            new Mechanism(Team2611.FULL_SEND, Team2611.FULL_SEND_MOTOR, 1 / (1.0 / 4.0)),
-            new Mechanism(Team2611.TRANSITION, Team2611.TRANSITION_MOTOR, 1 / (1.0 / 2.0)),
-            new Mechanism(Team2611.SHOOTER, Team2611.SHOOTER_MOTORS, 1))) {
+            new Mechanism(PIVOT, motors(Team2611.PIVOT), 1 / (1.0 / 25.0)),
+            new Mechanism(Team2611.INTAKE, motors(Team2611.INTAKE), 1 / (1.0 / 3.0)),
+            new Mechanism(Team2611.FULL_SEND, motors(Team2611.FULL_SEND), 1 / (1.0 / 4.0)),
+            new Mechanism(Team2611.TRANSITION, motors(Team2611.TRANSITION), 1 / (1.0 / 2.0)),
+            new Mechanism(Team2611.SHOOTER, motors(Team2611.SHOOTER), 1))) {
       assertThat(seeded(math, each.joint(), each.drive()).leader().Feedback.SensorToMechanismRatio)
           .as(each.joint().label())
           .isCloseTo(each.theirs(), within(1e-12));
@@ -82,10 +83,10 @@ class Team2611PhoenixTest {
     record Loop(Joint joint, Drive drive, double kV, double ratio) {}
     for (Loop loop :
         List.of(
-            new Loop(Team2611.SHOOTER, Team2611.SHOOTER_MOTORS, 0.12, 1),
-            new Loop(Team2611.INTAKE, Team2611.INTAKE_MOTOR, 0.13, 3),
-            new Loop(Team2611.FULL_SEND, Team2611.FULL_SEND_MOTOR, 0.13, 4),
-            new Loop(Team2611.TRANSITION, Team2611.TRANSITION_MOTOR, 0.14, 2))) {
+            new Loop(Team2611.SHOOTER, motors(Team2611.SHOOTER), 0.12, 1),
+            new Loop(Team2611.INTAKE, motors(Team2611.INTAKE), 0.13, 3),
+            new Loop(Team2611.FULL_SEND, motors(Team2611.FULL_SEND), 0.13, 4),
+            new Loop(Team2611.TRANSITION, motors(Team2611.TRANSITION), 0.14, 2))) {
       PhoenixMechanism.Settings settings =
           PhoenixMechanism.configure(
               math,
@@ -120,7 +121,7 @@ class Team2611PhoenixTest {
 
     PhoenixMechanism.Settings shooter =
         PhoenixMechanism.configure(
-            math, Team2611.SHOOTER, Team2611.SHOOTER_MOTORS, wired, control());
+            math, Team2611.SHOOTER, motors(Team2611.SHOOTER), wired, control());
 
     assertThat(shooter.leader().MotorOutput.Inverted)
         .isEqualTo(InvertedValue.CounterClockwise_Positive);
@@ -141,7 +142,7 @@ class Team2611PhoenixTest {
    */
   @Test
   void thePivotsEncoderWrapIsFlaggedBesideItsStow() {
-    Sensor.Encoder encoder = Team2611.PIVOT_ABSOLUTE;
+    Sensor.Encoder encoder = absolute(Team2611.PIVOT);
     double ours =
         PhoenixMechanism.cancoder(
                 math, encoder, cancoder(1, 0, false, MechanismWiring.Feedback.ROTOR))
@@ -150,7 +151,7 @@ class Team2611PhoenixTest {
 
     assertThat(PhoenixMechanism.wrapProblem(encoder, 1.0))
         .isEqualTo(
-            "pivot absolute wraps at 1 of its turn, 0.0° from pivot's range (0.0° to 135.0°), and"
+            "pivot absolute encoder wraps at 1 of its turn, 0.0° from pivot's range (0.0° to 135.0°), and"
                 + " 1.5° from where it stows (1.5°): a reading a hair past the wrap reads a turn"
                 + " away");
     assertThat(PhoenixMechanism.wrapMargin(encoder, 1.0)).isCloseTo(0, within(1e-12));
@@ -167,7 +168,7 @@ class Team2611PhoenixTest {
   void thePivotHasNoGravitySeedUnweighed() {
     PhoenixMechanism.Settings pivot =
         PhoenixMechanism.configure(
-            math, PIVOT, Team2611.PIVOT_MOTOR, wiring(motor(32, true)), control());
+            math, PIVOT, motors(Team2611.PIVOT), wiring(motor(32, true)), control());
 
     assertThat(pivot.leader().MotorOutput.Inverted).isEqualTo(InvertedValue.Clockwise_Positive);
     assertThat(pivot.leader().Slot0.kG).isZero();
@@ -202,7 +203,7 @@ class Team2611PhoenixTest {
                       .shapes(List.of())
                       .build())
               .build();
-      Drive motor = weighed.motors(Motor.KRAKEN_X60, 1, Parts.gearing(25));
+      Drive motor = JointFixtures.motors(weighed, Motor.KRAKEN_X60, 1, Parts.gearing(25));
       RobotMath alone = RobotMath.of(BODY, List.of(weighed), List.of(), List.of(motor), List.of());
 
       PhoenixMechanism.Settings pivot =
@@ -284,5 +285,15 @@ class Team2611PhoenixTest {
     assertThat(steer.cancoder().orElseThrow().MagnetSensor.AbsoluteSensorDiscontinuityPoint)
         .isEqualTo(0.5);
     assertThat(steer.notes()).isEmpty();
+  }
+
+  /** A joint's own motors, from its block. */
+  private static Drive motors(Joint joint) {
+    return joint.ownDrives().getFirst();
+  }
+
+  /** A joint's own absolute encoder, from its block. */
+  private static Sensor.Encoder absolute(Joint joint) {
+    return (Sensor.Encoder) joint.ownSensors().getFirst();
   }
 }

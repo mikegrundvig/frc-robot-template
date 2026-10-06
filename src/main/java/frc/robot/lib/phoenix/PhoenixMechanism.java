@@ -28,18 +28,20 @@ import com.ctre.phoenix6.signals.ReverseLimitTypeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
 import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Actuator;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import com.michaelgrundvig.frc.world.robot.Transmission;
-import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.CanPorts;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -362,7 +364,7 @@ public final class PhoenixMechanism {
 
   public static CANBus bus(CanBus bus) {
     return switch (bus) {
-      case CanBus.Port port -> new CANBus(port.port());
+      case CanBus.Port port -> new CANBus(CanPorts.of(port.port()));
       case CanBus.Canivore canivore -> new CANBus(canivore.name());
     };
   }

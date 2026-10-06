@@ -2,6 +2,8 @@ package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_BACK;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_FRONT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
@@ -43,7 +45,7 @@ class LimitStopSimTest {
    */
   @Test
   void aMovePastATrippedSwitchHoldsWhereItTripped() {
-    Move back = turret.goTo("back");
+    Move back = turret.goTo(TURRET_BACK);
     sim.scheduler.schedule(back);
     sim.runUntil(() -> back.outcome().isPresent(), 5);
 
@@ -51,7 +53,7 @@ class LimitStopSimTest {
     assertThat(back.reason()).contains("held: turret right tripped");
     assertThat(turretDegrees()).as("stopped past 90°, braking").isBetween(90.0, 100.0);
 
-    Move front = turret.goTo("front");
+    Move front = turret.goTo(TURRET_FRONT);
     sim.scheduler.schedule(front);
     sim.runUntil(() -> front.outcome().isPresent(), 3);
 

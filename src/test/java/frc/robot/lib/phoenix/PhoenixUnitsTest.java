@@ -9,12 +9,14 @@ import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Transmission;
+import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,7 @@ class PhoenixUnitsTest {
           .link(link("arm link"))
           .positions(List.of())
           .outputs(List.of())
+          .driven(Driven.NONE)
           .build();
 
   private static final Joint.Prismatic LIFT =
@@ -50,16 +53,19 @@ class PhoenixUnitsTest {
           .link(link("hook"))
           .positions(List.of())
           .outputs(List.of())
+          .driven(Driven.NONE)
           .build();
 
   private static final Gearing GEARING = Gearing.builder().ratio(100).efficiency(1).build();
 
   /** 100:1 on a ½ in spool: a quarter of an inch of radius. */
-  private static final Drive WINCH = LIFT.motors(Motor.KRAKEN_X60, 1, GEARING, Inches.of(0.25));
+  private static final Drive WINCH =
+      JointFixtures.motors(LIFT, Motor.KRAKEN_X60, 1, GEARING, Inches.of(0.25));
 
   @Test
   void aRevoluteJointsPhoenixUnitIsARotation() {
-    PhoenixUnits arm = PhoenixUnits.of(ARM, ARM.motors(Motor.KRAKEN_X60, 1, GEARING));
+    PhoenixUnits arm =
+        PhoenixUnits.of(ARM, JointFixtures.motors(ARM, Motor.KRAKEN_X60, 1, GEARING));
 
     assertThat(arm.joint()).isEqualTo(ARM);
     assertThat(arm.perPhoenixUnit()).isEqualTo(2 * Math.PI);
@@ -73,7 +79,8 @@ class PhoenixUnitsTest {
   /** 2 V per radian of error is 4π V per rotation: the same push for the same miss. */
   @Test
   void aRevoluteJointsGainsArePerRotation() {
-    PhoenixUnits arm = PhoenixUnits.of(ARM, ARM.motors(Motor.KRAKEN_X60, 1, GEARING));
+    PhoenixUnits arm =
+        PhoenixUnits.of(ARM, JointFixtures.motors(ARM, Motor.KRAKEN_X60, 1, GEARING));
 
     assertThat(arm.gainToPhoenix(2)).isCloseTo(4 * Math.PI, within(1e-12));
     assertThat(arm.gainFromPhoenix(4 * Math.PI)).isCloseTo(2, within(1e-12));

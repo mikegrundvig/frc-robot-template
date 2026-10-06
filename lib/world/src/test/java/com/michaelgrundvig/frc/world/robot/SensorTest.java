@@ -23,17 +23,12 @@ import org.wpilib.math.geometry.Translation3d;
  */
 class SensorTest {
   private static final Joint.Revolute PIVOT =
-      Joint.pivot(
-          "pivot",
-          Part.CHASSIS,
-          new Translation3d(0.2, 0, 0.3),
-          Joint.PITCH_UP,
-          Range.degrees(0, 120),
-          Degrees.of(0),
-          Link.unseen("arm"));
+      Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.2, 0, 0.3), Joint.PITCH_UP)
+          .range(Range.degrees(0, 120), Degrees.of(0))
+          .carries(Link.unseen("arm"));
 
   private static final Joint.Revolute ROLLER =
-      Joint.roller("roller", PIVOT, new Translation3d(0.3, 0, 0), Link.unseen("roller"));
+      Joint.roller("roller", PIVOT, new Translation3d(0.3, 0, 0));
 
   /**
    * A limit switch at the bottom of the pivot's travel trips at or below its position; the top one
@@ -76,6 +71,7 @@ class SensorTest {
             .pose(Optional.empty())
             .range(Meters.of(1.3))
             .fieldOfView(Degrees.of(27))
+            .wiring(Optional.empty())
             .build();
 
     assertThat(claw.tripped()).hasToString("claw beam tripped");
@@ -94,8 +90,8 @@ class SensorTest {
    */
   @Test
   void theDefinitionKnowsWhereItsSwitchesAreAndSaysWhatItDoesnt() {
-    Drive pivotMotor = PIVOT.motors(Motor.KRAKEN_X60, 1, gearing(30, 1));
-    Drive rollerMotor = ROLLER.motors(Motor.KRAKEN_X60, 1, gearing(3, 1));
+    Drive pivotMotor = MechanismFixtures.motors(PIVOT, Motor.KRAKEN_X60, 1, gearing(30, 1));
+    Drive rollerMotor = MechanismFixtures.motors(ROLLER, Motor.KRAKEN_X60, 1, gearing(3, 1));
     Sensor.Switch placed =
         Sensor.Switch.beam("claw beam", PIVOT)
             .at(new Pose3d(new Translation3d(0.35, 0, 0), Rotation3d.ZERO));
@@ -108,8 +104,7 @@ class SensorTest {
             List.of(),
             List.of(pivotMotor, rollerMotor),
             List.of(placed, unplaced, unknown));
-    Joint.Revolute stranger =
-        Joint.roller("stranger", Part.CHASSIS, new Translation3d(), Link.unseen("stranger"));
+    Joint.Revolute stranger = Joint.roller("stranger", Part.CHASSIS, new Translation3d());
 
     assertThat(robot.math().sensorPose(placed, Map.of(PIVOT, Math.PI / 2)).getTranslation())
         .as("on the arm, near its end, raised")

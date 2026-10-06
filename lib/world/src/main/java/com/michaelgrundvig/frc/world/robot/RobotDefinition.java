@@ -41,11 +41,13 @@ import org.wpilib.math.geometry.Translation2d;
  * @param cameras the AprilTag cameras
  * @param imus where each IMU is mounted, and whether its accelerometer has been checked to read
  *     along the robot's axes
- * @param joints the mechanisms' joints, each after its parent
+ * @param joints the mechanisms' joints, each after its parent, each with its own motors, sensors,
+ *     wiring and control in its block
  * @param couplings the joints that move as functions of others: an elevator's stages, a linkage
- * @param drives what moves the mechanisms: motors, cylinders, springs, each through its
- *     transmission
- * @param sensors the mechanisms' encoders, limit switches and beam breaks
+ * @param drives what moves the mechanisms beyond each joint's own: a differential's motors, turning
+ *     two joints at once; each through its transmission
+ * @param sensors the sensors beyond each joint's own: beam breaks, contact switches and
+ *     rangefinders, each on its part and carrying its wiring
  * @param configurations the poses the robot takes by name, each some joints at their named
  *     positions or outputs: "stowed", "amp", "feeding"
  * @param interlocks what one joint may do by where another is, enforced beneath every command
@@ -72,11 +74,11 @@ public record RobotDefinition(
     interlocks = List.copyOf(interlocks);
     List<Joint> allJoints = joints;
     List<Coupling> allCouplings = couplings;
-    List<Drive> allDrives = drives;
-    List<Sensor> allSensors = sensors;
     List<Configuration> allConfigurations = configurations;
     List<Interlock> allInterlocks = interlocks;
-    RobotMath whole = RobotMath.whole(body, joints, couplings, drives, sensors);
+    List<Drive> everyDrive = everyDrive(joints, drives);
+    List<Sensor> everySensor = everySensor(joints, sensors);
+    RobotMath whole = RobotMath.whole(body, joints, couplings, everyDrive, everySensor);
     Checks.on(RobotDefinition.class, name)
         .field("name", name, notBlank())
         .field("cameras", cameras, RobotDefinition::sharedNames)
@@ -85,7 +87,8 @@ public record RobotDefinition(
         .check("imus", () -> outside(imus, body))
         .check(
             "joints",
-            () -> RobotMath.problems(body, allJoints, allCouplings, allDrives, allSensors, cameras))
+            () ->
+                RobotMath.problems(body, allJoints, allCouplings, everyDrive, everySensor, cameras))
         .check(
             "configurations",
             () ->
@@ -109,11 +112,33 @@ public record RobotDefinition(
   }
 
   /**
+   * The same robot with some of its joints driven or wired otherwise: a practice robot of the same
+   * design, {@code COMPETITION.with(PIVOT.motor(Motor.KRAKEN_X60, Gearing.of(25),
+   * TALON_FX.can(33)))}. Each joint given replaces the robot's joint it's equal to, the same in all
+   * but how it's driven, so everything that names that joint, behavior included, finds this one.
+   *
+   * @throws IllegalArgumentException for a joint the robot has no equal of
+   */
+  public RobotDefinition with(Joint... changed) {
+    List<Joint> each = new ArrayList<>(joints);
+    for (Joint joint : changed) {
+      int at = each.indexOf(joint);
+      if (at < 0) {
+        throw new IllegalArgumentException(
+            name + " has no joint " + joint.label() + " the same but for how it's driven");
+      }
+      each.set(at, joint);
+    }
+    return RobotDefinitionBuilder.builder(this).joints(each).build();
+  }
+
+  /**
    * What the mechanisms derive: their poses, ratios, ideal gains, gravity and reach, as pure
    * functions of their joints' positions.
    */
   public RobotMath math() {
-    return RobotMath.of(body, joints, couplings, drives, sensors);
+    return RobotMath.of(
+        body, joints, couplings, everyDrive(joints, drives), everySensor(joints, sensors));
   }
 
   /**
@@ -222,7 +247,7 @@ public record RobotDefinition(
               joint.label() + " names outputs, and no motors turn it",
               "its speeds and voltages aren't checked against what its motors can do"));
     }
-    for (Sensor sensor : sensors) {
+    for (Sensor sensor : everySensor(joints, sensors)) {
       if (sensor instanceof Sensor.Placed placed && placed.pose().isEmpty()) {
         missing.add(
             new Missing(
@@ -241,6 +266,22 @@ public record RobotDefinition(
     return missing;
   }
 
+  /** Each joint's own drives, then the robot's. */
+  private static List<Drive> everyDrive(List<Joint> joints, List<Drive> drives) {
+    List<Drive> every = new ArrayList<>();
+    joints.forEach(joint -> every.addAll(joint.ownDrives()));
+    every.addAll(drives);
+    return every;
+  }
+
+  /** Each joint's own sensors, then the robot's. */
+  private static List<Sensor> everySensor(List<Joint> joints, List<Sensor> sensors) {
+    List<Sensor> every = new ArrayList<>();
+    joints.forEach(joint -> every.addAll(joint.ownSensors()));
+    every.addAll(sensors);
+    return every;
+  }
+
   /** Whether a drive moves the joint, or it follows another. */
   private boolean moved(Joint joint) {
     for (Coupling coupling : couplings) {
@@ -248,7 +289,7 @@ public record RobotDefinition(
         return true;
       }
     }
-    for (Drive drive : drives) {
+    for (Drive drive : everyDrive(joints, drives)) {
       if (drive.transmission().joints().contains(joint)) {
         return true;
       }

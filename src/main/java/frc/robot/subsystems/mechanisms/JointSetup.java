@@ -4,16 +4,17 @@ import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.Transmission;
-import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.phoenix.PhoenixUnits;
-import frc.robot.lib.wiring.MechanismWiring;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +48,28 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
         .check("joint.positions", () -> outsideSoftLimits(joint, control))
         .check("control.homing", () -> nothingToHome(joint, control))
         .orThrow();
+  }
+
+  /**
+   * Each joint's setup, from its block in the definition: every joint with a control, its wiring
+   * the block's, in the definition's order.
+   */
+  public static List<JointSetup> all(RobotDefinition definition) {
+    List<JointSetup> setups = new ArrayList<>();
+    for (Joint joint : definition.joints()) {
+      joint
+          .driven()
+          .control()
+          .ifPresent(
+              control ->
+                  setups.add(
+                      JointSetupBuilder.builder()
+                          .joint(joint)
+                          .control(control)
+                          .wiring(joint.driven().wiring())
+                          .build()));
+    }
+    return setups;
   }
 
   /** Starts describing a joint's setup, one named value at a time. */
@@ -219,6 +242,22 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
   }
 
   /**
+   * The joint's absolute encoder, when the robot reads it itself and tells the motor where the
+   * joint is from it: on a Systemcore port, or unwired, read only by the simulator. Null for none,
+   * or one its motor controller reads, a CANcoder or a SPARK's data port, or for a joint whose
+   * control names a homing recipe, which it homes by instead.
+   */
+  public static Driven.@Nullable AbsoluteEncoder readsAbsolute(JointSetup setup) {
+    Driven.AbsoluteEncoder encoder = setup.joint().driven().absoluteEncoder().orElse(null);
+    return encoder == null
+            || encoder.readByController()
+            || setup.control().homing().isPresent()
+            || !holdsPositions(setup.joint())
+        ? null
+        : encoder;
+  }
+
+  /**
    * Why a joint can't find where it is, or null when it can: held at positions, it homes by its
    * absolute encoder, read through its CANcoder on a robot, or names a recipe.
    */
@@ -232,12 +271,15 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
           + " has no absolute encoder, so where it is at power on is a guess: give its control a"
           + " homing recipe, Homing.toHardStop, Homing.toSwitch or Homing.assumeAtReference()";
     }
+    boolean onPort =
+        joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port).isPresent();
     if (setup.wiring().isPresent()
         && setup.wiring().get().cancoder().isEmpty()
-        && setup.wiring().get().dataPort().isEmpty()) {
+        && setup.wiring().get().dataPort().isEmpty()
+        && !onPort) {
       return joint.label()
-          + " homes by its absolute encoder, and its wiring names no CANcoder or data-port encoder"
-          + " to read it through";
+          + " homes by its absolute encoder, and its wiring names no CANcoder, data port or"
+          + " Systemcore port to read it on";
     }
     return null;
   }
@@ -252,7 +294,7 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
         end == MechanismControl.Homing.Stop.LOWER
             ? Sensor.Switch.Limit.End.LOWER
             : Sensor.Switch.Limit.End.UPPER;
-    for (Sensor sensor : definition.sensors()) {
+    for (Sensor sensor : definition.math().sensors()) {
       if (sensor instanceof Sensor.Switch onSwitch
           && onSwitch.kind() instanceof Sensor.Switch.Limit limit
           && limit.joint().equals(joint)

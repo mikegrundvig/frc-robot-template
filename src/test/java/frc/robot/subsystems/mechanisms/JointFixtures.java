@@ -8,11 +8,15 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
+import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Part;
@@ -20,14 +24,14 @@ import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import com.michaelgrundvig.frc.world.robot.Transmission;
 import frc.robot.Robots;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.lib.phoenix.MechanismControlBuilder;
 import java.util.List;
 import java.util.Optional;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.units.measure.Distance;
 
 /**
  * A robot with the joints the runtime's tests drive, on the template's: an intake's pivot with a
@@ -39,6 +43,30 @@ public final class JointFixtures {
 
   /** Turning about this, a joint whose zero points forward raises it as its position grows. */
   static final Vector3 PITCH_UP = new Vector3(0, -1, 0);
+
+  /** The pivot's places, and its push. */
+  public static final Position PIVOT_IN = Position.degrees("in", 1.5);
+
+  public static final Position PIVOT_RUN = Position.degrees("run", 110);
+  public static final Position PIVOT_OUT = Position.degrees("out", 130);
+  public static final Output PIVOT_PUSH = Output.volts("push", 3);
+
+  /** The roller's outputs. */
+  public static final Output ROLLER_INTAKING = Output.rpm("intaking", 1500);
+
+  public static final Output ROLLER_OUTTAKING = Output.volts("outtaking", -6);
+  public static final Output ROLLER_EJECTING = Output.dutyCycle("ejecting", -0.5);
+
+  /** The elevator's places. */
+  public static final Position ELEVATOR_DOWN = Position.of("down", Inches.of(0));
+
+  public static final Position ELEVATOR_CLEAR = Position.of("clear", Inches.of(0.4 / 0.0254));
+  public static final Position ELEVATOR_TOP = Position.of("top", Inches.of(1.1 / 0.0254));
+
+  /** The turret's places. */
+  public static final Position TURRET_FRONT = Position.degrees("front", 0);
+
+  public static final Position TURRET_BACK = Position.degrees("back", 180);
 
   /**
    * The intake's pivot: 2 kg, 0.3 m out along its zero, which points forward, level; stowed at
@@ -53,13 +81,11 @@ public final class JointFixtures {
           .range(Optional.of(Range.degrees(0, 135)))
           .reference(Math.toRadians(1.5))
           .link(link("intake arm", 2, new Translation3d(0.3, 0, 0)))
-          .positions(
-              List.of(
-                  Position.degrees("in", 1.5),
-                  Position.degrees("run", 110),
-                  Position.degrees("out", 130)))
-          .outputs(List.of(Output.volts("push", 3)))
-          .build();
+          .positions(List.of(PIVOT_IN, PIVOT_RUN, PIVOT_OUT))
+          .outputs(List.of(PIVOT_PUSH))
+          .driven(Driven.NONE)
+          .build()
+          .control(assumed(control(30, 1, profile(8, 30))));
 
   /** Its roller, through 3:1: intaking at 1500 rpm, outtaking at 6 V back, ejecting at half. */
   public static final Joint.Revolute ROLLER =
@@ -72,12 +98,10 @@ public final class JointFixtures {
           .reference(0)
           .link(link("roller", 0.5, new Translation3d(0, 0, 0)))
           .positions(List.of())
-          .outputs(
-              List.of(
-                  Output.rpm("intaking", 1500),
-                  Output.volts("outtaking", -6),
-                  Output.dutyCycle("ejecting", -0.5)))
-          .build();
+          .outputs(List.of(ROLLER_INTAKING, ROLLER_OUTTAKING, ROLLER_EJECTING))
+          .driven(Driven.NONE)
+          .build()
+          .control(control(0.02, 0, Optional.empty()));
 
   /** An elevator, 0 to 1.2 m, carrying 5 kg: down, clear at 0.4 m, and at the top. */
   public static final Joint.Prismatic ELEVATOR =
@@ -89,13 +113,11 @@ public final class JointFixtures {
           .range(Optional.of(Range.meters(0, 1.2)))
           .reference(0)
           .link(link("carriage", 5, new Translation3d(0, 0, 0.1)))
-          .positions(
-              List.of(
-                  Position.of("down", Inches.of(0)),
-                  Position.of("clear", Inches.of(0.4 / 0.0254)),
-                  Position.of("top", Inches.of(1.1 / 0.0254))))
+          .positions(List.of(ELEVATOR_DOWN, ELEVATOR_CLEAR, ELEVATOR_TOP))
           .outputs(List.of())
-          .build();
+          .driven(Driven.NONE)
+          .build()
+          .control(assumed(control(60, 2, profile(1.2, 5))));
 
   /** A turret that turns freely about the vertical, facing forward at 0°, back at 180°. */
   public static final Joint.Revolute TURRET =
@@ -107,19 +129,22 @@ public final class JointFixtures {
           .range(Optional.empty())
           .reference(0)
           .link(link("turret", 3, new Translation3d(0, 0, 0)))
-          .positions(List.of(Position.degrees("front", 0), Position.degrees("back", 180)))
+          .positions(List.of(TURRET_FRONT, TURRET_BACK))
           .outputs(List.of())
-          .build();
+          .driven(Driven.NONE)
+          .build()
+          .control(assumed(control(20, 0.5, profile(3, 10))));
 
-  public static final Drive PIVOT_MOTOR = PIVOT.motors(Motor.KRAKEN_X60, 1, gearing(25));
-  public static final Drive ROLLER_MOTOR = ROLLER.motors(Motor.KRAKEN_X60, 1, gearing(3));
+  public static final Drive PIVOT_MOTOR = motors(PIVOT, Motor.KRAKEN_X60, 1, gearing(25));
+  public static final Drive ROLLER_MOTOR = motors(ROLLER, Motor.KRAKEN_X60, 1, gearing(3));
   public static final Drive ELEVATOR_MOTORS =
-      ELEVATOR.motors(Motor.KRAKEN_X60, 2, gearing(10), Inches.of(1));
-  public static final Drive TURRET_MOTOR = TURRET.motors(Motor.KRAKEN_X60, 1, gearing(50));
+      motors(ELEVATOR, Motor.KRAKEN_X60, 2, gearing(10), Inches.of(1));
+  public static final Drive TURRET_MOTOR = motors(TURRET, Motor.KRAKEN_X60, 1, gearing(50));
 
   /** The intake out and rolling, and the elevator clear: three joints at once. */
   public static final Configuration INTAKING =
-      Configuration.of("intaking", PIVOT.at("out"), ROLLER.at("intaking"), ELEVATOR.at("clear"));
+      Configuration.of(
+          "intaking", PIVOT.at(PIVOT_OUT), ROLLER.at(ROLLER_INTAKING), ELEVATOR.at(ELEVATOR_CLEAR));
 
   /** The template's robot with these joints. */
   public static final RobotDefinition ROBOT =
@@ -131,15 +156,11 @@ public final class JointFixtures {
           .build();
 
   /**
-   * Each joint as the tests drive it: gains that track, a profile, no soft limits, braking. None
-   * has an absolute encoder, so each held at positions is stowed by hand, at its reference.
+   * Each joint as the tests drive it, from its block: gains that track, a profile, no soft limits,
+   * braking. None has an absolute encoder, so each held at positions is stowed by hand, at its
+   * reference.
    */
-  public static final List<JointSetup> SETUPS =
-      List.of(
-          setup(PIVOT, assumed(control(30, 1, profile(8, 30)))),
-          setup(ROLLER, control(0.02, 0, Optional.empty())),
-          setup(ELEVATOR, assumed(control(60, 2, profile(1.2, 5)))),
-          setup(TURRET, assumed(control(20, 0.5, profile(3, 10)))));
+  public static final List<JointSetup> SETUPS = JointSetup.all(ROBOT);
 
   /** A control whose joint is where its definition rests it at power on. */
   public static MechanismControl assumed(MechanismControl control) {
@@ -224,6 +245,30 @@ public final class JointFixtures {
                 .inertia(Inertia.box(Kilograms.of(kilograms), new Translation3d(0.1, 0.1, 0.1)))
                 .build())
         .shapes(List.of())
+        .build();
+  }
+
+  /** A joint's motors, through a gearing, as a drive of the robot's own. */
+  public static Drive motors(Joint.Revolute joint, Motor motor, int count, Gearing gearing) {
+    return Drive.builder()
+        .label(joint.label())
+        .actuator(Actuator.Motors.builder().motor(motor).count(count).build())
+        .transmission(Transmission.Geared.builder().joint(joint).gearing(gearing).build())
+        .build();
+  }
+
+  /** A sliding joint's motors, through a gearing onto a drum, as a drive of the robot's own. */
+  public static Drive motors(
+      Joint.Prismatic joint, Motor motor, int count, Gearing gearing, Distance pitchRadius) {
+    return Drive.builder()
+        .label(joint.label())
+        .actuator(Actuator.Motors.builder().motor(motor).count(count).build())
+        .transmission(
+            Transmission.Drum.builder()
+                .joint(joint)
+                .gearing(gearing)
+                .pitchRadius(pitchRadius)
+                .build())
         .build();
   }
 }

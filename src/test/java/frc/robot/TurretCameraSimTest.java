@@ -49,11 +49,10 @@ class TurretCameraSimTest {
           .definition(
               RobotDefinitionBuilder.builder(Robots.SIM.definition())
                   .name("turret camera")
-                  .joints(List.of(TURRET))
+                  .joints(List.of(TURRET.control(JointFixtures.SETUPS.get(3).control())))
                   .drives(List.of(TURRET_MOTOR))
                   .cameras(List.of(TURRET_CAMERA))
                   .build())
-          .joints(List.of(JointFixtures.SETUPS.get(3)))
           .build();
 
   /** Forward, across, turning: seconds, then the left stick's y and x and the right stick's x. */

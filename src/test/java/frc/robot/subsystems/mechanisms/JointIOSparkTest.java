@@ -12,10 +12,17 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Rotations;
 
+import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import com.revrobotics.sim.SparkAbsoluteEncoderSim;
 import com.revrobotics.spark.ClosedLoopSlot;
 import com.revrobotics.spark.SparkMax;
@@ -23,20 +30,12 @@ import com.revrobotics.spark.SparkSim;
 import com.revrobotics.spark.config.LimitSwitchConfig;
 import com.revrobotics.spark.config.LimitSwitchConfigAccessor;
 import frc.robot.RobotSim;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.lib.phoenix.MechanismControlBuilder;
-import frc.robot.lib.phoenix.MechanismControlGainsBuilder;
 import frc.robot.lib.rev.RevMechanism;
-import frc.robot.lib.wiring.CanBus;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.MechanismWiringBuilder;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.math.system.DCMotor;
 
 /**
@@ -51,10 +50,10 @@ class JointIOSparkTest {
       RobotDefinitionBuilder.builder(ROBOT)
           .drives(
               List.of(
-                  PIVOT.motors(Motor.NEO, 1, gearing(25)),
-                  ROLLER.motors(Motor.NEO_550, 1, gearing(3)),
-                  ELEVATOR.motors(Motor.NEO_VORTEX, 2, gearing(10), Inches.of(1)),
-                  TURRET.motors(Motor.NEO, 1, gearing(50))))
+                  JointFixtures.motors(PIVOT, Motor.NEO, 1, gearing(25)),
+                  JointFixtures.motors(ROLLER, Motor.NEO_550, 1, gearing(3)),
+                  JointFixtures.motors(ELEVATOR, Motor.NEO_VORTEX, 2, gearing(10), Inches.of(1)),
+                  JointFixtures.motors(TURRET, Motor.NEO, 1, gearing(50))))
           .build();
 
   private static JointSetup wired(
@@ -63,7 +62,7 @@ class JointIOSparkTest {
         .wiring(
             Optional.of(
                 MechanismWiring.builder()
-                    .canBus(CanBus.port(CANPort.CAN_S0))
+                    .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
                     .controller(controller)
                     .motors(
                         java.util.Arrays.stream(ids)

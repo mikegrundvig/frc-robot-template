@@ -1,6 +1,7 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -99,7 +100,7 @@ class JointFaultsSimTest {
   void aJointThatIsntAnsweringRefusesItsMoves() {
     pivotIo.silent = true;
     loop();
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
 
     scheduler.schedule(out);
     loopUntil(() -> out.outcome().isPresent());
@@ -117,7 +118,7 @@ class JointFaultsSimTest {
   void aJointWhoseMotorDidntTakeItsSettingsIsFaulted() {
     pivotIo.unconfigured = "motor 11";
     loop();
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
 
     scheduler.schedule(out);
     loopUntil(() -> out.outcome().isPresent());
@@ -132,7 +133,7 @@ class JointFaultsSimTest {
 
   @Test
   void aJointThatFallsSilentMidWayEndsItsMove() {
-    Move out = pivot.goTo("out");
+    Move out = pivot.goTo(PIVOT_OUT);
     scheduler.schedule(out);
     for (int i = 0; i < 10; i++) {
       loop();
@@ -156,7 +157,7 @@ class JointFaultsSimTest {
   void aJointWithNoHardwareRefusesItsMoves() {
     Scheduler alone = Scheduler.createIndependentScheduler();
     Joints none = new Joints(ROBOT, SETUPS, setup -> new JointIO() {}, alone);
-    Move out = none.of(PIVOT).goTo("out");
+    Move out = none.of(PIVOT).goTo(PIVOT_OUT);
 
     alone.schedule(out);
     for (int i = 0; i < 3; i++) {

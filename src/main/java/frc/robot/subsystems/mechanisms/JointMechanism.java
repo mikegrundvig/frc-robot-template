@@ -8,17 +8,19 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.world.robot.Condition;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
-import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -41,8 +43,7 @@ import org.wpilib.units.measure.LinearVelocity;
 /**
  * One driven joint, as a Commands v3 {@link Mechanism}: the template builds one for each joint the
  * robot's motors drive ({@link Joints}), from the robot's definition and the joint's setup, and
- * behavior code looks it up through the robot's parts ({@code joints.of(parts.pivot())}). Nobody
- * writes one.
+ * behavior code looks it up by its joint ({@code joints.of(PIVOT)}). Nobody writes one.
  *
  * <p>Its commands are pre-built, each a {@link Move} that ends with an outcome:
  *
@@ -68,7 +69,9 @@ import org.wpilib.units.measure.LinearVelocity;
  *
  * <p><b>Homing.</b> A joint held at positions knows where it is from its absolute encoder, or from
  * its control's homing recipe. Pushed into a hard stop, it homes on the first enable; moves wait
- * for it, and if it finds no stop it's faulted, and its moves are refused.
+ * for it, and if it finds no stop it's faulted, and its moves are refused. An absolute encoder its
+ * motor controller reads tells it at startup; one the robot reads itself, on a Systemcore port,
+ * seeds it from its first reading, and until then it waits as if homing.
  *
  * <p><b>Interlocks</b> from the robot's definition apply beneath every command, as the last thing
  * before the joint's output: no command, binding or auto skips one. While a {@code runsOnlyWhen}
@@ -120,9 +123,19 @@ public final class JointMechanism implements Mechanism {
   /** ...the output asks for, for this long, in seconds. */
   static final double STALL_SECONDS = 0.25;
 
+  /**
+   * A joint that knows where it is from an absolute encoder the robot reads waits this long for the
+   * encoder's first reading before it's faulted, in nanoseconds: the encoder still seeds it when
+   * the reading comes.
+   */
+  static final long ABSOLUTE_WAIT_NANOS = 2_000_000_000L;
+
   /** Where a joint stands, as {@code State} logs it. */
   public enum State {
-    /** Held at positions, and doesn't yet know where it is: it homes on the first enable. */
+    /**
+     * Held at positions, and doesn't yet know where it is: it homes on the first enable, or from
+     * its absolute encoder's first reading.
+     */
     UNHOMED,
     /** Finding where it is, now. */
     HOMING,
@@ -180,6 +193,29 @@ public final class JointMechanism implements Mechanism {
   private final Scheduler scheduler;
   private final JointIO io;
   private final JointIOInputsAutoLogged inputs = new JointIOInputsAutoLogged();
+  private final RobotMath math;
+
+  /**
+   * Its absolute encoder, where the robot reads it itself and tells the motor where the joint is
+   * from it ({@link JointSetup#readsAbsolute}), or null.
+   */
+  private @Nullable AbsoluteEncoderIO absoluteIo;
+
+  private final AbsoluteEncoderIOInputsAutoLogged absoluteInputs =
+      new AbsoluteEncoderIOInputsAutoLogged();
+
+  /** The encoder in the robot's definition, and its port, if it's on one. */
+  private Sensor.@Nullable Encoder absoluteModel;
+
+  private MechanismWiring.@Nullable PortEncoder absolutePort;
+
+  /** Whether it's waiting for its absolute encoder's reading, and since when. */
+  private boolean seeking;
+
+  private long seekingSince = -1;
+
+  /** Whether it's faulted for its encoder's silence, which a reading clears. */
+  private boolean silentEncoder;
 
   /** Whether it holds a position when idle: it has a range or named positions. */
   private final boolean positional;
@@ -227,6 +263,11 @@ public final class JointMechanism implements Mechanism {
 
   /** Where what its limit switches are doubted for is logged. */
   private final String switchDoubtsKey;
+
+  /** Where its absolute encoder's reading is logged, and where it says the joint is. */
+  private final String absoluteKey;
+
+  private final String absoluteAtKey;
 
   private final String setpointKey;
   private final String setpointVelocityKey;
@@ -355,6 +396,7 @@ public final class JointMechanism implements Mechanism {
       JointIO io,
       Scheduler scheduler) {
     joint = setup.joint();
+    this.math = math;
     this.tuned = tuned;
     retuned = setup.control();
     label = joint.label();
@@ -415,6 +457,8 @@ public final class JointMechanism implements Mechanism {
     atKey = key + "/At";
     heldByKey = key + "/HeldBy";
     switchDoubtsKey = key + "/SwitchDoubts";
+    absoluteKey = key + "/Absolute";
+    absoluteAtKey = key + "/AbsoluteAt";
     setpointKey = key + "/Setpoint";
     setpointVelocityKey = key + "/SetpointVelocity";
     outcomeKey = key + "/Outcome";
@@ -422,6 +466,18 @@ public final class JointMechanism implements Mechanism {
 
   private static MechanismControl.Bands bands(double enter, double stay) {
     return MechanismControl.Bands.builder().enter(enter).stay(stay).build();
+  }
+
+  /**
+   * Its absolute encoder, read by the robot: until its first reading the joint waits, unhomed, and
+   * then tells its motor controller where it is from it. Set once, by {@link Joints}, before the
+   * first loop.
+   */
+  void seedFrom(AbsoluteEncoderIO encoder) {
+    absoluteIo = encoder;
+    absoluteModel = JointSetup.absoluteEncoder(math, joint);
+    absolutePort =
+        joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port).orElse(null);
   }
 
   /** An interlock on this joint, whose condition reads another: set once, by {@link Joints}. */
@@ -494,18 +550,17 @@ public final class JointMechanism implements Mechanism {
   // ---- The pre-built commands ----
 
   /**
-   * Moves to one of its named positions at its cruise, profiled from where it is, and ends when it
-   * gets there ({@link Outcome#ARRIVED}) or its deadline passes: twice the profile's time from
-   * where it starts, plus half a second, unless {@link Move#within} says otherwise.
-   *
-   * @throws IllegalArgumentException if it has no position by the name
+   * Moves to one of its positions at its cruise, profiled from where it is, and ends when it gets
+   * there ({@link Outcome#ARRIVED}) or its deadline passes: twice the profile's time from where it
+   * starts, plus half a second, unless {@link Move#within} says otherwise. {@code
+   * pivot.goTo(PIVOT_OUT)}. A position of another joint's is {@link Outcome#REFUSED}, saying so.
    */
-  public Move goTo(String position) {
-    return Move.goTo(this, joint.position(position).value(), position);
+  public Move goTo(Position position) {
+    return Move.goTo(this, position.value(), position.name(), joint.whyNotOwn(position));
   }
 
   /**
-   * Moves to a computed angle, as {@link #goTo(String)} does: {@link Outcome#REFUSED} if it's
+   * Moves to a computed angle, as {@link #goTo(Position)} does: {@link Outcome#REFUSED} if it's
    * outside the joint's limits, its soft limits or else its range.
    *
    * @throws IllegalArgumentException if the joint slides
@@ -514,11 +569,11 @@ public final class JointMechanism implements Mechanism {
     if (!(joint instanceof Joint.Revolute)) {
       throw new IllegalArgumentException(label + " slides: send it to a distance");
     }
-    return Move.goTo(this, angle.in(Radians), null);
+    return Move.goTo(this, angle.in(Radians), null, null);
   }
 
   /**
-   * Moves to a computed distance, as {@link #goTo(String)} does: {@link Outcome#REFUSED} if it's
+   * Moves to a computed distance, as {@link #goTo(Position)} does: {@link Outcome#REFUSED} if it's
    * outside the joint's limits.
    *
    * @throws IllegalArgumentException if the joint turns
@@ -527,7 +582,7 @@ public final class JointMechanism implements Mechanism {
     if (!(joint instanceof Joint.Prismatic)) {
       throw new IllegalArgumentException(label + " turns: send it to an angle");
     }
-    return Move.goTo(this, distance.in(Meters), null);
+    return Move.goTo(this, distance.in(Meters), null, null);
   }
 
   /**
@@ -547,26 +602,23 @@ public final class JointMechanism implements Mechanism {
   }
 
   /**
-   * Runs it at one of its named outputs, a speed, a voltage or a duty cycle, until canceled: for
-   * "while held" and for work in the background. {@code "stopped"} is every joint's.
-   *
-   * @throws IllegalArgumentException if it has no output by the name
+   * Runs it at one of its outputs, a speed, a voltage or a duty cycle, until canceled: for "while
+   * held" and for work in the background. {@code roller.run(INTAKING)}. {@link Output#STOPPED} is
+   * every joint's; an output of another joint's is {@link Outcome#REFUSED}, saying so.
    */
-  public Move run(String output) {
-    return Move.run(this, joint.output(output), null);
+  public Move run(Output output) {
+    return Move.run(this, output, null, joint.whyNotOwn(output));
   }
 
   /**
-   * Runs it at one of its named outputs until a condition holds, which it ends on: {@link
+   * Runs it at one of its outputs until a condition holds, which it ends on: {@link
    * Outcome#ARRIVED}, or {@link Outcome#TIMED_OUT} after 3 s unless {@link Move#within} says
-   * otherwise. {@code roller.runUntil("intaking", coralIn)}. A {@link Gate} names it ("roller:
+   * otherwise. {@code roller.runUntil(INTAKING, coralIn)}. A {@link Gate} names it ("roller:
    * intaking until coral in claw") and, timed out, says why it never held ("coral in claw is false:
-   * claw beam lost").
-   *
-   * @throws IllegalArgumentException if it has no output by the name
+   * claw beam lost"). An output of another joint's is {@link Outcome#REFUSED}, saying so.
    */
-  public Move runUntil(String output, BooleanSupplier condition) {
-    return Move.run(this, joint.output(output), condition);
+  public Move runUntil(Output output, BooleanSupplier condition) {
+    return Move.run(this, output, condition, joint.whyNotOwn(output));
   }
 
   /**
@@ -589,27 +641,33 @@ public final class JointMechanism implements Mechanism {
   // ---- Its gates ----
 
   /**
-   * Whether it's at one of its named positions, within its band, measured; or runs at one of its
-   * named outputs, within its band for a speed: "pivot at out".
+   * Whether it's at one of its positions, within its band, measured: "pivot at out".
    *
-   * @throws IllegalArgumentException if it has no position or output by the name
+   * @throws IllegalArgumentException if the position isn't one of its own
    */
-  public Gate isAt(String name) {
-    if (joint.positions().stream().anyMatch(p -> p.name().equals(name))) {
-      double target = joint.position(name).value();
-      boolean[] inside = {false};
-      return new Gate(
-          scheduler,
-          label + " at " + name,
-          why -> {
-            double off = Math.abs(inputs.position - target);
-            inside[0] =
-                state == State.READY
-                    && (inside[0] ? off <= positionBands.stay() : off <= positionBands.enter());
-            return inside[0];
-          });
-    }
-    Output output = joint.output(name);
+  public Gate isAt(Position position) {
+    String name = joint.own(position).name();
+    double target = position.value();
+    boolean[] inside = {false};
+    return new Gate(
+        scheduler,
+        label + " at " + name,
+        why -> {
+          double off = Math.abs(inputs.position - target);
+          inside[0] =
+              state == State.READY
+                  && (inside[0] ? off <= positionBands.stay() : off <= positionBands.enter());
+          return inside[0];
+        });
+  }
+
+  /**
+   * Whether it runs at one of its outputs, within its band for a speed: "shooter at shooting".
+   *
+   * @throws IllegalArgumentException if the output isn't one of its own
+   */
+  public Gate isAt(Output output) {
+    String name = joint.own(output).name();
     boolean[] inside = {false};
     return new Gate(
         scheduler,
@@ -625,29 +683,29 @@ public final class JointMechanism implements Mechanism {
   }
 
   /**
-   * Whether it's past one of its named positions, from its reference: "pivot past run". A position
-   * isn't known until the joint is homed: until then, it's false.
+   * Whether it's past one of its positions, from its reference: "pivot past run". A position isn't
+   * known until the joint is homed: until then, it's false.
    *
-   * @throws IllegalArgumentException if it has no position by the name, or it's the reference
+   * @throws IllegalArgumentException if the position isn't one of its own, or it's the reference
    */
-  public Gate isPast(String position) {
+  public Gate isPast(Position position) {
     Condition.Past past = joint.past(position);
     return new Gate(
         scheduler,
-        label + " past " + position,
+        label + " past " + position.name(),
         why -> state == State.READY && past.holdsAt(inputs.position));
   }
 
   /**
-   * Whether it's between two of its named positions, edges included: "pivot between run and out".
+   * Whether it's between two of its positions, edges included: "pivot between run and out".
    *
-   * @throws IllegalArgumentException if it has no position by either name
+   * @throws IllegalArgumentException if either isn't one of its own
    */
-  public Gate isBetween(String from, String to) {
+  public Gate isBetween(Position from, Position to) {
     Condition.Between between = joint.between(from, to);
     return new Gate(
         scheduler,
-        label + " between " + from + " and " + to,
+        label + " between " + from.name() + " and " + to.name(),
         why -> state == State.READY && between.holdsAt(inputs.position));
   }
 
@@ -822,9 +880,19 @@ public final class JointMechanism implements Mechanism {
         || homing instanceof MechanismControl.Homing.ToSwitch;
   }
 
-  /** Starts homing it again by its recipe: a command asked ({@link #home()}). */
+  /** Whether it finds where it is from an absolute encoder the robot reads, and can again. */
+  boolean homesByEncoder() {
+    return absoluteIo != null;
+  }
+
+  /**
+   * Starts homing it again by its recipe, or from its absolute encoder's next reading: a command
+   * asked ({@link #home()}).
+   */
   void startHoming() {
-    if (enabled) {
+    if (homesByEncoder()) {
+      seekAgain();
+    } else if (enabled) {
       homingBegins();
     } else {
       setState(State.UNHOMED, null);
@@ -920,10 +988,18 @@ public final class JointMechanism implements Mechanism {
     }
     io.updateInputs(inputs);
     Logger.processInputs(inputsKey, inputs);
+    AbsoluteEncoderIO encoder = absoluteIo;
+    if (encoder != null) {
+      encoder.updateInputs(absoluteInputs);
+      Logger.processInputs(absoluteKey, absoluteInputs);
+    }
     boolean enabling = enabled && !this.enabled;
     if (!read) {
       read = true;
-      setState(homesToAStop() ? State.UNHOMED : State.READY, null);
+      setState(homesToAStop() || homesByEncoder() ? State.UNHOMED : State.READY, null);
+      if (homesByEncoder()) {
+        seekAgain();
+      }
     }
     if (!inputs.unconfigured.isEmpty() && state != State.FAULTED) {
       // Without its settings, a motor controller has no current limits or ratio: driving it would
@@ -941,9 +1017,12 @@ public final class JointMechanism implements Mechanism {
       reseed = true;
     }
     this.enabled = enabled;
+    if (seeking) {
+      seek();
+    }
     if (!enabled && state == State.HOMING) {
       setState(State.UNHOMED, null); // it starts again on the next enable
-    } else if (enabling && state == State.UNHOMED) {
+    } else if (enabling && state == State.UNHOMED && homesToAStop()) {
       homingBegins();
     } else if (state == State.HOMING && !(homing instanceof MechanismControl.Homing.ToSwitch)) {
       homingGoesOn();
@@ -1291,6 +1370,58 @@ public final class JointMechanism implements Mechanism {
 
   // ---- Homing ----
 
+  /** Waits for its absolute encoder's next reading, unhomed, to tell the motor where it is. */
+  private void seekAgain() {
+    seeking = true;
+    seekingSince = nowNanos;
+    if (state != State.FAULTED || silentEncoder) {
+      silentEncoder = false;
+      setState(State.UNHOMED, null);
+    }
+  }
+
+  /**
+   * Tells its motor controller where the joint is from its absolute encoder's reading, or, after a
+   * wait with none, faults it: it's seeded whenever the reading comes. Each loop it seeks, and the
+   * encoder's word on where the joint is is logged every loop it answers, beside where the motor
+   * says it is, so drift between them shows.
+   */
+  private void seek() {
+    Sensor.Encoder model = absoluteModel;
+    if (model == null) {
+      return;
+    }
+    if (absoluteInputs.connected) {
+      double at = math.fromAbsolute(model, absoluteReading());
+      io.resetPosition(at);
+      holdPosition = clamp(at);
+      justHomed = true;
+      seeking = false;
+      if (state == State.UNHOMED || silentEncoder) {
+        silentEncoder = false;
+        setState(State.READY, null);
+      }
+    } else if (state == State.UNHOMED && nowNanos - seekingSince >= ABSOLUTE_WAIT_NANOS) {
+      silentEncoder = true;
+      setState(
+          State.FAULTED,
+          String.format(
+              java.util.Locale.ROOT,
+              "%s's absolute encoder gave no reading in %.1f s%s: it's seeded when it does",
+              label,
+              ABSOLUTE_WAIT_NANOS / 1e9,
+              absolutePort == null ? "" : ", on port " + absolutePort.port()));
+    }
+  }
+
+  /**
+   * Its absolute encoder's reading, as its sensor in the definition reads: offset and direction.
+   */
+  private double absoluteReading() {
+    MechanismWiring.PortEncoder port = absolutePort;
+    return port == null ? absoluteInputs.share : port.read(absoluteInputs.share);
+  }
+
   private void homingBegins() {
     homingSince = nowNanos;
     stillSince = -1;
@@ -1443,6 +1574,10 @@ public final class JointMechanism implements Mechanism {
     Logger.recordOutput(setpointKey, setpoint.position);
     Logger.recordOutput(setpointVelocityKey, setpoint.velocity);
     Logger.recordOutput(outcomeKey, outcome);
+    Sensor.Encoder model = absoluteModel;
+    if (model != null && absoluteInputs.connected) {
+      Logger.recordOutput(absoluteAtKey, math.fromAbsolute(model, absoluteReading()));
+    }
   }
 
   /**

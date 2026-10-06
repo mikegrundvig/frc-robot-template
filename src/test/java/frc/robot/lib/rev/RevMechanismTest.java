@@ -8,31 +8,31 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Rotations;
 
 import com.ctre.phoenix6.configs.SlotConfigs;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.lib.phoenix.MechanismControlBuilder;
-import frc.robot.lib.phoenix.MechanismControlGainsBuilder;
 import frc.robot.lib.phoenix.PhoenixMechanism;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.MechanismWiringBuilder;
 import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
 
 /**
  * The REV helper: a SPARK's settings carried from the Phoenix helper's for the same mechanism, in a
  * SPARK's units. The fixtures' pivot on a NEO through 25:1.
  */
 class RevMechanismTest {
-  private static final Drive NEO = PIVOT.motors(Motor.NEO, 2, JointFixtures.gearing(25));
+  private static final Drive NEO =
+      JointFixtures.motors(PIVOT, Motor.NEO, 2, JointFixtures.gearing(25));
 
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
@@ -55,7 +55,7 @@ class RevMechanismTest {
   private static MechanismWiring wiring(
       MechanismWiring.Controller controller, Optional<MechanismWiring.Cancoder> cancoder) {
     return MechanismWiring.builder()
-        .canBus(CanBus.port(CANPort.CAN_S0))
+        .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
         .controller(controller)
         .motors(
             List.of(

@@ -147,7 +147,7 @@ final class RobotLayer implements Layer {
       mounts[i] = new Transform3d(resting.getTranslation(), resting.getRotation());
     }
     sensors =
-        robot.sensors().stream()
+        math.sensors().stream()
             .filter(Sensor.Placed.class::isInstance)
             .map(Sensor.Placed.class::cast)
             .toList();

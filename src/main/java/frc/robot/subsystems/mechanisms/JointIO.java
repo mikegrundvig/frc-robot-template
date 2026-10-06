@@ -1,6 +1,6 @@
 package frc.robot.subsystems.mechanisms;
 
-import frc.robot.lib.phoenix.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import org.littletonrobotics.junction.AutoLog;
 
 /**

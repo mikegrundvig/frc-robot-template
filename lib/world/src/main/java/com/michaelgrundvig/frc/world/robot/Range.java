@@ -49,8 +49,15 @@ public record Range(double lower, double upper) {
     return upper - lower;
   }
 
+  /**
+   * How far past a stop a position may be and still count as at it: a hair, so a place given in
+   * degrees one way ({@code Degrees.of(12)}) lands on a stop given in degrees another way ({@code
+   * Range.degrees(12, 90)}) though the two convert a floating-point step apart.
+   */
+  static final double EDGE = 1e-9;
+
   /** Whether a position is at or between the stops. */
   public boolean contains(double position) {
-    return position >= lower && position <= upper;
+    return position >= lower - EDGE && position <= upper + EDGE;
   }
 }

@@ -9,9 +9,9 @@ import com.ctre.phoenix6.configs.CANrangeConfiguration;
 import com.ctre.phoenix6.hardware.CANrange;
 import com.ctre.phoenix6.signals.UpdateModeValue;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.lib.wiring.SensorWiring;
 import org.wpilib.math.filter.Debouncer;
 import org.wpilib.units.measure.Distance;
 

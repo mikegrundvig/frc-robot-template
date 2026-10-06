@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.behavior.Gate;

@@ -1,4 +1,4 @@
-package frc.robot.lib.wiring;
+package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.between;
 import static com.michaelgrundvig.frc.world.config.Rules.size;
@@ -13,7 +13,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
-import org.wpilib.hardware.imu.OnboardIMU;
 import org.wpilib.units.measure.Angle;
 
 /**
@@ -35,11 +34,6 @@ import org.wpilib.units.measure.Angle;
  * @param gyroYawScale the gyro's readings times this are the true rotation: 1 until the gyro scale
  *     procedure measures it (docs/calibration.md)
  * @param modules front left, front right, back left, back right
- * @param systemcoreMount how Systemcore itself is mounted, for its onboard IMU, the backup to the
- *     gyro: flat, or on edge along its long side (landscape) or short side (portrait). WPILib takes
- *     its yaw about the axis this says is up. How the board is turned on the robot, which turns its
- *     accelerometer's axes into the robot's, is its mount in the robot's definition ({@code
- *     Imus.backup}).
  */
 @ConfigRecord
 public record SwerveWiring(
@@ -48,8 +42,7 @@ public record SwerveWiring(
     MechanismWiring.Controller steerController,
     int gyroId,
     double gyroYawScale,
-    List<ModuleWiring> modules,
-    OnboardIMU.MountOrientation systemcoreMount) {
+    List<ModuleWiring> modules) {
   public SwerveWiring {
     Checks.on(SwerveWiring.class)
         .field("gyroId", gyroId, between(0, 62)) // a CAN ID

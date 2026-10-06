@@ -14,6 +14,7 @@ import static org.wpilib.units.Units.MetersPerSecond;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Translation2d;
@@ -93,7 +94,12 @@ class DrivetrainGeometryTest {
     List<DrivetrainGeometry.Corner> corners = new ArrayList<>(drivetrain().corners());
     corners.set(2, corner(back, corners.get(2).position()));
     corners.set(3, corner(back, corners.get(3).position()));
-    DrivetrainGeometry mixed = DrivetrainGeometry.builder().corners(corners).build();
+    DrivetrainGeometry mixed =
+        DrivetrainGeometry.builder()
+            .corners(corners)
+            .wiring(Optional.empty())
+            .control(Optional.empty())
+            .build();
 
     assertThat(mixed.module(0)).isEqualTo(modules());
     assertThat(mixed.module(3)).isEqualTo(back);
@@ -124,10 +130,21 @@ class DrivetrainGeometryTest {
     swapped.set(0, drivetrain().corners().get(1));
     swapped.set(1, drivetrain().corners().get(0));
     assertRejected(
-        "DrivetrainGeometry.corners", () -> DrivetrainGeometry.builder().corners(swapped).build());
+        "DrivetrainGeometry.corners",
+        () ->
+            DrivetrainGeometry.builder()
+                .corners(swapped)
+                .wiring(Optional.empty())
+                .control(Optional.empty())
+                .build());
     assertRejected(
         "DrivetrainGeometry.corners: needs four",
-        () -> DrivetrainGeometry.builder().corners(swapped.subList(0, 3)).build());
+        () ->
+            DrivetrainGeometry.builder()
+                .corners(swapped.subList(0, 3))
+                .wiring(Optional.empty())
+                .control(Optional.empty())
+                .build());
   }
 
   @Test

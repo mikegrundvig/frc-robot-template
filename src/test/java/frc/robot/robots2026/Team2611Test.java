@@ -26,6 +26,7 @@ import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.BodyBuilder;
 import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Motor;
@@ -36,6 +37,7 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.game.Rebuilt;
+import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -142,13 +144,13 @@ class Team2611Test {
    */
   @Test
   void thePivotsEncoderWrapsBesideItsStow() {
-    double derived = math.discontinuityPoint(Team2611.PIVOT_ABSOLUTE);
+    double derived = math.discontinuityPoint(absolute(Team2611.PIVOT));
     var range = Team2611.PIVOT.range().orElseThrow();
 
     assertThat(derived).isCloseTo(0.6875, within(1e-12));
-    assertThat(RobotMath.wrapMargin(Team2611.PIVOT_ABSOLUTE, derived))
+    assertThat(RobotMath.wrapMargin(absolute(Team2611.PIVOT), derived))
         .isCloseTo(0.3125, within(1e-12));
-    assertThat(RobotMath.wrapMargin(Team2611.PIVOT_ABSOLUTE, 1.0))
+    assertThat(RobotMath.wrapMargin(absolute(Team2611.PIVOT), 1.0))
         .as("theirs")
         .isCloseTo(0, within(1e-12))
         .isLessThan(RobotMath.WRAP_MARGIN);
@@ -165,13 +167,14 @@ class Team2611Test {
    */
   @Test
   void eachRotorTurnsByItsDrivesRatio() {
-    assertThat(math.sensorToMechanismRatio(Team2611.PIVOT_MOTOR.rotor())).isEqualTo(1 / (1.0 / 25));
-    assertThat(math.sensorToMechanismRatio(Team2611.INTAKE_MOTOR.rotor())).isEqualTo(3);
-    assertThat(math.sensorToMechanismRatio(Team2611.FULL_SEND_MOTOR.rotor())).isEqualTo(4);
-    assertThat(math.sensorToMechanismRatio(Team2611.TRANSITION_MOTOR.rotor())).isEqualTo(2);
-    assertThat(math.sensorToMechanismRatio(Team2611.SHOOTER_MOTORS.rotor())).isEqualTo(1);
-    assertThat(Team2611.PIVOT_MOTOR.rotor().label()).isEqualTo("pivot rotor");
-    assertThat(math.rotorToSensorRatio(Team2611.PIVOT_MOTOR, Team2611.PIVOT_ABSOLUTE))
+    assertThat(math.sensorToMechanismRatio(motors(Team2611.PIVOT).rotor()))
+        .isEqualTo(1 / (1.0 / 25));
+    assertThat(math.sensorToMechanismRatio(motors(Team2611.INTAKE).rotor())).isEqualTo(3);
+    assertThat(math.sensorToMechanismRatio(motors(Team2611.FULL_SEND).rotor())).isEqualTo(4);
+    assertThat(math.sensorToMechanismRatio(motors(Team2611.TRANSITION).rotor())).isEqualTo(2);
+    assertThat(math.sensorToMechanismRatio(motors(Team2611.SHOOTER).rotor())).isEqualTo(1);
+    assertThat(motors(Team2611.PIVOT).rotor().label()).isEqualTo("pivot rotor");
+    assertThat(math.rotorToSensorRatio(motors(Team2611.PIVOT), absolute(Team2611.PIVOT)))
         .as("the rotor's turns for the absolute encoder's, were the two fused")
         .isCloseTo(25, within(1e-12));
   }
@@ -233,8 +236,8 @@ class Team2611Test {
                     ROBOT,
                     Team2611.FULL_SEND,
                     autoFeed,
-                    Team2611.FULL_SEND_MOTOR,
-                    autoFeed.motors(Motor.KRAKEN_X60, 1, Parts.gearing(4))))
+                    motors(Team2611.FULL_SEND),
+                    JointFixtures.motors(autoFeed, Motor.KRAKEN_X60, 1, Parts.gearing(4))))
         .withMessage(
             "RobotDefinition[2611 2026].joints: full send's feeding, 5000 rpm, is 3.333 times its"
                 + " free speed, 1500 rpm: its motors can't turn it that fast");
@@ -258,9 +261,12 @@ class Team2611Test {
    */
   @Test
   void aConfigurationThatRunsTheIntakeStowedIsRefused() {
-    Configuration stowed = Configuration.of("intaking", Team2611.INTAKE.at("intaking"));
+    Configuration stowed = Configuration.of("intaking", Team2611.INTAKE.at(Team2611.INTAKING));
     Configuration out =
-        Configuration.of("intaking", Team2611.PIVOT.at("out"), Team2611.INTAKE.at("intaking"));
+        Configuration.of(
+            "intaking",
+            Team2611.PIVOT.at(Team2611.PIVOT_OUT),
+            Team2611.INTAKE.at(Team2611.INTAKING));
 
     assertThatIllegalArgumentException()
         .isThrownBy(
@@ -396,17 +402,27 @@ class Team2611Test {
     Map<Joint, Double> lowered = Map.of(Team2611.HOOD, 0.0);
     Map<Joint, Double> raised = Map.of(Team2611.HOOD, Math.toRadians(40));
 
-    assertThat(servo.command(math.coordinate(Team2611.HOOD_LEFT, lowered)))
+    assertThat(servo.command(math.coordinate(Team2611.HOOD.ownDrives().get(0), lowered)))
         .isCloseTo(0.65, within(1e-9));
-    assertThat(servo.command(math.coordinate(Team2611.HOOD_LEFT, raised)))
+    assertThat(servo.command(math.coordinate(Team2611.HOOD.ownDrives().get(0), raised)))
         .isCloseTo(1.0, within(0.001));
-    assertThat(math.coordinate(Team2611.HOOD_RIGHT, raised))
-        .isCloseTo(math.coordinate(Team2611.HOOD_LEFT, raised), within(1e-12));
-    assertThat(math.torque(Team2611.HOOD_LEFT, Team2611.HOOD, lowered, 1.0))
+    assertThat(math.coordinate(Team2611.HOOD.ownDrives().get(1), raised))
+        .isCloseTo(math.coordinate(Team2611.HOOD.ownDrives().get(0), raised), within(1e-12));
+    assertThat(math.torque(Team2611.HOOD.ownDrives().get(0), Team2611.HOOD, lowered, 1.0))
         .as("told to extend, it lifts the hood")
         .isPositive();
-    assertThat(math.torque(Team2611.HOOD_LEFT, Team2611.HOOD, lowered, 0.65))
+    assertThat(math.torque(Team2611.HOOD.ownDrives().get(0), Team2611.HOOD, lowered, 0.65))
         .as("told where it is, it holds")
         .isCloseTo(0, within(1e-9));
+  }
+
+  /** A joint's own motors, from its block. */
+  private static Drive motors(Joint joint) {
+    return joint.ownDrives().getFirst();
+  }
+
+  /** A joint's own absolute encoder, from its block. */
+  private static Sensor.Encoder absolute(Joint joint) {
+    return (Sensor.Encoder) joint.ownSensors().getFirst();
   }
 }

@@ -14,6 +14,7 @@ import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.units.measure.Distance;
 
 /**
  * Synthetic mechanisms for the tests, one of each kind the audit's table lists, on the test robot's
@@ -70,6 +71,7 @@ final class MechanismFixtures {
         .link(link)
         .positions(List.of())
         .outputs(List.of())
+        .driven(Driven.NONE)
         .build();
   }
 
@@ -85,6 +87,7 @@ final class MechanismFixtures {
         .link(link)
         .positions(List.of())
         .outputs(List.of())
+        .driven(Driven.NONE)
         .build();
   }
 
@@ -149,5 +152,29 @@ final class MechanismFixtures {
 
   static double meters(org.wpilib.units.measure.Distance distance) {
     return distance.in(Meters);
+  }
+
+  /** A joint's motors, through a gearing, as a drive of the robot's own. */
+  static Drive motors(Joint.Revolute joint, Motor motor, int count, Gearing gearing) {
+    return Drive.builder()
+        .label(joint.label())
+        .actuator(Actuator.Motors.builder().motor(motor).count(count).build())
+        .transmission(Transmission.Geared.builder().joint(joint).gearing(gearing).build())
+        .build();
+  }
+
+  /** A sliding joint's motors, through a gearing onto a drum, as a drive of the robot's own. */
+  static Drive motors(
+      Joint.Prismatic joint, Motor motor, int count, Gearing gearing, Distance pitchRadius) {
+    return Drive.builder()
+        .label(joint.label())
+        .actuator(Actuator.Motors.builder().motor(motor).count(count).build())
+        .transmission(
+            Transmission.Drum.builder()
+                .joint(joint)
+                .gearing(gearing)
+                .pitchRadius(pitchRadius)
+                .build())
+        .build();
   }
 }

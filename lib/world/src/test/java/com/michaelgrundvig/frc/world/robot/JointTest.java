@@ -81,6 +81,7 @@ class JointTest {
                     .link(arm.link())
                     .positions(List.of())
                     .outputs(List.of())
+                    .driven(Driven.NONE)
                     .build())
         .withMessageStartingWith("Prismatic[lift].origin");
     assertThatIllegalArgumentException()
@@ -236,7 +237,7 @@ class JointTest {
   /** What a reference can get wrong: a part the definition doesn't list. */
   @Test
   void everythingADriveOrSensorTurnsIsOneOfTheRobotsJoints() {
-    Drive drive = arm.motors(Motor.KRAKEN_X60, 1, gearing(50, 1));
+    Drive drive = MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 1, gearing(50, 1));
     Sensor.Encoder pivot = encoder("arm-abs", arm, 1, true);
 
     assertThatIllegalArgumentException()
@@ -276,8 +277,8 @@ class JointTest {
                     List.of(arm, twin),
                     List.of(),
                     List.of(
-                        arm.motors(Motor.NEO, 1, gearing(10, 1)),
-                        twin.motors(Motor.NEO, 1, gearing(10, 1))),
+                        MechanismFixtures.motors(arm, Motor.NEO, 1, gearing(10, 1)),
+                        MechanismFixtures.motors(twin, Motor.NEO, 1, gearing(10, 1))),
                     List.of()))
         .withMessageContaining("two joints are labeled arm")
         .withMessageContaining("two drives are labeled arm");
@@ -401,7 +402,7 @@ class JointTest {
         CameraConfigBuilder.builder(ConfigFixtures.camera("arm", point(0.2, 0, 0.4)))
             .joint(Optional.of((Joint) arm))
             .build();
-    Drive drive = arm.motors(Motor.KRAKEN_X60, 1, gearing(50, 1));
+    Drive drive = MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 1, gearing(50, 1));
 
     RobotDefinition robot =
         definition(List.of(arm), List.of(), List.of(drive), List.of(), List.of(onArm));
@@ -443,7 +444,10 @@ class JointTest {
         .withMessageContaining("hood-rotor: a span is of absolute encoders on one joint");
     assertThatIllegalArgumentException().isThrownBy(() -> math.absoluteSpan(List.of()));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> math.rotorToSensorRatio(arm.motors(Motor.NEO, 1, gearing(5, 1)), reads))
+        .isThrownBy(
+            () ->
+                math.rotorToSensorRatio(
+                    MechanismFixtures.motors(arm, Motor.NEO, 1, gearing(5, 1)), reads))
         .withMessageContaining("doesn't turn hood");
   }
 

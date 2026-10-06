@@ -1,4 +1,4 @@
-package frc.robot.subsystems.drive;
+package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.atMost;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
@@ -12,12 +12,6 @@ import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
-import com.michaelgrundvig.frc.world.robot.Actuator;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SwerveWiring;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;

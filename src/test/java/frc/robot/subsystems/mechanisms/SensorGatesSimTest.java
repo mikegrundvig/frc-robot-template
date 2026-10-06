@@ -1,7 +1,9 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -43,6 +45,7 @@ class SensorGatesSimTest {
           .pose(Optional.empty())
           .range(Meters.of(1))
           .fieldOfView(Degrees.of(27))
+          .wiring(Optional.empty())
           .build();
 
   private static final RobotDefinition ROBOT =
@@ -76,7 +79,7 @@ class SensorGatesSimTest {
   /** A roller runs until the beam trips, and ends ARRIVED that loop, its name saying on what. */
   @Test
   void aMoveEndsTheLoopTheBeamTrips() {
-    Move intake = roller.runUntil("intaking", coralIn);
+    Move intake = roller.runUntil(ROLLER_INTAKING, coralIn);
     sim.scheduler.schedule(intake);
     sim.run(0.5);
     assertThat(intake.outcome()).isEmpty();
@@ -99,7 +102,7 @@ class SensorGatesSimTest {
   void aLostSensorHoldsNeitherWayAndWhatWaitedOnItSaysSo() {
     Gate clear = sensors.gate(CLAW_BEAM.clear());
     sim.sensors.silence(CLAW_BEAM, true);
-    Move intake = roller.runUntil("intaking", coralIn);
+    Move intake = roller.runUntil(ROLLER_INTAKING, coralIn);
     sim.scheduler.schedule(intake);
 
     sim.run(3.1);
@@ -124,7 +127,7 @@ class SensorGatesSimTest {
     sim.loop();
     assertThat(down.getAsBoolean()).isTrue();
 
-    sim.run(pivot.goTo("out"), 1.5);
+    sim.run(pivot.goTo(PIVOT_OUT), 1.5);
 
     assertThat(Math.toDegrees(sim.simulation.position(PIVOT))).isCloseTo(130, within(2.0));
     assertThat(down.getAsBoolean()).isFalse();

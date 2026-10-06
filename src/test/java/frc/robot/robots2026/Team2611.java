@@ -1,9 +1,9 @@
 package frc.robot.robots2026;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static frc.robot.robots2026.Parts.IN;
 import static frc.robot.robots2026.Parts.body;
 import static frc.robot.robots2026.Parts.camera;
-import static frc.robot.robots2026.Parts.drive;
 import static frc.robot.robots2026.Parts.inches;
 import static frc.robot.robots2026.Parts.point;
 import static frc.robot.robots2026.Parts.sensor;
@@ -14,18 +14,19 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Pounds;
+import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.VisionConfig;
-import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.Body.Weight;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Configuration;
-import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
@@ -34,6 +35,8 @@ import com.michaelgrundvig.frc.world.robot.Imus;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Part;
@@ -41,15 +44,10 @@ import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
-import com.michaelgrundvig.frc.world.robot.Sensor;
-import com.michaelgrundvig.frc.world.robot.Transmission;
+import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.RobotConfig;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.subsystems.drive.DrivetrainControl;
-import frc.robot.subsystems.mechanisms.JointSetup;
 import java.util.List;
 import java.util.Optional;
-import org.wpilib.math.geometry.Translation3d;
 
 /**
  * 2611's 2026 competition robot, as its code on main configures it: {@code
@@ -114,12 +112,32 @@ final class Team2611 {
           .couplingRatio(3.857142857142857)
           .build();
 
+  /** Their swerve's CANivore (generated/TunerConstants.java:71). */
+  static final CanBus CANIVORE = CanBus.canivore("canivore");
+
   /**
    * The modules at ±10.375 in (generated/TunerConstants.java:135-169; Tuner's swerve project,
-   * tuner-swerve-project.json: VerticalTrackSizeInches 20.75).
+   * tuner-swerve-project.json: VerticalTrackSizeInches 20.75), wired as Tuner X generated them:
+   * each corner's drive, steer and CANcoder IDs and the CANcoder's offset
+   * (TunerConstants.java:128-164), the right side's drive motors turned around (:86-87), the Pigeon
+   * 2 at ID 2 (:89).
    */
   static final DrivetrainGeometry DRIVETRAIN =
-      DrivetrainGeometry.uniform(MODULES, Inches.of(10.375), Inches.of(10.375));
+      DrivetrainGeometry.uniform(MODULES, Inches.of(10.375), Inches.of(10.375))
+          .wired(
+              SwerveWiring.builder()
+                  .canBus(CANIVORE)
+                  .driveController(MechanismWiring.Controller.TALON_FX)
+                  .steerController(MechanismWiring.Controller.TALON_FX)
+                  .gyroId(2)
+                  .gyroYawScale(1.0)
+                  .modules(
+                      List.of(
+                          corner(23, 24, 12, 0.3779296875, false), // front left
+                          corner(21, 22, 11, 0.058349609375, true), // front right
+                          corner(25, 26, 13, 0.000244, false), // back left
+                          corner(27, 28, 14, -0.200439453125, true))) // back right
+                  .build());
 
   /** Guess: its PhotonVision cameras' sensors, the template's typical AprilTag camera. */
   private static final CameraConfig.Sensor CAMERA =
@@ -158,11 +176,20 @@ final class Team2611 {
   static final CameraConfig RIGHT_FRONT =
       camera("Camera3", inches(-8.625, -12.25, 20.875), 0, 8.2, -23.162, CAMERA, Optional.empty());
 
+  /** The pivot's places: in to stow, out to intake, and run, from where its roller may run. */
+  static final Position PIVOT_IN = Position.degrees("in", 1.5);
+
+  static final Position PIVOT_RUN = Position.degrees("run", 110);
+  static final Position PIVOT_OUT = Position.degrees("out", 130);
+
   /**
-   * The intake's pivot (subsystems/Pivot.java): a Kraken X60 (Pivot.java:21) through 25:1
+   * The intake's pivot (subsystems/Pivot.java): a Kraken X60 at CAN ID 32 (Pivot.java:21,
+   * Constants.java:79), turning clockwise for positive (Pivot.java:32), through 25:1
    * (Constants.java:85 writes it 1/25, output over motor, as Pivot.java:83 divides by it), read by
-   * a duty-cycle absolute encoder (Pivot.java:23-24, DIO 1 at Constants.java:82; its offset, 296°,
-   * is wiring). In at 1.5°, out at 130°, run from 110° (Constants.java:89-91).
+   * a duty-cycle absolute encoder on DIO 1 (Pivot.java:23-24, Constants.java:82), inverted
+   * (Pivot.java:30, WPILib's DutyCycleEncoder.setInverted), its offset 296° taken off its inverted
+   * reading (Constants.java:83; VectorKit/hardware/AbsoluteEncoder.java:55-61): an offset of -296°,
+   * inverted. In at 1.5°, out at 130°, run from 110° (Constants.java:89-91).
    *
    * <p>Its named positions are its code's three angles: "in" to stow, "out" to intake, and "run",
    * from where its roller may run (PIVOT_RUN_ANGLE, Pivot.java:72-73's intakeCanRun).
@@ -170,98 +197,106 @@ final class Team2611 {
    * <p>Guess: the hard stops at 0° and 135° (the code holds only its setpoints), the pivot 0.25 m
    * forward and 0.32 m up, the arm straight up at 0° and swung forward and down as the angle grows
    * (Pivot.java:30-32 invert both the encoder and the motor, so the sign is a guess too), and the
-   * arm drawn as a 0.36 m box out to the roller.
+   * arm drawn as a 0.36 m box out to the roller. Guess: its encoder on the pivot's axle, 1:1, since
+   * AbsoluteEncoder.get (VectorKit/hardware/AbsoluteEncoder.java:55-61) reads its turn straight as
+   * the pivot's, and 1024 counts a turn, a REV through-bore's absolute output, the code naming no
+   * part.
+   *
+   * <p>How the template drives each joint is chosen to track in the simulator, its feedforward the
+   * definition's seed: their code's own gains aren't the point here. The hood's servos aren't
+   * driven by the template yet, so it has no control.
    */
   static final Joint.Revolute PIVOT =
-      Joint.pivot(
-          "pivot",
-          Part.CHASSIS,
-          point(0.25, 0, 0.32),
-          Joint.PITCH_DOWN,
-          Range.degrees(0, 135),
-          Degrees.of(1.5),
-          Link.box("intake arm", point(0, 0, 0.2), point(0.05, 0.55, 0.36)),
-          Position.degrees("in", 1.5),
-          Position.degrees("run", 110),
-          Position.degrees("out", 130));
+      Joint.pivot("pivot", Part.CHASSIS, point(0.25, 0, 0.32), Joint.PITCH_DOWN)
+          .range(Range.degrees(0, 135), PIVOT_IN)
+          .carries(Link.box("intake arm", point(0, 0, 0.2), point(0.05, 0.55, 0.36)))
+          .positions(PIVOT_IN, PIVOT_RUN, PIVOT_OUT)
+          .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).clockwise())
+          .absoluteEncoder(
+              1024, MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(-296)).inverted())
+          .control(MechanismControl.position(30).withKd(1).withProfile(8, 30));
+
+  /** The intake roller's speeds, the operator's. */
+  static final Output INTAKING = Output.rpm("intaking", 2000);
+
+  static final Output OUTTAKING = Output.rpm("outtaking", -500);
 
   /**
-   * The intake's roller, on the arm's end: a Kraken X60 (subsystems/Intake.java:21) through 3:1
+   * The intake's roller, on the arm's end: a Kraken X60 at CAN ID 31 (subsystems/Intake.java:21,
+   * Constants.java:80; counterclockwise for positive, Intake.java:27) through 3:1
    * (Constants.java:86, 1/3, as Intake.java:43 divides by it), velocity-controlled in output rpm
    * (Intake.java:43). Its speeds are the operator's, "intaking" at 2000 rpm and "outtaking" at 500
    * back (Intake.java:51-53), the 2000 its auto's too (RobotContainer.java:143). Guess: its size.
+   * Its rollers run velocity control without FOC (VectorKit/hardware/KrakenX60.java:48): the plain
+   * X60's numbers, here and on the shooter, feeder and transition.
    */
   static final Joint.Revolute INTAKE =
-      Joint.roller(
-          "intake",
-          PIVOT,
-          point(0, 0, 0.35),
-          Link.box("intake roller", point(0, 0, 0), point(0.05, 0.5, 0.05)),
-          Output.rpm("intaking", 2000),
-          Output.rpm("outtaking", -500));
+      Joint.roller("intake", PIVOT, point(0, 0, 0.35))
+          .carries(Link.box("intake roller", point(0, 0, 0), point(0.05, 0.5, 0.05)))
+          .outputs(INTAKING, OUTTAKING)
+          .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
+          .control(MechanismControl.velocity(0.02));
 
   /**
-   * The shooter's wheels: four Kraken X60s (subsystems/Shooter.java:23-27), three following the
-   * first (Shooter.java:34-36), 3 in wheels (Constants.java:62). Guess: 1:1, since Shooter.java:51
-   * commands the leader's rotor as the shooter's speed with no ratio anywhere; and where it sits,
-   * behind the center at the launch height, 18.33 in (Constants.java:65).
+   * The shooter's wheels: four Kraken X60s at CAN IDs 41 to 44 (subsystems/Shooter.java:23-27,
+   * Constants.java:51-54), three following the first (Shooter.java:34-36), 42 aligned with it and
+   * the right pair opposed, so turning clockwise where it turns counterclockwise (:37), 3 in wheels
+   * (Constants.java:62). Guess: 1:1, since Shooter.java:51 commands the leader's rotor as the
+   * shooter's speed with no ratio anywhere; and where it sits, behind the center at the launch
+   * height, 18.33 in (Constants.java:65).
    */
   static final Joint.Revolute SHOOTER =
-      Joint.roller(
-          "shooter",
-          Part.CHASSIS,
-          point(-0.2, 0, 18.33 * IN),
-          Link.box("shooter wheels", point(0, 0, 0), point(0.076, 0.5, 0.076)));
+      Joint.roller("shooter", Part.CHASSIS, point(-0.2, 0, 18.33 * IN))
+          .carries(Link.box("shooter wheels", point(0, 0, 0), point(0.076, 0.5, 0.076)))
+          .motors(
+              Motor.KRAKEN_X60,
+              Gearing.of(1),
+              TALON_FX.can(41),
+              TALON_FX.can(42),
+              TALON_FX.can(43).clockwise(),
+              TALON_FX.can(44).clockwise())
+          .control(MechanismControl.velocity(0.02));
+
+  /** The feeder's speeds, the driver's. */
+  static final Output FULL_SEND_FEEDING = Output.rpm("feeding", 1000);
+
+  static final Output FULL_SEND_UNJAMMING = Output.rpm("unjamming", -1000);
 
   /**
-   * "Full send", the feeder into the shooter: a Kraken X60 (subsystems/FullSend.java:21) through
-   * 4:1 (Constants.java:75 writes 1/4; FullSend.java:42 divides by it), in output rpm. Its speeds
-   * are the driver's, "feeding" at 1000 rpm and "unjamming" at 1000 back (FullSend.java:49-51).
-   * Their autos feed at 5000 (RobotContainer.java:146, AutoTarget.java:62, RobotTarget.java:36),
-   * which its motor can't turn it at, so it isn't here: the definition refuses it
-   * (Team2611Test.theAutosFeederSpeedIsRefused). Guess: where.
+   * "Full send", the feeder into the shooter: a Kraken X60 at CAN ID 60
+   * (subsystems/FullSend.java:21, Constants.java:74; clockwise for positive, FullSend.java:27)
+   * through 4:1 (Constants.java:75 writes 1/4; FullSend.java:42 divides by it), in output rpm. Its
+   * speeds are the driver's, "feeding" at 1000 rpm and "unjamming" at 1000 back
+   * (FullSend.java:49-51). Their autos feed at 5000 (RobotContainer.java:146, AutoTarget.java:62,
+   * RobotTarget.java:36), which its motor can't turn it at, so it isn't here: the definition
+   * refuses it (Team2611Test.theAutosFeederSpeedIsRefused). Guess: where.
    */
   static final Joint.Revolute FULL_SEND =
-      Joint.roller(
-          "full send",
-          Part.CHASSIS,
-          point(-0.1, 0, 0.35),
-          Link.box("full send rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)),
-          Output.rpm("feeding", 1000),
-          Output.rpm("unjamming", -1000));
+      Joint.roller("full send", Part.CHASSIS, point(-0.1, 0, 0.35))
+          .carries(Link.box("full send rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)))
+          .outputs(FULL_SEND_FEEDING, FULL_SEND_UNJAMMING)
+          .motor(Motor.KRAKEN_X60, Gearing.of(4), TALON_FX.can(60).clockwise())
+          .control(MechanismControl.velocity(0.02));
+
+  /** The transition's speeds, the driver's. */
+  static final Output TRANSITION_FEEDING = Output.rpm("feeding", 2000);
+
+  static final Output TRANSITION_UNJAMMING = Output.rpm("unjamming", -2000);
 
   /**
    * The transition's lower rollers, the only ones built (subsystems/Transition.java:21; the upper
-   * pair is commented out, :23-24): a Kraken X60 through 2:1 (Constants.java:100, 1/2;
-   * Transition.java:72), in output rpm. Its speeds are the driver's, "feeding" at 2000 rpm and
-   * "unjamming" at 2000 back (Transition.java:79-81); its autos run it at 1000 and 2000
-   * (RobotContainer.java:145, AutoTarget.java:63). Guess: where.
+   * pair is commented out, :23-24): a Kraken X60 at CAN ID 52 (Constants.java:97; clockwise for
+   * positive, Transition.java:34) through 2:1 (Constants.java:100, 1/2; Transition.java:72), in
+   * output rpm. Its speeds are the driver's, "feeding" at 2000 rpm and "unjamming" at 2000 back
+   * (Transition.java:79-81); its autos run it at 1000 and 2000 (RobotContainer.java:145,
+   * AutoTarget.java:63). Guess: where.
    */
   static final Joint.Revolute TRANSITION =
-      Joint.roller(
-          "transition",
-          Part.CHASSIS,
-          point(0, 0, 0.15),
-          Link.box("transition rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)),
-          Output.rpm("feeding", 2000),
-          Output.rpm("unjamming", -2000));
-
-  /**
-   * The hood (subsystems/Hood.java), turned by two linear servos, one each side, told the same
-   * share of their travel (Hood.java:22-32). Guess: everything about where it sits: its pivot 0.1 m
-   * above the shooter's wheels, raised as its angle grows, from 0° to 40°; its shape unknown. Its
-   * servos are placed below so that the code's lowest command, 0.65, is the hood at 0°, and their
-   * full stroke 40°.
-   */
-  static final Joint.Revolute HOOD =
-      Joint.pivot(
-          "hood",
-          Part.CHASSIS,
-          point(-0.2, 0, 18.33 * IN + 0.1),
-          Joint.PITCH_UP,
-          Range.degrees(0, 40),
-          Degrees.of(0),
-          Link.unseen("hood"));
+      Joint.roller("transition", Part.CHASSIS, point(0, 0, 0.15))
+          .carries(Link.box("transition rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)))
+          .outputs(TRANSITION_FEEDING, TRANSITION_UNJAMMING)
+          .motor(Motor.KRAKEN_X60, Gearing.of(2), TALON_FX.can(52).clockwise())
+          .control(MechanismControl.velocity(0.02));
 
   /**
    * The hood's servos, WCP-0408s (VectorKit/hardware/WCP_0408.java:11), Actuonix L16-100-35-6-R
@@ -275,42 +310,31 @@ final class Team2611 {
       Actuator.Servo.builder().from(0.168).to(0.268).force(50).speed(0.032).build();
 
   /**
-   * Guess: each servo's base on the chassis 0.233 m below its end on the hood, which is 54 mm out
-   * along the hood's zero and 0.1 m to its side.
+   * The hood (subsystems/Hood.java), turned by two linear servos, one each side, told the same
+   * share of their travel (Hood.java:22-32). Guess: everything about where it sits: its pivot 0.1 m
+   * above the shooter's wheels, raised as its angle grows, from 0° to 40°; its shape unknown. Its
+   * servos are placed below so that the code's lowest command, 0.65, is the hood at 0°, and their
+   * full stroke 40°. Guess: each servo's base on the chassis 0.233 m below its end on the hood,
+   * which is 54 mm out along the hood's zero and 0.1 m to its side.
    */
-  static final Drive HOOD_LEFT = hoodServo("hood left", 0.1);
-
-  static final Drive HOOD_RIGHT = hoodServo("hood right", -0.1);
-
-  static final Drive PIVOT_MOTOR = PIVOT.motors(Motor.KRAKEN_X60, 1, Gearing.of(25));
-
-  // Velocity control without FOC (VectorKit/hardware/KrakenX60.java:48): the plain X60's numbers.
-  static final Drive INTAKE_MOTOR = INTAKE.motors(Motor.KRAKEN_X60, 1, Gearing.of(3));
-  static final Drive SHOOTER_MOTORS = SHOOTER.motors(Motor.KRAKEN_X60, 4, Gearing.of(1));
-  static final Drive FULL_SEND_MOTOR = FULL_SEND.motors(Motor.KRAKEN_X60, 1, Gearing.of(4));
-  static final Drive TRANSITION_MOTOR = TRANSITION.motors(Motor.KRAKEN_X60, 1, Gearing.of(2));
-
-  /**
-   * The pivot's absolute encoder, a duty-cycle encoder on DIO 1 (VectorKit/hardware/
-   * AbsoluteEncoder.java, a WPILib DutyCycleEncoder). Guess: on the pivot's axle, 1:1, since
-   * AbsoluteEncoder.get (VectorKit/hardware/AbsoluteEncoder.java:55-61) reads its turn straight as
-   * the pivot's; and 1024 counts a turn, a REV through-bore's absolute output, the code naming no
-   * part. Each motor's own rotor needs no writing: its drive implies it ({@code
-   * PIVOT_MOTOR.rotor()}).
-   */
-  static final Sensor.Encoder PIVOT_ABSOLUTE =
-      Sensor.Encoder.absolute("pivot absolute", PIVOT, 1024);
+  static final Joint.Revolute HOOD =
+      Joint.pivot("hood", Part.CHASSIS, point(-0.2, 0, 18.33 * IN + 0.1), Joint.PITCH_UP)
+          .range(Range.degrees(0, 40), Degrees.of(0))
+          .servo("hood left", WCP_0408, point(0.054, 0.1, -0.233), point(0.054, 0.1, 0))
+          .servo("hood right", WCP_0408, point(0.054, -0.1, -0.233), point(0.054, -0.1, 0));
 
   /**
    * The driver's feed, both rollers at once, on the right trigger (RobotContainer.java:220-223):
    * the feed that gates on nothing, so the shooter may not be up to speed.
    */
   static final Configuration FEEDING =
-      Configuration.of("feeding", FULL_SEND.at("feeding"), TRANSITION.at("feeding"));
+      Configuration.of(
+          "feeding", FULL_SEND.at(FULL_SEND_FEEDING), TRANSITION.at(TRANSITION_FEEDING));
 
   /** The same backward, on the right bumper (RobotContainer.java:225-228). */
   static final Configuration UNJAMMING =
-      Configuration.of("unjamming", FULL_SEND.at("unjamming"), TRANSITION.at("unjamming"));
+      Configuration.of(
+          "unjamming", FULL_SEND.at(FULL_SEND_UNJAMMING), TRANSITION.at(TRANSITION_UNJAMMING));
 
   /**
    * The intake's roller runs only with the pivot past "run": their auto's guard
@@ -318,45 +342,7 @@ final class Team2611 {
    * (RobotContainer.java:216-218). As an interlock, it holds beneath every command.
    */
   static final Interlock INTAKE_ONLY_WHEN_OUT =
-      Interlock.that(INTAKE).runsOnlyWhen(PIVOT.past("run"));
-
-  /**
-   * 2611's 2026 design: the joints its code commands and the configurations that name them, which
-   * its behavior reads ({@code parts.pivot()}), never a label. One robot fills it here; a practice
-   * robot would fill the same record with its own.
-   *
-   * @param pivot the intake's pivot
-   * @param intake the intake's roller
-   * @param shooter the shooter's wheels
-   * @param fullSend the feeder into the shooter
-   * @param transition the transition's rollers
-   * @param hood the shooter's hood, on its servos
-   * @param feeding both feed rollers forward
-   * @param unjamming both feed rollers backward
-   */
-  @ConfigRecord
-  record Parts(
-      Joint.Revolute pivot,
-      Joint.Revolute intake,
-      Joint.Revolute shooter,
-      Joint.Revolute fullSend,
-      Joint.Revolute transition,
-      Joint.Revolute hood,
-      Configuration feeding,
-      Configuration unjamming) {}
-
-  /** The robot's parts. */
-  static final Parts PARTS =
-      Team2611PartsBuilder.builder()
-          .pivot(PIVOT)
-          .intake(INTAKE)
-          .shooter(SHOOTER)
-          .fullSend(FULL_SEND)
-          .transition(TRANSITION)
-          .hood(HOOD)
-          .feeding(FEEDING)
-          .unjamming(UNJAMMING)
-          .build();
+      Interlock.that(INTAKE).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
 
   /**
    * The robot. Its one IMU is a Pigeon 2 (generated/TunerConstants.java:89), given no mount pose
@@ -372,33 +358,11 @@ final class Team2611 {
           .imus(Imus.builder().gyro(ImuMount.UNCHECKED).backup(Optional.empty()).build())
           .joints(List.of(PIVOT, INTAKE, SHOOTER, FULL_SEND, TRANSITION, HOOD))
           .couplings(List.of())
-          .drives(
-              List.of(
-                  PIVOT_MOTOR,
-                  INTAKE_MOTOR,
-                  SHOOTER_MOTORS,
-                  FULL_SEND_MOTOR,
-                  TRANSITION_MOTOR,
-                  HOOD_LEFT,
-                  HOOD_RIGHT))
-          .sensors(List.of(PIVOT_ABSOLUTE))
+          .drives(List.of())
+          .sensors(List.of())
           .configurations(List.of(FEEDING, UNJAMMING))
           .interlocks(List.of(INTAKE_ONLY_WHEN_OUT))
           .build();
-
-  /**
-   * How the template drives the joints its motors move, chosen to track in the simulator: the
-   * feedforward is the definition's seed, the pivot's profile 8 rad/s at 30 rad/s², and the pivot
-   * homes by its absolute encoder. Their code's own gains aren't the point here. The hood's servos
-   * aren't driven by the template yet, so it has none.
-   */
-  static final List<JointSetup> JOINTS =
-      List.of(
-          JointSetup.of(PIVOT, MechanismControl.position(30).withKd(1).withProfile(8, 30)),
-          JointSetup.of(INTAKE, MechanismControl.velocity(0.02)),
-          JointSetup.of(SHOOTER, MechanismControl.velocity(0.02)),
-          JointSetup.of(FULL_SEND, MechanismControl.velocity(0.02)),
-          JointSetup.of(TRANSITION, MechanismControl.velocity(0.02)));
 
   /**
    * The robot as the template's program runs it in the simulator, without its cameras (odometry and
@@ -414,53 +378,51 @@ final class Team2611 {
                   .cameras(List.of())
                   .drivetrain(
                       DrivetrainGeometry.uniform(
-                          DrivetrainGeometryModuleTypeBuilder.builder(MODULES)
-                              .wheelCoefficientOfFriction(1.2)
-                              .build(),
-                          Inches.of(10.375),
-                          Inches.of(10.375)))
+                              DrivetrainGeometryModuleTypeBuilder.builder(MODULES)
+                                  .wheelCoefficientOfFriction(1.2)
+                                  .build(),
+                              Inches.of(10.375),
+                              Inches.of(10.375))
+                          .control(
+                              DrivetrainControl.builder()
+                                  .limits(
+                                      DrivetrainControl.Limits.builder()
+                                          .driveStatorCurrent(Amps.of(60))
+                                          .driveSupplyCurrent(Amps.of(60))
+                                          .driveSupplyLowerCurrent(Amps.of(40))
+                                          .driveSupplyLowerTime(Seconds.of(1))
+                                          .steerStatorCurrent(Amps.of(40))
+                                          .maxLinearSpeed(MetersPerSecond.of(4.0))
+                                          .maxAngularSpeed(RotationsPerSecond.of(1))
+                                          .build())
+                                  .gains(
+                                      DrivetrainControl.Gains.builder()
+                                          .driveKs(0.0)
+                                          .driveKv(MODULES.idealDriveKv())
+                                          .driveKp(2.0)
+                                          .steerKp(16.0)
+                                          .steerKd(0.08)
+                                          .skewLookahead(Seconds.of(0.03))
+                                          .headingKp(5.0)
+                                          .translationKp(3.0)
+                                          .build())
+                                  .build()))
                   .build())
-          .drivetrain(
-              DrivetrainControl.builder()
-                  .limits(
-                      DrivetrainControl.Limits.builder()
-                          .driveStatorCurrent(Amps.of(60))
-                          .driveSupplyCurrent(Amps.of(60))
-                          .driveSupplyLowerCurrent(Amps.of(40))
-                          .driveSupplyLowerTime(Seconds.of(1))
-                          .steerStatorCurrent(Amps.of(40))
-                          .maxLinearSpeed(MetersPerSecond.of(4.0))
-                          .maxAngularSpeed(RotationsPerSecond.of(1))
-                          .build())
-                  .gains(
-                      DrivetrainControl.Gains.builder()
-                          .driveKs(0.0)
-                          .driveKv(MODULES.idealDriveKv())
-                          .driveKp(2.0)
-                          .steerKp(16.0)
-                          .steerKd(0.08)
-                          .skewLookahead(Seconds.of(0.03))
-                          .headingKp(5.0)
-                          .translationKp(3.0)
-                          .build())
-                  .build())
-          .drivetrainWiring(Optional.empty())
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)
-          .joints(JOINTS)
-          .sensors(List.of())
           .build();
 
-  private static Drive hoodServo(String label, double side) {
-    Translation3d onHood = point(0.054, side, 0);
-    return drive(
-        label,
-        WCP_0408,
-        Transmission.Between.builder()
-            .a(Part.CHASSIS)
-            .onA(HOOD.origin().getTranslation().plus(point(0.054, side, -0.233)))
-            .b(HOOD)
-            .onB(onHood)
-            .build());
+  /** One corner's wiring, as Tuner X generated it: a CANcoder each, nothing else turned around. */
+  private static SwerveWiring.ModuleWiring corner(
+      int drive, int steer, int encoder, double offsetRotations, boolean driveInverted) {
+    return SwerveWiring.ModuleWiring.builder()
+        .driveId(drive)
+        .steerId(steer)
+        .encoderId(Optional.of(encoder))
+        .encoderOffset(Rotations.of(offsetRotations))
+        .driveInverted(driveInverted)
+        .steerInverted(false)
+        .encoderInverted(false)
+        .build();
   }
 }

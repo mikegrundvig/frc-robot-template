@@ -13,24 +13,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.world.config.ConfigException;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Coupling;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointPrismaticBuilder;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
-import frc.robot.lib.phoenix.MechanismControl;
-import frc.robot.lib.wiring.CanBus;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.MechanismWiringBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.math.geometry.Translation3d;
 
 /** A joint's setup against its definition: where it may be driven, and which joints need one. */
@@ -156,8 +155,8 @@ class JointSetupTest {
             .drives(
                 appendDrives(
                     ROBOT.drives(),
-                    hatch.motors(Motor.NEO, 1, JointFixtures.gearing(10)),
-                    flap.motors(Motor.MINION, 1, JointFixtures.gearing(10))))
+                    JointFixtures.motors(hatch, Motor.NEO, 1, JointFixtures.gearing(10)),
+                    JointFixtures.motors(flap, Motor.MINION, 1, JointFixtures.gearing(10))))
             .build();
     MechanismControl control = JointFixtures.assumed(SETUPS.getFirst().control());
 
@@ -185,7 +184,7 @@ class JointSetupTest {
         RobotDefinitionBuilder.builder(ROBOT)
             .drives(
                 List.of(
-                    PIVOT.motors(Motor.NEO, 1, JointFixtures.gearing(25)),
+                    JointFixtures.motors(PIVOT, Motor.NEO, 1, JointFixtures.gearing(25)),
                     JointFixtures.ROLLER_MOTOR,
                     JointFixtures.ELEVATOR_MOTORS,
                     JointFixtures.TURRET_MOTOR))
@@ -232,7 +231,7 @@ class JointSetupTest {
         .wiring(
             Optional.of(
                 MechanismWiring.builder()
-                    .canBus(CanBus.port(CANPort.CAN_S0))
+                    .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
                     .controller(controller)
                     .motors(
                         List.of(MechanismWiring.Motor.builder().id(id).clockwise(false).build()))

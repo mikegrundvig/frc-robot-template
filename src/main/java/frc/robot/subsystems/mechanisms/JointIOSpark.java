@@ -1,7 +1,10 @@
 package frc.robot.subsystems.mechanisms;
 
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.revrobotics.PersistMode;
@@ -17,12 +20,10 @@ import com.revrobotics.spark.SparkLowLevel;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.util.Signal;
-import frc.robot.lib.phoenix.MechanismControl;
 import frc.robot.lib.phoenix.PhoenixUnits;
 import frc.robot.lib.rev.RevMechanism;
-import frc.robot.lib.wiring.CanBus;
+import frc.robot.lib.wiring.CanPorts;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.MechanismWiring;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -133,7 +134,7 @@ public final class JointIOSpark implements JointIO {
       DriverStationErrors.reportWarning(joint.label() + ": " + note, false);
     }
     List<String> failed = new ArrayList<>();
-    leader = spark(bus.port(), wiring.leader().id());
+    leader = spark(CanPorts.of(bus.port()), wiring.leader().id());
     SparkBaseConfig leading = settings.leader();
     RevMechanism.limits(leading.limitSwitch, pins);
     if (!applied(
@@ -143,7 +144,7 @@ public final class JointIOSpark implements JointIO {
       failed.add("motor " + wiring.leader().id());
     }
     for (RevMechanism.Follower each : settings.followers()) {
-      SparkBase follower = spark(bus.port(), each.id());
+      SparkBase follower = spark(CanPorts.of(bus.port()), each.id());
       if (!applied(
           () ->
               follower.configure(

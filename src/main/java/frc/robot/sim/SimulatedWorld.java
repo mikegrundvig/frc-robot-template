@@ -13,6 +13,7 @@ import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.GyroIO;
+import frc.robot.subsystems.mechanisms.AbsoluteEncoderIO;
 import frc.robot.subsystems.mechanisms.JointIO;
 import frc.robot.subsystems.mechanisms.JointSetup;
 import frc.robot.subsystems.mechanisms.SensorIO;
@@ -20,6 +21,7 @@ import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
@@ -146,6 +148,14 @@ public final class SimulatedWorld implements AutoCloseable {
       joints = simulation;
     }
     return simulation.add(setup);
+  }
+
+  /**
+   * A joint's absolute encoder, simulated, where the robot reads it itself: asked for after the
+   * joint ({@link #joint}).
+   */
+  public AbsoluteEncoderIO absoluteEncoder(JointSetup setup) {
+    return Objects.requireNonNull(joints, "the joints come first").absoluteEncoder(setup);
   }
 
   /**

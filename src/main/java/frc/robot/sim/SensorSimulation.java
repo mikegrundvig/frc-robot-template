@@ -3,7 +3,7 @@ package frc.robot.sim;
 import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.world.robot.Sensor;
-import frc.robot.lib.wiring.SensorWiring;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.subsystems.mechanisms.SensorIO;
 import java.util.LinkedHashMap;
 import java.util.Map;

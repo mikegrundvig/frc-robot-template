@@ -4,19 +4,22 @@ import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Condition;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
+import com.michaelgrundvig.frc.world.robot.SensorWiringPortBuilder;
 import frc.robot.behavior.Gate;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SensorWiring;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
@@ -29,7 +32,7 @@ import org.wpilib.command3.Scheduler;
  * through the conditions the model names, as gates:
  *
  * <pre>{@code
- * Gate coralIn = sensors.gate("coral in claw", parts.clawBeam().tripped());
+ * Gate coralIn = sensors.gate("coral in claw", CLAW_BEAM.tripped());
  * roller.runUntil("intaking", coralIn)              // ends ARRIVED the loop it trips
  * co.waitUntil(coralIn);                             // holds a step
  * coralIn.onTrue(...)                                // runs a command as it trips
@@ -71,7 +74,7 @@ public final class Sensors {
       Scheduler scheduler) {
     this.scheduler = scheduler;
     List<Reading> built = new ArrayList<>();
-    for (Sensor sensor : definition.sensors()) {
+    for (Sensor sensor : definition.math().sensors()) {
       if (sensor instanceof Sensor.Placed placed) {
         Reading reading = new Reading(placed, pinned.apply(io.apply(placed)));
         built.add(reading);
@@ -120,8 +123,8 @@ public final class Sensors {
 
   /**
    * A gate on a condition, named for what it means to the robot: {@code sensors.gate("coral in
-   * claw", parts.clawBeam().tripped())}, logged as {@code Gates/coral in claw}. Combine and
-   * debounce it as any gate ({@link Gate#all}, {@link Gate#debounce}).
+   * claw", CLAW_BEAM.tripped())}, logged as {@code Gates/coral in claw}. Combine and debounce it as
+   * any gate ({@link Gate#all}, {@link Gate#debounce}).
    *
    * @throws IllegalArgumentException for a sensor the robot doesn't have
    */
@@ -161,24 +164,37 @@ public final class Sensors {
   /**
    * What's wrong with a robot's sensor wiring against its definition and its joints, or null when
    * nothing is: a wiring for a sensor the definition doesn't have, or of the wrong kind; a sensor
-   * wired twice; two sensors on one input; a controller's limit input on a joint that isn't wired,
-   * or whose controller has none (a Kraken's TalonFX), or a joint's limit switch on another joint's
-   * controller, which would stop the wrong motor. Whether a limit switch's input is the one for its
-   * end isn't checked: whether a SPARK's forward input follows its inversion is unconfirmed (open
-   * question M22). The robot's configuration asks this as it's built. Two CANranges on one ID are
-   * the CAN IDs' check's to say ({@code CanIds.sensorsTwice}).
+   * wired twice; two sensors on one input, a joint's absolute encoder on a Systemcore port among
+   * them; a controller's limit input on a joint that isn't wired, or whose controller has none (a
+   * Kraken's TalonFX), or a joint's limit switch on another joint's controller, which would stop
+   * the wrong motor. Whether a limit switch's input is the one for its end isn't checked: whether a
+   * SPARK's forward input follows its inversion is unconfirmed (open question M22). The robot's
+   * configuration asks this as it's built. Two CANranges on one ID are the CAN IDs' check's to say
+   * ({@code CanIds.sensorsTwice}).
    *
    * @param joints each wired joint's wiring, by its label
    */
   public static @Nullable String wiringProblems(
       RobotDefinition definition, Map<String, MechanismWiring> joints, List<SensorWiring> sensors) {
     Map<String, Sensor> byLabel = new HashMap<>();
-    for (Sensor sensor : definition.sensors()) {
+    for (Sensor sensor : definition.math().sensors()) {
       byLabel.put(sensor.label(), sensor);
     }
     List<String> problems = new ArrayList<>();
     Map<String, String> wired = new HashMap<>();
     Map<Object, String> inputs = new HashMap<>();
+    for (Joint joint : definition.joints()) {
+      Optional<MechanismWiring.PortEncoder> port =
+          joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port);
+      if (port.isPresent()) {
+        SensorWiring.Port input = SensorWiringPortBuilder.builder().port(port.get().port()).build();
+        String label = joint.label() + " absolute encoder";
+        String other = inputs.putIfAbsent(input, label);
+        if (other != null) {
+          problems.add(other + " and " + label + " are on one input: " + shown(input));
+        }
+      }
+    }
     for (SensorWiring wiring : sensors) {
       String label = wiring.sensor();
       Sensor sensor = byLabel.get(label);
@@ -303,7 +319,7 @@ public final class Sensors {
 
   /** The definition's switch a wiring is for, or null. */
   private static Sensor.@Nullable Switch switchOf(RobotDefinition definition, SensorWiring wiring) {
-    for (Sensor each : definition.sensors()) {
+    for (Sensor each : definition.math().sensors()) {
       if (each instanceof Sensor.Switch found && found.label().equals(wiring.sensor())) {
         return found;
       }

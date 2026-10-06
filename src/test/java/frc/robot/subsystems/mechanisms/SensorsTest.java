@@ -7,30 +7,31 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
-import frc.robot.lib.wiring.CanBus;
 import frc.robot.lib.wiring.ControllerPins;
-import frc.robot.lib.wiring.MechanismWiring;
-import frc.robot.lib.wiring.SensorWiring;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.wpilib.hardware.bus.CANPort;
 
 /**
  * Where a robot's switches and rangefinders are connected, checked against what its definition says
  * they are and against its joints' wiring, as its configuration is built.
  */
 class SensorsTest {
-  private static final CanBus BUS = CanBus.port(CANPort.CAN_S0);
+  private static final CanBus BUS = CanBus.port(CanBus.Systemcore.CAN_S0);
+
+  private static final Sensor.Rangefinder HOPPER_RANGE = range("hopper range");
+  private static final Sensor.Rangefinder SHOOTER_RANGE = range("shooter range");
 
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
@@ -40,20 +41,8 @@ class SensorsTest {
                   Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER),
                   Sensor.Switch.beam("claw beam", PIVOT),
                   Sensor.Switch.contact("cage", Part.CHASSIS),
-                  Sensor.Rangefinder.builder()
-                      .label("hopper range")
-                      .part(Part.CHASSIS)
-                      .pose(Optional.empty())
-                      .range(Meters.of(1.3))
-                      .fieldOfView(Degrees.of(27))
-                      .build(),
-                  Sensor.Rangefinder.builder()
-                      .label("shooter range")
-                      .part(Part.CHASSIS)
-                      .pose(Optional.empty())
-                      .range(Meters.of(1.3))
-                      .fieldOfView(Degrees.of(27))
-                      .build()))
+                  HOPPER_RANGE,
+                  SHOOTER_RANGE))
           .build();
 
   /** The pivot on a SPARK and the roller on a TalonFX; the others unwired. */
@@ -118,6 +107,21 @@ class SensorsTest {
   }
 
   /**
+   * A joint's absolute encoder on a Systemcore port holds that port: a switch on it, or a second
+   * encoder, is named with it.
+   */
+  @Test
+  void aPortEncodersPortIsNoOtherSensors() {
+    RobotDefinition robot =
+        ROBOT.with(PIVOT.absoluteEncoder(1024, MechanismWiring.PortEncoder.dutyCycle(2)));
+
+    assertThat(Sensors.wiringProblems(robot, wired(JOINTS), List.of(onPort("claw beam", 2))))
+        .isEqualTo("pivot absolute encoder and claw beam are on one input: Systemcore's port 2");
+    assertThat(Sensors.wiringProblems(robot, wired(JOINTS), List.of(onPort("claw beam", 3))))
+        .isNull();
+  }
+
+  /**
    * What an input can't be is refused as its wiring is built: a switch on a CANrange, a rangefinder
    * on a CANdi, a seventh Systemcore port.
    */
@@ -144,32 +148,36 @@ class SensorsTest {
   }
 
   /**
-   * The configuration asks the same as it's built, and holds a CANdi's and a CANrange's IDs to the
-   * rest of the bus's: a CANdi's two inputs are one device, two CANranges on one ID aren't.
+   * The configuration asks the same of the wiring its sensors carry, and holds a CANdi's and a
+   * CANrange's IDs to the rest of the bus's: a CANdi's two inputs are one device, two CANranges on
+   * one ID aren't.
    */
   @Test
   void theConfigurationRefusesSensorsItCantRead() {
-    List<JointSetup> joints = List.of(SETUPS.get(0), JOINTS.get(1), SETUPS.get(2), SETUPS.get(3));
-    List<SensorWiring> onCan =
-        List.of(
-            onCandi("pivot down", 1),
-            onCandi("pivot up", 2),
-            SensorWiring.OfRangefinder.builder()
-                .sensor("hopper range")
-                .input(new SensorWiring.CanRange(BUS, 30))
-                .build());
-    var robot =
-        RobotConfigBuilder.builder(Robots.SIM).definition(ROBOT).joints(joints).sensors(onCan);
-    assertThat(robot.build().sensors()).hasSize(3);
+    Sensor.Switch down =
+        Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
+            .on(new SensorWiring.Candi(BUS, 31, 1), SensorWiring.Polarity.NORMALLY_CLOSED);
+    Sensor.Switch up =
+        Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
+            .on(new SensorWiring.Candi(BUS, 31, 2), SensorWiring.Polarity.NORMALLY_CLOSED);
+    RobotDefinition wired =
+        RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
+            .sensors(List.of(down, up, HOPPER_RANGE.on(new SensorWiring.CanRange(BUS, 30))))
+            .build();
+    RobotDefinition shared =
+        RobotDefinitionBuilder.builder(wired)
+            .sensors(
+                List.of(
+                    down,
+                    up,
+                    HOPPER_RANGE.on(new SensorWiring.CanRange(BUS, 30)),
+                    SHOOTER_RANGE.on(new SensorWiring.CanRange(BUS, 30))))
+            .build();
 
-    List<SensorWiring> shared = new ArrayList<>(onCan);
-    shared.add(
-        SensorWiring.OfRangefinder.builder()
-            .sensor("shooter range")
-            .input(new SensorWiring.CanRange(BUS, 30))
-            .build());
+    assertThat(RobotConfigBuilder.builder(Robots.SIM).definition(wired).build().sensors())
+        .hasSize(3);
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> robot.sensors(shared).build())
+        .isThrownBy(() -> RobotConfigBuilder.builder(Robots.SIM).definition(shared).build())
         .withMessage(
             "RobotConfig[joints].sensors: two CANranges on Systemcore's CAN_S0 port share CAN ID"
                 + " 30, hopper range and shooter range: give each its own");
@@ -276,6 +284,17 @@ class SensorsTest {
                     .cancoder(Optional.empty())
                     .dataPort(Optional.empty())
                     .build()))
+        .build();
+  }
+
+  private static Sensor.Rangefinder range(String label) {
+    return Sensor.Rangefinder.builder()
+        .label(label)
+        .part(Part.CHASSIS)
+        .pose(Optional.empty())
+        .range(Meters.of(1.3))
+        .fieldOfView(Degrees.of(27))
+        .wiring(Optional.empty())
         .build();
   }
 }

@@ -27,8 +27,10 @@ import org.wpilib.units.measure.MomentOfInertia;
 
 /**
  * A swerve drivetrain, as built: a module at each corner, each of its own type and where its wheel
- * touches the floor. What it is, not how it's driven: its limits and gains are the drivetrain's own
- * configuration, tuned while the robot runs, and this is fixed until the robot is rebuilt.
+ * touches the floor; and, in the same block, how it's driven and wired: {@code
+ * DrivetrainGeometry.uniform(MODULES, forward, left).wired(WIRING).control(DRIVING)}. How it's
+ * driven isn't part of what it is: two drivetrains the same but for their control or wiring are
+ * one, re-tuned or re-wired.
  *
  * <p>Most drivetrains have one type of module at every corner, placed symmetrically: {@link
  * #uniform} places them as Phoenix Tuner X's swerve project gives them, and {@link #inset} from a
@@ -39,9 +41,14 @@ import org.wpilib.units.measure.MomentOfInertia;
  * front left, front right, back left, back right.
  *
  * @param corners the four modules: front left, front right, back left, back right
+ * @param wiring where its devices are on the CAN bus, and how they turn; none runs it in the
+ *     simulator alone
+ * @param control how it's driven: its limits and gains, tuned while the robot runs; a robot needs
+ *     it
  */
 @ConfigRecord
-public record DrivetrainGeometry(List<Corner> corners) {
+public record DrivetrainGeometry(
+    List<Corner> corners, Optional<SwerveWiring> wiring, Optional<DrivetrainControl> control) {
   /** The corners' names, in their order: front left, front right, back left, back right. */
   public static final List<String> LABELS =
       List.of("front-left", "front-right", "back-left", "back-right");
@@ -95,7 +102,28 @@ public record DrivetrainGeometry(List<Corner> corners) {
               .position(new Translation2d(sign[0] * x, sign[1] * y))
               .build());
     }
-    return builder().corners(corners).build();
+    return builder().corners(corners).wiring(Optional.empty()).control(Optional.empty()).build();
+  }
+
+  /** The same drivetrain, wired: its modules' and its gyro's devices. */
+  public DrivetrainGeometry wired(SwerveWiring wiring) {
+    return DrivetrainGeometryBuilder.builder(this).wiring(Optional.of(wiring)).build();
+  }
+
+  /** The same drivetrain, driven so: its limits and gains. */
+  public DrivetrainGeometry control(DrivetrainControl control) {
+    return DrivetrainGeometryBuilder.builder(this).control(Optional.of(control)).build();
+  }
+
+  /** Equal to another drivetrain the same in everything but how it's driven and wired. */
+  @Override
+  public boolean equals(@Nullable Object other) {
+    return other instanceof DrivetrainGeometry that && corners.equals(that.corners);
+  }
+
+  @Override
+  public int hashCode() {
+    return corners.hashCode();
   }
 
   /**
@@ -201,6 +229,7 @@ public record DrivetrainGeometry(List<Corner> corners) {
               .link(disc(label + " module", steerInertia, radius, Vector3.UP))
               .positions(List.of())
               .outputs(List.of())
+              .driven(Driven.NONE)
               .build();
       Joint.Revolute wheel =
           Joint.Revolute.builder()
@@ -213,6 +242,7 @@ public record DrivetrainGeometry(List<Corner> corners) {
               .link(disc(label + " wheel", driveInertia, radius, new Vector3(0, 1, 0)))
               .positions(List.of())
               .outputs(List.of())
+              .driven(Driven.NONE)
               .build();
       Drive drive =
           Drive.builder()

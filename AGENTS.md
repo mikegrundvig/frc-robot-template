@@ -15,7 +15,7 @@ list below before writing anything from memory, and read the code next to what y
 | `ChassisSpeeds`, `SwerveModuleState` | `ChassisVelocities`, `SwerveModuleVelocity` |
 | `SmartDashboard.putX` | `Telemetry.log(name, value)`, and AdvantageKit's `Logger.recordOutput` |
 | `Timer.getFPGATimestamp()` seconds | `RobotController.getTime()` nanoseconds; the DataLog API takes nanoseconds too |
-| A mechanism class per arm or roller | Describe the joint in the robot's definition (`Robots.java`); the template builds its mechanism and its commands ([docs/mechanisms.md](docs/mechanisms.md)) |
+| A mechanism class per arm or roller, CAN IDs in a constants file | Describe each joint in one block in `Robots.java`: its shape, places, motors and their CAN IDs, its own sensors and its control. The template builds its mechanism and its commands ([docs/mechanisms.md](docs/mechanisms.md)) |
 | Constants classes | `@ConfigRecord` records, built by name through their generated builders, each value with a row in [docs/values.md](docs/values.md) |
 
 Hardware sits behind AdvantageKit's IO pattern: a `*IO` interface with its `@AutoLog` inputs, one
@@ -48,7 +48,8 @@ version they could have written over the clever one.
 
 - [README.md](README.md): the quick start, what the template does and why, and the repository's
   layout
-- [docs/mechanisms.md](docs/mechanisms.md): describe a mechanism, set it up, use its commands
+- [docs/mechanisms.md](docs/mechanisms.md): describe a mechanism in one block, use its commands
+- [docs/driving.md](docs/driving.md): the drivetrain's moves
 - [docs/values.md](docs/values.md): every configuration value, what it means, and how to find yours
 - [docs/testing.md](docs/testing.md): the tests, and how to write one against the simulator
 - [docs/simulator.md](docs/simulator.md): the simulator, its faults and scenarios

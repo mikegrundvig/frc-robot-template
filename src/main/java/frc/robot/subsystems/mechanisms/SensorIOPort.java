@@ -1,6 +1,6 @@
 package frc.robot.subsystems.mechanisms;
 
-import frc.robot.lib.wiring.SensorWiring;
+import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import org.wpilib.hardware.discrete.DigitalInput;
 
 /**

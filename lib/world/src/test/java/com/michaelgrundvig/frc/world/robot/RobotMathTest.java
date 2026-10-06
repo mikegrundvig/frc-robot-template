@@ -60,7 +60,7 @@ class RobotMathTest {
             Optional.of(Range.degrees(-10, 110)),
             Math.toRadians(-10),
             link("arm", 4, point(0.3, 0, 0), point(0.6, 0.05, 0.05)));
-    final Drive motors = arm.motors(Motor.KRAKEN_X60, 2, gearing(60, 0.9));
+    final Drive motors = MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 2, gearing(60, 0.9));
     final Sensor.Encoder pivot = encoder("arm-abs", arm, 1, true);
     final Actuator.Servo linear =
         Actuator.Servo.builder().from(0.25).to(0.4).force(50).speed(0.03).build();
@@ -172,7 +172,7 @@ class RobotMathTest {
         definition(
                 List.of(arm),
                 List.of(),
-                List.of(arm.motors(Motor.KRAKEN_X60, 1, gearing(50, 1))),
+                List.of(MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 1, gearing(50, 1))),
                 List.of())
             .math();
     double offset = Math.atan2(0.1, 0.3);
@@ -215,7 +215,8 @@ class RobotMathTest {
             UP,
             Range.meters(0, 0.8),
             link("stage2", 1.5, point(0, 0, 0.3), point(0.22, 0.05, 0.6)));
-    final Drive winch = carriage.motors(Motor.KRAKEN_X60, 2, gearing(5, 1), Inches.of(1));
+    final Drive winch =
+        MechanismFixtures.motors(carriage, Motor.KRAKEN_X60, 2, gearing(5, 1), Inches.of(1));
     final RobotMath math =
         definition(
                 List.of(carriage, stage1, stage2),
@@ -281,7 +282,8 @@ class RobotMathTest {
           definition(
                   List.of(carriage, stage1, stage2, arm),
                   List.of(linear(carriage, stage1, 1.0 / 3), linear(carriage, stage2, 2.0 / 3)),
-                  List.of(winch, arm.motors(Motor.KRAKEN_X60, 1, gearing(40, 1))),
+                  List.of(
+                      winch, MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 1, gearing(40, 1))),
                   List.of())
               .math();
 
@@ -332,7 +334,9 @@ class RobotMathTest {
                 List.of(
                     curve(carriage, stage1, 0.45, 1.2, 0.75),
                     curve(carriage, stage2, 0.9, 1.2, 0.3)),
-                List.of(carriage.motors(Motor.KRAKEN_X60, 2, gearing(5, 1), Inches.of(1))),
+                List.of(
+                    MechanismFixtures.motors(
+                        carriage, Motor.KRAKEN_X60, 2, gearing(5, 1), Inches.of(1))),
                 List.of())
             .math();
 
@@ -388,7 +392,7 @@ class RobotMathTest {
         definition(
             List.of(intake, hopper),
             List.of(linkage),
-            List.of(intake.motors(Motor.KRAKEN_X60, 1, gearing(30, 1))),
+            List.of(MechanismFixtures.motors(intake, Motor.KRAKEN_X60, 1, gearing(30, 1))),
             List.of(),
             List.of(camera));
     RobotMath math = robot.math();
@@ -427,7 +431,7 @@ class RobotMathTest {
             link("turret", 3, point(0.05, 0, 0.1), point(0.3, 0.3, 0.2)));
     Sensor.Encoder a = encoder("turret-a", turret, 92.0 / 18, true);
     Sensor.Encoder b = encoder("turret-b", turret, 92.0 / 17, true);
-    Drive drive = turret.motors(Motor.KRAKEN_X60, 1, gearing(50, 1));
+    Drive drive = MechanismFixtures.motors(turret, Motor.KRAKEN_X60, 1, gearing(50, 1));
     RobotMath math = definition(List.of(turret), List.of(), List.of(drive), List.of(a, b)).math();
 
     assertThat(math.absoluteSpan(List.of(a, b))).isCloseTo(2 * Math.PI * 306 / 92, within(1e-9));
@@ -471,7 +475,9 @@ class RobotMathTest {
     double coarseRatio = (220.0 / 25) * (8.0 / 30) * (8.0 / 35);
     Sensor.Encoder coarse = encoder("turret coarse", turret, coarseRatio, true);
     Sensor.Encoder fine = encoder("turret fine", turret, (220.0 / 14) * (36.0 / 10), true);
-    Drive drive = turret.motors(Motor.KRAKEN_X60, 1, gearing((220.0 / 14) * (36.0 / 10), 1));
+    Drive drive =
+        MechanismFixtures.motors(
+            turret, Motor.KRAKEN_X60, 1, gearing((220.0 / 14) * (36.0 / 10), 1));
     RobotMath math =
         definition(List.of(turret), List.of(), List.of(drive), List.of(coarse, fine)).math();
 
@@ -511,7 +517,7 @@ class RobotMathTest {
             link("turret", 3, point(0.05, 0, 0.1), point(0.3, 0.3, 0.2)));
     double ratio = (220.0 / 25) * (8.0 / 30) * (8.0 / 35);
     Sensor.Encoder coarse = encoder("turret coarse", turret, ratio, true);
-    Drive drive = turret.motors(Motor.KRAKEN_X60, 1, gearing(56.6, 1));
+    Drive drive = MechanismFixtures.motors(turret, Motor.KRAKEN_X60, 1, gearing(56.6, 1));
     RobotMath math = definition(List.of(turret), List.of(), List.of(drive), List.of(coarse)).math();
     double perTurn = 360 / ratio;
 
@@ -628,7 +634,8 @@ class RobotMathTest {
         definition(
                 List.of(shoulder, wrist),
                 List.of(),
-                List.of(shoulder.motors(Motor.KRAKEN_X60, 2, gearing(80, 1)), chain),
+                List.of(
+                    MechanismFixtures.motors(shoulder, Motor.KRAKEN_X60, 2, gearing(80, 1)), chain),
                 List.of())
             .math();
 
@@ -722,7 +729,8 @@ class RobotMathTest {
         definition(
                 List.of(flywheel),
                 List.of(),
-                List.of(flywheel.motors(Motor.KRAKEN_X60, 2, gearing(2.0 / 3, 1))),
+                List.of(
+                    MechanismFixtures.motors(flywheel, Motor.KRAKEN_X60, 2, gearing(2.0 / 3, 1))),
                 List.of())
             .math();
 
@@ -781,7 +789,7 @@ class RobotMathTest {
             Optional.of(Range.degrees(0, 40)),
             Math.toRadians(40),
             link("floor", 1.5, point(0.16, 0, 0), point(0.32, 0.5, 0.02)));
-    Drive motor = intake.motors(Motor.KRAKEN_X44, 1, gearing(48.8, 1));
+    Drive motor = MechanismFixtures.motors(intake, Motor.KRAKEN_X44, 1, gearing(48.8, 1));
     RobotMath alone = definition(List.of(intake), List.of(), List.of(motor), List.of()).math();
     RobotMath linked =
         definition(
@@ -821,7 +829,7 @@ class RobotMathTest {
             Optional.of(Range.degrees(-10, 110)),
             0,
             Link.builder().label("arm").mass(MassProperties.NONE).shapes(List.of()).build());
-    Drive motors = arm.motors(Motor.KRAKEN_X60, 2, gearing(60, 0.9));
+    Drive motors = MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 2, gearing(60, 0.9));
     RobotDefinition robot = definition(List.of(arm), List.of(), List.of(motors), List.of());
     RobotMath math = robot.math();
     RobotMath.Gains gains = math.idealGains(arm);
@@ -875,7 +883,7 @@ class RobotMathTest {
         definition(
             List.of(arm, roller),
             List.of(),
-            List.of(arm.motors(Motor.KRAKEN_X60, 1, gearing(50, 1))),
+            List.of(MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 1, gearing(50, 1))),
             List.of());
     RobotDefinition unweighed =
         RobotDefinitionBuilder.builder(weighed)

@@ -30,15 +30,32 @@ public final class GyroIOSystemcore implements GyroIO {
   private long lastTime;
 
   /**
-   * @param mount how Systemcore is mounted on the robot, which sets the axis WPILib takes its yaw
-   *     about
    * @param orientation how the board is turned on the robot, from the robot's definition: the
-   *     rotation that takes the board's axes into the robot's
+   *     rotation that takes the board's axes into the robot's. How it's mounted, which sets the
+   *     axis WPILib takes its yaw about, follows from it ({@link #mount}).
    */
-  public GyroIOSystemcore(OnboardIMU.MountOrientation mount, Rotation3d orientation) {
+  public GyroIOSystemcore(Rotation3d orientation) {
+    OnboardIMU.MountOrientation mount = mount(orientation);
     imu = new OnboardIMU(mount);
     flat = mount == OnboardIMU.MountOrientation.FLAT;
     this.orientation = orientation;
+  }
+
+  /**
+   * How Systemcore is mounted, which WPILib's IMU takes its yaw by, from how the board is turned on
+   * the robot: flat when its face points up or down; on an edge, landscape when its long side lies
+   * level, portrait when its short side does. Its long side is taken to be its x axis: unconfirmed
+   * on a real unit, as its axes are.
+   */
+  static OnboardIMU.MountOrientation mount(Rotation3d orientation) {
+    Translation3d face = new Translation3d(0, 0, 1).rotateBy(orientation);
+    if (Math.abs(face.getZ()) > Math.sqrt(0.5)) {
+      return OnboardIMU.MountOrientation.FLAT;
+    }
+    Translation3d longSide = new Translation3d(1, 0, 0).rotateBy(orientation);
+    return Math.abs(longSide.getZ()) < Math.sqrt(0.5)
+        ? OnboardIMU.MountOrientation.LANDSCAPE
+        : OnboardIMU.MountOrientation.PORTRAIT;
   }
 
   @Override

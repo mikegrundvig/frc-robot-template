@@ -20,6 +20,7 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.ModuleIO;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.system.DCMotor;
@@ -65,7 +66,7 @@ final class TruthRig {
           DrivetrainGeometryCornerBuilder.builder(corner)
               .module(
                   DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
-                      .wheelCoefficientOfFriction(frictionCoefficient)
+                      .wheelCoefficientOfFriction(Optional.of(frictionCoefficient))
                       .build())
               .build());
     }
@@ -142,7 +143,7 @@ final class TruthRig {
   }
 
   double wheelInertia() {
-    return drivetrain.module(0).driveInertia().in(KilogramSquareMeters);
+    return drivetrain.module(0).driveInertiaOrDefault().in(KilogramSquareMeters);
   }
 
   double gearing() {

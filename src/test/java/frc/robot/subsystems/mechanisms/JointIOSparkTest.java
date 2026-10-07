@@ -25,6 +25,7 @@ import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import com.revrobotics.sim.SparkAbsoluteEncoderSim;
 import com.revrobotics.spark.ClosedLoopSlot;
+import com.revrobotics.spark.FeedbackSensor;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkSim;
 import com.revrobotics.spark.config.LimitSwitchConfig;
@@ -272,43 +273,113 @@ class JointIOSparkTest {
   }
 
   /**
-   * A pivot with REV's Through Bore on its SPARK's data port: powered on at 60°, not where it
-   * rests, it's told so by the encoder's first good reading, and its motor's encoder carries it on.
+   * A pivot with REV's Through Bore on its SPARK's data port, mounted reversed: the SPARK takes the
+   * encoder's direction and its offset, and reads zero at the low edge of the window one turn of it
+   * tells apart, centered on the pivot's travel (0° to 135°): -112.5°, so its reading never wraps
+   * between the stops. Powered on at 60°, not where it rests, the pivot is told so by the encoder's
+   * first good reading, and its motor's encoder carries it on. REV's simulation reports the reading
+   * it's given, applying neither the offset nor the direction, so the test gives it the SPARK's
+   * reading.
    */
   @Test
   void aPivotWithAnEncoderOnItsDataPortIsToldWhereItIs() {
-    RobotDefinition withEncoder =
-        RobotDefinitionBuilder.builder(ON_REV)
-            .sensors(List.of(Sensor.Encoder.absolute("pivot absolute", PIVOT, 8192)))
-            .build();
     JointSetup setup =
-        JointSetupBuilder.builder(wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 38))
-            .wiring(
-                Optional.of(
-                    MechanismWiringBuilder.builder(
-                            wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 38)
-                                .wiring()
-                                .orElseThrow())
-                        .dataPort(
-                            Optional.of(
-                                MechanismWiring.DataPortEncoder.builder()
-                                    .offset(Rotations.of(-0.1))
-                                    .reversed(false)
-                                    .build()))
-                        .build()))
-            .build();
-    JointIOSpark io = new JointIOSpark(withEncoder.math(), setup);
-    // Its raw reading at 60° is 60° of a turn, less the offset.
-    new SparkAbsoluteEncoderSim((SparkMax) io.leader()).setPosition(60.0 / 360 + 0.1);
+        withDataPort(wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 38), REVERSED);
+    JointIOSpark io = new JointIOSpark(WITH_ENCODER.math(), setup);
+    SparkMax spark = (SparkMax) io.leader();
+    // At 60°, a sixth of a turn past the pivot's zero and so 0.3125 + 1/6 of one past the edge.
+    new SparkAbsoluteEncoderSim(spark).setPosition(0.3125 + 60.0 / 360);
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
 
     io.updateInputs(inputs);
     double told = inputs.position;
     io.updateInputs(inputs);
+    double carried = inputs.position;
+    // The joint moves on without its motor, as across backlash or a slipping belt.
+    new SparkAbsoluteEncoderSim(spark).setPosition(0.3125 + 70.0 / 360);
+    io.updateInputs(inputs);
 
+    assertThat(spark.configAccessor.absoluteEncoder.getInverted()).isTrue();
+    // The raw reading at the edge, -0.3125 turns, reversed and offset 0.1: 0.4125.
+    assertThat(spark.configAccessor.absoluteEncoder.getZeroOffset())
+        .isCloseTo(0.4125, within(1e-6));
     assertThat(Math.toDegrees(told)).isCloseTo(60, within(1e-3));
-    assertThat(Math.toDegrees(inputs.position))
-        .as("then from its rotor")
-        .isCloseTo(60, within(1e-3));
+    assertThat(Math.toDegrees(carried)).as("then from its rotor").isCloseTo(60, within(1e-3));
+    assertThat(Math.toDegrees(inputs.position)).as("its rotor's").isCloseTo(60, within(1e-3));
+    assertThat(Math.toDegrees(inputs.absolutePosition))
+        .as("its encoder's, beside it")
+        .isCloseTo(70, within(1e-3));
+  }
+
+  /** The fixtures' robot on REV's motors, with an absolute encoder on the pivot's axle. */
+  private static final RobotDefinition WITH_ENCODER =
+      RobotDefinitionBuilder.builder(ON_REV)
+          .sensors(List.of(Sensor.Encoder.absolute("pivot absolute", PIVOT, 8192)))
+          .build();
+
+  /**
+   * A pivot whose SPARK's loop closes on its data-port encoder is read by the encoder each loop,
+   * wherever its motor's count is, and is moved in the encoder's turns from the window's edge: 45°
+   * is 0.3125 + 1/8 of a turn, and a turn a second 60 of the encoder's RPM. Its loop runs on the
+   * encoder, without position wrapping, its kP per turn of the encoder. REV's simulation runs its
+   * loop on the motor's own encoder whatever it's told, so what the SPARK does with these is read
+   * from what it took, not seen.
+   */
+  @Test
+  void aPivotClosedOnItsDataPortEncoderIsReadByItAndMovedInItsTurns() {
+    JointSetup setup =
+        withDataPort(
+            wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 39), REVERSED.closesLoop());
+    JointIOSpark io = new JointIOSpark(WITH_ENCODER.math(), setup);
+    SparkMax spark = (SparkMax) io.leader();
+    SparkSim sim = new SparkSim(spark, DCMotor.getNEO(1));
+    sim.enable();
+    SparkAbsoluteEncoderSim encoder = new SparkAbsoluteEncoderSim(spark);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+
+    encoder.setPosition(0.3125 + 60.0 / 360);
+    io.updateInputs(inputs);
+    io.updateInputs(inputs);
+    double seeded = inputs.position;
+    // The motor's count stays where the encoder first said; the joint moves on, or slipped.
+    encoder.setPosition(0.3125 + 70.0 / 360);
+    io.updateInputs(inputs);
+    double moved = inputs.position;
+    io.setPosition(Math.toRadians(45), 0, 0);
+    sim.iterate(0, 12, 0.02);
+    double toward = sim.getSetpoint();
+    io.setVelocity(2 * Math.PI);
+    sim.iterate(0, 12, 0.02);
+
+    assertThat(spark.configAccessor.closedLoop.getFeedbackSensor())
+        .isEqualTo(FeedbackSensor.kAbsoluteEncoder);
+    assertThat(spark.configAccessor.closedLoop.getPositionWrappingEnabled()).isFalse();
+    // 30 V a radian is 30 × 2π a turn of the pivot, one of the encoder's, as a share of 12 V.
+    double kP = 30 * 2 * Math.PI / 12;
+    assertThat(spark.configAccessor.closedLoop.getP(ClosedLoopSlot.kSlot0))
+        .isCloseTo(kP, within(1e-6 * kP));
+    assertThat(Math.toDegrees(seeded)).isCloseTo(60, within(1e-3));
+    assertThat(Math.toDegrees(moved)).as("from its encoder").isCloseTo(70, within(1e-3));
+    assertThat(toward).isCloseTo(0.3125 + 45.0 / 360, within(1e-6));
+    assertThat(sim.getSetpoint()).isCloseTo(60, within(1e-4));
+  }
+
+  /** The pivot's through-bore on its SPARK's data port, reversed and offset 0.1, seeded once. */
+  private static final MechanismWiring.DataPortEncoder REVERSED =
+      MechanismWiring.DataPortEncoder.builder()
+          .offset(Rotations.of(0.1))
+          .reversed(true)
+          .closedLoop(false)
+          .build();
+
+  /** A setup wired to a SPARK, an encoder on the SPARK's data port. */
+  private static JointSetup withDataPort(JointSetup setup, MechanismWiring.DataPortEncoder port) {
+    return JointSetupBuilder.builder(setup)
+        .wiring(
+            Optional.of(
+                MechanismWiringBuilder.builder(setup.wiring().orElseThrow())
+                    .dataPort(Optional.of(port))
+                    .build()))
+        .build();
   }
 }

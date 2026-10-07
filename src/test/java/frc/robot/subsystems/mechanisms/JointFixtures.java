@@ -199,6 +199,7 @@ public final class JointFixtures {
                 .kV(Optional.empty())
                 .kA(Optional.empty())
                 .kG(Optional.empty())
+                .gravityAngle(Optional.empty())
                 .build())
         .softLimits(softLimits)
         .profile(profile)

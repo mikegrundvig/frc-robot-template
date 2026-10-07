@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.DoublePredicate;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
@@ -132,6 +133,11 @@ public final class Rules {
       }
       return problems.isEmpty() ? null : String.join("; ", problems);
     };
+  }
+
+  /** An optional value: none passes, and one given passes the rule. */
+  public static <V> Rule<Optional<V>> given(Rule<? super V> rule) {
+    return value -> value.isPresent() ? rule.whyNot(value.get()) : null;
   }
 
   /** A measure as people write it: "4.729 m/s" rather than "4.728761e+00 m/s". */

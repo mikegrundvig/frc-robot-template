@@ -264,7 +264,8 @@ class DriveSimulationTest {
   private static double effectiveKilograms(double kilograms) {
     DrivetrainGeometry.ModuleType modules = Robots.SIM.definition().drivetrain().module(0);
     double radius = modules.wheelRadius().in(Meters);
-    return kilograms + 4 * modules.driveInertia().in(KilogramSquareMeters) / (radius * radius);
+    return kilograms
+        + 4 * modules.driveInertiaOrDefault().in(KilogramSquareMeters) / (radius * radius);
   }
 
   /**

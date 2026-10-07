@@ -1,6 +1,7 @@
 package frc.robot;
 
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_MAX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FXS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.wpilib.units.Units.Degrees;
@@ -18,8 +19,13 @@ import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryCornerBuilder;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
+import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.Part;
+import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -30,6 +36,7 @@ import frc.robot.subsystems.mechanisms.JointSetup;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.wpilib.math.geometry.Translation3d;
 
 class RobotConfigTest {
   @Test
@@ -176,6 +183,67 @@ class RobotConfigTest {
   }
 
   /**
+   * A control a joint's motor controllers can't take is refused as the configuration is built, in
+   * the robot's own words, wherever the program runs: an arm's gravity angle a third of a turn from
+   * its zero, past Phoenix's gravity offset, on the TalonFX the simulator stands in for when it's
+   * wired to nothing, and on the TalonFXS it's wired to. A SPARK takes it, the robot working out
+   * its gravity each loop; and it refuses what a TalonFX takes, a kI, only where the arm is wired
+   * to one.
+   */
+  @Test
+  void aControlItsMotorControllerWouldRefuseIsRefusedWithTheConfiguration() {
+    MechanismControl held =
+        MechanismControl.position(30).withHoming(MechanismControl.Homing.assumeAtReference());
+    Joint.Revolute arm =
+        Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
+            .range(Range.degrees(0, 90), Degrees.of(0))
+            .motor(Motor.NEO, JointFixtures.gearing(50))
+            .control(held.withKg(0.4, Degrees.of(120)));
+    String robots =
+        "arm's gravity angle, 120.0°, is more than a quarter turn from its zero, past Phoenix's"
+            + " gravity offset of ±0.25 rotations: its positive direction lowers it at its zero."
+            + " Turn its axis around in the definition (and its motors' and encoder's directions"
+            + " in the wiring), so that positive raises it; its gravity angle is then 60.0°";
+    MechanismControl integral =
+        MechanismControlBuilder.builder(held)
+            .gains(MechanismControlGainsBuilder.builder(held.gains()).kI(1).build())
+            .build();
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> withJoint(arm))
+        .withMessage("RobotConfig[sim].joints: " + robots);
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> withJoint(arm.motor(Motor.NEO, JointFixtures.gearing(50), TALON_FXS.can(21))))
+        .withMessage("RobotConfig[sim].joints: " + robots);
+    assertThat(
+            withJoint(arm.motor(Motor.NEO, JointFixtures.gearing(50), SPARK_MAX.can(21))).joints())
+        .as("on a SPARK, the robot works out its gravity, any offset")
+        .hasSize(1);
+    assertThat(withJoint(arm.control(integral)).joints()).hasSize(1);
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                withJoint(
+                    arm.motor(Motor.NEO, JointFixtures.gearing(50), SPARK_MAX.can(21))
+                        .control(integral)))
+        .withMessage(
+            "RobotConfig[sim].joints: arm's control has a kI, which isn't carried to a SPARK yet:"
+                + " its integral's units aren't confirmed. Leave kI at 0");
+  }
+
+  /** The simulator's robot with one joint, its configuration built. */
+  private static RobotConfig withJoint(Joint joint) {
+    return RobotConfigBuilder.builder(Robots.SIM)
+        .definition(
+            RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                .joints(List.of(joint))
+                .configurations(List.of())
+                .build())
+        .build();
+  }
+
+  /**
    * Treads said to grip harder than the slip check can tell from a collision are refused as the
    * configuration is built: a path planner's friction, a tuning value, often is.
    */
@@ -188,7 +256,7 @@ class RobotConfigTest {
                     DrivetrainGeometryCornerBuilder.builder(corner)
                         .module(
                             DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
-                                .wheelCoefficientOfFriction(1.6)
+                                .wheelCoefficientOfFriction(Optional.of(1.6))
                                 .build())
                         .build())
             .toList();

@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
@@ -156,18 +157,25 @@ public record DrivetrainGeometry(
    * A type of swerve module: its hardware, the same wherever one of its type sits. Wheel radius
    * shrinks as the tread wears; measure it again during the season.
    *
+   * <p>The tread's grip and the inertias are optional, each with a default until it's measured. The
+   * robot plans and judges by the grip, so it says at startup that it's the default; only the
+   * simulator reads the inertias, so it says so when it simulates ({@code
+   * RobotDefinition.missing}).
+   *
    * @param driveMotor the motor that drives the wheel
    * @param steerMotor the motor that turns the module
    * @param wheelRadius measured on the tread
    * @param driveGearing between the drive motor and the wheel: motor rotations per wheel rotation
    * @param steerGearing between the steering motor and the module: motor rotations per full turn of
    *     the module
-   * @param wheelCoefficientOfFriction the tread's grip on carpet: about 1.0 when worn, 1.3 new
+   * @param wheelCoefficientOfFriction the tread's grip on carpet: about 1.0 when worn, 1.3 new;
+   *     none measured, {@link #DEFAULT_WHEEL_COEFFICIENT_OF_FRICTION}
    * @param driveInertia the drive's own moving parts (the wheel with its tread, its gears, and the
    *     motor's rotor through them), as inertia at the wheel. The robot's mass the wheel moves
-   *     comes on top of it, from the body.
+   *     comes on top of it, from the body. None measured, {@link #DEFAULT_DRIVE_INERTIA}
    * @param steerInertia the module turning about its steering axis, with the steering motor's rotor
-   *     through its gearing: what the steering motor turns
+   *     through its gearing: what the steering motor turns. None measured, {@link
+   *     #DEFAULT_STEER_INERTIA}
    * @param couplingRatio how many turns the drive motor makes for each turn of the module, with the
    *     wheel held still: turning an MK4-style module turns its wheel through the bevel gear, which
    *     the drive's encoder would otherwise count as travel. Zero for a module without the coupling
@@ -179,16 +187,36 @@ public record DrivetrainGeometry(
       Distance wheelRadius,
       Gearing driveGearing,
       Gearing steerGearing,
-      double wheelCoefficientOfFriction,
-      MomentOfInertia driveInertia,
-      MomentOfInertia steerInertia,
+      Optional<Double> wheelCoefficientOfFriction,
+      Optional<MomentOfInertia> driveInertia,
+      Optional<MomentOfInertia> steerInertia,
       double couplingRatio) {
+    /**
+     * The tread's grip until it's measured: PathPlanner's default, which teams already plan with.
+     * Tread on carpet grips about 1.0 worn and 1.3 new; a pull test measures it.
+     */
+    public static final double DEFAULT_WHEEL_COEFFICIENT_OF_FRICTION = 1.2;
+
+    /**
+     * The drive's own moving parts until they're measured: an estimate for a 4 in wheel, about
+     * 0.0004 kg m², and a Kraken X60's rotor through 6.75:1, about 0.0006 (the rotor's inertia
+     * isn't published). It's about 2% of what a wheel's share of a robot's mass puts on it, so a
+     * rough one costs little.
+     */
+    public static final MomentOfInertia DEFAULT_DRIVE_INERTIA = KilogramSquareMeters.of(0.001);
+
+    /**
+     * The module's steering until it's measured: Phoenix Tuner X's generated simulation value, as
+     * AdvantageKit's swerve templates use it.
+     */
+    public static final MomentOfInertia DEFAULT_STEER_INERTIA = KilogramSquareMeters.of(0.004);
+
     public ModuleType {
       Checks.on(ModuleType.class)
           .field("wheelRadius", wheelRadius, positive())
-          .field("wheelCoefficientOfFriction", wheelCoefficientOfFriction, positive())
-          .field("driveInertia", driveInertia, positive())
-          .field("steerInertia", steerInertia, positive())
+          .field("wheelCoefficientOfFriction", wheelCoefficientOfFriction, given(positive()))
+          .field("driveInertia", driveInertia, given(positive()))
+          .field("steerInertia", steerInertia, given(positive()))
           .field("couplingRatio", couplingRatio, nonNegative())
           .orThrow();
     }
@@ -196,6 +224,21 @@ public record DrivetrainGeometry(
     /** Starts describing a type of module, one named value at a time. */
     public static DrivetrainGeometryModuleTypeBuilder.DriveMotorStage builder() {
       return DrivetrainGeometryModuleTypeBuilder.builder();
+    }
+
+    /** The tread's grip on carpet: as measured, or until it is, PathPlanner's default. */
+    public double wheelCoefficientOfFrictionOrDefault() {
+      return wheelCoefficientOfFriction.orElse(DEFAULT_WHEEL_COEFFICIENT_OF_FRICTION);
+    }
+
+    /** The drive's own moving parts, as inertia at the wheel: as measured, or the estimate. */
+    public MomentOfInertia driveInertiaOrDefault() {
+      return driveInertia.orElse(DEFAULT_DRIVE_INERTIA);
+    }
+
+    /** The module turning about its steering axis: as measured, or Tuner X's simulation value. */
+    public MomentOfInertia steerInertiaOrDefault() {
+      return steerInertia.orElse(DEFAULT_STEER_INERTIA);
     }
 
     /** What drives the wheel: one drive motor. Its gearing is {@link #driveGearing}. */
@@ -226,7 +269,7 @@ public record DrivetrainGeometry(
               .axis(Vector3.UP)
               .range(Optional.empty())
               .reference(0)
-              .link(disc(label + " module", steerInertia, radius, Vector3.UP))
+              .link(disc(label + " module", steerInertiaOrDefault(), radius, Vector3.UP))
               .positions(List.of())
               .outputs(List.of())
               .driven(Driven.NONE)
@@ -239,7 +282,7 @@ public record DrivetrainGeometry(
               .axis(new Vector3(0, 1, 0))
               .range(Optional.empty())
               .reference(0)
-              .link(disc(label + " wheel", driveInertia, radius, new Vector3(0, 1, 0)))
+              .link(disc(label + " wheel", driveInertiaOrDefault(), radius, new Vector3(0, 1, 0)))
               .positions(List.of())
               .outputs(List.of())
               .driven(Driven.NONE)
@@ -386,11 +429,14 @@ public record DrivetrainGeometry(
     return slowest;
   }
 
-  /** The treads' grip on carpet: its least, which slips first. */
+  /**
+   * The treads' grip on carpet: its least, which slips first, each as measured or PathPlanner's
+   * default.
+   */
   public double wheelCoefficientOfFriction() {
     double least = Double.POSITIVE_INFINITY;
     for (Corner corner : corners) {
-      least = Math.min(least, corner.module().wheelCoefficientOfFriction());
+      least = Math.min(least, corner.module().wheelCoefficientOfFrictionOrDefault());
     }
     return least;
   }

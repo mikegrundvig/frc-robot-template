@@ -50,8 +50,9 @@ import org.wpilib.units.measure.Angle;
  * motors, the rest following it, and its CANcoder, if its wiring names one. A TalonFXS takes the
  * settings a TalonFX would, in its own terms ({@link PhoenixMechanism#talonFxs}). Every setting
  * comes from the Phoenix helper ({@link PhoenixMechanism}), from the robot's definition, the
- * joint's wiring and its control: ratios, gains seeded from the definition, gravity, soft limits,
- * current limits, directions and followers. Nothing is retyped here.
+ * joint's wiring and its control ({@link ControllerSettings#talon}): ratios, gains seeded from the
+ * definition, gravity, soft limits, current limits, directions and followers. Nothing is retyped
+ * here.
  *
  * <p>Runs on Phoenix 6 without a Pro license, unless the definition's motors are its FOC ones
  * ({@code Motor.KRAKEN_X60_FOC}): only then do its requests use FOC. Positions go to the motor
@@ -116,8 +117,8 @@ public final class JointIOTalon implements JointIO {
    *
    * @param math what the robot's definition derives: the joint's drive, ratios and seeds
    * @param setup the joint, its control, and its wiring, which it must have
-   * @throws IllegalArgumentException for a setup without wiring, wiring that names a CANcoder the
-   *     definition doesn't have, and what the Phoenix helper refuses
+   * @throws IllegalArgumentException for a setup without wiring, and what its settings refuse
+   *     ({@link ControllerSettings#talon})
    */
   public JointIOTalon(RobotMath math, JointSetup setup) {
     this(math, setup, ControllerPins.NONE);
@@ -137,13 +138,11 @@ public final class JointIOTalon implements JointIO {
             .orElseThrow(
                 () -> new IllegalArgumentException(joint.label() + " has no wiring: wire it"));
     Drive drive = math.drivesOf(joint).get(0);
-    Sensor.Encoder absolute = wiring.cancoder().isPresent() ? absolute(math, joint) : null;
-    configure =
-        control ->
-            absolute == null
-                ? PhoenixMechanism.configure(math, joint, drive, wiring, control)
-                : PhoenixMechanism.configure(math, joint, drive, absolute, wiring, control);
+    configure = control -> ControllerSettings.talon(math, joint, wiring, control);
     PhoenixMechanism.Settings settings = configure.apply(setup.control());
+    // The definition's encoder its CANcoder is, which the settings found.
+    Sensor.Encoder absolute =
+        wiring.cancoder().isPresent() ? JointSetup.absoluteEncoder(math, joint) : null;
     units = settings.units();
     // What's doubtful in the settings, though allowed: said once, in the log and on the console.
     Logger.recordOutput(
@@ -246,17 +245,6 @@ public final class JointIOTalon implements JointIO {
   static boolean foc(Drive drive) {
     return drive.actuator() instanceof Actuator.Motors motors
         && motors.motor().name().endsWith(" FOC");
-  }
-
-  /** The definition's absolute encoder on the joint alone: the one its CANcoder is. */
-  private static Sensor.Encoder absolute(RobotMath math, Joint joint) {
-    Sensor.Encoder encoder = JointSetup.absoluteEncoder(math, joint);
-    if (encoder == null) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a CANcoder, and its definition has no absolute encoder on it");
-    }
-    return encoder;
   }
 
   /**

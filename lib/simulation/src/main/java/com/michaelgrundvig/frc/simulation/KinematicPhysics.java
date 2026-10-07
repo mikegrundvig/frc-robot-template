@@ -137,7 +137,7 @@ public final class KinematicPhysics implements Physics {
           driveInertiaKgM2(
               carriedKilograms,
               configuredRadiusMeters[i],
-              module.driveInertia().in(KilogramSquareMeters));
+              module.driveInertiaOrDefault().in(KilogramSquareMeters));
       wheels[i] =
           new Wheel(
               i,

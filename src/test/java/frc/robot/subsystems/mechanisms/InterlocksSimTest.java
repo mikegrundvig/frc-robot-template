@@ -190,6 +190,58 @@ class InterlocksSimTest {
         .endsWith("held: pivot keeps out of 40° to 80° while elevator before clear");
   }
 
+  /**
+   * The same rules written in the restricted joints' blocks hold the same: the roller, asked to run
+   * with the pivot stowed, stays still and says what holds it.
+   */
+  @Test
+  void rulesInTheBlocksHoldAsTheRobotsDo() {
+    RobotDefinition inBlocks =
+        RobotDefinitionBuilder.builder(ROBOT)
+            .name("guarded in blocks")
+            .configurations(List.of(DEPLOYED))
+            .build()
+            .with(
+                ROLLER.runsOnlyWhen(PIVOT.past(PIVOT_RUN)),
+                PIVOT.keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(ELEVATOR_CLEAR)));
+    JointsSimHarness blocks = new JointsSimHarness(inBlocks, SETUPS);
+    JointMechanism held = blocks.joints.of(ROLLER);
+
+    blocks.run(held.run(ROLLER_INTAKING), 0.5);
+
+    assertThat(blocks.simulation.velocity(ROLLER)).isCloseTo(0, within(0.5));
+    assertThat(held.heldBy()).isEqualTo("roller runs only when pivot past run");
+  }
+
+  /**
+   * A joint held until another is up to speed: the pivot, asked out, waits where it is while the
+   * roller is still, and goes once the roller runs at its 1500 rpm, past the 1000 it waits for.
+   */
+  @Test
+  void aSpeedHoldsAJointUntilAnotherIsUpToIt() {
+    RobotDefinition robot =
+        RobotDefinitionBuilder.builder(ROBOT)
+            .name("spun up")
+            .configurations(List.of())
+            .interlocks(List.of(Interlock.that(PIVOT).runsOnlyWhen(ROLLER.atLeast(RPM.of(1000)))))
+            .build();
+    JointsSimHarness spun = new JointsSimHarness(robot, SETUPS);
+    JointMechanism held = spun.joints.of(PIVOT);
+    Move out = held.goTo(PIVOT_OUT);
+    spun.scheduler.schedule(out);
+
+    spun.run(0.5);
+    double waiting = Math.toDegrees(spun.simulation.position(PIVOT));
+    String heldBy = held.heldBy();
+    spun.scheduler.schedule(spun.joints.of(ROLLER).run(ROLLER_INTAKING));
+    spun.runUntil(() -> out.outcome().isPresent(), 3);
+
+    assertThat(waiting).isCloseTo(1.5, within(1.0));
+    assertThat(heldBy).startsWith("pivot runs only when roller at least 1000");
+    assertThat(out.arrived()).isTrue();
+    assertThat(Math.toDegrees(spun.simulation.position(PIVOT))).isCloseTo(130, within(2.0));
+  }
+
   /** An interlock about a joint the template doesn't drive can't be enforced, so it's refused. */
   @Test
   void anInterlockTheTemplateCantEnforceIsRefused() {

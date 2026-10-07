@@ -10,6 +10,7 @@ import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.units.measure.Distance;
@@ -29,7 +30,9 @@ import org.wpilib.units.measure.MomentOfInertia;
  * season allows ({@link Weight#unweighed}), and the robot's missing-data report says so. Its
  * inertia is CAD's whole tensor, or its yaw alone, as PathPlanner, Choreo or a rotation test gives
  * it, or neither; what isn't given is a solid box's of its mass, bumpers and height ({@link
- * #massProperties}): never zero, or the drivetrain couldn't turn it.
+ * #massProperties}): never zero, or the drivetrain couldn't turn it. Its center of mass, which only
+ * the simulator reads, is the frame's center, a third of its height up, until it's given ({@link
+ * #cgOrDefault}), and the missing-data report notes it in the simulator.
  *
  * @param frameLength front to back, across the outside of the frame
  * @param frameWidth side to side, across the outside of the frame
@@ -41,7 +44,8 @@ import org.wpilib.units.measure.MomentOfInertia;
  * @param bumperTop how high their top edge is
  * @param weight everything that moves, robot, bumpers, and battery, with every mechanism stowed: as
  *     weighed, or the season's most until it is
- * @param cg its center of mass from the robot's origin, every mechanism stowed
+ * @param cg its center of mass from the robot's origin, every mechanism stowed; none given, the
+ *     frame's center, a third of its height up
  * @param inertia how hard it is to turn about its center of mass, along the robot's axes: CAD's
  *     whole tensor ({@link Turning#tensor}); its yaw alone ({@link Turning#yaw}), the box giving
  *     its pitch and roll; or none known ({@link Turning#BOX}), the box's all
@@ -56,7 +60,7 @@ public record Body(
     Distance bumperBottom,
     Distance bumperTop,
     Weight weight,
-    Translation3d cg,
+    Optional<Translation3d> cg,
     Turning inertia) {
   public Body {
     Checks.on(Body.class)
@@ -83,7 +87,8 @@ public record Body(
             () ->
                 whyNotABody(
                     inertia, box(weight, frameLength, frameWidth, height, bumperEnds, bumperSides)))
-        .check("cg", () -> outside(cg, frameLength, frameWidth, height))
+        .check(
+            "cg", () -> cg.isPresent() ? outside(cg.get(), frameLength, frameWidth, height) : null)
         .orThrow();
   }
 
@@ -258,7 +263,7 @@ public record Body(
                   .build();
           case Turning.Box nothing -> box;
         };
-    return MassProperties.builder().mass(weight.mass()).cg(cg).inertia(resolved).build();
+    return MassProperties.builder().mass(weight.mass()).cg(cgOrDefault()).inertia(resolved).build();
   }
 
   /** How hard the robot is to spin about the vertical axis through its center of mass. */
@@ -266,9 +271,19 @@ public record Body(
     return KilogramSquareMeters.of(massProperties().inertia().izz());
   }
 
-  /** The center of mass's height above the floor, every mechanism stowed. */
+  /**
+   * Its center of mass from the robot's origin, every mechanism stowed: as given, or until it is,
+   * the frame's center, a third of the robot's height up.
+   */
+  public Translation3d cgOrDefault() {
+    return cg.orElseGet(() -> new Translation3d(0, 0, height.in(Meters) / 3));
+  }
+
+  /**
+   * The center of mass's height above the floor, every mechanism stowed, as {@link #cgOrDefault}.
+   */
   public Distance cgHeight() {
-    return Meters.of(cg.getZ());
+    return Meters.of(cgOrDefault().getZ());
   }
 
   /** Starts building a body, one named value at a time. */

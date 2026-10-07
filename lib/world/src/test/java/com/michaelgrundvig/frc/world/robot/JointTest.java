@@ -226,12 +226,15 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> encoder("arm-abs", arm, 0, true))
         .withMessageContaining("a number other than 0");
+    // An absolute encoder's resolution is optional: only a pair decoded by their difference reads
+    // it, and the definition asks for it there. One given counts something.
+    assertThat(encoder("arm-abs", arm, 1, true, Optional.empty()).countsPerTurn()).isEmpty();
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> encoder("arm-abs", arm, 1, true, 0))
-        .withMessageContaining("an absolute encoder needs its resolution");
+        .isThrownBy(() -> encoder("arm-abs", arm, 1, true, Optional.of(0)))
+        .withMessageContaining("Encoder[arm-abs].countsPerTurn: 0 must be positive");
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> encoder("arm-abs", arm, 1, false, -1))
-        .withMessageContaining("must be zero or more");
+        .isThrownBy(() -> encoder("arm-abs", arm, 1, false, Optional.of(-1)))
+        .withMessageContaining("must be positive");
   }
 
   /** What a reference can get wrong: a part the definition doesn't list. */

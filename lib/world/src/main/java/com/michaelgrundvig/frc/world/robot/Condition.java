@@ -7,22 +7,24 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.Distance;
 
 /**
- * Where a joint is, by its named positions: at one, past one, before one, or between two. An
- * interlock restricts a joint while another's condition holds ({@link Interlock}), and a
- * configuration is joints at named positions or outputs ({@link Configuration}). Each is written
- * from the joint: {@code pivot.past("run")}, {@code elevator.before("clear")}, {@code
- * pivot.between("run", "out")}, {@code arm.at("level")}.
+ * Where a joint is: at one of its named positions, or past, before or between positions, given as
+ * numbers or as its named positions; how fast it runs; or what a sensor reads. An interlock
+ * restricts a joint while another's condition holds ({@link Interlock}), and a configuration is
+ * joints at named positions or outputs ({@link Configuration}). Each is written from the joint:
+ * {@code PIVOT.past(Degrees.of(110))}, {@code ELEVATOR.before(Inches.of(32))}, {@code
+ * ARM.at(ARM_LEVEL)}, {@code SHOOTER.atLeast(RPM.of(3000))}.
  *
  * <p>They're static: "past" means the named position lies between the joint's reference and where
  * it is, so a condition means the same whichever way the joint is moving. The definition judges
  * them exactly, at named positions ({@link #holdsAt}); at run time, a joint is at a position within
  * its band.
  */
-public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor {
+public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor, Condition.AtLeast {
   /**
    * A condition on a joint's position: what interlocks and configurations are made of, and what the
    * definition can judge exactly, at named positions.
@@ -154,102 +156,192 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor 
   }
 
   /**
-   * A joint past one of its named positions: the position between its reference and where it is.
+   * A joint past a position: the position lies between its reference and where it is, so a pivot
+   * stowed at 1.5° is past 110° from 110° on, whichever way it's moving.
    *
    * @param joint the joint
-   * @param position one of its positions, other than its reference
+   * @param position where, in its units: inside its range, and not its reference
+   * @param place the name of its position there, when it's one of them, for what's shown
    */
   @ConfigRecord
-  record Past(Joint joint, String position) implements OnJoint {
+  record Past(Joint joint, double position, Optional<String> place) implements OnJoint {
     public Past {
       Checks.on(Past.class, joint.label())
-          .check("position", () -> notAside(joint, position))
+          .check("position", () -> notAside(joint, position, place))
           .orThrow();
     }
 
-    /** Starts describing a joint past a named position, one named value at a time. */
+    /** Starts describing a joint past a position, one named value at a time. */
     public static ConditionPastBuilder.JointStage builder() {
       return ConditionPastBuilder.builder();
     }
 
     @Override
     public boolean holdsAt(double at) {
-      double edge = joint.position(position).value();
-      return edge > joint.reference() ? at >= edge : at <= edge;
+      return position > joint.reference() ? at >= position : at <= position;
     }
 
     @Override
     public String toString() {
-      return joint.label() + " past " + position;
+      return joint.label() + " past " + shown(joint, position, place);
     }
   }
 
   /**
-   * A joint before one of its named positions: not yet past it, on its reference's side.
+   * A joint before a position: not yet past it, on its reference's side.
    *
    * @param joint the joint
-   * @param position one of its positions, other than its reference
+   * @param position where, in its units: inside its range, and not its reference
+   * @param place the name of its position there, when it's one of them, for what's shown
    */
   @ConfigRecord
-  record Before(Joint joint, String position) implements OnJoint {
+  record Before(Joint joint, double position, Optional<String> place) implements OnJoint {
     public Before {
       Checks.on(Before.class, joint.label())
-          .check("position", () -> notAside(joint, position))
+          .check("position", () -> notAside(joint, position, place))
           .orThrow();
     }
 
-    /** Starts describing a joint before a named position, one named value at a time. */
+    /** Starts describing a joint before a position, one named value at a time. */
     public static ConditionBeforeBuilder.JointStage builder() {
       return ConditionBeforeBuilder.builder();
     }
 
     @Override
     public boolean holdsAt(double at) {
-      double edge = joint.position(position).value();
-      return edge > joint.reference() ? at < edge : at > edge;
+      return position > joint.reference() ? at < position : at > position;
     }
 
     @Override
     public String toString() {
-      return joint.label() + " before " + position;
+      return joint.label() + " before " + shown(joint, position, place);
     }
   }
 
   /**
-   * A joint between two of its named positions, both included, whichever way round they're named.
+   * A joint between two positions, both included, whichever way round they're given.
    *
    * @param joint the joint
-   * @param from one of its positions
-   * @param to another
+   * @param from one end, in its units, inside its range
+   * @param to the other
+   * @param fromPlace the name of its position at {@code from}, when it's one of them
+   * @param toPlace the name of its position at {@code to}, when it's one of them
    */
   @ConfigRecord
-  record Between(Joint joint, String from, String to) implements OnJoint {
+  record Between(
+      Joint joint, double from, double to, Optional<String> fromPlace, Optional<String> toPlace)
+      implements OnJoint {
     public Between {
       Checks.on(Between.class, joint.label())
-          .check("from", () -> unknown(joint, from, false))
-          .check("to", () -> unknown(joint, to, false))
+          .check("from", () -> notWithin(joint, from, fromPlace))
+          .check("to", () -> notWithin(joint, to, toPlace))
           .check(
               "to",
-              () -> from.equals(to) ? "a joint between " + from + " and itself is at it" : null)
+              () ->
+                  Math.abs(from - to) <= Range.EDGE
+                      ? "a joint between " + shown(joint, from, fromPlace) + " and itself is at it"
+                      : null)
           .orThrow();
     }
 
-    /** Starts describing a joint between two named positions, one named value at a time. */
+    /** Starts describing a joint between two positions, one named value at a time. */
     public static ConditionBetweenBuilder.JointStage builder() {
       return ConditionBetweenBuilder.builder();
     }
 
     @Override
     public boolean holdsAt(double at) {
-      double a = joint.position(from).value();
-      double b = joint.position(to).value();
-      return at >= Math.min(a, b) && at <= Math.max(a, b);
+      return at >= Math.min(from, to) && at <= Math.max(from, to);
     }
 
     @Override
     public String toString() {
-      return joint.label() + " between " + from + " and " + to;
+      return joint.label()
+          + " between "
+          + shown(joint, from, fromPlace)
+          + " and "
+          + shown(joint, to, toPlace);
     }
+  }
+
+  /**
+   * A joint running at least a speed, forward: a flywheel up to speed before anything feeds it.
+   * Only the robot, reading the joint, can judge it, as a sensor's condition: a joint that isn't
+   * answering, or doesn't know where it is, doesn't hold it.
+   *
+   * @param joint the joint
+   * @param speed its speed, in its units a second: radians, or meters
+   */
+  @ConfigRecord
+  record AtLeast(Joint joint, double speed) implements Condition {
+    public AtLeast {
+      Checks.on(AtLeast.class, joint.label())
+          .check(
+              "speed",
+              () ->
+                  Double.isFinite(speed) && speed > 0
+                      ? null
+                      : "a speed to reach must be forward, and more than none: "
+                          + Places.shownSpeed(joint instanceof Joint.Revolute, speed))
+          .orThrow();
+    }
+
+    /** Starts describing a joint running at least a speed, one named value at a time. */
+    public static ConditionAtLeastBuilder.JointStage builder() {
+      return ConditionAtLeastBuilder.builder();
+    }
+
+    /** Whether it holds with the joint running at a speed, in its units a second. */
+    public boolean holdsAt(double velocity) {
+      return velocity >= speed;
+    }
+
+    @Override
+    public String toString() {
+      return joint.label()
+          + " at least "
+          + Places.shownSpeed(joint instanceof Joint.Revolute, speed);
+    }
+  }
+
+  /** A position as it's shown: its name, when it's one of the joint's, or its value. */
+  private static String shown(Joint joint, double position, Optional<String> place) {
+    return place.orElseGet(() -> Places.shownAt(joint instanceof Joint.Revolute, position));
+  }
+
+  /**
+   * Why a position isn't one a joint can be at, or null when it is: inside its range, and, when
+   * it's named, one of its positions, there.
+   */
+  private static @Nullable String notWithin(Joint joint, double position, Optional<String> place) {
+    if (!Double.isFinite(position)) {
+      return position + " isn't a position";
+    }
+    if (place.isPresent()) {
+      String unknown = unknown(joint, place.get(), false);
+      if (unknown != null) {
+        return unknown;
+      }
+      if (joint.position(place.get()).value() != position) {
+        return place.get()
+            + " is "
+            + shown(joint, joint.position(place.get()).value(), Optional.empty())
+            + ", not "
+            + shown(joint, position, Optional.empty());
+      }
+    }
+    if (joint.range().isPresent() && !joint.range().get().contains(position)) {
+      Range range = joint.range().get();
+      boolean revolute = joint instanceof Joint.Revolute;
+      return shown(joint, position, place)
+          + " is outside "
+          + joint.label()
+          + "'s range, "
+          + Places.shownAt(revolute, range.lower())
+          + " to "
+          + Places.shownAt(revolute, range.upper());
+    }
+    return null;
   }
 
   /** Why a joint has no position (or output, where one may be) by a name, or null when it has. */
@@ -272,13 +364,15 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor 
   }
 
   /** Why a position names no side of a joint's reference, or null when it does. */
-  private static @Nullable String notAside(Joint joint, String position) {
-    String unknown = unknown(joint, position, false);
-    if (unknown != null) {
-      return unknown;
+  private static @Nullable String notAside(Joint joint, double position, Optional<String> place) {
+    String within = notWithin(joint, position, place);
+    if (within != null) {
+      return within;
     }
-    return joint.position(position).value() == joint.reference()
-        ? position
+    // A step apart is the reference: Degrees.of(1.5) and Math.toRadians(1.5) differ in the last
+    // bit.
+    return Math.abs(position - joint.reference()) <= Range.EDGE
+        ? shown(joint, position, place)
             + " is "
             + joint.label()
             + "'s reference: everywhere is past it, and nowhere before it"

@@ -64,9 +64,10 @@ public final class RobotMath {
    *     over their free speed through the gearing
    * @param kA volts per unit per second squared, with every link it moves at its reference and the
    *     motors' rotors through their gearing
-   * @param kG volts to hold it against gravity: for a revolute joint, at its worst, which {@code
-   *     ArmFeedforward} scales by the cosine of its angle from horizontal ({@link #gravityOffset}),
-   *     and how well that cosine fits is {@link #gravityFit}; for a prismatic one, everywhere
+   * @param kG volts to hold it against gravity, from its links' mass, so 0 for links without it:
+   *     for a revolute joint, at its worst, which {@code ArmFeedforward} scales by the cosine of
+   *     its angle from horizontal ({@link #gravityOffset}), and how well that cosine fits is {@link
+   *     #gravityFit}; for a prismatic one, everywhere
    */
   public record Gains(double kV, double kA, double kG) {}
 
@@ -293,7 +294,9 @@ public final class RobotMath {
    * How far a revolute joint's zero is from horizontal: the angle to add to its position to give
    * the angle {@code ArmFeedforward} takes, and Phoenix's {@code GravityArmPositionOffset}, with
    * the joint's parent level and every other joint at its reference. Zero for a joint gravity
-   * doesn't turn, such as a turret.
+   * doesn't turn, such as a turret, and for one whose links have no mass: its weight is then taken
+   * to pull hardest at its zero, unless its control says where ({@code
+   * MechanismControl.Gains.gravityAngle}).
    *
    * @throws IllegalArgumentException for a prismatic joint, which doesn't turn against gravity
    */
@@ -339,6 +342,22 @@ public final class RobotMath {
   }
 
   /**
+   * Whether gravity can move a joint, whatever it carries: a revolute joint about an axis that
+   * isn't vertical, or a prismatic one along an axis that isn't level, with the joints at their
+   * references. Not a turret or a spindexer, which turn about the vertical, nor a slide that runs
+   * level. It needs no mass: it's what a tuned kG may hold against.
+   */
+  public boolean gravityActsOn(Joint joint) {
+    Vector3 axis = joint.axis().unit();
+    double up =
+        Math.abs(
+            new Translation3d(axis.x(), axis.y(), axis.z())
+                .rotateBy(pose(joint, Map.of()).getRotation())
+                .getZ());
+    return joint instanceof Joint.Revolute ? up < 1 - 1e-9 : up > 1e-9;
+  }
+
+  /**
    * The drives of motors meant to move a joint, which its seeds and free speed come from: those
    * whose every joint moves with it (the joint itself, or one that follows it), where any do;
    * otherwise every drive whose motors turn as it moves. A swerve module's steering is its steering
@@ -380,11 +399,22 @@ public final class RobotMath {
     if (pushing == 0) {
       throw new IllegalArgumentException("no motors move " + joint.label());
     }
-    double kG =
-        joint instanceof Joint.Revolute
-            ? Math.hypot(levelGravity(j, 0), levelGravity(j, Math.PI / 2))
-            : levelGravity(j, q[j]);
-    return new Gains(backEmf / pushing, inertia(j, q) / pushing, kG / pushing);
+    return new Gains(backEmf / pushing, inertia(j, q) / pushing, gravityHeld(joint) / pushing);
+  }
+
+  /**
+   * What the ideal kG holds against, through the joint's motors: gravity's torque at the joint from
+   * its links' mass, at its worst for a revolute joint, everywhere for a prismatic one, with its
+   * parent level. Zero for links without mass.
+   *
+   * @return newton meters for a revolute joint, newtons for a prismatic one
+   * @throws IllegalArgumentException if it follows another joint
+   */
+  double gravityHeld(Joint joint) {
+    int j = independent(joint);
+    return joint instanceof Joint.Revolute
+        ? Math.hypot(levelGravity(j, 0), levelGravity(j, Math.PI / 2))
+        : levelGravity(j, joint.reference());
   }
 
   /**
@@ -590,8 +620,8 @@ public final class RobotMath {
    *
    * With more than two, the best one or pair is what a decoder would read.
    *
-   * @throws IllegalArgumentException if there are none, or they aren't all absolute and on one
-   *     joint
+   * @throws IllegalArgumentException if there are none, they aren't all absolute and on one joint,
+   *     or a pair geared nearly alike doesn't give each one's counts per turn
    */
   public double absoluteSpan(List<Sensor.Encoder> encoders) {
     return decoding(encoders).span();
@@ -700,6 +730,9 @@ public final class RobotMath {
    * What a pair tells apart decoded by their difference, in the joint's turns: the turn of their
    * difference, if it's longer than either's own and a count off on each still picks the right turn
    * of the slower one; 0 otherwise, for a pair a decoder reads coarse then fine.
+   *
+   * @throws IllegalArgumentException for a pair geared nearly alike without each one's counts per
+   *     turn, which is all that says whether their difference picks the right turn
    */
   private static double vernier(Sensor.Encoder a, Sensor.Encoder b, Joint joint) {
     double ra = Math.abs(a.ratio(joint));
@@ -708,9 +741,17 @@ public final class RobotMath {
     if (!(apart < Math.min(ra, rb))) {
       return 0;
     }
+    if (a.countsPerTurn().isEmpty() || b.countsPerTurn().isEmpty()) {
+      throw new IllegalArgumentException(
+          "decoding "
+              + a.label()
+              + " and "
+              + b.label()
+              + " by their difference needs each encoder's counts per turn: give them");
+    }
     // The difference is off by up to a count of each, in their turns; through the beat, that's
     // off by this much of the joint's turn, which must be under half the slower one's turn.
-    double counts = 1.0 / a.countsPerTurn() + 1.0 / b.countsPerTurn();
+    double counts = 1.0 / a.countsPerTurn().get() + 1.0 / b.countsPerTurn().get();
     return 2 * Math.min(ra, rb) * counts < apart ? 1 / apart : 0;
   }
 
@@ -850,7 +891,13 @@ public final class RobotMath {
       return;
     }
     Range range = joint.range().get();
-    double span = absoluteSpan(absolute);
+    double span;
+    try {
+      span = absoluteSpan(absolute);
+    } catch (IllegalArgumentException e) {
+      problems.add(String.valueOf(e.getMessage()));
+      return;
+    }
     String units = joint instanceof Joint.Revolute ? "radians" : "meters";
     if (!(span > range.width())) {
       problems.add(

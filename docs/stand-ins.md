@@ -24,7 +24,12 @@ Released, but alpha: each is tied to one WPILib alpha, and moves with it.
 - **REVLib 2027.0.0-alpha-8** (`vendordeps/REVLib.json`, from REV's own `REVLib-2027.json`,
   `2027_alpha7`). Its units were measured in REV's simulation (2026-10-05); a SPARK's direction
   (counterclockwise positive, seen facing its shaft, as Phoenix's) is REV's convention and not yet
-  confirmed on a robot.
+  confirmed on a robot. Neither is how a SPARK reads an encoder on its data port: its `zeroOffset`
+  the raw reading where it reads zero, before inverting, and its reading from 0 to 1, as REV
+  documents them; REV's simulation reports the reading a test gives it, applying neither. Nor, for
+  a SPARK whose loop closes on that encoder, its soft limits on the encoder's turns, its speed in
+  the encoder's RPM, or what it does when the encoder is unplugged: REV's simulation runs its loop
+  on the motor's own encoder whatever it's told.
 
 ## Waiting on
 

@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.atMost;
 import static com.michaelgrundvig.frc.world.config.Rules.finite;
+import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
@@ -10,8 +11,8 @@ import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
-import com.michaelgrundvig.frc.world.config.Rule;
 import java.util.Optional;
+import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Current;
 import org.wpilib.units.measure.Time;
 
@@ -99,6 +100,32 @@ public record MechanismControl(
         .build();
   }
 
+  /**
+   * The same, holding it against gravity with this many volts, as tuned: an elevator everywhere, an
+   * arm where its weight pulls hardest, as its control says, or its links' mass puts it, or, with
+   * neither, at its zero. 0 for a joint a counterbalance holds.
+   */
+  public MechanismControl withKg(double kG) {
+    return MechanismControlBuilder.builder(this)
+        .gains(MechanismControlGainsBuilder.builder(gains).kG(Optional.of(kG)).build())
+        .build();
+  }
+
+  /**
+   * The same, holding an arm against gravity with this many volts, as tuned, its weight pulling
+   * hardest at this angle: {@code withKg(0.4, Degrees.of(-90))} for an arm whose zero points
+   * straight up, its positive direction tipping it forward.
+   */
+  public MechanismControl withKg(double kG, Angle gravityAngle) {
+    return MechanismControlBuilder.builder(this)
+        .gains(
+            MechanismControlGainsBuilder.builder(gains)
+                .kG(Optional.of(kG))
+                .gravityAngle(Optional.of(gravityAngle))
+                .build())
+        .build();
+  }
+
   /** The same, the motor controller stopping it inside its hard stops. */
   public MechanismControl withSoftLimits(double lower, double upper) {
     return MechanismControlBuilder.builder(this)
@@ -152,7 +179,12 @@ public record MechanismControl(
    * @param kA volts per radian (or meter) per second squared, where tuned
    * @param kG volts to hold the joint against gravity, where tuned: for a revolute joint, at its
    *     worst, positive to hold it up whichever way it's turned, as the seed is; for a prismatic
-   *     one, everywhere
+   *     one, everywhere. It needs no mass: the definition's mass only seeds it, and a link's mass
+   *     is optional
+   * @param gravityAngle where a revolute joint's weight pulls hardest, the angle at which holding
+   *     it takes all of kG forward; where not given, where its links' mass puts it ({@code
+   *     RobotMath.gravityOffset}), or its zero, horizontal as WPILib takes an arm's, with no mass.
+   *     A prismatic joint has none: it's held the same all along
    */
   @ConfigRecord
   public record Gains(
@@ -162,7 +194,8 @@ public record MechanismControl(
       double kS,
       Optional<Double> kV,
       Optional<Double> kA,
-      Optional<Double> kG) {
+      Optional<Double> kG,
+      Optional<Angle> gravityAngle) {
     public Gains {
       Checks.on(Gains.class)
           .field("kP", kP, nonNegative())
@@ -172,6 +205,7 @@ public record MechanismControl(
           .field("kV", kV, given(nonNegative()))
           .field("kA", kA, given(nonNegative()))
           .field("kG", kG, given(finite()))
+          .field("gravityAngle", gravityAngle, given(finite()))
           .orThrow();
     }
 
@@ -190,11 +224,8 @@ public record MechanismControl(
           .kV(Optional.empty())
           .kA(Optional.empty())
           .kG(Optional.empty())
+          .gravityAngle(Optional.empty())
           .build();
-    }
-
-    private static Rule<Optional<Double>> given(Rule<Object> rule) {
-      return value -> value.isPresent() ? rule.whyNot(value.get()) : null;
     }
   }
 
@@ -337,18 +368,81 @@ public record MechanismControl(
 
     /**
      * On the first enable, the joint is pushed gently into one of its hard stops, and its position
-     * there is the stop's: 2 V, for at most 3 s.
+     * there is the stop's: 2 V, for as long as its model says crossing its range takes at that
+     * push, twice over and half a second more ({@link #secondsAllowed}).
      */
     static Homing toHardStop(Stop stop) {
-      return ToHardStop.builder().stop(stop).volts(2).timeout(Seconds.of(3)).build();
+      return ToHardStop.builder().stop(stop).volts(2).timeout(Optional.empty()).build();
+    }
+
+    /**
+     * The same, for at most this long: for a joint slower than its model says, such as one pushed
+     * up against its weight.
+     */
+    static Homing toHardStop(Stop stop, Time timeout) {
+      return ToHardStop.builder().stop(stop).volts(2).timeout(Optional.of(timeout)).build();
     }
 
     /**
      * On the first enable, the joint is driven gently toward its limit switch at one end of its
-     * travel, and its position, once the switch trips, is the switch's: 2 V, for at most 3 s.
+     * travel, and its position, once the switch trips, is the switch's: 2 V, for as long as its
+     * model says crossing its range takes at that push, twice over and half a second more ({@link
+     * #secondsAllowed}).
      */
     static Homing toSwitch(Stop end) {
-      return ToSwitch.builder().end(end).volts(2).timeout(Seconds.of(3)).build();
+      return ToSwitch.builder().end(end).volts(2).timeout(Optional.empty()).build();
+    }
+
+    /** The same, for at most this long: for a joint slower than its model says. */
+    static Homing toSwitch(Stop end, Time timeout) {
+      return ToSwitch.builder().end(end).volts(2).timeout(Optional.of(timeout)).build();
+    }
+
+    /**
+     * How long a joint takes to cross its travel at a push, from its model, in seconds: its range
+     * at the speed the push gives it, its free speed through its gearing scaled by the push over
+     * its motors' 12 V (the push over {@link RobotMath#idealGains}'s kV). A joint that turns freely
+     * has no range: it reaches anywhere within a turn. A slide with no hard stops goes only between
+     * its named places and where it rests.
+     *
+     * @param volts the push
+     * @throws IllegalArgumentException if no motors move it, or it follows another joint
+     */
+    static double travelSeconds(RobotMath math, Joint joint, double volts) {
+      double travel =
+          joint
+              .range()
+              .map(Range::width)
+              .orElseGet(() -> joint instanceof Joint.Revolute ? 2 * Math.PI : spread(joint));
+      return travel * math.idealGains(joint).kV() / volts;
+    }
+
+    /**
+     * How long homing may push a joint before it's faulted, in seconds: the timeout its recipe
+     * gives, or, left to the joint, twice its travel's time at the push ({@link #travelSeconds})
+     * and half a second more, as a move's default deadline is. Twice leaves room for friction, and
+     * for gravity, to take half the push; the half second, for a hard stop's quarter second of
+     * stillness.
+     *
+     * @param timeout the recipe's, or empty to work it out from the joint
+     * @param volts the push
+     */
+    static double secondsAllowed(
+        Optional<Time> timeout, double volts, RobotMath math, Joint joint) {
+      return timeout
+          .map(time -> time.in(Seconds))
+          .orElseGet(() -> 2 * travelSeconds(math, joint, volts) + 0.5);
+    }
+
+    /** How far apart a slide's named places and where it rests lie: its travel, without stops. */
+    private static double spread(Joint joint) {
+      double lowest = joint.reference();
+      double highest = joint.reference();
+      for (Position place : joint.positions()) {
+        lowest = Math.min(lowest, place.value());
+        highest = Math.max(highest, place.value());
+      }
+      return highest - lowest;
     }
 
     /** Which of a joint's hard stops, or which end of its travel. */
@@ -368,16 +462,22 @@ public record MechanismControl(
      *
      * @param stop which hard stop
      * @param volts how hard it's pushed: enough to move it, against gravity if the stop is above
-     * @param timeout how long it may take
+     * @param timeout how long it may take; empty to work it out from the joint ({@link
+     *     Homing#secondsAllowed})
      */
     @ConfigRecord
-    record ToHardStop(Stop stop, double volts, Time timeout) implements Homing {
+    record ToHardStop(Stop stop, double volts, Optional<Time> timeout) implements Homing {
       public ToHardStop {
         Checks.on(ToHardStop.class)
             .field("volts", volts, positive())
             .field("volts", volts, atMost(12.0))
-            .field("timeout", timeout, positive())
+            .field("timeout", timeout, given(positive()))
             .orThrow();
+      }
+
+      /** How long it may push a joint before the joint is faulted, in seconds. */
+      public double secondsOn(RobotMath math, Joint joint) {
+        return Homing.secondsAllowed(timeout, volts, math, joint);
       }
 
       /** Starts describing the homing, one named value at a time. */
@@ -389,20 +489,26 @@ public record MechanismControl(
     /**
      * Driven toward its limit switch at one end on the first enable, the joint is there the loop
      * the switch trips, at the switch's position in the definition; if it hasn't by the timeout,
-     * it's faulted, and its moves refused. One resting on its switch is home at once.
+     * it's faulted, and its moves refused. One resting on its switch backs off it first.
      *
      * @param end which end's limit switch: the definition's limit switch on the joint at that end
      * @param volts how hard it's driven: enough to move it, against gravity if the switch is above
-     * @param timeout how long it may take
+     * @param timeout how long it may take; empty to work it out from the joint ({@link
+     *     Homing#secondsAllowed})
      */
     @ConfigRecord
-    record ToSwitch(Stop end, double volts, Time timeout) implements Homing {
+    record ToSwitch(Stop end, double volts, Optional<Time> timeout) implements Homing {
       public ToSwitch {
         Checks.on(ToSwitch.class)
             .field("volts", volts, positive())
             .field("volts", volts, atMost(12.0))
-            .field("timeout", timeout, positive())
+            .field("timeout", timeout, given(positive()))
             .orThrow();
+      }
+
+      /** How long it may drive a joint before the joint is faulted, in seconds. */
+      public double secondsOn(RobotMath math, Joint joint) {
+        return Homing.secondsAllowed(timeout, volts, math, joint);
       }
 
       /** Starts describing the homing, one named value at a time. */

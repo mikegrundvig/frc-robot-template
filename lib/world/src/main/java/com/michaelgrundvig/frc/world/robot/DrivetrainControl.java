@@ -224,7 +224,8 @@ public record DrivetrainControl(Limits limits, Gains gains) {
               * module.driveGearing().ratio()
               * module.driveGearing().efficiency()
               / module.wheelRadius().in(Meters);
-      double gripped = module.wheelCoefficientOfFriction() * mass * GRAVITY / corners.size();
+      double gripped =
+          module.wheelCoefficientOfFrictionOrDefault() * mass * GRAVITY / corners.size();
       double wheel = Math.min(pushed, gripped);
       force += wheel;
       torque += wheel * corner.position().getNorm();

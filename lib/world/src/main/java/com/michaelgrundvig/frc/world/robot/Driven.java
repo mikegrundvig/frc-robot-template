@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 
@@ -29,6 +30,9 @@ import org.wpilib.units.measure.Distance;
  * @param absoluteEncoder an absolute encoder on its axle, if it has one
  * @param limitSwitches the switches it presses at the ends of its travel
  * @param control how the program drives it; needed for a joint with motors
+ * @param interlocks what restricts it by where another joint is, how fast one runs, or what a
+ *     sensor reads, written in its block ({@code .keepsOut(...).when(...)}, {@code
+ *     .runsOnlyWhen(...)}); the robot's definition can list more beside them
  */
 @ConfigRecord
 public record Driven(
@@ -36,7 +40,8 @@ public record Driven(
     List<Servo> servos,
     Optional<AbsoluteEncoder> absoluteEncoder,
     List<LimitSwitch> limitSwitches,
-    Optional<MechanismControl> control) {
+    Optional<MechanismControl> control,
+    List<Interlock> interlocks) {
   /** A joint nothing drives: a follower, a passive hinge, or one not described yet. */
   public static final Driven NONE =
       DrivenBuilder.builder()
@@ -45,11 +50,13 @@ public record Driven(
           .absoluteEncoder(Optional.empty())
           .limitSwitches(List.of())
           .control(Optional.empty())
+          .interlocks(List.of())
           .build();
 
   public Driven {
     servos = List.copyOf(servos);
     limitSwitches = List.copyOf(limitSwitches);
+    interlocks = List.copyOf(interlocks);
     Optional<Motors> turning = motors;
     Optional<AbsoluteEncoder> encoder = absoluteEncoder;
     List<LimitSwitch> switches = limitSwitches;
@@ -184,7 +191,9 @@ public record Driven(
    * the joint's TalonFX; on its SPARK's data port; or on one of Systemcore's ports, by the robot;
    * or by none of them, in the simulator alone.
    *
-   * @param countsPerTurn its resolution: what it tells apart depends on it
+   * @param countsPerTurn its resolution, from its datasheet, if it's given: only a pair geared
+   *     nearly alike, decoded by their difference, reads it, and needs it ({@code
+   *     RobotMath.absoluteSpan})
    * @param ratio its turns for each of the joint's, positive: 1 on the axle, 92/18 on an 18-tooth
    *     gear against a 92-tooth ring, which way it turns being its wiring's; it must stay within
    *     one of its turns, or the joint's position can't be told from it alone
@@ -194,7 +203,7 @@ public record Driven(
    */
   @ConfigRecord
   public record AbsoluteEncoder(
-      int countsPerTurn,
+      Optional<Integer> countsPerTurn,
       double ratio,
       Optional<MechanismWiring.Cancoder> cancoder,
       Optional<MechanismWiring.DataPortEncoder> dataPort,
@@ -205,7 +214,7 @@ public record Driven(
               + (dataPort.isPresent() ? 1 : 0)
               + (port.isPresent() ? 1 : 0);
       Checks.on(AbsoluteEncoder.class)
-          .field("countsPerTurn", countsPerTurn, positive())
+          .field("countsPerTurn", countsPerTurn, given(positive()))
           .field(
               "ratio",
               ratio,
@@ -227,12 +236,27 @@ public record Driven(
     }
 
     /**
+     * An absolute encoder on the joint's axle and unwired, its resolution not given: {@code
+     * AbsoluteEncoder.of().ratio(0.536).on(cancoder)}.
+     */
+    public static AbsoluteEncoder of() {
+      return DrivenAbsoluteEncoderBuilder.builder()
+          .countsPerTurn(Optional.empty())
+          .ratio(1)
+          .cancoder(Optional.empty())
+          .dataPort(Optional.empty())
+          .port(Optional.empty())
+          .build();
+    }
+
+    /**
      * An absolute encoder of a resolution, on the joint's axle and unwired: {@code
-     * AbsoluteEncoder.of(4096).ratio(92.0 / 18).on(cancoder)}.
+     * AbsoluteEncoder.of(4096).ratio(92.0 / 18).on(cancoder)}, one of a pair decoded by their
+     * difference, which reads it.
      */
     public static AbsoluteEncoder of(int countsPerTurn) {
       return DrivenAbsoluteEncoderBuilder.builder()
-          .countsPerTurn(countsPerTurn)
+          .countsPerTurn(Optional.of(countsPerTurn))
           .ratio(1)
           .cancoder(Optional.empty())
           .dataPort(Optional.empty())
@@ -278,6 +302,17 @@ public record Driven(
     /** Whether the joint's motor controller reads it: a CANcoder, or a SPARK's data port. */
     public boolean readByController() {
       return cancoder.isPresent() || dataPort.isPresent();
+    }
+
+    /**
+     * Whether the joint's loop closes on it, as its wiring says, rather than on its motor's own
+     * encoder told once where the joint is: a Systemcore port's, in robot code each loop, or a
+     * SPARK's data port's, on the SPARK. A CANcoder's wiring says it its own way ({@link
+     * MechanismWiring.Feedback}).
+     */
+    public boolean closedLoop() {
+      return port.map(MechanismWiring.PortEncoder::closedLoop).orElse(false)
+          || dataPort.map(MechanismWiring.DataPortEncoder::closedLoop).orElse(false);
     }
   }
 

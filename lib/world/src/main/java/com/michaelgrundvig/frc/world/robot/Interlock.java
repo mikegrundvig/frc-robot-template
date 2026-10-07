@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.world.robot;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -30,6 +31,15 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
 
   /** Where the other joint must be, or what a sensor must read, for it to apply: see each shape. */
   Condition condition();
+
+  /** The other joint its condition is about, where it is or how fast it runs; none for a sensor. */
+  default Optional<Joint> other() {
+    return switch (condition()) {
+      case Condition.OnJoint onJoint -> Optional.of(onJoint.joint());
+      case Condition.AtLeast atLeast -> Optional.of(atLeast.joint());
+      case Condition.OnSensor onSensor -> Optional.empty();
+    };
+  }
 
   /** Starts an interlock about a joint: {@code Interlock.that(INTAKE).runsOnlyWhen(...)}. */
   static Subject that(Joint joint) {
@@ -138,9 +148,14 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
 
   /**
    * Why a condition can't restrict a joint, or null when it can: one on a joint must be about
-   * another joint, and where it is, not how it runs. Any sensor's can.
+   * another joint, where it is or how fast it runs, not one of its named outputs. Any sensor's can.
    */
   private static @Nullable String notAnother(Joint joint, Condition given) {
+    if (given instanceof Condition.AtLeast atLeast) {
+      return atLeast.joint().equals(joint)
+          ? joint.label() + " can't be held by how fast it runs itself: an interlock is on another"
+          : null;
+    }
     if (!(given instanceof Condition.OnJoint condition)) {
       return null;
     }
@@ -150,11 +165,13 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
           + " joint";
     }
     if (condition instanceof Condition.At at && at.isOutput()) {
-      return "an interlock speaks of where a joint is, and "
+      return "an interlock speaks of where a joint is, or how fast it runs, and "
           + at.name()
           + " is "
           + at.joint().label()
-          + "'s output: a readiness gate in code says how it runs";
+          + "'s output: say the speed it must reach, "
+          + at.joint().label()
+          + ".atLeast(...)";
     }
     return null;
   }

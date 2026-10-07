@@ -4,7 +4,9 @@ import static com.michaelgrundvig.frc.world.config.Rules.finite;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Radians;
+import static org.wpilib.units.Units.RadiansPerSecond;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
@@ -17,6 +19,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Quaternion;
 import org.wpilib.math.geometry.Rotation3d;
@@ -24,7 +27,9 @@ import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.linalg.VecBuilder;
 import org.wpilib.units.measure.Angle;
+import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Distance;
+import org.wpilib.units.measure.LinearVelocity;
 
 /**
  * A mechanism's joint: one way a link moves on what it hangs from, turning about an axis ({@link
@@ -33,9 +38,10 @@ import org.wpilib.units.measure.Distance;
  * elevator is a joint whose parent is the elevator's.
  *
  * <p>Position 0 is the pose its {@link #origin} gives: an arm's zero is wherever CAD's frame put
- * it, and where it is from horizontal is derived ({@code RobotMath.gravityOffset}), never written
- * down as a second number. A joint has no state: where it is now comes from its sensors, as a
- * position the derived functions take.
+ * it. Where its weight pulls hardest comes from its links' mass ({@code RobotMath.gravityOffset}),
+ * or from its control, beside its tuned kG ({@code MechanismControl.withKg(kG, angle)}); with
+ * neither, it's its zero, horizontal as WPILib takes an arm's. A joint has no state: where it is
+ * now comes from its sensors, as a position the derived functions take.
  *
  * <p>It names its own places and outputs ({@link #positions}, {@link #outputs}), and from those,
  * what configurations and interlocks say about it: {@link #at}, {@link #past}, {@link #before} and
@@ -164,6 +170,14 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
   List<Output> outputs();
 
   /**
+   * Whether it's held at positions: it has a range or named positions. One without either, a
+   * roller, only runs at outputs, and stops when idle.
+   */
+  default boolean holdsPositions() {
+    return range().isPresent() || !positions().isEmpty();
+  }
+
+  /**
    * How it's driven and wired: its motors or servos, its own sensors, their wiring, and its
    * control. Not part of its identity: joints that differ only here are equal.
    */
@@ -201,7 +215,9 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
                                     .build()))
                         .absolute(true)
                         .countsPerTurn(
-                            (int) Math.round(encoder.countsPerTurn() * encoder.turnsPerSignal()))
+                            encoder
+                                .countsPerTurn()
+                                .map(counts -> (int) Math.round(counts * encoder.turnsPerSignal())))
                         .build());
               }
             });
@@ -213,6 +229,38 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
       sensors.add(each.wiring().map(made::on).orElse(made));
     }
     return sensors;
+  }
+
+  /**
+   * Its own interlocks, as its block says them ({@code .keepsOut(...).when(...)}, {@code
+   * .runsOnlyWhen(...)}), each about this joint as the robot has it.
+   */
+  default List<Interlock> ownInterlocks() {
+    List<Interlock> own = new ArrayList<>();
+    for (Interlock interlock : driven().interlocks()) {
+      own.add(
+          switch (interlock) {
+            case Interlock.RunsOnlyWhen runs -> Interlock.that(this).runsOnlyWhen(runs.condition());
+            case Interlock.KeepsOut keeps ->
+                Interlock.that(this).keepsOut(keeps.region()).when(keeps.condition());
+          });
+    }
+    return own;
+  }
+
+  /**
+   * A stretch of a joint's travel being kept out, in its block: say while what. Not an interlock
+   * until it's said.
+   *
+   * @param joint the joint
+   * @param region where it may not be
+   * @param adding the joint with the interlock added
+   */
+  record KeepingOut<J extends Joint>(J joint, Range region, Function<Interlock, J> adding) {
+    /** While the condition holds: the joint, kept out meanwhile. */
+    public J when(Condition condition) {
+      return adding.apply(Interlock.that(joint).keepsOut(region).when(condition));
+    }
   }
 
   /**
@@ -304,7 +352,11 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
    * @throws IllegalArgumentException if the position isn't one of its own, or it's the reference
    */
   default Condition.Past past(Position position) {
-    return ConditionPastBuilder.builder().joint(this).position(own(position).name()).build();
+    return ConditionPastBuilder.builder()
+        .joint(this)
+        .position(own(position).value())
+        .place(Optional.of(position.name()))
+        .build();
   }
 
   /**
@@ -313,7 +365,11 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
    * @throws IllegalArgumentException if the position isn't one of its own, or it's the reference
    */
   default Condition.Before before(Position position) {
-    return ConditionBeforeBuilder.builder().joint(this).position(own(position).name()).build();
+    return ConditionBeforeBuilder.builder()
+        .joint(this)
+        .position(own(position).value())
+        .place(Optional.of(position.name()))
+        .build();
   }
 
   /**
@@ -324,8 +380,10 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
   default Condition.Between between(Position from, Position to) {
     return ConditionBetweenBuilder.builder()
         .joint(this)
-        .from(own(from).name())
-        .to(own(to).name())
+        .from(own(from).value())
+        .to(own(to).value())
+        .fromPlace(Optional.of(from.name()))
+        .toPlace(Optional.of(to.name()))
         .build();
   }
 
@@ -501,6 +559,61 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
       return with().reference(rest.in(Radians)).build();
     }
 
+    /**
+     * It past an angle: the angle lies between its reference and where it is. What an interlock's
+     * edge usually is, a clearance rather than a place it goes: {@code
+     * PIVOT.past(Degrees.of(110))}.
+     *
+     * @throws IllegalArgumentException if it's outside its range, or its reference
+     */
+    public Condition.Past past(Angle position) {
+      return ConditionPastBuilder.builder()
+          .joint(this)
+          .position(position.in(Radians))
+          .place(Optional.empty())
+          .build();
+    }
+
+    /**
+     * It before an angle: not yet past it, on its reference's side.
+     *
+     * @throws IllegalArgumentException if it's outside its range, or its reference
+     */
+    public Condition.Before before(Angle position) {
+      return ConditionBeforeBuilder.builder()
+          .joint(this)
+          .position(position.in(Radians))
+          .place(Optional.empty())
+          .build();
+    }
+
+    /**
+     * It between two angles, both included, whichever way round they're given.
+     *
+     * @throws IllegalArgumentException if either is outside its range, or they're one
+     */
+    public Condition.Between between(Angle from, Angle to) {
+      return ConditionBetweenBuilder.builder()
+          .joint(this)
+          .from(from.in(Radians))
+          .to(to.in(Radians))
+          .fromPlace(Optional.empty())
+          .toPlace(Optional.empty())
+          .build();
+    }
+
+    /**
+     * It running at least a speed, forward: {@code SHOOTER.atLeast(RPM.of(3000))}.
+     *
+     * @throws IllegalArgumentException for a speed that isn't forward
+     */
+    public Condition.AtLeast atLeast(AngularVelocity speed) {
+      return ConditionAtLeastBuilder.builder()
+          .joint(this)
+          .speed(speed.in(RadiansPerSecond))
+          .build();
+    }
+
     /** What it moves. */
     public Revolute carries(Link link) {
       return with().link(link).build();
@@ -577,23 +690,53 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
     }
 
     /** An absolute encoder on its axle, in the simulator alone until it's wired. */
+    public Revolute absoluteEncoder() {
+      return absoluteEncoder(Driven.AbsoluteEncoder.of());
+    }
+
+    /** An absolute encoder on its axle, read by a CANcoder through its TalonFX. */
+    public Revolute absoluteEncoder(MechanismWiring.Cancoder cancoder) {
+      return absoluteEncoder(Driven.AbsoluteEncoder.of().on(cancoder));
+    }
+
+    /**
+     * An absolute encoder on its axle, on its SPARK's data port: with {@code closesLoop()} on it,
+     * the SPARK's loop closing on it.
+     */
+    public Revolute absoluteEncoder(MechanismWiring.DataPortEncoder dataPort) {
+      return absoluteEncoder(Driven.AbsoluteEncoder.of().on(dataPort));
+    }
+
+    /**
+     * An absolute encoder on its axle, on one of Systemcore's ports, read by the robot: {@code
+     * .absoluteEncoder(PortEncoder.dutyCycle(1).offset(Rotations.of(0.82)))}, and with {@code
+     * .closesLoop()} after it, the joint's loop closing on it.
+     */
+    public Revolute absoluteEncoder(MechanismWiring.PortEncoder port) {
+      return absoluteEncoder(Driven.AbsoluteEncoder.of().on(port));
+    }
+
+    /**
+     * An absolute encoder on its axle, of a resolution, in the simulator alone until it's wired.
+     * The resolution is optional: only a pair decoded by their difference reads it.
+     */
     public Revolute absoluteEncoder(int countsPerTurn) {
       return absoluteEncoder(Driven.AbsoluteEncoder.of(countsPerTurn));
     }
 
-    /** An absolute encoder on its axle, read by a CANcoder through its TalonFX. */
+    /** An absolute encoder on its axle, of a resolution, read by a CANcoder through its TalonFX. */
     public Revolute absoluteEncoder(int countsPerTurn, MechanismWiring.Cancoder cancoder) {
       return absoluteEncoder(Driven.AbsoluteEncoder.of(countsPerTurn).on(cancoder));
     }
 
-    /** An absolute encoder on its axle, on its SPARK's data port. */
+    /** An absolute encoder on its axle, of a resolution, on its SPARK's data port. */
     public Revolute absoluteEncoder(int countsPerTurn, MechanismWiring.DataPortEncoder dataPort) {
       return absoluteEncoder(Driven.AbsoluteEncoder.of(countsPerTurn).on(dataPort));
     }
 
     /**
-     * An absolute encoder on its axle, on one of Systemcore's ports, read by the robot: {@code
-     * .absoluteEncoder(1024, PortEncoder.dutyCycle(1).offset(Rotations.of(0.82)))}.
+     * An absolute encoder on its axle, of a resolution, on one of Systemcore's ports, read by the
+     * robot: {@code .absoluteEncoder(1024, PortEncoder.dutyCycle(1).offset(Rotations.of(0.82)))}.
      */
     public Revolute absoluteEncoder(int countsPerTurn, MechanismWiring.PortEncoder port) {
       return absoluteEncoder(Driven.AbsoluteEncoder.of(countsPerTurn).on(port));
@@ -660,6 +803,29 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
         SensorWiring.Direction pin,
         SensorWiring.Polarity polarity) {
       return limitSwitch(end, at, SensorWiring.ControllerLimit.of(this, pin), polarity);
+    }
+
+    /**
+     * It kept out of a stretch of its travel while a condition holds, enforced beneath every
+     * command: {@code .keepsOut(Range.degrees(-180, -101)).when(ELEVATOR.before(Inches.of(32)))}.
+     * Its target is held at the stretch's edge, on the side it's on, until the condition clears.
+     */
+    public KeepingOut<Revolute> keepsOut(Range region) {
+      return new KeepingOut<>(this, region, this::interlocked);
+    }
+
+    /**
+     * It moving only while a condition holds, enforced beneath every command: {@code
+     * .runsOnlyWhen(PIVOT.past(Degrees.of(110)))}. Meanwhile it holds where it is, or stops.
+     */
+    public Revolute runsOnlyWhen(Condition condition) {
+      return interlocked(Interlock.that(this).runsOnlyWhen(condition));
+    }
+
+    private Revolute interlocked(Interlock interlock) {
+      List<Interlock> interlocks = new ArrayList<>(driven.interlocks());
+      interlocks.add(interlock);
+      return driven(drivenWith().interlocks(interlocks));
     }
 
     /** How the program drives it: {@code .control(MechanismControl.position(30))}. */
@@ -731,6 +897,7 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
       check(Prismatic.class, label, origin, axis, range, reference, positions, outputs);
       Optional<Driven.Motors> motors = driven.motors();
       Optional<Driven.AbsoluteEncoder> encoder = driven.absoluteEncoder();
+      Optional<MechanismControl> control = driven.control();
       Checks.on(Prismatic.class, label)
           .check(
               "driven.motors",
@@ -743,6 +910,13 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
               () ->
                   encoder.isPresent()
                       ? "an absolute encoder reads a joint that turns: one that slides has none"
+                      : null)
+          .check(
+              "driven.control",
+              () ->
+                  control.isPresent() && control.get().gains().gravityAngle().isPresent()
+                      ? "a joint that slides is held against gravity the same all along it, so"
+                          + " its kG has no angle: give kG alone, withKg(kG)"
                       : null)
           .orThrow();
     }
@@ -808,6 +982,58 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
     /** It resting at a distance where the robot starts, with no hard stops. */
     public Prismatic rests(Distance rest) {
       return with().reference(rest.in(Meters)).build();
+    }
+
+    /**
+     * It past a distance: the angle lies between its reference and where it is. What an interlock's
+     * edge usually is, a clearance rather than a place it goes: {@code
+     * ELEVATOR.before(Inches.of(32))}.
+     *
+     * @throws IllegalArgumentException if it's outside its range, or its reference
+     */
+    public Condition.Past past(Distance position) {
+      return ConditionPastBuilder.builder()
+          .joint(this)
+          .position(position.in(Meters))
+          .place(Optional.empty())
+          .build();
+    }
+
+    /**
+     * It before a distance: not yet past it, on its reference's side.
+     *
+     * @throws IllegalArgumentException if it's outside its range, or its reference
+     */
+    public Condition.Before before(Distance position) {
+      return ConditionBeforeBuilder.builder()
+          .joint(this)
+          .position(position.in(Meters))
+          .place(Optional.empty())
+          .build();
+    }
+
+    /**
+     * It between two distances, both included, whichever way round they're given.
+     *
+     * @throws IllegalArgumentException if either is outside its range, or they're one
+     */
+    public Condition.Between between(Distance from, Distance to) {
+      return ConditionBetweenBuilder.builder()
+          .joint(this)
+          .from(from.in(Meters))
+          .to(to.in(Meters))
+          .fromPlace(Optional.empty())
+          .toPlace(Optional.empty())
+          .build();
+    }
+
+    /**
+     * It running at least a speed, forward: {@code LIFT.atLeast(MetersPerSecond.of(0.5))}.
+     *
+     * @throws IllegalArgumentException for a speed that isn't forward
+     */
+    public Condition.AtLeast atLeast(LinearVelocity speed) {
+      return ConditionAtLeastBuilder.builder().joint(this).speed(speed.in(MetersPerSecond)).build();
     }
 
     /** What it moves. */
@@ -943,6 +1169,29 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
         SensorWiring.Direction pin,
         SensorWiring.Polarity polarity) {
       return limitSwitch(end, at, SensorWiring.ControllerLimit.of(this, pin), polarity);
+    }
+
+    /**
+     * It kept out of a stretch of its travel while a condition holds, enforced beneath every
+     * command: {@code .keepsOut(Range.meters(0, 0.25)).when(INTAKE.before(Degrees.of(30)))}. Its
+     * target is held at the stretch's edge, on the side it's on, until the condition clears.
+     */
+    public KeepingOut<Prismatic> keepsOut(Range region) {
+      return new KeepingOut<>(this, region, this::interlocked);
+    }
+
+    /**
+     * It moving only while a condition holds, enforced beneath every command: {@code
+     * .runsOnlyWhen(CLIMBER.past(Degrees.of(-75)))}. Meanwhile it holds where it is, or stops.
+     */
+    public Prismatic runsOnlyWhen(Condition condition) {
+      return interlocked(Interlock.that(this).runsOnlyWhen(condition));
+    }
+
+    private Prismatic interlocked(Interlock interlock) {
+      List<Interlock> interlocks = new ArrayList<>(driven.interlocks());
+      interlocks.add(interlock);
+      return driven(drivenWith().interlocks(interlocks).build());
     }
 
     /** How the program drives it. */

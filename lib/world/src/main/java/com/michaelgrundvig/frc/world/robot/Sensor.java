@@ -1,7 +1,7 @@
 package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.between;
-import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
+import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static org.wpilib.units.Units.Degrees;
@@ -54,12 +54,17 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
    * @param absolute whether it knows where it is in its turn at power-up (a CANcoder, a
    *     through-bore's duty cycle), rather than counting from wherever it started. One that is
    *     reads one joint; a motor's rotor never is.
-   * @param countsPerTurn how many readings its turn has: a CANcoder's 4096. Its datasheet gives it,
-   *     and what an absolute encoder tells apart with another depends on it, so an absolute encoder
-   *     needs its own; zero for one whose resolution nothing reads, such as a rotor's
+   * @param countsPerTurn how many readings its turn has, from its datasheet: a CANcoder's 4096.
+   *     Only a pair of absolute encoders geared nearly alike, decoded by their difference, reads
+   *     it, and needs each one's ({@code RobotMath.absoluteSpan}); none for one whose resolution
+   *     nothing reads, such as a rotor's
    */
   @ConfigRecord
-  record Encoder(String label, List<Transmission.Term> terms, boolean absolute, int countsPerTurn)
+  record Encoder(
+      String label,
+      List<Transmission.Term> terms,
+      boolean absolute,
+      Optional<Integer> countsPerTurn)
       implements Sensor {
     public Encoder {
       terms = List.copyOf(terms);
@@ -67,18 +72,12 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
       Checks.on(Encoder.class, label)
           .field("label", label, notBlank())
           .field("terms", terms, Transmission.Combined::notTerms)
-          .field("countsPerTurn", countsPerTurn, nonNegative())
+          .field("countsPerTurn", countsPerTurn, given(positive()))
           .check(
               "terms",
               () ->
                   absolute && read.size() > 1
                       ? "an absolute encoder reads one joint, not " + read.size()
-                      : null)
-          .check(
-              "countsPerTurn",
-              () ->
-                  absolute && countsPerTurn == 0
-                      ? "an absolute encoder needs its resolution: what it tells apart depends on it"
                       : null)
           .orThrow();
     }
@@ -105,7 +104,7 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
                       .pitchRadius(Optional.empty())
                       .build()))
           .absolute(true)
-          .countsPerTurn(countsPerTurn)
+          .countsPerTurn(Optional.of(countsPerTurn))
           .build();
     }
 

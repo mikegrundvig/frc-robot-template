@@ -2,15 +2,18 @@ package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
+import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Translation2d;
 
@@ -75,9 +78,9 @@ public record RobotDefinition(
     List<Joint> allJoints = joints;
     List<Coupling> allCouplings = couplings;
     List<Configuration> allConfigurations = configurations;
-    List<Interlock> allInterlocks = interlocks;
     List<Drive> everyDrive = everyDrive(joints, drives);
     List<Sensor> everySensor = everySensor(joints, sensors);
+    List<Interlock> everyInterlock = everyInterlock(joints, interlocks);
     RobotMath whole = RobotMath.whole(body, joints, couplings, everyDrive, everySensor);
     Checks.on(RobotDefinition.class, name)
         .field("name", name, notBlank())
@@ -94,10 +97,11 @@ public record RobotDefinition(
             () ->
                 whole == null
                     ? null
-                    : Places.configurationProblems(whole, allConfigurations, allInterlocks))
+                    : Places.configurationProblems(whole, allConfigurations, everyInterlock))
+        .check("interlocks", () -> twice(everyInterlock))
         .check(
             "interlocks",
-            () -> whole == null ? null : Places.interlockProblems(whole, allInterlocks))
+            () -> whole == null ? null : Places.interlockProblems(whole, everyInterlock))
         .orThrow();
   }
 
@@ -154,38 +158,63 @@ public record RobotDefinition(
    * One thing the definition doesn't know, and what not knowing it costs: a line the robot program
    * says at startup.
    *
-   * @param what what isn't known: {@code "hopper floor has no mass"}
-   * @param costs what the derived values and the simulator lose for it
+   * @param what what isn't known: {@code "pivot has no kG"}
+   * @param costs what the robot's code, its derived values, or the simulator lose for it
+   * @param scope what reads it: the robot, or only the simulator
    */
-  public record Missing(String what, String costs) {
+  public record Missing(String what, String costs, Scope scope) {
     @Override
     public String toString() {
       return what + ": " + costs;
     }
+
+    /** What reads a value that isn't known, and so where not knowing it is said. */
+    public enum Scope {
+      /** The robot's code, its derived values or its checks: said wherever the program runs. */
+      ROBOT,
+      /**
+       * Only the simulator, such as a link's mass: said only when it simulates, never on the
+       * robot's console.
+       */
+      SIMULATOR
+    }
   }
 
   /**
-   * What the definition doesn't know, each with what it costs, robot first and then each link in
-   * its joint's order. Nothing here is wrong, only unknown: a value nobody has is zero or the
-   * model's own stand-in, never a guess, and this says where.
+   * What the definition doesn't know, each with what it costs and what reads it, robot first and
+   * then each joint in order. Nothing here is wrong, only unknown: a value nobody has is zero or
+   * the model's own stand-in, never a guess, and this says where.
+   *
+   * <p>On the robot ({@link Missing.Scope#ROBOT}):
    *
    * <ul>
-   *   <li>the robot not weighed, its mass the season's most;
-   *   <li>its body's inertia a box's, or its pitch and roll beside a given yaw;
-   *   <li>the share of its mass in no link: the chassis, its electronics, bumpers and battery;
-   *   <li>a link with no mass, or mass but no inertia, or no shape;
+   *   <li>the robot not weighed, its mass the season's most, or its inertia a box's: the drive's
+   *       moves and feedforward read them;
+   *   <li>the tread's grip not measured, PathPlanner's default: the drive's moves plan on it, and
+   *       the slip check judges by it;
+   *   <li>a joint gravity acts on, held at positions, with no kG written: none, or one seeded from
+   *       its links' mass, never tuned;
+   *   <li>a link with no shape;
    *   <li>a joint nothing drives or couples;
-   *   <li>a joint with named speeds or voltages no motors turn it at, which can't be checked.
+   *   <li>a joint with named speeds or voltages no motors turn it at, which can't be checked;
+   *   <li>a sensor not placed on its part, or a limit switch whose position isn't known.
    * </ul>
+   *
+   * <p>In the simulator alone ({@link Missing.Scope#SIMULATOR}), since mass is optional and only
+   * the simulator reads it: the body's pitch and roll a box's beside a given yaw; its center of
+   * mass not given; the share of its mass in no link; the modules' drive or steering inertia not
+   * measured; a link with no mass, or mass but no inertia.
    */
   public List<Missing> missing() {
+    RobotMath math = math();
     List<Missing> missing = new ArrayList<>();
     if (!body.weight().weighed()) {
       missing.add(
           new Missing(
               "the robot isn't weighed: its mass is the season's most, " + shown(body.mass()),
-              "the simulator's acceleration and the links' mass budget rest on the rules, not the"
-                  + " robot"));
+              "the drive's moves and feedforward, the simulator's acceleration and the links' mass"
+                  + " budget rest on the rules, not the robot",
+              Missing.Scope.ROBOT));
     }
     switch (body.inertia()) {
       case Body.Turning.Box nothing ->
@@ -193,66 +222,83 @@ public record RobotDefinition(
               new Missing(
                   "the body's inertia is a box's, its mass spread through its bumpers' outline and"
                       + " height",
-                  "how the simulator tips and turns the robot is approximate"));
+                  "how fast the drive's moves turn, its turning feedforward, and how the simulator"
+                      + " tips and turns the robot are approximate",
+                  Missing.Scope.ROBOT));
       case Body.Turning.Yaw yaw ->
           missing.add(
               new Missing(
                   "the body's pitch and roll are a box's, beside its given yaw",
-                  "how the simulator tips the robot is approximate"));
+                  "how the simulator tips the robot is approximate",
+                  Missing.Scope.SIMULATOR));
       case Body.Turning.Tensor tensor -> {}
     }
+    // A center of mass not given isn't a doubt: nothing reads it but the mass model's own check.
     double robot = body.mass().in(Kilograms);
-    double links = math().linksKilograms();
+    double links = math.linksKilograms();
     missing.add(
         new Missing(
             String.format(
                 Locale.ROOT, "%.2f kg of the robot's %.2f kg is in no link", robot - links, robot),
-            "the chassis, its electronics, bumpers and battery: carried as one rigid body"));
+            "the chassis, its electronics, bumpers and battery: carried as one rigid body",
+            Missing.Scope.SIMULATOR));
+    unmeasuredModules(missing);
     for (Joint joint : joints) {
       Link link = joint.link();
+      // Held at positions against gravity: a joint that sags without its kG.
+      boolean sags = joint.holdsPositions() && math.gravityActsOn(joint);
       if (link.mass().isMassless()) {
         boolean spins = !link.mass().inertia().isZero();
         missing.add(
             new Missing(
                 link.label() + (spins ? " has no mass, only its inertia" : " has no mass"),
-                joint.label()
-                    + " has no gravity seed (kG 0), no gravity torque, and no center of mass to"
-                    + " shift"
-                    + (spins ? "" : "; its kA seeds from its motors' rotors alone")));
+                (sags ? joint.label() + "'s gravity comes from its kG, and " : "")
+                    + link.label()
+                    + (spins ? " adds only its own turning to " : " adds nothing to ")
+                    + joint.label()
+                    + "'s inertia",
+                Missing.Scope.SIMULATOR));
       } else if (link.mass().inertia().isZero()) {
         missing.add(
             new Missing(
                 link.label() + " has mass but no inertia",
-                "its own turning adds nothing to "
-                    + joint.label()
-                    + "'s inertia: its kA seeds low"));
+                "its own turning adds nothing to " + joint.label() + "'s inertia",
+                Missing.Scope.SIMULATOR));
       }
       if (link.shapes().isEmpty()) {
         missing.add(
             new Missing(
                 link.label() + " has no shape",
-                "it isn't drawn, nor checked against the starting height and the extension limit"));
+                "it isn't drawn, nor checked against the starting height and the extension limit",
+                Missing.Scope.ROBOT));
       }
       if (!moved(joint)) {
         missing.add(
             new Missing(
                 joint.label() + " has nothing moving it",
                 "no drive turns it and no coupling leads it: no ideal gains, and the simulator"
-                    + " leaves it where it is"));
+                    + " leaves it where it is",
+                Missing.Scope.ROBOT));
+      }
+      Missing kG = noKg(math, joint, sags);
+      if (kG != null) {
+        missing.add(kG);
       }
     }
-    for (Joint joint : Places.unchecked(math())) {
+    for (Joint joint : Places.unchecked(math)) {
       missing.add(
           new Missing(
               joint.label() + " names outputs, and no motors turn it",
-              "its speeds and voltages aren't checked against what its motors can do"));
+              "its speeds and voltages aren't checked against what its motors can do",
+              Missing.Scope.ROBOT));
     }
     for (Sensor sensor : everySensor(joints, sensors)) {
       if (sensor instanceof Sensor.Placed placed && placed.pose().isEmpty()) {
         missing.add(
             new Missing(
                 sensor.label() + " isn't placed on its part",
-                "it's drawn, and simulated, at its part's origin"));
+                "it's drawn, and simulated, at its part's origin",
+                Missing.Scope.ROBOT));
       }
       if (sensor instanceof Sensor.Switch onSwitch
           && onSwitch.kind() instanceof Sensor.Switch.Limit limit
@@ -260,10 +306,80 @@ public record RobotDefinition(
         missing.add(
             new Missing(
                 sensor.label() + "'s position on " + limit.joint().label() + " isn't known",
-                "it can stop " + limit.joint().label() + " but not home it"));
+                "it can stop " + limit.joint().label() + " but not home it",
+                Missing.Scope.ROBOT));
       }
     }
     return missing;
+  }
+
+  /**
+   * What the drivetrain's modules leave to their defaults: the tread's grip, which the robot plans
+   * and judges by; the drive's and the steering's inertia, which only the simulator reads. Each
+   * once, if any corner's module leaves it out.
+   */
+  private void unmeasuredModules(List<Missing> missing) {
+    List<DrivetrainGeometry.ModuleType> modules =
+        drivetrain.corners().stream().map(DrivetrainGeometry.Corner::module).toList();
+    if (modules.stream().anyMatch(module -> module.wheelCoefficientOfFriction().isEmpty())) {
+      missing.add(
+          new Missing(
+              "the tread's grip isn't measured: it's "
+                  + shown(DrivetrainGeometry.ModuleType.DEFAULT_WHEEL_COEFFICIENT_OF_FRICTION)
+                  + ", PathPlanner's default",
+              "drive moves plan their acceleration on it, and the slip check judges by it: measure"
+                  + " it with a pull test (docs/characterization.md, tread friction)",
+              Missing.Scope.ROBOT));
+    }
+    if (modules.stream().anyMatch(module -> module.driveInertia().isEmpty())) {
+      missing.add(
+          new Missing(
+              "the drive's own inertia isn't measured: it's "
+                  + shown(
+                      DrivetrainGeometry.ModuleType.DEFAULT_DRIVE_INERTIA.in(KilogramSquareMeters))
+                  + " kg m², an estimate for a 4 in wheel and a Kraken X60's rotor",
+              "how fast the simulator's wheels spin up is a guess, though a small one beside the"
+                  + " robot's mass they carry",
+              Missing.Scope.SIMULATOR));
+    }
+    if (modules.stream().anyMatch(module -> module.steerInertia().isEmpty())) {
+      missing.add(
+          new Missing(
+              "the steering's inertia isn't measured: it's "
+                  + shown(
+                      DrivetrainGeometry.ModuleType.DEFAULT_STEER_INERTIA.in(KilogramSquareMeters))
+                  + " kg m², Phoenix Tuner X's simulation value",
+              "how fast the simulator's modules steer at their current limit is a guess",
+              Missing.Scope.SIMULATOR));
+    }
+  }
+
+  /**
+   * A joint's kG, if it isn't written where it's needed: a joint held at positions that gravity
+   * acts on, driven by its control, with no kG in it. Its links' mass may seed one, but only a
+   * tuned kG is known to hold it; a counterbalanced joint writes 0. Null when it's written, or not
+   * needed: a roller, a turret, a joint that follows another.
+   */
+  private static @Nullable Missing noKg(RobotMath math, Joint joint, boolean sags) {
+    MechanismControl control = joint.driven().control().orElse(null);
+    if (control == null
+        || control.gains().kG().isPresent()
+        || !sags
+        || math.leaderOf(joint) != null) {
+      return null;
+    }
+    if (math.gravityHeld(joint) > 1e-12) {
+      return new Missing(
+          joint.label() + "'s kG is seeded from its mass, not tuned",
+          "it holds only as well as its links' mass and where it sits are right: tune its kG and"
+              + " write it, withKg(...)",
+          Missing.Scope.ROBOT);
+    }
+    return new Missing(
+        joint.label() + " has no kG",
+        "it holds against gravity by kP alone, so it sits below its targets until its kG is tuned"
+            + " and written, withKg(...), or written as 0 for a counterbalanced joint",
+        Missing.Scope.ROBOT);
   }
 
   /** Each joint's own drives, then the robot's. */
@@ -272,6 +388,37 @@ public record RobotDefinition(
     joints.forEach(joint -> every.addAll(joint.ownDrives()));
     every.addAll(drives);
     return every;
+  }
+
+  /**
+   * Every interlock: each joint's own, from its block, then the robot's list. What the robot
+   * enforces, and what the definition checks.
+   */
+  public List<Interlock> everyInterlock() {
+    return everyInterlock(joints, interlocks);
+  }
+
+  /** Each joint's own interlocks, then the robot's. */
+  private static List<Interlock> everyInterlock(List<Joint> joints, List<Interlock> interlocks) {
+    List<Interlock> every = new ArrayList<>();
+    joints.forEach(joint -> every.addAll(joint.ownInterlocks()));
+    every.addAll(interlocks);
+    return every;
+  }
+
+  /** An interlock written twice, in a block and in the robot's list, or twice in one. */
+  private static @Nullable String twice(List<Interlock> interlocks) {
+    Set<Interlock> seen = new HashSet<>();
+    for (Interlock interlock : interlocks) {
+      if (!seen.add(interlock)) {
+        return "\""
+            + interlock
+            + "\" is written twice: once is enough, in "
+            + interlock.joint().label()
+            + "'s block or the robot's interlocks";
+      }
+    }
+    return null;
   }
 
   /** Each joint's own sensors, then the robot's. */

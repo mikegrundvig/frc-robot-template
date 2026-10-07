@@ -73,6 +73,31 @@ class HomingSimTest {
     assertThat(elevator.position()).isCloseTo(0.4, within(0.01));
   }
 
+  /**
+   * Powered on at its top, 1.2 m up, the elevator takes over 4 s to come down at 2 V: past the 3 s
+   * a homing once had, inside the 9.5 s worked out from its travel, twice the 4.5 s its model takes
+   * at 2 V and half a second more. While it homes, its state says so.
+   */
+  @Test
+  void aJointHomesFromItsFarEndWithinTheTimeItsTravelTakes() {
+    JointsSimHarness sim =
+        new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, Homing.toHardStop(Homing.Stop.LOWER)));
+    JointMechanism elevator = sim.joints.of(ELEVATOR);
+    sim.simulation.powerOnAt(ELEVATOR, 1.2);
+
+    sim.loop();
+    String homing = elevator.stateShown();
+    double took = sim.runUntil(() -> elevator.state() != JointMechanism.State.HOMING, 10);
+    sim.loop();
+
+    assertThat(Homing.travelSeconds(ROBOT.math(), ELEVATOR, 2)).isCloseTo(4.51, within(0.01));
+    assertThat(homing).isEqualTo("HOMING: toward its lower stop, for at most 9.5 s");
+    assertThat(elevator.state()).isEqualTo(JointMechanism.State.READY);
+    assertThat(took).isGreaterThan(3).isLessThan(9.5);
+    assertThat(sim.simulation.position(ELEVATOR)).isCloseTo(0, within(0.005));
+    assertThat(elevator.position()).isCloseTo(0, within(0.005));
+  }
+
   /** Disabled, it waits to home, and so do moves on it; enabled, it homes. */
   @Test
   void itHomesOnlyOnceEnabled() {
@@ -93,17 +118,13 @@ class HomingSimTest {
   }
 
   /**
-   * Powered on near its top, with a homing too short to reach the bottom: it's faulted, says why,
-   * and refuses its moves; homed again from its stop, it's ready.
+   * Powered on near its top, with a homing given too short a time to reach the bottom: it's
+   * faulted, says why, and refuses its moves; homed again from its stop, it's ready. The time given
+   * wins over the one its travel would give it.
    */
   @Test
   void aHomingThatFindsNoStopFaultsTheJointUntilItHomesAgain() {
-    Homing quick =
-        Homing.ToHardStop.builder()
-            .stop(Homing.Stop.LOWER)
-            .volts(2)
-            .timeout(Seconds.of(0.3))
-            .build();
+    Homing quick = Homing.toHardStop(Homing.Stop.LOWER, Seconds.of(0.3));
     JointsSimHarness sim = new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, quick));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     sim.simulation.powerOnAt(ELEVATOR, 1.1);

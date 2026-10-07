@@ -219,16 +219,20 @@ public record MechanismWiring(
 
   /**
    * An absolute encoder plugged into the leading motor controller's data port, as REV's Through
-   * Bore Encoder is into a SPARK's: read once at startup, to tell the motor where the joint is.
-   * From a team's REVLib code, whose {@code zeroOffset} is the raw reading at zero before
-   * inverting: an offset of {@code -zeroOffset}, or {@code +zeroOffset} reversed.
+   * Bore Encoder is into a SPARK's: read once at startup, to tell the motor where the joint is, or,
+   * closing the loop on it ({@link #closesLoop}), the SPARK's own loop running on it. The SPARK
+   * applies its direction and offset itself ({@code RevMechanism}). From a team's REVLib code,
+   * whose {@code zeroOffset} is the raw reading at zero before inverting: an offset of {@code
+   * -zeroOffset}, or {@code +zeroOffset} reversed.
    *
    * @param offset added to its reading, in turns, so it reads zero with the joint at zero: measured
    *     per install, and again whenever the encoder is moved
    * @param reversed whether its reading falls as the joint moves forward
+   * @param closedLoop whether the SPARK's loop runs on it, rather than on its motor's own encoder
+   *     told once where the joint is
    */
   @ConfigRecord
-  public record DataPortEncoder(Angle offset, boolean reversed) {
+  public record DataPortEncoder(Angle offset, boolean reversed, boolean closedLoop) {
     public DataPortEncoder {
       Checks.on(DataPortEncoder.class)
           .field("offset", offset, between(Rotations.of(-1), Rotations.of(1)))
@@ -240,16 +244,30 @@ public record MechanismWiring(
       return MechanismWiringDataPortEncoderBuilder.builder();
     }
 
-    /** Its reading in turns, from what the controller reads raw, from 0 to 1. */
-    public double turns(double raw) {
-      return (reversed ? -raw : raw) + offset.in(Rotations);
+    /**
+     * The same encoder, the SPARK's loop running on it, at the SPARK's own rate, rather than on its
+     * motor's encoder, which can slip or sit across backlash from the joint.
+     */
+    public DataPortEncoder closesLoop() {
+      return MechanismWiringDataPortEncoderBuilder.builder(this).closedLoop(true).build();
+    }
+
+    /**
+     * What the controller reads raw, from 0 to 1, where this encoder reads a number of turns, its
+     * offset and direction applied: a SPARK's {@code zeroOffset}, for it to read zero there.
+     */
+    public double raw(double turns) {
+      double raw = (reversed ? -1 : 1) * (turns - offset.in(Rotations));
+      return raw - Math.floor(raw);
     }
   }
 
   /**
    * An absolute encoder plugged into one of Systemcore's own ports, read by the robot, not by a
    * motor controller: a REV Through Bore Encoder's duty-cycle output, or an analog encoder or
-   * potentiometer. The robot tells the motor where the joint is from its first good reading.
+   * potentiometer. The robot tells the motor where the joint is from its first good reading, and
+   * the motor's own encoder runs the joint's loop from then on; or, closing the loop on it ({@link
+   * #closesLoop}), the robot runs the loop itself each loop on this encoder's reading.
    *
    * @param port the Systemcore port it's on, 0 to 5
    * @param signal how it reports where it is: a duty cycle, or a voltage
@@ -258,10 +276,17 @@ public record MechanismWiring(
    * @param offset added to its reading, in its turns, so it reads zero with the joint at zero:
    *     measured per install, and again whenever the encoder is moved
    * @param reversed whether its reading falls as the joint moves forward
+   * @param closedLoop whether the joint's loop closes on it, in robot code each loop, rather than
+   *     on its motor's own encoder told once where the joint is
    */
   @ConfigRecord
   public record PortEncoder(
-      int port, Signal signal, double turnsPerRange, Angle offset, boolean reversed) {
+      int port,
+      Signal signal,
+      double turnsPerRange,
+      Angle offset,
+      boolean reversed,
+      boolean closedLoop) {
     public PortEncoder {
       Checks.on(PortEncoder.class)
           .field("port", port, between(0, 5))
@@ -294,6 +319,7 @@ public record MechanismWiring(
           .turnsPerRange(1)
           .offset(Rotations.of(0))
           .reversed(false)
+          .closedLoop(false)
           .build();
     }
 
@@ -308,6 +334,7 @@ public record MechanismWiring(
           .turnsPerRange(turnsPerRange)
           .offset(Rotations.of(0))
           .reversed(false)
+          .closedLoop(false)
           .build();
     }
 
@@ -322,6 +349,16 @@ public record MechanismWiring(
      */
     public PortEncoder inverted() {
       return MechanismWiringPortEncoderBuilder.builder(this).reversed(true).build();
+    }
+
+    /**
+     * The same encoder, the joint's loop closing on it: each loop, the robot works out the motor's
+     * voltage from where this encoder says the joint is, rather than streaming a position to the
+     * motor controller, whose own encoder can slip or sit across backlash from the joint. A loop
+     * the robot runs, at its 50 Hz, is coarser than a motor controller's at 1 kHz.
+     */
+    public PortEncoder closesLoop() {
+      return MechanismWiringPortEncoderBuilder.builder(this).closedLoop(true).build();
     }
 
     /**

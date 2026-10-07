@@ -109,7 +109,7 @@ class LocalizationServiceTest {
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
           .weight(Body.Weight.weighed(Kilograms.of(60)))
-          .cg(new Translation3d(0, 0, 0.2))
+          .cg(Optional.of(new Translation3d(0, 0, 0.2)))
           .inertia(
               Body.Turning.tensor(
                   Inertia.builder().ixx(6).iyy(6).izz(6).ixy(0).ixz(0).iyz(0).build()))
@@ -128,9 +128,9 @@ class LocalizationServiceTest {
                       .wheelRadius(Inches.of(2))
                       .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
                       .steerGearing(Gearing.builder().ratio(12.8).efficiency(1.0).build())
-                      .wheelCoefficientOfFriction(1.2)
-                      .driveInertia(KilogramSquareMeters.of(0.001))
-                      .steerInertia(KilogramSquareMeters.of(0.004))
+                      .wheelCoefficientOfFriction(Optional.of(1.2))
+                      .driveInertia(Optional.of(KilogramSquareMeters.of(0.001)))
+                      .steerInertia(Optional.of(KilogramSquareMeters.of(0.004)))
                       .couplingRatio(0)
                       .build(),
                   BODY,

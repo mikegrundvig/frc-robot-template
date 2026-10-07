@@ -57,7 +57,7 @@ final class Team2611Actions {
     return readyToShoot;
   }
 
-  /** Deploy and roll. The definition's interlock holds the roller until the pivot passes "run". */
+  /** Deploy and roll. The definition's interlock holds the roller until the pivot passes 110°. */
   Command intake() {
     return Command.requiring(pivot, roller)
         .executing(

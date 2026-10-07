@@ -299,9 +299,11 @@ headings wrap at ±180°: count the whole turns.
 ## Tread friction
 
 **What it measures:** the tread's grip on carpet, new and worn: the coefficient of friction,
-`DrivetrainGeometry.ModuleType.wheelCoefficientOfFriction`. The simulator's grip comes from it, and
-with the center of gravity's height it sets where the wheels slip under acceleration, which the
-drive's current limit is chosen to stay under.
+`DrivetrainGeometry.ModuleType.wheelCoefficientOfFriction`. The robot's drive moves plan their
+acceleration on it and its slip check judges by it, the simulator's grip comes from it, and with the
+center of gravity's height it sets where the wheels slip under acceleration, which the drive's
+current limit is chosen to stay under. Until it's measured, it's PathPlanner's default, 1.2, and
+the robot says so at startup.
 
 **Equipment:**
 

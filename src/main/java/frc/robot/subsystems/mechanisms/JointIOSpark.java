@@ -1,7 +1,6 @@
 package frc.robot.subsystems.mechanisms;
 
 import com.michaelgrundvig.frc.world.robot.CanBus;
-import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
@@ -37,15 +36,17 @@ import org.wpilib.math.filter.Debouncer;
 /**
  * A driven joint on REV hardware: a SPARK MAX or SPARK Flex leading its drive's motors, the rest
  * following it, read by its motor's own encoder. Every setting comes from the REV helper ({@link
- * RevMechanism}), from the robot's definition, the joint's wiring and its control, as a TalonFX's
- * come from the Phoenix helper: nothing is retyped here.
+ * RevMechanism}), from the robot's definition, the joint's wiring and its control ({@link
+ * ControllerSettings#spark}), as a TalonFX's come from the Phoenix helper: nothing is retyped here.
  *
  * <p>Positions go to the SPARK's loop with the profile's point and the feedforward the robot works
- * out in volts ({@link RevMechanism.Feedforward}); speeds the same way. A joint is read by its
+ * out in volts ({@code PhoenixMechanism.Feedforward}); speeds the same way. A joint is read by its
  * rotor: one with an absolute encoder on the SPARK's data port is told where it is from that
  * encoder's first good reading; one without takes its reference as where it is at power on, until
- * it homes. Its settings are kept through a brownout: REV's controllers fall back to what's saved
- * on them.
+ * it homes. One whose loop closes on that encoder is read by it instead, each loop, and its
+ * positions go to the SPARK's loop in the encoder's turns ({@link
+ * RevMechanism.Settings#loopRatio}). Its settings are kept through a brownout: REV's controllers
+ * fall back to what's saved on them.
  */
 public final class JointIOSpark implements JointIO {
   /** At startup, configuring a device is tried this many times. */
@@ -92,8 +93,8 @@ public final class JointIOSpark implements JointIO {
    *
    * @param math what the robot's definition derives: the joint's drive, ratios and seeds
    * @param setup the joint, its control, and its wiring, which it must have, on a SPARK
-   * @throws IllegalArgumentException for a setup without wiring, wiring on a CANivore, and what the
-   *     REV helper refuses
+   * @throws IllegalArgumentException for a setup without wiring, and what its settings refuse
+   *     ({@link ControllerSettings#spark})
    */
   public JointIOSpark(RobotMath math, JointSetup setup) {
     this(math, setup, ControllerPins.NONE);
@@ -111,20 +112,15 @@ public final class JointIOSpark implements JointIO {
             .wiring()
             .orElseThrow(
                 () -> new IllegalArgumentException(joint.label() + " has no wiring: wire it"));
-    if (!(wiring.canBus() instanceof CanBus.Port bus)) {
-      throw new IllegalArgumentException(
-          joint.label() + "'s SPARKs are on a CANivore: a SPARK is on Systemcore's own CAN");
-    }
-    Drive drive = math.drivesOf(joint).get(0);
     this.math = math;
-    Sensor.Encoder model = wiring.dataPort().isPresent() ? absolute(math, joint) : null;
-    absoluteModel = model;
-    configure =
-        control ->
-            model == null
-                ? RevMechanism.configure(math, joint, drive, wiring, control)
-                : RevMechanism.configure(math, joint, drive, model, wiring, control);
+    configure = control -> ControllerSettings.spark(math, joint, wiring, control);
     settings = configure.apply(setup.control());
+    // On Systemcore's own CAN, as the settings require, and the definition's encoder on the data
+    // port, which they found.
+    CanBus.Port bus = (CanBus.Port) wiring.canBus();
+    Sensor.Encoder model =
+        wiring.dataPort().isPresent() ? JointSetup.absoluteEncoder(math, joint) : null;
+    absoluteModel = model;
     units = settings.units();
     rotorRatio = settings.rotorRatio();
     // What's doubtful in the settings, though allowed: said once, in the log and on the console.
@@ -158,18 +154,6 @@ public final class JointIOSpark implements JointIO {
     loop = leader.getClosedLoopController();
     absolute = model != null ? leader.getAbsoluteEncoder() : null;
     encoder.setPosition(units.toPhoenix(joint.reference()) * rotorRatio);
-  }
-
-  /** The definition's absolute encoder on the joint alone: the one on the SPARK's data port. */
-  private static Sensor.Encoder absolute(RobotMath math, Joint joint) {
-    Sensor.Encoder encoder = JointSetup.absoluteEncoder(math, joint);
-    if (encoder == null) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a data-port encoder, and its definition has no absolute encoder on"
-              + " it");
-    }
-    return encoder;
   }
 
   /** The leading SPARK: for the tests, which read what it was told through REV's simulation. */
@@ -214,7 +198,12 @@ public final class JointIOSpark implements JointIO {
     double share = leader.getAppliedOutput().get(0.0);
     double current = Math.abs(leader.getOutputCurrent().get(0.0));
     inputs.connected = connected.calculate(rotor.isValid() && rpm.isValid());
-    if (!Double.isNaN(seededAt)) {
+    double fromEncoder = fromAbsolute();
+    if (settings.closedLoop() && !Double.isNaN(fromEncoder)) {
+      // Its loop runs on its absolute encoder, whose word is where the joint is.
+      position = fromEncoder;
+      seededAt = Double.NaN;
+    } else if (!Double.isNaN(seededAt)) {
       // Told where it is this loop: its encoder's reading catches up on the next.
       position = seededAt;
       seededAt = Double.NaN;
@@ -222,6 +211,8 @@ public final class JointIOSpark implements JointIO {
       position = rotor.get(0.0) / rotorRatio;
     }
     velocity = rpm.get(0.0) / 60 / rotorRatio;
+    inputs.absolutePosition =
+        Double.isNaN(fromEncoder) ? Double.NaN : units.fromPhoenix(fromEncoder);
     inputs.position = units.fromPhoenix(position);
     inputs.velocity = units.fromPhoenix(velocity);
     inputs.appliedVolts = share * leader.getBusVoltage().get(0.0);
@@ -241,20 +232,30 @@ public final class JointIOSpark implements JointIO {
    * once, at startup.
    */
   private void seed() {
-    SparkAbsoluteEncoder reading = absolute;
-    Sensor.Encoder model = absoluteModel;
-    MechanismWiring.DataPortEncoder port = wiring.dataPort().orElse(null);
-    if (seeded || reading == null || model == null || port == null) {
+    double at = seeded ? Double.NaN : fromAbsolute();
+    if (Double.isNaN(at)) {
       return;
     }
-    Signal<Double> raw = reading.getPosition();
-    if (!raw.isValid()) {
-      return;
-    }
-    double at = units.toPhoenix(math.fromAbsolute(model, port.turns(raw.get())));
     encoder.setPosition(at * rotorRatio);
     seededAt = at;
     seeded = true;
+  }
+
+  /**
+   * Where the absolute encoder on its data port says the joint is, in the mechanism's rotations:
+   * NaN without one, or before its first good reading. The SPARK reads it with its direction and
+   * offset applied, from the window's low edge ({@link RevMechanism.Settings#windowEdge}).
+   */
+  private double fromAbsolute() {
+    SparkAbsoluteEncoder reading = absolute;
+    Sensor.Encoder model = absoluteModel;
+    if (reading == null || model == null) {
+      return Double.NaN;
+    }
+    Signal<Double> fromEdge = reading.getPosition();
+    return fromEdge.isValid()
+        ? units.toPhoenix(math.fromAbsolute(model, settings.windowEdge() + fromEdge.get()))
+        : Double.NaN;
   }
 
   @Override
@@ -262,7 +263,7 @@ public final class JointIOSpark implements JointIO {
     double at = units.toPhoenix(position);
     double moving = units.toPhoenix(velocity);
     loop.setSetpoint(
-        at * rotorRatio,
+        at * settings.loopRatio() + settings.loopZero(),
         SparkLowLevel.ControlType.kPosition,
         ClosedLoopSlot.kSlot0,
         feedforwardVolts + settings.feedforward().atPosition(at, moving, this.velocity),
@@ -273,7 +274,7 @@ public final class JointIOSpark implements JointIO {
   public void setVelocity(double velocity) {
     double moving = units.toPhoenix(velocity);
     loop.setSetpoint(
-        moving * rotorRatio * 60,
+        moving * settings.loopRatio() * 60,
         SparkLowLevel.ControlType.kVelocity,
         ClosedLoopSlot.kSlot1,
         settings.feedforward().atSpeed(position, moving),

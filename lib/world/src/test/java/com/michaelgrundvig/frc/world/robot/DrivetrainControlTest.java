@@ -28,9 +28,9 @@ class DrivetrainControlTest {
               .wheelRadius(Inches.of(2))
               .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
               .steerGearing(Gearing.builder().ratio(150.0 / 7.0).efficiency(1.0).build())
-              .wheelCoefficientOfFriction(1.2)
-              .driveInertia(KilogramSquareMeters.of(0.001))
-              .steerInertia(KilogramSquareMeters.of(0.004))
+              .wheelCoefficientOfFriction(Optional.of(1.2))
+              .driveInertia(Optional.of(KilogramSquareMeters.of(0.001)))
+              .steerInertia(Optional.of(KilogramSquareMeters.of(0.004)))
               .couplingRatio(50.0 / 14.0)
               .build(),
           Inches.of(10.375),

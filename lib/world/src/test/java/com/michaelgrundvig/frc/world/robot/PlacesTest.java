@@ -15,7 +15,10 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.RPM;
+import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Volts;
 
@@ -338,7 +341,7 @@ class PlacesTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Interlock.that(PIVOT).runsOnlyWhen(ROLLER.at(ROLLER_INTAKING)))
         .withMessageContaining(
-            "an interlock speaks of where a joint is, and intaking is roller's output");
+            "an interlock speaks of where a joint is, or how fast it runs, and intaking is roller's output: say the speed it must reach, roller.atLeast(...)");
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -355,6 +358,101 @@ class PlacesTest {
         .withMessage(
             "KeepsOut[arm].region: -40° to 130° is all of arm's range, -30° to 120°: it would have"
                 + " nowhere to be");
+  }
+
+  /**
+   * An edge is a number, as a clearance usually is, or one of the joint's places when it really is
+   * one: judged the same, shown as it was written. A speed restricts by how fast another joint
+   * runs, and joints holding each other through a speed are a deadlock all the same.
+   */
+  @Test
+  void anEdgeIsANumberOrAPlaceAndASpeedIsHowFastAnotherRuns() {
+    Condition.Past byNumber = PIVOT.past(Degrees.of(110));
+    Condition.Past byPlace = PIVOT.past(PIVOT_RUN);
+    Condition.Before low = ELEVATOR.before(Inches.of(10));
+    Condition.Between band = ARM.between(Degrees.of(45), Degrees.of(0));
+    Condition.AtLeast spun = ROLLER.atLeast(RPM.of(1500));
+
+    assertThat(byNumber.holdsAt(Math.toRadians(111))).isTrue();
+    assertThat(byNumber.holdsAt(Math.toRadians(109))).isFalse();
+    assertThat(byPlace.holdsAt(Math.toRadians(111))).isTrue();
+    assertThat(byNumber).hasToString("pivot past 110°");
+    assertThat(byPlace).hasToString("pivot past run");
+    assertThat(low.holdsAt(Inches.of(9).in(Meters))).isTrue();
+    assertThat(low.holdsAt(Inches.of(11).in(Meters))).isFalse();
+    assertThat(band.holdsAt(Math.toRadians(30))).isTrue();
+    assertThat(band.holdsAt(Math.toRadians(50))).isFalse();
+    assertThat(spun.holdsAt(RPM.of(1600).in(RadiansPerSecond))).isTrue();
+    assertThat(spun.holdsAt(RPM.of(1400).in(RadiansPerSecond))).isFalse();
+    assertThat(spun.toString()).startsWith("roller at least 1500");
+    assertThat(Interlock.that(PIVOT).runsOnlyWhen(spun).other()).contains(ROLLER);
+    assertThat(robot(List.of(), List.of(Interlock.that(PIVOT).runsOnlyWhen(spun))).interlocks())
+        .hasSize(1);
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> PIVOT.past(Degrees.of(150)))
+        .withMessageContaining("150° is outside pivot's range, 0° to 135°");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> PIVOT.before(Degrees.of(1.5)))
+        .withMessageContaining("is pivot's reference");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> ARM.between(Degrees.of(10), Degrees.of(10)))
+        .withMessageContaining("is at it");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> ROLLER.atLeast(RPM.of(-100)))
+        .withMessageContaining("must be forward");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Interlock.that(ROLLER).runsOnlyWhen(ROLLER.atLeast(RPM.of(100))))
+        .withMessageContaining("roller can't be held by how fast it runs itself");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                robot(
+                    List.of(),
+                    List.of(
+                        Interlock.that(PIVOT).runsOnlyWhen(ROLLER.atLeast(RPM.of(100))),
+                        Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(Degrees.of(110))))))
+        .withMessageContaining("pivot and roller hold each other by their interlocks");
+  }
+
+  /**
+   * An interlock written in the restricted joint's block is the robot's as one in its list is: both
+   * enforced and checked together, so a pair split between a block and the list is still a
+   * deadlock, and one written in both is refused. A practice robot of the same joints keeps them.
+   */
+  @Test
+  void anInterlockInABlockIsTheRobotsAsOneInItsList() {
+    Joint.Revolute arm = ARM.keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(Inches.of(10)));
+    Interlock written =
+        Interlock.that(ARM).keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(Inches.of(10)));
+    RobotDefinition robot =
+        RobotDefinitionBuilder.builder(robot(List.of(), List.of(ROLLER_ONLY_WHEN_OUT)))
+            .joints(List.of(PIVOT, ROLLER, ELEVATOR, arm))
+            .build();
+
+    assertThat(arm).isEqualTo(ARM);
+    assertThat(arm.ownInterlocks()).containsExactly(written);
+    assertThat(robot.interlocks()).containsExactly(ROLLER_ONLY_WHEN_OUT);
+    assertThat(robot.everyInterlock()).containsExactly(written, ROLLER_ONLY_WHEN_OUT);
+    assertThat(robot.with(ARM.control(MechanismControl.position(20))).everyInterlock())
+        .as("re-tuned, it's the joint as written, without its block's interlocks")
+        .containsExactly(ROLLER_ONLY_WHEN_OUT);
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                RobotDefinitionBuilder.builder(robot)
+                    .interlocks(List.of(ROLLER_ONLY_WHEN_OUT, written))
+                    .build())
+        .withMessageContaining(
+            "is written twice: once is enough, in arm's block or the robot's interlocks");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                RobotDefinitionBuilder.builder(robot)
+                    .interlocks(
+                        List.of(Interlock.that(ELEVATOR).runsOnlyWhen(ARM.past(Degrees.of(0)))))
+                    .build())
+        .withMessageContaining("hold each other by their interlocks");
   }
 
   /** Two joints held by each other's interlocks can't either move first. */

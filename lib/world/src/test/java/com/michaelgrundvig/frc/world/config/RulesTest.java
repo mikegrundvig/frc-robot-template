@@ -6,6 +6,7 @@ import static com.michaelgrundvig.frc.world.config.Rules.below;
 import static com.michaelgrundvig.frc.world.config.Rules.between;
 import static com.michaelgrundvig.frc.world.config.Rules.each;
 import static com.michaelgrundvig.frc.world.config.Rules.finite;
+import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.oneOf;
@@ -20,6 +21,7 @@ import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Radians;
 
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Distance;
@@ -108,6 +110,15 @@ class RulesTest {
     assertThat(scales.whyNot(List.of(1.0, 1.01))).isNull();
     assertThat(scales.whyNot(List.of(1.0, -1.0, 1.0, Double.NaN)))
         .isEqualTo("[1] -1 must be positive; [3] NaN must be a finite number");
+  }
+
+  @Test
+  void anOptionalValueIsCheckedOnlyWhenGiven() {
+    Rule<Optional<Integer>> counts = given(positive());
+
+    assertThat(counts.whyNot(Optional.empty())).isNull();
+    assertThat(counts.whyNot(Optional.of(4096))).isNull();
+    assertThat(counts.whyNot(Optional.of(0))).isEqualTo("0 must be positive");
   }
 
   @Test

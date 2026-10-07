@@ -32,7 +32,6 @@ import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.Imus;
-import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
@@ -106,9 +105,9 @@ final class Team2611 {
           .wheelRadius(Inches.of(1.93))
           .driveGearing(Gearing.of(6.026785714285714))
           .steerGearing(Gearing.of(26.09090909090909))
-          .wheelCoefficientOfFriction(2.255)
-          .driveInertia(KilogramSquareMeters.of(0.01))
-          .steerInertia(KilogramSquareMeters.of(0.01))
+          .wheelCoefficientOfFriction(Optional.of(2.255))
+          .driveInertia(Optional.of(KilogramSquareMeters.of(0.01)))
+          .steerInertia(Optional.of(KilogramSquareMeters.of(0.01)))
           .couplingRatio(3.857142857142857)
           .build();
 
@@ -179,7 +178,6 @@ final class Team2611 {
   /** The pivot's places: in to stow, out to intake, and run, from where its roller may run. */
   static final Position PIVOT_IN = Position.degrees("in", 1.5);
 
-  static final Position PIVOT_RUN = Position.degrees("run", 110);
   static final Position PIVOT_OUT = Position.degrees("out", 130);
 
   /**
@@ -191,8 +189,9 @@ final class Team2611 {
    * reading (Constants.java:83; VectorKit/hardware/AbsoluteEncoder.java:55-61): an offset of -296°,
    * inverted. In at 1.5°, out at 130°, run from 110° (Constants.java:89-91).
    *
-   * <p>Its named positions are its code's three angles: "in" to stow, "out" to intake, and "run",
-   * from where its roller may run (PIVOT_RUN_ANGLE, Pivot.java:72-73's intakeCanRun).
+   * <p>Its named positions are where its code sends it: "in" to stow, "out" to intake. Its code's
+   * third angle, PIVOT_RUN_ANGLE at 110° (Constants.java:91), is no place it goes: it's where the
+   * roller may run from (Pivot.java:72-73's intakeCanRun), the intake's interlock.
    *
    * <p>Guess: the hard stops at 0° and 135° (the code holds only its setpoints), the pivot 0.25 m
    * forward and 0.32 m up, the arm straight up at 0° and swung forward and down as the angle grows
@@ -210,7 +209,7 @@ final class Team2611 {
       Joint.pivot("pivot", Part.CHASSIS, point(0.25, 0, 0.32), Joint.PITCH_DOWN)
           .range(Range.degrees(0, 135), PIVOT_IN)
           .carries(Link.box("intake arm", point(0, 0, 0.2), point(0.05, 0.55, 0.36)))
-          .positions(PIVOT_IN, PIVOT_RUN, PIVOT_OUT)
+          .positions(PIVOT_IN, PIVOT_OUT)
           .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).clockwise())
           .absoluteEncoder(
               1024, MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(-296)).inverted())
@@ -229,12 +228,17 @@ final class Team2611 {
    * back (Intake.java:51-53), the 2000 its auto's too (RobotContainer.java:143). Guess: its size.
    * Its rollers run velocity control without FOC (VectorKit/hardware/KrakenX60.java:48): the plain
    * X60's numbers, here and on the shooter, feeder and transition.
+   *
+   * <p>It runs only with the pivot past 110°: their auto's guard (RobotContainer.java:143,
+   * Pivot.java:72-73, PIVOT_RUN_ANGLE at Constants.java:91), which the operator's buttons don't
+   * apply (RobotContainer.java:216-218). As an interlock, it holds beneath every command.
    */
   static final Joint.Revolute INTAKE =
       Joint.roller("intake", PIVOT, point(0, 0, 0.35))
           .carries(Link.box("intake roller", point(0, 0, 0), point(0.05, 0.5, 0.05)))
           .outputs(INTAKING, OUTTAKING)
           .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
+          .runsOnlyWhen(PIVOT.past(Degrees.of(110)))
           .control(MechanismControl.velocity(0.02));
 
   /**
@@ -337,14 +341,6 @@ final class Team2611 {
           "unjamming", FULL_SEND.at(FULL_SEND_UNJAMMING), TRANSITION.at(TRANSITION_UNJAMMING));
 
   /**
-   * The intake's roller runs only with the pivot past "run": their auto's guard
-   * (RobotContainer.java:143, Pivot.java:72-73), which the operator's buttons don't apply
-   * (RobotContainer.java:216-218). As an interlock, it holds beneath every command.
-   */
-  static final Interlock INTAKE_ONLY_WHEN_OUT =
-      Interlock.that(INTAKE).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
-
-  /**
    * The robot. Its one IMU is a Pigeon 2 (generated/TunerConstants.java:89), given no mount pose
    * (TunerConstants.java:67, null configs). Guess: at the center, level. No backup IMU: a 2026
    * roboRIO robot has no Systemcore's own.
@@ -361,7 +357,7 @@ final class Team2611 {
           .drives(List.of())
           .sensors(List.of())
           .configurations(List.of(FEEDING, UNJAMMING))
-          .interlocks(List.of(INTAKE_ONLY_WHEN_OUT))
+          .interlocks(List.of())
           .build();
 
   /**
@@ -379,7 +375,7 @@ final class Team2611 {
                   .drivetrain(
                       DrivetrainGeometry.uniform(
                               DrivetrainGeometryModuleTypeBuilder.builder(MODULES)
-                                  .wheelCoefficientOfFriction(1.2)
+                                  .wheelCoefficientOfFriction(Optional.of(1.2))
                                   .build(),
                               Inches.of(10.375),
                               Inches.of(10.375))

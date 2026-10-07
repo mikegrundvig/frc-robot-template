@@ -24,6 +24,13 @@ public interface JointIO {
     /** How fast it moves, in radians or meters a second. */
     public double velocity = 0.0;
 
+    /**
+     * Where the absolute encoder its leading motor controller reads says the joint is, each loop,
+     * in its units: a SPARK's data port's. NaN without one, or before its first good reading; an
+     * encoder only the robot reads has inputs of its own ({@link AbsoluteEncoderIO}).
+     */
+    public double absolutePosition = Double.NaN;
+
     /** The voltage across the leading motor. */
     public double appliedVolts = 0.0;
 

@@ -32,7 +32,7 @@ import org.wpilib.simulation.GamepadSim;
  * ({@link Team2611Actions}) bound to two gamepads, run by the robot program's own loop, the drive
  * and localization included. The behavior design's checkpoint C (docs/design/robot-behavior.md).
  * Checked against the simulator's truth throughout: the intake's roller is never driven up to speed
- * while the pivot is short of "run". A test fixture, not 2026 play.
+ * while the pivot is short of 110°. A test fixture, not 2026 play.
  */
 class Team2611RobotSimTest {
   /** The blue hub's center, as their code has it (Constants.java:178-182: 182.11 in, 158.84 in). */
@@ -55,7 +55,7 @@ class Team2611RobotSimTest {
   private JointMechanism fullSend;
   private JointSimulation truth;
 
-  /** The fastest the roller was turning last loop, and whether it ever sped up short of "run". */
+  /** The fastest the roller was turning last loop, and whether it ever sped up short of 110°. */
   private double rollerWas;
 
   private boolean ruleBroken;
@@ -120,7 +120,7 @@ class Team2611RobotSimTest {
     press(() -> operator.setRightTriggerAxis(0));
     run(1);
 
-    assertThat(held).isEqualTo("intake runs only when pivot past run");
+    assertThat(held).isEqualTo("intake runs only when pivot past 110°");
     assertThat(intaking).as("near 2000 rpm, its free speed").isGreaterThan(1900);
     assertThat(Math.abs(rpm(Team2611.INTAKE))).as("let go: stopped").isLessThan(10);
     assertThat(Math.toDegrees(truth.position(Team2611.PIVOT)))
@@ -138,7 +138,7 @@ class Team2611RobotSimTest {
     press(() -> operator.setLeftTriggerAxis(1));
     run(1);
 
-    assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot past run");
+    assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot past 110°");
     assertThat(Math.abs(rpm(Team2611.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }

@@ -108,14 +108,14 @@ final class Parts {
   /** A CANcoder's resolution: 4096 counts a turn. */
   static final int CANCODER = 4096;
 
-  /** An encoder on one joint, at a resolution: an absolute encoder needs its own. */
+  /** An encoder on one joint, at a resolution. */
   static Sensor.Encoder encoder(
       String label, Joint joint, double ratio, boolean absolute, int countsPerTurn) {
     return Sensor.Encoder.builder()
         .label(label)
         .terms(List.of(term(joint, ratio)))
         .absolute(absolute)
-        .countsPerTurn(countsPerTurn)
+        .countsPerTurn(Optional.of(countsPerTurn))
         .build();
   }
 
@@ -143,7 +143,7 @@ final class Parts {
         .bumperBottom(Inches.of(bumperBottom))
         .bumperTop(Inches.of(bumperTop))
         .weight(weight)
-        .cg(cg)
+        .cg(Optional.of(cg))
         .inertia(inertia)
         .build();
   }

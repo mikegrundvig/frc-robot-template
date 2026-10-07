@@ -36,7 +36,7 @@ class Team2611BehaviorSimTest {
 
   private final boolean[] held = {false};
 
-  /** When the pivot first passed "run", when the roller spun, and what held the roller first. */
+  /** When the pivot first passed 110°, when the roller spun, and what held the roller first. */
   private record Intaking(double passedRun, double spun, String heldBy) {}
 
   /** Holds the intake button for a time. */
@@ -72,7 +72,7 @@ class Team2611BehaviorSimTest {
     assertThat(intaking.spun())
         .as("the roller spun only once the pivot was past it")
         .isGreaterThan(intaking.passedRun());
-    assertThat(intaking.heldBy()).isEqualTo("intake runs only when pivot past run");
+    assertThat(intaking.heldBy()).isEqualTo("intake runs only when pivot past 110°");
     assertThat(roller.heldBy()).isEmpty();
     assertThat(Math.toDegrees(sim.simulation.position(Team2611.PIVOT))).isCloseTo(130, within(2.0));
     assertThat(pivot.lastOutcome()).matches("pivot → out: ARRIVED in 0\\.\\d\\d s");

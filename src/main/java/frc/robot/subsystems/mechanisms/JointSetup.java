@@ -33,7 +33,9 @@ import org.jspecify.annotations.Nullable;
  * position inside the soft limits, since the joint is never driven past them; a homing recipe only
  * for a joint held at positions, and a hard stop to home to. A place it can't reach is a typo or a
  * stale number, found here rather than in a match. Against the robot's definition ({@link
- * #problems}), a joint held at positions homes by its absolute encoder, or names how it does.
+ * #problems}), a joint held at positions homes by its absolute encoder, or names how it does, and
+ * its motor controllers take the settings worked out from it ({@link ControllerSettings}): what
+ * they'd refuse at startup is refused there, in the simulator too.
  *
  * @param joint the joint, as the robot's definition has it
  * @param control how it's driven: its gains, soft limits, profile, current limits and neutral mode
@@ -88,7 +90,9 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
   /**
    * What's wrong with a robot's setups against its definition, or null when nothing is: each joint
    * the template drives set up once, and no setup for a joint it isn't the robot's, or one the
-   * template doesn't drive ({@link #whyNotDriven}).
+   * template doesn't drive ({@link #whyNotDriven}); and none whose settings its motor controllers
+   * would refuse, as the robot would say it at startup ({@link ControllerSettings#notes}), wired or
+   * not.
    */
   public static @Nullable String problems(RobotDefinition definition, List<JointSetup> setups) {
     RobotMath math = definition.math();
@@ -107,6 +111,11 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
         String wired = wrongController(math, setup);
         if (wired != null) {
           problems.add(wired);
+        } else {
+          String refused = refused(math, setup);
+          if (refused != null) {
+            problems.add(refused);
+          }
         }
       }
       if (!setUp.add(joint)) {
@@ -116,6 +125,10 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
         String homing = cantHome(math, setup);
         if (homing != null) {
           problems.add(homing);
+        }
+        String loop = cantCloseLoop(setup);
+        if (loop != null) {
+          problems.add(loop);
         }
         String toSwitch = noSwitch(definition, setup);
         if (toSwitch != null) {
@@ -222,11 +235,17 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
   }
 
   /**
-   * Whether a joint is held at positions: it has a range or named positions. One without either, a
-   * roller, only runs at outputs, and stops when idle.
+   * What the joint's motor controllers would refuse of its settings at startup, in the robot's own
+   * words, or null when they'd take them: worked out for the controller it's wired to, and for
+   * TalonFXs with no wiring ({@link ControllerSettings#notes}).
    */
-  public static boolean holdsPositions(Joint joint) {
-    return joint.range().isPresent() || !joint.positions().isEmpty();
+  private static @Nullable String refused(RobotMath math, JointSetup setup) {
+    try {
+      ControllerSettings.notes(math, setup);
+      return null;
+    } catch (IllegalArgumentException e) {
+      return String.valueOf(e.getMessage());
+    }
   }
 
   /** The definition's absolute encoder on the joint alone, or null when it has none. */
@@ -252,7 +271,7 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
     return encoder == null
             || encoder.readByController()
             || setup.control().homing().isPresent()
-            || !holdsPositions(setup.joint())
+            || !setup.joint().holdsPositions()
         ? null
         : encoder;
   }
@@ -263,7 +282,7 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
    */
   private static @Nullable String cantHome(RobotMath math, JointSetup setup) {
     Joint joint = setup.joint();
-    if (!holdsPositions(joint) || setup.control().homing().isPresent()) {
+    if (!joint.holdsPositions() || setup.control().homing().isPresent()) {
       return null;
     }
     if (absoluteEncoder(math, joint) == null) {
@@ -280,6 +299,39 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
       return joint.label()
           + " homes by its absolute encoder, and its wiring names no CANcoder, data port or"
           + " Systemcore port to read it on";
+    }
+    return null;
+  }
+
+  /**
+   * Why a joint's loop can't close on its absolute encoder, as its wiring says it does, or null
+   * when it can, or doesn't: the joint must be held at positions, know where it is from that
+   * encoder rather than a homing recipe, and have a range, which the definition checks one of the
+   * encoder's turns holds, rather than turn freely, where the reading wraps within its travel.
+   */
+  private static @Nullable String cantCloseLoop(JointSetup setup) {
+    Joint joint = setup.joint();
+    if (!joint.driven().absoluteEncoder().map(Driven.AbsoluteEncoder::closedLoop).orElse(false)
+        && !setup
+            .wiring()
+            .flatMap(MechanismWiring::dataPort)
+            .map(MechanismWiring.DataPortEncoder::closedLoop)
+            .orElse(false)) {
+      return null;
+    }
+    if (!joint.holdsPositions()) {
+      return joint.label()
+          + " only runs at outputs, so its loop has no position to close on its absolute encoder";
+    }
+    if (setup.control().homing().isPresent()) {
+      return joint.label()
+          + "'s loop closes on its absolute encoder, which tells it where it is: drop its"
+          + " control's homing recipe";
+    }
+    if (joint.range().isEmpty()) {
+      return joint.label()
+          + " turns freely, and its absolute encoder's reading wraps each turn: its loop can't"
+          + " close on it yet, so let the encoder tell its motor where it is instead";
     }
     return null;
   }
@@ -339,7 +391,7 @@ public record JointSetup(Joint joint, MechanismControl control, Optional<Mechani
     if (control.homing().isEmpty()) {
       return null;
     }
-    if (!holdsPositions(joint)) {
+    if (!joint.holdsPositions()) {
       return joint.label() + " only runs at outputs: it has no position to home";
     }
     if (control.homing().get() instanceof MechanismControl.Homing.ToHardStop

@@ -43,19 +43,18 @@ import org.wpilib.math.geometry.Translation3d;
  * battery on}.
  *
  * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
- * places and outputs, its motors and their wiring, its own sensors, and how the program drives it.
- * The configurations the robot takes, and the interlocks between joints, which hold beneath every
- * command, name the joints and their places. The template's robot has none; an intake would read:
+ * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
+ * its interlocks, which hold beneath every command. The configurations the robot takes name the
+ * joints and their places. The template's robot has none; an intake would read:
  *
  * <pre>{@code
  * static final Position PIVOT_IN = Position.degrees("in", 1.5);
- * static final Position PIVOT_RUN = Position.degrees("run", 110);
  * static final Position PIVOT_OUT = Position.degrees("out", 130);
  *
  * static final Joint.Revolute PIVOT =
  *     Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
  *         .range(Range.degrees(0, 135), PIVOT_IN)
- *         .positions(PIVOT_IN, PIVOT_RUN, PIVOT_OUT)
+ *         .positions(PIVOT_IN, PIVOT_OUT)
  *         .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32))
  *         .control(MechanismControl.position(30).withProfile(8, 30));
  *
@@ -64,12 +63,11 @@ import org.wpilib.math.geometry.Translation3d;
  *     Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))
  *         .outputs(INTAKING)
  *         .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
+ *         .runsOnlyWhen(PIVOT.past(Degrees.of(110)))   // only once the pivot is out of the frame
  *         .control(MechanismControl.velocity(0.02));
  *
  * static final Configuration INTAKE =
  *     Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
- * static final Interlock ROLLER_ONLY_WHEN_OUT =
- *     Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
  * }</pre>
  *
  * <p>The definition refuses what can't be: a position outside its joint's range, a speed past what
@@ -101,7 +99,9 @@ public final class Robots {
    * bumpers 4 in beyond it (R403) filling the bumper zone, 2.5 to 5.75 in up (R405), and 30 in
    * tall, 2026's starting height limit (R104). The 6.7 kg m^2 yaw inertia is an estimate, not a
    * measurement; pitch and roll are the model's box, provisional until CAD or a tilt test gives
-   * them. The center of gravity is centered and low: the best case.
+   * them. The center of gravity is centered and low, the best case: only the simulator reads it,
+   * and the drive's current limit (below) is estimated from it. Left out, it's the frame's center a
+   * third of the robot's height up.
    */
   private static final Body BODY =
       Body.builder()
@@ -113,7 +113,7 @@ public final class Robots {
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
           .weight(WEIGHT)
-          .cg(new Translation3d(0, 0, 0.15))
+          .cg(Optional.of(new Translation3d(0, 0, 0.15)))
           .inertia(Body.Turning.yaw(KilogramSquareMeters.of(6.7)))
           .build();
 
@@ -121,10 +121,11 @@ public final class Robots {
    * SDS MK4i modules with L2 gearing (6.75:1 drive, 150/7:1 steer) and 4 in wheels, driven by
    * Kraken X60s without FOC: it needs a Phoenix Pro license, and under this drivetrain's 30 A limit
    * it adds nothing. Free speed: 4.73 m/s. The gearing's losses aren't modeled yet (efficiency 1).
-   * The drive's moving parts, as inertia at the wheel, are an estimate (a 4 in wheel, about 0.0004
-   * kg m², and a Kraken X60's rotor through 6.75:1, about 0.0006); the steering's is Phoenix Tuner
-   * X's generated simulation value. The coupling, 50/14 drive motor turns per turn of the module,
-   * is Tuner X's for the MK4i, as 2611's 2024 code had it.
+   * The tread's grip and the drive's and steering's inertia aren't measured, so they're left out
+   * and the module's defaults stand in: PathPlanner's 1.2 for the grip, which the robot says at
+   * startup, and estimates for the inertias, which only the simulator reads, and notes. Measure the
+   * grip with a pull test (docs/characterization.md). The coupling, 50/14 drive motor turns per
+   * turn of the module, is Tuner X's for the MK4i, as 2611's 2024 code had it.
    */
   private static final DrivetrainGeometry.ModuleType MODULES =
       DrivetrainGeometry.ModuleType.builder()
@@ -133,9 +134,9 @@ public final class Robots {
           .wheelRadius(Inches.of(2))
           .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
           .steerGearing(Gearing.builder().ratio(150.0 / 7.0).efficiency(1.0).build())
-          .wheelCoefficientOfFriction(1.2)
-          .driveInertia(KilogramSquareMeters.of(0.001))
-          .steerInertia(KilogramSquareMeters.of(0.004))
+          .wheelCoefficientOfFriction(Optional.empty())
+          .driveInertia(Optional.empty())
+          .steerInertia(Optional.empty())
           .couplingRatio(50.0 / 14.0)
           .build();
 

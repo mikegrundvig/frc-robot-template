@@ -10,10 +10,13 @@ import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.link;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.point;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.prismatic;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.revolute;
+import static com.michaelgrundvig.frc.world.robot.RobotDefinition.Missing.Scope.ROBOT;
+import static com.michaelgrundvig.frc.world.robot.RobotDefinition.Missing.Scope.SIMULATOR;
 import static com.michaelgrundvig.frc.world.robot.RobotMath.GRAVITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.KilogramSquareMeters;
@@ -23,12 +26,15 @@ import static org.wpilib.units.Units.MetersPerSecond;
 
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose3d;
+import org.wpilib.math.geometry.Rotation3d;
+import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.system.DCMotor;
@@ -442,9 +448,28 @@ class RobotMathTest {
     assertThat(Math.toDegrees(window.upper())).isCloseTo(-175 + 180.0 * 306 / 92, within(1e-9));
     // At 16 counts a turn, a count off on each moves their difference more than half the slower
     // one's turn: the pair can't pick it, and tells apart only what one does alone.
-    Sensor.Encoder coarseA = encoder("turret-a", turret, 92.0 / 18, true, 16);
-    Sensor.Encoder coarseB = encoder("turret-b", turret, 92.0 / 17, true, 16);
+    Sensor.Encoder coarseA = encoder("turret-a", turret, 92.0 / 18, true, Optional.of(16));
+    Sensor.Encoder coarseB = encoder("turret-b", turret, 92.0 / 17, true, Optional.of(16));
     assertThat(math.absoluteSpan(List.of(coarseA, coarseB)))
+        .isCloseTo(2 * Math.PI * 18 / 92, within(1e-9));
+    // Without each one's counts, nothing says whether their difference picks the turn: refused.
+    Sensor.Encoder uncountedA = encoder("turret-a", turret, 92.0 / 18, true, Optional.empty());
+    Sensor.Encoder uncountedB = encoder("turret-b", turret, 92.0 / 17, true, Optional.empty());
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> math.absoluteSpan(List.of(a, uncountedB)))
+        .withMessage(
+            "decoding turret-a and turret-b by their difference needs each encoder's counts per"
+                + " turn: give them");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                definition(
+                    List.of(turret), List.of(), List.of(drive), List.of(uncountedA, uncountedB)))
+        .withMessageContaining(
+            "joints: decoding turret-a and turret-b by their difference needs each encoder's counts"
+                + " per turn: give them");
+    assertThat(math.absoluteSpan(List.of(uncountedA)))
+        .as("one alone reads no counts")
         .isCloseTo(2 * Math.PI * 18 / 92, within(1e-9));
     assertThat(math.gravityOffset(turret)).as("gravity doesn't turn it").isZero();
     assertThat(math.idealGains(turret).kG()).isCloseTo(0, within(1e-12));
@@ -487,6 +512,20 @@ class RobotMathTest {
     assertThat(Math.toDegrees(window.lower())).isCloseTo(-175 - 180 / coarseRatio, within(1e-9));
     assertThat(window.width()).isCloseTo(2 * Math.PI / coarseRatio, within(1e-9));
     assertThat(math.absoluteWindow(List.of(coarse, fine))).isEqualTo(window);
+    // Read coarse then fine, a pair reads neither one's counts: they needn't be given.
+    Sensor.Encoder uncountedCoarse =
+        encoder("turret coarse", turret, coarseRatio, true, Optional.empty());
+    Sensor.Encoder uncountedFine =
+        encoder("turret fine", turret, (220.0 / 14) * (36.0 / 10), true, Optional.empty());
+    assertThat(
+            definition(
+                    List.of(turret),
+                    List.of(),
+                    List.of(drive),
+                    List.of(uncountedCoarse, uncountedFine))
+                .math()
+                .absoluteSpan(List.of(uncountedCoarse, uncountedFine)))
+        .isCloseTo(2 * Math.PI / coarseRatio, within(1e-9));
     // The motor's rotor reads it too, but never absolutely: it counts from where it started.
     Sensor.Encoder rotor = drive.rotor();
     assertThat(rotor.absolute()).isFalse();
@@ -581,7 +620,7 @@ class RobotMathTest {
                     .label("wrist cancoder")
                     .terms(rotorB.terms())
                     .absolute(true)
-                    .countsPerTurn(4096)
+                    .countsPerTurn(Optional.of(4096))
                     .build())
         .withMessageContaining("an absolute encoder reads one joint, not 2");
     RobotMath.Gains pitching = math.idealGains(pitch);
@@ -846,9 +885,68 @@ class RobotMathTest {
   }
 
   /**
+   * Gravity can move an arm about a level axis and a slide that isn't level, by their axes alone,
+   * with no mass at all; not a turret, about the vertical, nor a slide that runs level. A ramp, a
+   * slide along its own x on a frame tipped up 30°, is read in the robot's frame.
+   */
+  @Test
+  void gravityActsOnJointsByTheirAxesNotTheirMass() {
+    Joint.Revolute arm =
+        revolute(
+            "arm",
+            Part.CHASSIS,
+            point(0.1, 0, 0.5),
+            PITCH_UP,
+            Optional.of(Range.degrees(-10, 110)),
+            0,
+            Link.unseen("arm"));
+    Joint.Revolute turret =
+        revolute(
+            "turret",
+            Part.CHASSIS,
+            point(0, 0, 0.6),
+            UP,
+            Optional.empty(),
+            0,
+            Link.unseen("turret"));
+    Joint.Prismatic lift =
+        prismatic(
+            "lift", Part.CHASSIS, point(-0.2, 0, 0.1), UP, Range.meters(0, 1), Link.unseen("lift"));
+    Joint.Prismatic hopper =
+        prismatic(
+            "hopper",
+            Part.CHASSIS,
+            point(0, 0, 0.2),
+            new Vector3(1, 0, 0),
+            Range.meters(0, 0.3),
+            Link.unseen("hopper"));
+    Joint.Prismatic ramp =
+        JointPrismaticBuilder.builder(
+                prismatic(
+                    "ramp",
+                    Part.CHASSIS,
+                    point(0, 0, 0.3),
+                    new Vector3(1, 0, 0),
+                    Range.meters(0, 0.3),
+                    Link.unseen("ramp")))
+            .origin(new Transform3d(point(0, 0, 0.3), new Rotation3d(0, Math.toRadians(-30), 0)))
+            .build();
+    RobotMath math =
+        definition(List.of(arm, turret, lift, hopper, ramp), List.of(), List.of(), List.of())
+            .math();
+
+    assertThat(math.gravityActsOn(arm)).isTrue();
+    assertThat(math.gravityActsOn(turret)).isFalse();
+    assertThat(math.gravityActsOn(lift)).isTrue();
+    assertThat(math.gravityActsOn(hopper)).isFalse();
+    assertThat(math.gravityActsOn(ramp)).isTrue();
+  }
+
+  /**
    * What a definition doesn't know, each with its cost: the test robot weighed and its inertia
    * given, so only the share of its mass no link holds; then the same robot unweighed, its inertia
-   * a box's, with an arm nobody weighed, a roller weighed but not spun, and a joint nothing moves.
+   * a box's, its center of mass not given, with an arm nobody weighed, a roller weighed but not
+   * spun, and a joint nothing moves.
    */
   @Test
   void theMissingDataReportSaysWhatIsntKnownAndWhatItCosts() {
@@ -890,26 +988,211 @@ class RobotMathTest {
             .body(
                 BodyBuilder.builder(weighed.body())
                     .weight(Body.Weight.unweighed(Kilograms.of(68)))
+                    .cg(Optional.empty())
                     .inertia(Body.Turning.BOX)
                     .build())
             .build();
 
     assertThat(ConfigFixtures.definition(List.of()).missing())
-        .extracting(RobotDefinition.Missing::what)
-        .containsExactly("60.00 kg of the robot's 60.00 kg is in no link");
+        .extracting(RobotDefinition.Missing::what, RobotDefinition.Missing::scope)
+        .containsExactly(tuple("60.00 kg of the robot's 60.00 kg is in no link", SIMULATOR));
     assertThat(unweighed.missing())
+        .extracting(RobotDefinition.Missing::what, RobotDefinition.Missing::scope)
+        .containsExactly(
+            tuple("the robot isn't weighed: its mass is the season's most, 68 Kg", ROBOT),
+            tuple(
+                "the body's inertia is a box's, its mass spread through its bumpers' outline and"
+                    + " height",
+                ROBOT),
+            tuple("67.50 kg of the robot's 68.00 kg is in no link", SIMULATOR),
+            tuple("arm has no mass", SIMULATOR),
+            tuple("arm has no shape", ROBOT),
+            tuple("roller has mass but no inertia", SIMULATOR),
+            tuple("roller has nothing moving it", ROBOT));
+    assertThat(unweighed.missing().get(3).toString())
+        .isEqualTo(
+            "arm has no mass: arm's gravity comes from its kG, and arm adds nothing to arm's"
+                + " inertia");
+    assertThat(unweighed.missing().get(5).costs())
+        .isEqualTo("its own turning adds nothing to roller's inertia");
+  }
+
+  /**
+   * Modules that leave their tread's grip and inertias to the defaults say so where each is read:
+   * the grip on the robot, which plans its drive moves and judges slip by it; the inertias in the
+   * simulator alone. Each once, however many corners leave it out, and only what's left out.
+   */
+  @Test
+  void theModulesDefaultsAreSaidWhereTheyreRead() {
+    RobotDefinition robot = ConfigFixtures.definition(List.of());
+    DrivetrainGeometry.ModuleType unmeasured =
+        DrivetrainGeometryModuleTypeBuilder.builder(ConfigFixtures.modules())
+            .wheelCoefficientOfFriction(Optional.empty())
+            .driveInertia(Optional.empty())
+            .steerInertia(Optional.empty())
+            .build();
+    DrivetrainGeometry.ModuleType steerUnmeasured =
+        DrivetrainGeometryModuleTypeBuilder.builder(ConfigFixtures.modules())
+            .steerInertia(Optional.empty())
+            .build();
+    RobotDefinition defaulted =
+        RobotDefinitionBuilder.builder(robot)
+            .drivetrain(DrivetrainGeometry.inset(unmeasured, robot.body(), Inches.of(2.625)))
+            .build();
+    RobotDefinition steerDefaulted =
+        RobotDefinitionBuilder.builder(robot)
+            .drivetrain(DrivetrainGeometry.inset(steerUnmeasured, robot.body(), Inches.of(2.625)))
+            .build();
+
+    assertThat(defaulted.missing())
+        .extracting(RobotDefinition.Missing::toString, RobotDefinition.Missing::scope)
+        .containsExactly(
+            tuple(
+                "60.00 kg of the robot's 60.00 kg is in no link: the chassis, its electronics,"
+                    + " bumpers and battery: carried as one rigid body",
+                SIMULATOR),
+            tuple(
+                "the tread's grip isn't measured: it's 1.2, PathPlanner's default: drive moves"
+                    + " plan their acceleration on it, and the slip check judges by it: measure it"
+                    + " with a pull test (docs/characterization.md, tread friction)",
+                ROBOT),
+            tuple(
+                "the drive's own inertia isn't measured: it's 0.001 kg m², an estimate for a 4 in"
+                    + " wheel and a Kraken X60's rotor: how fast the simulator's wheels spin up is"
+                    + " a guess, though a small one beside the robot's mass they carry",
+                SIMULATOR),
+            tuple(
+                "the steering's inertia isn't measured: it's 0.004 kg m², Phoenix Tuner X's"
+                    + " simulation value: how fast the simulator's modules steer at their current"
+                    + " limit is a guess",
+                SIMULATOR));
+    assertThat(steerDefaulted.missing())
         .extracting(RobotDefinition.Missing::what)
         .containsExactly(
-            "the robot isn't weighed: its mass is the season's most, 68 Kg",
-            "the body's inertia is a box's, its mass spread through its bumpers' outline and"
-                + " height",
-            "67.50 kg of the robot's 68.00 kg is in no link",
-            "arm has no mass",
-            "arm has no shape",
-            "roller has mass but no inertia",
-            "roller has nothing moving it");
-    assertThat(unweighed.missing().get(3).costs()).contains("no gravity seed (kG 0)");
-    assertThat(unweighed.missing().get(3).toString()).startsWith("arm has no mass: arm has no");
+            "60.00 kg of the robot's 60.00 kg is in no link",
+            "the steering's inertia isn't measured: it's 0.004 kg m², Phoenix Tuner X's simulation"
+                + " value");
+  }
+
+  /**
+   * A joint gravity acts on, held at positions, is held by its kG: one not written is doubted on
+   * the robot, as missing, or as seeded from a mass nobody tuned. A kG written, 0 included, clears
+   * it; a roller, a turret, a slide that runs level, and a joint with no control never need one.
+   */
+  @Test
+  void aJointGravityActsOnWithNoKgWrittenIsDoubted() {
+    MechanismControl control = MechanismControl.position(30);
+    Joint.Revolute bare =
+        revolute(
+                "bare",
+                Part.CHASSIS,
+                point(0.1, 0, 0.5),
+                PITCH_UP,
+                Optional.of(Range.degrees(-10, 110)),
+                0,
+                Link.unseen("bare arm"))
+            .control(control);
+    Joint.Revolute weighed =
+        revolute(
+                "weighed",
+                Part.CHASSIS,
+                point(0.1, 0.3, 0.5),
+                PITCH_UP,
+                Optional.of(Range.degrees(-10, 110)),
+                0,
+                link("weighed arm", 2, point(0.3, 0, 0), point(0.6, 0.05, 0.05)))
+            .control(control);
+    Joint.Revolute counterbalanced =
+        revolute(
+                "counterbalanced",
+                Part.CHASSIS,
+                point(0.1, -0.3, 0.5),
+                PITCH_UP,
+                Optional.of(Range.degrees(-10, 110)),
+                0,
+                Link.unseen("balanced arm"))
+            .control(control.withKg(0));
+    Joint.Revolute roller =
+        revolute(
+                "roller",
+                bare,
+                point(0.5, 0, 0),
+                PITCH_UP,
+                Optional.empty(),
+                0,
+                Link.unseen("roller"))
+            .control(MechanismControl.velocity(0.02));
+    Joint.Revolute turret =
+        revolute(
+                "turret",
+                Part.CHASSIS,
+                point(0, 0, 0.6),
+                UP,
+                Optional.of(Range.degrees(-90, 90)),
+                0,
+                Link.unseen("turret"))
+            .control(control);
+    Joint.Prismatic lift =
+        prismatic(
+                "lift",
+                Part.CHASSIS,
+                point(-0.2, 0, 0.1),
+                UP,
+                Range.meters(0, 1),
+                Link.unseen("lift"))
+            .control(control);
+    Joint.Prismatic hopper =
+        prismatic(
+                "hopper",
+                Part.CHASSIS,
+                point(0, 0, 0.2),
+                new Vector3(1, 0, 0),
+                Range.meters(0, 0.3),
+                Link.unseen("hopper"))
+            .control(control);
+    Joint.Revolute idle =
+        revolute(
+            "idle",
+            Part.CHASSIS,
+            point(0.1, 0, 0.2),
+            PITCH_UP,
+            Optional.of(Range.degrees(0, 90)),
+            0,
+            Link.unseen("idle arm"));
+    List<Joint> joints =
+        List.of(bare, weighed, counterbalanced, roller, turret, lift, hopper, idle);
+    List<Drive> drives = new ArrayList<>();
+    for (Joint joint : joints) {
+      drives.add(
+          joint instanceof Joint.Revolute revolute
+              ? MechanismFixtures.motors(revolute, Motor.KRAKEN_X60, 1, gearing(50, 1))
+              : MechanismFixtures.motors(
+                  (Joint.Prismatic) joint, Motor.KRAKEN_X60, 1, gearing(10, 1), Inches.of(1)));
+    }
+    RobotDefinition robot = definition(joints, List.of(), drives, List.of());
+
+    assertThat(robot.missing())
+        .filteredOn(missing -> missing.what().contains("kG"))
+        .extracting(RobotDefinition.Missing::toString, RobotDefinition.Missing::scope)
+        .containsExactly(
+            tuple(
+                "bare has no kG: it holds against gravity by kP alone, so it sits below its"
+                    + " targets until its kG is tuned and written, withKg(...), or written as 0"
+                    + " for a counterbalanced joint",
+                ROBOT),
+            tuple(
+                "weighed's kG is seeded from its mass, not tuned: it holds only as well as its"
+                    + " links' mass and where it sits are right: tune its kG and write it,"
+                    + " withKg(...)",
+                ROBOT),
+            tuple(
+                "lift has no kG: it holds against gravity by kP alone, so it sits below its"
+                    + " targets until its kG is tuned and written, withKg(...), or written as 0"
+                    + " for a counterbalanced joint",
+                ROBOT));
+    assertThat(robot.with(bare.control(control.withKg(0.4))).missing())
+        .extracting(RobotDefinition.Missing::what)
+        .doesNotContain("bare has no kG");
   }
 
   private static Coupling.Curve curve(

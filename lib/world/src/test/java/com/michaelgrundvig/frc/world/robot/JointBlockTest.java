@@ -135,8 +135,52 @@ class JointBlockTest {
     Sensor.Encoder encoder = (Sensor.Encoder) wired.ownSensors().getFirst();
     assertThat(encoder.label()).isEqualTo("arm absolute encoder");
     assertThat(encoder.absolute()).isTrue();
-    assertThat(encoder.countsPerTurn()).isEqualTo(4096);
+    assertThat(encoder.countsPerTurn()).contains(4096);
     assertThat(encoder.joint()).isEqualTo(wired);
+  }
+
+  /**
+   * An absolute encoder's resolution is optional, in its block as written in full: only a pair
+   * decoded by their difference reads it. Each way it's read, it's the same encoder without it.
+   */
+  @Test
+  void anAbsoluteEncoderNeedsNoResolution() {
+    Joint.Revolute arm =
+        Joint.pivot("arm", Part.CHASSIS, AXLE, Joint.PITCH_UP)
+            .range(Range.degrees(-30, 120), Degrees.of(-20))
+            .motor(Motor.KRAKEN_X60, Gearing.of(60), TALON_FX.can(20));
+    MechanismWiring.Cancoder cancoder =
+        MechanismWiring.Cancoder.builder()
+            .id(22)
+            .offset(Rotations.of(0.12))
+            .clockwise(false)
+            .feedback(MechanismWiring.Feedback.FUSED)
+            .build();
+    MechanismWiring.DataPortEncoder dataPort =
+        MechanismWiring.DataPortEncoder.builder()
+            .offset(Rotations.of(0.3))
+            .reversed(false)
+            .closedLoop(false)
+            .build();
+    MechanismWiring.PortEncoder pot =
+        MechanismWiring.PortEncoder.analog(2, 10).offset(Rotations.of(-2.5));
+
+    assertThat(arm.absoluteEncoder().driven().absoluteEncoder())
+        .contains(Driven.AbsoluteEncoder.of());
+    assertThat(arm.absoluteEncoder(cancoder).driven().absoluteEncoder())
+        .contains(Driven.AbsoluteEncoder.of().on(cancoder));
+    assertThat(arm.absoluteEncoder(dataPort).driven().absoluteEncoder())
+        .contains(Driven.AbsoluteEncoder.of().on(dataPort));
+    assertThat(arm.absoluteEncoder(pot).driven().absoluteEncoder())
+        .contains(Driven.AbsoluteEncoder.of().on(pot));
+    assertThat(Driven.AbsoluteEncoder.of().countsPerTurn()).isEmpty();
+    assertThat(Driven.AbsoluteEncoder.of().wired()).isFalse();
+    Sensor.Encoder read = (Sensor.Encoder) arm.absoluteEncoder(pot).ownSensors().getFirst();
+    assertThat(read.absolute()).isTrue();
+    assertThat(read.countsPerTurn()).isEmpty();
+    assertThat(read.terms().getFirst().ratio()).isCloseTo(0.1, within(1e-12));
+    assertThat(arm.absoluteEncoder(cancoder).driven().wiring().orElseThrow().cancoder())
+        .contains(cancoder);
   }
 
   /**
@@ -174,7 +218,7 @@ class JointBlockTest {
     assertThat(pot.raw(1.1)).isCloseTo(0.35, within(1e-12));
     Sensor.Encoder slow = (Sensor.Encoder) winch.ownSensors().getFirst();
     assertThat(slow.terms().getFirst().ratio()).isCloseTo(0.4, within(1e-12));
-    assertThat(slow.countsPerTurn()).isEqualTo(10240);
+    assertThat(slow.countsPerTurn()).contains(10240);
     assertThat(pivot.driven().wiring()).isEmpty();
     assertThat(pivot.driven().absoluteEncoder().orElseThrow().readByController()).isFalse();
     assertThatIllegalArgumentException()
@@ -186,6 +230,7 @@ class JointBlockTest {
                         MechanismWiring.DataPortEncoder.builder()
                             .offset(Rotations.of(0))
                             .reversed(false)
+                            .closedLoop(false)
                             .build()))
         .withMessageContaining("it's read one way");
     assertThatIllegalArgumentException()
@@ -321,6 +366,7 @@ class JointBlockTest {
                     MechanismWiring.DataPortEncoder.builder()
                         .offset(Rotations.of(0))
                         .reversed(false)
+                        .closedLoop(false)
                         .build()))
         .withMessageContaining("its absolute encoder is wired, and its motors aren't");
     assertThatIllegalArgumentException()
@@ -353,6 +399,31 @@ class JointBlockTest {
                 new Driven.Motors(
                     Motor.KRAKEN_X60, 2, Gearing.of(1), Optional.empty(), List.of(TALON_FX.can(1))))
         .withMessageContaining("names 1 controllers for 2 motors");
+  }
+
+  /**
+   * A tuned kG needs no mass, and an arm's may say where its weight pulls hardest; a slide's holds
+   * it the same all along, so it has no angle.
+   */
+  @Test
+  void aSlidesKgHasNoAngle() {
+    Joint.Revolute arm =
+        Joint.pivot("arm", Part.CHASSIS, AXLE, Joint.PITCH_UP)
+            .control(MechanismControl.position(30).withKg(0.4, Degrees.of(-90)));
+    Joint.Prismatic elevator =
+        Joint.elevator("elevator", Part.CHASSIS, AXLE)
+            .control(MechanismControl.position(60).withKg(0.5));
+
+    assertThat(arm.link().mass().isMassless()).isTrue();
+    assertThat(arm.driven().control().orElseThrow().gains().gravityAngle())
+        .contains(Degrees.of(-90));
+    assertThat(elevator.driven().control().orElseThrow().gains().kG()).contains(0.5);
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> elevator.control(MechanismControl.position(60).withKg(0.5, Degrees.of(0))))
+        .withMessageContaining(
+            "a joint that slides is held against gravity the same all along it, so its kG has no"
+                + " angle: give kG alone, withKg(kG)");
   }
 
   /**

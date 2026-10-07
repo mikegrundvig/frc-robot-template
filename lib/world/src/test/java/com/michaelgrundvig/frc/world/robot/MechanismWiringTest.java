@@ -55,15 +55,17 @@ class MechanismWiringTest {
   }
 
   /**
-   * A data-port encoder reads its turns from what its controller reads raw, its offset added and
-   * its direction the joint's; the joint has one absolute encoder, so the wiring reads it one way.
+   * A data-port encoder says what its controller reads raw where it reads a number of turns, its
+   * offset and direction undone, from 0 to 1, a turn on or back the same: what a SPARK is told to
+   * read as zero. The joint has one absolute encoder, so the wiring reads it one way.
    */
   @Test
-  void aDataPortEncoderReadsTurnsAndIsTheOnlyReader() {
+  void aDataPortEncoderGivesItsRawReadingAndIsTheOnlyReader() {
     MechanismWiring.DataPortEncoder port =
         MechanismWiring.DataPortEncoder.builder()
             .offset(Rotations.of(-0.25))
             .reversed(true)
+            .closedLoop(false)
             .build();
     MechanismWiring.Cancoder cancoder =
         MechanismWiring.Cancoder.builder()
@@ -73,7 +75,9 @@ class MechanismWiringTest {
             .feedback(MechanismWiring.Feedback.ROTOR)
             .build();
 
-    assertThat(port.turns(0.1)).isCloseTo(-0.35, within(1e-12));
+    // Reversed, offset a quarter turn back: reading -0.35 turns, it reads 0.1 raw.
+    assertThat(port.raw(-0.35)).isCloseTo(0.1, within(1e-12));
+    assertThat(port.raw(0.65)).isCloseTo(0.1, within(1e-12));
     assertThatThrownBy(
             () ->
                 MechanismWiringBuilder.builder(wiring(List.of(motor(11))))
@@ -81,5 +85,33 @@ class MechanismWiringTest {
                     .dataPort(Optional.of(port))
                     .build())
         .hasMessageStartingWith("MechanismWiring.dataPort: names a CANcoder and a data-port");
+  }
+
+  /**
+   * A port encoder, or a data-port one, tells its motor where the joint is, once, unless its wiring
+   * says the joint's loop closes on it; nothing else about it changes.
+   */
+  @Test
+  void anEncodersLoopClosesOnItOnlyWhenItsWiringSays() {
+    MechanismWiring.PortEncoder once =
+        MechanismWiring.PortEncoder.dutyCycle(1).offset(Rotations.of(0.82)).inverted();
+    MechanismWiring.PortEncoder closing = once.closesLoop();
+
+    assertThat(once.closedLoop()).isFalse();
+    assertThat(MechanismWiring.PortEncoder.analog(2, 10).closedLoop()).isFalse();
+    assertThat(closing.closedLoop()).isTrue();
+    assertThat(closing.read(0.25)).isEqualTo(once.read(0.25));
+    assertThat(Driven.AbsoluteEncoder.of().on(once).closedLoop()).isFalse();
+    assertThat(Driven.AbsoluteEncoder.of().on(closing).closedLoop()).isTrue();
+    MechanismWiring.DataPortEncoder dataPort =
+        MechanismWiring.DataPortEncoder.builder()
+            .offset(Rotations.of(-0.25))
+            .reversed(true)
+            .closedLoop(false)
+            .build();
+    assertThat(dataPort.closesLoop().closedLoop()).isTrue();
+    assertThat(dataPort.closesLoop().raw(0.4)).isEqualTo(dataPort.raw(0.4));
+    assertThat(Driven.AbsoluteEncoder.of().on(dataPort).closedLoop()).isFalse();
+    assertThat(Driven.AbsoluteEncoder.of().on(dataPort.closesLoop()).closedLoop()).isTrue();
   }
 }

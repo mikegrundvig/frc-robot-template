@@ -96,6 +96,7 @@ final class PhoenixParts {
         .kV(Double.isNaN(kV) ? Optional.empty() : Optional.of(gain(units, kV, theirsPerOurs)))
         .kA(Optional.empty())
         .kG(Double.isNaN(kG) ? Optional.empty() : Optional.of(kG))
+        .gravityAngle(Optional.empty())
         .build();
   }
 

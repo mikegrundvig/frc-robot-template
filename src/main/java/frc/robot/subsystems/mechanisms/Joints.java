@@ -149,13 +149,9 @@ public final class Joints {
       }
       joint.stopAt(limits, sensors);
     }
-    for (Interlock interlock : definition.interlocks()) {
+    for (Interlock interlock : definition.everyInterlock()) {
       enforced(interlock.joint())
-          .restrict(
-              interlock,
-              interlock.condition() instanceof Condition.OnJoint onJoint
-                  ? enforced(onJoint.joint())
-                  : null);
+          .restrict(interlock, interlock.other().map(this::enforced).orElse(null));
     }
   }
 
@@ -167,11 +163,9 @@ public final class Joints {
   public static @Nullable String unenforceable(RobotDefinition definition) {
     RobotMath math = definition.math();
     List<String> problems = new ArrayList<>();
-    for (Interlock interlock : definition.interlocks()) {
+    for (Interlock interlock : definition.everyInterlock()) {
       List<Joint> joints = new ArrayList<>(List.of(interlock.joint()));
-      if (interlock.condition() instanceof Condition.OnJoint onJoint) {
-        joints.add(onJoint.joint());
-      }
+      interlock.other().ifPresent(joints::add);
       for (Joint joint : joints) {
         String why = JointSetup.whyNotDriven(math, joint);
         if (why != null) {

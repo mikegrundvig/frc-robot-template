@@ -116,13 +116,13 @@ final class MechanismFixtures {
     return Gearing.builder().ratio(ratio).efficiency(efficiency).build();
   }
 
-  /** An encoder on one joint: a CANcoder's 4096 counts a turn if absolute, unknown if not. */
+  /** An encoder on one joint: a CANcoder's 4096 counts a turn if absolute, none given if not. */
   static Sensor.Encoder encoder(String label, Joint joint, double ratio, boolean absolute) {
-    return encoder(label, joint, ratio, absolute, absolute ? 4096 : 0);
+    return encoder(label, joint, ratio, absolute, absolute ? Optional.of(4096) : Optional.empty());
   }
 
   static Sensor.Encoder encoder(
-      String label, Joint joint, double ratio, boolean absolute, int countsPerTurn) {
+      String label, Joint joint, double ratio, boolean absolute, Optional<Integer> countsPerTurn) {
     return Sensor.Encoder.builder()
         .label(label)
         .terms(

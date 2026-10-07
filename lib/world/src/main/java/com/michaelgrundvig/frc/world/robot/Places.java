@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import org.jspecify.annotations.Nullable;
@@ -203,6 +204,7 @@ final class Places {
       List<Joint> joints = new ArrayList<>(List.of(interlock.joint()));
       switch (interlock.condition()) {
         case Condition.OnJoint onJoint -> joints.add(onJoint.joint());
+        case Condition.AtLeast atLeast -> joints.add(atLeast.joint());
         case Condition.OnSensor onSensor -> {
           if (!math.sensors().contains(onSensor.sensor())) {
             problems.add(
@@ -224,9 +226,10 @@ final class Places {
     if (!problems.isEmpty()) {
       return String.join("; ", problems);
     }
-    // A sensor's reading isn't known until the robot runs: only joints' positions are checked.
+    // A sensor's reading, or how fast a joint runs, isn't known until the robot runs: beyond
+    // joints holding each other, only joints' positions are checked.
     List<Interlock> onJoints = onJoints(interlocks);
-    rings(onJoints, problems);
+    rings(interlocks.stream().filter(interlock -> about(interlock) != null).toList(), problems);
     stuck(onJoints, problems);
     unreachable(math, onJoints, problems);
     Map<Joint, Double> start = math.positions(Map.of());
@@ -252,6 +255,13 @@ final class Places {
     return interlocks.stream()
         .filter(interlock -> interlock.condition() instanceof Condition.OnJoint)
         .toList();
+  }
+
+  /**
+   * The joint an interlock's condition is about, where it is or how fast, or null for a sensor's.
+   */
+  private static @Nullable Joint about(Interlock interlock) {
+    return interlock.other().orElse(null);
   }
 
   /** An interlock's condition on another joint's position: only for one of {@link #onJoints}. */
@@ -319,7 +329,7 @@ final class Places {
       Set<Set<Joint>> reported,
       List<String> problems) {
     for (Interlock interlock : on.getOrDefault(at, List.of())) {
-      Joint next = on(interlock).joint();
+      Joint next = Objects.requireNonNull(about(interlock));
       path.add(interlock);
       if (next.equals(start)) {
         Set<Joint> members = new HashSet<>();
@@ -450,10 +460,9 @@ final class Places {
     Joint joint = condition.joint();
     return switch (condition) {
       case Condition.At at -> List.of(joint.position(at.name()).value());
-      case Condition.Past past -> List.of(joint.position(past.position()).value());
-      case Condition.Before before -> List.of(joint.position(before.position()).value());
-      case Condition.Between between ->
-          List.of(joint.position(between.from()).value(), joint.position(between.to()).value());
+      case Condition.Past past -> List.of(past.position());
+      case Condition.Before before -> List.of(before.position());
+      case Condition.Between between -> List.of(between.from(), between.to());
     };
   }
 

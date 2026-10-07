@@ -17,6 +17,7 @@ import static frc.robot.robots2026.Team2611.MODULES;
 import static frc.robot.robots2026.Team2611.ROBOT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
@@ -33,6 +34,7 @@ import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition.Missing.Scope;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -201,20 +203,16 @@ class Team2611Test {
    */
   @Test
   void theirPlacesAreNamedInTheDefinition() {
-    assertThat(Team2611.PIVOT.positions())
-        .extracting(Position::name)
-        .containsExactly("in", "run", "out");
-    assertThat(Team2611.PIVOT.position("run").value())
-        .isCloseTo(Math.toRadians(110), within(1e-12));
+    assertThat(Team2611.PIVOT.positions()).extracting(Position::name).containsExactly("in", "out");
     assertThat(Team2611.INTAKE.output("outtaking").value() * 60 / (2 * Math.PI))
         .isCloseTo(-500, within(1e-9));
     assertThat(ROBOT.configurations())
         .extracting(Configuration::name)
         .containsExactly("feeding", "unjamming");
     assertThat(Team2611.FEEDING.joints()).containsExactly(Team2611.FULL_SEND, Team2611.TRANSITION);
-    assertThat(ROBOT.interlocks())
+    assertThat(ROBOT.everyInterlock())
         .singleElement()
-        .hasToString("intake runs only when pivot past run");
+        .hasToString("intake runs only when pivot past 110°");
   }
 
   /**
@@ -273,7 +271,7 @@ class Team2611Test {
             () -> RobotDefinitionBuilder.builder(ROBOT).configurations(List.of(stowed)).build())
         .withMessage(
             "RobotDefinition[2611 2026].configurations: configuration intaking runs intake, but"
-                + " intake runs only when pivot past run, and pivot is at 1.5°, its reference");
+                + " intake runs only when pivot past 110°, and pivot is at 1.5°, its reference");
     assertThat(
             RobotDefinitionBuilder.builder(ROBOT)
                 .configurations(List.of(out))
@@ -360,31 +358,34 @@ class Team2611Test {
   }
 
   /**
-   * What the definition doesn't know. No link's mass, so no gravity seeds; the robot weighed, as
-   * the code gives it; its yaw the code's 5.5 kg m² (Constants.java:188), its pitch and roll the
-   * model's box, which would put the yaw at 6.89, the PathPlanner app's 6.883 (settings.json:16) to
-   * a tenth of a percent.
+   * What the definition doesn't know. No link's mass, which only the simulator reads; the pivot's
+   * kG not written, as 2611's code has none (Pivot.java:26-27), which the robot says; the robot
+   * weighed, as the code gives it; its yaw the code's 5.5 kg m² (Constants.java:188), its pitch and
+   * roll the model's box, which would put the yaw at 6.89, the PathPlanner app's 6.883
+   * (settings.json:16) to a tenth of a percent.
    */
   @Test
   void theMissingDataReportListsEveryLinksMass() {
     ROBOT.missing().forEach(System.out::println);
 
     assertThat(ROBOT.missing())
-        .extracting(RobotDefinition.Missing::what)
+        .extracting(RobotDefinition.Missing::what, RobotDefinition.Missing::scope)
         .containsExactly(
-            "the body's pitch and roll are a box's, beside its given yaw",
-            "62.57 kg of the robot's 62.57 kg is in no link",
-            "intake arm has no mass",
-            "intake roller has no mass",
-            "shooter wheels has no mass",
-            "full send rollers has no mass",
-            "transition rollers has no mass",
-            "hood has no mass",
-            "hood has no shape");
+            tuple("the body's pitch and roll are a box's, beside its given yaw", Scope.SIMULATOR),
+            tuple("62.57 kg of the robot's 62.57 kg is in no link", Scope.SIMULATOR),
+            tuple("intake arm has no mass", Scope.SIMULATOR),
+            tuple("pivot has no kG", Scope.ROBOT),
+            tuple("intake roller has no mass", Scope.SIMULATOR),
+            tuple("shooter wheels has no mass", Scope.SIMULATOR),
+            tuple("full send rollers has no mass", Scope.SIMULATOR),
+            tuple("transition rollers has no mass", Scope.SIMULATOR),
+            tuple("hood has no mass", Scope.SIMULATOR),
+            tuple("hood has no shape", Scope.ROBOT));
     assertThat(ROBOT.missing().get(2).costs())
         .isEqualTo(
-            "pivot has no gravity seed (kG 0), no gravity torque, and no center of mass to shift;"
-                + " its kA seeds from its motors' rotors alone");
+            "pivot's gravity comes from its kG, and intake arm adds nothing to pivot's inertia");
+    assertThat(ROBOT.missing().get(4).costs())
+        .isEqualTo("intake roller adds nothing to intake's inertia");
     assertThat(BODY.yawMomentOfInertia().in(KilogramSquareMeters)).isEqualTo(5.5);
     Body boxed = BodyBuilder.builder(BODY).inertia(Body.Turning.BOX).build();
     assertThat(boxed.yawMomentOfInertia().in(KilogramSquareMeters)).isCloseTo(6.883, within(0.01));

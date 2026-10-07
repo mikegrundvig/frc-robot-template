@@ -34,9 +34,50 @@ class DrivetrainGeometryTest {
     assertThat(modules.wheelRadius().in(Inches)).isCloseTo(2, within(1e-9));
     assertThat(modules.driveGearing()).isEqualTo(gearing(6.75));
     assertThat(modules.steerGearing()).isEqualTo(gearing(12.8));
-    assertThat(modules.wheelCoefficientOfFriction()).isEqualTo(1.2);
-    assertThat(modules.driveInertia().in(KilogramSquareMeters)).isEqualTo(0.001);
-    assertThat(modules.steerInertia().in(KilogramSquareMeters)).isEqualTo(0.004);
+    assertThat(modules.wheelCoefficientOfFriction()).contains(1.2);
+    assertThat(modules.driveInertia().orElseThrow().in(KilogramSquareMeters)).isEqualTo(0.001);
+    assertThat(modules.steerInertia().orElseThrow().in(KilogramSquareMeters)).isEqualTo(0.004);
+  }
+
+  /**
+   * A module type that leaves its tread's grip and its inertias out takes their defaults:
+   * PathPlanner's 1.2, and the template's estimates, 0.001 and 0.004 kg m². Its joints' discs turn
+   * as hard as those, and a measured tread beside it still slips first at its own grip.
+   */
+  @Test
+  void aModuleTypeLeftUnmeasuredTakesTheDefaults() {
+    DrivetrainGeometry.ModuleType unmeasured =
+        changeModules()
+            .wheelCoefficientOfFriction(Optional.empty())
+            .driveInertia(Optional.empty())
+            .steerInertia(Optional.empty())
+            .build();
+    DrivetrainGeometry.ModuleJoints corner = unmeasured.joints("here", new Translation2d(0.3, 0.2));
+    DrivetrainGeometry worn =
+        DrivetrainGeometry.builder()
+            .corners(
+                List.of(
+                    corner(unmeasured, new Translation2d(0.3, 0.2)),
+                    corner(unmeasured, new Translation2d(0.3, -0.2)),
+                    corner(
+                        changeModules().wheelCoefficientOfFriction(Optional.of(1.0)).build(),
+                        new Translation2d(-0.3, 0.2)),
+                    corner(unmeasured, new Translation2d(-0.3, -0.2))))
+            .wiring(Optional.empty())
+            .control(Optional.empty())
+            .build();
+
+    assertThat(unmeasured.wheelCoefficientOfFrictionOrDefault()).isEqualTo(1.2);
+    assertThat(unmeasured.driveInertiaOrDefault().in(KilogramSquareMeters)).isEqualTo(0.001);
+    assertThat(unmeasured.steerInertiaOrDefault().in(KilogramSquareMeters)).isEqualTo(0.004);
+    assertThat(corner.wheel().link().mass().inertia().iyy()).isCloseTo(0.001, within(1e-12));
+    assertThat(corner.steer().link().mass().inertia().izz()).isCloseTo(0.004, within(1e-12));
+    assertThat(
+            DrivetrainGeometry.inset(unmeasured, body(), Inches.of(2.625))
+                .wheelCoefficientOfFriction())
+        .isEqualTo(1.2);
+    assertThat(worn.wheelCoefficientOfFriction()).as("the measured tread's, least").isEqualTo(1.0);
+    assertThat(modules().wheelCoefficientOfFrictionOrDefault()).as("as measured").isEqualTo(1.2);
   }
 
   @Test
@@ -89,7 +130,7 @@ class DrivetrainGeometryTest {
         DrivetrainGeometryModuleTypeBuilder.builder(modules())
             .steerGearing(gearing(26.09))
             .driveGearing(gearing(7.5))
-            .wheelCoefficientOfFriction(1.0)
+            .wheelCoefficientOfFriction(Optional.of(1.0))
             .build();
     List<DrivetrainGeometry.Corner> corners = new ArrayList<>(drivetrain().corners());
     corners.set(2, corner(back, corners.get(2).position()));
@@ -153,13 +194,13 @@ class DrivetrainGeometryTest {
         "ModuleType.wheelRadius", () -> changeModules().wheelRadius(Inches.of(0)).build());
     assertRejected(
         "ModuleType.wheelCoefficientOfFriction",
-        () -> changeModules().wheelCoefficientOfFriction(Double.NaN).build());
+        () -> changeModules().wheelCoefficientOfFriction(Optional.of(Double.NaN)).build());
     assertRejected(
         "ModuleType.driveInertia",
-        () -> changeModules().driveInertia(KilogramSquareMeters.of(0)).build());
+        () -> changeModules().driveInertia(Optional.of(KilogramSquareMeters.of(0))).build());
     assertRejected(
         "ModuleType.steerInertia",
-        () -> changeModules().steerInertia(KilogramSquareMeters.of(-0.004)).build());
+        () -> changeModules().steerInertia(Optional.of(KilogramSquareMeters.of(-0.004))).build());
     assertRejected("ModuleType.couplingRatio", () -> changeModules().couplingRatio(-1).build());
     assertRejected("Corner.position", () -> corner(modules(), new Translation2d(Double.NaN, 0.2)));
   }
@@ -194,9 +235,9 @@ class DrivetrainGeometryTest {
         .containsExactly(coupled.wheel(), coupled.steer());
     assertThat(coupled.drive().transmission().shaftRadiansPer(coupled.steer())).isEqualTo(3.5);
     assertThat(coupled.wheel().link().mass().inertia().iyy())
-        .isCloseTo(modules().driveInertia().in(KilogramSquareMeters), within(1e-12));
+        .isCloseTo(modules().driveInertiaOrDefault().in(KilogramSquareMeters), within(1e-12));
     assertThat(coupled.steer().link().mass().inertia().izz())
-        .isCloseTo(modules().steerInertia().in(KilogramSquareMeters), within(1e-12));
+        .isCloseTo(modules().steerInertiaOrDefault().in(KilogramSquareMeters), within(1e-12));
   }
 
   private static void assertRejected(String field, ThrowingCallable build) {

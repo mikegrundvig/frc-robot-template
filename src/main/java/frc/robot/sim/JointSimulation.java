@@ -21,7 +21,8 @@ import org.wpilib.math.geometry.Transform3d;
  * The robot's driven joints in the simulator, each a {@link JointIOSim} the joints' mechanisms read
  * and drive as they would real motor controllers. Stepped once a loop, before the robot reads its
  * sensors, as the drivetrain's physics is ({@link DriveSimulation}): gravity on each joint is
- * worked out from where every joint really is as the step starts, so a wrist feels its arm's angle.
+ * worked out from where every joint really is as the step starts, so a wrist feels its arm's angle
+ * through its links' weight (a tuned kG holds it as one cosine, {@link JointIOSim}).
  *
  * <p>Closed form, from the robot's definition: no joint pushes on another as it moves, which the
  * simulator's rigid-body engine will add.
@@ -78,7 +79,7 @@ public final class JointSimulation {
       truth.put(joint.joint(), joint.position());
     }
     for (JointIOSim joint : joints) {
-      joint.step(seconds, -math.gravityTorque(joint.joint(), truth));
+      joint.step(seconds, joint.gravityTorque(truth));
     }
   }
 

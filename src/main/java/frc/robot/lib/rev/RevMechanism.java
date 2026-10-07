@@ -2,15 +2,15 @@ package frc.robot.lib.rev;
 
 import static org.wpilib.units.Units.Amps;
 
-import com.ctre.phoenix6.configs.SlotConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.signals.GravityTypeValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
+import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
@@ -39,10 +39,20 @@ import org.jspecify.annotations.Nullable;
  * factors. With its voltage compensated to {@link #NOMINAL_VOLTS}, its loop's output is a share of
  * that. Its loop runs the slot's kP, per rotor rotation of error in slot 0, for positions, and per
  * rotor RPM in slot 1, for speeds. The rest, the feedforward (kS, kV, kA and gravity) and kD, the
- * robot works out each loop in volts ({@link Feedforward}) and adds as the loop's arbitrary
- * feedforward: volts are the one unit a SPARK takes exactly, whatever the units of its own
- * feedforward and derivative. Measured in REV's simulation (2026-10-05): kP 0.01 on 10 rotations of
- * error gave a share of 0.1, and 1.2 V of feedforward a share of 0.1.
+ * robot works out each loop in volts ({@link PhoenixMechanism.Feedforward}) and adds as the loop's
+ * arbitrary feedforward: volts are the one unit a SPARK takes exactly, whatever the units of its
+ * own feedforward and derivative. Measured in REV's simulation (2026-10-05): kP 0.01 on 10
+ * rotations of error gave a share of 0.1, and 1.2 V of feedforward a share of 0.1.
+ *
+ * <p>A SPARK whose loop closes on the absolute encoder on its data port ({@code
+ * DataPortEncoder#closesLoop}) runs it on that encoder's turns instead, with no conversion factor
+ * either: its setpoints, its soft limits and its kP are per turn of the encoder, read from the low
+ * edge of the joint's window, where the SPARK reads zero, so it never wraps inside the joint's
+ * range and needs no position wrapping, which would take the short way round, through a hard stop.
+ * Its speeds, on the same sensor, are per RPM of the encoder. The feedforward is the robot's, as
+ * ever, and the speed it damps toward is the motor's. That REV's soft limits follow the sensor the
+ * loop runs on, and that the absolute encoder's speed is in RPM, are as REV documents them, and
+ * unconfirmed: REV's simulation runs its loop on the motor's own encoder whatever it's told.
  *
  * <p>A SPARK limits its motor's current (its smart limit, from the control's stator limit), not the
  * battery's, so the supply limits aren't applied. Its kI isn't carried over yet: a joint whose
@@ -64,14 +74,24 @@ public final class RevMechanism {
    * @param followers each following SPARK's, in the wiring's order
    * @param units the mechanism's rotations ({@link PhoenixUnits}), which the robot's gains are in
    * @param rotorRatio rotor rotations for each of the mechanism's
-   * @param positionKp the loop's kP for positions: a share of {@link #NOMINAL_VOLTS} per rotor
-   *     rotation of error
-   * @param velocityKp the loop's kP for speeds: a share per rotor RPM of error
-   * @param softLimits the soft limits, in rotor rotations, lower then upper, if the control has
+   * @param loopRatio turns of the sensor its loop runs on for each of the mechanism's rotations:
+   *     the rotor's, or, closed on its absolute encoder, the encoder's
+   * @param loopZero what that sensor reads with the mechanism at zero: 0 for its rotor, and for its
+   *     absolute encoder, read from the window's edge, minus the edge
+   * @param positionKp the loop's kP for positions: a share of {@link #NOMINAL_VOLTS} per turn of
+   *     error of the sensor it runs on
+   * @param velocityKp the loop's kP for speeds: a share per RPM of error of that sensor
+   * @param softLimits the soft limits, in that sensor's turns, lower then upper, if the control has
    *     them
    * @param feedforward what the robot adds each loop, in volts
    * @param absolute the definition's absolute encoder the SPARK's data port reads, if its wiring
    *     names one: read once at startup, to tell the motor where the joint is
+   * @param windowEdge where the SPARK's reading of that encoder is zero: the encoder's reading, in
+   *     its turns from the joint's zero, at the low edge of the window it tells apart ({@code
+   *     RobotMath.absoluteWindow}), so the SPARK's reading, from 0 to 1, wraps outside the joint's
+   *     range; 0 without one
+   * @param closedLoop whether its loop runs on that encoder, as its wiring says, rather than on its
+   *     rotor
    * @param notes what's doubtful about them, each a sentence for a log or a test
    */
   public record Settings(
@@ -79,11 +99,15 @@ public final class RevMechanism {
       List<Follower> followers,
       PhoenixUnits units,
       double rotorRatio,
+      double loopRatio,
+      double loopZero,
       double positionKp,
       double velocityKp,
       Optional<double[]> softLimits,
-      Feedforward feedforward,
+      PhoenixMechanism.Feedforward feedforward,
       Optional<Sensor.Encoder> absolute,
+      double windowEdge,
+      boolean closedLoop,
       List<String> notes) {
     public Settings {
       followers = List.copyOf(followers);
@@ -115,51 +139,6 @@ public final class RevMechanism {
    */
   public record Follower(int id, SparkBaseConfig config) {}
 
-  /**
-   * What the robot adds to a SPARK's loop each loop, in volts: the slot's feedforward and kD, in
-   * the mechanism's rotations ({@link PhoenixUnits}), as Phoenix's slot holds them.
-   *
-   * @param kS volts to overcome friction, in the direction of travel
-   * @param kV volts per rotation a second
-   * @param kA volts per rotation a second squared: in the program's own feedforward, as on a
-   *     TalonFX, and so unused here
-   * @param kG volts to hold against gravity: always, for an elevator, or at the arm's angle
-   * @param arm whether gravity turns with the joint, as an arm's does
-   * @param armOffset what's added to the position for its angle to gravity, in rotations
-   * @param kD volts per rotation a second of speed error
-   */
-  public record Feedforward(
-      double kS, double kV, double kA, double kG, boolean arm, double armOffset, double kD) {
-    /**
-     * Volts to follow a profile's point: friction, speed, gravity, and damping toward its speed.
-     *
-     * @param position where the profile is, in the mechanism's rotations
-     * @param velocity how fast it moves there, in rotations a second
-     * @param measured how fast the mechanism moves now, in rotations a second
-     */
-    public double atPosition(double position, double velocity, double measured) {
-      return kS * Math.signum(velocity)
-          + kV * velocity
-          + gravity(position)
-          + kD * (velocity - measured);
-    }
-
-    /** Volts to run at a speed: friction, speed and gravity; the loop's kP closes the rest. */
-    public double atSpeed(double position, double velocity) {
-      return kS * Math.signum(velocity) + kV * velocity + gravity(position);
-    }
-
-    private double gravity(double position) {
-      return arm ? kG * Math.cos(2 * Math.PI * (position + armOffset)) : kG;
-    }
-  }
-
-  /**
-   * A mechanism on SPARKs, read by its motor's own encoder.
-   *
-   * @throws IllegalArgumentException for wiring that isn't a SPARK's, names a CANcoder or a
-   *     data-port encoder, a control with a kI, and whatever the Phoenix helper refuses
-   */
   /**
    * A SPARK's limit inputs, from what's on them ({@link ControllerPins}): a switch's polarity, and
    * whether the SPARK stops on it, only for a limit switch; an input with nothing on it stops
@@ -194,6 +173,13 @@ public final class RevMechanism {
         : LimitSwitchConfig.Behavior.kKeepMovingMotor;
   }
 
+  /**
+   * A mechanism on SPARKs, read by its motor's own encoder.
+   *
+   * @throws IllegalArgumentException for wiring that isn't a SPARK's, is on a CANivore, or names a
+   *     CANcoder or a data-port encoder, a control with a kI, and whatever the Phoenix helper
+   *     refuses
+   */
   public static Settings configure(
       RobotMath math, Joint joint, Drive drive, MechanismWiring wiring, MechanismControl control) {
     if (wiring.dataPort().isPresent()) {
@@ -207,7 +193,8 @@ public final class RevMechanism {
 
   /**
    * A mechanism on SPARKs with an absolute encoder on the leader's data port: the definition's
-   * absolute encoder on the joint, read once at startup, so the joint needs no homing.
+   * absolute encoder on the joint, read once at startup, so the joint needs no homing, and the
+   * SPARK's loop running on it where the wiring says so.
    *
    * @throws IllegalArgumentException as the other does, for an encoder that isn't absolute on the
    *     joint alone, or whose joint's range is more than one of its turns tells apart, and for
@@ -247,6 +234,10 @@ public final class RevMechanism {
       throw new IllegalArgumentException(
           joint.label() + "'s wiring is " + controller.shown() + "'s, not a SPARK's");
     }
+    if (!(wiring.canBus() instanceof CanBus.Port)) {
+      throw new IllegalArgumentException(
+          joint.label() + "'s SPARKs are on a CANivore: a SPARK is on Systemcore's own CAN");
+    }
     if (wiring.cancoder().isPresent()) {
       throw new IllegalArgumentException(
           joint.label()
@@ -259,24 +250,31 @@ public final class RevMechanism {
               + "'s control has a kI, which isn't carried to a SPARK yet: its integral's units"
               + " aren't confirmed. Leave kI at 0");
     }
-    // The Phoenix helper's own settings for the motor alone: the data port is the SPARK's.
+    // The Phoenix helper's own settings for the motor alone: the data port is the SPARK's. The
+    // robot works out the SPARK's feedforward, so an arm's gravity offset isn't Phoenix's to limit.
     MechanismWiring motorsAlone =
         MechanismWiringBuilder.builder(wiring).dataPort(Optional.empty()).build();
     PhoenixMechanism.Settings phoenix =
-        PhoenixMechanism.configure(math, joint, drive, motorsAlone, control);
+        PhoenixMechanism.configureFeedforwardOnRobot(math, joint, drive, motorsAlone, control);
     List<String> notes = new ArrayList<>(phoenix.notes());
+    PhoenixUnits units = phoenix.units();
+    double windowEdge = 0;
+    double encoderRatio = 0;
     if (absolute != null) {
-      // One turn of the encoder must tell the joint's range apart; it's read once, at startup.
-      math.absoluteWindow(List.of(absolute));
+      // One turn of the encoder must tell the joint's range apart, and wrap outside it, as a
+      // CANcoder's discontinuity point puts it.
+      Range window = math.absoluteWindow(List.of(absolute));
       double point = math.discontinuityPoint(absolute);
       String wraps =
           PhoenixMechanism.wrapProblem(absolute, absolute.ratio(joint) < 0 ? 1 - point : point);
       if (wraps != null) {
         notes.add(wraps);
       }
+      encoderRatio = units.ratioToPhoenix(Math.abs(absolute.ratio(joint)));
+      windowEdge = encoderRatio * units.toPhoenix(window.lower());
     }
+    boolean closed = absolute != null && wiring.dataPort().orElseThrow().closedLoop();
     TalonFXConfiguration fx = phoenix.leader();
-    SlotConfigs slot = SlotConfigs.from(fx.Slot0);
     double ratio = fx.Feedback.SensorToMechanismRatio;
     boolean brake = fx.MotorOutput.NeutralMode == NeutralModeValue.Brake;
     int amps = statorAmps(control);
@@ -287,17 +285,25 @@ public final class RevMechanism {
         .idleMode(brake ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
         .smartCurrentLimit(amps)
         .voltageCompensation(NOMINAL_VOLTS);
-    double positionKp = slot.kP / (NOMINAL_VOLTS * ratio);
-    double velocityKp = slot.kP / (NOMINAL_VOLTS * ratio * 60);
+    // The sensor its loop runs on, and its turns: the rotor's, or the absolute encoder's from the
+    // window's edge.
+    double loopRatio = closed ? encoderRatio : ratio;
+    double loopZero = closed ? -windowEdge : 0;
+    double positionKp = phoenix.kP() / (NOMINAL_VOLTS * loopRatio);
+    double velocityKp = phoenix.kP() / (NOMINAL_VOLTS * loopRatio * 60);
     leader
         .closedLoop
-        .feedbackSensor(FeedbackSensor.kPrimaryEncoder)
+        .feedbackSensor(closed ? FeedbackSensor.kAbsoluteEncoder : FeedbackSensor.kPrimaryEncoder)
         .p(positionKp, ClosedLoopSlot.kSlot0)
         .p(velocityKp, ClosedLoopSlot.kSlot1);
+    if (closed) {
+      // Its reading wraps outside the joint's range: the short way round could be through a stop.
+      leader.closedLoop.positionWrappingEnabled(false);
+    }
     Optional<double[]> softLimits = Optional.empty();
     if (fx.SoftwareLimitSwitch.ForwardSoftLimitEnable) {
-      double lower = fx.SoftwareLimitSwitch.ReverseSoftLimitThreshold * ratio;
-      double upper = fx.SoftwareLimitSwitch.ForwardSoftLimitThreshold * ratio;
+      double lower = fx.SoftwareLimitSwitch.ReverseSoftLimitThreshold * loopRatio + loopZero;
+      double upper = fx.SoftwareLimitSwitch.ForwardSoftLimitThreshold * loopRatio + loopZero;
       leader
           .softLimit
           .reverseSoftLimit(lower)
@@ -307,9 +313,14 @@ public final class RevMechanism {
       softLimits = Optional.of(new double[] {lower, upper});
     }
     if (absolute != null) {
+      MechanismWiring.DataPortEncoder port = wiring.dataPort().orElseThrow();
       if (controller == MechanismWiring.Controller.SPARK_MAX) {
         leader.absoluteEncoder.setSparkMaxDataPortConfig();
       }
+      // The SPARK applies the encoder's direction and offset itself, as a CANcoder does: its
+      // reading grows with the joint, and reads zero at the window's low edge, so it wraps where
+      // the joint never is.
+      leader.absoluteEncoder.inverted(port.reversed()).zeroOffset(port.raw(windowEdge));
       leader.signals.absoluteEncoderPositionPeriodMs(SIGNAL_MS);
     }
     leader
@@ -331,25 +342,20 @@ public final class RevMechanism {
       followers.add(new Follower(motor.id(), follower));
     }
 
-    Feedforward feedforward =
-        new Feedforward(
-            slot.kS,
-            slot.kV,
-            slot.kA,
-            slot.kG,
-            slot.GravityType == GravityTypeValue.Arm_Cosine,
-            slot.GravityArmPositionOffset,
-            slot.kD);
     return new Settings(
         leader,
         followers,
-        phoenix.units(),
+        units,
         ratio,
+        loopRatio,
+        loopZero,
         positionKp,
         velocityKp,
         softLimits,
-        feedforward,
+        phoenix.feedforward(),
         Optional.ofNullable(absolute),
+        windowEdge,
+        closed,
         notes);
   }
 

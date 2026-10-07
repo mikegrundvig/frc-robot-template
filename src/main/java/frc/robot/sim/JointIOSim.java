@@ -1,6 +1,7 @@
 package frc.robot.sim;
 
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Radians;
 
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Drive;
@@ -8,18 +9,30 @@ import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
+import frc.robot.subsystems.mechanisms.ControllerSettings;
 import frc.robot.subsystems.mechanisms.JointIO;
 import frc.robot.subsystems.mechanisms.JointSetup;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.system.DCMotor;
 
 /**
  * A simulated joint: its motor controller and its motors, as the robot's definition and the joint's
  * control describe them, moving the joint's link. Built from the model alone ({@link
  * JointSimulation}): the motors' model through the transmission, with its losses; the link and
- * everything it carries, and the motors' rotors, as the inertia ({@code RobotMath.inertia});
- * gravity on the links that have mass ({@code RobotMath.gravityTorque}), with the other joints
- * where they are; and the joint's hard stops, which stop it dead.
+ * everything it carries, and the motors' rotors, as the inertia ({@code RobotMath.inertia}), the
+ * rotors alone for links without mass; gravity ({@link #gravityTorque}); and the joint's hard
+ * stops, which stop it dead.
+ *
+ * <p>Gravity is what the kG tuned in the joint's block holds, through its motors, since that's what
+ * a team measures: one cosine about where its weight pulls hardest for an arm, the same all along a
+ * slide. Where its block tunes none, gravity is its links' weight ({@code
+ * RobotMath.gravityTorque}), with the other joints where they are, and none for links without mass.
+ * Gravity is the robot's, from its block, not its motor controller's: a test can run the controller
+ * with another kG ({@code JointSetup.of}), and live tuning doesn't move it. An arm's tuned gravity
+ * doesn't follow a parent that tilts it, as Phoenix's {@code Arm_Cosine} doesn't.
  *
  * <p>The motor controller runs as a TalonFX runs what the Phoenix helper configures: its loop every
  * millisecond, on the joint's own position and speed; its slot's gains, the control's, its kV, kA
@@ -32,6 +45,11 @@ import org.wpilib.math.system.DCMotor;
  * current limit isn't modeled, as the drivetrain's isn't ({@code ModuleIOSim}). Friction isn't
  * either: it isn't known until measured. Joints move independently: one joint's motion doesn't push
  * on another's, which waits for the simulator's rigid-body engine.
+ *
+ * <p>What the robot's own settings for the joint would note ({@link ControllerSettings#notes}), for
+ * the controller it's wired to, or a TalonFX with no wiring, it logs once as the robot does ({@code
+ * Joints/<label>/SettingsNotes}), so the simulator says what the robot would. What the robot would
+ * refuse, its configuration refused before the simulator started.
  */
 final class JointIOSim implements JointIO {
   /** A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz). */
@@ -49,6 +67,7 @@ final class JointIOSim implements JointIO {
   }
 
   private final Joint joint;
+  private final RobotMath math;
   private final CurrentLimitedMotorSim motor;
 
   /** How many motors turn it: its readings are each one's, as a motor controller reads its own. */
@@ -63,8 +82,26 @@ final class JointIOSim implements JointIO {
   private final double kV;
   private final double kG;
 
-  /** For an arm, the angle to add to its position for its angle from level; NaN for a slide. */
+  /**
+   * For an arm, the angle to add to its position for its angle from where its weight pulls hardest,
+   * as its control gives it or its links' mass puts it; NaN for a slide.
+   */
   private final double gravityOffset;
+
+  /**
+   * Newton meters at the joint for each volt across its motors held still (newtons, for a slide):
+   * their stall torque per volt, all of them, through its gearing, less its losses.
+   */
+  private final double torquePerVolt;
+
+  /**
+   * The kG tuned in the joint's block, which sets gravity on it; empty where none is, and its
+   * links' mass does.
+   */
+  private final Optional<Double> weightKg;
+
+  /** As {@link #gravityOffset}, for the block's kG: where the robot's weight pulls hardest. */
+  private final double weightOffset;
 
   private final double softLower;
   private final double softUpper;
@@ -84,14 +121,19 @@ final class JointIOSim implements JointIO {
   /** Seconds of the robot's loop not yet run, under a millisecond: the next step's. */
   private double owed;
 
+  /** What the robot's settings for the joint would note, as logged. */
+  private final List<String> notes;
+
   JointIOSim(RobotMath math, JointSetup setup) {
     joint = setup.joint();
+    this.math = math;
     MechanismControl control = setup.control();
     Drive drive = math.drivesOf(joint).get(0);
     Actuator.Motors motors = (Actuator.Motors) drive.actuator();
     DCMotor model = motors.model(drive.transmission().efficiency());
     double gearing = Math.abs(drive.transmission().shaftRadiansPer(joint));
     motor = new CurrentLimitedMotorSim(model, math.inertia(joint, Map.of()), gearing);
+    torquePerVolt = gearing * model.stallTorque / model.nominalVoltage;
     count = motors.count();
     statorLimitAmps = control.currentLimits().stator().in(Amps) * count;
     brake = control.neutralMode() == MechanismControl.NeutralMode.BRAKE;
@@ -102,15 +144,17 @@ final class JointIOSim implements JointIO {
     kD = gains.kD();
     kS = gains.kS();
     kV = gains.kV().orElse(seed.kV());
-    double gravity = gains.kG().orElse(seed.kG());
-    if (joint instanceof Joint.Revolute) {
-      RobotMath.GravityFit fit = math.gravityFit(joint);
-      kG = fit.peak() == 0 ? 0 : gravity;
-      gravityOffset = fit.offset();
-    } else {
-      kG = gravity;
-      gravityOffset = Double.NaN;
-    }
+    boolean gravityActs = math.gravityActsOn(joint);
+    kG = gravityActs ? gains.kG().orElse(seed.kG()) : 0;
+    gravityOffset = gravityOffset(math, gains);
+    MechanismControl.Gains block =
+        joint
+            .driven()
+            .control()
+            .map(MechanismControl::gains)
+            .orElse(MechanismControl.Gains.seeded());
+    weightKg = gravityActs ? block.kG() : Optional.empty();
+    weightOffset = gravityOffset(math, block);
     softLower =
         control
             .softLimits()
@@ -124,11 +168,48 @@ final class JointIOSim implements JointIO {
     hardLower = joint.range().map(Range::lower).orElse(Double.NEGATIVE_INFINITY);
     hardUpper = joint.range().map(Range::upper).orElse(Double.POSITIVE_INFINITY);
     motor.place(joint.reference(), 0);
+    // What's doubtful in the robot's settings, though allowed: said once, in the log, as the robot
+    // says it. The Driver Station's console is the robot's alone.
+    notes = ControllerSettings.notes(math, setup);
+    Logger.recordOutput("Joints/" + joint.label() + "/SettingsNotes", notes.toArray(String[]::new));
+  }
+
+  /**
+   * For an arm, the angle to add to its position for its angle from where its weight pulls hardest:
+   * the gains' angle where given, else where its links' mass puts it, else its zero. NaN for a
+   * slide.
+   */
+  private double gravityOffset(RobotMath math, MechanismControl.Gains gains) {
+    if (!(joint instanceof Joint.Revolute)) {
+      return Double.NaN;
+    }
+    return gains.gravityAngle().map(angle -> -angle.in(Radians)).orElse(math.gravityOffset(joint));
   }
 
   /** The joint. */
   Joint joint() {
     return joint;
+  }
+
+  /** What the robot's settings for the joint would note, as it logged them: for the tests. */
+  List<String> notes() {
+    return notes;
+  }
+
+  /**
+   * Gravity's torque on the joint, positive turning it forward, with the joints where they stand:
+   * newton meters, or newtons for a slide. What its block's tuned kG holds, through its motors;
+   * where none is tuned, its links' weight.
+   */
+  double gravityTorque(Map<Joint, Double> positions) {
+    if (weightKg.isEmpty()) {
+      return -math.gravityTorque(joint, positions);
+    }
+    double volts =
+        Double.isNaN(weightOffset)
+            ? weightKg.get()
+            : weightKg.get() * Math.cos(position() + weightOffset);
+    return -volts * torquePerVolt;
   }
 
   /** Where the joint really is, in its units. */

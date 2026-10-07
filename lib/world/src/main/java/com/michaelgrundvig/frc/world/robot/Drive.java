@@ -64,7 +64,7 @@ public record Drive(String label, Actuator actuator, Transmission transmission) 
         .label(label + " rotor")
         .terms(terms)
         .absolute(false)
-        .countsPerTurn(0)
+        .countsPerTurn(Optional.empty())
         .build();
   }
 

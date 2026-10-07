@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
@@ -138,7 +139,7 @@ class PhoenixMechanismTest {
           .label("turret cancoder")
           .terms(List.of(term(TURRET, -1)))
           .absolute(true)
-          .countsPerTurn(4096)
+          .countsPerTurn(Optional.of(4096))
           .build();
 
   /** The arm's CANcoder, on its shaft. */
@@ -527,31 +528,23 @@ class PhoenixMechanismTest {
   }
 
   /**
-   * An unweighed arm has no gravity seed, and the helper says so; an unweighed turret or flywheel
-   * needs none, since gravity doesn't turn it however much it weighs.
+   * An unweighed arm has no gravity seed: kG 0, its weight taken to pull hardest at its zero, until
+   * kG is tuned. The definition, not the helper, says it has none ({@code
+   * RobotDefinition.missing}); an unweighed turret or flywheel needs none, since gravity doesn't
+   * turn it however much it weighs.
    */
   @Test
   void anUnweighedArmHasNoGravitySeed() {
-    Joint.Revolute bare =
-        revolute(
-            "bare arm",
-            Part.CHASSIS,
-            new Translation3d(0, 0, 0.5),
-            RAISE,
-            Optional.of(Range.degrees(0, 90)),
-            0,
-            unseen("bare link"));
+    Joint.Revolute bare = bareArm();
     Drive motor = JointFixtures.motors(bare, Motor.KRAKEN_X60, 1, gearing(40));
     RobotMath robot = RobotMath.of(BODY, List.of(bare), List.of(), List.of(motor), List.of());
     PhoenixMechanism.Settings arm =
         PhoenixMechanism.configure(robot, bare, motor, wiring(1), control());
 
     assertThat(arm.leader().Slot0.kG).isZero();
-    assertThat(arm.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Elevator_Static);
-    assertThat(arm.notes())
-        .containsExactly(
-            "bare link has no mass: bare arm has no gravity seed, kG 0, and no offset for"
-                + " Phoenix's Arm_Cosine");
+    assertThat(arm.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
+    assertThat(arm.leader().Slot0.GravityArmPositionOffset).isZero();
+    assertThat(arm.notes()).isEmpty();
     assertThat(
             PhoenixMechanism.configure(math, TURRET, TURRET_MOTOR, wiring(50), control()).notes())
         .isEmpty();
@@ -561,43 +554,154 @@ class PhoenixMechanismTest {
         .isEmpty();
   }
 
+  /**
+   * A tuned kG needs no mass: an unweighed arm takes it along one cosine about its zero, horizontal
+   * as WPILib takes an arm's, or about the angle given with it, where its weight pulls hardest.
+   */
   @Test
-  void anUnweighedCarriageHasNoGravitySeed() {
-    Joint.Prismatic slide =
-        Joint.Prismatic.builder()
-            .label("slide")
-            .parent(Part.CHASSIS)
-            .origin(Transform3d.ZERO)
-            .axis(Vector3.UP)
-            .range(Optional.of(Range.meters(0, 0.5)))
-            .reference(0)
-            .link(unseen("slide carriage"))
-            .positions(List.of())
-            .outputs(List.of())
-            .driven(Driven.NONE)
-            .build();
-    Drive motor = JointFixtures.motors(slide, Motor.KRAKEN_X60, 1, gearing(5), Meters.of(0.02));
-    RobotMath robot = RobotMath.of(BODY, List.of(slide), List.of(), List.of(motor), List.of());
+  void anUnweighedArmTakesItsTunedKgAboutItsZeroOrTheAngleGiven() {
+    Joint.Revolute bare = bareArm();
+    Drive motor = JointFixtures.motors(bare, Motor.KRAKEN_X60, 1, gearing(40));
+    RobotMath robot = RobotMath.of(BODY, List.of(bare), List.of(), List.of(motor), List.of());
 
-    assertThat(PhoenixMechanism.configure(robot, slide, motor, wiring(1), control()).notes())
-        .containsExactly("slide carriage has no mass: slide has no gravity seed, kG 0");
+    PhoenixMechanism.Settings atZero =
+        PhoenixMechanism.configure(robot, bare, motor, wiring(1), control().withKg(0.4));
+    PhoenixMechanism.Settings hanging =
+        PhoenixMechanism.configure(
+            robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(-90)));
+    PhoenixMechanism.Settings tipped =
+        PhoenixMechanism.configure(
+            robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(30)));
+
+    assertThat(atZero.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
+    assertThat(atZero.leader().Slot0.kG).isEqualTo(0.4);
+    assertThat(atZero.leader().Slot0.GravityArmPositionOffset).isZero();
+    assertThat(atZero.notes()).isEmpty();
+    assertThat(hanging.leader().Slot0.GravityArmPositionOffset)
+        .as("a quarter turn: Phoenix's limit, taken as given")
+        .isCloseTo(0.25, within(1e-12));
+    assertThat(hanging.notes()).as("a given angle doesn't move with CAD").isEmpty();
+    assertThat(tipped.leader().Slot0.GravityArmPositionOffset).isCloseTo(-1.0 / 12, within(1e-12));
   }
 
   /**
-   * A tuned kG on a joint gravity doesn't turn is refused: Arm_Cosine's offset would be a guess,
-   * and a turret's kG is nothing at all.
+   * The feedforward the robot works out itself is the slot's in volts: at rest at the angle where
+   * gravity pulls hardest, it holds with kG; moving, kS and kV too, and kD toward the speed.
    */
   @Test
-  void aTunedKgWhereGravityDoesntTurnTheJointIsRefused() {
-    MechanismControl tuned =
-        control(gains(0, 0, 0, 0, Optional.empty(), Optional.empty(), Optional.of(0.3)));
+  void theFeedforwardOnTheRobotIsTheSlotsInVolts() {
+    PhoenixMechanism.Feedforward feedforward =
+        new PhoenixMechanism.Feedforward(0.1, 2, 0, 0.5, true, 0, 1);
+    PhoenixMechanism.Settings arm =
+        PhoenixMechanism.configureFeedforwardOnRobot(
+            math, ARM, ARM_MOTORS, wiring(11, 12), control().withKg(0.3, Degrees.of(10)));
+
+    assertThat(feedforward.atPosition(0, 0, 0)).isCloseTo(0.5, within(1e-12));
+    assertThat(feedforward.atPosition(0.25, 0, 0)).as("straight up").isCloseTo(0, within(1e-12));
+    assertThat(feedforward.atPosition(0, 1, 0.5)).isCloseTo(0.1 + 2 + 0.5 + 0.5, within(1e-12));
+    assertThat(feedforward.atSpeed(0, -1)).isCloseTo(-0.1 - 2 + 0.5, within(1e-12));
+    assertThat(arm.feedforward())
+        .isEqualTo(
+            new PhoenixMechanism.Feedforward(
+                arm.leader().Slot0.kS,
+                arm.leader().Slot0.kV,
+                arm.leader().Slot0.kA,
+                0.3,
+                true,
+                -10.0 / 360,
+                arm.leader().Slot0.kD));
+    assertThat(arm.kP()).isEqualTo(arm.leader().Slot0.kP);
+  }
+
+  /** A gravity angle given wins over where the links' mass puts the arm's weight. */
+  @Test
+  void aGivenGravityAngleWinsOverTheMasses() {
+    PhoenixMechanism.Settings arm =
+        PhoenixMechanism.configure(
+            math, ARM, ARM_MOTORS, wiring(11, 12), control().withKg(0.3, Degrees.of(10)));
+
+    assertThat(math.gravityOffset(ARM)).as("its mass on its zero").isCloseTo(0, within(1e-12));
+    assertThat(arm.leader().Slot0.GravityArmPositionOffset).isCloseTo(-10.0 / 360, within(1e-12));
+    assertThat(arm.leader().Slot0.kG).isEqualTo(0.3);
+  }
+
+  /** A gravity angle more than a quarter turn from the zero is past Phoenix's offset. */
+  @Test
+  void aGravityAnglePastPhoenixsOffsetIsRefusedWithTheTurnedAngle() {
+    Joint.Revolute bare = bareArm();
+    Drive motor = JointFixtures.motors(bare, Motor.KRAKEN_X60, 1, gearing(40));
+    RobotMath robot = RobotMath.of(BODY, List.of(bare), List.of(), List.of(motor), List.of());
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(math, TURRET, TURRET_MOTOR, wiring(50), tuned))
+        .isThrownBy(
+            () ->
+                PhoenixMechanism.configure(
+                    robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(120))))
         .withMessage(
-            "turret has a tuned kG of 0.3 V, but gravity doesn't turn it in the definition (turret"
-                + " plate has no mass): Phoenix's Arm_Cosine needs where its weight sits, which"
-                + " only its mass gives");
+            "bare arm's gravity angle, 120.0°, is more than a quarter turn from its zero, past"
+                + " Phoenix's gravity offset of ±0.25 rotations: its positive direction lowers it"
+                + " at its zero. Turn its axis around in the definition (and its motors' and"
+                + " encoder's directions in the wiring), so that positive raises it; its gravity"
+                + " angle is then 60.0°");
+    assertThat(
+            PhoenixMechanism.configure(
+                    robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(270)))
+                .leader()
+                .Slot0
+                .GravityArmPositionOffset)
+        .as("270° is -90°")
+        .isCloseTo(0.25, within(1e-12));
+  }
+
+  /** An unweighed carriage has no gravity seed; tuned, its kG holds it all along. */
+  @Test
+  void anUnweighedCarriageTakesItsTunedKg() {
+    Joint.Prismatic slide = slide("slide", Vector3.UP);
+    Drive motor = JointFixtures.motors(slide, Motor.KRAKEN_X60, 1, gearing(5), Meters.of(0.02));
+    RobotMath robot = RobotMath.of(BODY, List.of(slide), List.of(), List.of(motor), List.of());
+    PhoenixMechanism.Settings seeded =
+        PhoenixMechanism.configure(robot, slide, motor, wiring(1), control());
+    PhoenixMechanism.Settings tuned =
+        PhoenixMechanism.configure(robot, slide, motor, wiring(1), control().withKg(0.5));
+
+    assertThat(seeded.leader().Slot0.kG).isZero();
+    assertThat(seeded.notes()).isEmpty();
+    assertThat(tuned.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Elevator_Static);
+    assertThat(tuned.leader().Slot0.kG).isEqualTo(0.5);
+    assertThat(tuned.notes()).isEmpty();
+  }
+
+  /**
+   * A tuned kG on a joint gravity can't move is refused, whatever it carries: a turret's would turn
+   * it, and a level slide's would push it.
+   */
+  @Test
+  void aTunedKgWhereGravityCantMoveTheJointIsRefused() {
+    Joint.Prismatic level = slide("hopper", new Vector3(1, 0, 0));
+    Drive motor = JointFixtures.motors(level, Motor.KRAKEN_X60, 1, gearing(5), Meters.of(0.02));
+    RobotMath robot = RobotMath.of(BODY, List.of(level), List.of(), List.of(motor), List.of());
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                PhoenixMechanism.configure(
+                    math, TURRET, TURRET_MOTOR, wiring(50), control().withKg(0.3)))
+        .withMessage(
+            "turret has a tuned kG of 0.3 V, but gravity can't move it: it turns about the"
+                + " vertical. Leave its kG out, or write 0");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> PhoenixMechanism.configure(robot, level, motor, wiring(1), control().withKg(0.3)))
+        .withMessage(
+            "hopper has a tuned kG of 0.3 V, but gravity can't move it: it slides level. Leave its"
+                + " kG out, or write 0");
+    assertThat(
+            PhoenixMechanism.configure(math, TURRET, TURRET_MOTOR, wiring(50), control().withKg(0))
+                .leader()
+                .Slot0
+                .kG)
+        .as("0 written is fine")
+        .isZero();
   }
 
   @Test
@@ -883,7 +987,7 @@ class PhoenixMechanismTest {
             .label("arm quadrature")
             .terms(List.of(term(ARM, 1)))
             .absolute(false)
-            .countsPerTurn(2048)
+            .countsPerTurn(Optional.of(2048))
             .build();
     MechanismWiring wired = wiring(cancoder(MechanismWiring.Feedback.REMOTE), 11, 12);
 
@@ -1023,7 +1127,7 @@ class PhoenixMechanismTest {
         .label(label)
         .terms(List.of(term(joint, ratio)))
         .absolute(true)
-        .countsPerTurn(4096)
+        .countsPerTurn(Optional.of(4096))
         .build();
   }
 
@@ -1037,6 +1141,34 @@ class PhoenixMechanismTest {
                 .terms(List.of(term(PITCH, pitch), term(ROLL, roll)))
                 .efficiency(1)
                 .build())
+        .build();
+  }
+
+  /** An arm on a level parent, unweighed: its zero points forward, raised as it grows. */
+  private static Joint.Revolute bareArm() {
+    return revolute(
+        "bare arm",
+        Part.CHASSIS,
+        new Translation3d(0, 0, 0.5),
+        RAISE,
+        Optional.of(Range.degrees(0, 90)),
+        0,
+        unseen("bare link"));
+  }
+
+  /** A slide along an axis, unweighed, half a meter long. */
+  private static Joint.Prismatic slide(String label, Vector3 axis) {
+    return Joint.Prismatic.builder()
+        .label(label)
+        .parent(Part.CHASSIS)
+        .origin(Transform3d.ZERO)
+        .axis(axis)
+        .range(Optional.of(Range.meters(0, 0.5)))
+        .reference(0)
+        .link(unseen(label + " carriage"))
+        .positions(List.of())
+        .outputs(List.of())
+        .driven(Driven.NONE)
         .build();
   }
 
@@ -1092,6 +1224,7 @@ class PhoenixMechanismTest {
         .kV(kV)
         .kA(kA)
         .kG(kG)
+        .gravityAngle(Optional.empty())
         .build();
   }
 

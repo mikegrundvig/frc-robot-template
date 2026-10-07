@@ -176,7 +176,7 @@ final class ModuleIOSim implements ModuleIO {
     steerSim =
         new CurrentLimitedMotorSim(
             modules.steerMotors().model(modules.steerGearing().efficiency()),
-            modules.steerInertia().in(KilogramSquareMeters),
+            modules.steerInertiaOrDefault().in(KilogramSquareMeters),
             modules.steerGearing().ratio());
     this.steerOffsetRadians = steerOffsetRadians;
     builtSteerOffsetRadians = steerOffsetRadians;

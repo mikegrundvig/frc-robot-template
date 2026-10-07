@@ -624,12 +624,33 @@ public final class RobotContainer implements AutoCloseable {
   /**
    * What's doubtful or unknown in the robot's definition: allowed, but said once at startup, in the
    * log ({@code Robot/DefinitionDoubts}) and, on a robot, on the Driver Station's console, so
-   * nobody has to run a test to read it.
+   * nobody has to run a test to read it. What only the simulator reads, a link's mass, is said only
+   * when it simulates ({@code Robot/SimulatorNotes}).
    */
   private static void reportDoubts(RobotDefinition definition, Constants.Mode mode) {
+    List<String> doubts = doubts(definition);
+    Logger.recordOutput("Robot/DefinitionDoubts", doubts.toArray(String[]::new));
+    if (mode == Constants.Mode.SIM) {
+      Logger.recordOutput(
+          "Robot/SimulatorNotes", simulatorNotes(definition).toArray(String[]::new));
+    }
+    if (mode == Constants.Mode.REAL) {
+      for (String doubt : doubts) {
+        DriverStationErrors.reportWarning(definition.name() + ": " + doubt, false);
+      }
+    }
+  }
+
+  /**
+   * The definition's doubts the robot says wherever it runs: its notes, what it doesn't know that
+   * the robot's code reads, and the configurations it can't run.
+   */
+  static List<String> doubts(RobotDefinition definition) {
     List<String> doubts = new ArrayList<>(definition.notes());
     for (RobotDefinition.Missing missing : definition.missing()) {
-      doubts.add("not known: " + missing);
+      if (missing.scope() == RobotDefinition.Missing.Scope.ROBOT) {
+        doubts.add("not known: " + missing);
+      }
     }
     for (Configuration configuration : definition.configurations()) {
       String cantRun = Joints.cantRun(definition, configuration);
@@ -637,12 +658,20 @@ public final class RobotContainer implements AutoCloseable {
         doubts.add(cantRun);
       }
     }
-    Logger.recordOutput("Robot/DefinitionDoubts", doubts.toArray(String[]::new));
-    if (mode == Constants.Mode.REAL) {
-      for (String doubt : doubts) {
-        DriverStationErrors.reportWarning(definition.name() + ": " + doubt, false);
+    return doubts;
+  }
+
+  /**
+   * What the definition doesn't know that only the simulator reads: said only when it simulates.
+   */
+  static List<String> simulatorNotes(RobotDefinition definition) {
+    List<String> notes = new ArrayList<>();
+    for (RobotDefinition.Missing missing : definition.missing()) {
+      if (missing.scope() == RobotDefinition.Missing.Scope.SIMULATOR) {
+        notes.add("simulator: " + missing);
       }
     }
+    return notes;
   }
 
   /**

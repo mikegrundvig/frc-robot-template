@@ -2,6 +2,7 @@ package frc.robot.lib.phoenix;
 
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.Seconds;
 
@@ -26,7 +27,6 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.ReverseLimitSourceValue;
 import com.ctre.phoenix6.signals.ReverseLimitTypeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
-import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Drive;
@@ -48,7 +48,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.units.measure.Angle;
 
 /**
  * A mechanism's Phoenix 6 settings, from what it is (the robot's definition), how it's wired, and
@@ -64,7 +64,8 @@ import org.wpilib.math.geometry.Translation3d;
  * a cruise, a soft limit or a gravity offset Phoenix can't hold or the mechanism can't reach.
  * What's doubtful is noted, beside the settings ({@link Settings#notes}): a tuned gain far from
  * what the definition derives, an encoder wrapping close to the joint's range, a gravity one cosine
- * fits badly, a definition that can't seed what Phoenix needs.
+ * fits badly. A joint with no kG written is the definition's doubt ({@code
+ * RobotDefinition.missing}), not noted here.
  */
 public final class PhoenixMechanism {
   private PhoenixMechanism() {}
@@ -152,6 +153,69 @@ public final class PhoenixMechanism {
       followers = List.copyOf(followers);
       notes = List.copyOf(notes);
     }
+
+    /** The slot's kP: volts per rotation of error ({@link PhoenixUnits}). */
+    public double kP() {
+      return leader.Slot0.kP;
+    }
+
+    /**
+     * The slot's feedforward and kD, as the robot works them out each loop where Phoenix's slot
+     * doesn't run them. Settings worked out with the feedforward on the robot ({@link
+     * #configureFeedforwardOnRobot}) give an arm's gravity offset as it is.
+     */
+    public Feedforward feedforward() {
+      SlotConfigs slot = SlotConfigs.from(leader.Slot0);
+      return new Feedforward(
+          slot.kS,
+          slot.kV,
+          slot.kA,
+          slot.kG,
+          slot.GravityType == GravityTypeValue.Arm_Cosine,
+          slot.GravityArmPositionOffset,
+          slot.kD);
+    }
+  }
+
+  /**
+   * What the robot works out each loop in volts and sends with its request, where the motor
+   * controller's own slot doesn't: beside a SPARK's loop ({@code RevMechanism}), and in a loop the
+   * robot closes itself on an encoder it reads. The slot's feedforward and kD, in the mechanism's
+   * rotations ({@link PhoenixUnits}), as Phoenix's slot holds them.
+   *
+   * @param kS volts to overcome friction, in the direction of travel
+   * @param kV volts per rotation a second
+   * @param kA volts per rotation a second squared: in the program's own feedforward, as on a
+   *     TalonFX, and so unused here
+   * @param kG volts to hold against gravity: always, for an elevator, or at the arm's angle
+   * @param arm whether gravity turns with the joint, as an arm's does
+   * @param armOffset what's added to the position for its angle to gravity, in rotations
+   * @param kD volts per rotation a second of speed error
+   */
+  public record Feedforward(
+      double kS, double kV, double kA, double kG, boolean arm, double armOffset, double kD) {
+    /**
+     * Volts to follow a profile's point: friction, speed, gravity, and damping toward its speed.
+     *
+     * @param position where the profile is, in the mechanism's rotations
+     * @param velocity how fast it moves there, in rotations a second
+     * @param measured how fast the mechanism moves now, in rotations a second
+     */
+    public double atPosition(double position, double velocity, double measured) {
+      return kS * Math.signum(velocity)
+          + kV * velocity
+          + gravity(position)
+          + kD * (velocity - measured);
+    }
+
+    /** Volts to run at a speed: friction, speed and gravity; the loop's kP closes the rest. */
+    public double atSpeed(double position, double velocity) {
+      return kS * Math.signum(velocity) + kV * velocity + gravity(position);
+    }
+
+    private double gravity(double position) {
+      return arm ? kG * Math.cos(2 * Math.PI * (position + armOffset)) : kG;
+    }
   }
 
   /**
@@ -181,7 +245,24 @@ public final class PhoenixMechanism {
           joint.label()
               + "'s wiring names a CANcoder: give the definition's encoder it is, or wire none");
     }
-    return build(math, joint, drive, null, wiring, control);
+    return build(math, joint, drive, null, wiring, control, true);
+  }
+
+  /**
+   * The same settings for a motor controller whose feedforward the robot works out each loop and
+   * sends with its request, as a SPARK's is ({@code RevMechanism}): an arm's gravity offset is its
+   * own, not held to the ±0.25 rotations only Phoenix's onboard gravity can take.
+   *
+   * @throws IllegalArgumentException as the other does, but for the gravity offset
+   */
+  public static Settings configureFeedforwardOnRobot(
+      RobotMath math, Joint joint, Drive drive, MechanismWiring wiring, MechanismControl control) {
+    if (wiring.cancoder().isPresent()) {
+      throw new IllegalArgumentException(
+          joint.label()
+              + "'s wiring names a CANcoder: give the definition's encoder it is, or wire none");
+    }
+    return build(math, joint, drive, null, wiring, control, false);
   }
 
   /**
@@ -202,7 +283,7 @@ public final class PhoenixMechanism {
       throw new IllegalArgumentException(
           joint.label() + "'s wiring names no CANcoder for " + cancoder.label() + ": wire it");
     }
-    return build(math, joint, drive, cancoder, wiring, control);
+    return build(math, joint, drive, cancoder, wiring, control, true);
   }
 
   /** The TalonFXS's motor arrangement for each catalog motor it drives, by its JST connector. */
@@ -375,7 +456,8 @@ public final class PhoenixMechanism {
       Drive drive,
       Sensor.@Nullable Encoder encoder,
       MechanismWiring wiring,
-      MechanismControl control) {
+      MechanismControl control,
+      boolean onboardGravity) {
     List<String> notes = new ArrayList<>();
     if (!(drive.actuator() instanceof Actuator.Motors motors)) {
       throw new IllegalArgumentException(drive.label() + " isn't motors: Phoenix drives motors");
@@ -448,7 +530,8 @@ public final class PhoenixMechanism {
         }
       }
     }
-    leader.Slot0 = Slot0Configs.from(slot(math, units, control.gains(), rotorRatio, notes));
+    leader.Slot0 =
+        Slot0Configs.from(slot(math, units, control.gains(), rotorRatio, onboardGravity, notes));
     // A joint that turns freely takes the short way round to a position, a turn being a turn.
     leader.ClosedLoopGeneral.ContinuousWrap =
         joint instanceof Joint.Revolute && joint.range().isEmpty();
@@ -546,6 +629,7 @@ public final class PhoenixMechanism {
       PhoenixUnits units,
       MechanismControl.Gains gains,
       double rotorRatio,
+      boolean onboardGravity,
       List<String> notes) {
     Joint joint = units.joint();
     RobotMath.Gains seed = math.idealGains(joint);
@@ -563,56 +647,54 @@ public final class PhoenixMechanism {
     }
     slot.kV = units.gainToPhoenix(kV);
     slot.kA = units.gainToPhoenix(gains.kA().orElse(seed.kA()));
-    gravity(math, units, gains.kG(), seed.kG(), slot, notes);
+    gravity(math, units, gains, seed.kG(), onboardGravity, slot, notes);
     return slot;
   }
 
-  /** Gravity's type, offset and kG in a slot. */
+  /**
+   * Gravity's type, offset and kG in a slot: the tuned kG where given, else the definition's seed
+   * from its links' mass, 0 without it. An arm's weight pulls hardest where its control says
+   * ({@code gravityAngle}), else where its links' mass puts it, else at its zero. Phoenix's onboard
+   * gravity takes an offset within ±0.25 rotations; worked out on the robot, any offset.
+   */
   private static void gravity(
       RobotMath math,
       PhoenixUnits units,
-      Optional<Double> tuned,
+      MechanismControl.Gains gains,
       double seed,
+      boolean onboardGravity,
       SlotConfigs slot,
       List<String> notes) {
     Joint joint = units.joint();
-    boolean massless = joint.link().mass().isMassless();
+    Optional<Double> tuned = gains.kG();
+    if (!math.gravityActsOn(joint)) {
+      if (tuned.isPresent() && tuned.get() != 0) {
+        throw new IllegalArgumentException(
+            String.format(
+                Locale.ROOT,
+                "%s has a tuned kG of %s V, but gravity can't move it: it %s. Leave its kG out, or"
+                    + " write 0",
+                joint.label(),
+                shown(tuned.get()),
+                joint instanceof Joint.Revolute ? "turns about the vertical" : "slides level"));
+      }
+      return;
+    }
+    double kG = tuned.orElse(seed);
     if (joint instanceof Joint.Revolute) {
-      RobotMath.GravityFit fit = math.gravityFit(joint);
-      if (fit.peak() == 0) {
-        if (tuned.isPresent() && tuned.get() != 0) {
-          throw new IllegalArgumentException(
-              String.format(
-                  Locale.ROOT,
-                  "%s has a tuned kG of %s V, but gravity doesn't turn it in the definition (%s):"
-                      + " Phoenix's Arm_Cosine needs where its weight sits, which only its mass"
-                      + " gives",
-                  joint.label(),
-                  shown(tuned.get()),
-                  massless
-                      ? joint.link().label() + " has no mass"
-                      : "its weight sits on its axis, or it turns about the vertical"));
-        }
-        if (massless && weighs(math, joint)) {
-          notes.add(
-              joint.link().label()
-                  + " has no mass: "
-                  + joint.label()
-                  + " has no gravity seed, kG 0, and no offset for Phoenix's Arm_Cosine");
-        }
-        return;
-      }
-      double offset = fit.offset() / (2 * Math.PI);
       slot.GravityType = GravityTypeValue.Arm_Cosine;
-      slot.GravityArmPositionOffset = gravityOffset(joint, offset, notes);
-      double kG = tuned.orElse(seed);
-      slot.kG = volts(joint, "kG", kG);
-      if (tuned.isPresent()) {
-        String far = farFromIdeal(units, "kG", kG, seed, 0);
-        if (far != null) {
-          notes.add(far);
-        }
-      }
+      double angle = gains.gravityAngle().map(given -> given.in(Radians)).orElse(Double.NaN);
+      double offset =
+          gains.gravityAngle().isPresent()
+              ? -Math.IEEEremainder(angle, 2 * Math.PI) / (2 * Math.PI)
+              : math.gravityOffset(joint) / (2 * Math.PI);
+      slot.GravityArmPositionOffset =
+          !onboardGravity
+              ? offset
+              : gains.gravityAngle().isPresent()
+                  ? givenOffset(joint, gains.gravityAngle().get())
+                  : gravityOffset(joint, offset, notes);
+      RobotMath.GravityFit fit = math.gravityFit(joint);
       if (fit.misfit() > MISFIT) {
         notes.add(
             String.format(
@@ -625,22 +707,17 @@ public final class PhoenixMechanism {
                 shownJoint(joint, fit.worstAt())));
       }
     } else {
-      double kG = tuned.orElse(seed);
       slot.GravityType = GravityTypeValue.Elevator_Static;
-      slot.kG = volts(joint, "kG", kG);
-      if (seed == 0 && massless && tuned.isEmpty() && weighs(math, joint)) {
-        notes.add(
-            joint.link().label() + " has no mass: " + joint.label() + " has no gravity seed, kG 0");
+    }
+    slot.kG = volts(joint, "kG", kG);
+    if (tuned.isPresent()) {
+      String far = farFromIdeal(units, "kG", kG, seed, 0);
+      if (far != null) {
+        notes.add(far);
       }
-      if (tuned.isPresent() && seed != 0) {
-        String far = farFromIdeal(units, "kG", kG, seed, 0);
-        if (far != null) {
-          notes.add(far);
-        }
-      }
-      if (kG == 0) {
-        return;
-      }
+    }
+    if (kG == 0) {
+      return;
     }
     Joint tilting = tilting(math, joint);
     if (tilting != null) {
@@ -654,6 +731,29 @@ public final class PhoenixMechanism {
               tilting.label(),
               tilting.label()));
     }
+  }
+
+  /**
+   * Phoenix's {@code GravityArmPositionOffset} for an arm's gravity angle as its control gives it:
+   * refused more than a quarter turn from its zero, where Phoenix can't take it.
+   */
+  private static double givenOffset(Joint joint, Angle gravityAngle) {
+    double angle = Math.IEEEremainder(gravityAngle.in(Radians), 2 * Math.PI);
+    double offset = -angle / (2 * Math.PI);
+    if (Math.abs(offset) > MAX_GRAVITY_OFFSET + 1e-9) {
+      throw new IllegalArgumentException(
+          String.format(
+              Locale.ROOT,
+              "%s's gravity angle, %s, is more than a quarter turn from its zero, past Phoenix's"
+                  + " gravity offset of ±0.25 rotations: its positive direction lowers it at its"
+                  + " zero. Turn its axis around in the definition (and its motors' and encoder's"
+                  + " directions in the wiring), so that positive raises it; its gravity angle is"
+                  + " then %s",
+              joint.label(),
+              shownDegrees(angle),
+              shownDegrees(Math.IEEEremainder(Math.PI - angle, 2 * Math.PI))));
+    }
+    return Math.max(-MAX_GRAVITY_OFFSET, Math.min(MAX_GRAVITY_OFFSET, offset));
   }
 
   /**
@@ -869,30 +969,13 @@ public final class PhoenixMechanism {
   }
 
   /**
-   * Whether gravity would move the joint once its link is weighed, so a link without mass leaves a
-   * seed missing: an arm with stops about an axis that isn't vertical, or a slide that isn't level.
-   * Not a roller, a wheel or a flywheel, which turn freely and balanced, nor a turret.
-   */
-  private static boolean weighs(RobotMath math, Joint joint) {
-    double up = Math.abs(robotAxis(math, joint).getZ());
-    return joint instanceof Joint.Revolute ? joint.range().isPresent() && up < 1 - 1e-9 : up > 1e-9;
-  }
-
-  /** A joint's axis, a unit vector in the robot's frame, the joints at their references. */
-  private static Translation3d robotAxis(RobotMath math, Joint joint) {
-    Vector3 axis = joint.axis().unit();
-    return new Translation3d(axis.x(), axis.y(), axis.z())
-        .rotateBy(math.pose(joint, Map.of()).getRotation());
-  }
-
-  /**
    * The first joint above this one whose turning tilts gravity at it: a revolute joint about an
    * axis that isn't vertical, with the joints at their references. Null when none does.
    */
   private static @Nullable Joint tilting(RobotMath math, Joint joint) {
     Part up = joint.parent();
     while (up instanceof Joint parent) {
-      if (parent instanceof Joint.Revolute && Math.abs(robotAxis(math, parent).getZ()) < 1 - 1e-9) {
+      if (parent instanceof Joint.Revolute && math.gravityActsOn(parent)) {
         return parent;
       }
       up = parent.parent();

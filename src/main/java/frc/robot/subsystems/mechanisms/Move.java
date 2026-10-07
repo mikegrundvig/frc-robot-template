@@ -83,12 +83,21 @@ public final class Move implements Command {
   /** {@code runUntil}'s default deadline, in seconds. */
   static final double RUN_UNTIL_SECONDS = 3;
 
-  /** One joint's part in a move: a position to go to, or an output to run at. */
+  /**
+   * One joint's part in a move: a position to go to, or an output to run at. A position with no
+   * name is a computed one, which a turret takes as a heading.
+   */
   private static final class Leg {
     final JointMechanism joint;
     final @Nullable Output output;
     final double position;
     final @Nullable String name;
+
+    /**
+     * Where its latest run sends the joint: its position, or for a computed angle on a turret, the
+     * turn of it chosen as the run starts ({@link JointMechanism#turnNear}).
+     */
+    double target;
 
     /** When the joint last came inside its band, in nanoseconds: -1 while it's outside. */
     long insideSince = -1;
@@ -98,6 +107,7 @@ public final class Move implements Command {
       this.output = output;
       this.position = position;
       this.name = name;
+      target = position;
     }
 
     Leg copy() {
@@ -487,13 +497,19 @@ public final class Move implements Command {
     double seconds = Double.NaN;
     for (Leg leg : legs) {
       leg.insideSince = -1;
+      // A named position is exact: a team named that very angle. A computed one, on a turret, is
+      // the turn of it nearest where the joint is now.
+      leg.target =
+          kind == Kind.GO_TO && leg.output == null && leg.name == null
+              ? leg.joint.turnNear(leg.position, leg.joint.position())
+              : leg.position;
       if (leg.output == null) {
         leg.joint.beginMove();
       }
       if (kind == Kind.GO_TO) {
         double leg_ =
             leg.output == null
-                ? leg.joint.secondsTo(leg.position, plan.fraction())
+                ? leg.joint.secondsTo(leg.target, plan.fraction())
                 : leg.output.kind() == Output.Kind.VELOCITY ? leg.joint.secondsToSpeed() : 0;
         seconds = Double.isNaN(seconds) ? leg_ : Math.max(seconds, leg_);
       }
@@ -573,7 +589,7 @@ public final class Move implements Command {
         if (output != null) {
           joint.askOutput(output);
         } else {
-          joint.askPosition(leg.position, plan.fraction(), leg.name);
+          joint.askPosition(leg.target, plan.fraction(), leg.name);
         }
       }
       case HOLD -> joint.askPosition(held, 1, null);
@@ -581,7 +597,7 @@ public final class Move implements Command {
         Supplier<? extends Measure<?>> chased = plan.target();
         Measure<?> wanted = chased == null ? null : chased.get();
         if (wanted != null && joint.isPosition(wanted)) {
-          joint.askPosition(joint.clamp(wanted.baseUnitMagnitude()), 1, null);
+          joint.askPosition(joint.reachable(wanted.baseUnitMagnitude()), 1, null);
         } else if (wanted != null && joint.isSpeed(wanted)) {
           joint.askVelocity(wanted.baseUnitMagnitude());
         } else {
@@ -609,7 +625,7 @@ public final class Move implements Command {
       Output output = leg.output;
       boolean inside =
           output == null
-              ? leg.joint.settledAt(leg.position)
+              ? leg.joint.settledAt(leg.target)
               : output.kind() != Output.Kind.VELOCITY || leg.joint.atSpeed(output.value());
       if (!inside) {
         leg.insideSince = -1;
@@ -675,7 +691,7 @@ public final class Move implements Command {
     reason = text.toString();
     for (Leg leg : legs) {
       if (started && leg.output == null && kind != Kind.HOME) {
-        leg.joint.moveEnded(how == Outcome.ARRIVED && kind == Kind.GO_TO, leg.position);
+        leg.joint.moveEnded(how == Outcome.ARRIVED && kind == Kind.GO_TO, leg.target);
       }
       leg.joint.recordOutcome(reason);
     }

@@ -29,6 +29,7 @@ import com.michaelgrundvig.frc.world.robot.Sensor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Translation3d;
 
@@ -176,7 +177,8 @@ class JointSetupTest {
 
   /**
    * A joint held at positions by its absolute encoder needs no homing recipe when its wiring reads
-   * the encoder, through a CANcoder or a SPARK's data port. A TalonFX has no data port.
+   * the encoder, through a CANcoder or a SPARK's data port, its loop closing on the encoder or not.
+   * A TalonFX has no data port.
    */
   @Test
   void anEncoderOnADataPortHomesAJointAndATalonFxHasNone() {
@@ -192,7 +194,11 @@ class JointSetupTest {
             .build();
     MechanismControl unhomed = MechanismControl.position(30);
     MechanismWiring.DataPortEncoder port =
-        MechanismWiring.DataPortEncoder.builder().offset(Rotations.of(0)).reversed(false).build();
+        MechanismWiring.DataPortEncoder.builder()
+            .offset(Rotations.of(0))
+            .reversed(false)
+            .closedLoop(false)
+            .build();
     JointSetup onSpark =
         JointSetupBuilder.builder(wired(PIVOT, unhomed, MechanismWiring.Controller.SPARK_MAX, 23))
             .wiring(
@@ -212,15 +218,68 @@ class JointSetupTest {
                         .controller(MechanismWiring.Controller.TALON_FX)
                         .build()))
             .build();
+    JointSetup closedOnIt =
+        JointSetupBuilder.builder(onSpark)
+            .wiring(
+                Optional.of(
+                    MechanismWiringBuilder.builder(onSpark.wiring().orElseThrow())
+                        .dataPort(Optional.of(port.closesLoop()))
+                        .build()))
+            .build();
     List<JointSetup> setups = new ArrayList<>(SETUPS.subList(1, SETUPS.size()));
 
     setups.add(onSpark);
     assertThat(JointSetup.problems(withEncoder, setups)).isNull();
+    setups.set(setups.size() - 1, closedOnIt);
+    assertThat(JointSetup.problems(withEncoder, setups)).isNull();
+    setups.set(
+        setups.size() - 1,
+        JointSetupBuilder.builder(closedOnIt).control(SETUPS.getFirst().control()).build());
+    assertThat(JointSetup.problems(withEncoder, setups))
+        .as("its loop on the SPARK, as a port's on the robot, closes only without a recipe")
+        .isEqualTo(
+            "pivot's loop closes on its absolute encoder, which tells it where it is: drop its"
+                + " control's homing recipe");
     setups.set(setups.size() - 1, onTalon);
     assertThat(JointSetup.problems(withEncoder, setups))
         .isEqualTo(
             "pivot's wiring names an encoder on its controller's data port, and a TalonFX has"
                 + " none: wire it as a CANcoder");
+  }
+
+  /**
+   * A joint's loop closes on its absolute encoder only where the encoder tells it where it is
+   * across its whole range: one held at positions, without a homing recipe, whose range one of the
+   * encoder's turns holds, which the definition checks. A roller, a recipe and a joint that turns
+   * freely are each refused, saying why.
+   */
+  @Test
+  void aLoopClosesOnAnEncoderOnlyWhereItTellsTheWholeRange() {
+    MechanismWiring.PortEncoder closing = MechanismWiring.PortEncoder.dutyCycle(1).closesLoop();
+    MechanismControl unhomed = control(30, 1, profile(8, 30));
+    Joint.Revolute pivot = PIVOT.absoluteEncoder(closing).control(unhomed);
+
+    assertThat(problems(pivot)).isNull();
+    assertThat(problems(PIVOT.absoluteEncoder(closing)))
+        .isEqualTo(
+            "pivot's loop closes on its absolute encoder, which tells it where it is: drop its"
+                + " control's homing recipe");
+    assertThat(problems(JointFixtures.ROLLER.absoluteEncoder(closing)))
+        .isEqualTo(
+            "roller only runs at outputs, so its loop has no position to close on its absolute"
+                + " encoder");
+    assertThat(problems(JointFixtures.TURRET.absoluteEncoder(closing).control(unhomed)))
+        .isEqualTo(
+            "turret turns freely, and its absolute encoder's reading wraps each turn: its loop"
+                + " can't close on it yet, so let the encoder tell its motor where it is instead");
+  }
+
+  /**
+   * What's wrong with the fixtures' robot with a joint changed, each joint set up from its block.
+   */
+  private static @Nullable String problems(Joint changed) {
+    RobotDefinition robot = ROBOT.with(changed);
+    return JointSetup.problems(robot, JointSetup.all(robot));
   }
 
   private static JointSetup wired(

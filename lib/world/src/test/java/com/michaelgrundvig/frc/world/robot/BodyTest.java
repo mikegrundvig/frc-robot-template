@@ -11,6 +11,7 @@ import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Pounds;
 
 import com.michaelgrundvig.frc.world.physical.Inertia;
+import java.util.Optional;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Translation3d;
@@ -147,9 +148,24 @@ class BodyTest {
 
   @Test
   void centerOfGravityMustBeInsideTheFrameAndBelowTheTop() {
-    assertRejected("cg", () -> change().cg(new Translation3d(0, 0, 0.8)).build());
-    assertRejected("cg", () -> change().cg(new Translation3d(0.4, 0, 0.2)).build());
-    assertRejected("cg", () -> change().cg(new Translation3d(0, 0, 0)).build());
+    assertRejected("cg", () -> change().cg(Optional.of(new Translation3d(0, 0, 0.8))).build());
+    assertRejected("cg", () -> change().cg(Optional.of(new Translation3d(0.4, 0, 0.2))).build());
+    assertRejected("cg", () -> change().cg(Optional.of(new Translation3d(0, 0, 0))).build());
+  }
+
+  /**
+   * A center of mass nobody gave is the frame's center, a third of the robot's height up: inside
+   * any body, so it's never refused, and what its mass properties and height read.
+   */
+  @Test
+  void aCenterOfMassNotGivenIsTheFramesCenterAThirdOfItsHeightUp() {
+    Body body = change().cg(Optional.empty()).build(); // 30 in tall
+
+    assertThat(body.cg()).isEmpty();
+    assertThat(body.cgOrDefault()).isEqualTo(new Translation3d(0, 0, Inches.of(10).in(Meters)));
+    assertThat(body.cgHeight().in(Inches)).isCloseTo(10, within(1e-9));
+    assertThat(body.massProperties().cg()).isEqualTo(body.cgOrDefault());
+    assertThat(body().cgOrDefault()).as("as given").isEqualTo(new Translation3d(0, 0, 0.2));
   }
 
   @Test

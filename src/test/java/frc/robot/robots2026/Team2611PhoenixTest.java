@@ -162,7 +162,7 @@ class Team2611PhoenixTest {
 
   /**
    * The pivot as 2611 drives it: a Kraken X60 turning clockwise to swing it out (Pivot.java:30-32),
-   * braking; its arm unweighed, so no gravity seed, which the helper says.
+   * braking; its arm unweighed and its kG not written, as 2611's has none: kG 0, about its zero.
    */
   @Test
   void thePivotHasNoGravitySeedUnweighed() {
@@ -172,10 +172,7 @@ class Team2611PhoenixTest {
 
     assertThat(pivot.leader().MotorOutput.Inverted).isEqualTo(InvertedValue.Clockwise_Positive);
     assertThat(pivot.leader().Slot0.kG).isZero();
-    assertThat(pivot.notes())
-        .containsExactly(
-            "intake arm has no mass: pivot has no gravity seed, kG 0, and no offset for Phoenix's"
-                + " Arm_Cosine");
+    assertThat(pivot.notes()).isEmpty();
   }
 
   /**

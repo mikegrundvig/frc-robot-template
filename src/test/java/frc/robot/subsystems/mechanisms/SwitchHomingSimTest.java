@@ -18,6 +18,7 @@ import frc.robot.RobotSim;
 import frc.robot.sim.JointsSimHarness;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -73,7 +74,7 @@ class SwitchHomingSimTest {
                 Homing.ToSwitch.builder()
                     .end(Homing.Stop.LOWER)
                     .volts(1)
-                    .timeout(Seconds.of(5))
+                    .timeout(Optional.of(Seconds.of(5)))
                     .build())));
     JointsSimHarness turretSim = new JointsSimHarness(TURRET_ROBOT, setups);
     JointMechanism turret = turretSim.joints.of(TURRET);
@@ -106,17 +107,23 @@ class SwitchHomingSimTest {
         .isCloseTo(degrees(sim.simulation.position(PIVOT)), within(2.2));
   }
 
-  /** With its switch lost, homing never ends well: the joint's faulted, saying why. */
+  /**
+   * With its switch lost, homing never ends well: the joint's faulted, saying why, once the time
+   * worked out from its travel has passed, and saying that time: twice the 0.56 s its model crosses
+   * its 135° in at 2 V, and half a second more, 1.625 s from its first loop.
+   */
   @Test
   void aLostSwitchFaultsItsHoming() {
     sim.simulation.powerOnAt(PIVOT, Math.toRadians(40));
     sim.sensors.silence(PIVOT_DOWN, true);
 
-    sim.run(3.5);
+    double took = sim.runUntil(() -> pivot.state() == JointMechanism.State.FAULTED, 3);
 
-    assertThat(pivot.state()).isEqualTo(JointMechanism.State.FAULTED);
+    assertThat(took).as("the first loop past 1.625 s from the first").isCloseTo(1.66, within(1e-9));
     assertThat(pivot.fault())
-        .isEqualTo("pivot's homing didn't trip pivot down in 3.0 s: pivot down is lost");
+        .isEqualTo(
+            "pivot's homing didn't trip pivot down in 1.6 s (its travel takes 0.6 s at 2.0 V):"
+                + " pivot down is lost");
   }
 
   /** A joint homed to a switch it hasn't, or one whose position isn't known, is refused. */

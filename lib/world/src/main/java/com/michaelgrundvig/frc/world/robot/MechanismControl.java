@@ -7,35 +7,68 @@ import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.MetersPerSecondPerSecond;
+import static org.wpilib.units.Units.Radians;
+import static org.wpilib.units.Units.RadiansPerSecond;
+import static org.wpilib.units.Units.RadiansPerSecondPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
+import org.wpilib.units.AngleUnit;
+import org.wpilib.units.AngularAccelerationUnit;
+import org.wpilib.units.AngularVelocityUnit;
+import org.wpilib.units.DistanceUnit;
+import org.wpilib.units.LinearAccelerationUnit;
+import org.wpilib.units.LinearVelocityUnit;
+import org.wpilib.units.Measure;
+import org.wpilib.units.PerUnit;
+import org.wpilib.units.Unit;
+import org.wpilib.units.VoltageUnit;
 import org.wpilib.units.measure.Angle;
+import org.wpilib.units.measure.AngularAcceleration;
+import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
+import org.wpilib.units.measure.Distance;
+import org.wpilib.units.measure.LinearAcceleration;
+import org.wpilib.units.measure.LinearVelocity;
 import org.wpilib.units.measure.Time;
 
 /**
- * How one mechanism is driven: its gains, its soft limits, its motion profile, its current limits,
- * and what it does when told nothing. What the mechanism is (its gearing, its range, its masses) is
- * the robot's definition, which seeds the feedforward gains not given here; how it's wired is its
- * {@code MechanismWiring}. {@link PhoenixMechanism} turns the three into Phoenix's settings.
+ * How one joint is driven: its gains, its soft limits, its motion profile, its current limits, what
+ * it does when told nothing, and how it finds where it is. Its block gives it, beside its motors
+ * and their wiring ({@link Driven}): {@code .control(MechanismControl.position(30))}. What the
+ * joint is (its gearing, its range, its masses) seeds the feedforward gains not given here. The
+ * robot program turns the two into its motor controller's settings, a TalonFX's or a SPARK's.
  *
- * <p>Every value is in the joint's own units, as the definition's are: radians for a revolute
- * joint, meters for a prismatic one, and seconds. Phoenix's units differ ({@link PhoenixUnits});
- * the helper converts, so no gain is ever written per rotor turn or per degree here.
+ * <p>Every value is held in the joint's own units, as the definition's are: radians for a revolute
+ * joint, meters for a prismatic one, and seconds. A motor controller's units differ (Phoenix's
+ * rotations of its rotor or its sensor); the program converts. Each value is given with its unit
+ * where that reads better, and converted: a kP per turn of the joint as Phoenix's slot holds it
+ * ({@code position(Volts.per(Rotation).of(188))}), a profile in degrees per second, soft limits as
+ * a {@link Range}. A value given with its unit remembers whether it's an angle or a length, and the
+ * joint refuses one of the other kind. A plain number is in the joint's units: {@code position(30)}
+ * is 30 volts per radian on an arm, per meter on an elevator.
  *
  * @param gains the slot's feedback gains, and its feedforward gains where tuned
  * @param softLimits where the motor controller stops driving the joint, inside its hard stops;
  *     empty for none
- * @param profile Motion Magic's limits; empty for a mechanism that isn't profiled
+ * @param profile how fast its moves go, profiled on the robot; empty for a quarter of its free
+ *     speed
  * @param currentLimits its motors' current limits
  * @param neutralMode what its motors do when told nothing: hold (brake) or coast
  * @param bands how near a target the joint must come to be there, and how far it may then stray;
  *     empty for the template's: 2° and 4°, 1 cm and 2 cm, or 3% and 6% of a speed
  * @param homing how the joint finds where it is once the robot is on; empty for its absolute
  *     encoder, which the definition must have on it
+ * @param deadChannel when one of its motor controllers reads as drawing nothing on its PDH channel
+ *     while the joint works: a tripped breaker, unplugged power, or a channel its block names wrong
  */
 @ConfigRecord
 public record MechanismControl(
@@ -45,7 +78,8 @@ public record MechanismControl(
     CurrentLimits currentLimits,
     NeutralMode neutralMode,
     Optional<Bands> bands,
-    Optional<Homing> homing) {
+    Optional<Homing> homing,
+    DeadChannel deadChannel) {
   /** Starts describing how a mechanism is driven, one named value at a time. */
   public static MechanismControlBuilder.GainsStage builder() {
     return MechanismControlBuilder.builder();
@@ -55,12 +89,27 @@ public record MechanismControl(
    * A joint held at positions, an arm or an elevator, in a line: feedback {@code kP}, the
    * feedforward seeded from the definition, no profile (so a move goes at a quarter of its free
    * speed until it has one), the default current limits, and braking. Change any one value after:
-   * {@code MechanismControl.position(30).withProfile(8, 30)}.
+   * {@code MechanismControl.position(30).withProfile(DegreesPerSecond.of(450),
+   * DegreesPerSecondPerSecond.of(1700))}.
    *
-   * @param kP volts per radian (or meter) of error
+   * @param kP volts per radian (or meter) of error: a kP per turn, as Phoenix's slot holds it, is
+   *     2π times this; give that one with its unit
    */
   public static MechanismControl position(double kP) {
-    return defaults(kP, NeutralMode.BRAKE);
+    return defaults(kP, Optional.empty());
+  }
+
+  /**
+   * The same, its kP given with its unit: per turn of the joint as Phoenix's slot holds it, {@code
+   * position(Volts.per(Rotation).of(188))}, or per length for a joint that slides, {@code
+   * position(Volts.per(Inch).of(30))}. A Phoenix kP per turn of the motor's rotor is its gearing
+   * times that per turn of the joint; an elevator's per turn of its drum is that per its drum's
+   * circumference.
+   *
+   * @throws IllegalArgumentException for a kP per anything but an angle or a length
+   */
+  public static MechanismControl position(Measure<? extends PerUnit<VoltageUnit, ?>> kP) {
+    return defaults(kP.baseUnitMagnitude(), Optional.of(per("kP", kP, POSITION)));
   }
 
   /**
@@ -69,10 +118,22 @@ public record MechanismControl(
    * piece where it is when told nothing. A flywheel coasts instead: {@code
    * MechanismControl.velocity(0.02).coasting()}.
    *
-   * @param kP volts per radian (or meter) per second of error
+   * @param kP volts per radian (or meter) per second of error: a kP per turn per second, as
+   *     Phoenix's slot holds it, is 2π times this; give that one with its unit
    */
   public static MechanismControl velocity(double kP) {
-    return defaults(kP, NeutralMode.BRAKE);
+    return defaults(kP, Optional.empty());
+  }
+
+  /**
+   * The same, its kP given with its unit: per turn per second as Phoenix's slot holds it, {@code
+   * velocity(Volts.per(RotationsPerSecond).of(0.12))}, or per speed along a joint that slides,
+   * {@code Volts.per(MetersPerSecond)}.
+   *
+   * @throws IllegalArgumentException for a kP per anything but a speed
+   */
+  public static MechanismControl velocity(Measure<? extends PerUnit<VoltageUnit, ?>> kP) {
+    return defaults(kP.baseUnitMagnitude(), Optional.of(per("kP", kP, SPEED)));
   }
 
   /** The same, coasting when told nothing: a flywheel spinning down rather than stopping hard. */
@@ -80,24 +141,107 @@ public record MechanismControl(
     return MechanismControlBuilder.builder(this).neutralMode(NeutralMode.COAST).build();
   }
 
-  /** The same, its moves profiled: at most this fast, and this quick to get there. */
+  /**
+   * The same, its moves profiled: at most this fast, and this quick to get there, in the joint's
+   * units, radians (or meters) per second and per second squared. Give them with their units where
+   * they read better: {@code withProfile(DegreesPerSecond.of(450),
+   * DegreesPerSecondPerSecond.of(1700))}.
+   */
   public MechanismControl withProfile(double cruiseVelocity, double acceleration) {
-    return MechanismControlBuilder.builder(this)
-        .profile(
-            Optional.of(
-                Profile.builder()
-                    .cruiseVelocity(cruiseVelocity)
-                    .acceleration(acceleration)
-                    .jerk(0)
-                    .build()))
-        .build();
+    return profiled(cruiseVelocity, acceleration, Optional.empty());
   }
 
-  /** The same, with a derivative gain: volts per radian (or meter) per second of error. */
+  /**
+   * The same, a joint that turns profiled: {@code withProfile(DegreesPerSecond.of(450),
+   * DegreesPerSecondPerSecond.of(1700))}, or in turns per second as Phoenix's are.
+   */
+  public MechanismControl withProfile(AngularVelocity cruise, AngularAcceleration acceleration) {
+    return profiled(
+        cruise.in(RadiansPerSecond),
+        acceleration.in(RadiansPerSecondPerSecond),
+        Optional.of(Position.Kind.ANGLE));
+  }
+
+  /**
+   * The same, a joint that slides profiled: {@code withProfile(InchesPerSecond.of(60),
+   * InchesPerSecondPerSecond.of(240))}.
+   */
+  public MechanismControl withProfile(LinearVelocity cruise, LinearAcceleration acceleration) {
+    return profiled(
+        cruise.in(MetersPerSecond),
+        acceleration.in(MetersPerSecondPerSecond),
+        Optional.of(Position.Kind.LENGTH));
+  }
+
+  /** The same, with an integral gain: volts per radian (or meter) of error, per second it lasts. */
+  public MechanismControl withKi(double kI) {
+    return with(gainsWith().kI(kI).build());
+  }
+
+  /**
+   * The same, with a derivative gain: volts per radian (or meter) per second of error, for a joint
+   * held at positions; per radian (or meter) per second squared, for one run at speeds.
+   */
   public MechanismControl withKd(double kD) {
-    return MechanismControlBuilder.builder(this)
-        .gains(MechanismControlGainsBuilder.builder(gains).kD(kD).build())
-        .build();
+    return with(gainsWith().kD(kD).build());
+  }
+
+  /**
+   * The same, its derivative gain given with its unit: per speed for a joint held at positions,
+   * {@code withKd(Volts.per(RotationsPerSecond).of(2))}, as Phoenix's slot holds it; per
+   * acceleration for one run at speeds, {@code Volts.per(RotationsPerSecondPerSecond)}.
+   *
+   * @throws IllegalArgumentException for a kD per anything but a speed or an acceleration, or per
+   *     the other kind than its other gains
+   */
+  public MechanismControl withKd(Measure<? extends PerUnit<VoltageUnit, ?>> kD) {
+    return with(
+        gainsWith().kD(kD.baseUnitMagnitude()).kind(kind("kD", kD, SPEED, ACCELERATION)).build());
+  }
+
+  /** The same, with SysId's kS: the volts that overcome static friction. */
+  public MechanismControl withKs(double kS) {
+    return with(gainsWith().kS(kS).build());
+  }
+
+  /**
+   * The same, with SysId's kV, in place of the definition's seed: volts per radian (or meter) per
+   * second. SysId run on Phoenix's signals gives it per turn per second: give that one with its
+   * unit.
+   */
+  public MechanismControl withKv(double kV) {
+    return with(gainsWith().kV(kV).build());
+  }
+
+  /**
+   * The same, with SysId's kV given with its unit: {@code
+   * withKv(Volts.per(RotationsPerSecond).of(0.12))}, as SysId gives it on Phoenix's signals.
+   *
+   * @throws IllegalArgumentException for a kV per anything but a speed, or per the other kind than
+   *     its other gains
+   */
+  public MechanismControl withKv(Measure<? extends PerUnit<VoltageUnit, ?>> kV) {
+    return with(gainsWith().kV(kV.baseUnitMagnitude()).kind(kind("kV", kV, SPEED)).build());
+  }
+
+  /**
+   * The same, with SysId's kA, in place of the definition's seed: volts per radian (or meter) per
+   * second squared. SysId run on Phoenix's signals gives it per turn per second squared: give that
+   * one with its unit.
+   */
+  public MechanismControl withKa(double kA) {
+    return with(gainsWith().kA(kA).build());
+  }
+
+  /**
+   * The same, with SysId's kA given with its unit: {@code
+   * withKa(Volts.per(RotationsPerSecondPerSecond).of(0.01))}.
+   *
+   * @throws IllegalArgumentException for a kA per anything but an acceleration, or per the other
+   *     kind than its other gains
+   */
+  public MechanismControl withKa(Measure<? extends PerUnit<VoltageUnit, ?>> kA) {
+    return with(gainsWith().kA(kA.baseUnitMagnitude()).kind(kind("kA", kA, ACCELERATION)).build());
   }
 
   /**
@@ -106,9 +250,7 @@ public record MechanismControl(
    * neither, at its zero. 0 for a joint a counterbalance holds.
    */
   public MechanismControl withKg(double kG) {
-    return MechanismControlBuilder.builder(this)
-        .gains(MechanismControlGainsBuilder.builder(gains).kG(Optional.of(kG)).build())
-        .build();
+    return with(gainsWith().kG(kG).build());
   }
 
   /**
@@ -117,20 +259,23 @@ public record MechanismControl(
    * straight up, its positive direction tipping it forward.
    */
   public MechanismControl withKg(double kG, Angle gravityAngle) {
-    return MechanismControlBuilder.builder(this)
-        .gains(
-            MechanismControlGainsBuilder.builder(gains)
-                .kG(Optional.of(kG))
-                .gravityAngle(Optional.of(gravityAngle))
-                .build())
-        .build();
+    return with(gainsWith().kG(kG).gravityAngle(gravityAngle).build());
   }
 
-  /** The same, the motor controller stopping it inside its hard stops. */
+  /**
+   * The same, the motor controller stopping it inside its hard stops, as its range is written:
+   * {@code withSoftLimits(Range.degrees(5, 130))}.
+   */
+  public MechanismControl withSoftLimits(Range limits) {
+    return limited(limits.lower(), limits.upper(), Optional.of(limits.kind()));
+  }
+
+  /**
+   * The same, the motor controller stopping it inside its hard stops, in the joint's units: radians
+   * or meters. Degrees read better as a range: {@code withSoftLimits(Range.degrees(5, 130))}.
+   */
   public MechanismControl withSoftLimits(double lower, double upper) {
-    return MechanismControlBuilder.builder(this)
-        .softLimits(Optional.of(SoftLimits.builder().lower(lower).upper(upper).build()))
-        .build();
+    return limited(lower, upper, Optional.empty());
   }
 
   /** The same, its motors' torque capped at this current. */
@@ -141,21 +286,224 @@ public record MechanismControl(
         .build();
   }
 
-  /** The same, finding where it is by this recipe once the robot is on. */
-  public MechanismControl withHoming(Homing homing) {
-    return MechanismControlBuilder.builder(this).homing(Optional.of(homing)).build();
+  /**
+   * The same, what its motors draw from the battery capped at this current, for at most its {@code
+   * supplyLowerTime} at a time, then at its {@code supplyLower} (as {@link CurrentLimits} says);
+   * below that, at this always.
+   */
+  public MechanismControl withSupplyLimit(Current supply) {
+    return MechanismControlBuilder.builder(this)
+        .currentLimits(
+            MechanismControlCurrentLimitsBuilder.builder(currentLimits).supply(supply).build())
+        .build();
   }
 
-  private static MechanismControl defaults(double kP, NeutralMode neutralMode) {
-    return builder()
-        .gains(MechanismControlGainsBuilder.builder(Gains.seeded()).kP(kP).build())
-        .softLimits(Optional.empty())
-        .profile(Optional.empty())
-        .currentLimits(CurrentLimits.DEFAULTS)
-        .neutralMode(neutralMode)
-        .bands(Optional.empty())
-        .homing(Optional.empty())
+  /**
+   * The same, there once inside {@code enter} of a target, and still while inside {@code stay}: in
+   * the joint's units, radians or meters, for a joint held at positions; shares of the speed it's
+   * asked for, {@code withBands(0.03, 0.06)}, for one run at speeds.
+   */
+  public MechanismControl withBands(double enter, double stay) {
+    return banded(enter, stay, Optional.empty());
+  }
+
+  /**
+   * The same, a joint that turns there within these angles: {@code withBands(Degrees.of(1),
+   * Degrees.of(2))}.
+   */
+  public MechanismControl withBands(Angle enter, Angle stay) {
+    return banded(enter.in(Radians), stay.in(Radians), Optional.of(Position.Kind.ANGLE));
+  }
+
+  /**
+   * The same, a joint that slides there within these lengths: {@code withBands(Inches.of(0.5),
+   * Inches.of(1))}.
+   */
+  public MechanismControl withBands(Distance enter, Distance stay) {
+    return banded(enter.in(Meters), stay.in(Meters), Optional.of(Position.Kind.LENGTH));
+  }
+
+  /** The same, finding where it is by this recipe once the robot is on. */
+  public MechanismControl withHoming(Homing homing) {
+    return MechanismControlBuilder.builder(this).homing(homing).build();
+  }
+
+  /**
+   * The same, a motor controller flagged as drawing nothing once, for longer than {@code time}, its
+   * joint's leading controller draws more than {@code drawing} and its PDH channel reads under
+   * {@code dead}: {@code withDeadChannel(Amps.of(2), Amps.of(0.5), Seconds.of(0.5))} is the
+   * template's.
+   */
+  public MechanismControl withDeadChannel(Current drawing, Current dead, Time time) {
+    return MechanismControlBuilder.builder(this)
+        .deadChannel(DeadChannel.builder().drawing(drawing).dead(dead).time(time).build())
         .build();
+  }
+
+  /**
+   * Why its values given with their units don't fit a joint of this kind, one reason for each, or
+   * null when they do: an elevator's soft limits in degrees, an arm's kP per inch.
+   */
+  @Nullable String ofTheOtherKind(Position.Kind joint) {
+    boolean turns = joint == Position.Kind.ANGLE;
+    List<String> wrong = new ArrayList<>();
+    if (gains.kind().isPresent() && gains.kind().get() != joint) {
+      wrong.add(
+          turns
+              ? "its gains are per length, and the joint turns: give them per angle,"
+                  + " Volts.per(Rotation)"
+              : "its gains are per angle, and the joint slides: give them per length,"
+                  + " Volts.per(Meter) or Volts.per(Inch); a gain per turn of its drum is that per"
+                  + " the drum's circumference");
+    }
+    if (softLimits.flatMap(SoftLimits::kind).filter(kind -> kind != joint).isPresent()) {
+      wrong.add(
+          turns
+              ? "its soft limits are lengths, and the joint turns: give them in angles,"
+                  + " Range.degrees(...)"
+              : "its soft limits are angles, and the joint slides: give them in lengths,"
+                  + " Range.meters(...) or Range.of(Inches.of(...), Inches.of(...))");
+    }
+    if (profile.flatMap(Profile::kind).filter(kind -> kind != joint).isPresent()) {
+      wrong.add(
+          turns
+              ? "its profile is in lengths, and the joint turns: give it in angles,"
+                  + " DegreesPerSecond.of(...) and DegreesPerSecondPerSecond.of(...)"
+              : "its profile is in angles, and the joint slides: give it in lengths,"
+                  + " InchesPerSecond.of(...) and InchesPerSecondPerSecond.of(...)");
+    }
+    if (bands.flatMap(Bands::kind).filter(kind -> kind != joint).isPresent()) {
+      wrong.add(
+          turns
+              ? "its bands are lengths, and the joint turns: give them in angles, Degrees.of(...)"
+              : "its bands are angles, and the joint slides: give them in lengths,"
+                  + " Inches.of(...)");
+    }
+    return wrong.isEmpty() ? null : String.join("; ", wrong);
+  }
+
+  private static MechanismControl defaults(double kP, Optional<Position.Kind> per) {
+    return builder()
+        .gains(MechanismControlGainsBuilder.builder(Gains.seeded()).kP(kP).kind(per).build())
+        .currentLimits(CurrentLimits.DEFAULTS)
+        .neutralMode(NeutralMode.BRAKE)
+        .deadChannel(DeadChannel.DEFAULTS)
+        .build();
+  }
+
+  private MechanismControlGainsBuilder gainsWith() {
+    return MechanismControlGainsBuilder.builder(gains);
+  }
+
+  private MechanismControl with(Gains changed) {
+    return MechanismControlBuilder.builder(this).gains(changed).build();
+  }
+
+  private MechanismControl profiled(
+      double cruiseVelocity, double acceleration, Optional<Position.Kind> kind) {
+    return MechanismControlBuilder.builder(this)
+        .profile(
+            Profile.builder()
+                .cruiseVelocity(cruiseVelocity)
+                .acceleration(acceleration)
+                .kind(kind)
+                .build())
+        .build();
+  }
+
+  private MechanismControl limited(double lower, double upper, Optional<Position.Kind> kind) {
+    return MechanismControlBuilder.builder(this)
+        .softLimits(SoftLimits.builder().lower(lower).upper(upper).kind(kind).build())
+        .build();
+  }
+
+  private MechanismControl banded(double enter, double stay, Optional<Position.Kind> kind) {
+    return MechanismControlBuilder.builder(this)
+        .bands(Bands.builder().enter(enter).stay(stay).kind(kind).build())
+        .build();
+  }
+
+  /** A gain per a position: an angle or a length. */
+  private static final int POSITION = 0;
+
+  /** A gain per a speed. */
+  private static final int SPEED = 1;
+
+  /** A gain per an acceleration. */
+  private static final int ACCELERATION = 2;
+
+  /** What a gain may be per, a position, a speed or an acceleration, and how to write each. */
+  private static final List<String> TAKES =
+      List.of(
+          "an angle, Volts.per(Rotation), or a length, Volts.per(Meter)",
+          "a speed, Volts.per(RotationsPerSecond) or Volts.per(MetersPerSecond)",
+          "an acceleration, Volts.per(RotationsPerSecondPerSecond) or"
+              + " Volts.per(MetersPerSecondPerSecond)");
+
+  /**
+   * What a gain given with its unit is per: an angle or a length, and how many times per second
+   * ({@link #POSITION}, {@link #SPEED}, {@link #ACCELERATION}).
+   */
+  private record Per(Position.Kind kind, int perSecond) {}
+
+  /** What a unit a gain is per is, or null for one no gain is per: a time, a current. */
+  private static @Nullable Per per(Unit unit) {
+    return switch (unit) {
+      case AngleUnit _ -> new Per(Position.Kind.ANGLE, POSITION);
+      case DistanceUnit _ -> new Per(Position.Kind.LENGTH, POSITION);
+      case AngularVelocityUnit _ -> new Per(Position.Kind.ANGLE, SPEED);
+      case LinearVelocityUnit _ -> new Per(Position.Kind.LENGTH, SPEED);
+      case AngularAccelerationUnit _ -> new Per(Position.Kind.ANGLE, ACCELERATION);
+      case LinearAccelerationUnit _ -> new Per(Position.Kind.LENGTH, ACCELERATION);
+      default -> null;
+    };
+  }
+
+  /**
+   * What a gain given with its unit is per, an angle or a length: refused unless it's per what the
+   * gain takes, a position, a speed or an acceleration ({@code takes}).
+   */
+  private static Position.Kind per(
+      String gain, Measure<? extends PerUnit<VoltageUnit, ?>> value, int... takes) {
+    Unit unit = value.unit().denominator();
+    Per per = per(unit);
+    for (int allowed : takes) {
+      if (per != null && per.perSecond() == allowed) {
+        return per.kind();
+      }
+    }
+    List<String> ways = new ArrayList<>();
+    for (int allowed : takes) {
+      ways.add(TAKES.get(allowed));
+    }
+    throw new IllegalArgumentException(
+        "Gains."
+            + gain
+            + ": volts per "
+            + unit.name()
+            + " can't be one: give it per "
+            + String.join(", or per ", ways));
+  }
+
+  /**
+   * The gains' kind with one more gain given with its unit: refused if it's per the other kind than
+   * the gains already are.
+   */
+  private Optional<Position.Kind> kind(
+      String gain, Measure<? extends PerUnit<VoltageUnit, ?>> value, int... takes) {
+    Position.Kind kind = per(gain, value, takes);
+    if (gains.kind().isPresent() && gains.kind().get() != kind) {
+      boolean angle = kind == Position.Kind.ANGLE;
+      throw new IllegalArgumentException(
+          "Gains."
+              + gain
+              + ": it's per "
+              + (angle ? "an angle" : "a length")
+              + ", and the other gains are per "
+              + (angle ? "a length" : "an angle")
+              + ": a control drives one joint, which turns or slides");
+    }
+    return Optional.of(kind);
   }
 
   /** What the motors do when told nothing. */
@@ -185,6 +533,9 @@ public record MechanismControl(
    *     it takes all of kG forward; where not given, where its links' mass puts it ({@code
    *     RobotMath.gravityOffset}), or its zero, horizontal as WPILib takes an arm's, with no mass.
    *     A prismatic joint has none: it's held the same all along
+   * @param kind what its gains given with their units are per: an angle ({@code
+   *     Volts.per(Rotation)}) or a length ({@code Volts.per(Meter)}), which the joint must be;
+   *     empty when each is a plain number, in the joint's units
    */
   @ConfigRecord
   public record Gains(
@@ -195,7 +546,8 @@ public record MechanismControl(
       Optional<Double> kV,
       Optional<Double> kA,
       Optional<Double> kG,
-      Optional<Angle> gravityAngle) {
+      Optional<Angle> gravityAngle,
+      Optional<Position.Kind> kind) {
     public Gains {
       Checks.on(Gains.class)
           .field("kP", kP, nonNegative())
@@ -216,16 +568,7 @@ public record MechanismControl(
 
     /** No feedback, no friction, and every feedforward gain the definition's seed. */
     public static Gains seeded() {
-      return builder()
-          .kP(0)
-          .kI(0)
-          .kD(0)
-          .kS(0)
-          .kV(Optional.empty())
-          .kA(Optional.empty())
-          .kG(Optional.empty())
-          .gravityAngle(Optional.empty())
-          .build();
+      return builder().kP(0).kI(0).kD(0).kS(0).build();
     }
   }
 
@@ -236,9 +579,11 @@ public record MechanismControl(
    *
    * @param lower the lowest position it drives the joint to
    * @param upper the highest
+   * @param kind angles or lengths, as they were given with their units ({@code Range.degrees}),
+   *     which the joint must be; empty when given as plain numbers, in the joint's units
    */
   @ConfigRecord
-  public record SoftLimits(double lower, double upper) {
+  public record SoftLimits(double lower, double upper, Optional<Position.Kind> kind) {
     public SoftLimits {
       Checks.on(SoftLimits.class)
           .field("lower", lower, finite())
@@ -259,20 +604,21 @@ public record MechanismControl(
   }
 
   /**
-   * Motion Magic's limits, in the joint's units: the cruise is held under the joint's free speed,
-   * which the helper checks.
+   * How fast a joint's moves go, in its units: each is profiled on the robot (WPILib's {@code
+   * TrapezoidProfile}), from where the joint is to where it's going. The definition refuses a
+   * cruise faster than the joint's motors turn it.
    *
    * @param cruiseVelocity the fastest the profile moves it, per second
    * @param acceleration how fast the profile speeds it up and slows it down, per second squared
-   * @param jerk how fast the acceleration changes, per second cubed: 0 for none, a trapezoid
+   * @param kind angles or lengths, as they were given with their units ({@code DegreesPerSecond}),
+   *     which the joint must be; empty when given as plain numbers, in the joint's units
    */
   @ConfigRecord
-  public record Profile(double cruiseVelocity, double acceleration, double jerk) {
+  public record Profile(double cruiseVelocity, double acceleration, Optional<Position.Kind> kind) {
     public Profile {
       Checks.on(Profile.class)
           .field("cruiseVelocity", cruiseVelocity, positive())
           .field("acceleration", acceleration, positive())
-          .field("jerk", jerk, nonNegative())
           .orThrow();
     }
 
@@ -331,9 +677,12 @@ public record MechanismControl(
    *
    * @param enter the most it may be off to come to be there
    * @param stay the most it may be off to stay there: at least {@code enter}
+   * @param kind angles or lengths, as they were given with their units ({@code Degrees.of}), which
+   *     the joint must be, held at positions; empty when given as plain numbers, in the joint's
+   *     units or as shares of a speed
    */
   @ConfigRecord
-  public record Bands(double enter, double stay) {
+  public record Bands(double enter, double stay, Optional<Position.Kind> kind) {
     public Bands {
       Checks.on(Bands.class)
           .field("enter", enter, positive())
@@ -350,6 +699,50 @@ public record MechanismControl(
     /** Starts describing bands, one named value at a time. */
     public static MechanismControlBandsBuilder.EnterStage builder() {
       return MechanismControlBandsBuilder.builder();
+    }
+  }
+
+  /**
+   * When one of a joint's motor controllers reads as drawing nothing on its PDH channel while the
+   * joint works: its breaker tripped, its power unplugged, or its block naming another channel than
+   * the one it's on. Each of a joint's motors drives the same load, so while its leading controller
+   * draws from the battery, each draws about as much on its own channel. A controller whose channel
+   * reads next to nothing meanwhile, for long enough, is flagged. A joint asked for volts at a
+   * steady speed with no load draws next to nothing, alive or not, so working is what its leader
+   * draws, not what it's asked: in the simulator, which models no friction, nothing at all. Only a
+   * controller whose block says its channel is checked, and only while the PDH answers.
+   *
+   * @param drawing what the joint's leading controller draws from the battery, by its own reading,
+   *     above which each of its motors draws too
+   * @param dead what a channel reads under, drawing nothing: no less than the PDH's resolution
+   * @param time how long both must hold before it's flagged
+   */
+  @ConfigRecord
+  public record DeadChannel(Current drawing, Current dead, Time time) {
+    /** The template's: 2 A drawing, under 0.5 A on the channel, for half a second. */
+    public static final DeadChannel DEFAULTS =
+        builder().drawing(Amps.of(2)).dead(Amps.of(0.5)).time(Seconds.of(0.5)).build();
+
+    public DeadChannel {
+      Checks.on(DeadChannel.class)
+          .field("drawing", drawing, positive())
+          .field("dead", dead, positive())
+          .field("time", time, positive())
+          .check(
+              "dead",
+              () ->
+                  dead.lt(drawing)
+                      ? null
+                      : shown(dead)
+                          + " must be under what the joint's leader draws, "
+                          + shown(drawing)
+                          + ": a motor drawing as much as its leader isn't dead")
+          .orThrow();
+    }
+
+    /** Starts describing when a channel is dead, one named value at a time. */
+    public static MechanismControlDeadChannelBuilder.DrawingStage builder() {
+      return MechanismControlDeadChannelBuilder.builder();
     }
   }
 
@@ -372,7 +765,7 @@ public record MechanismControl(
      * push, twice over and half a second more ({@link #secondsAllowed}).
      */
     static Homing toHardStop(Stop stop) {
-      return ToHardStop.builder().stop(stop).volts(2).timeout(Optional.empty()).build();
+      return ToHardStop.builder().stop(stop).volts(2).build();
     }
 
     /**
@@ -380,7 +773,7 @@ public record MechanismControl(
      * up against its weight.
      */
     static Homing toHardStop(Stop stop, Time timeout) {
-      return ToHardStop.builder().stop(stop).volts(2).timeout(Optional.of(timeout)).build();
+      return ToHardStop.builder().stop(stop).volts(2).timeout(timeout).build();
     }
 
     /**
@@ -390,12 +783,12 @@ public record MechanismControl(
      * #secondsAllowed}).
      */
     static Homing toSwitch(Stop end) {
-      return ToSwitch.builder().end(end).volts(2).timeout(Optional.empty()).build();
+      return ToSwitch.builder().end(end).volts(2).build();
     }
 
     /** The same, for at most this long: for a joint slower than its model says. */
     static Homing toSwitch(Stop end, Time timeout) {
-      return ToSwitch.builder().end(end).volts(2).timeout(Optional.of(timeout)).build();
+      return ToSwitch.builder().end(end).volts(2).timeout(timeout).build();
     }
 
     /**

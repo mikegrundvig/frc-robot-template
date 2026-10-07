@@ -2,14 +2,11 @@ package frc.robot.lib.rev;
 
 import static org.wpilib.units.Units.Amps;
 
-import com.ctre.phoenix6.configs.TalonFXConfiguration;
-import com.ctre.phoenix6.signals.NeutralModeValue;
-import com.michaelgrundvig.frc.world.robot.CanBus;
-import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
-import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -20,8 +17,6 @@ import com.revrobotics.spark.config.LimitSwitchConfig;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkFlexConfig;
 import com.revrobotics.spark.config.SparkMaxConfig;
-import frc.robot.lib.phoenix.PhoenixMechanism;
-import frc.robot.lib.phoenix.PhoenixUnits;
 import frc.robot.lib.wiring.ControllerPins;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,20 +24,20 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A mechanism's REV SPARK settings: the mechanism the Phoenix helper works out from the robot's
- * definition, the joint's wiring and its control ({@link PhoenixMechanism}), its ratios, gains
- * seeded from the definition, gravity, soft limits, current limits and followers, carried to a
- * SPARK MAX or a SPARK Flex. Every check the Phoenix helper makes holds here too. Pure functions:
- * nothing here touches a device.
+ * A mechanism's REV SPARK settings, translated from how the program drives its joint ({@link
+ * ControllerPlan}): its ratios, gains seeded from the definition, soft limits, current limits and
+ * followers, said as a SPARK MAX or a SPARK Flex takes them. The plan owns every value; this says
+ * them in a SPARK's units and refuses what a SPARK can't take. Pure functions: nothing here touches
+ * a device.
  *
  * <p>A SPARK reads its motor's own encoder in rotations and RPM: REVLib 2027 has no conversion
  * factors. With its voltage compensated to {@link #NOMINAL_VOLTS}, its loop's output is a share of
- * that. Its loop runs the slot's kP, per rotor rotation of error in slot 0, for positions, and per
- * rotor RPM in slot 1, for speeds. The rest, the feedforward (kS, kV, kA and gravity) and kD, the
- * robot works out each loop in volts ({@link PhoenixMechanism.Feedforward}) and adds as the loop's
- * arbitrary feedforward: volts are the one unit a SPARK takes exactly, whatever the units of its
- * own feedforward and derivative. Measured in REV's simulation (2026-10-05): kP 0.01 on 10
- * rotations of error gave a share of 0.1, and 1.2 V of feedforward a share of 0.1.
+ * that. Its loop runs the plan's kP, per rotor rotation of error in slot 0, for positions, and per
+ * rotor RPM in slot 1, for speeds. The rest, the plan's feedforward law (kS, kV, kA and gravity)
+ * and its kD, the robot works out each loop in volts ({@link ControllerPlan#feedforward}) and adds
+ * as the loop's arbitrary feedforward: volts are the one unit a SPARK takes exactly, whatever the
+ * units of its own feedforward and derivative. Measured in REV's simulation (2026-10-05): kP 0.01
+ * on 10 rotations of error gave a share of 0.1, and 1.2 V of feedforward a share of 0.1.
  *
  * <p>A SPARK whose loop closes on the absolute encoder on its data port ({@code
  * DataPortEncoder#closesLoop}) runs it on that encoder's turns instead, with no conversion factor
@@ -70,9 +65,10 @@ public final class RevMechanism {
   /**
    * One mechanism's SPARK settings.
    *
+   * @param plan how the program drives its joint: its rotations, which its positions are converted
+   *     with, and the feedforward the robot works out each loop
    * @param leader the leading SPARK's, applied whole at startup
    * @param followers each following SPARK's, in the wiring's order
-   * @param units the mechanism's rotations ({@link PhoenixUnits}), which the robot's gains are in
    * @param rotorRatio rotor rotations for each of the mechanism's
    * @param loopRatio turns of the sensor its loop runs on for each of the mechanism's rotations:
    *     the rotor's, or, closed on its absolute encoder, the encoder's
@@ -83,7 +79,6 @@ public final class RevMechanism {
    * @param velocityKp the loop's kP for speeds: a share per RPM of error of that sensor
    * @param softLimits the soft limits, in that sensor's turns, lower then upper, if the control has
    *     them
-   * @param feedforward what the robot adds each loop, in volts
    * @param absolute the definition's absolute encoder the SPARK's data port reads, if its wiring
    *     names one: read once at startup, to tell the motor where the joint is
    * @param windowEdge where the SPARK's reading of that encoder is zero: the encoder's reading, in
@@ -95,16 +90,15 @@ public final class RevMechanism {
    * @param notes what's doubtful about them, each a sentence for a log or a test
    */
   public record Settings(
+      ControllerPlan plan,
       SparkBaseConfig leader,
       List<Follower> followers,
-      PhoenixUnits units,
       double rotorRatio,
       double loopRatio,
       double loopZero,
       double positionKp,
       double velocityKp,
       Optional<double[]> softLimits,
-      PhoenixMechanism.Feedforward feedforward,
       Optional<Sensor.Encoder> absolute,
       double windowEdge,
       boolean closedLoop,
@@ -114,17 +108,23 @@ public final class RevMechanism {
       notes = List.copyOf(notes);
     }
 
+    /** The joint's rotations, which the SPARK's rotor turns are counted through. */
+    public MechanismRotations rotations() {
+      return plan.rotations();
+    }
+
     /** The settings the pit tunes live, alone: the loop's gains and the current limits. */
-    public SparkBaseConfig tuning(MechanismWiring wiring, MechanismControl control) {
-      SparkBaseConfig tuning = blank(wiring.controller());
+    public SparkBaseConfig tuning(MechanismWiring.Controller controller, MechanismControl control) {
+      SparkBaseConfig tuning = blank(controller);
       tuning.smartCurrentLimit(statorAmps(control));
       tuning.closedLoop.p(positionKp, ClosedLoopSlot.kSlot0).p(velocityKp, ClosedLoopSlot.kSlot1);
       return tuning;
     }
 
     /** The soft limits switched on or off, alone: off while the joint homes past them. */
-    public SparkBaseConfig softLimitsEnabled(MechanismWiring wiring, boolean enabled) {
-      SparkBaseConfig limits = blank(wiring.controller());
+    public SparkBaseConfig softLimitsEnabled(
+        MechanismWiring.Controller controller, boolean enabled) {
+      SparkBaseConfig limits = blank(controller);
       limits.softLimit.forwardSoftLimitEnabled(enabled).reverseSoftLimitEnabled(enabled);
       return limits;
     }
@@ -176,19 +176,11 @@ public final class RevMechanism {
   /**
    * A mechanism on SPARKs, read by its motor's own encoder.
    *
-   * @throws IllegalArgumentException for wiring that isn't a SPARK's, is on a CANivore, or names a
-   *     CANcoder or a data-port encoder, a control with a kI, and whatever the Phoenix helper
-   *     refuses
+   * @param plan how the program drives its joint, its motors' SPARKs named, the leader first
+   * @throws IllegalArgumentException for controllers that aren't SPARKs, and a control with a kI
    */
-  public static Settings configure(
-      RobotMath math, Joint joint, Drive drive, MechanismWiring wiring, MechanismControl control) {
-    if (wiring.dataPort().isPresent()) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a data-port encoder: give the definition's encoder it is, or"
-              + " wire none");
-    }
-    return build(math, joint, drive, null, wiring, control);
+  public static Settings configure(ControllerPlan plan) {
+    return build(plan, null, null, null);
   }
 
   /**
@@ -196,101 +188,81 @@ public final class RevMechanism {
    * absolute encoder on the joint, read once at startup, so the joint needs no homing, and the
    * SPARK's loop running on it where the wiring says so.
    *
+   * @param math what the robot's definition derives: the window the encoder tells apart
+   * @param absolute the definition's absolute encoder the data port reads
+   * @param port how it's read there: its offset, its direction, and whether the loop closes on it
    * @throws IllegalArgumentException as the other does, for an encoder that isn't absolute on the
-   *     joint alone, or whose joint's range is more than one of its turns tells apart, and for
-   *     wiring without a data-port encoder
+   *     joint alone, or whose joint's range is more than one of its turns tells apart
    */
   public static Settings configure(
       RobotMath math,
-      Joint joint,
-      Drive drive,
+      ControllerPlan plan,
       Sensor.Encoder absolute,
-      MechanismWiring wiring,
-      MechanismControl control) {
-    if (wiring.dataPort().isEmpty()) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names no data-port encoder for "
-              + absolute.label()
-              + ": wire it");
-    }
+      MechanismWiring.DataPortEncoder port) {
+    Joint joint = plan.joint();
     if (!absolute.absolute() || !absolute.joints().equals(List.of(joint))) {
       throw new IllegalArgumentException(
           absolute.label() + " must be an absolute encoder on " + joint.label() + " alone");
     }
-    return build(math, joint, drive, absolute, wiring, control);
+    return build(plan, math, absolute, port);
   }
 
   private static Settings build(
-      RobotMath math,
-      Joint joint,
-      Drive drive,
+      ControllerPlan plan,
+      @Nullable RobotMath math,
       Sensor.@Nullable Encoder absolute,
-      MechanismWiring wiring,
-      MechanismControl control) {
-    MechanismWiring.Controller controller = wiring.controller();
+      MechanismWiring.@Nullable DataPortEncoder port) {
+    Joint joint = plan.joint();
+    List<MechanismWiring.Device> controllers = plan.controllers();
+    if (controllers.isEmpty()) {
+      throw new IllegalArgumentException(
+          joint.label() + "'s motors aren't wired: a SPARK drives each");
+    }
+    MechanismWiring.Device leading = controllers.get(0);
+    MechanismWiring.Controller controller = leading.controller();
     if (controller != MechanismWiring.Controller.SPARK_MAX
         && controller != MechanismWiring.Controller.SPARK_FLEX) {
       throw new IllegalArgumentException(
           joint.label() + "'s wiring is " + controller.shown() + "'s, not a SPARK's");
     }
-    if (!(wiring.canBus() instanceof CanBus.Port)) {
-      throw new IllegalArgumentException(
-          joint.label() + "'s SPARKs are on a CANivore: a SPARK is on Systemcore's own CAN");
-    }
-    if (wiring.cancoder().isPresent()) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a CANcoder, which a SPARK doesn't read: plug the encoder into the"
-              + " SPARK's data port, or give its control a homing recipe");
-    }
-    if (control.gains().kI() != 0) {
+    if (plan.kI() != 0) {
       throw new IllegalArgumentException(
           joint.label()
               + "'s control has a kI, which isn't carried to a SPARK yet: its integral's units"
               + " aren't confirmed. Leave kI at 0");
     }
-    // The Phoenix helper's own settings for the motor alone: the data port is the SPARK's. The
-    // robot works out the SPARK's feedforward, so an arm's gravity offset isn't Phoenix's to limit.
-    MechanismWiring motorsAlone =
-        MechanismWiringBuilder.builder(wiring).dataPort(Optional.empty()).build();
-    PhoenixMechanism.Settings phoenix =
-        PhoenixMechanism.configureFeedforwardOnRobot(math, joint, drive, motorsAlone, control);
-    List<String> notes = new ArrayList<>(phoenix.notes());
-    PhoenixUnits units = phoenix.units();
+    List<String> notes = new ArrayList<>(plan.notes());
+    MechanismRotations rotations = plan.rotations();
     double windowEdge = 0;
     double encoderRatio = 0;
-    if (absolute != null) {
+    if (math != null && absolute != null) {
       // One turn of the encoder must tell the joint's range apart, and wrap outside it, as a
       // CANcoder's discontinuity point puts it.
       Range window = math.absoluteWindow(List.of(absolute));
-      double point = math.discontinuityPoint(absolute);
-      String wraps =
-          PhoenixMechanism.wrapProblem(absolute, absolute.ratio(joint) < 0 ? 1 - point : point);
+      String wraps = ControllerPlan.wrapProblem(absolute, ControllerPlan.wrapPoint(math, absolute));
       if (wraps != null) {
         notes.add(wraps);
       }
-      encoderRatio = units.ratioToPhoenix(Math.abs(absolute.ratio(joint)));
-      windowEdge = encoderRatio * units.toPhoenix(window.lower());
+      encoderRatio = rotations.ratioPerRotation(Math.abs(absolute.ratio(joint)));
+      windowEdge = encoderRatio * rotations.toRotations(window.lower());
     }
-    boolean closed = absolute != null && wiring.dataPort().orElseThrow().closedLoop();
-    TalonFXConfiguration fx = phoenix.leader();
-    double ratio = fx.Feedback.SensorToMechanismRatio;
-    boolean brake = fx.MotorOutput.NeutralMode == NeutralModeValue.Brake;
-    int amps = statorAmps(control);
+    boolean closed = absolute != null && port != null && port.closedLoop();
+    double ratio = rotations.ratioPerRotation(plan.rotorRatio());
+    int amps = statorAmps(plan.control());
 
     SparkBaseConfig leader = blank(controller);
     leader
-        .inverted(wiring.leader().clockwise())
-        .idleMode(brake ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
+        .inverted(leading.turnsClockwise())
+        .idleMode(plan.brakes() ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
         .smartCurrentLimit(amps)
         .voltageCompensation(NOMINAL_VOLTS);
     // The sensor its loop runs on, and its turns: the rotor's, or the absolute encoder's from the
     // window's edge.
     double loopRatio = closed ? encoderRatio : ratio;
     double loopZero = closed ? -windowEdge : 0;
-    double positionKp = phoenix.kP() / (NOMINAL_VOLTS * loopRatio);
-    double velocityKp = phoenix.kP() / (NOMINAL_VOLTS * loopRatio * 60);
+    double kP = rotations.gainPerRotation(plan.kP());
+    double positionKp = kP / (NOMINAL_VOLTS * loopRatio);
+    double velocityKp = kP / (NOMINAL_VOLTS * loopRatio * 60);
     leader
         .closedLoop
         .feedbackSensor(closed ? FeedbackSensor.kAbsoluteEncoder : FeedbackSensor.kPrimaryEncoder)
@@ -301,9 +273,10 @@ public final class RevMechanism {
       leader.closedLoop.positionWrappingEnabled(false);
     }
     Optional<double[]> softLimits = Optional.empty();
-    if (fx.SoftwareLimitSwitch.ForwardSoftLimitEnable) {
-      double lower = fx.SoftwareLimitSwitch.ReverseSoftLimitThreshold * loopRatio + loopZero;
-      double upper = fx.SoftwareLimitSwitch.ForwardSoftLimitThreshold * loopRatio + loopZero;
+    if (plan.softLimits().isPresent()) {
+      MechanismControl.SoftLimits limits = plan.softLimits().get();
+      double lower = rotations.toRotations(limits.lower()) * loopRatio + loopZero;
+      double upper = rotations.toRotations(limits.upper()) * loopRatio + loopZero;
       leader
           .softLimit
           .reverseSoftLimit(lower)
@@ -312,8 +285,7 @@ public final class RevMechanism {
           .forwardSoftLimitEnabled(true);
       softLimits = Optional.of(new double[] {lower, upper});
     }
-    if (absolute != null) {
-      MechanismWiring.DataPortEncoder port = wiring.dataPort().orElseThrow();
+    if (absolute != null && port != null) {
       if (controller == MechanismWiring.Controller.SPARK_MAX) {
         leader.absoluteEncoder.setSparkMaxDataPortConfig();
       }
@@ -332,27 +304,27 @@ public final class RevMechanism {
         .busVoltagePeriodMs(SIGNAL_MS);
 
     List<Follower> followers = new ArrayList<>();
-    for (MechanismWiring.Motor motor : wiring.motors().subList(1, wiring.motors().size())) {
+    for (MechanismWiring.Device motor : controllers.subList(1, controllers.size())) {
       SparkBaseConfig follower = blank(controller);
       follower
-          .idleMode(brake ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
+          .idleMode(
+              plan.brakes() ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
           .smartCurrentLimit(amps)
           .voltageCompensation(NOMINAL_VOLTS)
-          .follow(wiring.leader().id(), motor.clockwise() != wiring.leader().clockwise());
+          .follow(leading.id(), plan.opposes(motor));
       followers.add(new Follower(motor.id(), follower));
     }
 
     return new Settings(
+        plan,
         leader,
         followers,
-        units,
         ratio,
         loopRatio,
         loopZero,
         positionKp,
         velocityKp,
         softLimits,
-        phoenix.feedforward(),
         Optional.ofNullable(absolute),
         windowEdge,
         closed,

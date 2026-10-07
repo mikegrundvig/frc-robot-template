@@ -4,7 +4,6 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
@@ -20,8 +19,8 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.RobotSim;
 import frc.robot.sim.JointsSimHarness;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -38,10 +37,8 @@ class SensorInterlocksSimTest {
       Sensor.Rangefinder.builder()
           .label("reef range")
           .part(Part.CHASSIS)
-          .pose(Optional.empty())
           .range(Meters.of(1))
           .fieldOfView(Degrees.of(27))
-          .wiring(Optional.empty())
           .build();
 
   private static final RobotDefinition ROBOT =
@@ -55,7 +52,7 @@ class SensorInterlocksSimTest {
                       .when(REEF.nearerThan(Meters.of(0.3)))))
           .build();
 
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);
 
@@ -101,6 +98,37 @@ class SensorInterlocksSimTest {
     assertThat(heldBy)
         .isEqualTo("pivot keeps out of 60° to 90° while reef range nearer than 0.300 m");
     assertThat(out.arrived()).isTrue();
+  }
+
+  /**
+   * A pivot swinging out as the reef comes near, too close to the band to stop short of it,
+   * overshoots into it and holds where it would stop as it entered, a point worked out once: never
+   * on through. Worked out again each loop from how fast it still went, the hold ran ahead of a
+   * joint its loop hadn't yet slowed, and an elevator coming down ran through its whole region to
+   * its stop.
+   */
+  @Test
+  void aJointOvershootingIntoAClosedBandHoldsWhereItWouldStop() {
+    Move out = pivot.goTo(PIVOT_OUT).at(0.3).within(Seconds.of(5));
+    sim.scheduler.schedule(out);
+    sim.runUntil(() -> Math.toDegrees(sim.simulation.position(PIVOT)) > 58, 3);
+    sim.sensors.see(REEF, Meters.of(0.2));
+    sim.runUntil(() -> Math.toDegrees(sim.simulation.position(PIVOT)) > 60, 1);
+    double entering = Math.toDegrees(sim.simulation.velocity(PIVOT));
+    sim.loop();
+    double held = pivot.goal();
+    List<Double> goals = new ArrayList<>();
+    for (int i = 0; i < 50; i++) {
+      sim.loop();
+      goals.add(pivot.goal());
+    }
+
+    assertThat(entering).as("it enters the band moving, in °/s").isGreaterThan(20);
+    assertThat(Math.toDegrees(held)).as("inside the band").isBetween(60.0, 90.0);
+    assertThat(goals).as("one point, worked out once").containsOnly(held);
+    assertThat(sim.simulation.position(PIVOT)).isCloseTo(held, within(Math.toRadians(1)));
+    assertThat(pivot.heldBy())
+        .isEqualTo("pivot keeps out of 60° to 90° while reef range nearer than 0.300 m");
   }
 
   /** An interlock on a sensor the robot doesn't have is refused as the definition is built. */

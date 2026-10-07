@@ -59,7 +59,9 @@ import org.wpilib.units.Units;
  * change's values in that record. Any message refuses the change; this form only places it.
  *
  * <p>Nothing is saved on the robot. {@link #changes()} lists what differs from the committed
- * configuration, each with the builder call that commits it.
+ * configuration, each with the builder call that commits it: by default the record's own builder
+ * step, {@code .steerKp(18.5)}, or the call a value's tuning names where the configuration is
+ * written otherwise, {@code .withKs(0.25)}.
  *
  * <p>Values are named by path, the record component names from the root: {@code gains.steerKp}. A
  * measure is tuned as a number in the unit its committed value was written in: amps, for {@code
@@ -84,7 +86,8 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    * @param committed the committed value, with its unit
    * @param tuned the tuned value, with its unit
    * @param builderCall the builder call that writes the tuned value into the configuration, such as
-   *     {@code .steerKp(18.5)}
+   *     {@code .steerKp(18.5)}, or the one its tuning names ({@link #number(String, Limits,
+   *     String)}), such as {@code .withKs(0.25)}
    */
   public record Change(String path, String committed, String tuned, String builderCall) {}
 
@@ -138,9 +141,21 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
     }
   }
 
-  /** Where a tunable value is: the components leading to it from the root, then its own. */
+  /**
+   * Where a tunable value is: the components leading to it from the root, then its own; and the
+   * call that commits it, {@code %s} where its value goes.
+   */
   private record Slot(
-      Knob knob, List<RecordComponent> route, RecordComponent component, @Nullable Unit unit) {}
+      Knob knob,
+      List<RecordComponent> route,
+      RecordComponent component,
+      @Nullable Unit unit,
+      String commit) {}
+
+  /**
+   * Where a tuned value goes in the call that commits it ({@link #number(String, Limits, String)}).
+   */
+  private static final String VALUE = "%s";
 
   /** Writes text as a JSON string, quotes and backslashes escaped, as properties carry it. */
   private static final JsonType<String> TEXT = Jsonb.builder().build().type(String.class);
@@ -220,6 +235,30 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    *     if it was chosen already, or if its committed value is outside the limits
    */
   public LiveConfig<T> number(String path, Limits limits) {
+    return chosen(path, limits, null);
+  }
+
+  /**
+   * Makes a value tunable, within limits, committed by a call of its own where the configuration is
+   * written by more than its builder: {@code number("gains.kS", Limits.between(0, 2),
+   * ".withKs(%s)")}, the value in its place as written, {@code .withKs(0.25)}, a measure with its
+   * unit, {@code .withSupplyLimit(Amps.of(50.0))}.
+   *
+   * @param commit the call, with {@code %s} where the value goes
+   * @return this, to choose the next
+   * @throws IllegalArgumentException as {@link #number(String, Limits)} does, or if the call has no
+   *     {@code %s}
+   */
+  public LiveConfig<T> number(String path, Limits limits, String commit) {
+    return chosen(path, limits, commit);
+  }
+
+  /** A value made tunable, committed by its call, or by its builder step for a null one. */
+  private LiveConfig<T> chosen(String path, Limits limits, @Nullable String commit) {
+    if (commit != null && !commit.contains(VALUE)) {
+      throw new IllegalArgumentException(
+          name + ": " + path + "'s call, " + commit + ", has no " + VALUE + " for its value");
+    }
     if (slots.containsKey(path)) {
       throw new IllegalArgumentException(name + ": " + path + " is tunable already");
     }
@@ -249,7 +288,8 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
               new Knob(path, unit == null ? "" : unit.symbol(), limits),
               List.copyOf(route),
               component,
-              unit);
+              unit,
+              commit != null ? commit : "." + component.getName() + "(" + VALUE + ")");
       String outside = limits.whyNot(number(slot, committed));
       if (outside != null) {
         throw new IllegalArgumentException(
@@ -271,7 +311,26 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    *     the limits' kind
    */
   public LiveConfig<T> measure(String path, Measure<?> min, Measure<?> max) {
-    number(path, Limits.NONE); // finds and checks it
+    return measured(path, min, max, null);
+  }
+
+  /**
+   * Makes a measure tunable, within limits given as measures, committed by a call of its own, as
+   * {@link #number(String, Limits, String)} is: {@code measure("currentLimits.supply", Amps.of(5),
+   * Amps.of(80), ".withSupplyLimit(%s)")}.
+   *
+   * @return this, to choose the next
+   * @throws IllegalArgumentException as {@link #measure(String, Measure, Measure)} does, or if the
+   *     call has no {@code %s}
+   */
+  public LiveConfig<T> measure(String path, Measure<?> min, Measure<?> max, String commit) {
+    return measured(path, min, max, commit);
+  }
+
+  /** A measure made tunable, committed by its call, or by its builder step for a null one. */
+  private LiveConfig<T> measured(
+      String path, Measure<?> min, Measure<?> max, @Nullable String commit) {
+    chosen(path, Limits.NONE, commit); // finds and checks it
     Slot slot = slot(path);
     Unit unit = slot.unit();
     if (unit == null
@@ -286,7 +345,12 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
             unit.fromBaseUnits(min.baseUnitMagnitude()),
             unit.fromBaseUnits(max.baseUnitMagnitude()));
     Slot limited =
-        new Slot(new Knob(path, slot.knob().unit(), limits), slot.route(), slot.component(), unit);
+        new Slot(
+            new Knob(path, slot.knob().unit(), limits),
+            slot.route(),
+            slot.component(),
+            unit,
+            slot.commit());
     String outside = limits.whyNot(number(limited, committed));
     if (outside != null) {
       slots.remove(path);
@@ -805,7 +869,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
     Unit unit = slot.unit();
     String argument =
         unit == null ? Double.toString(value) : unitsConstant(unit) + ".of(" + value + ")";
-    return "." + slot.component().getName() + "(" + argument + ")";
+    return slot.commit().replace(VALUE, argument);
   }
 
   /**

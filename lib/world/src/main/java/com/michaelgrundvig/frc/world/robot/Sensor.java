@@ -96,15 +96,9 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
     public static Encoder absolute(String label, Joint.Revolute joint, int countsPerTurn) {
       return builder()
           .label(label)
-          .terms(
-              List.of(
-                  Transmission.Term.builder()
-                      .joint(joint)
-                      .ratio(1)
-                      .pitchRadius(Optional.empty())
-                      .build()))
+          .terms(List.of(Transmission.Term.builder().joint(joint).ratio(1).build()))
           .absolute(true)
-          .countsPerTurn(Optional.of(countsPerTurn))
+          .countsPerTurn(countsPerTurn)
           .build();
     }
 
@@ -183,14 +177,7 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
       return builder()
           .label(label)
           .part(joint.parent())
-          .pose(Optional.empty())
-          .kind(
-              SensorSwitchLimitBuilder.builder()
-                  .joint(joint)
-                  .position(Optional.of(position))
-                  .end(end)
-                  .build())
-          .wiring(Optional.empty())
+          .kind(SensorSwitchLimitBuilder.builder().joint(joint).end(end).position(position).build())
           .build();
     }
 
@@ -202,26 +189,13 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
       return builder()
           .label(label)
           .part(joint.parent())
-          .pose(Optional.empty())
-          .kind(
-              SensorSwitchLimitBuilder.builder()
-                  .joint(joint)
-                  .position(Optional.empty())
-                  .end(end)
-                  .build())
-          .wiring(Optional.empty())
+          .kind(SensorSwitchLimitBuilder.builder().joint(joint).end(end).build())
           .build();
     }
 
     /** A beam break, through-beam or reflective, on a part: tripped by something in its beam. */
     public static Switch beam(String label, Part part) {
-      return builder()
-          .label(label)
-          .part(part)
-          .pose(Optional.empty())
-          .kind(new Beam())
-          .wiring(Optional.empty())
-          .build();
+      return builder().label(label).part(part).kind(new Beam()).build();
     }
 
     /**
@@ -229,32 +203,21 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
      * the model doesn't have.
      */
     public static Switch contact(String label, Part part) {
-      return builder()
-          .label(label)
-          .part(part)
-          .pose(Optional.empty())
-          .kind(new Contact())
-          .wiring(Optional.empty())
-          .build();
+      return builder().label(label).part(part).kind(new Contact()).build();
     }
 
     /** The same switch, placed on its part: for the 3D view and the simulator. */
     public Switch at(Pose3d where) {
-      return SensorSwitchBuilder.builder(this).pose(Optional.of(where)).build();
+      return SensorSwitchBuilder.builder(this).pose(where).build();
     }
 
     /**
-     * The same switch, connected: {@code Sensor.Switch.beam("claw beam", PIVOT).on(new
-     * SensorWiring.Candi(CAN, 30, 1), SensorWiring.Polarity.NORMALLY_OPEN)}. Unconnected, it runs
-     * in the simulator alone.
+     * The same switch, connected: on a CANdi's S1, {@code .on(CANDI.can(30).s1().normallyOpen())},
+     * or on a Systemcore port, {@code .on(SensorWiring.port(1).normallyClosed())}. Unconnected, it
+     * runs in the simulator alone.
      */
-    public Switch on(SensorWiring.Input input, SensorWiring.Polarity polarity) {
-      return on(new SensorWiring.Connection(input, polarity));
-    }
-
-    /** The same switch, connected. */
     public Switch on(SensorWiring.Connection connection) {
-      return SensorSwitchBuilder.builder(this).wiring(Optional.of(connection)).build();
+      return SensorSwitchBuilder.builder(this).wiring(connection).build();
     }
 
     /** Equal to another switch the same in everything but its wiring. */
@@ -376,27 +339,20 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
     /**
      * A rangefinder on a part, reading this far within a cone this wide: {@code
      * Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))}, then {@code
-     * .at(pose)} where it's known and {@code .on(canRange)} once it's wired.
+     * .at(pose)} where it's known and {@code .on(CANRANGE.can(31))} once it's wired.
      */
     public static Rangefinder of(String label, Part part, Distance range, Angle fieldOfView) {
-      return builder()
-          .label(label)
-          .part(part)
-          .pose(Optional.empty())
-          .range(range)
-          .fieldOfView(fieldOfView)
-          .wiring(Optional.empty())
-          .build();
+      return builder().label(label).part(part).range(range).fieldOfView(fieldOfView).build();
     }
 
     /** The same rangefinder, placed on its part, looking along its x. */
     public Rangefinder at(Pose3d where) {
-      return SensorRangefinderBuilder.builder(this).pose(Optional.of(where)).build();
+      return SensorRangefinderBuilder.builder(this).pose(where).build();
     }
 
     /** The same rangefinder, on a CANrange. Unconnected, it runs in the simulator alone. */
     public Rangefinder on(SensorWiring.CanRange canRange) {
-      return SensorRangefinderBuilder.builder(this).wiring(Optional.of(canRange)).build();
+      return SensorRangefinderBuilder.builder(this).wiring(canRange).build();
     }
 
     /** Equal to another rangefinder the same in everything but its wiring. */

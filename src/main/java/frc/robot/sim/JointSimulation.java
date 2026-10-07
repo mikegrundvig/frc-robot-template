@@ -7,7 +7,6 @@ import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.subsystems.mechanisms.AbsoluteEncoderIO;
 import frc.robot.subsystems.mechanisms.JointIO;
-import frc.robot.subsystems.mechanisms.JointSetup;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -22,10 +21,9 @@ import org.wpilib.math.geometry.Transform3d;
  * and drive as they would real motor controllers. Stepped once a loop, before the robot reads its
  * sensors, as the drivetrain's physics is ({@link DriveSimulation}): gravity on each joint is
  * worked out from where every joint really is as the step starts, so a wrist feels its arm's angle
- * through its links' weight (a tuned kG holds it as one cosine, {@link JointIOSim}).
+ * through its links' weight (a tuned kG holds it as one cosine, {@code JointPlant}).
  *
- * <p>Closed form, from the robot's definition: no joint pushes on another as it moves, which the
- * simulator's rigid-body engine will add.
+ * <p>Closed form, from the robot's definition: no joint pushes on another as it moves.
  */
 public final class JointSimulation {
   private final RobotMath math;
@@ -42,20 +40,23 @@ public final class JointSimulation {
     this.math = math;
   }
 
-  /** A driven joint, simulated: its motor controller, for its mechanism to read and drive. */
-  public JointIO add(JointSetup setup) {
-    JointIOSim joint = new JointIOSim(math, setup);
-    joints.add(joint);
-    return joint;
+  /**
+   * A driven joint, simulated: its motor controller, for its mechanism to read and drive. Its
+   * controller runs the control its block gives it; gravity on it is the definition's ({@link
+   * JointIOSim}).
+   */
+  public JointIO add(Joint joint) {
+    JointIOSim simulated = new JointIOSim(math, joint);
+    joints.add(simulated);
+    return simulated;
   }
 
   /**
    * A joint's absolute encoder, simulated, where the robot reads it itself: on a Systemcore port,
-   * or unwired ({@code JointSetup.readsAbsolute}). Asked for after the joint itself.
+   * or unwired ({@code Joints.readsAbsolute}). Asked for after the joint itself.
    */
-  public AbsoluteEncoderIO absoluteEncoder(JointSetup setup) {
-    Joint joint = setup.joint();
-    Sensor.Encoder model = Objects.requireNonNull(JointSetup.absoluteEncoder(math, joint));
+  public AbsoluteEncoderIO absoluteEncoder(Joint joint) {
+    Sensor.Encoder model = Objects.requireNonNull(math.absoluteEncoder(joint));
     AbsoluteEncoderIOSim encoder =
         new AbsoluteEncoderIOSim(
             sim(joint),
@@ -108,6 +109,14 @@ public final class JointSimulation {
     return sim(joint).position();
   }
 
+  /**
+   * The current each of a joint's motors draws from the battery, in amps: what its PDH channel
+   * reads.
+   */
+  public double supplyAmps(Joint joint) {
+    return sim(joint).supplyAmps();
+  }
+
   /** How fast a joint really moves, in its units a second. */
   public double velocity(Joint joint) {
     return sim(joint).velocity();
@@ -132,6 +141,7 @@ public final class JointSimulation {
         return each;
       }
     }
-    throw new IllegalArgumentException(joint.label() + " isn't simulated: it has no setup");
+    throw new IllegalArgumentException(
+        joint.label() + " isn't simulated: the template doesn't drive it");
   }
 }

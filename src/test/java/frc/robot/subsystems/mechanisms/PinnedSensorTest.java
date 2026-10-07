@@ -1,10 +1,10 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -45,10 +45,18 @@ class PinnedSensorTest {
   private final Joints joints =
       new Joints(
           ROBOT,
-          SETUPS,
-          setup -> setup::control,
-          setup -> setup.joint().equals(PIVOT) ? pivot : new JointIO() {},
-          sensor -> SensorIO.onPin("pivot", SensorWiring.Direction.REVERSE),
+          new Joints.Hardware() {
+            @Override
+            public JointIO joint(Joint joint) {
+              return joint.equals(PIVOT) ? pivot : new JointIO() {};
+            }
+
+            @Override
+            public SensorIO sensor(Sensor.Placed sensor) {
+              return SensorIO.onPin("pivot", SensorWiring.Direction.REVERSE);
+            }
+          },
+          Joints.untuned(),
           scheduler);
 
   @Test
@@ -75,10 +83,18 @@ class PinnedSensorTest {
             () ->
                 new Joints(
                     ROBOT,
-                    SETUPS,
-                    setup -> setup::control,
-                    setup -> new JointIO() {},
-                    sensor -> SensorIO.onPin("winch", SensorWiring.Direction.REVERSE),
+                    new Joints.Hardware() {
+                      @Override
+                      public JointIO joint(Joint joint) {
+                        return new JointIO() {};
+                      }
+
+                      @Override
+                      public SensorIO sensor(Sensor.Placed sensor) {
+                        return SensorIO.onPin("winch", SensorWiring.Direction.REVERSE);
+                      }
+                    },
+                    Joints.untuned(),
                     scheduler))
         .withMessage("a switch is on winch's limit input, and the template doesn't drive it");
   }

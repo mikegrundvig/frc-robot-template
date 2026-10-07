@@ -46,7 +46,6 @@ class MountCheckTest {
     assertThat(check.doubtMeters(TOLERANCE)).isZero();
   }
 
-  /** Each tag 10 cm off in some direction: noise, which averages out. */
   /** How far its tags were, on average: what turns a doubt in meters into a turn on its mount. */
   @Test
   void itKnowsHowFarItsTagsWere() {
@@ -61,6 +60,7 @@ class MountCheckTest {
     assertThat(check.distanceMeters()).isCloseTo(sum / SIGHTINGS, within(1e-9));
   }
 
+  /** Each tag 10 cm off in some direction: noise, which averages out. */
   @Test
   void noiseAveragesOut() {
     MountCheck check = new MountCheck(SIGHTINGS);

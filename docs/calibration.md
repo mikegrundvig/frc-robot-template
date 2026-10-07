@@ -252,8 +252,7 @@ in volts per rad/s². Then `I = 4 × (stall torque / nominal voltage) × driveGe
 (wheelRadius × kA)`, in kg m², with the drive motor's stall torque and nominal voltage from its
 datasheet (or `Motor.model()`), and `r` each wheel's distance from the robot's center. Friction
 makes it read a little high. Nothing in the code reads it yet: the simulator spins the robot as
-if its mass sat at its wheels ([stand-ins](stand-ins.md)); a simulator that models the robot as one
-body will.
+if its mass sat at its wheels, a known gap ([stand-ins](stand-ins.md#the-simulators-physics)).
 
 When: once the robot is built, and after a big change.
 

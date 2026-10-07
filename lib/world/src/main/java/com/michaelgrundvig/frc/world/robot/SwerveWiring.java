@@ -44,20 +44,63 @@ public record SwerveWiring(
     double gyroYawScale,
     List<ModuleWiring> modules) {
   public SwerveWiring {
+    modules = List.copyOf(modules);
+    List<ModuleWiring> wired = modules;
     Checks.on(SwerveWiring.class)
         .field("gyroId", gyroId, between(0, 62)) // a CAN ID
         .field("gyroYawScale", gyroYawScale, between(0.9, 1.1)) // off by more is a broken gyro
         .field("modules", modules, size(4))
         .field("driveController", driveController, SwerveWiring::notSwerve)
         .field("steerController", steerController, SwerveWiring::notSwerve)
-        .check("modules", () -> encoders(steerController, modules))
-        .check("modules", () -> sharedIds(driveController, steerController, modules))
+        .check("modules", () -> encoders(steerController, wired))
+        .check("modules", () -> sharedIds(driveController, steerController, wired))
         .orThrow();
   }
 
   /** Starts describing a drivetrain's wiring, one named value at a time. */
   public static SwerveWiringBuilder.CanBusStage builder() {
     return SwerveWiringBuilder.builder();
+  }
+
+  /**
+   * Its devices on the CAN bus: the gyro, then each module's drive, steering and CANcoder, in the
+   * modules' order, "front-left drive", "front-left steering", "front-left CANcoder", each motor
+   * controller with the PDH channel that feeds it where its module's wiring says.
+   */
+  List<CanDevice> devices() {
+    List<CanDevice> devices = new ArrayList<>();
+    devices.add(
+        new CanDevice("the gyro", CanDevice.Kind.PIGEON_2, canBus, gyroId, Optional.empty()));
+    for (int i = 0; i < modules.size(); i++) {
+      String module = DrivetrainGeometry.LABELS.get(i);
+      ModuleWiring wiring = modules.get(i);
+      devices.add(
+          new CanDevice(
+              module + " drive",
+              driveController.kind(),
+              canBus,
+              wiring.driveId(),
+              wiring.driveFeed()));
+      devices.add(
+          new CanDevice(
+              module + " steering",
+              steerController.kind(),
+              canBus,
+              wiring.steerId(),
+              wiring.steerFeed()));
+      wiring
+          .encoderId()
+          .ifPresent(
+              id ->
+                  devices.add(
+                      new CanDevice(
+                          module + " CANcoder",
+                          CanDevice.Kind.CANCODER,
+                          canBus,
+                          id,
+                          Optional.empty())));
+    }
+    return devices;
   }
 
   /**
@@ -76,6 +119,9 @@ public record SwerveWiring(
    * @param steerInverted whether the steering motor turns clockwise to turn the module
    *     counterclockwise
    * @param encoderInverted whether the absolute encoder counts clockwise
+   * @param driveFeed the PDH channel the drive motor controller is powered from, and its breaker:
+   *     {@code .driveFeed(Pdh.feed(0, Amps.of(40)))}; empty where it isn't said
+   * @param steerFeed the same, the steering motor controller's
    */
   @ConfigRecord
   public record ModuleWiring(
@@ -85,7 +131,9 @@ public record SwerveWiring(
       Angle encoderOffset,
       boolean driveInverted,
       boolean steerInverted,
-      boolean encoderInverted) {
+      boolean encoderInverted,
+      Optional<Pdh.Feed> driveFeed,
+      Optional<Pdh.Feed> steerFeed) {
     public ModuleWiring {
       Checks.on(ModuleWiring.class)
           .field("driveId", driveId, between(0, 62))
@@ -145,7 +193,7 @@ public record SwerveWiring(
           List.of(
               Map.entry(drive.kind(), module.driveId()),
               Map.entry(steer.kind(), module.steerId()))) {
-        if (!seen.add(device.getKey() + device.getValue())) {
+        if (!seen.add(device.getKey() + " " + device.getValue())) {
           shared.add("CAN ID " + device.getValue() + " is used by two " + device.getKey() + "s");
         }
       }
@@ -153,7 +201,7 @@ public record SwerveWiring(
           .encoderId()
           .ifPresent(
               id -> {
-                if (!seen.add("CANcoder" + id)) {
+                if (!seen.add("CANcoder " + id)) {
                   shared.add("CAN ID " + id + " is used by two CANcoders");
                 }
               });

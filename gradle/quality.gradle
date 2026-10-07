@@ -30,6 +30,10 @@ tasks.withType(JavaCompile).configureEach {
         "-Xlint:cast,divzero,empty,fallthrough,finally,overrides,rawtypes,unchecked",
         "-Werror",
     ])
+    // Javadoc's references checked as the code compiles: a {@link}, @see or @param naming a class,
+    // member or parameter that doesn't exist, or that this project can't see, fails the build, so
+    // the docs can't drift from the code. Only references: a missing comment isn't a bug.
+    options.compilerArgs.add "-Xdoclint:reference"
     // Error Prone (Google's bug finder) at error level only: its warnings are style advice, worth
     // reading in review, never worth failing a build over. NullAway (Uber's null checker) proves at
     // compile time that nothing can be null unless it is annotated @Nullable (org.jspecify).

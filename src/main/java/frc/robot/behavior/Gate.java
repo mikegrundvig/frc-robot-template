@@ -18,11 +18,11 @@ import org.wpilib.units.measure.Time;
  * co.waitUntil(readyToShoot)}), with a name and named terms. Every joint's checks are gates already
  * ({@code shooter.isAtGoal()} is "shooter at goal"), and code makes its own:
  *
- * <pre>{@code
- * Gate aimed = Gate.within(scheduler, "aimed", () -> drive.headingError().getDegrees(), 2.0, 4.0);
+ * {@snippet :
+ * Gate aimed = Gate.within(scheduler, "aimed", () -> headingErrorDegrees(), 2.0, 4.0);
  * Gate readyToShoot = Gate.all("ready to shoot", shooter.isAtGoal(), aimed)
  *     .debounce(Milliseconds.of(80), Debouncer.DebounceType.FALLING); // rides out a flywheel dip
- * }</pre>
+ * }
  *
  * <p>It's worked out once a loop, before the scheduler's bindings and commands read it, and logged
  * then: {@code Gates/ready to shoot = false}, and {@code Gates/ready to shoot/Blocking = [aimed]},
@@ -176,6 +176,25 @@ public final class Gate extends Trigger {
           }
           return holds;
         });
+  }
+
+  /**
+   * A trigger true while this gate and a condition both hold. With a gamepad's button, it's the
+   * button's, recording what's bound to it: {@code readyToShoot.and(operator.rightBumper())} is
+   * "right bumper and ready to shoot", as the other way round.
+   */
+  @Override
+  public Trigger and(BooleanSupplier condition) {
+    return condition instanceof RecordingTrigger button ? button.and(this) : super.and(condition);
+  }
+
+  /**
+   * A trigger true while this gate or a condition holds: with a gamepad's button, the button's, as
+   * {@link #and} is.
+   */
+  @Override
+  public Trigger or(BooleanSupplier condition) {
+    return condition instanceof RecordingTrigger button ? button.or(this) : super.or(condition);
   }
 
   /** Its name, as logged: "ready to shoot". */

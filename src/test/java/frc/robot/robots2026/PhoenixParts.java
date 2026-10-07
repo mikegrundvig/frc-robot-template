@@ -1,21 +1,21 @@
 package frc.robot.robots2026;
 
 import static org.wpilib.units.Units.Amps;
-import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.phoenix.PhoenixMechanism;
-import frc.robot.lib.phoenix.PhoenixUnits;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -25,61 +25,38 @@ import java.util.Optional;
  * tests share, and a team's numbers in another frame turned into the control's. Nothing here is a
  * fact about a robot.
  *
- * <p>A team's Phoenix unit is often not the helper's ({@link PhoenixUnits}: a joint's rotations, a
- * drum's, or meters): its rotor's turns when it sets no ratio, degrees, inches. {@code
+ * <p>A team's Phoenix unit is often not the helper's ({@link MechanismRotations}: a joint's
+ * rotations, a drum's, or meters): its rotor's turns when it sets no ratio, degrees, inches. {@code
  * theirsPerOurs} is how many of the team's units make one of the helper's: the gearing for a
  * rotor's turns, 360 for degrees.
  */
 final class PhoenixParts {
   private PhoenixParts() {}
 
-  static MechanismWiring.Motor motor(int id, boolean clockwise) {
-    return MechanismWiring.Motor.builder().id(id).clockwise(clockwise).build();
+  /** A TalonFX on 2611's CANivore, turning clockwise to move its joint forward, or not. */
+  static MechanismWiring.Device motor(int id, boolean clockwise) {
+    MechanismWiring.Device talon =
+        MechanismWiring.Controller.TALON_FX.can(CanBus.canivore("canivore"), id);
+    return clockwise ? talon.clockwise() : talon;
   }
 
   /** The drive's motors, IDs from 1, each turning counterclockwise to move the joint forward. */
-  static MechanismWiring wiring(Drive drive) {
+  static List<MechanismWiring.Device> wiring(Drive drive) {
     int count = ((Actuator.Motors) drive.actuator()).count();
-    List<MechanismWiring.Motor> motors = new ArrayList<>();
+    List<MechanismWiring.Device> motors = new ArrayList<>();
     for (int id = 1; id <= count; id++) {
       motors.add(motor(id, false));
     }
-    return wiring(Optional.empty(), motors);
+    return motors;
   }
 
-  static MechanismWiring wiring(MechanismWiring.Motor... motors) {
-    return wiring(Optional.empty(), List.of(motors));
+  static List<MechanismWiring.Device> wiring(MechanismWiring.Device... motors) {
+    return List.of(motors);
   }
 
-  static MechanismWiring wiring(
-      MechanismWiring.Cancoder cancoder, MechanismWiring.Motor... motors) {
-    return wiring(Optional.of(cancoder), List.of(motors));
-  }
-
-  private static MechanismWiring wiring(
-      Optional<MechanismWiring.Cancoder> cancoder, List<MechanismWiring.Motor> motors) {
-    return MechanismWiring.builder()
-        .canBus(CanBus.canivore("canivore"))
-        .controller(MechanismWiring.Controller.TALON_FX)
-        .motors(motors)
-        .cancoder(cancoder)
-        .dataPort(Optional.empty())
-        .build();
-  }
-
-  static MechanismWiring.Cancoder cancoder(
-      int id, double offsetRotations, boolean clockwise, MechanismWiring.Feedback feedback) {
-    return MechanismWiring.Cancoder.builder()
-        .id(id)
-        .offset(Rotations.of(offsetRotations))
-        .clockwise(clockwise)
-        .feedback(feedback)
-        .build();
-  }
-
-  /** The helper's units for a joint, as a drive moves it. */
-  static PhoenixUnits units(Joint joint, Drive drive) {
-    return PhoenixUnits.of(joint, drive);
+  /** The helper's units for a joint, as a drive moves it: its rotations. */
+  static MechanismRotations units(Joint joint, Drive drive) {
+    return MechanismRotations.of(joint, drive);
   }
 
   /**
@@ -87,16 +64,14 @@ final class PhoenixParts {
    * leaves to the seed.
    */
   static MechanismControl.Gains gains(
-      PhoenixUnits units, double kP, double kD, double kV, double kG, double theirsPerOurs) {
+      MechanismRotations units, double kP, double kD, double kV, double kG, double theirsPerOurs) {
     return MechanismControl.Gains.builder()
         .kP(gain(units, kP, theirsPerOurs))
         .kI(0)
         .kD(gain(units, kD, theirsPerOurs))
         .kS(0)
         .kV(Double.isNaN(kV) ? Optional.empty() : Optional.of(gain(units, kV, theirsPerOurs)))
-        .kA(Optional.empty())
         .kG(Double.isNaN(kG) ? Optional.empty() : Optional.of(kG))
-        .gravityAngle(Optional.empty())
         .build();
   }
 
@@ -104,13 +79,13 @@ final class PhoenixParts {
    * A gain per a team's unit (per rotor turn, per degree, per inch) as the control takes it, per
    * radian or meter.
    */
-  static double gain(PhoenixUnits units, double perTheirUnit, double theirsPerOurs) {
-    return units.gainFromPhoenix(perTheirUnit * theirsPerOurs);
+  static double gain(MechanismRotations units, double perTheirUnit, double theirsPerOurs) {
+    return units.gainPerJointUnit(perTheirUnit * theirsPerOurs);
   }
 
   /** A position, a speed or an acceleration in a team's units as the control takes it. */
-  static double position(PhoenixUnits units, double theirs, double theirsPerOurs) {
-    return units.fromPhoenix(theirs / theirsPerOurs);
+  static double position(MechanismRotations units, double theirs, double theirsPerOurs) {
+    return units.fromRotations(theirs / theirsPerOurs);
   }
 
   static Optional<MechanismControl.SoftLimits> soft(double lower, double upper) {
@@ -122,7 +97,6 @@ final class PhoenixParts {
         MechanismControl.Profile.builder()
             .cruiseVelocity(cruise)
             .acceleration(acceleration)
-            .jerk(0)
             .build());
   }
 
@@ -141,8 +115,6 @@ final class PhoenixParts {
       Optional<MechanismControl.Profile> profile) {
     return MechanismControl.builder()
         .gains(gains)
-        .softLimits(softLimits)
-        .profile(profile)
         .currentLimits(
             MechanismControl.CurrentLimits.builder()
                 .stator(Amps.of(40))
@@ -151,14 +123,38 @@ final class PhoenixParts {
                 .supplyLowerTime(Seconds.of(1))
                 .build())
         .neutralMode(MechanismControl.NeutralMode.BRAKE)
-        .bands(Optional.empty())
-        .homing(Optional.empty())
+        .deadChannel(MechanismControl.DeadChannel.DEFAULTS)
+        .softLimits(softLimits)
+        .profile(profile)
         .build();
   }
 
   /** The helper's settings for a drive's motors, rotor alone, seeded. */
   static PhoenixMechanism.Settings seeded(RobotMath math, Joint joint, Drive drive) {
-    return PhoenixMechanism.configure(math, joint, drive, wiring(drive), control());
+    return configure(math, joint, drive, wiring(drive), control());
+  }
+
+  /** The helper's settings for a mechanism's parts, through the plan the program works out. */
+  static PhoenixMechanism.Settings configure(
+      RobotMath math,
+      Joint joint,
+      Drive drive,
+      List<MechanismWiring.Device> controllers,
+      MechanismControl control) {
+    return PhoenixMechanism.configure(ControllerPlan.of(math, joint, drive, controllers, control));
+  }
+
+  /** The same, with a CANcoder. */
+  static PhoenixMechanism.Settings configure(
+      RobotMath math,
+      Joint joint,
+      Drive drive,
+      Sensor.Encoder encoder,
+      MechanismWiring.Cancoder cancoder,
+      List<MechanismWiring.Device> controllers,
+      MechanismControl control) {
+    return PhoenixMechanism.configure(
+        math, ControllerPlan.of(math, joint, drive, controllers, control), encoder, cancoder);
   }
 
   /** A swerve corner's mechanisms, its CANcoder on its steering's shaft. */

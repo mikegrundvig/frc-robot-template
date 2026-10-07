@@ -1,9 +1,7 @@
 package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_MOTOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_FRONT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.gearing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
@@ -11,8 +9,6 @@ import static org.wpilib.units.Units.Radians;
 
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
-import com.michaelgrundvig.frc.world.robot.MechanismControl;
-import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
@@ -21,7 +17,6 @@ import frc.robot.RobotSim;
 import frc.robot.behavior.Outcome;
 import frc.robot.sim.JointsSimHarness;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -38,7 +33,7 @@ class TurretTurnsSimTest {
 
   private static final Joint.Revolute TURRET =
       JointRevoluteBuilder.builder(JointFixtures.TURRET)
-          .range(Optional.of(Range.degrees(-200, 200)))
+          .range(Range.degrees(-200, 200))
           .positions(List.of(TURRET_FRONT, BACK))
           .build();
 
@@ -46,8 +41,6 @@ class TurretTurnsSimTest {
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
           .joints(List.of(PIVOT, TURRET))
-          .drives(
-              List.of(PIVOT_MOTOR, JointFixtures.motors(TURRET, Motor.KRAKEN_X60, 1, gearing(50))))
           .configurations(List.of())
           .build();
 
@@ -139,11 +132,11 @@ class TurretTurnsSimTest {
    */
   @Test
   void softLimitsNarrowerThanATurnLeaveSomeHeadingsOutside() {
-    MechanismControl control = TURRET.driven().control().orElseThrow();
     JointsSimHarness limited =
         new JointsSimHarness(
             ROBOT.with(
-                TURRET.control(control.withSoftLimits(Math.toRadians(-190), Math.toRadians(160)))));
+                TURRET.retuned(
+                    control -> control.withSoftLimits(Math.toRadians(-190), Math.toRadians(160)))));
     JointMechanism soft = limited.joints.of(TURRET);
     Move wrapped = soft.goTo(Degrees.of(200));
     Move outside = soft.goTo(Degrees.of(165));
@@ -158,8 +151,8 @@ class TurretTurnsSimTest {
     assertThat(outside.outcome()).contains(Outcome.REFUSED);
     assertThat(outside.reason())
         .isEqualTo(
-            "turret → 165.0°: REFUSED: 165.0°, at every turn of it, is outside turret's limits,"
-                + " -190.0° to 160.0°");
+            "turret → 165°: REFUSED: 165°, at every turn of it, is outside turret's limits,"
+                + " -190° to 160°");
     assertThat(degrees(limited)).isCloseTo(160, within(2.0));
   }
 
@@ -193,6 +186,6 @@ class TurretTurnsSimTest {
 
     assertThat(far.outcome()).contains(Outcome.REFUSED);
     assertThat(far.reason())
-        .isEqualTo("pivot → 370.0°: REFUSED: 370.0° is outside pivot's limits, 0.0° to 135.0°");
+        .isEqualTo("pivot → 370°: REFUSED: 370° is outside pivot's limits, 0° to 135°");
   }
 }

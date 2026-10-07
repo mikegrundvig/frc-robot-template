@@ -148,9 +148,9 @@ class BodyTest {
 
   @Test
   void centerOfGravityMustBeInsideTheFrameAndBelowTheTop() {
-    assertRejected("cg", () -> change().cg(Optional.of(new Translation3d(0, 0, 0.8))).build());
-    assertRejected("cg", () -> change().cg(Optional.of(new Translation3d(0.4, 0, 0.2))).build());
-    assertRejected("cg", () -> change().cg(Optional.of(new Translation3d(0, 0, 0))).build());
+    assertRejected("cg", () -> change().cg(new Translation3d(0, 0, 0.8)).build());
+    assertRejected("cg", () -> change().cg(new Translation3d(0.4, 0, 0.2)).build());
+    assertRejected("cg", () -> change().cg(new Translation3d(0, 0, 0)).build());
   }
 
   /**

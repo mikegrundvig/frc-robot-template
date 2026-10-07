@@ -135,6 +135,12 @@ tasks.named("test") {
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file("layouts/advantagescope.json").withPropertyName("advantageScopeLayout")
             .withPathSensitivity(PathSensitivity.RELATIVE)
+    // The documentation's examples of code (DocExamplesTest): the guides, and the Javadoc of the
+    // sources, whose comments the compiled classes don't carry.
+    inputs.files(fileTree("docs") { include "**/*.md" }, "README.md", "AGENTS.md")
+    .withPropertyName("guides").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(fileTree("src") { include "*/java/**/*.java" }, fileTree("lib") { include "*/src/*/java/**/*.java" })
+    .withPropertyName("documentedSources").withPathSensitivity(PathSensitivity.RELATIVE)
     // The models the layout names are those the build generates, before the tests (when the
     // AdvantageScope plugin is applied).
     inputs.files(fileTree("ascope_assets")).withPropertyName("advantageScopeAssets")

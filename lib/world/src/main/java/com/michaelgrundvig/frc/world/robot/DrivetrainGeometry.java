@@ -22,6 +22,7 @@ import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.LinearVelocity;
 import org.wpilib.units.measure.MomentOfInertia;
@@ -103,28 +104,76 @@ public record DrivetrainGeometry(
               .position(new Translation2d(sign[0] * x, sign[1] * y))
               .build());
     }
-    return builder().corners(corners).wiring(Optional.empty()).control(Optional.empty()).build();
+    return builder().corners(corners).build();
   }
 
   /** The same drivetrain, wired: its modules' and its gyro's devices. */
   public DrivetrainGeometry wired(SwerveWiring wiring) {
-    return DrivetrainGeometryBuilder.builder(this).wiring(Optional.of(wiring)).build();
+    return DrivetrainGeometryBuilder.builder(this).wiring(wiring).build();
+  }
+
+  /**
+   * The same drivetrain, its modules' absolute encoders offset otherwise, front left, front right,
+   * back left, back right, as Phoenix Tuner X's swerve generator gives them, the rest of its wiring
+   * kept: a practice robot's, {@code DRIVETRAIN.encoderOffsets(Rotations.of(0.12),
+   * Rotations.of(-0.3), Rotations.of(0.41), Rotations.of(0.07))}. A CANcoder moved to another ID in
+   * the competition robot's wiring reaches it.
+   *
+   * @throws IllegalArgumentException if it isn't wired
+   */
+  public DrivetrainGeometry encoderOffsets(
+      Angle frontLeft, Angle frontRight, Angle backLeft, Angle backRight) {
+    SwerveWiring was =
+        wiring.orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "the drivetrain isn't wired, so its modules have no offsets: wire it,"
+                        + " .wired(...)"));
+    List<Angle> offsets = List.of(frontLeft, frontRight, backLeft, backRight);
+    List<SwerveWiring.ModuleWiring> modules = new ArrayList<>();
+    for (int i = 0; i < offsets.size(); i++) {
+      modules.add(
+          SwerveWiringModuleWiringBuilder.builder(was.modules().get(i))
+              .encoderOffset(offsets.get(i))
+              .build());
+    }
+    return wired(SwerveWiringBuilder.builder(was).modules(modules).build());
   }
 
   /** The same drivetrain, driven so: its limits and gains. */
   public DrivetrainGeometry control(DrivetrainControl control) {
-    return DrivetrainGeometryBuilder.builder(this).control(Optional.of(control)).build();
+    return DrivetrainGeometryBuilder.builder(this).control(control).build();
   }
 
-  /** Equal to another drivetrain the same in everything but how it's driven and wired. */
+  /**
+   * Equal to another drivetrain the same in everything but how it's driven and wired, and what only
+   * the simulator reads: its modules' drive and steering inertias. A practice robot's drivetrain,
+   * its Tuner X simulation inertias its own, is still the competition robot's.
+   */
   @Override
   public boolean equals(@Nullable Object other) {
-    return other instanceof DrivetrainGeometry that && corners.equals(that.corners);
+    return other instanceof DrivetrainGeometry that
+        && robotReads(corners).equals(robotReads(that.corners));
   }
 
   @Override
   public int hashCode() {
-    return corners.hashCode();
+    return robotReads(corners).hashCode();
+  }
+
+  /** Its corners as the robot reads them: each module without what only the simulator reads. */
+  private static List<Corner> robotReads(List<Corner> corners) {
+    return corners.stream()
+        .map(
+            corner ->
+                DrivetrainGeometryCornerBuilder.builder(corner)
+                    .module(
+                        DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
+                            .driveInertia(Optional.empty())
+                            .steerInertia(Optional.empty())
+                            .build())
+                    .build())
+        .toList();
   }
 
   /**
@@ -267,12 +316,7 @@ public record DrivetrainGeometry(
               .parent(Part.CHASSIS)
               .origin(new Transform3d(at.getX(), at.getY(), 0, Rotation3d.ZERO))
               .axis(Vector3.UP)
-              .range(Optional.empty())
-              .reference(0)
               .link(disc(label + " module", steerInertiaOrDefault(), radius, Vector3.UP))
-              .positions(List.of())
-              .outputs(List.of())
-              .driven(Driven.NONE)
               .build();
       Joint.Revolute wheel =
           Joint.Revolute.builder()
@@ -280,12 +324,7 @@ public record DrivetrainGeometry(
               .parent(steer)
               .origin(new Transform3d(0, 0, radius, Rotation3d.ZERO))
               .axis(new Vector3(0, 1, 0))
-              .range(Optional.empty())
-              .reference(0)
               .link(disc(label + " wheel", driveInertiaOrDefault(), radius, new Vector3(0, 1, 0)))
-              .positions(List.of())
-              .outputs(List.of())
-              .driven(Driven.NONE)
               .build();
       Drive drive =
           Drive.builder()
@@ -310,19 +349,9 @@ public record DrivetrainGeometry(
     /** The drive motor's turns: the drive's ratio on the wheel, and the coupling's on steering. */
     private List<Transmission.Term> terms(Joint wheel, Joint steer) {
       List<Transmission.Term> terms = new ArrayList<>();
-      terms.add(
-          Transmission.Term.builder()
-              .joint(wheel)
-              .ratio(driveGearing.ratio())
-              .pitchRadius(Optional.empty())
-              .build());
+      terms.add(Transmission.Term.builder().joint(wheel).ratio(driveGearing.ratio()).build());
       if (couplingRatio != 0) {
-        terms.add(
-            Transmission.Term.builder()
-                .joint(steer)
-                .ratio(couplingRatio)
-                .pitchRadius(Optional.empty())
-                .build());
+        terms.add(Transmission.Term.builder().joint(steer).ratio(couplingRatio).build());
       }
       return terms;
     }
@@ -351,7 +380,6 @@ public record DrivetrainGeometry(
                           .iyz(0)
                           .build())
                   .build())
-          .shapes(List.of())
           .build();
     }
 

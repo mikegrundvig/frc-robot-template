@@ -5,9 +5,8 @@ import static frc.robot.robots2026.Compare.SANITY_LOW;
 import static frc.robot.robots2026.Compare.freeRpm;
 import static frc.robot.robots2026.Compare.kV;
 import static frc.robot.robots2026.Compare.sameMount;
-import static frc.robot.robots2026.Parts.CANCODER;
+import static frc.robot.robots2026.Parts.CANCODER_COUNTS;
 import static frc.robot.robots2026.Parts.IN;
-import static frc.robot.robots2026.Parts.encoder;
 import static frc.robot.robots2026.Parts.inches;
 import static frc.robot.robots2026.Parts.swapped;
 import static frc.robot.robots2026.Parts.withOutputs;
@@ -23,18 +22,19 @@ import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.MetersPerSecond;
 
+import com.michaelgrundvig.frc.world.config.Finding;
+import com.michaelgrundvig.frc.world.config.Finding.Scope;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.BodyBuilder;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Position;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition.Missing.Scope;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -63,6 +63,19 @@ class Team2611Test {
   }
 
   /**
+   * The robot the simulator runs is theirs, its drivetrain given the template's control through
+   * {@code with}: their wiring kept, Tuner X's, and the tread's grip the default the robot plans on
+   * until it's measured.
+   */
+  @Test
+  void theSimulatorsRobotKeepsTheirWiring() {
+    assertThat(Team2611.CONFIG.definition().drivetrain()).isEqualTo(ROBOT.drivetrain());
+    assertThat(Team2611.CONFIG.drivetrainWiring()).isEqualTo(ROBOT.drivetrain().wiring());
+    assertThat(Team2611.CONFIG.drivetrain().gains().steerKp()).isEqualTo(16.0);
+    assertThat(ROBOT.drivetrain().wheelCoefficientOfFriction()).isEqualTo(1.2);
+  }
+
+  /**
    * The drivetrain's Phoenix ratios as ModuleIOTalonFX sets them from Tuner's constants
    * (subsystems/drive/ModuleIOTalonFX.java:100,122; generated/TunerConstants.java:80-83), and its
    * modules where TunerConstants.java:135-169 puts them.
@@ -70,7 +83,8 @@ class Team2611Test {
   @Test
   void theSwerveModulesAreTunersOwn() {
     DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
-    Sensor.Encoder cancoder = encoder("front-left cancoder", frontLeft.steer(), 1, true, CANCODER);
+    Sensor.Encoder cancoder =
+        Sensor.Encoder.absolute("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     Sensor.Encoder rotor = frontLeft.drive().rotor();
     RobotMath corner =
         RobotMath.of(
@@ -212,7 +226,7 @@ class Team2611Test {
     assertThat(Team2611.FEEDING.joints()).containsExactly(Team2611.FULL_SEND, Team2611.TRANSITION);
     assertThat(ROBOT.everyInterlock())
         .singleElement()
-        .hasToString("intake runs only when pivot past 110°");
+        .hasToString("intake runs only when pivot at least 110°");
   }
 
   /**
@@ -235,7 +249,7 @@ class Team2611Test {
                     Team2611.FULL_SEND,
                     autoFeed,
                     motors(Team2611.FULL_SEND),
-                    JointFixtures.motors(autoFeed, Motor.KRAKEN_X60, 1, Parts.gearing(4))))
+                    JointFixtures.motors(autoFeed, Motor.KRAKEN_X60, 1, Gearing.of(4))))
         .withMessage(
             "RobotDefinition[2611 2026].joints: full send's feeding, 5000 rpm, is 3.333 times its"
                 + " free speed, 1500 rpm: its motors can't turn it that fast");
@@ -247,7 +261,9 @@ class Team2611Test {
    */
   @Test
   void theIntakesSpeedIsNotedAtItsFreeSpeed() {
-    assertThat(ROBOT.notes())
+    assertThat(ROBOT.findings())
+        .filteredOn(finding -> finding.level() == Finding.Level.DOUBT)
+        .extracting(Finding::message)
         .containsExactly(
             "intake's intaking, 2000 rpm, is 100% of its free speed, 2000 rpm: a velocity loop has"
                 + " little or nothing left to hold it under load");
@@ -271,7 +287,7 @@ class Team2611Test {
             () -> RobotDefinitionBuilder.builder(ROBOT).configurations(List.of(stowed)).build())
         .withMessage(
             "RobotDefinition[2611 2026].configurations: configuration intaking runs intake, but"
-                + " intake runs only when pivot past 110°, and pivot is at 1.5°, its reference");
+                + " intake runs only when pivot at least 110°, and pivot is at 1.5°, where it rests");
     assertThat(
             RobotDefinitionBuilder.builder(ROBOT)
                 .configurations(List.of(out))
@@ -358,34 +374,79 @@ class Team2611Test {
   }
 
   /**
-   * What the definition doesn't know. No link's mass, which only the simulator reads; the pivot's
-   * kG not written, as 2611's code has none (Pivot.java:26-27), which the robot says; the robot
-   * weighed, as the code gives it; its yaw the code's 5.5 kg m² (Constants.java:188), its pitch and
-   * roll the model's box, which would put the yaw at 6.89, the PathPlanner app's 6.883
+   * What the definition doesn't know. No link's mass, which only the simulator reads; the tread's
+   * grip, which their code gives only as PathPlanner's tuning value, which the robot says; the
+   * pivot's kG not written, as 2611's code has none (Pivot.java:26-27), which the robot says; the
+   * robot weighed, as the code gives it; its yaw the code's 5.5 kg m² (Constants.java:188), its
+   * pitch and roll the model's box, which would put the yaw at 6.89, the PathPlanner app's 6.883
    * (settings.json:16) to a tenth of a percent.
    */
   @Test
   void theMissingDataReportListsEveryLinksMass() {
-    ROBOT.missing().forEach(System.out::println);
+    List<Finding> notes =
+        ROBOT.findings().stream().filter(finding -> finding.level() == Finding.Level.NOTE).toList();
 
-    assertThat(ROBOT.missing())
-        .extracting(RobotDefinition.Missing::what, RobotDefinition.Missing::scope)
+    assertThat(notes)
+        .extracting(Finding::message, Finding::scope)
         .containsExactly(
-            tuple("the body's pitch and roll are a box's, beside its given yaw", Scope.SIMULATOR),
-            tuple("62.57 kg of the robot's 62.57 kg is in no link", Scope.SIMULATOR),
-            tuple("intake arm has no mass", Scope.SIMULATOR),
-            tuple("pivot has no kG", Scope.ROBOT),
-            tuple("intake roller has no mass", Scope.SIMULATOR),
-            tuple("shooter wheels has no mass", Scope.SIMULATOR),
-            tuple("full send rollers has no mass", Scope.SIMULATOR),
-            tuple("transition rollers has no mass", Scope.SIMULATOR),
-            tuple("hood has no mass", Scope.SIMULATOR),
-            tuple("hood has no shape", Scope.ROBOT));
-    assertThat(ROBOT.missing().get(2).costs())
-        .isEqualTo(
-            "pivot's gravity comes from its kG, and intake arm adds nothing to pivot's inertia");
-    assertThat(ROBOT.missing().get(4).costs())
-        .isEqualTo("intake roller adds nothing to intake's inertia");
+            tuple(
+                "the body's pitch and roll are a box's, beside its given yaw: how the simulator"
+                    + " tips the robot is approximate",
+                Scope.SIMULATOR),
+            tuple(
+                "62.57 kg of the robot's 62.57 kg is in no link: the chassis, its electronics,"
+                    + " bumpers and battery: carried as one rigid body",
+                Scope.SIMULATOR),
+            tuple(
+                "the tread's grip isn't measured: it's 1.2, PathPlanner's default: drive moves"
+                    + " plan their acceleration on it, and the slip check judges by it: measure it"
+                    + " with a pull test (docs/characterization.md, tread friction)",
+                Scope.ROBOT),
+            tuple(
+                "intake arm has no mass: pivot's gravity comes from its kG, and intake arm adds"
+                    + " nothing to pivot's inertia",
+                Scope.SIMULATOR),
+            tuple(
+                "pivot has no kG: it holds against gravity by kP alone, so it sits below its"
+                    + " targets until its kG is tuned and written, withKg(...), or written as 0"
+                    + " for a counterbalanced joint",
+                Scope.ROBOT),
+            tuple(
+                "intake roller has no mass: intake roller adds nothing to intake's inertia",
+                Scope.SIMULATOR),
+            tuple(
+                "shooter wheels has no mass: shooter wheels adds nothing to shooter's inertia",
+                Scope.SIMULATOR),
+            tuple(
+                "full send rollers has no mass: full send rollers adds nothing to full send's"
+                    + " inertia",
+                Scope.SIMULATOR),
+            tuple(
+                "transition rollers has no mass: transition rollers adds nothing to transition's"
+                    + " inertia",
+                Scope.SIMULATOR),
+            tuple(
+                "hood has no mass: hood's gravity comes from its kG, and hood adds nothing to"
+                    + " hood's inertia",
+                Scope.SIMULATOR),
+            tuple(
+                "hood has no shape: it isn't drawn, nor checked against the starting height and"
+                    + " the extension limit",
+                Scope.ROBOT));
+    assertThat(notes)
+        .extracting(Finding::subject)
+        .containsExactly(
+            "2611 2026",
+            "2611 2026",
+            "2611 2026",
+            "pivot",
+            "pivot",
+            "intake",
+            "shooter",
+            "full send",
+            "transition",
+            "hood",
+            "hood");
     assertThat(BODY.yawMomentOfInertia().in(KilogramSquareMeters)).isEqualTo(5.5);
     Body boxed = BodyBuilder.builder(BODY).inertia(Body.Turning.BOX).build();
     assertThat(boxed.yawMomentOfInertia().in(KilogramSquareMeters)).isCloseTo(6.883, within(0.01));

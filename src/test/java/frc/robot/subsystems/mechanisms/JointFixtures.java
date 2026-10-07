@@ -11,7 +11,7 @@ import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.Driven;
+import com.michaelgrundvig.frc.world.robot.DrivenBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
@@ -35,8 +35,11 @@ import org.wpilib.units.measure.Distance;
 
 /**
  * A robot with the joints the runtime's tests drive, on the template's: an intake's pivot with a
- * roller on its end, an elevator, and a turret that turns freely. Numbers are chosen to read, not
- * taken from a robot.
+ * roller on its end, an elevator, and a turret that turns freely, each turned by its block's
+ * motors, unwired, so it runs in the simulator. Numbers are chosen to read, not taken from a robot.
+ * A test varies a joint through its block, {@code ROBOT.with(PIVOT.retuned(control -> ...))}, or
+ * wires it, {@code PIVOT.motorsOn(TALON_FX.can(32))}; one that turns it with other motors takes
+ * them off first, {@code unmotored(PIVOT).motor(Motor.NEO, gearing(25), SPARK_MAX.can(32))}.
  */
 public final class JointFixtures {
   private JointFixtures() {}
@@ -78,13 +81,13 @@ public final class JointFixtures {
           .parent(Part.CHASSIS)
           .origin(new Transform3d(new Translation3d(0.2, 0, 0.3), Rotation3d.ZERO))
           .axis(PITCH_UP)
-          .range(Optional.of(Range.degrees(0, 135)))
-          .reference(Math.toRadians(1.5))
           .link(link("intake arm", 2, new Translation3d(0.3, 0, 0)))
           .positions(List.of(PIVOT_IN, PIVOT_RUN, PIVOT_OUT))
           .outputs(List.of(PIVOT_PUSH))
-          .driven(Driven.NONE)
+          .range(Range.degrees(0, 135))
+          .rest(Math.toRadians(1.5))
           .build()
+          .motor(Motor.KRAKEN_X60, gearing(25))
           .control(assumed(control(30, 1, profile(8, 30))));
 
   /** Its roller, through 3:1: intaking at 1500 rpm, outtaking at 6 V back, ejecting at half. */
@@ -94,13 +97,10 @@ public final class JointFixtures {
           .parent(PIVOT)
           .origin(new Transform3d(new Translation3d(0.35, 0, 0), Rotation3d.ZERO))
           .axis(PITCH_UP)
-          .range(Optional.empty())
-          .reference(0)
           .link(link("roller", 0.5, new Translation3d(0, 0, 0)))
-          .positions(List.of())
           .outputs(List.of(ROLLER_INTAKING, ROLLER_OUTTAKING, ROLLER_EJECTING))
-          .driven(Driven.NONE)
           .build()
+          .motor(Motor.KRAKEN_X60, gearing(3))
           .control(control(0.02, 0, Optional.empty()));
 
   /** An elevator, 0 to 1.2 m, carrying 5 kg: down, clear at 0.4 m, and at the top. */
@@ -110,13 +110,11 @@ public final class JointFixtures {
           .parent(Part.CHASSIS)
           .origin(new Transform3d(new Translation3d(-0.2, 0, 0.1), Rotation3d.ZERO))
           .axis(Vector3.UP)
-          .range(Optional.of(Range.meters(0, 1.2)))
-          .reference(0)
           .link(link("carriage", 5, new Translation3d(0, 0, 0.1)))
           .positions(List.of(ELEVATOR_DOWN, ELEVATOR_CLEAR, ELEVATOR_TOP))
-          .outputs(List.of())
-          .driven(Driven.NONE)
+          .range(Range.meters(0, 1.2))
           .build()
+          .motors(Motor.KRAKEN_X60, gearing(10), Inches.of(1), 2)
           .control(assumed(control(60, 2, profile(1.2, 5))));
 
   /** A turret that turns freely about the vertical, facing forward at 0°, back at 180°. */
@@ -126,20 +124,11 @@ public final class JointFixtures {
           .parent(Part.CHASSIS)
           .origin(new Transform3d(new Translation3d(0, 0, 0.5), Rotation3d.ZERO))
           .axis(Vector3.UP)
-          .range(Optional.empty())
-          .reference(0)
           .link(link("turret", 3, new Translation3d(0, 0, 0)))
           .positions(List.of(TURRET_FRONT, TURRET_BACK))
-          .outputs(List.of())
-          .driven(Driven.NONE)
           .build()
+          .motor(Motor.KRAKEN_X60, gearing(50))
           .control(assumed(control(20, 0.5, profile(3, 10))));
-
-  public static final Drive PIVOT_MOTOR = motors(PIVOT, Motor.KRAKEN_X60, 1, gearing(25));
-  public static final Drive ROLLER_MOTOR = motors(ROLLER, Motor.KRAKEN_X60, 1, gearing(3));
-  public static final Drive ELEVATOR_MOTORS =
-      motors(ELEVATOR, Motor.KRAKEN_X60, 2, gearing(10), Inches.of(1));
-  public static final Drive TURRET_MOTOR = motors(TURRET, Motor.KRAKEN_X60, 1, gearing(50));
 
   /** The intake out and rolling, and the elevator clear: three joints at once. */
   public static final Configuration INTAKING =
@@ -151,16 +140,28 @@ public final class JointFixtures {
       RobotDefinitionBuilder.builder(Robots.SIM.definition())
           .name("joints")
           .joints(List.of(PIVOT, ROLLER, ELEVATOR, TURRET))
-          .drives(List.of(PIVOT_MOTOR, ROLLER_MOTOR, ELEVATOR_MOTORS, TURRET_MOTOR))
           .configurations(List.of(INTAKING))
           .build();
 
+  /** Each joint's motors, from its block: what the vendor helpers' tests drive it with. */
+  public static final Drive PIVOT_MOTOR = ROBOT.math().drivesOf(PIVOT).get(0);
+
+  public static final Drive ROLLER_MOTOR = ROBOT.math().drivesOf(ROLLER).get(0);
+  public static final Drive ELEVATOR_MOTORS = ROBOT.math().drivesOf(ELEVATOR).get(0);
+  public static final Drive TURRET_MOTOR = ROBOT.math().drivesOf(TURRET).get(0);
+
   /**
-   * Each joint as the tests drive it, from its block: gains that track, a profile, no soft limits,
-   * braking. None has an absolute encoder, so each held at positions is stowed by hand, at its
-   * reference.
+   * A joint as the fixtures have it, its motors taken off for a test to give it others: a block
+   * says its motors once, and a joint re-wired keeps its motor.
    */
-  public static final List<JointSetup> SETUPS = JointSetup.all(ROBOT);
+  public static Joint.Revolute unmotored(Joint.Revolute joint) {
+    return joint.driven(DrivenBuilder.builder(joint.driven()).motors(Optional.empty()).build());
+  }
+
+  /** A sliding joint as the fixtures have it, its motors taken off for a test to give it others. */
+  public static Joint.Prismatic unmotored(Joint.Prismatic joint) {
+    return joint.driven(DrivenBuilder.builder(joint.driven()).motors(Optional.empty()).build());
+  }
 
   /** A control whose joint is where its definition rests it at power on. */
   public static MechanismControl assumed(MechanismControl control) {
@@ -169,12 +170,7 @@ public final class JointFixtures {
 
   /** A control with a homing recipe. */
   public static MechanismControl homed(MechanismControl control, MechanismControl.Homing homing) {
-    return MechanismControlBuilder.builder(control).homing(Optional.of(homing)).build();
-  }
-
-  /** A joint's setup, unwired: it runs in the simulator. */
-  public static JointSetup setup(Joint joint, MechanismControl control) {
-    return JointSetup.of(joint, control);
+    return MechanismControlBuilder.builder(control).homing(homing).build();
   }
 
   /** Feedback gains, the feedforward seeded from the definition, a profile, 40 A, braking. */
@@ -190,19 +186,7 @@ public final class JointFixtures {
       Optional<MechanismControl.Profile> profile,
       double statorAmps) {
     return MechanismControl.builder()
-        .gains(
-            MechanismControl.Gains.builder()
-                .kP(kP)
-                .kI(0)
-                .kD(kD)
-                .kS(0)
-                .kV(Optional.empty())
-                .kA(Optional.empty())
-                .kG(Optional.empty())
-                .gravityAngle(Optional.empty())
-                .build())
-        .softLimits(softLimits)
-        .profile(profile)
+        .gains(MechanismControl.Gains.builder().kP(kP).kI(0).kD(kD).kS(0).build())
         .currentLimits(
             MechanismControl.CurrentLimits.builder()
                 .stator(Amps.of(statorAmps))
@@ -211,8 +195,9 @@ public final class JointFixtures {
                 .supplyLowerTime(Seconds.of(1))
                 .build())
         .neutralMode(MechanismControl.NeutralMode.BRAKE)
-        .bands(Optional.empty())
-        .homing(Optional.empty())
+        .deadChannel(MechanismControl.DeadChannel.DEFAULTS)
+        .softLimits(softLimits)
+        .profile(profile)
         .build();
   }
 
@@ -221,7 +206,6 @@ public final class JointFixtures {
         MechanismControl.Profile.builder()
             .cruiseVelocity(cruise)
             .acceleration(acceleration)
-            .jerk(0)
             .build());
   }
 
@@ -245,7 +229,6 @@ public final class JointFixtures {
                 .cg(cg)
                 .inertia(Inertia.box(Kilograms.of(kilograms), new Translation3d(0.1, 0.1, 0.1)))
                 .build())
-        .shapes(List.of())
         .build();
   }
 

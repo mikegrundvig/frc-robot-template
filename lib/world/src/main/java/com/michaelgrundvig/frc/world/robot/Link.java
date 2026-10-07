@@ -8,6 +8,7 @@ import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Material;
 import com.michaelgrundvig.frc.world.physical.Shape;
+import io.soabase.recordbuilder.core.RecordBuilder;
 import java.util.List;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation3d;
@@ -28,7 +29,10 @@ import org.wpilib.units.measure.Mass;
  *     limit are checked against, and what the views draw. None: it isn't drawn or checked.
  */
 @ConfigRecord
-public record Link(String label, MassProperties mass, List<Shape> shapes) {
+public record Link(
+    String label,
+    MassProperties mass,
+    @RecordBuilder.Initializer(value = "of", source = List.class) List<Shape> shapes) {
   public Link {
     Checks.on(Link.class).field("label", label, notBlank()).orThrow();
     shapes = List.copyOf(shapes);
@@ -53,7 +57,7 @@ public record Link(String label, MassProperties mass, List<Shape> shapes) {
 
   /** A link nobody has weighed or drawn: where its shape would be a guess on a guess. */
   public static Link unseen(String label) {
-    return builder().label(label).mass(MassProperties.NONE).shapes(List.of()).build();
+    return builder().label(label).mass(MassProperties.NONE).build();
   }
 
   /**

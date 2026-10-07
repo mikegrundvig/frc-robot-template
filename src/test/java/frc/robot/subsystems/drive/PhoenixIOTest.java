@@ -21,7 +21,6 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import java.util.ArrayDeque;
 import java.util.List;
-import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.function.BooleanSupplier;
@@ -61,11 +60,11 @@ class PhoenixIOTest {
     return SwerveWiring.ModuleWiring.builder()
         .driveId(drive)
         .steerId(steer)
-        .encoderId(Optional.of(encoder))
         .encoderOffset(Rotations.of(0))
         .driveInverted(false)
         .steerInverted(false)
         .encoderInverted(false)
+        .encoderId(encoder)
         .build();
   }
 

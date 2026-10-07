@@ -1,4 +1,4 @@
-package frc.robot.subsystems.localization;
+package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -16,7 +16,7 @@ import java.util.List;
  * variable {@code GOLDEN_UPDATE=1} the test records the session instead, for a change meant to move
  * it; commit the file with the change, saying why it moved.
  */
-final class GoldenFile {
+public final class GoldenFile {
   /** Close enough for the same arithmetic on another processor; far below any real change. */
   private static final double TOLERANCE = 1e-6;
 
@@ -29,7 +29,7 @@ final class GoldenFile {
    * @param name the recording's file name
    * @param header what each row's columns are, for the failure's message
    */
-  static void check(Class<?> test, String name, String header, List<String> actual)
+  public static void check(Class<?> test, String name, String header, List<String> actual)
       throws IOException {
     if ("1".equals(System.getenv("GOLDEN_UPDATE"))) {
       Path file =

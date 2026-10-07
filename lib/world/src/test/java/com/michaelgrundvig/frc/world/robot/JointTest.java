@@ -41,6 +41,30 @@ class JointTest {
           0,
           link("arm", 4, point(0.3, 0, 0), point(0.6, 0.05, 0.05)));
 
+  /**
+   * Every message shows a position on a joint one way: degrees for one that turns, meters for one
+   * that slides, to four significant figures, no finer than a hundredth of a degree or a tenth of a
+   * millimeter, so a position measured on the robot reads as where it is, not its noise.
+   */
+  @Test
+  void aJointShowsAPositionInItsUnits() {
+    Joint.Prismatic lift =
+        prismatic(
+            "lift",
+            Part.CHASSIS,
+            point(0, 0, 0.1),
+            UP,
+            Range.meters(0, 1.2),
+            link("lift", 1, point(0, 0, 0), point(0.1, 0.1, 0.1)));
+
+    assertThat(arm.shown(Math.toRadians(130))).isEqualTo("130°");
+    assertThat(arm.shown(Math.toRadians(40.27312))).isEqualTo("40.27°");
+    assertThat(arm.shown(Math.toRadians(-5.7296))).isEqualTo("-5.73°");
+    assertThat(arm.shown(-1e-9)).as("noise about zero").isEqualTo("0°");
+    assertThat(lift.shown(Inches.of(32).in(Meters))).isEqualTo("0.8128 m");
+    assertThat(lift.shown(0.40000012)).isEqualTo("0.4 m");
+  }
+
   @Test
   void aJointIsOne() {
     assertThatIllegalArgumentException()
@@ -56,18 +80,20 @@ class JointTest {
                     arm.link()))
         .withMessageContaining("Revolute[ ].label")
         .withMessageContaining("an axis can't be zero");
+    Joint.Revolute restingPastItsStops =
+        revolute(
+            "arm",
+            Part.CHASSIS,
+            point(0, 0, 0),
+            UP,
+            Optional.of(Range.degrees(0, 90)),
+            2,
+            arm.link());
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                revolute(
-                    "arm",
-                    Part.CHASSIS,
-                    point(0, 0, 0),
-                    UP,
-                    Optional.of(Range.degrees(0, 90)),
-                    2,
-                    arm.link()))
-        .withMessage("Revolute[arm].reference: 2 must be inside its range (0 to 1.571)");
+        .isThrownBy(() -> definition(List.of(restingPastItsStops), List.of(), List.of(), List.of()))
+        .withMessageContaining(
+            "RobotDefinition[test].joints: arm rests at 114.6°, outside its hard stops, 0° to 90°:"
+                + " it can't start there");
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -76,12 +102,7 @@ class JointTest {
                     .parent(Part.CHASSIS)
                     .origin(new Transform3d(Double.NaN, 0, 0, Rotation3d.ZERO))
                     .axis(UP)
-                    .range(Optional.empty())
-                    .reference(0)
                     .link(arm.link())
-                    .positions(List.of())
-                    .outputs(List.of())
-                    .driven(Driven.NONE)
                     .build())
         .withMessageStartingWith("Prismatic[lift].origin");
     assertThatIllegalArgumentException()
@@ -193,20 +214,13 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Transmission.Combined.builder().terms(List.of()).efficiency(1).build())
         .withMessageContaining("needs a joint");
-    Transmission.Term term =
-        Transmission.Term.builder().joint(arm).ratio(3).pitchRadius(Optional.empty()).build();
+    Transmission.Term term = Transmission.Term.builder().joint(arm).ratio(3).build();
     assertThatIllegalArgumentException()
         .isThrownBy(
             () -> Transmission.Combined.builder().terms(List.of(term, term)).efficiency(1).build())
         .withMessageContaining("name each joint once, not arm");
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                Transmission.Term.builder()
-                    .joint(arm)
-                    .ratio(0)
-                    .pitchRadius(Optional.empty())
-                    .build())
+        .isThrownBy(() -> Transmission.Term.builder().joint(arm).ratio(0).build())
         .withMessageContaining("a number other than 0");
     Transmission.Combined combined =
         Transmission.Combined.builder().terms(List.of(term)).efficiency(0.8).build();
@@ -340,7 +354,7 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(
             () -> definition(List.of(carriage, stage), List.of(offset), List.of(), List.of()))
-        .withMessageContaining("stage's reference (0.000) isn't where its coupling puts it");
+        .withMessageContaining("stage's rest (0.000) isn't where its coupling puts it");
   }
 
   /**
@@ -390,8 +404,7 @@ class JointTest {
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> definition(List.of(boom), List.of(), List.of(), List.of()))
-        .withMessageContaining(
-            "the chassis, the body less its links at their references, isn't a body");
+        .withMessageContaining("the chassis, the body less its links at rest, isn't a body");
   }
 
   /** A camera on a link sits on it, and inside the robot when its joint is stowed. */
@@ -399,11 +412,11 @@ class JointTest {
   void aCameraOnAJointSitsOnItsLink() {
     CameraConfig onArm =
         CameraConfigBuilder.builder(ConfigFixtures.camera("arm", point(0.2, 0, 0.03)))
-            .joint(Optional.of((Joint) arm))
+            .joint((Joint) arm)
             .build();
     CameraConfig floating =
         CameraConfigBuilder.builder(ConfigFixtures.camera("arm", point(0.2, 0, 0.4)))
-            .joint(Optional.of((Joint) arm))
+            .joint((Joint) arm)
             .build();
     Drive drive = MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 1, gearing(50, 1));
 
@@ -428,7 +441,12 @@ class JointTest {
             Part.CHASSIS,
             point(0, 0, 0.5),
             PITCH_UP,
-            Optional.of(Range.builder().lower(1.2 * Math.PI).upper(2.6 * Math.PI).build()),
+            Optional.of(
+                Range.builder()
+                    .kind(Position.Kind.ANGLE)
+                    .lower(1.2 * Math.PI)
+                    .upper(2.6 * Math.PI)
+                    .build()),
             1.2 * Math.PI,
             link("hood", 1, point(0.1, 0, 0), point(0.1, 0.1, 0.1)));
     Sensor.Encoder reads = encoder("hood-abs", hood, 1, true);
@@ -436,8 +454,8 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> definition(List.of(hood), List.of(), List.of(), List.of(reads)))
         .withMessageContaining(
-            "hood's absolute encoders read it from 0.000 to 6.283 radians, and its range, 3.770 to"
-                + " 8.168, crosses where they wrap");
+            "hood's absolute encoders read it from 0° to 360°, and its range, 216° to 468°,"
+                + " crosses where they wrap");
     RobotMath math = definition(List.of(hood), List.of(), List.of(), List.of()).math();
     assertThatIllegalArgumentException()
         .isThrownBy(() -> math.discontinuityPoint(encoder("hood-rotor", hood, 40, false)))
@@ -464,11 +482,11 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> encoded(-360, -180))
         .withMessageContaining(
-            "hood's absolute encoders read it from -6.283 to 0.000 radians, and its range, -6.283"
-                + " to -3.142, comes within 0.000 of where they wrap");
+            "hood's absolute encoders read it from -360° to 0°, and its range, -360° to -180°,"
+                + " comes within 0° of where they wrap");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> encoded(0, 350))
-        .withMessageContaining("comes within 0.08727 of where they wrap, a fortieth of their turn");
+        .withMessageContaining("comes within 5° of where they wrap, a fortieth of their turn");
     Sensor.Encoder clear = (Sensor.Encoder) encoded(0, 340).sensors().get(0);
     assertThat(RobotMath.wrapMargin(clear, 0.5 + 170.0 / 360))
         .isCloseTo(10.0 / 360, within(1e-12))
@@ -485,14 +503,9 @@ class JointTest {
   void aCombinedTransmissionsSlideNamesItsPinion() {
     Joint.Prismatic lift =
         prismatic("lift", Part.CHASSIS, point(0, 0, 0), UP, Range.meters(0, 1), arm.link());
-    Transmission.Term bare =
-        Transmission.Term.builder().joint(lift).ratio(400).pitchRadius(Optional.empty()).build();
+    Transmission.Term bare = Transmission.Term.builder().joint(lift).ratio(400).build();
     Transmission.Term pinion =
-        Transmission.Term.builder()
-            .joint(lift)
-            .ratio(5)
-            .pitchRadius(Optional.of(Inches.of(0.5)))
-            .build();
+        Transmission.Term.builder().joint(lift).ratio(5).pitchRadius(Inches.of(0.5)).build();
 
     assertThatIllegalArgumentException()
         .isThrownBy(
@@ -502,11 +515,7 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
-                Transmission.Term.builder()
-                    .joint(arm)
-                    .ratio(5)
-                    .pitchRadius(Optional.of(Inches.of(0.5)))
-                    .build())
+                Transmission.Term.builder().joint(arm).ratio(5).pitchRadius(Inches.of(0.5)).build())
         .withMessageContaining("arm turns: its ratio is per turn, through no drum");
     assertThat(bare.perTurnOrMeter()).as("read straight off the slide").isEqualTo(400);
     assertThat(pinion.perTurnOrMeter())

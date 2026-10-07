@@ -20,7 +20,6 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.ModuleIO;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.system.DCMotor;
@@ -66,7 +65,7 @@ final class TruthRig {
           DrivetrainGeometryCornerBuilder.builder(corner)
               .module(
                   DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
-                      .wheelCoefficientOfFriction(Optional.of(frictionCoefficient))
+                      .wheelCoefficientOfFriction(frictionCoefficient)
                       .build())
               .build());
     }

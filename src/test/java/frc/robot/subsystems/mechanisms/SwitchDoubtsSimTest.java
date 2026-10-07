@@ -3,7 +3,6 @@ package frc.robot.subsystems.mechanisms;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
@@ -30,7 +29,7 @@ class SwitchDoubtsSimTest {
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(JointFixtures.ROBOT).sensors(List.of(PIVOT_DOWN)).build();
 
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final JointMechanism pivot = sim.joints.of(PIVOT);
 
   /**
@@ -50,7 +49,7 @@ class SwitchDoubtsSimTest {
     assertThat(early).as("not for a moment's disagreement").isEmpty();
     assertThat(sim.joints.switchDoubts())
         .containsExactly(
-            "pivot down reads tripped with pivot at 130.0°, nowhere near where it trips, 30.0°: a"
+            "pivot down reads tripped with pivot at 130°, nowhere near where it trips, 30°: a"
                 + " cut wire, if it's normally closed, or a switch out of place");
     Move in = pivot.goTo(PIVOT_IN);
     sim.scheduler.schedule(in);
@@ -71,7 +70,7 @@ class SwitchDoubtsSimTest {
 
     assertThat(sim.joints.switchDoubts())
         .containsExactly(
-            "pivot down reads clear with pivot at 1.2°, past where it trips, 30.0°: a cut wire, if"
+            "pivot down reads clear with pivot at 1.21°, past where it trips, 30°: a cut wire, if"
                 + " it's normally open, or a switch out of place");
   }
 }

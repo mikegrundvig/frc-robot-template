@@ -48,7 +48,7 @@ The calibration procedures print their results in exactly this form, ready to pa
 Do the same for what you measure by hand:
 
 ```java
-.mass(Pounds.of(131.2)) // measured YYYY-MM-DD: two scales, bumpers and battery on
+.weight(Body.Weight.weighed(Pounds.of(131.2))) // measured YYYY-MM-DD: two scales, bumpers and battery on
 ```
 
 A number measured for a part rather than a robot (a camera's latency, a tread's friction) goes where
@@ -169,19 +169,20 @@ The values that move the robot most, and are least known today:
 `frc.robot.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
 what the robot is (its definition, which names it, each joint's block saying its motors, wiring,
 sensors and control), and how this program drives the drivetrain and judges what its sensors say.
-Each driven joint's setup ([`JointSetup`](#jointsetup)) and each sensor's wiring ([a sensor's
-wiring](#a-sensors-wiring)) are worked out from the definition, never written twice.
+Each joint's block says how it's driven and wired, and each sensor carries its wiring ([a sensor's
+wiring](#a-sensors-wiring)): the program reads them from the definition, never written twice.
 
 ### `RobotDefinition`
 
 `com.michaelgrundvig.frc.world.robot.RobotDefinition`: what the robot is, read by localization, the
 simulator, and the views (`RobotConfig.definition`). Its values are records with sections of their
-own: the body, the drivetrain as built, the cameras, the IMUs, and the mechanisms' drives
+own: the body, the drivetrain as built, the cameras, the IMUs, the PDH, and the mechanisms' drives
 ([mechanisms](#mechanisms)), and its named places, configurations and interlocks ([named
 places](#named-places-configurations-and-interlocks)). It checks them against each other: the wheels
 inside the frame, every camera and IMU inside the robot, every joint a drive, coupling, sensor,
 camera, configuration, group, or interlock names among its joints, what's left of the body once the links
-come off still a body, and every interlock obeyed. The template's robot has no mechanisms.
+come off still a body, every interlock obeyed, and each device's feed a channel of the PDH's of its
+own. The template's robot has no mechanisms.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -266,6 +267,36 @@ at the center, level, and unchecked.
 | `up` | as built | 3 in | guess (a belly pan) | As `forward`, above the floor. Inside the robot, as a camera is. The slip check reads only the yaw rate, which swings an IMU level whatever its height, so nothing uses it yet: a robot pitching or rolling would swing a high IMU too. |
 | `orientation` | as built | level, x forward (`Rotation3d.ZERO`) | none (the simulator's IMUs are mounted so) | How it's turned on the robot: the rotation that takes the axes printed on it into the robot's. It turns the accelerometer's axes into the robot's, and for Systemcore mounted flat, its pitch and roll too. For Systemcore, it also says how the board is mounted, which WPILib takes its yaw by: flat with its face up or down, landscape stood on its long side, portrait on its short side (its long side taken to be its x axis: to confirm on a real one). From how it's mounted; [the accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes) confirms it. For the Pigeon, it must agree with the mount pose saved on it in Phoenix Tuner X, which its own yaw, pitch, and roll follow: the code doesn't write it there yet. |
 | `accelerometerChecked` | calibrated | true for the simulator's robot; false for a new one (`Imus.UNCHECKED`) | none (the simulator's IMUs read along their axes by construction) | [The accelerometer check](calibration.md#the-accelerometer-reads-along-the-robots-axes): three short drives in a log, for each IMU. Until it passes, the slip check compares the wheels' speed with that IMU's accelerometer by size, not direction, which no turn on its mount changes, once the robot has stood still long enough to learn its bias (`SlipCheck.Settings.steadySeconds`); and a jolt counts by its size alone. Off by default because a mis-mounted accelerometer trusted for direction is far worse than one compared by size: on the simulator's clean driving, one turned a quarter turn on its mount, trusted, read slip in most loops. |
+
+### `Pdh`
+
+`com.michaelgrundvig.frc.world.robot.Pdh`: the robot's power distribution, REV's Power
+Distribution Hub (`RobotDefinition.pdh`, `.pdh(Pdh.can(1))`). Its channels, as REV labels
+them and WPILib numbers them: 0 to 19 high-current, each taking a breaker up to 40 A; 20 to 22
+low-current, and 23 the switchable one, each a fuse or breaker up to 15 A. Each motor controller
+says which channel feeds it where it's wired ([`Pdh.Feed`](#pdhfeed)), and the definition checks
+them against it. Optional: a robot that declares none checks no feed. CTRE's Power Distribution
+Panel isn't supported: its channels' ratings aren't confirmed yet. The template's robot has no
+wiring, so it declares none.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `bus` | as built | none (the template's robot declares no PDH) | none | Which of Systemcore's CAN ports it's on (`Pdh.can(id)` is the first). Never a CANivore: WPILib reads a PDH on Systemcore's own CAN. |
+| `id` | as built | none (as `bus`) | none | REV's Hardware Client: its CAN ID, 1 to 63. 1 unless it's been changed, where WPILib looks for a REV PDH by default. |
+
+### `Pdh.Feed`
+
+Which of the PDH's channels feeds one motor controller, and through what breaker: in a joint's
+block, one call where the controller is named, `TALON_FX.can(32).pdh(4, Amps.of(40))`; in the
+drivetrain's wiring, each module's `driveFeed` and `steerFeed`, `.driveFeed(Pdh.feed(0,
+Amps.of(40)))`. The robot refuses a channel that feeds two devices, one the PDH hasn't, a breaker
+over its channel's rating, and a feed on a robot that declares no PDH. With a PDH declared, a
+wired motor controller that doesn't say its feed is a doubt the robot says at startup.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `channel` | as built | none (the template's robot has no wiring) | none | Follow the controller's power wires to the PDH, and read the number printed beside its terminals: 0 to 23. |
+| `breaker` | as built | none (as `channel`) | none | The rating printed on the breaker or fuse in that channel's holder: up to 40 A on a high-current channel, 15 A on a low-current one. |
 
 ## The drivetrain
 
@@ -406,7 +437,9 @@ no wiring, so nothing is set today.
 
 ### `SwerveWiring.ModuleWiring`
 
-One module's devices.
+One module's devices. Its drive's and its steering's feeds, the PDH channel each motor controller is
+powered from and its breaker (`driveFeed`, `steerFeed`), are [`Pdh.Feed`](#pdhfeed)s: empty where
+they aren't said.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -478,7 +511,7 @@ the joint is: two joints the same but for it are one joint, re-tuned or re-wired
 | `parent` | as built | none (as `label`) | none | What it turns on: the chassis (`Part.CHASSIS`), or another joint, standing for that joint's link. A joint is built after its parent, so joints never loop. |
 | `origin` | as built | none (as `label`) | none | From CAD: where its axis sits in its parent's frame, and how its own frame is turned there, with the joint at 0. Position 0 is wherever CAD draws it; the gravity offset Phoenix wants is derived from it (`RobotMath.gravityOffset`), not entered. |
 | `axis` | as built | none (as `label`) | none | From CAD: the axis it turns about, in its own frame. A position grows turning right-handed about it, so pick its sign for the direction the motors' positive voltage turns it. Any length: only its direction counts. |
-| `reference` | as built | none (as `label`) | none | Where it sits as the robot is weighed and starts a match: its stowed position, inside its range. The body's mass properties are the robot with every joint here, and the season's starting limits are checked here. |
+| `rest` | as built | none (as `label`) | none | Where it rests as the robot is weighed and starts a match, its stowed position, inside its range: its reference. Its block says it once, with its range (`range(range, rest)`) or alone for one without stops (`rests(...)`); one whose block doesn't, a roller, starts at 0. A practice robot's joint that rests elsewhere moves it, `rest(...)`, keeping its stops. The body's mass properties are the robot with every joint here, and the season's starting limits are checked here. |
 
 ### `Joint.Prismatic`
 
@@ -491,7 +524,7 @@ elevator's stage, a telescope. Its range, its link, and how it's driven have sec
 | `parent` | as built | none (as `label`) | none | As a revolute joint's. |
 | `origin` | as built | none (as `label`) | none | From CAD: where its link sits on its parent with the joint at 0, its lowest or most retracted usually. |
 | `axis` | as built | none (as `label`) | none | From CAD: the direction it slides as its position grows, in its own frame. Any length. |
-| `reference` | as built | none (as `label`) | none | As a revolute joint's: where it sits stowed, in meters. |
+| `rest` | as built | none (as `label`) | none | As a revolute joint's: where it rests stowed, in meters. |
 
 ### `Driven`
 
@@ -522,7 +555,8 @@ the robot's own (`RobotDefinition.drives`).
 
 `com.michaelgrundvig.frc.world.robot.Driven.Servo`: a servo pushing between a joint's parent and its
 link, in its block (`.servo("hood left", WCP_0408, onParent, onLink)`): a hood's linear servo. Its
-drive is worked out from it, under its own label. The template doesn't drive servos yet.
+drive is worked out from it, under its own label. The template doesn't drive servos yet: drive
+them from a subsystem of your own ([mechanisms](mechanisms.md#7-when-the-template-cant-drive-it)).
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -534,8 +568,8 @@ drive is worked out from it, under its own label. The template doesn't drive ser
 
 `com.michaelgrundvig.frc.world.robot.Driven.AbsoluteEncoder`: an absolute encoder on a joint,
 turning with it, in its block: `.absoluteEncoder()`, with its CANcoder, a SPARK's data port or
-a Systemcore port (`.absoluteEncoder(cancoder)`), or written in full, geared, as
-`.absoluteEncoder(AbsoluteEncoder.of().ratio(0.536).on(cancoder))`. Its sensor is worked
+a Systemcore port (`.absoluteEncoder(CANCODER.can(34).offset(Rotations.of(0.82)))`), or written in
+full, geared, as `.absoluteEncoder(AbsoluteEncoder.of().ratio(0.536).on(CANCODER.can(34)...))`. Its sensor is worked
 out from it: "arm absolute encoder", which says where the joint is from the moment the robot
 starts. It's read one way at most, its wiring in its own section: a CANcoder
 (`MechanismWiring.Cancoder`), a SPARK's data port (`MechanismWiring.DataPortEncoder`) or a
@@ -571,6 +605,7 @@ heading, at the turn of it inside its limits nearest where it is
 |---|---|---|---|---|
 | `lower` | as built | none (the template's robot has no mechanisms) | none | From CAD, then by moving the mechanism to its hard stop: where it stops, in radians or meters. The soft limit inside it is the mechanism's own. |
 | `upper` | as built | none (as `lower`) | none | As `lower`, the other way. |
+| `kind` | as built | none (as `lower`) | none | `ANGLE` for a joint that turns, `LENGTH` for one that slides: set by how it's written (`Range.degrees`, `Range.meters`, or `Range.of` with angles or distances). The joint refuses a range of the other kind, as its stops or as a region an interlock keeps it out of. |
 
 ### `Link`
 
@@ -624,7 +659,8 @@ points.
 `com.michaelgrundvig.frc.world.robot.Actuator.Servo`: a servo on PWM, a linear servo between two
 points or a hobby servo's shaft, with its own loop and nothing reading back where it is. Robot code
 tells it a share of its travel (`Servo.command`), from the drive's coordinate at the position it
-wants (`RobotMath.coordinate`), as WPILib's `Servo.set` takes it.
+wants (`RobotMath.coordinate`): its pulse that share of the way from its shortest to its longest,
+which WPILib 2027 sends as a `PWM`'s pulse in microseconds.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -708,7 +744,7 @@ its beam blocked), whatever its wiring's polarity. What it means to the robot is
 | `part` | as built | none (as `label`) | none | What it's mounted on: the chassis, or a joint's link. A limit switch's is its joint's parent, which the joint presses it against. |
 | `pose` | as built | none (as `label`) | none | From CAD, where it sits in its part's frame, x along its beam or its actuator; optional, since a team rarely knows it, and only the simulator and the 3D view use it. Unknown, it's at the part's origin, and the missing-data report says so. |
 | `kind` | as built | none (as `label`) | none | What kind of switch: [`Sensor.Switch.Limit`](#sensorswitchlimit), or `Beam` (a beam break, through-beam or reflective) or `Contact` (a button, a cage sensor), which have no values. |
-| `wiring` | as built | none (as `label`) | none | Where it's connected and which raw signal means tripped (`.on(input, polarity)`): a Systemcore port, a CANdi's input, or a motor controller's limit pin ([a sensor's wiring](#a-sensors-wiring)). None runs it in the simulator alone. Not part of what the switch is: two the same but for it are one switch. |
+| `wiring` | as built | none (as `label`) | none | Where it's connected and which raw signal means tripped (`.on(CANDI.can(30).s1().normallyOpen())`): a Systemcore port, a CANdi's input, or a motor controller's limit pin ([a sensor's wiring](#a-sensors-wiring)). None runs it in the simulator alone. Not part of what the switch is: two the same but for it are one switch. |
 
 ### `Sensor.Switch.Limit`
 
@@ -742,13 +778,17 @@ joints, each at a named place) and its interlocks (what one joint may do by wher
 definition. They're facts about the robot, read by everything that reads it: robot code moves to
 them by name, Pitwall offers them, logs show them. What to do with them is the robot program's own
 code. Each reference is the joint itself, and each place the joint's own constant
-(`PIVOT.at(PIVOT_OUT)`, `PIVOT.past(Degrees.of(110))`), checked as they're written. The definition checks them all when it's built:
+(`PIVOT.at(PIVOT_OUT)`, `PIVOT.atLeast(Degrees.of(110))`), checked as they're written. A place is a
+name on its joint, and its value the robot's: a practice robot's joint may put it elsewhere
+(`PIVOT.replaced(PIVOT_OUT, Degrees.of(128))`), and code naming it finds it there. The joint keeps
+where it was (`formerPositions`, `formerOutputs`), so the competition robot's constant is still its
+own; one of the name at a value it has never had is another joint's or another robot's, and refused. The definition checks them all when it's built:
 each position inside its joint's range, each output within what the joint's motors can do (a speed
 within `RobotMath.freeSpeed`, refused above it and noted above nine tenths of it,
 `RobotDefinition.notes`; a voltage within their nominal voltage),
 every configuration obeying every interlock with the joints it doesn't name at their references, the
-robot obeying them as it starts, no two joints holding each other, and no named place the interlocks
-leave unreachable; the season's extension limit is checked at each configuration (`SeasonLimits`).
+robot obeying them as it starts, no joints holding each other there or at a configuration so that
+none can move to free another, and no named place the interlocks leave unreachable; the season's extension limit is checked at each configuration (`SeasonLimits`).
 The template's robot has no mechanisms, so nothing here has a starting value.
 
 ### `Position`
@@ -797,23 +837,46 @@ written `ARM.at(ARM_LEVEL)`: what a configuration is made of, and an interlock's
 | `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
 | `name` | chosen | none (as `joint`) | none | One of its positions or outputs, by name, or `stopped`, which every joint has. |
 
-### `Condition.Past`
+### `Condition.AtLeast`
 
-`com.michaelgrundvig.frc.world.robot.Condition.Past`: a joint past a position, written as a number,
-`PIVOT.past(Degrees.of(110))`, or as one of its named positions, `PIVOT.past(PIVOT_OUT)`: the position
-lies between the joint's reference and where it is, so it holds from the position on, away from the
-reference, whichever way the joint moves.
+`com.michaelgrundvig.frc.world.robot.Condition.AtLeast`: a joint at a position or beyond it, toward
+its range's upper end, written `PIVOT.atLeast(Degrees.of(110))`: what an interlock's edge usually
+is, a clearance, the same wherever the joint rests.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
-| `position` | as built | none (as `joint`) | none | Where, in the joint's units: inside its range, not its reference. For an interlock, the clearance, from CAD or measured on the robot where the parts just clear. |
+| `position` | as built | none (as `joint`) | none | Where, in the joint's units: inside its range, not its lower end, where it would always hold. For an interlock, the clearance, from CAD or measured on the robot where the parts just clear. |
+
+### `Condition.AtMost`
+
+`com.michaelgrundvig.frc.world.robot.Condition.AtMost`: a joint at a position or short of it, toward
+its range's lower end, written `ELEVATOR.atMost(Inches.of(32))`: as `Condition.AtLeast`, the other
+way.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
+| `position` | as built | none (as `joint`) | none | As `Condition.AtLeast`'s, not its upper end. |
+
+### `Condition.Past`
+
+`com.michaelgrundvig.frc.world.robot.Condition.Past`: a joint past a position, written as one of its
+named positions, `PIVOT.past(PIVOT_RUN)`, or as a number, `PIVOT.past(Degrees.of(110))`: the
+position lies between where the joint rests and where it is, so it holds from the position on, away
+from its rest, whichever way the joint moves. For a clearance, `Condition.AtLeast` and
+`Condition.AtMost` say the same without depending on where the joint rests.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `joint` | chosen | none (the template's robot has no mechanisms) | none | The joint. |
+| `position` | as built | none (as `joint`) | none | Where, in the joint's units: inside its range, not where it rests. |
 | `place` | chosen | none (as `joint`) | none | The name of its position there, when the edge is one of its named positions; empty for a number. |
 
 ### `Condition.Before`
 
-`com.michaelgrundvig.frc.world.robot.Condition.Before`: a joint not yet past a position, on its
-reference's side, written `ELEVATOR.before(Inches.of(32))` or with one of its named positions.
+`com.michaelgrundvig.frc.world.robot.Condition.Before`: a joint not yet past a position, on the side
+where it rests, written `ELEVATOR.before(ELEVATOR_SCORE)` or with a number.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -835,9 +898,9 @@ positions.
 | `fromPlace` | chosen | none (as `joint`) | none | The name of its position at `from`, when it's one; empty for a number. |
 | `toPlace` | chosen | none (as `joint`) | none | The same, at `to`. |
 
-### `Condition.AtLeast`
+### `Condition.UpToSpeed`
 
-`com.michaelgrundvig.frc.world.robot.Condition.AtLeast`: a joint running at least a speed, forward,
+`com.michaelgrundvig.frc.world.robot.Condition.UpToSpeed`: a joint running at least a speed, forward,
 written `SHOOTER.atLeast(RPM.of(3000))`: an interlock's condition for what mustn't run until another
 joint is up to speed. Only the robot judges it, from the joint's motors; a joint that isn't answering
 doesn't hold it.
@@ -850,7 +913,7 @@ doesn't hold it.
 ### `Interlock.RunsOnlyWhen`
 
 `com.michaelgrundvig.frc.world.robot.Interlock.RunsOnlyWhen`: a joint that moves only while another is
-somewhere, written in its block, `.runsOnlyWhen(PIVOT.past(Degrees.of(110)))`, or in the robot's
+somewhere, written in its block, `.runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))`, or in the robot's
 interlocks, `Interlock.that(INTAKE).runsOnlyWhen(...)`: while the condition
 doesn't hold, a joint held to a position stays where it is and one run at a speed stops, each going
 on when it holds again.
@@ -858,12 +921,12 @@ on when it holds again.
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `joint` | chosen | none (the template's robot has no mechanisms) | none | Why: the joint that breaks something run at the wrong time: a roller that would chew the bumper stowed. |
-| `condition` | chosen | none (as `joint`) | none | Why: where another joint must be first: [`Condition.Past`](#conditionpast), [`Condition.Before`](#conditionbefore), [`Condition.Between`](#conditionbetween), or [`Condition.At`](#conditionat) a position; or what a sensor must read (`tripped()`, `clear()`, `nearerThan`, `fartherThan`), which holds it while the sensor is lost. Check: a log of the interlock holding the joint (its `HeldBy`) while nothing was at risk says it's too tight. |
+| `condition` | chosen | none (as `joint`) | none | Why: where another joint must be first, by a clearance, [`Condition.AtLeast`](#conditionatleast), [`Condition.AtMost`](#conditionatmost) or [`Condition.Between`](#conditionbetween), or by its named positions, [`Condition.Past`](#conditionpast), [`Condition.Before`](#conditionbefore) or [`Condition.At`](#conditionat) one; how fast it runs, [`Condition.UpToSpeed`](#conditionuptospeed); or what a sensor must read (`tripped()`, `clear()`, `nearerThan`, `fartherThan`), which holds it while the sensor is lost. Check: a log of the interlock holding the joint (its `HeldBy`) while nothing was at risk says it's too tight. |
 
 ### `Interlock.KeepsOut`
 
 `com.michaelgrundvig.frc.world.robot.Interlock.KeepsOut`: a joint kept out of a region of its travel while
-another is somewhere, written in its block, `.keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.before(Inches.of(32)))`, or in the robot's interlocks, `Interlock.that(ARM).keepsOut(...).when(...)`:
+another is somewhere, written in its block, `.keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.atMost(Inches.of(32)))`, or in the robot's interlocks, `Interlock.that(ARM).keepsOut(...).when(...)`:
 its target is held at the region's edge until the condition clears. The region is a
 [`Range`](#range) in the joint's units, part of its range and not all of it.
 
@@ -874,42 +937,44 @@ its target is held at the region's edge until the condition clears. The region i
 
 ## A mechanism's wiring and control
 
-A mechanism on Phoenix devices is described once, in the definition above, and its TalonFX's and
-CANcoder's settings come out of it (`frc.robot.lib.phoenix.PhoenixMechanism`): its ratios, its
-encoder's discontinuity point, its gravity type and offset, and the feedforward gains it seeds. Two
-records hold what the definition doesn't: how the mechanism is wired, and how it's driven. Phoenix's
-units for each joint (a revolute joint's rotations, a prismatic joint's drum's rotations) are fixed
-in `PhoenixUnits`; these records are in the joint's own units, radians or meters. The template's
-robot has no mechanisms, so nothing here has a starting value.
+A mechanism is described once, in the definition above, and how the program drives it comes out
+of it (`ControllerPlan`): its ratios, its encoder's discontinuity point, its gravity's kind and
+angle, the feedforward gains it seeds, and the one feedforward law every loop driving it runs. Its
+motor controllers' settings are that plan in their own terms, a TalonFX's and a CANcoder's
+(`frc.robot.lib.phoenix.PhoenixMechanism`) or a SPARK's (`frc.robot.lib.rev.RevMechanism`). Its
+joint's block holds the rest, how the mechanism is wired and how it's driven, and the program reads
+them there. A motor controller's units for each joint, its rotations (a revolute joint's own, a
+prismatic joint's drum's), are fixed in `MechanismRotations`; these records are in the joint's own
+units, radians or meters. The template's robot has no mechanisms, so nothing here has a starting
+value.
 
-### `MechanismWiring`
+### A motor's controller
 
-`com.michaelgrundvig.frc.world.robot.MechanismWiring`: where one mechanism's devices are, worked
-out from its joint's block: its motors' controllers, the leader first, one for each motor
-(`.motors(Motor.KRAKEN_X60, gearing, TALON_FX.can(41), TALON_FX.can(42))`), as
-[`MechanismWiring.Motor`](#mechanismwiringmotor)s; and its absolute encoder's CANcoder
+Each motor's controller is named in its joint's block, the leader first, one for each motor
+(`.motors(Motor.KRAKEN_X60, gearing, TALON_FX.can(41), TALON_FX.can(42).clockwise())`), with the
+PDH channel that feeds it (`.pdh(4, Amps.of(40))`); and its absolute encoder's CANcoder
 ([`MechanismWiring.Cancoder`](#mechanismwiringcancoder)), or that encoder on a SPARK's data port
-(`.absoluteEncoder(cancoder)`).
+([`MechanismWiring.DataPortEncoder`](#mechanismwiringdataportencoder)) or a Systemcore port
+([`MechanismWiring.PortEncoder`](#mechanismwiringportencoder)):
+`.absoluteEncoder(CANCODER.can(34).offset(Rotations.of(0.82)))`,
+`.absoluteEncoder(DATA_PORT.offset(Rotations.of(0.82)))`.
 
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `canBus` | as built | none (the template's robot has no mechanisms) | none | Tuner X: Systemcore's port, or the CANivore's name. Every device of the mechanism is on it. |
-| `controller` | as built | none (as `canBus`) | none | What the motors are on: `TALON_FX` (in a Kraken or a Falcon), `SPARK_MAX` or `SPARK_FLEX` (REV's), or `TALON_FXS` (a Minion, or REV's motors by their connector). The robot refuses a motor its controller can't drive. |
-
-### `MechanismWiring.Motor`
-
-One motor controller.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `id` | as built | none (the template's robot has no mechanisms) | none | Tuner X, or REV's Hardware Client for a SPARK. |
-| `clockwise` | as built | none (as `id`) | none | Drive the joint forward (its positive direction in the definition) by hand or at a low voltage in Tuner X, and watch the motor's shaft end: clockwise or not. The helper sets each motor's `Inverted` from it, and each follower's alignment from whether it turns the leader's way. |
+- **Its kind**: `TALON_FX` (in a Kraken or a Falcon), `SPARK_MAX` or `SPARK_FLEX` (REV's), or
+  `TALON_FXS` (a Minion, or REV's motors by their connector). The definition refuses a motor its
+  controller can't drive, and a joint's motors on different kinds or buses.
+- **Its bus**: Tuner X, Systemcore's port or the CANivore's name (`TALON_FX.can(CANIVORE, 23)`).
+- **Its ID**: Tuner X, or REV's Hardware Client for a SPARK.
+- **Which way it turns** (`.clockwise()`): drive the joint forward (its positive direction in the
+  definition) by hand or at a low voltage in Tuner X, and watch the motor's shaft end: clockwise or
+  not. The helper sets each motor's `Inverted` from it, and each follower's alignment from whether
+  it turns the leader's way.
 
 ### `MechanismWiring.DataPortEncoder`
 
-An absolute encoder on the leading SPARK's data port, such as REV's Through Bore Encoder: read once
-at startup to tell the motor where the joint is, or, closing the SPARK's loop on it
-(`.closesLoop()`), its loop's sensor ([absolute encoders](mechanisms.md#absolute-encoders)). The
+An absolute encoder on the leading SPARK's data port, such as REV's Through Bore Encoder, named in
+its joint's block by its offset (`DATA_PORT.offset(Rotations.of(0.82))`, then `.inverted()` for one
+whose reading falls): read once at startup to tell the motor where the joint is, or, closing the
+SPARK's loop on it (`.closesLoop()`), its loop's sensor ([absolute encoders](mechanisms.md#absolute-encoders)). The
 SPARK applies its direction and offset itself: it's told to invert as `reversed` says, and a
 `zeroOffset` worked out from `offset`, the raw reading at the low edge of the window one turn of the
 encoder tells apart, so its reading wraps outside the joint's range.
@@ -917,8 +982,8 @@ encoder tells apart, so its reading wraps outside the joint's range.
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `offset` | calibrated | none (the template's robot has no mechanisms) | none | Put the joint at its zero (the pose its origin gives in CAD), read the encoder's absolute position in REV's Hardware Client with no offset, and negate it; again whenever the encoder moves. |
-| `reversed` | as built | none (as `offset`) | none | Move the joint forward and watch the encoder's reading in REV's Hardware Client: true if it falls. |
-| `closedLoop` | chosen | none (as `offset`) | none | Why: false (seeded once), the encoder tells the motor's own encoder where the joint is at startup, and the SPARK's loop runs on that; true (`.closesLoop()`), the SPARK's loop runs on this encoder itself, at the controller's rate, so backlash or slip between the motor and the joint doesn't move where the joint goes. Its kP is then per turn of the encoder, worked out from the same control. Only a joint held at positions, without a homing recipe, and with a range closes its loop on it. Unconfirmed on a SPARK yet ([stand-ins](stand-ins.md)). Check: a log, seeded once, of `Joints/<label>`'s position (the motor's) against `Joints/<label>/AbsoluteAt` (the encoder's, as the SPARK reads it): a gap that follows the direction of travel is backlash, and one that grows or jumps is slip; either is a reason to close the loop on the encoder. |
+| `reversed` | as built | false | none | Move the joint forward and watch the encoder's reading in REV's Hardware Client: true (`.inverted()`) if it falls. |
+| `closedLoop` | chosen | false (seeded once) | none | Why: false, the encoder tells the motor's own encoder where the joint is at startup, and the SPARK's loop runs on that; true (`.closesLoop()`), the SPARK's loop runs on this encoder itself, at the controller's rate, so backlash or slip between the motor and the joint doesn't move where the joint goes. Its kP is then per turn of the encoder, worked out from the same control. Only a joint held at positions, without a homing recipe, and with a range closes its loop on it. Unconfirmed on a SPARK yet ([stand-ins](stand-ins.md)). Check: a log, seeded once, of `Joints/<label>`'s position (the motor's) against `Joints/<label>/AbsoluteAt` (the encoder's, as the SPARK reads it): a gap that follows the direction of travel is backlash, and one that grows or jumps is slip; either is a reason to close the loop on the encoder. |
 
 ### `MechanismWiring.PortEncoder`
 
@@ -939,14 +1004,17 @@ loop ([absolute encoders](mechanisms.md#absolute-encoders)).
 
 ### `MechanismWiring.Cancoder`
 
-The mechanism's CANcoder.
+The mechanism's CANcoder, named in its joint's block as a motor's controller is, with its offset:
+`CANCODER.can(CANIVORE, 34).offset(Rotations.of(0.82))`, read once at startup (`ROTOR`), with
+`.clockwise()` before the offset, and `.remote()`, `.fused()` or `.sync()` after it.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
-| `id` | as built | none (the template's robot has no mechanisms) | none | Tuner X. |
-| `offset` | calibrated | none (as `id`) | none | Put the joint at its zero (the pose its origin gives in CAD), read the CANcoder's absolute position in Tuner X with no offset, and negate it; again whenever the encoder or its magnet moves. The discontinuity point is derived, never set. |
-| `clockwise` | as built | none (as `id`) | none | Move the joint forward and watch the CANcoder from its LED side: clockwise or not, so its reading grows with the joint. |
-| `feedback` | chosen | none (as `id`) | none | What the TalonFX reads its position from: `ROTOR` (the CANcoder read only by code, at boot), `REMOTE` (no license), or `FUSED` or `SYNC` (Phoenix Pro). `FUSED` keeps the rotor's rate with the CANcoder's position, and is the best where it's licensed. |
+| `bus` | as built | none (the template's robot has no mechanisms) | none | Tuner X: Systemcore's port, or the CANivore's name. Its joint's motors' bus, where their TalonFX reads it: the robot refuses another. |
+| `id` | as built | none (as `bus`) | none | Tuner X. |
+| `offset` | calibrated | none (as `bus`) | none | Put the joint at its zero (the pose its origin gives in CAD), read the CANcoder's absolute position in Tuner X with no offset, and negate it; again whenever the encoder or its magnet moves. The discontinuity point is derived, never set. |
+| `clockwise` | as built | false | none | Move the joint forward and watch the CANcoder from its LED side: clockwise or not, so its reading grows with the joint. |
+| `feedback` | chosen | `ROTOR` | none | What the TalonFX reads its position from: `ROTOR` (the CANcoder read only by code, at boot), `REMOTE` (no license), or `FUSED` or `SYNC` (Phoenix Pro). `FUSED` keeps the rotor's rate with the CANcoder's position, and is the best where it's licensed. |
 
 ### `MechanismControl`
 
@@ -954,8 +1022,14 @@ The mechanism's CANcoder.
 (`.control(...)`). Its
 gains, soft limits, profile and current limits have sections of their own. `position(kP)` and
 `velocity(kP)` start one from the defaults: the feedforward seeded, no profile, the default current
-limits, braking; `withProfile`, `withKd`, `withKg`, `withSoftLimits`, `withStatorLimit`,
-`withHoming` and `coasting` change one value each.
+limits, braking, the default dead channel; `withKi`, `withKd`, `withKs`, `withKv`, `withKa`,
+`withKg`, `withProfile`, `withSoftLimits`, `withStatorLimit`, `withSupplyLimit`, `withBands`,
+`withHoming`, `withDeadChannel` and `coasting` change one value each. Each takes plain numbers in
+the joint's units, radians or meters, or values with their units, converted:
+`position(Volts.per(Rotation).of(188))`, `withProfile(DegreesPerSecond.of(450),
+DegreesPerSecondPerSecond.of(1700))`, `withSoftLimits(Range.degrees(5, 130))`,
+`withBands(Degrees.of(1), Degrees.of(2))`. A value with its unit remembers whether it's an angle or
+a length, and the joint refuses one of the other kind.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -964,7 +1038,8 @@ limits, braking; `withProfile`, `withKd`, `withKg`, `withSoftLimits`, `withStato
 
 ### `MechanismControl.Gains`
 
-The slot's gains, in volts per the joint's units (radians or meters). kV, kA and kG are seeded from
+The slot's gains, in volts per the joint's units (radians or meters), or given with their units
+and converted (`Volts.per(Rotation)`, as Phoenix's slot holds them). kV, kA and kG are seeded from
 the definition until tuned (`RobotMath.idealGains`); a tuned one always wins, and the helper notes
 a kV or kG more than twice, or less than half, the ideal, naming the two frames when it looks like a
 unit slip. kG needs no mass: a joint held against gravity with none written is a doubt at startup,
@@ -976,22 +1051,41 @@ and its kG is what the simulator's gravity on it is ([mechanisms](mechanisms.md#
 | `kI` | chosen | none (as `kP`) | none | Why: removes an error that stays. Usually 0: a steady error is a missing kG or kS. |
 | `kD` | chosen | none (as `kP`) | none | Why: damps overshoot. Raise it if the joint overshoots its setpoints. |
 | `kS` | characterized | none (as `kP`) | none | [Feedforward](characterization.md#feedforward): SysId's kS. The definition has no friction, so there's no seed. |
-| `kV` | characterized | none (seeded from the definition) | math (seeded: the motors' nominal voltage over the joint's free speed) | [Feedforward](characterization.md#feedforward): SysId's kV, in the joint's units: SysId run on Phoenix's signals gives it per rotation, so divide a revolute joint's by 2π (`PhoenixUnits.gainFromPhoenix`). |
+| `kV` | characterized | none (seeded from the definition) | math (seeded: the motors' nominal voltage over the joint's free speed) | [Feedforward](characterization.md#feedforward): SysId's kV, in the joint's units: SysId run on Phoenix's signals gives it per rotation, so write it with its unit, `withKv(Volts.per(RotationsPerSecond).of(0.12))`, or divide a revolute joint's by 2π. |
 | `kA` | characterized | none (seeded from the definition) | math (seeded: what the joint moves and its motors' rotors, through the gearing) | As `kV`. The seed is low when a link has no mass or inertia (`RobotDefinition.missing`). |
 | `kG` | characterized | none (seeded from the definition) | math (seeded: the links' weight at its worst, 0 without mass) | As `kV`, or by hand: the volts that just hold it still, an arm where its weight pulls hardest. Positive to hold the joint up. It needs no mass, and it's what the simulator's gravity on the joint is (`withKg(0.4)`); 0 for a joint a counterbalance holds. Phoenix's gravity type comes from the joint: `Arm_Cosine` for an arm, `Elevator_Static` for a slide. |
 | `gravityAngle` | characterized | none (where the links' mass puts it, or the joint's zero) | math (where the links' mass pulls hardest; the joint's zero, horizontal as WPILib takes an arm's, without mass) | An arm's only, given with its kG (`withKg(0.4, Degrees.of(-90))`): where its weight pulls hardest, the angle at which holding it takes all of kG forward. Let the arm hang still, its motors coasting, and read its angle: add 90° (hanging at -90°, it's 0°). Phoenix takes it within a quarter turn of the joint's zero. |
+| `kind` | as built | none (as `kP`) | none | `ANGLE` or `LENGTH`: what the gains given with their units are per (`position(Volts.per(Rotation).of(188))`, `withKv(Volts.per(InchesPerSecond).of(0.3))`). Empty when each is a plain number, in the joint's units. The joint refuses gains per the other kind, and a control one gain per an angle beside another per a length. |
 
 ### `MechanismControl.Bands`
 
 How near a target a joint must come to be there (`enter`), and how far it may then stray and still
 be (`stay`): a move arrives inside `enter`, and a joint's gates (`isAt`, `isAtGoal`) hold until it's
-past `stay`. For a joint held at positions, in radians or meters; for a roller, shares of the speed
-it's asked for. Empty for the template's: 2° and 4°, 1 cm and 2 cm, or 3% and 6% of a speed.
+past `stay`. For a joint held at positions, in radians or meters, or with their units
+(`withBands(Degrees.of(1), Degrees.of(2))`); for a roller, shares of the speed it's asked for
+(`withBands(0.03, 0.06)`). Empty for the template's: 2° and 4°, 1 cm and 2 cm, or 3% and 6% of a
+speed.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `enter` | chosen | none (the template's robot has no mechanisms; empty is 2°, 1 cm or 3%) | none | Why: as tight as the mechanism needs to be to do its job there, and no tighter than it can settle: watch `Joints/<label>/At` and the error in a log of a few moves. |
 | `stay` | chosen | none (as `enter`; empty is twice it) | none | Why: wide enough that the reading's noise and a flywheel's dip as a shot leaves don't flicker the gate. At least `enter`. |
+| `kind` | as built | none (as `enter`) | none | `ANGLE` or `LENGTH`, set by giving the bands with their units (`withBands(Degrees.of(1), Degrees.of(2))`); empty for plain numbers, in the joint's units or a roller's shares. The joint refuses bands of the other kind, and a roller's given as angles or lengths. |
+
+### `MechanismControl.DeadChannel`
+
+When one of the joint's motor controllers reads as drawing nothing on its PDH channel while the
+joint works: its breaker tripped, its power unplugged, or its block naming the wrong channel
+([mechanisms](mechanisms.md#wiring)). For longer than `time`, its leading controller draws more
+than `drawing` from the battery, by its own reading, and the controller's channel reads under
+`dead`: it's flagged, in `Joints/<label>/DeadChannels` and an alert, until its channel draws again.
+Only a controller whose block says its channel is checked, and only while the PDH answers.
+
+| Value | Kind | Template's starting value | Source | How to measure it, or why |
+|---|---|---|---|---|
+| `drawing` | chosen | 2 A (`DeadChannel.DEFAULTS`, which `position` and `velocity` start from) | guess | Why: each of a joint's motors drives the same load, so while its leader draws this much, each draws about as much on its own channel. Working is what the leader draws, not what it's asked: a joint asked for volts at a steady speed with no load draws next to nothing, alive or not (the simulator, with no friction, nothing at all). Check: in a log of the joint working, `Joints/<label>/SupplyCurrentAmps` against each of its channels (`PDH/Devices/<name>`): raise it if a healthy motor's channel lags its leader's reading enough to be flagged. |
+| `dead` | chosen | 0.5 A | guess | Why: under it, a channel draws nothing: four times the PDH's resolution on a high-current channel (0.125 A, REV's specifications), and a quarter of `drawing`, so a motor drawing a little less than its leader isn't flagged. Under `drawing`. |
+| `time` | chosen | 0.5 s | guess | Why: long enough that the PDH's reading, a CAN frame behind the controller's, and a moment's spike don't flag a motor; short enough to say so during a match's first push. |
 
 ### `MechanismControl.Homing.ToHardStop`
 
@@ -1022,24 +1116,30 @@ timeout to the joint; `toSwitch(end, timeout)` gives one.
 
 ### `MechanismControl.SoftLimits`
 
-Where the motor controller stops driving the joint, in radians or meters, inside the joint's hard
-stops, which the helper checks.
+Where the motor controller stops driving the joint, inside the joint's hard stops and around its
+named positions, which the definition checks: as a range, `withSoftLimits(Range.degrees(5, 130))`, or in radians or meters. Plain numbers
+refused outside the stops that fit them as degrees are said to look like degrees.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `lower` | chosen | none (the template's robot has no mechanisms) | none | Why: keeps the motors from driving the joint into its stop. A little inside the hard stop, by what the mechanism coasts past at speed. |
 | `upper` | chosen | none (as `lower`) | none | As `lower`, the other end. |
+| `kind` | as built | none (as `lower`) | none | `ANGLE` or `LENGTH`, set by giving the limits as a range (`Range.degrees`, `Range.of(Inches.of(1), Inches.of(47))`); empty for plain numbers, in the joint's units. The joint refuses limits of the other kind. |
 
 ### `MechanismControl.Profile`
 
-Motion Magic's limits, in radians or meters per second (and squared, and cubed). The helper refuses
-a cruise above the joint's free speed (`RobotMath.freeSpeed`).
+How fast a joint's moves go, in radians or meters per second (and squared), or with their units
+(`withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700))`): each move is profiled
+on the robot (WPILib's `TrapezoidProfile`), from where the joint is to where it's going. The
+definition refuses a cruise above the joint's free speed (`RobotMath.freeSpeed`); one given as
+plain numbers says they're radians (or meters) per second, and how to give it with its unit, since
+degrees and turns per second are both too large as radians.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
 | `cruiseVelocity` | chosen | none (the template's robot has no mechanisms) | none | Why: the fastest the profile moves the joint. Under its free speed, with room for a sagging battery: a joint that lags its profile at cruise in the logs is asked too much. |
 | `acceleration` | chosen | none (as `cruiseVelocity`) | none | Why: how hard the profile pushes. Raise it until the joint lags its profile or the current limit holds it. |
-| `jerk` | chosen | none (as `cruiseVelocity`) | none | Why: softens the profile's corners. 0 for none. |
+| `kind` | as built | none (as `cruiseVelocity`) | none | `ANGLE` or `LENGTH`, set by giving the profile with its units (`DegreesPerSecond`, `InchesPerSecond`); empty for plain numbers, in the joint's units. The joint refuses a profile of the other kind. |
 
 ### `MechanismControl.CurrentLimits`
 
@@ -1053,55 +1153,33 @@ Each motor's current limits, all set where they show, as the drivetrain's are
 | `supplyLower` | chosen | 40 A | guess | Why: the supply limit after `supplyLowerTime`: no more than the motor's breaker's rating. |
 | `supplyLowerTime` | chosen | 1 s | guess | Why: how long the motor may draw `supply`: well short of its breaker's trip. |
 
-### `JointSetup`
-
-`frc.robot.subsystems.mechanisms.JointSetup`: one driven joint as this program drives it, worked out
-from the joint's block (`RobotConfig.joints()`): its control and its wiring, beside the joint
-itself. The template builds the joint's mechanism from it, one for every joint with a control, and
-the robot's configuration refuses a joint with motors and no control, or one the template doesn't
-drive yet (a differential, a servo's, one that follows another). It checks the control against the
-joint: its soft limits inside the joint's hard stops, and every named position inside its soft
-limits, where the joint is driven. The template's robot has no mechanisms, so nothing here has a
-starting value.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `joint` | as built | none (the template's robot has no mechanisms) | none | The joint, from the robot's definition: the same object, never its label. Its control ([`MechanismControl`](#mechanismcontrol)) and wiring ([`MechanismWiring`](#mechanismwiring)) have sections of their own. |
-
 ## A sensor's wiring
 
 Where each switch and rangefinder is connected, carried by the sensor: a joint's limit switch in its
-block (`.limitSwitch(End.LOWER, Degrees.of(0), new SensorWiring.Port(1), NORMALLY_CLOSED)`), any
-other switch with `.on(input, polarity)`, a rangefinder with `.on(canRange)`. The configuration works
-out one record per wired sensor, by its label (`RobotConfig.sensors()`); a sensor with no wiring
-only runs in the simulator. The robot refuses a sensor of the wrong kind for its input, two sensors
-on one input, a controller's limit input on a joint that isn't wired or whose controller has none, a
-joint's limit switch on another joint's controller, and a CANdi's or CANrange's CAN ID another of
-its kind has. The template's robot has no sensors, so nothing here has a starting value.
+block (`.limitSwitch(End.LOWER, Degrees.of(0), SensorWiring.port(1).normallyClosed())`), any
+other switch with `.on(...)` (`.on(CANDI.can(CANIVORE, 30).s1().normallyOpen())`), a
+rangefinder with `.on(CANRANGE.can(CANIVORE, 31))`. A sensor with no wiring only runs in the
+simulator. The definition refuses two sensors on one input, a controller's limit input on a joint
+that isn't wired or whose controller has none, a joint's limit switch on another joint's
+controller, and a CANdi's or CANrange's CAN ID another of its kind has. The template's robot has
+no sensors, so nothing here has a starting value.
 
-### `SensorWiring.OfSwitch`
-
-`com.michaelgrundvig.frc.world.robot.SensorWiring.OfSwitch`: where a switch is connected, and which raw signal
-means tripped.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `sensor` | as built | none (the template's robot has no sensors) | none | The switch's label in the definition. |
-| `input` | as built | none (as `sensor`) | none | Where it's connected: a Systemcore port ([`SensorWiring.Port`](#sensorwiringport)), a CANdi's input ([`SensorWiring.Candi`](#sensorwiringcandi)), or a motor controller's limit input ([`SensorWiring.ControllerLimit`](#sensorwiringcontrollerlimit)). With six Systemcore ports, the CAN and SPARK inputs are most of the room. |
-| `polarity` | as built | none (as `sensor`) | none | `NORMALLY_OPEN` or `NORMALLY_CLOSED`, from the switch's datasheet and how it's wired (for a banner sensor, light-on or dark-on): actuate it by hand and watch the raw input. Normally closed reads tripped with its wire cut, so its motor stops: the one to choose for a limit switch. |
-
-### `SensorWiring.OfRangefinder`
-
-`com.michaelgrundvig.frc.world.robot.SensorWiring.OfRangefinder`: where a rangefinder is connected.
-
-| Value | Kind | Template's starting value | Source | How to measure it, or why |
-|---|---|---|---|---|
-| `sensor` | as built | none (the template's robot has no sensors) | none | The rangefinder's label in the definition. |
-| `input` | as built | none (as `sensor`) | none | A CANrange ([`SensorWiring.CanRange`](#sensorwiringcanrange)). An analog rangefinder on a Systemcore port needs its volts for each meter, which the wiring doesn't hold yet. |
+- **A switch's input**: a Systemcore port ([`SensorWiring.Port`](#sensorwiringport)), a CANdi's
+  input ([`SensorWiring.Candi`](#sensorwiringcandi)), or a motor controller's limit input
+  ([`SensorWiring.ControllerLimit`](#sensorwiringcontrollerlimit)). With six Systemcore ports, the
+  CAN and SPARK inputs are most of the room.
+- **A switch's polarity**: `.normallyOpen()` or `.normallyClosed()` after its input, from the
+  switch's datasheet and how it's wired (for a banner sensor, light-on or dark-on): actuate it by
+  hand and watch the raw input. Normally closed reads tripped with its wire cut, so its motor stops:
+  the one to choose for a limit switch.
+- **A rangefinder's input**: a CANrange ([`SensorWiring.CanRange`](#sensorwiringcanrange)). An
+  analog rangefinder on a Systemcore port needs its volts for each meter, which the wiring doesn't
+  hold yet.
 
 ### `SensorWiring.Port`
 
-One of Systemcore's own I/O ports, set as what its sensor needs (alpha spec: six).
+One of Systemcore's own I/O ports, set as what its sensor needs (alpha spec: six):
+`SensorWiring.port(1)`.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -1110,6 +1188,7 @@ One of Systemcore's own I/O ports, set as what its sensor needs (alpha spec: six
 ### `SensorWiring.Candi`
 
 One of a CANdi's two inputs: CTRE's CAN input board, which a TalonFX can read as its hardware limit.
+`CANDI.can(CANIVORE, 30).s1()`.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|
@@ -1119,7 +1198,7 @@ One of a CANdi's two inputs: CTRE's CAN input board, which a TalonFX can read as
 
 ### `SensorWiring.CanRange`
 
-A CANrange: CTRE's CAN rangefinder.
+A CANrange: CTRE's CAN rangefinder. `CANRANGE.can(CANIVORE, 31)`.
 
 | Value | Kind | Template's starting value | Source | How to measure it, or why |
 |---|---|---|---|---|

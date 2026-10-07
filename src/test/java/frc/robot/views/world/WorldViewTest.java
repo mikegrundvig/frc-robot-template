@@ -267,10 +267,8 @@ class WorldViewTest {
                     Sensor.Rangefinder.builder()
                         .label("floor range")
                         .part(Part.CHASSIS)
-                        .pose(Optional.empty())
                         .range(Meters.of(1.3))
                         .fieldOfView(Degrees.of(27))
-                        .wiring(Optional.empty())
                         .build()))
             .build();
     scenes.add(

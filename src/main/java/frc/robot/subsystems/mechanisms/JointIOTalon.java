@@ -22,15 +22,16 @@ import com.ctre.phoenix6.signals.ForwardLimitValue;
 import com.ctre.phoenix6.signals.ReverseLimitValue;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.lib.phoenix.PhoenixMechanism;
-import frc.robot.lib.phoenix.PhoenixUnits;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.lib.wiring.ControllerPins;
 import java.util.ArrayList;
@@ -40,8 +41,6 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
-import org.littletonrobotics.junction.Logger;
-import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.math.filter.Debouncer;
 import org.wpilib.units.measure.Angle;
 
@@ -69,7 +68,7 @@ public final class JointIOTalon implements JointIO {
 
   private final Talon leader;
   private final List<Talon> followers = new ArrayList<>();
-  private final PhoenixUnits units;
+  private final MechanismRotations rotations;
   private final BaseStatusSignal[] signals;
   private final BaseStatusSignal position;
   private final BaseStatusSignal velocity;
@@ -96,7 +95,7 @@ public final class JointIOTalon implements JointIO {
   private final NeutralOut neutral = new NeutralOut();
   private final String unconfigured;
 
-  /** The Phoenix settings for a control: the joint's, its drive's and its wiring's, with it. */
+  /** The Phoenix settings for a control: the joint's, its drive's and its block's, with it. */
   private final Function<MechanismControl, PhoenixMechanism.Settings> configure;
 
   /**
@@ -116,12 +115,12 @@ public final class JointIOTalon implements JointIO {
    * Configures every device of the joint, waiting for each, at startup.
    *
    * @param math what the robot's definition derives: the joint's drive, ratios and seeds
-   * @param setup the joint, its control, and its wiring, which it must have
-   * @throws IllegalArgumentException for a setup without wiring, and what its settings refuse
-   *     ({@link ControllerSettings#talon})
+   * @param joint the joint, its block naming its control and its motors' controllers, which it must
+   * @throws IllegalArgumentException for a joint whose motors aren't wired, and what its settings
+   *     refuse ({@link ControllerSettings#talon})
    */
-  public JointIOTalon(RobotMath math, JointSetup setup) {
-    this(math, setup, ControllerPins.NONE);
+  public JointIOTalon(RobotMath math, Joint joint) {
+    this(math, joint, ControllerPins.NONE);
   }
 
   /**
@@ -130,37 +129,32 @@ public final class JointIOTalon implements JointIO {
    *
    * @param pins its limits, from the robot's sensor wiring
    */
-  public JointIOTalon(RobotMath math, JointSetup setup, ControllerPins pins) {
-    Joint joint = setup.joint();
-    MechanismWiring wiring =
-        setup
-            .wiring()
-            .orElseThrow(
-                () -> new IllegalArgumentException(joint.label() + " has no wiring: wire it"));
-    Drive drive = math.drivesOf(joint).get(0);
-    configure = control -> ControllerSettings.talon(math, joint, wiring, control);
-    PhoenixMechanism.Settings settings = configure.apply(setup.control());
-    // The definition's encoder its CANcoder is, which the settings found.
-    Sensor.Encoder absolute =
-        wiring.cancoder().isPresent() ? JointSetup.absoluteEncoder(math, joint) : null;
-    units = settings.units();
-    // What's doubtful in the settings, though allowed: said once, in the log and on the console.
-    Logger.recordOutput(
-        "Joints/" + joint.label() + "/SettingsNotes", settings.notes().toArray(String[]::new));
-    for (String note : settings.notes()) {
-      DriverStationErrors.reportWarning(joint.label() + ": " + note, false);
+  public JointIOTalon(RobotMath math, Joint joint, ControllerPins pins) {
+    List<MechanismWiring.Device> controllers =
+        joint.driven().motors().map(Driven.Motors::controllers).orElse(List.of());
+    if (controllers.isEmpty()) {
+      throw new IllegalArgumentException(joint.label() + " has no wiring: wire it");
     }
-    CANBus bus = PhoenixMechanism.bus(wiring.canBus());
+    MechanismWiring.Device wiredLeader = controllers.get(0);
+    Optional<MechanismWiring.Cancoder> wiredCancoder =
+        joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::cancoder);
+    Drive drive = math.drivesOf(joint).get(0);
+    configure = control -> ControllerSettings.talon(math, joint, control);
+    PhoenixMechanism.Settings settings = configure.apply(ControllerSettings.control(joint));
+    // The definition's encoder its CANcoder is, which the settings found.
+    Sensor.Encoder absolute = wiredCancoder.isPresent() ? math.absoluteEncoder(joint) : null;
+    rotations = settings.rotations();
+    CANBus bus = PhoenixMechanism.bus(wiredLeader.bus());
     List<String> failed = new ArrayList<>();
     Motor motor = ((Actuator.Motors) drive.actuator()).motor();
-    leader = new Talon(wiring.controller(), wiring.leader().id(), bus, motor);
+    leader = new Talon(wiredLeader.controller(), wiredLeader.id(), bus, motor);
     TalonFXConfiguration leading = settings.leader();
     PhoenixMechanism.limits(leading.HardwareLimitSwitch, pins);
     if (!applied(() -> leader.apply(leading, STARTUP_TIMEOUT_SECONDS))) {
-      failed.add("motor " + wiring.leader().id());
+      failed.add("motor " + wiredLeader.id());
     }
     for (PhoenixMechanism.FollowerSettings each : settings.followers()) {
-      Talon follower = new Talon(wiring.controller(), each.id(), bus, motor);
+      Talon follower = new Talon(wiredLeader.controller(), each.id(), bus, motor);
       if (!applied(() -> follower.apply(each.configuration(), STARTUP_TIMEOUT_SECONDS))) {
         failed.add("motor " + each.id());
       }
@@ -170,7 +164,7 @@ public final class JointIOTalon implements JointIO {
     StatusSignal<Angle> cancoderReading = null;
     if (settings.cancoder().isPresent()) {
       CANcoderConfiguration config = settings.cancoder().get();
-      int id = wiring.cancoder().orElseThrow().id();
+      int id = wiredCancoder.orElseThrow().id();
       CANcoder cancoder = new CANcoder(id, bus);
       if (!applied(() -> cancoder.getConfigurator().apply(config, STARTUP_TIMEOUT_SECONDS))) {
         failed.add("CANcoder " + id);
@@ -178,11 +172,12 @@ public final class JointIOTalon implements JointIO {
       cancoderReading = cancoder.getAbsolutePosition();
     }
     boolean readsRotor =
-        wiring.cancoder().isEmpty()
-            || wiring.cancoder().get().feedback() == MechanismWiring.Feedback.ROTOR;
+        wiredCancoder.isEmpty() || wiredCancoder.get().feedback() == MechanismWiring.Feedback.ROTOR;
     if (readsRotor) {
       // Where it rests, until a CANcoder read by the robot says where it is (seed).
-      leader.device().setPosition(units.toPhoenix(joint.reference()), STARTUP_TIMEOUT_SECONDS);
+      leader
+          .device()
+          .setPosition(rotations.toRotations(joint.reference()), STARTUP_TIMEOUT_SECONDS);
     }
     this.math = math;
     seedFrom = readsRotor ? cancoderReading : null;
@@ -270,7 +265,7 @@ public final class JointIOTalon implements JointIO {
     if (seeded || reading == null || model == null || !reading.refresh().getStatus().isOK()) {
       return;
     }
-    double at = units.toPhoenix(math.fromAbsolute(model, reading.getValueAsDouble()));
+    double at = rotations.toRotations(math.fromAbsolute(model, reading.getValueAsDouble()));
     leader.device().setPosition(at, 0);
     seededAt = at;
     seeded = true;
@@ -282,9 +277,9 @@ public final class JointIOTalon implements JointIO {
     inputs.connected = connected.calculate(BaseStatusSignal.refreshAll(signals).isOK());
     // Told where it is this loop: its rotor's reading catches up on the next.
     inputs.position =
-        units.fromPhoenix(Double.isNaN(seededAt) ? position.getValueAsDouble() : seededAt);
+        rotations.fromRotations(Double.isNaN(seededAt) ? position.getValueAsDouble() : seededAt);
     seededAt = Double.NaN;
-    inputs.velocity = units.fromPhoenix(velocity.getValueAsDouble());
+    inputs.velocity = rotations.fromRotations(velocity.getValueAsDouble());
     inputs.appliedVolts = volts.getValueAsDouble();
     inputs.statorCurrentAmps = Math.abs(statorCurrent.getValueAsDouble());
     inputs.supplyCurrentAmps = supplyCurrent.getValueAsDouble();
@@ -301,14 +296,14 @@ public final class JointIOTalon implements JointIO {
         .device()
         .setControl(
             positionRequest
-                .withPosition(units.toPhoenix(position))
-                .withVelocity(units.toPhoenix(velocity))
+                .withPosition(rotations.toRotations(position))
+                .withVelocity(rotations.toRotations(velocity))
                 .withFeedForward(feedforwardVolts));
   }
 
   @Override
   public void setVelocity(double velocity) {
-    leader.device().setControl(velocityRequest.withVelocity(units.toPhoenix(velocity)));
+    leader.device().setControl(velocityRequest.withVelocity(rotations.toRotations(velocity)));
   }
 
   @Override
@@ -334,7 +329,7 @@ public final class JointIOTalon implements JointIO {
   /** Sets the leader's position without waiting for it to confirm: this runs in the loop. */
   @Override
   public void resetPosition(double position) {
-    leader.device().setPosition(units.toPhoenix(position), 0);
+    leader.device().setPosition(rotations.toRotations(position), 0);
   }
 
   /**

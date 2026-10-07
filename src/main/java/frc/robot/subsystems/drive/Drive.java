@@ -413,12 +413,12 @@ public class Drive implements Mechanism, AutoCloseable {
    * ARRIVED at the last within 2 cm and 2°, nearly still, for 40 ms. {@link DriveMove#at} opens as
    * it passes a named one.
    *
-   * <pre>{@code
+   * {@snippet :
    * DriveMove leg = drive.follow(
    *     Keyframe.at(new Pose2d(3, 1, Rotation2d.ZERO)),
-   *     Keyframe.at(new Pose2d(5, 2, Rotation2d.fromDegrees(90))).named("pickup"),
-   *     Keyframe.at(new Pose2d(7, 2, Rotation2d.fromDegrees(180))));
-   * }</pre>
+   *     Keyframe.at(new Pose2d(5, 2, Rotation2d.CCW_90DEG)).named("pickup"),
+   *     Keyframe.at(new Pose2d(7, 2, Rotation2d.PI)));
+   * }
    *
    * @throws IllegalArgumentException with no keyframes, or two of one name
    */

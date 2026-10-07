@@ -50,7 +50,7 @@ class DynamicsTruthSimTest {
    * <p>Today the robot speeds up about 2% short of it at either current: the motor controller's
    * limit is applied once a 4 ms step, as a voltage the drive's motor model then holds through the
    * step, and the current falls a little within each step as the wheel speeds up
-   * (CurrentLimitedMotorSim's notes describe the same for the steering, which they fix there).
+   * (CurrentLimitedMotor's notes describe the same for the steering, which they fix there).
    */
   @ParameterizedTest
   @ValueSource(doubles = {30, 60})

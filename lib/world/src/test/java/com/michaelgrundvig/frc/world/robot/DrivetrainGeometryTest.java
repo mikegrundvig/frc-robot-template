@@ -60,11 +60,9 @@ class DrivetrainGeometryTest {
                     corner(unmeasured, new Translation2d(0.3, 0.2)),
                     corner(unmeasured, new Translation2d(0.3, -0.2)),
                     corner(
-                        changeModules().wheelCoefficientOfFriction(Optional.of(1.0)).build(),
+                        changeModules().wheelCoefficientOfFriction(1.0).build(),
                         new Translation2d(-0.3, 0.2)),
                     corner(unmeasured, new Translation2d(-0.3, -0.2))))
-            .wiring(Optional.empty())
-            .control(Optional.empty())
             .build();
 
     assertThat(unmeasured.wheelCoefficientOfFrictionOrDefault()).isEqualTo(1.2);
@@ -130,17 +128,12 @@ class DrivetrainGeometryTest {
         DrivetrainGeometryModuleTypeBuilder.builder(modules())
             .steerGearing(gearing(26.09))
             .driveGearing(gearing(7.5))
-            .wheelCoefficientOfFriction(Optional.of(1.0))
+            .wheelCoefficientOfFriction(1.0)
             .build();
     List<DrivetrainGeometry.Corner> corners = new ArrayList<>(drivetrain().corners());
     corners.set(2, corner(back, corners.get(2).position()));
     corners.set(3, corner(back, corners.get(3).position()));
-    DrivetrainGeometry mixed =
-        DrivetrainGeometry.builder()
-            .corners(corners)
-            .wiring(Optional.empty())
-            .control(Optional.empty())
-            .build();
+    DrivetrainGeometry mixed = DrivetrainGeometry.builder().corners(corners).build();
 
     assertThat(mixed.module(0)).isEqualTo(modules());
     assertThat(mixed.module(3)).isEqualTo(back);
@@ -171,21 +164,10 @@ class DrivetrainGeometryTest {
     swapped.set(0, drivetrain().corners().get(1));
     swapped.set(1, drivetrain().corners().get(0));
     assertRejected(
-        "DrivetrainGeometry.corners",
-        () ->
-            DrivetrainGeometry.builder()
-                .corners(swapped)
-                .wiring(Optional.empty())
-                .control(Optional.empty())
-                .build());
+        "DrivetrainGeometry.corners", () -> DrivetrainGeometry.builder().corners(swapped).build());
     assertRejected(
         "DrivetrainGeometry.corners: needs four",
-        () ->
-            DrivetrainGeometry.builder()
-                .corners(swapped.subList(0, 3))
-                .wiring(Optional.empty())
-                .control(Optional.empty())
-                .build());
+        () -> DrivetrainGeometry.builder().corners(swapped.subList(0, 3)).build());
   }
 
   @Test
@@ -194,13 +176,13 @@ class DrivetrainGeometryTest {
         "ModuleType.wheelRadius", () -> changeModules().wheelRadius(Inches.of(0)).build());
     assertRejected(
         "ModuleType.wheelCoefficientOfFriction",
-        () -> changeModules().wheelCoefficientOfFriction(Optional.of(Double.NaN)).build());
+        () -> changeModules().wheelCoefficientOfFriction(Double.NaN).build());
     assertRejected(
         "ModuleType.driveInertia",
-        () -> changeModules().driveInertia(Optional.of(KilogramSquareMeters.of(0))).build());
+        () -> changeModules().driveInertia(KilogramSquareMeters.of(0)).build());
     assertRejected(
         "ModuleType.steerInertia",
-        () -> changeModules().steerInertia(Optional.of(KilogramSquareMeters.of(-0.004))).build());
+        () -> changeModules().steerInertia(KilogramSquareMeters.of(-0.004)).build());
     assertRejected("ModuleType.couplingRatio", () -> changeModules().couplingRatio(-1).build());
     assertRejected("Corner.position", () -> corner(modules(), new Translation2d(Double.NaN, 0.2)));
   }

@@ -27,8 +27,8 @@ import org.wpilib.math.util.Nat;
 /**
  * Today's physics: the robot moves as its wheels roll, kinematically, as the best fit of their
  * travel, and each wheel carries an equal share of the robot's mass as inertia on its own drive
- * motor. It's the template's first engine behind {@link Physics}, kept exactly as the simulator has
- * run it, so every recorded run stays as it was; a rigid-body engine replaces it.
+ * motor. It's the template's physics behind {@link Physics}: the simulator tests the robot's code,
+ * not its traction or power, and the truth suite measures what that leaves out.
  *
  * <p>Each step is one sub-step. In it:
  *

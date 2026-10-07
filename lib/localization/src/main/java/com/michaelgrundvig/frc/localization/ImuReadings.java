@@ -56,16 +56,20 @@ public record ImuReadings(
           .build();
 
   public ImuReadings {
+    yawTimesNanos = List.copyOf(yawTimesNanos);
+    yawsRadians = List.copyOf(yawsRadians);
+    int times = yawTimesNanos.size();
+    int readings = yawsRadians.size();
     Checks.on(ImuReadings.class)
         .check(
             "yawsRadians",
             () ->
-                yawsRadians.size() == yawTimesNanos.size()
+                readings == times
                     ? null
                     : "must have one reading for each time: "
-                        + yawTimesNanos.size()
+                        + times
                         + " times, "
-                        + yawsRadians.size()
+                        + readings
                         + " readings")
         .orThrow();
   }

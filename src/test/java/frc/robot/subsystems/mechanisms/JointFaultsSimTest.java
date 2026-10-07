@@ -3,7 +3,6 @@ package frc.robot.subsystems.mechanisms;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.RobotSim;
@@ -71,14 +70,14 @@ class JointFaultsSimTest {
   private final Joints joints =
       new Joints(
           ROBOT,
-          SETUPS,
-          setup -> {
-            Silenceable io = new Silenceable(simulation.add(setup));
-            if (setup.joint().equals(PIVOT)) {
+          joint -> {
+            Silenceable io = new Silenceable(simulation.add(joint));
+            if (joint.equals(PIVOT)) {
               pivotIo = io;
             }
             return io;
           },
+          Joints.untuned(),
           scheduler);
   private final JointMechanism pivot = joints.of(PIVOT);
 
@@ -156,7 +155,7 @@ class JointFaultsSimTest {
   @Test
   void aJointWithNoHardwareRefusesItsMoves() {
     Scheduler alone = Scheduler.createIndependentScheduler();
-    Joints none = new Joints(ROBOT, SETUPS, setup -> new JointIO() {}, alone);
+    Joints none = new Joints(ROBOT, joint -> new JointIO() {}, Joints.untuned(), alone);
     Move out = none.of(PIVOT).goTo(PIVOT_OUT);
 
     alone.schedule(out);

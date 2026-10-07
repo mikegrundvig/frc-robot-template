@@ -2,17 +2,17 @@ package frc.robot.robots2026;
 
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static frc.robot.robots2026.Parts.IN;
-import static frc.robot.robots2026.Parts.body;
-import static frc.robot.robots2026.Parts.camera;
-import static frc.robot.robots2026.Parts.inches;
 import static frc.robot.robots2026.Parts.point;
-import static frc.robot.robots2026.Parts.sensor;
-import static frc.robot.robots2026.Parts.yaw;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.DegreesPerSecond;
+import static org.wpilib.units.Units.DegreesPerSecondPerSecond;
+import static org.wpilib.units.Units.Hertz;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.KilogramSquareMeters;
+import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.Pounds;
 import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.RotationsPerSecond;
@@ -28,7 +28,6 @@ import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.ImuMount;
 import com.michaelgrundvig.frc.world.robot.Imus;
@@ -46,7 +45,6 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.RobotConfig;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 2611's 2026 competition robot, as its code on main configures it: {@code
@@ -78,25 +76,29 @@ final class Team2611 {
    * model's box gives its pitch and roll.
    */
   static final Body BODY =
-      body(
-          26,
-          26,
-          30,
-          3,
-          3,
-          2.5,
-          5.75,
-          Weight.weighed(Pounds.of(137.95)),
-          point(0, 0, 0.2),
-          yaw(5.5));
+      Body.builder()
+          .frameLength(Inches.of(26))
+          .frameWidth(Inches.of(26))
+          .height(Inches.of(30))
+          .bumperEnds(Inches.of(3))
+          .bumperSides(Inches.of(3))
+          .bumperBottom(Inches.of(2.5))
+          .bumperTop(Inches.of(5.75))
+          .weight(Weight.weighed(Pounds.of(137.95)))
+          .inertia(Body.Turning.yaw(KilogramSquareMeters.of(5.5)))
+          .cg(point(0, 0, 0.2))
+          .build();
 
   /**
    * SDS modules, R2 (tuner-swerve-project.json: SwerveModuleConfiguration): 6.027:1 drive and
    * 26.09:1 steer, coupling 3.857 (generated/TunerConstants.java:80-83), wheels 1.93 in
    * (TunerConstants.java:84; Tuner's own file says 2.0). Kraken X60 drive with FOC (Tuner's 96.7
    * rps free speed, and Drive.java:74's PathPlanner motor), Kraken X44 steer (Tuner's file).
-   * Tuner's simulation inertias, 0.01 kg m² each (TunerConstants.java:92-93), and the wheel's grip
-   * as PathPlanner's 2.255 (Constants.java:189).
+   * Tuner's simulation inertias, 0.01 kg m² each (TunerConstants.java:92-93). The tread's grip
+   * isn't measured, so it's left out and the robot says so, planning on the default, 1.2: their
+   * 2.255 (Constants.java:189) is PathPlanner's tuning value, not the tread's, which grips 1.0 to
+   * 1.3 on carpet. A robot's configuration would refuse it, since at a grip that high the slip
+   * check can't tell a slide from a collision ({@code LocalizationService.problems}).
    */
   static final DrivetrainGeometry.ModuleType MODULES =
       DrivetrainGeometry.ModuleType.builder()
@@ -105,14 +107,65 @@ final class Team2611 {
           .wheelRadius(Inches.of(1.93))
           .driveGearing(Gearing.of(6.026785714285714))
           .steerGearing(Gearing.of(26.09090909090909))
-          .wheelCoefficientOfFriction(Optional.of(2.255))
-          .driveInertia(Optional.of(KilogramSquareMeters.of(0.01)))
-          .steerInertia(Optional.of(KilogramSquareMeters.of(0.01)))
           .couplingRatio(3.857142857142857)
+          .driveInertia(KilogramSquareMeters.of(0.01))
+          .steerInertia(KilogramSquareMeters.of(0.01))
           .build();
 
   /** Their swerve's CANivore (generated/TunerConstants.java:71). */
   static final CanBus CANIVORE = CanBus.canivore("canivore");
+
+  /**
+   * The front left module's wiring, as Tuner X generated it
+   * (generated/TunerConstants.java:128-164): its motors' and its CANcoder's IDs and the CANcoder's
+   * offset, nothing turned around.
+   */
+  private static final SwerveWiring.ModuleWiring FRONT_LEFT =
+      SwerveWiring.ModuleWiring.builder()
+          .driveId(23)
+          .steerId(24)
+          .encoderOffset(Rotations.of(0.3779296875))
+          .driveInverted(false)
+          .steerInverted(false)
+          .encoderInverted(false)
+          .encoderId(12)
+          .build();
+
+  /** The front right's, its drive motor turned around, as the right side's are (:86-87). */
+  private static final SwerveWiring.ModuleWiring FRONT_RIGHT =
+      SwerveWiring.ModuleWiring.builder()
+          .driveId(21)
+          .steerId(22)
+          .encoderOffset(Rotations.of(0.058349609375))
+          .driveInverted(true)
+          .steerInverted(false)
+          .encoderInverted(false)
+          .encoderId(11)
+          .build();
+
+  /** The back left's. */
+  private static final SwerveWiring.ModuleWiring BACK_LEFT =
+      SwerveWiring.ModuleWiring.builder()
+          .driveId(25)
+          .steerId(26)
+          .encoderOffset(Rotations.of(0.000244))
+          .driveInverted(false)
+          .steerInverted(false)
+          .encoderInverted(false)
+          .encoderId(13)
+          .build();
+
+  /** The back right's, its drive motor turned around. */
+  private static final SwerveWiring.ModuleWiring BACK_RIGHT =
+      SwerveWiring.ModuleWiring.builder()
+          .driveId(27)
+          .steerId(28)
+          .encoderOffset(Rotations.of(-0.200439453125))
+          .driveInverted(true)
+          .steerInverted(false)
+          .encoderInverted(false)
+          .encoderId(14)
+          .build();
 
   /**
    * The modules at ±10.375 in (generated/TunerConstants.java:135-169; Tuner's swerve project,
@@ -130,28 +183,51 @@ final class Team2611 {
                   .steerController(MechanismWiring.Controller.TALON_FX)
                   .gyroId(2)
                   .gyroYawScale(1.0)
-                  .modules(
-                      List.of(
-                          corner(23, 24, 12, 0.3779296875, false), // front left
-                          corner(21, 22, 11, 0.058349609375, true), // front right
-                          corner(25, 26, 13, 0.000244, false), // back left
-                          corner(27, 28, 14, -0.200439453125, true))) // back right
+                  .modules(List.of(FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT))
                   .build());
 
   /** Guess: its PhotonVision cameras' sensors, the template's typical AprilTag camera. */
   private static final CameraConfig.Sensor CAMERA =
-      sensor(1280, 800, 80, CameraConfig.Across.DIAGONAL);
+      CameraConfig.Sensor.builder()
+          .widthPixels(1280)
+          .heightPixels(800)
+          .fieldOfView(Degrees.of(80))
+          .fieldOfViewAcross(CameraConfig.Across.DIAGONAL)
+          .frameRate(Hertz.of(30))
+          .latency(Milliseconds.of(30))
+          .sightRange(Meters.of(7))
+          .build();
 
   /**
    * "Camera6", the left rear (Constants.java:119-126): WPILib's Rotation3d(-2°, -10°, 180.985°),
    * pitch down positive, so tilted up 10°.
    */
   static final CameraConfig LEFT_REAR =
-      camera("Camera6", inches(-10.5, 12, 21), -2, 10, 180.985, CAMERA, Optional.empty());
+      CameraConfig.builder()
+          .name("Camera6")
+          .forward(Inches.of(-10.5))
+          .left(Inches.of(12))
+          .up(Inches.of(21))
+          .roll(Degrees.of(-2))
+          .tiltUp(Degrees.of(10))
+          .yaw(Degrees.of(180.985))
+          .sensor(CAMERA)
+          .noiseScale(1.0)
+          .build();
 
   /** "FrontLeft" (Constants.java:129-136). */
   static final CameraConfig LEFT_FRONT =
-      camera("FrontLeft", inches(-7.75, 12.25, 21), 0, 10, 23.162, CAMERA, Optional.empty());
+      CameraConfig.builder()
+          .name("FrontLeft")
+          .forward(Inches.of(-7.75))
+          .left(Inches.of(12.25))
+          .up(Inches.of(21))
+          .roll(Degrees.of(0))
+          .tiltUp(Degrees.of(10))
+          .yaw(Degrees.of(23.162))
+          .sensor(CAMERA)
+          .noiseScale(1.0)
+          .build();
 
   /**
    * "Camera4", the right rear (Constants.java:139-147): (-11.6875, -12, 16.837) in, turned (0°,
@@ -162,18 +238,31 @@ final class Team2611 {
    * quirk, which the test checks against WPILib's composition.
    */
   static final CameraConfig RIGHT_REAR =
-      camera(
-          "Camera4",
-          inches(-10.8504, -11.9856, 20.6133),
-          0,
-          12.5,
-          180.985,
-          CAMERA,
-          Optional.empty());
+      CameraConfig.builder()
+          .name("Camera4")
+          .forward(Inches.of(-10.8504))
+          .left(Inches.of(-11.9856))
+          .up(Inches.of(20.6133))
+          .roll(Degrees.of(0))
+          .tiltUp(Degrees.of(12.5))
+          .yaw(Degrees.of(180.985))
+          .sensor(CAMERA)
+          .noiseScale(1.0)
+          .build();
 
   /** "Camera3", the right front (Constants.java:150-157). */
   static final CameraConfig RIGHT_FRONT =
-      camera("Camera3", inches(-8.625, -12.25, 20.875), 0, 8.2, -23.162, CAMERA, Optional.empty());
+      CameraConfig.builder()
+          .name("Camera3")
+          .forward(Inches.of(-8.625))
+          .left(Inches.of(-12.25))
+          .up(Inches.of(20.875))
+          .roll(Degrees.of(0))
+          .tiltUp(Degrees.of(8.2))
+          .yaw(Degrees.of(-23.162))
+          .sensor(CAMERA)
+          .noiseScale(1.0)
+          .build();
 
   /** The pivot's places: in to stow, out to intake, and run, from where its roller may run. */
   static final Position PIVOT_IN = Position.degrees("in", 1.5);
@@ -213,7 +302,10 @@ final class Team2611 {
           .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).clockwise())
           .absoluteEncoder(
               1024, MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(-296)).inverted())
-          .control(MechanismControl.position(30).withKd(1).withProfile(8, 30));
+          .control(
+              MechanismControl.position(30)
+                  .withKd(1)
+                  .withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700)));
 
   /** The intake roller's speeds, the operator's. */
   static final Output INTAKING = Output.rpm("intaking", 2000);
@@ -229,7 +321,7 @@ final class Team2611 {
    * Its rollers run velocity control without FOC (VectorKit/hardware/KrakenX60.java:48): the plain
    * X60's numbers, here and on the shooter, feeder and transition.
    *
-   * <p>It runs only with the pivot past 110°: their auto's guard (RobotContainer.java:143,
+   * <p>It runs only with the pivot at 110° or beyond: their auto's guard (RobotContainer.java:143,
    * Pivot.java:72-73, PIVOT_RUN_ANGLE at Constants.java:91), which the operator's buttons don't
    * apply (RobotContainer.java:216-218). As an interlock, it holds beneath every command.
    */
@@ -238,7 +330,7 @@ final class Team2611 {
           .carries(Link.box("intake roller", point(0, 0, 0), point(0.05, 0.5, 0.05)))
           .outputs(INTAKING, OUTTAKING)
           .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
-          .runsOnlyWhen(PIVOT.past(Degrees.of(110)))
+          .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))
           .control(MechanismControl.velocity(0.02));
 
   /**
@@ -350,75 +442,54 @@ final class Team2611 {
           .name("2611 2026")
           .body(BODY)
           .drivetrain(DRIVETRAIN)
+          .imus(Imus.builder().gyro(ImuMount.UNCHECKED).build())
           .cameras(List.of(LEFT_REAR, LEFT_FRONT, RIGHT_REAR, RIGHT_FRONT))
-          .imus(Imus.builder().gyro(ImuMount.UNCHECKED).backup(Optional.empty()).build())
           .joints(List.of(PIVOT, INTAKE, SHOOTER, FULL_SEND, TRANSITION, HOOD))
-          .couplings(List.of())
-          .drives(List.of())
-          .sensors(List.of())
           .configurations(List.of(FEEDING, UNJAMMING))
-          .interlocks(List.of())
+          // No PDH declared: the code reads a REV PDH at 1
+          // (VectorKit/hardware/LoggedPDH.java:31-36)
+          // and sums its channels by mechanism (LoggedPDH.java:111-134), but never says which
+          // motor is on which channel, nor any breaker, so no motor's feed is given.
           .build();
 
   /**
    * The robot as the template's program runs it in the simulator, without its cameras (odometry and
-   * the gyro alone, which the behavior here doesn't depend on, and quicker to run). Its tread grips
-   * as the template's does, 1.2: their 2.255 is PathPlanner's tuning value, more grip than the
-   * simulator's collisions allow. The drive's limits and gains are the template's kind, chosen for
-   * the simulator, not their Tuner X values.
+   * the gyro alone, which the behavior here doesn't depend on, and quicker to run), its drivetrain
+   * driven as the template drives one, wired as their Tuner X generated it. The drive's limits and
+   * gains are the template's kind, chosen for the simulator, not their Tuner X values.
    */
   static final RobotConfig CONFIG =
       RobotConfig.builder()
           .definition(
               RobotDefinitionBuilder.builder(ROBOT)
                   .cameras(List.of())
-                  .drivetrain(
-                      DrivetrainGeometry.uniform(
-                              DrivetrainGeometryModuleTypeBuilder.builder(MODULES)
-                                  .wheelCoefficientOfFriction(Optional.of(1.2))
-                                  .build(),
-                              Inches.of(10.375),
-                              Inches.of(10.375))
-                          .control(
-                              DrivetrainControl.builder()
-                                  .limits(
-                                      DrivetrainControl.Limits.builder()
-                                          .driveStatorCurrent(Amps.of(60))
-                                          .driveSupplyCurrent(Amps.of(60))
-                                          .driveSupplyLowerCurrent(Amps.of(40))
-                                          .driveSupplyLowerTime(Seconds.of(1))
-                                          .steerStatorCurrent(Amps.of(40))
-                                          .maxLinearSpeed(MetersPerSecond.of(4.0))
-                                          .maxAngularSpeed(RotationsPerSecond.of(1))
-                                          .build())
-                                  .gains(
-                                      DrivetrainControl.Gains.builder()
-                                          .driveKs(0.0)
-                                          .driveKv(MODULES.idealDriveKv())
-                                          .driveKp(2.0)
-                                          .steerKp(16.0)
-                                          .steerKd(0.08)
-                                          .skewLookahead(Seconds.of(0.03))
-                                          .headingKp(5.0)
-                                          .translationKp(3.0)
-                                          .build())
-                                  .build()))
-                  .build())
+                  .build()
+                  .with(
+                      DRIVETRAIN.control(
+                          DrivetrainControl.builder()
+                              .limits(
+                                  DrivetrainControl.Limits.builder()
+                                      .driveStatorCurrent(Amps.of(60))
+                                      .driveSupplyCurrent(Amps.of(60))
+                                      .driveSupplyLowerCurrent(Amps.of(40))
+                                      .driveSupplyLowerTime(Seconds.of(1))
+                                      .steerStatorCurrent(Amps.of(40))
+                                      .maxLinearSpeed(MetersPerSecond.of(4.0))
+                                      .maxAngularSpeed(RotationsPerSecond.of(1))
+                                      .build())
+                              .gains(
+                                  DrivetrainControl.Gains.builder()
+                                      .driveKs(0.0)
+                                      .driveKv(MODULES.idealDriveKv())
+                                      .driveKp(2.0)
+                                      .steerKp(16.0)
+                                      .steerKd(0.08)
+                                      .skewLookahead(Seconds.of(0.03))
+                                      .headingKp(5.0)
+                                      .translationKp(3.0)
+                                      .build())
+                              .build())))
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)
           .build();
-
-  /** One corner's wiring, as Tuner X generated it: a CANcoder each, nothing else turned around. */
-  private static SwerveWiring.ModuleWiring corner(
-      int drive, int steer, int encoder, double offsetRotations, boolean driveInverted) {
-    return SwerveWiring.ModuleWiring.builder()
-        .driveId(drive)
-        .steerId(steer)
-        .encoderId(Optional.of(encoder))
-        .encoderOffset(Rotations.of(offsetRotations))
-        .driveInverted(driveInverted)
-        .steerInverted(false)
-        .encoderInverted(false)
-        .build();
-  }
 }

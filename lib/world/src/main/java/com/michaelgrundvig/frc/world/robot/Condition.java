@@ -12,25 +12,33 @@ import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.Distance;
 
 /**
- * Where a joint is: at one of its named positions, or past, before or between positions, given as
- * numbers or as its named positions; how fast it runs; or what a sensor reads. An interlock
- * restricts a joint while another's condition holds ({@link Interlock}), and a configuration is
- * joints at named positions or outputs ({@link Configuration}). Each is written from the joint:
- * {@code PIVOT.past(Degrees.of(110))}, {@code ELEVATOR.before(Inches.of(32))}, {@code
- * ARM.at(ARM_LEVEL)}, {@code SHOOTER.atLeast(RPM.of(3000))}.
+ * Where a joint is: at one of its named positions; at least or at most a position, or between two;
+ * past or before a position, from where it rests; how fast it runs; or what a sensor reads. An
+ * interlock restricts a joint while another's condition holds ({@link Interlock}), and a
+ * configuration is joints at named positions or outputs ({@link Configuration}). Each is written
+ * from the joint: {@code PIVOT.atLeast(Degrees.of(110))}, {@code ELEVATOR.atMost(Inches.of(32))},
+ * {@code ARM.at(ARM_LEVEL)}, {@code ELEVATOR.before(ELEVATOR_SCORE)}, {@code
+ * SHOOTER.atLeast(RPM.of(3000))}.
  *
- * <p>They're static: "past" means the named position lies between the joint's reference and where
- * it is, so a condition means the same whichever way the joint is moving. The definition judges
- * them exactly, at named positions ({@link #holdsAt}); at run time, a joint is at a position within
- * its band.
+ * <p>They're static: "past" means the position lies between where the joint rests and where it is,
+ * so a condition means the same whichever way the joint is moving. "At least" and "at most" don't
+ * depend on where it rests, so an interlock's clearance written with them means the same when the
+ * rest moves. The definition judges them exactly, at named positions ({@link OnJoint#holdsAt}); at
+ * run time, a joint is at a position within its band.
  */
-public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor, Condition.AtLeast {
+public sealed interface Condition
+    permits Condition.OnJoint, Condition.OnSensor, Condition.UpToSpeed {
   /**
    * A condition on a joint's position: what interlocks and configurations are made of, and what the
    * definition can judge exactly, at named positions.
    */
   sealed interface OnJoint extends Condition
-      permits Condition.At, Condition.Past, Condition.Before, Condition.Between {
+      permits Condition.At,
+          Condition.AtLeast,
+          Condition.AtMost,
+          Condition.Past,
+          Condition.Before,
+          Condition.Between {
     /** The joint whose position it's about. */
     Joint joint();
 
@@ -117,9 +125,9 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor,
   }
 
   /**
-   * A joint at one of its named positions or outputs: {@code arm.at("level")}, {@code
-   * feeder.at("feeding")}, {@code feeder.at("stopped")}. A configuration is made of these; an
-   * interlock's condition is one at a position.
+   * A joint at one of its named positions or outputs: {@code ARM.at(ARM_STOWED)}, {@code
+   * FEEDER.at(FEEDER_FEEDING)}, {@code FEEDER.at(Output.STOPPED)}. A configuration is made of
+   * these; an interlock's condition is one at a position.
    *
    * @param joint the joint
    * @param name one of its positions or outputs, or {@code "stopped"}, which every joint has
@@ -156,11 +164,78 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor,
   }
 
   /**
-   * A joint past a position: the position lies between its reference and where it is, so a pivot
-   * stowed at 1.5° is past 110° from 110° on, whichever way it's moving.
+   * A joint at a position or beyond it, toward its range's upper end: {@code
+   * PIVOT.atLeast(Degrees.of(110))}. What an interlock's edge usually is, a clearance, and the same
+   * wherever the joint rests.
    *
    * @param joint the joint
-   * @param position where, in its units: inside its range, and not its reference
+   * @param position where, in its units: inside its range, and short of its lower end, where it
+   *     would always hold
+   */
+  @ConfigRecord
+  record AtLeast(Joint joint, double position) implements OnJoint {
+    public AtLeast {
+      Checks.on(AtLeast.class, joint.label())
+          .check("position", () -> notAnEdge(joint, position, true))
+          .orThrow();
+    }
+
+    /** Starts describing a joint at least at a position, one named value at a time. */
+    public static ConditionAtLeastBuilder.JointStage builder() {
+      return ConditionAtLeastBuilder.builder();
+    }
+
+    @Override
+    public boolean holdsAt(double at) {
+      return at >= position;
+    }
+
+    @Override
+    public String toString() {
+      return joint.label() + " at least " + shown(joint, position, Optional.empty());
+    }
+  }
+
+  /**
+   * A joint at a position or short of it, toward its range's lower end: {@code
+   * ELEVATOR.atMost(Inches.of(32))}. What an interlock's edge usually is, a clearance, and the same
+   * wherever the joint rests.
+   *
+   * @param joint the joint
+   * @param position where, in its units: inside its range, and short of its upper end, where it
+   *     would always hold
+   */
+  @ConfigRecord
+  record AtMost(Joint joint, double position) implements OnJoint {
+    public AtMost {
+      Checks.on(AtMost.class, joint.label())
+          .check("position", () -> notAnEdge(joint, position, false))
+          .orThrow();
+    }
+
+    /** Starts describing a joint at most at a position, one named value at a time. */
+    public static ConditionAtMostBuilder.JointStage builder() {
+      return ConditionAtMostBuilder.builder();
+    }
+
+    @Override
+    public boolean holdsAt(double at) {
+      return at <= position;
+    }
+
+    @Override
+    public String toString() {
+      return joint.label() + " at most " + shown(joint, position, Optional.empty());
+    }
+  }
+
+  /**
+   * A joint past a position: the position lies between where it rests and where it is, so a pivot
+   * resting at 1.5° is past 110° from 110° on, whichever way it's moving. For a clearance, {@link
+   * AtLeast} and {@link AtMost} say the same without depending on where it rests.
+   *
+   * @param joint the joint
+   * @param position where, in its units: inside its range, and not where it rests
    * @param place the name of its position there, when it's one of them, for what's shown
    */
   @ConfigRecord
@@ -188,10 +263,10 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor,
   }
 
   /**
-   * A joint before a position: not yet past it, on its reference's side.
+   * A joint before a position: not yet past it, on the side where it rests.
    *
    * @param joint the joint
-   * @param position where, in its units: inside its range, and not its reference
+   * @param position where, in its units: inside its range, and not where it rests
    * @param place the name of its position there, when it's one of them, for what's shown
    */
   @ConfigRecord
@@ -273,9 +348,9 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor,
    * @param speed its speed, in its units a second: radians, or meters
    */
   @ConfigRecord
-  record AtLeast(Joint joint, double speed) implements Condition {
-    public AtLeast {
-      Checks.on(AtLeast.class, joint.label())
+  record UpToSpeed(Joint joint, double speed) implements Condition {
+    public UpToSpeed {
+      Checks.on(UpToSpeed.class, joint.label())
           .check(
               "speed",
               () ->
@@ -287,8 +362,8 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor,
     }
 
     /** Starts describing a joint running at least a speed, one named value at a time. */
-    public static ConditionAtLeastBuilder.JointStage builder() {
-      return ConditionAtLeastBuilder.builder();
+    public static ConditionUpToSpeedBuilder.JointStage builder() {
+      return ConditionUpToSpeedBuilder.builder();
     }
 
     /** Whether it holds with the joint running at a speed, in its units a second. */
@@ -363,19 +438,39 @@ public sealed interface Condition permits Condition.OnJoint, Condition.OnSensor,
             + (names.isEmpty() ? "none" : String.join(", ", names));
   }
 
-  /** Why a position names no side of a joint's reference, or null when it does. */
+  /**
+   * Why a position isn't an edge a joint can be either side of, or null when it is: inside its
+   * range, and short of the end where being at least it (or at most) would always hold.
+   */
+  private static @Nullable String notAnEdge(Joint joint, double position, boolean atLeast) {
+    String within = notWithin(joint, position, Optional.empty());
+    if (within != null || joint.range().isEmpty()) {
+      return within;
+    }
+    double end = atLeast ? joint.range().get().lower() : joint.range().get().upper();
+    return Math.abs(position - end) <= Range.EDGE
+        ? shown(joint, position, Optional.empty())
+            + " is "
+            + joint.label()
+            + "'s "
+            + (atLeast ? "lowest: it's at least that" : "highest: it's at most that")
+            + " everywhere"
+        : null;
+  }
+
+  /** Why a position names no side of where a joint rests, or null when it does. */
   private static @Nullable String notAside(Joint joint, double position, Optional<String> place) {
     String within = notWithin(joint, position, place);
     if (within != null) {
       return within;
     }
-    // A step apart is the reference: Degrees.of(1.5) and Math.toRadians(1.5) differ in the last
+    // A step apart is where it rests: Degrees.of(1.5) and Math.toRadians(1.5) differ in the last
     // bit.
     return Math.abs(position - joint.reference()) <= Range.EDGE
         ? shown(joint, position, place)
-            + " is "
+            + " is where "
             + joint.label()
-            + "'s reference: everywhere is past it, and nowhere before it"
+            + " rests: everywhere is past it, and nowhere before it"
         : null;
   }
 }

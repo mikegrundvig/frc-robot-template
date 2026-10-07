@@ -1,4 +1,4 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
@@ -13,7 +13,7 @@ import org.wpilib.math.system.LinearSystem;
 import org.wpilib.math.system.Models;
 
 /** The steering's motor: exactly WPILib's model below its current limit, a steady torque at it. */
-class CurrentLimitedMotorSimTest {
+class CurrentLimitedMotorTest {
   /** The template's steering: a Kraken X60 turning an MK4i module through 150/7. */
   private static final DCMotor MOTOR = DCMotor.getKrakenX60(1);
 
@@ -23,8 +23,7 @@ class CurrentLimitedMotorSimTest {
   /** At 40 A, how fast the module speeds up: the motor's torque through the gearing. */
   private static final double ACCELERATION_AT_40_AMPS = 40 * MOTOR.Kt * GEARING / INERTIA_KG_M2;
 
-  private final CurrentLimitedMotorSim motor =
-      new CurrentLimitedMotorSim(MOTOR, INERTIA_KG_M2, GEARING);
+  private final CurrentLimitedMotor motor = new CurrentLimitedMotor(MOTOR, INERTIA_KG_M2, GEARING);
 
   @Test
   void belowItsLimitItMovesExactlyAsWpilibsModel() {
@@ -78,7 +77,7 @@ class CurrentLimitedMotorSimTest {
    */
   @Test
   void theLimitHoldsHoweverTheTimeIsCut() {
-    CurrentLimitedMotorSim whole = new CurrentLimitedMotorSim(MOTOR, INERTIA_KG_M2, GEARING);
+    CurrentLimitedMotor whole = new CurrentLimitedMotor(MOTOR, INERTIA_KG_M2, GEARING);
     whole.run(12, 40, 0.02);
 
     double most = 0;
@@ -103,7 +102,7 @@ class CurrentLimitedMotorSimTest {
   void aSteadyLoadIsTheVoltageItsCurrentWouldTake() {
     double torque = -0.6; // newton meters at the load: gravity on a light arm
     double asVolts = torque / (GEARING * MOTOR.Kt) * MOTOR.R;
-    CurrentLimitedMotorSim loaded = new CurrentLimitedMotorSim(MOTOR, INERTIA_KG_M2, GEARING);
+    CurrentLimitedMotor loaded = new CurrentLimitedMotor(MOTOR, INERTIA_KG_M2, GEARING);
 
     for (double volts : new double[] {12, -6, 3, 0}) {
       loaded.run(volts, Double.POSITIVE_INFINITY, torque, 0.004);

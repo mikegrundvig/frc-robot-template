@@ -24,8 +24,7 @@ public final class WheelDrive {
    *     the battery's voltage: its loop's output, before its current limit
    * @param voltsPerRadPerSec how the controller's ask moves with the wheel's speed, in volts per
    *     radian a second: its velocity loop's gain, negative, through the wheel's radius; zero for a
-   *     voltage it simply holds, or one the battery caps. An engine that integrates implicitly
-   *     folds it into the motor's line, and caps the line at the current limit and the battery.
+   *     voltage it simply holds, or one the battery caps.
    * @param currentLimitAmps the most current the controller lets through the motor, either way: the
    *     physics holds the motor to it, cutting the voltage toward the motor's back EMF
    * @param batteryVolts the most the controller can put across the motor, either way, whatever the

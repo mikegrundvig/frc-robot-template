@@ -1,14 +1,17 @@
 package frc.robot;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Degrees;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
+import com.michaelgrundvig.frc.world.robot.Pdh;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
@@ -29,7 +32,9 @@ class DefinitionDoubtsTest {
               Link.box(
                   "arm plate", new Translation3d(0.2, 0, 0), new Translation3d(0.4, 0.05, 0.05)))
           .motor(Motor.KRAKEN_X60, Gearing.of(50))
-          .control(MechanismControl.position(30));
+          .control(
+              MechanismControl.position(30)
+                  .withHoming(MechanismControl.Homing.assumeAtReference()));
 
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(Robots.SIM.definition())
@@ -43,8 +48,8 @@ class DefinitionDoubtsTest {
    */
   @Test
   void theRobotSaysWhatItsCodeReadsAndTheSimulatorWhatOnlyItReads() {
-    List<String> doubts = RobotContainer.doubts(ROBOT);
-    List<String> notes = RobotContainer.simulatorNotes(ROBOT);
+    List<String> doubts = Doubts.lines(Doubts.of(ROBOT), Finding.Scope.ROBOT);
+    List<String> notes = Doubts.lines(Doubts.of(ROBOT), Finding.Scope.SIMULATOR);
 
     assertThat(doubts)
         .contains(
@@ -70,8 +75,8 @@ class DefinitionDoubtsTest {
   @Test
   void theTemplatesUnmeasuredGripIsTheRobotsDoubtAndItsInertiasTheSimulators() {
     RobotDefinition template = Robots.SIM.definition();
-    List<String> doubts = RobotContainer.doubts(template);
-    List<String> notes = RobotContainer.simulatorNotes(template);
+    List<String> doubts = Doubts.lines(Doubts.of(template), Finding.Scope.ROBOT);
+    List<String> notes = Doubts.lines(Doubts.of(template), Finding.Scope.SIMULATOR);
 
     assertThat(doubts)
         .contains(
@@ -93,8 +98,29 @@ class DefinitionDoubtsTest {
   /** A kG written, even 0 for a counterbalanced arm, is no doubt. */
   @Test
   void aWrittenKgIsNoDoubt() {
-    RobotDefinition tuned = ROBOT.with(ARM.control(MechanismControl.position(30).withKg(0)));
+    RobotDefinition tuned = ROBOT.with(ARM.retuned(control -> control.withKg(0)));
 
-    assertThat(RobotContainer.doubts(tuned)).noneMatch(doubt -> doubt.contains("kG"));
+    assertThat(Doubts.lines(Doubts.of(tuned), Finding.Scope.ROBOT))
+        .noneMatch(doubt -> doubt.contains("kG"));
+  }
+
+  /**
+   * With a PDH declared, a wired motor controller that doesn't say which channel feeds it is the
+   * robot's doubt. The template's robot declares none, so it says nothing of feeds.
+   */
+  @Test
+  void aWiredControllerWithNoChannelIsADoubtOnceThereIsAPdh() {
+    RobotDefinition wired =
+        RobotDefinitionBuilder.builder(ROBOT.with(ARM.motorsOn(TALON_FX.can(32))))
+            .pdh(Pdh.can(1))
+            .build();
+
+    assertThat(Doubts.lines(Doubts.of(wired), Finding.Scope.ROBOT))
+        .contains(
+            "not known: arm's motor controller 32 has no PDH channel: which channel feeds each, and"
+                + " through what breaker, isn't checked: give each its own where it's wired,"
+                + " .pdh(channel, breaker)");
+    assertThat(Doubts.lines(Doubts.of(Robots.SIM.definition()), Finding.Scope.ROBOT))
+        .noneMatch(doubt -> doubt.contains("PDH"));
   }
 }

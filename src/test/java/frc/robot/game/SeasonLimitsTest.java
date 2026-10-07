@@ -16,7 +16,6 @@ import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.BodyBuilder;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Coupling;
-import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Link;
@@ -29,8 +28,6 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotConfig;
 import frc.robot.Robots;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation3d;
@@ -133,19 +130,6 @@ class SeasonLimitsTest {
         .containsExactly("it starts 0.850 m tall, more than the 0.762 m allowed");
   }
 
-  /** What a mechanism's guard asks before a move: how far out the robot would reach. */
-  @Test
-  void aGuardAsksHowFarTheRobotWouldReach() {
-    Joint.Revolute arm = arm(0.7, UPRIGHT);
-    RobotDefinition robot = withArm(arm);
-
-    assertThat(Rebuilt.LIMITS.whyTooFar(robot, Map.of(arm, UPRIGHT))).isNull();
-    assertThat(Rebuilt.LIMITS.whyTooFar(robot, Map.of(arm, Math.PI / 4))).isNull();
-    assertThat(Rebuilt.LIMITS.whyTooFar(robot, Map.of(arm, 0.0)))
-        .isEqualTo(
-            "it would reach 0.351 m beyond its frame perimeter, more than the 0.305 m allowed");
-  }
-
   /**
    * Each configuration is checked against the extension limit, with the joints it doesn't name at
    * their references: the arm laid flat reaches 0.351 m out, more than the 12 in allowed, and
@@ -200,8 +184,6 @@ class SeasonLimitsTest {
         .parent(Part.CHASSIS)
         .origin(new Transform3d(0, 0, 0.05, Rotation3d.ZERO))
         .axis(new Vector3(0, -1, 0))
-        .range(Optional.of(Range.degrees(-10, 100)))
-        .reference(reference)
         .link(
             Link.builder()
                 .label("arm")
@@ -219,9 +201,8 @@ class SeasonLimitsTest {
                             .material(Material.builder().name("aluminum").build())
                             .build()))
                 .build())
-        .positions(List.of())
-        .outputs(List.of())
-        .driven(Driven.NONE)
+        .range(Range.degrees(-10, 100))
+        .rest(reference)
         .build();
   }
 }

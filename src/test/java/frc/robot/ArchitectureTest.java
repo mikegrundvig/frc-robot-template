@@ -27,11 +27,15 @@ import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
+import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.wpilib.driverstation.Alliance;
@@ -147,8 +151,9 @@ class ArchitectureTest {
   }
 
   /**
-   * The REV helper carries the Phoenix helper's settings to a SPARK's, so it reads those and REV's
-   * configuration classes. Never a device, as the Phoenix helper never is.
+   * The REV helper says the program's plan for a joint ({@code ControllerPlan}) in a SPARK's terms,
+   * so it reads the model, the wiring and REV's configuration classes: never Phoenix's settings,
+   * and never a device, as the Phoenix helper never is.
    */
   @Test
   void theRevHelperBuildsSettingsAndNeverTouchesADevice() {
@@ -158,20 +163,20 @@ class ArchitectureTest {
         .should()
         .onlyDependOnClassesThat(
             resideInAnyPackage(
-                    "frc.robot.lib..",
+                    "frc.robot.lib.rev..",
+                    "frc.robot.lib.wiring..",
                     "java..",
                     "org.wpilib.math..",
                     "org.wpilib.units..",
                     "org.jspecify..",
                     "com.michaelgrundvig.frc.world.robot..",
-                    "com.ctre.phoenix6.configs..",
-                    "com.ctre.phoenix6.signals..",
                     // REV's settings: plain values, which the IO layer applies.
                     "com.revrobotics.spark.config..")
                 .or(belongToAnyOf(ClosedLoopSlot.class, FeedbackSensor.class)))
         .because(
-            "the helper is pure functions from the robot's definition, wiring and control to a"
-                + " SPARK's settings: devices and the robot's state stay in the IO layer")
+            "the helper is pure functions from the program's plan for a joint to a SPARK's"
+                + " settings, with no vendor's settings between: devices and the robot's state stay"
+                + " in the IO layer")
         .check(PRODUCTION_CODE);
   }
 
@@ -338,6 +343,8 @@ class ArchitectureTest {
         .resideInAnyPackage(
             "frc.robot.lib..",
             "frc.robot.subsystems..",
+            "frc.robot.hardware..",
+            "frc.robot.behavior..",
             "frc.robot.views..",
             "frc.robot.commands..",
             "frc.robot.dashboard..",
@@ -359,6 +366,8 @@ class ArchitectureTest {
         .resideInAnyPackage(
             "frc.robot.lib..",
             "frc.robot.subsystems..",
+            "frc.robot.hardware..",
+            "frc.robot.behavior..",
             "frc.robot.commands..",
             "frc.robot.dashboard..",
             "frc.robot.game..",
@@ -413,6 +422,108 @@ class ArchitectureTest {
             "a constructor takes its values by position, so two can swap without a compile error;"
                 + " the builder names every value (Body.builder().frameLength(...)...)")
         .check(PRODUCTION_CODE);
+  }
+
+  /**
+   * A configuration record's builder hands on a list, a set or a map as it's given, so the record
+   * copies each it holds: one changed after the record is built would change the record.
+   */
+  static final ArchRule CONFIGURATION_COPIES_WHAT_IT_HOLDS =
+      classes()
+          .that()
+          .areAnnotatedWith(ConfigRecord.class)
+          .should(copyEachCollectionTheyHold())
+          .because(
+              "its builder hands a list on as it's given, so a list changed after the record is"
+                  + " built would change the record: copy each in the record's constructor, names"
+                  + " = List.copyOf(names)");
+
+  @Test
+  void configurationCopiesTheListsItHolds() {
+    CONFIGURATION_COPIES_WHAT_IT_HOLDS.check(PRODUCTION_CODE);
+  }
+
+  /** The rule catches a record that holds a list as it's given, and passes one that copies it. */
+  @Test
+  void theCopyRuleCatchesARecordHoldingTheListItsGiven() {
+    JavaClasses records =
+        new ClassFileImporter().importClasses(HoldsWhatItsGiven.class, CopiesWhatItHolds.class);
+
+    assertThatThrownBy(() -> CONFIGURATION_COPIES_WHAT_IT_HOLDS.check(records))
+        .hasMessageContaining("HoldsWhatItsGiven holds parts and copies 0 of them")
+        .hasMessageNotContaining("CopiesWhatItHolds");
+  }
+
+  /** Holds the list it's given: changing that list changes it. */
+  @ConfigRecord
+  record HoldsWhatItsGiven(String name, List<String> parts) {}
+
+  /** Copies the list it's given. */
+  @ConfigRecord
+  record CopiesWhatItHolds(String name, List<String> parts) {
+    CopiesWhatItHolds {
+      parts = List.copyOf(parts);
+    }
+  }
+
+  /**
+   * Each list, set or map a record holds copied in its canonical constructor: as many copies there
+   * ({@code List.copyOf}, {@code Set.copyOf}, {@code Map.copyOf}, or a stream's {@code toList}) as
+   * it holds.
+   */
+  private static ArchCondition<JavaClass> copyEachCollectionTheyHold() {
+    return new ArchCondition<>("copy each list, set or map they hold") {
+      @Override
+      public void check(JavaClass record, ConditionEvents events) {
+        RecordComponent[] components = record.reflect().getRecordComponents();
+        if (components == null) {
+          return;
+        }
+        List<String> held =
+            Arrays.stream(components)
+                .filter(
+                    component ->
+                        Collection.class.isAssignableFrom(component.getType())
+                            || Map.class.isAssignableFrom(component.getType()))
+                .map(RecordComponent::getName)
+                .toList();
+        if (held.isEmpty()) {
+          return;
+        }
+        List<String> canonical =
+            Arrays.stream(components).map(component -> component.getType().getName()).toList();
+        long copies =
+            record.getConstructors().stream()
+                .filter(
+                    constructor ->
+                        constructor.getRawParameterTypes().stream()
+                            .map(JavaClass::getName)
+                            .toList()
+                            .equals(canonical))
+                .flatMap(constructor -> constructor.getMethodCallsFromSelf().stream())
+                .filter(ArchitectureTest::copies)
+                .count();
+        if (copies < held.size()) {
+          events.add(
+              SimpleConditionEvent.violated(
+                  record,
+                  record.getName()
+                      + " holds "
+                      + String.join(", ", held)
+                      + " and copies "
+                      + copies
+                      + " of them in its constructor"));
+        }
+      }
+    };
+  }
+
+  /** A call that copies a list, a set or a map into one that can't change. */
+  private static boolean copies(JavaMethodCall call) {
+    String owner = call.getTargetOwner().getName();
+    return (call.getName().equals("copyOf")
+            && List.of("java.util.List", "java.util.Set", "java.util.Map").contains(owner))
+        || (call.getName().equals("toList") && owner.equals("java.util.stream.Stream"));
   }
 
   private static DescribedPredicate<JavaField> arrays() {

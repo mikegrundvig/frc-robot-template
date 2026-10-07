@@ -60,12 +60,7 @@ public record Drive(String label, Actuator actuator, Transmission transmission) 
           case Transmission.Between line ->
               throw new IllegalStateException(label + " pushes along a line: it has no rotor");
         };
-    return Sensor.Encoder.builder()
-        .label(label + " rotor")
-        .terms(terms)
-        .absolute(false)
-        .countsPerTurn(Optional.empty())
-        .build();
+    return Sensor.Encoder.builder().label(label + " rotor").terms(terms).absolute(false).build();
   }
 
   private static Transmission.Term term(Joint joint, double ratio, Optional<Distance> pitchRadius) {

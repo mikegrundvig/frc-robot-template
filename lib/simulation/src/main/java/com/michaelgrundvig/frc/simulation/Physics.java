@@ -6,7 +6,7 @@ package com.michaelgrundvig.frc.simulation;
  * through the {@link Actuators}; true motion comes out, as the {@link ChassisTruth} and each {@link
  * WheelTruth}, which only the sensor models and the simulator's own outputs read.
  *
- * <p>An engine behind this interface keeps three promises, which the truth suite and the recorded
+ * <p>The physics behind this interface keeps three promises, which the truth suite and the recorded
  * runs rely on:
  *
  * <ul>
@@ -16,10 +16,9 @@ package com.michaelgrundvig.frc.simulation;
  *       same truth, to the bit: no clock, no unseeded randomness, no order that depends on identity
  *       hash codes, and sub-steps of a fixed length, never chosen by how long a step took.
  *   <li><b>Sub-steps inside.</b> {@link #step} moves the world on by however long the simulator
- *       asks (a fifth of a robot loop, 4 ms, at its odometry's 250 Hz), in sub-steps of the
- *       engine's own choosing, and asks the actuators what drives each wheel at the start of every
- *       one. Today's engine ({@link KinematicPhysics}) takes each step as one sub-step; a
- *       rigid-body engine takes a millisecond or a few.
+ *       asks (a fifth of a robot loop, 4 ms, at its odometry's 250 Hz), in sub-steps of its own
+ *       choosing, and asks the actuators what drives each wheel at the start of every one. The
+ *       template's ({@link KinematicPhysics}) takes each step as one sub-step.
  * </ul>
  */
 public interface Physics {
@@ -30,8 +29,8 @@ public interface Physics {
   double STANDARD_GRAVITY = 9.80665;
 
   /**
-   * Moves the world on by this long: the engine's sub-steps, each starting with the actuators told
-   * the truth as it stands and asked what drives each wheel over it.
+   * Moves the world on by this long: its sub-steps, each starting with the actuators told the truth
+   * as it stands and asked what drives each wheel over it.
    *
    * @param seconds how long, more than zero
    */

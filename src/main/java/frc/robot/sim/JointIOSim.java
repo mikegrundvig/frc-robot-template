@@ -1,58 +1,48 @@
 package frc.robot.sim;
 
 import static org.wpilib.units.Units.Amps;
-import static org.wpilib.units.Units.Radians;
 
-import com.michaelgrundvig.frc.world.robot.Actuator;
-import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.simulation.JointPlant;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
-import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import frc.robot.subsystems.mechanisms.ControllerSettings;
 import frc.robot.subsystems.mechanisms.JointIO;
-import frc.robot.subsystems.mechanisms.JointSetup;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import org.littletonrobotics.junction.Logger;
-import org.wpilib.math.system.DCMotor;
 
 /**
- * A simulated joint: its motor controller and its motors, as the robot's definition and the joint's
- * control describe them, moving the joint's link. Built from the model alone ({@link
- * JointSimulation}): the motors' model through the transmission, with its losses; the link and
- * everything it carries, and the motors' rotors, as the inertia ({@code RobotMath.inertia}), the
- * rotors alone for links without mass; gravity ({@link #gravityTorque}); and the joint's hard
- * stops, which stop it dead.
+ * A simulated joint: its motor controller, as the joint's control and wiring describe it, driving
+ * the joint's plant, its motors moving its link, built from the robot's definition alone ({@link
+ * JointPlant}, in the simulation library: the motors through the transmission, the inertia,
+ * gravity, the hard stops).
  *
- * <p>Gravity is what the kG tuned in the joint's block holds, through its motors, since that's what
- * a team measures: one cosine about where its weight pulls hardest for an arm, the same all along a
- * slide. Where its block tunes none, gravity is its links' weight ({@code
- * RobotMath.gravityTorque}), with the other joints where they are, and none for links without mass.
- * Gravity is the robot's, from its block, not its motor controller's: a test can run the controller
- * with another kG ({@code JointSetup.of}), and live tuning doesn't move it. An arm's tuned gravity
- * doesn't follow a parent that tilts it, as Phoenix's {@code Arm_Cosine} doesn't.
+ * <p>Gravity is the plant's: what the kG tuned in the joint's block holds, through its motors, or,
+ * where its block tunes none, its links' weight. It's the robot's, from its block in the definition
+ * the simulator was built from, not its motor controller's: a test can run the controller with
+ * another kG, re-tuning the joint ({@code PIVOT.retuned(control -> control.withKg(0))}) in a robot
+ * whose definition keeps its own, and live tuning doesn't move it.
  *
- * <p>The motor controller runs as a TalonFX runs what the Phoenix helper configures: its loop every
- * millisecond, on the joint's own position and speed; its slot's gains, the control's, its kV, kA
- * and kG seeded from the definition where the control gives none, as on the robot; gravity's
- * feedforward as Phoenix gives it, one cosine of the joint's angle for an arm, steady for a slide;
- * its stator current limit; its soft limits, past which it drives no further; and neutral as its
- * control says, braking or coasting. Like a real one, it knows only where its own count says the
- * joint is: from where the joint was at power on, taken as its reference, until homing tells it
- * otherwise ({@link #powerOnAt}, {@link #resetPosition}). The battery holds 12 V, and the supply
- * current limit isn't modeled, as the drivetrain's isn't ({@code ModuleIOSim}). Friction isn't
- * either: it isn't known until measured. Joints move independently: one joint's motion doesn't push
- * on another's, which waits for the simulator's rigid-body engine.
+ * <p>The motor controller runs as the controller its block names runs what its vendor's helper
+ * configures, from the joint's plan ({@link ControllerPlan}), its loop every millisecond on the
+ * joint's own position and speed: a TalonFX's slot, the plan's whole law on the device ({@link
+ * TalonFxEmulator}), for a TalonFX, a TalonFXS, or a joint wired to nothing; a SPARK's kP on the
+ * device, with the plan's feedforward the robot works out as it asks ({@link SparkEmulator}).
+ * Either way: its stator current limit; its soft limits, past which it drives no further; and
+ * neutral as its control says, braking or coasting. Like a real one, it knows only where its own
+ * count says the joint is: from where the joint was at power on, taken as its reference, until
+ * homing tells it otherwise ({@link #powerOnAt}, {@link #resetPosition}). The battery holds 12 V,
+ * and the supply current limit isn't modeled, as the drivetrain's isn't ({@code ModuleIOSim}).
  *
- * <p>What the robot's own settings for the joint would note ({@link ControllerSettings#notes}), for
- * the controller it's wired to, or a TalonFX with no wiring, it logs once as the robot does ({@code
- * Joints/<label>/SettingsNotes}), so the simulator says what the robot would. What the robot would
- * refuse, its configuration refused before the simulator started.
+ * <p>What the robot would refuse of the joint's settings, its configuration refused before the
+ * simulator started; what it would doubt, the robot says at startup, in the simulator as on the
+ * robot ({@link ControllerSettings#findings}).
  */
 final class JointIOSim implements JointIO {
-  /** A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz). */
+  /**
+   * A motor controller runs its closed loop every millisecond: a TalonFX's (CTRE's Phoenix 6
+   * documentation: 1 kHz), and a SPARK's.
+   */
   static final double DEVICE_LOOP_SECONDS = 0.001;
 
   private static final double BATTERY_VOLTS = 12.0;
@@ -68,122 +58,37 @@ final class JointIOSim implements JointIO {
 
   private final Joint joint;
   private final RobotMath math;
-  private final CurrentLimitedMotorSim motor;
+  private final JointPlant plant;
+  private final ControllerEmulator controller;
 
-  /** How many motors turn it: its readings are each one's, as a motor controller reads its own. */
-  private final int count;
-
-  private double statorLimitAmps;
-  private final boolean brake;
-  private double kP;
-  private double kI;
-  private double kD;
-  private double kS;
-  private final double kV;
-  private final double kG;
-
-  /**
-   * For an arm, the angle to add to its position for its angle from where its weight pulls hardest,
-   * as its control gives it or its links' mass puts it; NaN for a slide.
-   */
-  private final double gravityOffset;
-
-  /**
-   * Newton meters at the joint for each volt across its motors held still (newtons, for a slide):
-   * their stall torque per volt, all of them, through its gearing, less its losses.
-   */
-  private final double torquePerVolt;
-
-  /**
-   * The kG tuned in the joint's block, which sets gravity on it; empty where none is, and its
-   * links' mass does.
-   */
-  private final Optional<Double> weightKg;
-
-  /** As {@link #gravityOffset}, for the block's kG: where the robot's weight pulls hardest. */
-  private final double weightOffset;
-
-  private final double softLower;
-  private final double softUpper;
-  private final double hardLower;
-  private final double hardUpper;
+  /** How its motor controller drives it: its block's control, or as the pit tunes it. */
+  private ControllerPlan plan;
 
   /** Where the motor controller reads the joint, less where it really is: 0 until misplaced. */
   private double offset;
 
+  /** Where, and how fast, the motor controller last told the robot the joint is. */
+  private double read;
+
+  private double readVelocity;
+
   private Mode mode = Mode.NEUTRAL;
-  private double setPosition;
-  private double setVelocity;
-  private double feedforwardVolts;
   private double setVolts;
-  private double integral;
 
   /** Seconds of the robot's loop not yet run, under a millisecond: the next step's. */
   private double owed;
 
-  /** What the robot's settings for the joint would note, as logged. */
-  private final List<String> notes;
-
-  JointIOSim(RobotMath math, JointSetup setup) {
-    joint = setup.joint();
-    this.math = math;
-    MechanismControl control = setup.control();
-    Drive drive = math.drivesOf(joint).get(0);
-    Actuator.Motors motors = (Actuator.Motors) drive.actuator();
-    DCMotor model = motors.model(drive.transmission().efficiency());
-    double gearing = Math.abs(drive.transmission().shaftRadiansPer(joint));
-    motor = new CurrentLimitedMotorSim(model, math.inertia(joint, Map.of()), gearing);
-    torquePerVolt = gearing * model.stallTorque / model.nominalVoltage;
-    count = motors.count();
-    statorLimitAmps = control.currentLimits().stator().in(Amps) * count;
-    brake = control.neutralMode() == MechanismControl.NeutralMode.BRAKE;
-    RobotMath.Gains seed = math.idealGains(joint);
-    MechanismControl.Gains gains = control.gains();
-    kP = gains.kP();
-    kI = gains.kI();
-    kD = gains.kD();
-    kS = gains.kS();
-    kV = gains.kV().orElse(seed.kV());
-    boolean gravityActs = math.gravityActsOn(joint);
-    kG = gravityActs ? gains.kG().orElse(seed.kG()) : 0;
-    gravityOffset = gravityOffset(math, gains);
-    MechanismControl.Gains block =
-        joint
-            .driven()
-            .control()
-            .map(MechanismControl::gains)
-            .orElse(MechanismControl.Gains.seeded());
-    weightKg = gravityActs ? block.kG() : Optional.empty();
-    weightOffset = gravityOffset(math, block);
-    softLower =
-        control
-            .softLimits()
-            .map(MechanismControl.SoftLimits::lower)
-            .orElse(Double.NEGATIVE_INFINITY);
-    softUpper =
-        control
-            .softLimits()
-            .map(MechanismControl.SoftLimits::upper)
-            .orElse(Double.POSITIVE_INFINITY);
-    hardLower = joint.range().map(Range::lower).orElse(Double.NEGATIVE_INFINITY);
-    hardUpper = joint.range().map(Range::upper).orElse(Double.POSITIVE_INFINITY);
-    motor.place(joint.reference(), 0);
-    // What's doubtful in the robot's settings, though allowed: said once, in the log, as the robot
-    // says it. The Driver Station's console is the robot's alone.
-    notes = ControllerSettings.notes(math, setup);
-    Logger.recordOutput("Joints/" + joint.label() + "/SettingsNotes", notes.toArray(String[]::new));
-  }
-
   /**
-   * For an arm, the angle to add to its position for its angle from where its weight pulls hardest:
-   * the gains' angle where given, else where its links' mass puts it, else its zero. NaN for a
-   * slide.
+   * @param math what the robot's definition derives: its joint's block sets the gravity on it
+   * @param joint the joint as its motor controller runs it: its block's control and wiring
    */
-  private double gravityOffset(RobotMath math, MechanismControl.Gains gains) {
-    if (!(joint instanceof Joint.Revolute)) {
-      return Double.NaN;
-    }
-    return gains.gravityAngle().map(angle -> -angle.in(Radians)).orElse(math.gravityOffset(joint));
+  JointIOSim(RobotMath math, Joint joint) {
+    this.joint = joint;
+    this.math = math;
+    plan = ControllerPlan.of(math, joint, ControllerSettings.control(joint));
+    plant = JointPlant.of(math, joint);
+    controller = ControllerEmulator.of(plan);
+    read = plant.position();
   }
 
   /** The joint. */
@@ -191,40 +96,35 @@ final class JointIOSim implements JointIO {
     return joint;
   }
 
-  /** What the robot's settings for the joint would note, as it logged them: for the tests. */
-  List<String> notes() {
-    return notes;
+  /**
+   * Gravity's torque on the joint, positive turning it forward, with the joints where they stand:
+   * newton meters, or newtons for a slide ({@link JointPlant#gravityTorque}).
+   */
+  double gravityTorque(Map<Joint, Double> positions) {
+    return plant.gravityTorque(positions);
   }
 
   /**
-   * Gravity's torque on the joint, positive turning it forward, with the joints where they stand:
-   * newton meters, or newtons for a slide. What its block's tuned kG holds, through its motors;
-   * where none is tuned, its links' weight.
+   * The current each of its motors draws from the battery, in amps: what its controller reads, and
+   * what its PDH channel does.
    */
-  double gravityTorque(Map<Joint, Double> positions) {
-    if (weightKg.isEmpty()) {
-      return -math.gravityTorque(joint, positions);
-    }
-    double volts =
-        Double.isNaN(weightOffset)
-            ? weightKg.get()
-            : weightKg.get() * Math.cos(position() + weightOffset);
-    return -volts * torquePerVolt;
+  double supplyAmps() {
+    return plant.supplyAmps();
   }
 
   /** Where the joint really is, in its units. */
   double position() {
-    return motor.positionRadians();
+    return plant.position();
   }
 
   /** How fast it really moves. */
   double velocity() {
-    return motor.velocityRadPerSec();
+    return plant.velocity();
   }
 
   /** Puts the joint somewhere, still, where its motor controller reads it too: a test's start. */
   void place(double position) {
-    motor.place(position, 0);
+    plant.place(position);
     offset = 0;
   }
 
@@ -233,7 +133,7 @@ final class JointIOSim implements JointIO {
    * reference anyway, as a joint read by its motor alone does, until it's homed.
    */
   void powerOnAt(double position) {
-    motor.place(position, 0);
+    plant.place(position);
     offset = joint.reference() - position;
   }
 
@@ -254,87 +154,69 @@ final class JointIOSim implements JointIO {
 
   /** One millisecond: the motor controller's loop, then the joint, held at its stops. */
   private void deviceLoop(double gravityTorque) {
-    double position = motor.positionRadians() + offset; // where the motor controller reads it
-    double velocity = motor.velocityRadPerSec();
+    double position = plant.position() + offset; // where the motor controller reads it
+    double velocity = plant.velocity();
+    double limit = plan.currentLimits().stator().in(Amps);
     if (mode == Mode.NEUTRAL) {
-      if (brake) {
-        motor.run(0, statorLimitAmps, gravityTorque, DEVICE_LOOP_SECONDS);
+      if (plan.brakes()) {
+        plant.run(0, limit, gravityTorque, DEVICE_LOOP_SECONDS);
       } else {
-        motor.coast(gravityTorque, DEVICE_LOOP_SECONDS);
+        plant.coast(gravityTorque, DEVICE_LOOP_SECONDS);
       }
-    } else {
-      double volts = Math.clamp(volts(position, velocity), -BATTERY_VOLTS, BATTERY_VOLTS);
-      boolean limited = mode != Mode.HOMING; // homing ignores the soft limits
-      if (limited
-          && ((position >= softUpper && volts > 0) || (position <= softLower && volts < 0))) {
-        volts = 0;
-      }
-      motor.run(volts, statorLimitAmps, gravityTorque, DEVICE_LOOP_SECONDS);
+      return;
     }
-    if (motor.positionRadians() < hardLower) {
-      motor.place(hardLower, Math.max(0, motor.velocityRadPerSec()));
-    } else if (motor.positionRadians() > hardUpper) {
-      motor.place(hardUpper, Math.min(0, motor.velocityRadPerSec()));
+    double volts = Math.clamp(volts(position, velocity), -BATTERY_VOLTS, BATTERY_VOLTS);
+    if (mode != Mode.HOMING && pastSoftLimit(position, volts)) {
+      volts = 0; // homing ignores the soft limits
     }
+    plant.run(volts, limit, gravityTorque, DEVICE_LOOP_SECONDS);
   }
 
-  /** What the motor controller asks of the motors this millisecond, as Phoenix works it out. */
+  /** Whether it's at or past a soft limit, driven on past it. */
+  private boolean pastSoftLimit(double position, double volts) {
+    return plan.softLimits()
+        .map(
+            limits ->
+                (position >= limits.upper() && volts > 0)
+                    || (position <= limits.lower() && volts < 0))
+        .orElse(false);
+  }
+
+  /** What the motor controller asks of the motors this millisecond. */
   private double volts(double position, double velocity) {
     return switch (mode) {
-      case POSITION -> {
-        double error = setPosition - position;
-        integral += error * DEVICE_LOOP_SECONDS;
-        yield kP * error
-            + kI * integral
-            + kD * (setVelocity - velocity)
-            + kV * setVelocity
-            + kS * Math.signum(setVelocity)
-            + gravity(position)
-            + feedforwardVolts;
-      }
-      case VELOCITY ->
-          kP * (setVelocity - velocity)
-              + kV * setVelocity
-              + kS * Math.signum(setVelocity)
-              + gravity(position);
+      case POSITION -> controller.holding(position, velocity, DEVICE_LOOP_SECONDS);
+      case VELOCITY -> controller.running(position, velocity);
       case VOLTAGE, HOMING -> setVolts;
       case DUTY_CYCLE -> setVolts * BATTERY_VOLTS;
       case NEUTRAL -> 0;
     };
   }
 
-  /** Phoenix's gravity feedforward: kG along one cosine for an arm, steady for a slide. */
-  private double gravity(double position) {
-    return Double.isNaN(gravityOffset) ? kG : kG * Math.cos(position + gravityOffset);
-  }
-
   @Override
   public void updateInputs(JointIOInputs inputs) {
     inputs.connected = true;
-    inputs.position = motor.positionRadians() + offset;
-    inputs.velocity = motor.velocityRadPerSec();
-    inputs.appliedVolts = motor.appliedVolts();
-    inputs.statorCurrentAmps = Math.abs(motor.currentAmps()) / count;
-    inputs.supplyCurrentAmps =
-        Math.abs(motor.currentAmps() * motor.appliedVolts()) / BATTERY_VOLTS / count;
+    inputs.position = plant.position() + offset;
+    inputs.velocity = plant.velocity();
+    inputs.appliedVolts = plant.appliedVolts();
+    inputs.statorCurrentAmps = plant.statorAmps();
+    inputs.supplyCurrentAmps = plant.supplyAmps();
     inputs.unconfigured = "";
+    read = inputs.position;
+    readVelocity = inputs.velocity;
   }
 
   @Override
   public void setPosition(double position, double velocity, double feedforwardVolts) {
-    if (mode != Mode.POSITION) {
-      integral = 0;
-    }
+    controller.hold(
+        position, velocity, feedforwardVolts, read, readVelocity, mode != Mode.POSITION);
     mode = Mode.POSITION;
-    setPosition = position;
-    setVelocity = velocity;
-    this.feedforwardVolts = feedforwardVolts;
   }
 
   @Override
   public void setVelocity(double velocity) {
+    controller.run(velocity, read);
     mode = Mode.VELOCITY;
-    setVelocity = velocity;
   }
 
   @Override
@@ -362,15 +244,13 @@ final class JointIOSim implements JointIO {
 
   @Override
   public void resetPosition(double position) {
-    offset = position - motor.positionRadians();
+    offset = position - plant.position();
   }
 
+  /** Takes the pit's tuning: its gains and current limits, as its motor controller would. */
   @Override
   public void retune(MechanismControl control) {
-    statorLimitAmps = control.currentLimits().stator().in(Amps) * count;
-    kP = control.gains().kP();
-    kI = control.gains().kI();
-    kD = control.gains().kD();
-    kS = control.gains().kS();
+    plan = ControllerPlan.of(math, joint, control);
+    controller.retune(plan);
   }
 }

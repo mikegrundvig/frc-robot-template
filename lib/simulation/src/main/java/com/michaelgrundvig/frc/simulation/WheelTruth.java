@@ -40,9 +40,9 @@ public interface WheelTruth {
 
   /**
    * What the floor pushes back on its steering with, about its steering axis, in N m: the scrub of
-   * its tread turning on the carpet, for the steering's closed form to feel. Zero where the engine
-   * models no scrub, as today's does; the robot program's steering doesn't read it until a real
-   * module's scrub is measured.
+   * its tread turning on the carpet, for the steering's closed form to feel. Zero where the physics
+   * models no scrub, as the template's doesn't; the robot program's steering doesn't read it until
+   * a real module's scrub is measured.
    */
   double steerLoadNewtonMeters();
 

@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANDI;
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANRANGE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.wpilib.units.Units.Degrees;
@@ -13,67 +15,32 @@ import org.wpilib.math.geometry.Translation3d;
 class SensorWiringTest {
   private static final CanBus BUS = CanBus.SYSTEMCORE;
 
+  /**
+   * A switch carries where it's connected, an input a switch can be on, and a rangefinder its
+   * CANrange: a switch can't be given a CANrange, nor a rangefinder a switch's input, as its types
+   * say.
+   */
   @Test
-  void aSwitchIsOnAnInputThatReadsIt() {
-    SensorWiring.OfSwitch beam =
-        SensorWiring.OfSwitch.builder()
-            .sensor("claw beam")
-            .input(new SensorWiring.Candi(BUS, 30, 1))
-            .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-            .build();
-    SensorWiring.OfSwitch limit =
-        SensorWiring.OfSwitch.builder()
-            .sensor("pivot down")
-            .input(new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.REVERSE))
-            .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-            .build();
+  void aSensorCarriesTheInputItsOn() {
+    Sensor.Switch beam =
+        Sensor.Switch.beam("claw beam", Part.CHASSIS).on(CANDI.can(BUS, 30).s1().normallyOpen());
+    Sensor.Rangefinder hopper =
+        Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))
+            .on(CANRANGE.can(BUS, 31));
 
-    assertThat(beam.input()).isEqualTo(new SensorWiring.Candi(BUS, 30, 1));
-    assertThat(limit.sensor()).isEqualTo("pivot down");
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                SensorWiring.OfSwitch.builder()
-                    .sensor("claw beam")
-                    .input(new SensorWiring.CanRange(BUS, 31))
-                    .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-                    .build())
-        .withMessageContaining("a switch isn't on a CANrange");
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                SensorWiring.OfSwitch.builder()
-                    .sensor(" ")
-                    .input(new SensorWiring.Port(0))
-                    .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-                    .build());
-  }
-
-  @Test
-  void aRangefinderIsOnACanRange() {
-    SensorWiring.OfRangefinder hopper =
-        SensorWiring.OfRangefinder.builder()
-            .sensor("hopper")
-            .input(new SensorWiring.CanRange(BUS, 31))
-            .build();
-
-    assertThat(hopper.input()).isEqualTo(new SensorWiring.CanRange(BUS, 31));
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                SensorWiring.OfRangefinder.builder()
-                    .sensor("hopper")
-                    .input(new SensorWiring.Port(2))
-                    .build())
-        .withMessageContaining("a rangefinder is on a CANrange");
+    assertThat(beam.wiring())
+        .contains(
+            new SensorWiring.Connection(
+                CANDI.can(BUS, 30).s1(), SensorWiring.Polarity.NORMALLY_OPEN));
+    assertThat(hopper.wiring()).contains(CANRANGE.can(BUS, 31));
   }
 
   @Test
   void inputsAreWhereTheHardwareHasThem() {
-    assertThatIllegalArgumentException().isThrownBy(() -> new SensorWiring.Port(6));
-    assertThatIllegalArgumentException().isThrownBy(() -> new SensorWiring.Candi(BUS, 63, 1));
+    assertThatIllegalArgumentException().isThrownBy(() -> SensorWiring.port(6));
+    assertThatIllegalArgumentException().isThrownBy(() -> CANDI.can(BUS, 63).s1());
     assertThatIllegalArgumentException().isThrownBy(() -> new SensorWiring.Candi(BUS, 30, 3));
-    assertThatIllegalArgumentException().isThrownBy(() -> new SensorWiring.CanRange(BUS, -1));
+    assertThatIllegalArgumentException().isThrownBy(() -> CANRANGE.can(BUS, -1));
     assertThatIllegalArgumentException()
         .isThrownBy(() -> new SensorWiring.ControllerLimit("", SensorWiring.Direction.FORWARD));
   }
@@ -88,11 +55,49 @@ class SensorWiringTest {
     Sensor.Rangefinder hopper =
         Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))
             .at(Pose3d.ZERO)
-            .on(new SensorWiring.CanRange(BUS, 31));
+            .on(CANRANGE.can(BUS, 31));
 
     assertThat(SensorWiring.ControllerLimit.of(roller, SensorWiring.Direction.FORWARD))
         .isEqualTo(new SensorWiring.ControllerLimit("roller", SensorWiring.Direction.FORWARD));
     assertThat(hopper.pose()).isPresent();
-    assertThat(hopper.wiring()).contains(new SensorWiring.CanRange(BUS, 31));
+    assertThat(hopper.wiring()).contains(CANRANGE.can(BUS, 31));
+  }
+
+  /** An input is named as a motor's controller is: a CANdi's or a CANrange's by bus and ID. */
+  @Test
+  void anInputIsNamedAsAMotorsControllerIs() {
+    CanBus canivore = CanBus.canivore("canivore");
+
+    assertThat(CANDI.can(canivore, 30).s1())
+        .isEqualTo(SensorWiringCandiBuilder.builder().bus(canivore).id(30).input(1).build());
+    assertThat(CANDI.can(canivore, 30).s2().input()).isEqualTo(2);
+    assertThat(CANDI.can(30).s1().bus()).isEqualTo(CanBus.SYSTEMCORE);
+    assertThat(CANRANGE.can(canivore, 31))
+        .isEqualTo(SensorWiringCanRangeBuilder.builder().bus(canivore).id(31).build());
+    assertThat(CANRANGE.can(31).bus()).isEqualTo(CanBus.SYSTEMCORE);
+    assertThat(SensorWiring.port(1).port()).isEqualTo(1);
+  }
+
+  /**
+   * A switch's polarity is said after its input; a joint's own limit switch's after its pin, which
+   * its block puts on the joint's leading controller.
+   */
+  @Test
+  void aSwitchsPolarityFollowsItsInput() {
+    Joint.Revolute roller = Joint.roller("roller", Part.CHASSIS, new Translation3d());
+
+    assertThat(CANDI.can(BUS, 30).s1().normallyOpen())
+        .isEqualTo(
+            new SensorWiring.Connection(
+                CANDI.can(BUS, 30).s1(), SensorWiring.Polarity.NORMALLY_OPEN));
+    assertThat(SensorWiring.port(1).normallyClosed().polarity())
+        .isEqualTo(SensorWiring.Polarity.NORMALLY_CLOSED);
+    assertThat(SensorWiring.Direction.REVERSE.normallyClosed())
+        .isEqualTo(
+            new SensorWiring.Pin(
+                SensorWiring.Direction.REVERSE, SensorWiring.Polarity.NORMALLY_CLOSED));
+    assertThat(SensorWiring.Direction.FORWARD.normallyOpen().of(roller))
+        .isEqualTo(
+            SensorWiring.ControllerLimit.of(roller, SensorWiring.Direction.FORWARD).normallyOpen());
   }
 }

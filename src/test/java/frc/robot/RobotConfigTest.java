@@ -32,7 +32,7 @@ import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.subsystems.mechanisms.JointFixtures;
-import frc.robot.subsystems.mechanisms.JointSetup;
+import frc.robot.subsystems.mechanisms.Joints;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -47,8 +47,8 @@ class RobotConfigTest {
   }
 
   /**
-   * The driver's top speed is how it's driven, the free speed what the robot is: the configuration
-   * holds one to the other. The template's robot reaches 4.73 m/s free.
+   * The driver's top speed is how it's driven, the free speed what the robot is: the definition
+   * holds one to the other, as it's built. The template's robot reaches 4.73 m/s free.
    */
   @Test
   void topSpeedCannotExceedTheFreeSpeed() {
@@ -70,26 +70,24 @@ class RobotConfigTest {
                             .build())
                     .build())
         .withMessage(
-            "RobotConfig[sim].definition.drivetrain.control.limits.maxLinearSpeed: 5 m/s is faster"
-                + " than the"
-                + " drivetrain's free speed of 4.729 m/s");
+            "RobotDefinition[sim].drivetrain.control.limits.maxLinearSpeed: 5 m/s is faster than"
+                + " the drivetrain's free speed of 4.729 m/s");
   }
 
   /**
-   * Each joint's block is its setup: the configuration works out its control and its wiring, and
-   * its limit switch's wiring, from the definition alone. A joint with motors and no control is
-   * refused, naming what to give it.
+   * Each joint's block is how it's driven: the program drives it from the definition alone, its
+   * control and its motors' controllers the block's, and its limit switch's wiring its own. A joint
+   * with motors and no control is refused, naming what to give it.
    */
   @Test
   void eachJointsBlockIsItsSetup() {
     Joint.Revolute pivot =
-        JointFixtures.PIVOT
+        JointFixtures.unmotored(JointFixtures.PIVOT)
             .motor(Motor.NEO, JointFixtures.gearing(25), SPARK_MAX.can(32).clockwise())
             .limitSwitch(
                 Sensor.Switch.Limit.End.LOWER,
                 Degrees.of(0),
-                SensorWiring.Direction.REVERSE,
-                SensorWiring.Polarity.NORMALLY_CLOSED);
+                SensorWiring.Direction.REVERSE.normallyClosed());
     RobotDefinition wired =
         RobotDefinitionBuilder.builder(Robots.SIM.definition())
             .joints(List.of(pivot))
@@ -98,18 +96,16 @@ class RobotConfigTest {
 
     RobotConfig robot = RobotConfigBuilder.builder(Robots.SIM).definition(wired).build();
 
-    JointSetup setup = robot.joints().getFirst();
-    assertThat(setup.joint()).isEqualTo(JointFixtures.PIVOT);
-    assertThat(setup.control()).isEqualTo(JointFixtures.PIVOT.driven().control().orElseThrow());
-    assertThat(setup.wiring().orElseThrow().motors())
-        .containsExactly(new MechanismWiring.Motor(32, true));
-    assertThat(robot.sensors())
-        .containsExactly(
-            SensorWiring.OfSwitch.builder()
-                .sensor("pivot lower limit")
-                .input(new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.REVERSE))
-                .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-                .build());
+    Joint driven = Joints.driven(robot.definition()).getFirst();
+    assertThat(driven).isEqualTo(JointFixtures.PIVOT);
+    assertThat(driven.driven().control()).isEqualTo(JointFixtures.PIVOT.driven().control());
+    assertThat(driven.driven().motors().orElseThrow().controllers())
+        .containsExactly(SPARK_MAX.can(32).clockwise());
+    assertThat(driven.switchAt(Sensor.Switch.Limit.End.LOWER).wiring())
+        .contains(
+            new SensorWiring.Connection(
+                new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.REVERSE),
+                SensorWiring.Polarity.NORMALLY_CLOSED));
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -129,32 +125,63 @@ class RobotConfigTest {
   }
 
   /**
-   * A practice robot is the same definition with its differences: a joint re-wired replaces its
-   * equal, and the configuration, and behavior that names the joint, find the practice one. A joint
-   * the robot hasn't is refused.
+   * A practice robot is the competition robot under its own name, with its differences: a joint, a
+   * sensor or the drivetrain re-wired replaces its equal, the rest of it kept, so behavior that
+   * names the joint finds the practice one. It's a configuration of its own, checked as every robot
+   * is, so Robots.all() lists it beside the competition robot. A part the robot hasn't is refused.
    */
   @Test
-  void aPracticeRobotIsTheSameRobotRewired() {
+  void aPracticeRobotIsTheCompetitionRobotRewired() {
     Joint.Revolute pivot =
-        JointFixtures.PIVOT.motor(
-            Motor.NEO, JointFixtures.gearing(25), SPARK_MAX.can(32).clockwise());
-    RobotDefinition competition =
-        RobotDefinitionBuilder.builder(Robots.SIM.definition())
-            .joints(List.of(pivot))
-            .configurations(List.of())
+        JointFixtures.unmotored(JointFixtures.PIVOT)
+            .motor(Motor.NEO, JointFixtures.gearing(25), SPARK_MAX.can(32).clockwise());
+    Sensor.Switch beam =
+        Sensor.Switch.beam("claw beam", pivot).on(SensorWiring.port(1).normallyOpen());
+    RobotConfig competition =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .name("competition")
+                    .joints(List.of(pivot))
+                    .sensors(List.of(beam))
+                    .configurations(List.of())
+                    .build())
+            .build();
+    SwerveWiring wiring =
+        SwerveWiring.builder()
+            .canBus(CanBus.SYSTEMCORE)
+            .driveController(MechanismWiring.Controller.TALON_FX)
+            .steerController(MechanismWiring.Controller.TALON_FX)
+            .gyroId(1)
+            .gyroYawScale(1.0)
+            .modules(List.of(module(1, 2, 1), module(3, 4, 2), module(5, 6, 3), module(7, 8, 4)))
             .build();
 
-    RobotDefinition practice =
-        competition.with(
-            pivot.motor(Motor.NEO, JointFixtures.gearing(25), SPARK_MAX.can(33).clockwise()));
-    RobotConfig robot = RobotConfigBuilder.builder(Robots.SIM).definition(practice).build();
+    RobotConfig practice =
+        competition
+            .named("practice")
+            .with(pivot.motorsOn(SPARK_MAX.can(33).clockwise()))
+            .with(beam.on(SensorWiring.port(2).normallyOpen()))
+            .with(competition.definition().drivetrain().wired(wiring));
+    List<RobotConfig> all = List.of(competition, practice);
 
-    assertThat(practice.joints()).containsExactly(JointFixtures.PIVOT);
-    assertThat(robot.joints().getFirst().wiring().orElseThrow().motors())
-        .containsExactly(new MechanismWiring.Motor(33, true));
+    assertThat(all).extracting(RobotConfig::name).containsExactly("competition", "practice");
+    assertThat(practice.definition().joints()).containsExactly(JointFixtures.PIVOT);
+    assertThat(controllers(practice)).containsExactly(SPARK_MAX.can(33).clockwise());
+    assertThat(controllers(competition)).containsExactly(SPARK_MAX.can(32).clockwise());
+    assertThat(((Sensor.Switch) practice.definition().sensors().getFirst()).wiring())
+        .contains(SensorWiring.port(2).normallyOpen());
+    assertThat(practice.drivetrainWiring()).contains(wiring);
+    assertThat(competition.drivetrainWiring()).isEmpty();
     assertThatIllegalArgumentException()
         .isThrownBy(() -> competition.with(JointFixtures.ROLLER))
-        .withMessage("sim has no joint roller the same but for how it's driven");
+        .withMessage(
+            "competition has no joint roller the same but for how it's driven, its stops, where it"
+                + " rests and where its places are");
+  }
+
+  private static List<MechanismWiring.Device> controllers(RobotConfig robot) {
+    return robot.definition().joints().getFirst().driven().motors().orElseThrow().controllers();
   }
 
   /**
@@ -185,10 +212,10 @@ class RobotConfigTest {
   /**
    * A control a joint's motor controllers can't take is refused as the configuration is built, in
    * the robot's own words, wherever the program runs: an arm's gravity angle a third of a turn from
-   * its zero, past Phoenix's gravity offset, on the TalonFX the simulator stands in for when it's
-   * wired to nothing, and on the TalonFXS it's wired to. A SPARK takes it, the robot working out
-   * its gravity each loop; and it refuses what a TalonFX takes, a kI, only where the arm is wired
-   * to one.
+   * its zero, past Phoenix's gravity offset, on a TalonFXS it's wired to, and on Krakens wired to
+   * nothing, which the simulator runs on TalonFXs. On NEOs wired to nothing it runs on a SPARK, as
+   * it does wired to one, the robot working out its gravity each loop, any offset; and a SPARK
+   * refuses what a TalonFX takes, a kI, wired or not.
    */
   @Test
   void aControlItsMotorControllerWouldRefuseIsRefusedWithTheConfiguration() {
@@ -199,37 +226,45 @@ class RobotConfigTest {
             .range(Range.degrees(0, 90), Degrees.of(0))
             .motor(Motor.NEO, JointFixtures.gearing(50))
             .control(held.withKg(0.4, Degrees.of(120)));
+    Joint.Revolute onKrakens =
+        Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
+            .range(Range.degrees(0, 90), Degrees.of(0))
+            .motor(Motor.KRAKEN_X60, JointFixtures.gearing(50))
+            .control(held.withKg(0.4, Degrees.of(120)));
     String robots =
-        "arm's gravity angle, 120.0°, is more than a quarter turn from its zero, past Phoenix's"
+        "arm's gravity angle, 120°, is more than a quarter turn from its zero, past Phoenix's"
             + " gravity offset of ±0.25 rotations: its positive direction lowers it at its zero."
             + " Turn its axis around in the definition (and its motors' and encoder's directions"
-            + " in the wiring), so that positive raises it; its gravity angle is then 60.0°";
+            + " in the wiring), so that positive raises it; its gravity angle is then 60°";
     MechanismControl integral =
         MechanismControlBuilder.builder(held)
             .gains(MechanismControlGainsBuilder.builder(held.gains()).kI(1).build())
             .build();
+    String noKi =
+        "RobotConfig[sim].joints: arm's control has a kI, which isn't carried to a SPARK yet:"
+            + " its integral's units aren't confirmed. Leave kI at 0";
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> withJoint(arm))
+        .isThrownBy(() -> withJoint(onKrakens))
         .withMessage("RobotConfig[sim].joints: " + robots);
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () -> withJoint(arm.motor(Motor.NEO, JointFixtures.gearing(50), TALON_FXS.can(21))))
+        .isThrownBy(() -> withJoint(arm.motorsOn(TALON_FXS.can(21))))
         .withMessage("RobotConfig[sim].joints: " + robots);
-    assertThat(
-            withJoint(arm.motor(Motor.NEO, JointFixtures.gearing(50), SPARK_MAX.can(21))).joints())
+    assertThat(withJoint(arm).definition().joints())
+        .as("on NEOs wired to nothing, a SPARK: any offset")
+        .hasSize(1);
+    assertThat(withJoint(arm.motorsOn(SPARK_MAX.can(21))).definition().joints())
         .as("on a SPARK, the robot works out its gravity, any offset")
         .hasSize(1);
-    assertThat(withJoint(arm.control(integral)).joints()).hasSize(1);
+    assertThat(withJoint(onKrakens.retuned(control -> integral.withKg(0.4, Degrees.of(60)))))
+        .as("a TalonFX takes a kI")
+        .isNotNull();
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                withJoint(
-                    arm.motor(Motor.NEO, JointFixtures.gearing(50), SPARK_MAX.can(21))
-                        .control(integral)))
-        .withMessage(
-            "RobotConfig[sim].joints: arm's control has a kI, which isn't carried to a SPARK yet:"
-                + " its integral's units aren't confirmed. Leave kI at 0");
+        .isThrownBy(() -> withJoint(arm.retuned(control -> integral)))
+        .withMessage(noKi);
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> withJoint(arm.motorsOn(SPARK_MAX.can(21)).retuned(control -> integral)))
+        .withMessage(noKi);
   }
 
   /** The simulator's robot with one joint, its configuration built. */
@@ -256,7 +291,7 @@ class RobotConfigTest {
                     DrivetrainGeometryCornerBuilder.builder(corner)
                         .module(
                             DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
-                                .wheelCoefficientOfFriction(Optional.of(1.6))
+                                .wheelCoefficientOfFriction(1.6)
                                 .build())
                         .build())
             .toList();
@@ -311,17 +346,11 @@ class RobotConfigTest {
             .modules(List.of(module(1, 2, 1), module(3, 4, 2), module(5, 6, 3), module(7, 8, 4)))
             .build();
 
-    assertThat(RobotConfigBuilder.builder(Robots.SIM).definition(rev).build().definition())
-        .isEqualTo(rev);
+    RobotConfig unwired = RobotConfigBuilder.builder(Robots.SIM).definition(rev).build();
+
+    assertThat(unwired.definition()).isEqualTo(rev);
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                RobotConfigBuilder.builder(Robots.SIM)
-                    .definition(
-                        RobotDefinitionBuilder.builder(rev)
-                            .drivetrain(rev.drivetrain().wired(wiring))
-                            .build())
-                    .build())
+        .isThrownBy(() -> unwired.with(rev.drivetrain().wired(wiring)))
         .withMessage(
             "RobotConfig[sim].definition.drivetrain.wiring: the drivetrain's wiring: its drive's NEO isn't"
                 + " driven by a TalonFX");
@@ -331,11 +360,11 @@ class RobotConfigTest {
     return SwerveWiring.ModuleWiring.builder()
         .driveId(drive)
         .steerId(steer)
-        .encoderId(Optional.of(encoder))
         .encoderOffset(Rotations.of(0))
         .driveInverted(false)
         .steerInverted(true)
         .encoderInverted(false)
+        .encoderId(encoder)
         .build();
   }
 }

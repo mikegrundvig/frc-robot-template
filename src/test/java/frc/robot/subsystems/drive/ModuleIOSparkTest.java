@@ -17,7 +17,6 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkSim;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.hardware.bus.CANPort;
@@ -44,7 +43,6 @@ class ModuleIOSparkTest {
         SwerveWiring.ModuleWiring.builder()
             .driveId(drive)
             .steerId(steer)
-            .encoderId(Optional.empty())
             .encoderOffset(Rotations.of(offsetTurns))
             .driveInverted(false)
             .steerInverted(true)

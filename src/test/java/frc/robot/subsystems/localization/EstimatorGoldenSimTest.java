@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import frc.robot.GoldenFile;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;

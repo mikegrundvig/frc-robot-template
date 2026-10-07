@@ -6,64 +6,46 @@ import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.Angle;
+import org.wpilib.units.measure.Current;
 
 /**
- * Where one mechanism's devices are on the CAN bus, which way each motor turns, and how its
- * CANcoder reads: the motors of one drive in the robot's definition, the first leading and the rest
- * following it, and the absolute encoder on its joint, if it has one. What the mechanism is (its
- * gearing, its range, where the encoder sits in its gear train) is the definition's; this is only
- * how it's connected, and differs robot to robot even with identical mechanisms.
+ * How a joint's devices are wired, as its block names them: each motor's controller ({@link
+ * Device}: {@code TALON_FX.can(32).clockwise().pdh(4, Amps.of(40))}), and its absolute encoder's
+ * CANcoder ({@link #CANCODER}), its SPARK's data port ({@link #DATA_PORT}) or a Systemcore port
+ * ({@link PortEncoder}). What the mechanism is (its gearing, its range, where the encoder sits in
+ * its gear train) is the definition's; this is only how it's connected, and differs robot to robot
+ * even with identical mechanisms. The block holds it ({@link Driven}), and the program reads it
+ * there.
  *
  * <p>Directions are against the joint's positive direction in the definition, never a motor's own
  * idea of forward: each motor says which way it turns as the joint moves forward, and the encoder
  * which way it counts. Phoenix's ratios are then plain magnitudes, and its followers' alignment
  * follows from the motors' directions ({@code PhoenixMechanism}).
- *
- * @param canBus the bus every device of the mechanism is on
- * @param controller the kind of motor controller its motors are on, every one of them
- * @param motors its motor controllers' CAN IDs and directions: the leader, then each follower, as
- *     many as its drive's motors
- * @param cancoder its CANcoder, if it has one: the definition's absolute encoder on its joint
- * @param dataPort the absolute encoder plugged into its leading motor controller's data port, if it
- *     has one instead: the definition's absolute encoder on its joint, read through a SPARK
  */
-@ConfigRecord
-public record MechanismWiring(
-    CanBus canBus,
-    Controller controller,
-    List<Motor> motors,
-    Optional<Cancoder> cancoder,
-    Optional<DataPortEncoder> dataPort) {
-  public MechanismWiring {
-    motors = List.copyOf(motors);
-    Checks.on(MechanismWiring.class)
-        .field("motors", motors, MechanismWiring::notMotors)
-        .check(
-            "dataPort",
-            () ->
-                cancoder.isPresent() && dataPort.isPresent()
-                    ? "names a CANcoder and a data-port encoder: the joint has one absolute encoder,"
-                        + " read one way"
-                    : null)
-        .orThrow();
-  }
+public final class MechanismWiring {
+  private MechanismWiring() {}
 
-  /** Starts describing a mechanism's wiring, one named value at a time. */
-  public static MechanismWiringBuilder.CanBusStage builder() {
-    return MechanismWiringBuilder.builder();
-  }
+  /**
+   * A CANcoder at its bus and ID, named in a joint's block as a motor's controller is, with the
+   * offset it's measured to need: {@code CANCODER.can(CANIVORE, 34).offset(Rotations.of(0.82))}. It
+   * counts counterclockwise, seen facing its LED, as the joint moves forward, until {@code
+   * .clockwise()} before its offset says otherwise. It's read once at startup, to tell its joint's
+   * TalonFX where the joint is ({@link Feedback#ROTOR}), until {@code .remote()}, {@code .fused()}
+   * or {@code .sync()} after its offset has the TalonFX's loop run on it.
+   */
+  public static final CanDeviceKind<CancoderAt> CANCODER =
+      new CanDeviceKind<>((bus, id) -> new CancoderAt(bus, id, false));
 
-  /** The motor controller that leads: the first. */
-  public Motor leader() {
-    return motors.get(0);
-  }
+  /**
+   * An absolute encoder on the leading SPARK's data port, as REV's Through Bore Encoder plugs in,
+   * with the offset it's measured to need: {@code DATA_PORT.offset(Rotations.of(0.82))}. Then
+   * {@code .inverted()} for one whose reading falls as the joint moves forward, and {@code
+   * .closesLoop()} for the SPARK's loop to run on it.
+   */
+  public static final DataPort DATA_PORT = new DataPort();
 
   /**
    * The kind of motor controller a mechanism's motors are on, and the motors each can drive, as its
@@ -74,48 +56,32 @@ public record MechanismWiring(
     TALON_FX(
         "a TalonFX",
         Set.of(
-            com.michaelgrundvig.frc.world.robot.Motor.KRAKEN_X60,
-            com.michaelgrundvig.frc.world.robot.Motor.KRAKEN_X60_FOC,
-            com.michaelgrundvig.frc.world.robot.Motor.KRAKEN_X44,
-            com.michaelgrundvig.frc.world.robot.Motor.KRAKEN_X44_FOC,
-            com.michaelgrundvig.frc.world.robot.Motor.FALCON_500,
-            com.michaelgrundvig.frc.world.robot.Motor.FALCON_500_FOC)),
+            Motor.KRAKEN_X60,
+            Motor.KRAKEN_X60_FOC,
+            Motor.KRAKEN_X44,
+            Motor.KRAKEN_X44_FOC,
+            Motor.FALCON_500,
+            Motor.FALCON_500_FOC)),
     /**
      * CTRE's TalonFXS: a Minion, or REV's motors by their JST connectors (Phoenix's {@code
      * MotorArrangementValue}).
      */
-    TALON_FXS(
-        "a TalonFXS",
-        Set.of(
-            com.michaelgrundvig.frc.world.robot.Motor.MINION,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO_550,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO_VORTEX)),
+    TALON_FXS("a TalonFXS", Set.of(Motor.MINION, Motor.NEO, Motor.NEO_550, Motor.NEO_VORTEX)),
     /** REV's SPARK MAX: a NEO or a NEO 550, or a NEO Vortex on its Solo Adapter. */
-    SPARK_MAX(
-        "a SPARK MAX",
-        Set.of(
-            com.michaelgrundvig.frc.world.robot.Motor.NEO,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO_550,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO_VORTEX)),
+    SPARK_MAX("a SPARK MAX", Set.of(Motor.NEO, Motor.NEO_550, Motor.NEO_VORTEX)),
     /** REV's SPARK Flex: a NEO Vortex docked to it, or a NEO or NEO 550 through its adapter. */
-    SPARK_FLEX(
-        "a SPARK Flex",
-        Set.of(
-            com.michaelgrundvig.frc.world.robot.Motor.NEO_VORTEX,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO,
-            com.michaelgrundvig.frc.world.robot.Motor.NEO_550));
+    SPARK_FLEX("a SPARK Flex", Set.of(Motor.NEO_VORTEX, Motor.NEO, Motor.NEO_550));
 
     private final String shown;
-    private final Set<com.michaelgrundvig.frc.world.robot.Motor> drives;
+    private final Set<Motor> drives;
 
-    Controller(String shown, Set<com.michaelgrundvig.frc.world.robot.Motor> drives) {
+    Controller(String shown, Set<Motor> drives) {
       this.shown = shown;
       this.drives = drives;
     }
 
     /** Whether it drives a motor of the definition's catalog. */
-    public boolean drives(com.michaelgrundvig.frc.world.robot.Motor motor) {
+    public boolean drives(Motor motor) {
       return drives.contains(motor);
     }
 
@@ -124,10 +90,6 @@ public record MechanismWiring(
       return shown;
     }
 
-    /**
-     * The kind of device it is on the bus, which two can't share an ID within: REV's two SPARKs are
-     * one.
-     */
     /**
      * This kind of controller on Systemcore's first CAN port, at an ID: {@code TALON_FX.can(32)},
      * its motor turning counterclockwise for positive, seen facing its shaft, until {@link
@@ -139,62 +101,89 @@ public record MechanismWiring(
 
     /** This kind of controller on a CAN bus, at an ID: {@code TALON_FX.can(CANIVORE, 23)}. */
     public Device can(CanBus bus, int id) {
-      return new Device(this, bus, id, false);
+      return new Device(this, bus, id, false, Optional.empty());
     }
 
-    public String kind() {
+    /**
+     * The kind of device it is on the bus, which two can't share an ID within: REV's two SPARKs are
+     * one.
+     */
+    public CanDevice.Kind kind() {
       return switch (this) {
-        case TALON_FX -> "TalonFX";
-        case TALON_FXS -> "TalonFXS";
-        case SPARK_MAX, SPARK_FLEX -> "SPARK";
+        case TALON_FX -> CanDevice.Kind.TALON_FX;
+        case TALON_FXS -> CanDevice.Kind.TALON_FXS;
+        case SPARK_MAX, SPARK_FLEX -> CanDevice.Kind.SPARK;
       };
     }
   }
 
   /**
-   * One motor controller.
-   *
-   * @param id its CAN ID
-   * @param clockwise whether the motor turns clockwise, seen facing its shaft, as the joint moves
-   *     in its positive direction: Phoenix's {@code Clockwise_Positive}, a SPARK's {@code
-   *     inverted}. For a differential, as the joint both motors move together (its average axis)
-   *     moves forward.
-   */
-  /**
-   * One motor's controller, as a joint's block names it: its kind, its bus and ID, and which way
-   * its motor turns for positive. {@code TALON_FX.can(32).clockwise()}.
+   * One motor's controller, as a joint's block names it: its kind, its bus and ID, which way its
+   * motor turns for positive, and the PDH channel that feeds it. {@code
+   * TALON_FX.can(32).clockwise().pdh(4, Amps.of(40))}.
    *
    * @param controller what it is
    * @param bus the CAN bus it's on
    * @param id its CAN ID
    * @param turnsClockwise whether its motor turns clockwise for positive, seen facing its shaft
+   * @param feed the PDH channel it's powered from, and its breaker, if its block says
    */
-  public record Device(Controller controller, CanBus bus, int id, boolean turnsClockwise) {
+  public record Device(
+      Controller controller, CanBus bus, int id, boolean turnsClockwise, Optional<Pdh.Feed> feed) {
     public Device {
       Checks.on(Device.class).field("id", id, between(0, 62)).orThrow();
     }
 
     /** The same controller, its motor turning clockwise for positive, seen facing its shaft. */
     public Device clockwise() {
-      return new Device(controller, bus, id, true);
-    }
-  }
-
-  @ConfigRecord
-  public record Motor(int id, boolean clockwise) {
-    public Motor {
-      Checks.on(Motor.class).field("id", id, between(0, 62)).orThrow();
+      return new Device(controller, bus, id, true, feed);
     }
 
-    /** Starts describing a motor controller, one named value at a time. */
-    public static MechanismWiringMotorBuilder.IdStage builder() {
-      return MechanismWiringMotorBuilder.builder();
+    /**
+     * The same controller, powered from one of the PDH's channels through a breaker: {@code .pdh(4,
+     * Amps.of(40))}, channel 4 as labeled on the PDH, through a 40 A breaker. The robot reads its
+     * current there, and flags it drawing nothing while its joint works.
+     */
+    public Device pdh(int channel, Current breaker) {
+      return new Device(
+          controller, bus, id, turnsClockwise, Optional.of(Pdh.feed(channel, breaker)));
     }
   }
 
   /**
-   * The mechanism's CANcoder.
+   * A CANcoder at its bus and ID, its offset still to say ({@link #offset}): what {@link #CANCODER}
+   * names.
    *
+   * @param bus the bus it's on
+   * @param id its CAN ID
+   * @param turnsClockwise whether it turns clockwise, seen facing its LED, as the joint moves
+   *     forward
+   */
+  public record CancoderAt(CanBus bus, int id, boolean turnsClockwise) {
+    /** The same CANcoder, turning clockwise, seen facing its LED, as the joint moves forward. */
+    public CancoderAt clockwise() {
+      return new CancoderAt(bus, id, true);
+    }
+
+    /**
+     * The CANcoder, its reading offset so it reads zero with the joint at zero, read once at
+     * startup to tell the joint's TalonFX where the joint is ({@link Feedback#ROTOR}).
+     */
+    public Cancoder offset(Angle offset) {
+      return MechanismWiringCancoderBuilder.builder()
+          .bus(bus)
+          .id(id)
+          .offset(offset)
+          .clockwise(turnsClockwise)
+          .feedback(Feedback.ROTOR)
+          .build();
+    }
+  }
+
+  /**
+   * The mechanism's CANcoder: {@code CANCODER.can(CANIVORE, 34).offset(Rotations.of(0.82))}.
+   *
+   * @param bus the bus it's on: its joint's motors', where their TalonFX reads it
    * @param id its CAN ID
    * @param offset added to its reading so it reads zero with the joint at zero: measured per
    *     install, and again whenever the encoder or its magnet is moved
@@ -203,7 +192,7 @@ public record MechanismWiring(
    * @param feedback what the motor controller reads its position from
    */
   @ConfigRecord
-  public record Cancoder(int id, Angle offset, boolean clockwise, Feedback feedback) {
+  public record Cancoder(CanBus bus, int id, Angle offset, boolean clockwise, Feedback feedback) {
     public Cancoder {
       Checks.on(Cancoder.class)
           .field("id", id, between(0, 62))
@@ -212,18 +201,65 @@ public record MechanismWiring(
     }
 
     /** Starts describing a CANcoder, one named value at a time. */
-    public static MechanismWiringCancoderBuilder.IdStage builder() {
+    public static MechanismWiringCancoderBuilder.BusStage builder() {
       return MechanismWiringCancoderBuilder.builder();
+    }
+
+    /**
+     * The same CANcoder, the TalonFX's loop running on it, read over CAN at the CANcoder's own rate
+     * ({@link Feedback#REMOTE}). No license needed.
+     */
+    public Cancoder remote() {
+      return readAs(Feedback.REMOTE);
+    }
+
+    /**
+     * The same CANcoder, the TalonFX's loop running on it fused with the motor's rotor: the
+     * CANcoder's position, the rotor's rate ({@link Feedback#FUSED}, Phoenix Pro).
+     */
+    public Cancoder fused() {
+      return readAs(Feedback.FUSED);
+    }
+
+    /**
+     * The same CANcoder, the TalonFX's loop running on its rotor kept in step with the CANcoder
+     * ({@link Feedback#SYNC}, Phoenix Pro).
+     */
+    public Cancoder sync() {
+      return readAs(Feedback.SYNC);
+    }
+
+    private Cancoder readAs(Feedback feedback) {
+      return MechanismWiringCancoderBuilder.builder(this).feedback(feedback).build();
+    }
+  }
+
+  /** An absolute encoder on the leading SPARK's data port, its offset still to say. */
+  public static final class DataPort {
+    private DataPort() {}
+
+    /**
+     * The encoder, its reading offset so it reads zero with the joint at zero: read once at
+     * startup, to tell the motor where the joint is, its reading growing as the joint moves
+     * forward.
+     */
+    public DataPortEncoder offset(Angle offset) {
+      return MechanismWiringDataPortEncoderBuilder.builder()
+          .offset(offset)
+          .reversed(false)
+          .closedLoop(false)
+          .build();
     }
   }
 
   /**
    * An absolute encoder plugged into the leading motor controller's data port, as REV's Through
    * Bore Encoder is into a SPARK's: read once at startup, to tell the motor where the joint is, or,
-   * closing the loop on it ({@link #closesLoop}), the SPARK's own loop running on it. The SPARK
-   * applies its direction and offset itself ({@code RevMechanism}). From a team's REVLib code,
-   * whose {@code zeroOffset} is the raw reading at zero before inverting: an offset of {@code
-   * -zeroOffset}, or {@code +zeroOffset} reversed.
+   * closing the loop on it ({@link #closesLoop}), the SPARK's own loop running on it: {@code
+   * DATA_PORT.offset(Rotations.of(0.82)).closesLoop()}. The SPARK applies its direction and offset
+   * itself ({@code RevMechanism}). From a team's REVLib code, whose {@code zeroOffset} is the raw
+   * reading at zero before inverting: an offset of {@code -zeroOffset}, or {@code +zeroOffset}
+   * inverted.
    *
    * @param offset added to its reading, in turns, so it reads zero with the joint at zero: measured
    *     per install, and again whenever the encoder is moved
@@ -242,6 +278,14 @@ public record MechanismWiring(
     /** Starts describing a data-port encoder, one named value at a time. */
     public static MechanismWiringDataPortEncoderBuilder.OffsetStage builder() {
       return MechanismWiringDataPortEncoderBuilder.builder();
+    }
+
+    /**
+     * The same encoder, inverted, as REVLib's {@code inverted(true)}: its reading falls as the
+     * joint moves forward.
+     */
+    public DataPortEncoder inverted() {
+      return MechanismWiringDataPortEncoderBuilder.builder(this).reversed(true).build();
     }
 
     /**
@@ -394,20 +438,5 @@ public record MechanismWiring(
     FUSED,
     /** Its rotor, synchronized to the CANcoder (Phoenix Pro). */
     SYNC
-  }
-
-  /** Why a mechanism's motors aren't a leader and its followers, or null when they are. */
-  private static @Nullable String notMotors(List<Motor> motors) {
-    if (motors.isEmpty()) {
-      return "needs a motor";
-    }
-    Set<Integer> seen = new HashSet<>();
-    List<String> twice = new ArrayList<>();
-    for (Motor motor : motors) {
-      if (!seen.add(motor.id())) {
-        twice.add("CAN ID " + motor.id() + " is used by two motor controllers");
-      }
-    }
-    return twice.isEmpty() ? null : String.join("; ", twice);
   }
 }

@@ -9,21 +9,21 @@ import org.jspecify.annotations.Nullable;
  * An interlock: what one joint may do, by where another is or what a sensor reads. Each is one of
  * two shapes, written from the joint it restricts:
  *
- * <pre>{@code
- * Interlock.that(INTAKE).runsOnlyWhen(PIVOT.past("run"))      // the roller only with the pivot out
- * Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.before("clear"))
- * Interlock.that(LATERATOR).keepsOut(Range.of(0.1, 0.4)).when(CORAL_BEAM.clear())
- * }</pre>
+ * {@snippet :
+ * Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))   // only with the pivot out
+ * Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.atMost(Inches.of(32)))
+ * }
  *
  * <p>Interlocks are facts about the robot, in its definition, enforced beneath every command: no
  * command, binding, auto or button skips one. They speak only of the robot's own joints and
  * sensors; where the field or the game says what's allowed (a trench, a zone, a hub), that's a gate
  * in the robot's code, which knows the field. A sensor that's lost holds no condition: one that
  * keeps a joint out keeps it out, and one it runs only when holds it. The definition checks them
- * when it's built: every joint and sensor one of the robot's, none that follows another, no two
- * joints waiting on each other, no joint held where it can't move or from a named position it can't
- * then reach, and every configuration, and the robot as it starts, obeying every interlock on a
- * joint's position (a sensor's reading isn't known until the robot runs).
+ * when it's built: every joint and sensor one of the robot's, none that follows another, no joint
+ * held where it can't move or from a named position it can't then reach, and every configuration,
+ * and the robot as it starts, obeying every interlock on a joint's position (a sensor's reading
+ * isn't known until the robot runs), with no joints there holding each other so that none can move
+ * to free another.
  */
 public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.KeepsOut {
   /** The joint it restricts. */
@@ -36,12 +36,12 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
   default Optional<Joint> other() {
     return switch (condition()) {
       case Condition.OnJoint onJoint -> Optional.of(onJoint.joint());
-      case Condition.AtLeast atLeast -> Optional.of(atLeast.joint());
+      case Condition.UpToSpeed upToSpeed -> Optional.of(upToSpeed.joint());
       case Condition.OnSensor onSensor -> Optional.empty();
     };
   }
 
-  /** Starts an interlock about a joint: {@code Interlock.that(INTAKE).runsOnlyWhen(...)}. */
+  /** Starts an interlock about a joint: {@code Interlock.that(ROLLER).runsOnlyWhen(...)}. */
   static Subject that(Joint joint) {
     return new Subject(joint);
   }
@@ -49,7 +49,7 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
   /**
    * A joint that may move only while a condition holds: while it doesn't, a joint held to a
    * position stays where it is, and one run at an output stops, each going on when it holds again.
-   * 2611's intake roller runs only with its pivot past "run".
+   * 2611's intake roller runs only with its pivot past 110°.
    *
    * @param joint the joint it restricts
    * @param condition where another joint must be, or what a sensor must read, for it to move
@@ -97,9 +97,48 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
       return InterlockKeepsOutBuilder.builder();
     }
 
-    /** Whether a position is inside the region, short of its edges, where the joint may be. */
+    /**
+     * Whether a position is inside the region: short of its edges, where the joint may be, and at
+     * an edge that reaches an end of the joint's range, past which there's no room to be out. A
+     * joint headed there is held at the region's other edge, so it never gets to that end.
+     */
     public boolean keepsOut(double position) {
-      return position > region.lower() && position < region.upper();
+      return (roomBelow() ? position > region.lower() : position >= region.lower())
+          && (roomAbove() ? position < region.upper() : position <= region.upper());
+    }
+
+    /**
+     * Which side of the region a joint at a position is kept to: below it (true) or above. Out of
+     * it, the side it's on. Inside, as one there when the robot started or when the region closed
+     * is, it may only leave: by the side it was last on, else by the nearer edge, and never by a
+     * side with no room past it.
+     *
+     * @param lastSide the side the joint was last out on: -1 below, 1 above, 0 never or unknown
+     */
+    public boolean keptBelow(double position, int lastSide) {
+      if (position <= region.lower() && roomBelow()) {
+        return true;
+      }
+      if (position >= region.upper() && roomAbove()) {
+        return false;
+      }
+      return !roomAbove()
+          || (roomBelow()
+              && (lastSide != 0
+                  ? lastSide < 0
+                  : position - region.lower() <= region.upper() - position));
+    }
+
+    /** Whether there's room below the region: it doesn't reach the low end of the joint's range. */
+    private boolean roomBelow() {
+      Optional<Range> range = joint.range();
+      return range.isEmpty() || region.lower() > range.get().lower();
+    }
+
+    /** Whether there's room above the region: it doesn't reach the high end of its range. */
+    private boolean roomAbove() {
+      Optional<Range> range = joint.range();
+      return range.isEmpty() || region.upper() < range.get().upper();
     }
 
     @Override
@@ -151,8 +190,8 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
    * another joint, where it is or how fast it runs, not one of its named outputs. Any sensor's can.
    */
   private static @Nullable String notAnother(Joint joint, Condition given) {
-    if (given instanceof Condition.AtLeast atLeast) {
-      return atLeast.joint().equals(joint)
+    if (given instanceof Condition.UpToSpeed upToSpeed) {
+      return upToSpeed.joint().equals(joint)
           ? joint.label() + " can't be held by how fast it runs itself: an interlock is on another"
           : null;
     }
@@ -176,13 +215,19 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
     return null;
   }
 
-  /** Why a region isn't part of a joint's range, and not all of it, or null when it is. */
+  /**
+   * Why a region isn't part of a joint's range, and not all of it, or isn't of its kind, or null
+   * when it is.
+   */
   private static @Nullable String notPartOf(Joint joint, Range region) {
+    boolean revolute = joint instanceof Joint.Revolute;
+    if (region.kind() != Position.Kind.of(joint)) {
+      return Joint.wrongKind("the region is", revolute);
+    }
     if (joint.range().isEmpty()) {
       return null;
     }
     Range range = joint.range().get();
-    boolean revolute = joint instanceof Joint.Revolute;
     String regionShown =
         Places.shownAt(revolute, region.lower())
             + " to "

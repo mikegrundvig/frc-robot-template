@@ -29,11 +29,11 @@ class AbsoluteSeedingSimTest {
       MechanismWiring.PortEncoder.dutyCycle(1).offset(Rotations.of(0.3)).inverted();
 
   private static final Joint.Revolute ON_PORT =
-      PIVOT.absoluteEncoder(1024, PORT_1).control(control(30, 1, profile(8, 30)));
+      PIVOT.absoluteEncoder(1024, PORT_1).retuned(old -> control(30, 1, profile(8, 30)));
 
   private static JointsSimHarness sim(Joint.Revolute pivot) {
     RobotDefinition robot = ROBOT.with(pivot);
-    return new JointsSimHarness(robot, JointSetup.all(robot));
+    return new JointsSimHarness(robot);
   }
 
   /**
@@ -63,7 +63,8 @@ class AbsoluteSeedingSimTest {
   /** An encoder no one wires yet is the simulator's to read: the joint is seeded all the same. */
   @Test
   void anUnwiredEncoderIsReadInTheSimulator() {
-    JointsSimHarness sim = sim(ON_PORT.absoluteEncoder(1024));
+    JointsSimHarness sim =
+        sim(PIVOT.absoluteEncoder(1024).retuned(old -> control(30, 1, profile(8, 30))));
     JointMechanism pivot = sim.joints.of(PIVOT);
     sim.simulation.powerOnAt(PIVOT, Math.toRadians(80));
 

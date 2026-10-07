@@ -8,6 +8,8 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import frc.robot.behavior.Bindings;
+import frc.robot.behavior.RecordingGamepad;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
@@ -16,6 +18,7 @@ import frc.robot.sim.Scenario;
 import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.Joints;
+import frc.robot.subsystems.mechanisms.Sensors;
 import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
@@ -70,6 +73,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   private @Nullable MockTelemetryBackend telemetry;
   private @Nullable Scheduler scheduler;
   private @Nullable GamepadSim driver;
+  private @Nullable GamepadSim operator;
   private @Nullable Pitwall pitwall;
   private @Nullable RobotContainer container;
   private @Nullable LoopHealth loopHealth;
@@ -87,6 +91,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     scheduler = Scheduler.createIndependentScheduler();
     // Made after the Driver Station's data is reset, which clears a gamepad's axes.
     driver = new GamepadSim(0);
+    operator = new GamepadSim(1);
   }
 
   @Override
@@ -199,6 +204,44 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   /** The driver's gamepad, port 0. */
   public GamepadSim driver() {
     return Objects.requireNonNull(driver, "the test hasn't started");
+  }
+
+  /** The operator's gamepad, port 1. */
+  public GamepadSim operator() {
+    return Objects.requireNonNull(operator, "the test hasn't started");
+  }
+
+  /** A team's {@code Controls}' constructor: what the robot hands its own. */
+  @FunctionalInterface
+  public interface ControlsMaker<T> {
+    T make(
+        Scheduler scheduler,
+        Joints joints,
+        Drive drive,
+        Sensors sensors,
+        RecordingGamepad driver,
+        RecordingGamepad operator);
+  }
+
+  /**
+   * A team's controls on the robot, made as the robot makes its own {@code Controls}, with its
+   * joints, drivetrain, sensors and both gamepads: {@code sim.controls(Team2611Controls::new)}. Its
+   * bindings join the robot's record ({@link #bindings}).
+   */
+  public <T> T controls(ControlsMaker<T> controls) {
+    RobotContainer robot = robot();
+    return controls.make(
+        scheduler(),
+        robot.joints(),
+        robot.drive(),
+        robot.joints().sensors(),
+        robot.driver(),
+        robot.operator());
+  }
+
+  /** Every command bound to the robot's gamepads, as the bindings were made. */
+  public Bindings bindings() {
+    return robot().bindings();
   }
 
   /** What the robot published, as a dashboard sees it. */

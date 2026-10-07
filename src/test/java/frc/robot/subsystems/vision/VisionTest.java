@@ -90,7 +90,6 @@ class VisionTest {
                   .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
-          .joint(Optional.empty())
           .build();
 
   /** A camera that reports whatever the test scripts. */
@@ -504,7 +503,6 @@ class VisionTest {
             .yaw(Degrees.of(0))
             .sensor(camera.sensor())
             .noiseScale(1.0)
-            .joint(Optional.empty())
             .build();
     io.see(T0 + 200_000_000L, reallyHigher);
 

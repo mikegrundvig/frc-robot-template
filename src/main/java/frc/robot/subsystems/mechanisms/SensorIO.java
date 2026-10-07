@@ -33,7 +33,7 @@ public interface SensorIO {
 
   /**
    * A switch on a joint's motor controller's limit input, read by that joint's IO with the rest of
-   * the joint: what the robot's container hands for one, which the joints bind to the joint as
+   * the joint: what the robot's hardware hands for one, which the joints bind to the joint as
    * they're built.
    *
    * @param joint the joint's label

@@ -13,9 +13,9 @@ The example throughout is an intake: a pivot that swings out, with a roller on i
 ## 1. Describe it, in one block
 
 Everything about a mechanism goes in one block in `Robots.java`: where its joint sits, its range,
-what it carries, the places it goes, its motors and their wiring, its own sensors, and how the
-program drives it. The places come first, as constants, so your code names them, and a misspelled
-one won't compile.
+what it carries, the places it goes, its motors and their wiring, its own sensors, its interlocks,
+and how the program drives it. The places come first, as constants, so your code names them, and a
+misspelled one won't compile.
 
 ```java
 static final Position PIVOT_IN = Position.degrees("in", 1.5);
@@ -27,9 +27,10 @@ static final Joint.Revolute PIVOT =
         .carries(Link.box("intake arm", new Translation3d(0, 0, 0.2),
             new Translation3d(0.05, 0.55, 0.36)))
         .positions(PIVOT_IN, PIVOT_OUT)
-        .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32))
-        .absoluteEncoder(PIVOT_CANCODER)
-        .control(MechanismControl.position(30).withProfile(8, 30));
+        .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).pdh(4, Amps.of(40)))
+        .absoluteEncoder(CANCODER.can(34).offset(Rotations.of(0.82)))
+        .control(MechanismControl.position(30)
+            .withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700)));
 
 static final Output INTAKING = Output.rpm("intaking", 2000);
 static final Output OUTTAKING = Output.volts("outtaking", -4);
@@ -37,25 +38,31 @@ static final Output OUTTAKING = Output.volts("outtaking", -4);
 static final Joint.Revolute ROLLER =
     Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))   // it rides on the pivot's end
         .outputs(INTAKING, OUTTAKING)
-        .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
+        .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31).pdh(5, Amps.of(40)))
+        .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))   // only once the pivot is out of the frame
         .control(MechanismControl.velocity(0.02));
 ```
 
 Then list the joints in the robot's definition: `.joints(List.of(PIVOT, ROLLER))`.
 
 - **`Joint.pivot`, `Joint.roller` and `Joint.elevator`** start the common joints; each call after
-  adds one thing. For anything else, the builders (`Joint.Revolute.builder()`,
-  `Joint.Prismatic.builder()`) take every value by name.
+  says one thing about it. For anything else, the builders (`Joint.Revolute.builder()`,
+  `Joint.Prismatic.builder()`) take every value by name: first what every joint has, then what it
+  may not (its range, where it rests, its places, what drives it), each left out if it hasn't.
 - **A link** is what the joint moves. `Link.box` draws it as a box for the extension checks, its
   mass unknown; `Link.weighed` adds a mass from CAD or a scale; `Link.unseen` is neither. A mass
   is optional, and a rough one does: the simulator reads it, and beyond that it only seeds a
   joint's kG and kA until you tune them ([Gravity](#gravity)). One left out is never guessed: the
   simulator says what it does without it.
 - **Positions** are named places a joint goes: "in", "out". They're relative to the joint's
-  parent, so an arm's "level" means the same at any elevator height.
+  parent, so an arm's "level" means the same at any elevator height. Code names each by its
+  constant, and goes where the robot running it puts it, so a practice robot's own "out" is where
+  its pivot goes (below).
 - **Outputs** are named ways a joint runs: a speed (`Output.rpm`), a voltage (`Output.volts`) or a
   share of the battery (`Output.dutyCycle`). Every joint also has `Output.STOPPED`. Two joints
-  that both have a "feeding" each get their own constant: `FEEDER_FEEDING`, `INDEXER_FEEDING`.
+  that both have a "feeding" each get their own constant: `FEEDER_FEEDING`, `INDEXER_FEEDING`. A
+  constant is its joint's at the joint's own value, so the indexer's, at another speed, is refused
+  on the feeder; two at one speed may share one.
 - **Motors** turn it through its gearing (`.motor(...)`, or `.motors(...)` for several together,
   the leader first), and onto a drum for one that slides (`.motors(Motor.KRAKEN_X60, gearing,
   drumRadius, ...)`). With no controllers named, it runs in the simulator alone. A drive that
@@ -64,15 +71,85 @@ Then list the joints in the robot's definition: `.joints(List.of(PIVOT, ROLLER))
 - **Its own sensors**: an absolute encoder turning with it (`.absoluteEncoder(...)`, see
   [Absolute encoders](#absolute-encoders)), and the limit switches it presses at the ends of its
   travel (`.limitSwitch(End.LOWER, Degrees.of(0), ...)`). [Sensors](#sensors) has the rest.
+- **Its interlocks** hold it by where another joint is, beneath every command: the roller runs only
+  with the pivot out (`.runsOnlyWhen(...)`, below).
 
-**How it's driven isn't part of what the joint is.** A joint re-tuned or re-wired is the same
-joint: everything that names it still finds it. So a practice robot of the same design is the
-competition robot with its differences, and the same code runs on either:
+**A block says each thing once.** What a joint has one of (its range, where it rests, its link,
+its positions, its outputs, its motors, its absolute encoder, a switch at each end, its control) is
+refused said twice, saying how to change it: a second `.absoluteEncoder(...)` meant as a pair is
+"pivot already has an absolute encoder: to re-wire it, encoderOn(...); a decoded pair isn't
+supported yet". What it has several of, servos and interlocks, adds up.
+
+**How it's driven isn't part of what the joint is, nor where its places are.** A joint re-tuned
+or re-wired is the same joint, and so is one whose places are placed otherwise: a position or an
+output is a name on its joint, and where it is, or how fast, the robot's. Everything that names
+the joint or its places still finds them, the robot's own. So a practice robot of the same design
+is the competition robot, `COMPETITION` in `Robots.java`, under its own name, with its
+differences, and the same code runs on either, `pivot.goTo(PIVOT_OUT)` to each robot's own out:
 
 ```java
-static final RobotDefinition PRACTICE =
-    COMPETITION.with(PIVOT.motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(33)));
+static final RobotConfig PRACTICE =
+    COMPETITION.named("practice")
+        .with(
+            PIVOT.motorsOn(TALON_FX.can(33).pdh(4, Amps.of(40))) // another CAN ID
+                .replaced(PIVOT_OUT, Degrees.of(128)), // it swings out to 128°
+            ARM.encoderOffset(Rotations.of(0.47)) // its magnet's own offset
+                .retuned(control -> control.withKg(0.3)) // a lighter arm
+                .rest(Degrees.of(-30))) // it stows at -30°
+        .with(CLAW_BEAM.on(CANDI.can(36).s1().normallyOpen())) // a beam on another CANdi
+        .with(CameraConfigBuilder.builder(BACK_LEFT).up(Inches.of(20.5)).build()); // lower
 ```
+
+Each change keeps the rest of what it changes, so a CAD revision that regears the competition
+robot's pivot regears the practice robot's too:
+- `motorsOn(...)` puts a joint's motors on other controllers, the leader first, keeping the motor,
+  how many and their gearing; `gearing(...)` gears them otherwise, keeping their controllers.
+- `encoderOffset(...)` gives its absolute encoder another offset, its magnet's own, keeping its
+  CANcoder, data port or Systemcore port and the rest of their wiring, so a CANcoder moved to
+  another ID on the competition robot moves on the practice robot too; `encoderOn(...)` reads it
+  on another device, keeping its ratio and counts.
+- `limitSwitchOn(End.LOWER, ...)` puts its switch at that end on another input, keeping where it
+  trips.
+- `retuned(control -> ...)` changes its control, a wither at a time.
+- `replaced(PIVOT_OUT, Degrees.of(128))` puts one of its named positions elsewhere, its name kept,
+  so a move, a configuration or an interlock that names it finds it there: a practice elevator
+  that scores at its own heights. `replaced(UNJAMMING, Volts.of(-1))` runs one of its outputs
+  otherwise, at a speed, a voltage, or a share of the battery, `Percent.of(60)`. A name the joint
+  doesn't have is refused: its places' names are what its code says, the same on every robot.
+  The joint keeps where each was, so the competition robot's constant is still its own; one of the
+  name at a value it has never had is another joint's or another robot's, and refused (below).
+- `range(Range.degrees(-355, 5))` moves its hard stops, keeping where it rests, which must be
+  inside them: a practice turret that turns less far than the competition robot's.
+- `rest(Degrees.of(-30))` moves where it rests as the robot starts, keeping its stops, which it
+  must be inside: a practice arm that stows elsewhere. Given one of its positions,
+  `rest(ARM_STOWED)`, it rests at the joint's own, so after `replaced(ARM_STOWED, ...)`, at the
+  practice robot's. A rest given in its block as a position stays where it was when that position
+  is re-placed: move it too. Every check runs on it: the interlocks as the robot starts there, and
+  `past` and `before`, measured from where it rests, move with it (`atLeast` and `atMost` don't).
+- A sensor of the robot's own is re-wired by `.on(...)`. The drivetrain's modules are offset by
+  its `encoderOffsets(...)`, front left, front right, back left, back right, as Tuner X gives them,
+  keeping the rest of its wiring, `.with(DRIVETRAIN.encoderOffsets(Rotations.of(0.12), ...))`, and
+  re-wired whole by its `wired(...)`. Its modules may differ in what only the simulator reads,
+  Tuner X's inertias, and still be its own.
+- A camera mounted otherwise is given whole, through its builder, and replaces the robot's camera
+  of its name, as the back-left one above, half an inch lower.
+
+Some differences have no change yet: a drivetrain re-geared or its modules placed otherwise, a
+joint on another count of motors, and a joint only one of the robots has. Write those through the
+builders for now, `RobotDefinitionBuilder.builder(COMPETITION.definition()).joints(...)`, knowing a
+later change to that part of the competition robot won't reach the practice robot.
+
+Every check of the definition runs on the practice robot's values: a place outside its range, an
+interlock's edge or a soft limit past its stops, or a place where a configuration breaks an
+interlock, is refused. They're checked together, on the finished joint, so its changes go in any
+order: a practice wrist whose stops and places both move, each past the other's, is
+`WRIST.range(...).replaced(...)` either way round. A joint given twice is refused, since the
+second would drop the first's change: chain them, as the pivot's and the arm's are.
+`PIVOT.motor(...)` in a practice robot, which would restate its gearing and leave it behind when
+the competition robot's changes, is refused as a second say of its motors: "pivot already has its
+motors: to re-wire them, motorsOn(...); to re-gear them, gearing(...)". List the practice robot in
+`Robots.all()` beside the competition robot, `List.of(COMPETITION, PRACTICE)`, and the test that
+builds every robot checks it.
 
 **Configurations** name joints and their places, so they come after the blocks; an **interlock** is
 usually written in the block of the joint it restricts:
@@ -88,85 +165,136 @@ usually written in the block of the joint it restricts:
 - **An interlock** is a rule between two joints that must hold whatever command is running: one
   per physical clash, written in the block of the joint it restricts:
 
-  ```java
+  ```java fragment
   static final Joint.Revolute ROLLER =
-      Joint.roller("roller", PIVOT, point(0.36, 0, 0))
-          .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
+      Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))
+          ...
           // The roller runs only once the pivot is out of the frame.
-          .runsOnlyWhen(PIVOT.past(Degrees.of(110)))
-          .control(MechanismControl.velocity(0.1));
+          .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))
+          .control(MechanismControl.velocity(0.02));
 
   static final Joint.Revolute ARM =
-      Joint.pivot("arm", ELEVATOR, point(0.1, 0, 0.3), Joint.PITCH_UP)
+      Joint.pivot("arm", ELEVATOR, new Translation3d(0.1, 0, 0.3), Joint.PITCH_UP)
           ...
           // The arm keeps out of the bumper's band while the elevator is too low to clear it.
-          .keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.before(Inches.of(32)))
+          .keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.atMost(Inches.of(32)))
           .control(...);
   ```
 
   An edge is usually a clearance, a number from CAD or measured where the parts just clear, not a
-  place the joint goes, so it's written as one: `PIVOT.past(Degrees.of(110))` means 110° lies
-  between the pivot's reference and where it is now, whichever way it's moving. `before` and
-  `between` complete the set, and a named position works wherever the edge really is one
-  (`ELEVATOR.before(ELEVATOR_SCORE)`). `SHOOTER.atLeast(RPM.of(3000))` holds a joint until another
-  is up to speed. A sensor's conditions work as well (`.runsOnlyWhen(CLAW_BEAM.clear())`), and a lost
-  sensor restricts: a joint kept out stays out, one that runs only when it holds is held.
+  place the joint goes, so it's written as one: `PIVOT.atLeast(Degrees.of(110))` holds with the
+  pivot at 110° or beyond, `ELEVATOR.atMost(Inches.of(32))` with the elevator at 32 in or below,
+  and `between` inside a band. They mean the same wherever the joint rests, so moving its rest in a
+  CAD revision leaves them alone. `past` and `before` are measured from where the joint rests
+  (`PIVOT.past(PIVOT_RUN)` holds from "run" on, away from its rest), for an edge that really is a
+  named position: `ELEVATOR.before(ELEVATOR_SCORE)`. `SHOOTER.atLeast(RPM.of(3000))` holds a joint
+  until another is up to speed. A sensor's conditions work as well
+  (`.runsOnlyWhen(CLAW_BEAM.clear())`), and a lost sensor restricts: a joint kept out stays out,
+  one that runs only when it holds is held.
 
   A block can only name joints written above it, so a joint restricted by one that rides on it (an
   elevator held up while its own arm is down) has its rule in the robot's definition instead:
-  `.interlocks(List.of(Interlock.that(ELEVATOR).keepsOut(...).when(ARM.before(...))))`, written
-  the same way. Either place is fine; both are enforced and checked together, and a rule written in
-  both is refused. The definition checks interlocks on joints against each other and the
-  configurations; one on a sensor, or on a speed, it can only check is the robot's, since neither is
-  known until the robot runs.
+  `.interlocks(List.of(Interlock.that(ELEVATOR).keepsOut(Range.meters(0, 0.3)).when(ARM.atMost(Degrees.of(-40)))))`,
+  written the same way. Either place is fine; both are enforced and checked together, and a rule
+  written in both is refused. The definition checks interlocks on joints against each other and
+  the configurations; one on a sensor, or on a speed, it can only check is the robot's, since
+  neither is known until the robot runs.
+
+  Two joints may restrict each other, as the arm and the elevator above do, so long as one can
+  always move to free the other: kept below the bumper's band, the arm can still rise to its edge
+  at -10°, above -40°, and let the elevator down. Rules that hold each joint where only the other
+  could free it are a deadlock, and the definition refuses them where the robot starts or a
+  configuration puts it, saying where each is held. The elevator kept at its bottom while the arm
+  is at most 0°, with the arm resting below the band, is one: "as the robot starts, it leaves
+  elevator and arm holding each other by their interlocks, so neither can free the other: a
+  deadlock (elevator keeps out of 0.1 m to 0.6 m while arm at most 0°, so elevator stays between
+  0 m and 0.1 m; arm keeps out of -10° to 30° while elevator at most 0.8128 m, so arm stays between
+  -30° and -10°)".
+
+  A joint may rest inside a region it's kept out of, as an elevator at its bottom stop kept out of
+  its lowest stretch while the intake is in does. It's a doubt said at startup, not a refusal:
+  until the region opens, the joint may only leave it, by the edge with room past it (the nearer,
+  if both have), and the definition's deadlock check counts that way out. A configuration may not
+  put a joint there.
 
 **The definition checks itself** when the robot starts, and in the test that builds every robot,
 so a mistake fails the build, not a match. It refuses:
-- a position outside its joint's range, or a name used twice;
-- a position, an output or a configuration's place that isn't that joint's own;
-- a speed faster than the joint's motors can turn it, through its gearing (it notes one within 10%
-  of it, since the motor can't hold that under load);
-- a configuration that breaks an interlock, two joints whose interlocks wait on each other, or an
-  interlock written twice.
+- a position, or where its joint rests, outside the joint's range; a name used twice;
+- a position, an output, or a configuration's or a condition's place that isn't that joint's own:
+  a name it hasn't, or one of its names at a value it has never had;
+- a speed faster than the joint's motors can turn it, through its gearing, whether one of its
+  outputs or its profile's cruise (it notes an output within 10% of it, since the motor can't hold
+  that under load);
+- a value of the other kind: a range, soft limits, a profile, bands or gains given in angles for a
+  joint that slides, or in lengths for one that turns;
+- a control that doesn't fit its joint: soft limits past its hard stops, or a named position
+  outside them; a homing recipe it can't carry out (a roller's, a hard stop on one that turns
+  freely, a switch it hasn't, or one whose position isn't known); a joint held at positions with
+  neither an absolute encoder nor a recipe; a loop closed on an absolute encoder where it can't be
+  ([Absolute encoders](#absolute-encoders));
+- wiring that can't work: an encoder on a TalonFX's data port, which it hasn't; two sensors on one
+  input; a switch on a motor controller's limit input that has none, or another joint's;
+- a configuration that breaks an interlock, joints whose interlocks hold each other for good where
+  the robot starts or a configuration puts them, or an interlock written twice. A joint resting
+  inside a region it's kept out of is a doubt, not a refusal.
 
 ## 2. How it's driven and wired
 
 ### Control
 
 `.control(...)` says how the program drives the joint: gains, soft limits, motion profile, current
-limits, neutral mode, bands and homing. Every value is in the joint's own units, radians or meters.
-`MechanismControl.position(kP)` and `velocity(kP)` start from the defaults (the feedforward from
-the definition, 40 A, braking), and each `with...` changes one value; a flywheel adds
-`.coasting()`. A joint with motors needs one: the robot won't start without it, and says what to
-give.
+limits, neutral mode, bands and homing. `MechanismControl.position(kP)` and `velocity(kP)` start
+from the defaults (the feedforward from the definition, 40 A, braking), and each `with...` changes
+one value; a flywheel adds `.coasting()`. A joint with motors needs one: the robot won't start
+without it, and says what to give.
 
-[values.md](values.md) says what each value means and how to find yours. The robot refuses to
-start if a named position lies outside its soft limits, where it would be sent and never get.
+Each value is given with its unit, or as a plain number in the joint's own units, radians or
+meters: `withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700))` or
+`withProfile(7.85, 29.7)`, `withSoftLimits(Range.degrees(5, 130))`, `withBands(Degrees.of(1),
+Degrees.of(2))`. A kP of 30 is 30 V per radian of error on a pivot, and per meter on an elevator;
+one per turn, as Phoenix's slot holds it, is written with its unit,
+`position(Volts.per(Rotation).of(188))`, as is SysId's kV per turn per second,
+`withKv(Volts.per(RotationsPerSecond).of(0.12))`. A value with its unit knows whether it's an angle
+or a length, so an elevator's soft limits in degrees are refused, saying how to write them; plain
+soft limits refused as too large say when they look like degrees, and a plain profile refused as
+too fast says it's in radians per second, and how to give it with its unit.
 
-Its motor controller's settings are worked out from its control as the robot's configuration is
+[values.md](values.md) says what each value means and how to find yours. The definition refuses
+a named position outside its soft limits, where it would be sent and never get.
+
+How the program drives the joint is worked out once from its block: its gains, tuned or seeded,
+its gravity, its limits, and the one feedforward law (kS, kV, kA and kG) that every loop driving
+it runs, its motor controller's, the robot's own, and the simulator's. Its motor controller's
+settings are that, in the controller's own terms, worked out as the robot's configuration is
 checked: when the robot starts, in the simulator, and in the test that builds every robot. What the
 controller can't take is refused there, in the words the robot would use: a gravity angle past
-Phoenix's quarter turn, a profile cruising faster than the motors turn the joint, a ratio or a gain
-past what Phoenix holds, a kI on a SPARK. They're worked out for the controller the joint is wired
-to, and for a joint with no wiring, for a TalonFX, which is what the simulator runs it as. What's
-doubtful, though the controller takes it (a tuned kG far from what the joint's weight needs, a
-gravity offset at Phoenix's limit), is noted under `Joints/<label>/SettingsNotes` when the joint
-starts, in the simulator as on the robot, and on the robot's Driver Station console.
+Phoenix's quarter turn, a ratio or a gain past what Phoenix holds, a kI on a SPARK. They're worked
+out for the controller the joint is wired to, and for a joint with no wiring, for a TalonFX, which
+is what the simulator runs it as. What's doubtful, though the controller takes it (a tuned kG far
+from what the joint's weight needs, a gravity offset at Phoenix's limit), is said as the robot
+starts, with the definition's other doubts: in the log (`Robot/Doubts`), in the
+simulator as on the robot, and on the robot's Driver Station console.
 
 - **Gains.** kV, kA and kG start from the definition, worked out from the motors, gearing and mass,
-  until you measure them ([characterization](characterization.md)). kP, kI and kD are yours. kG
-  is the one that matters most for a joint held against gravity: [Gravity](#gravity).
-- **Profile.** Moves are profiled on the robot: the cruise speed and acceleration of every move. With
-  no profile, a joint moves at a quarter of its free speed, safe for a first enable.
+  until you measure them ([characterization](characterization.md)): `withKs`, `withKv`, `withKa`
+  and `withKg` take what you measure. kP, kI and kD are yours. kG is the one that matters most for
+  a joint held against gravity: [Gravity](#gravity).
+- **Profile.** Moves are profiled on the robot, by WPILib's `TrapezoidProfile`: the cruise speed and
+  acceleration of every move. With no profile, a joint moves at a quarter of its free speed, safe
+  for a first enable.
 - **Bands** (`MechanismControl.Bands`) say how near a target counts as there:
   - `enter` is how close it must come to arrive;
   - `stay` is how far it may then drift and still count.
 
-  The defaults are 2° and 4°, 1 cm and 2 cm, or 3% and 6% of a speed.
+  The defaults are 2° and 4°, 1 cm and 2 cm, or 3% and 6% of a speed:
+  `withBands(Degrees.of(1), Degrees.of(2))` changes them, and a roller's, which are shares of the
+  speed it's asked for, `withBands(0.03, 0.06)`.
 - **Live tuning.** Each joint's kP, kD and kS, and its current limits, can be tuned on Pitwall
   while the robot runs (`Joints/<label>/config`); its motor controller takes a change on the next
-  loop. Nothing is saved: Pitwall lists what differs from `Robots.java`, with the builder call that
-  commits it. Its feedforward, profile and named positions aren't tunable live yet.
+  loop. Nothing is saved: Pitwall lists what differs from `Robots.java`, each with the call that
+  commits it in the joint's block: `.withKs(0.25)`, `.withSupplyLimit(Amps.of(50.0))`, and a kP as
+  its factory, `MechanismControl.position(31.5)`. Its feedforward, profile and named positions
+  aren't tunable live yet.
 - **Homing** is how a joint finds where it is:
 
   | Recipe | When to use it |
@@ -176,8 +304,8 @@ starts, in the simulator as on the robot, and on the robot's Driver Station cons
   | `Homing.toSwitch(Stop.LOWER)` | No absolute encoder, and a limit switch at that end whose position its block knows. On the first enable, the joint is driven gently (2 V) toward it, and its position as the switch trips becomes the switch's; one starting on it backs off first. It's as close as half the joint's travel in a loop at that speed: slower is closer. Moves wait for it; if the switch doesn't trip in time (below), the joint is faulted, and says if the switch is lost. |
   | `Homing.assumeAtReference()` | No absolute encoder, and you stow the joint by hand before every power-on. It trusts that. |
 
-  A joint held at positions without an absolute encoder must name one of these: the robot won't
-  start until you choose.
+  A joint held at positions without an absolute encoder must name one of these: the definition
+  refuses it until you choose.
 
   **How long homing may take** comes from the joint: twice the time its motors, through its
   gearing, take to cross its whole range at 2 V, and half a second more, as a move's deadline is.
@@ -194,7 +322,7 @@ starts, in the simulator as on the robot, and on the robot's Driver Station cons
 An arm or an elevator is held up by its **kG**: the volts its motors push with to hold it still,
 which you tune on the robot and write in its control. It needs no mass:
 
-```java
+```java fragment
 .control(MechanismControl.position(30).withKg(0.35))                   // held with 0.35 V
 .control(MechanismControl.position(30).withKg(0.35, Degrees.of(-90)))  // pulling hardest at -90°
 ```
@@ -232,16 +360,50 @@ on different kinds of controller or different buses. Two devices of one kind on 
 share an ID, the drivetrain's included (a TalonFX and a SPARK may): the robot won't start, and
 names both.
 
-A joint with no wiring runs in the simulator, its control checked as a TalonFX would take it. On a
-robot it stays still, and an alert says so.
+**Power.** Each motor controller says which of the PDH's channels feeds it, and the breaker in that
+channel, where it's wired: `TALON_FX.can(32).clockwise().pdh(4, Amps.of(40))`, channel 4 as labeled
+on the PDH, through a 40 A breaker. The PDH itself is the robot's, declared once in its definition,
+`.pdh(Pdh.can(1))`: REV's Power Distribution Hub on Systemcore's CAN, at its ID, 1
+unless it's been changed. The drivetrain's motor controllers say theirs in its wiring, each module's
+`driveFeed` and `steerFeed`. The robot refuses a channel that feeds two devices, one the PDH hasn't
+(it has 0 to 23), a breaker over its channel's rating (40 A on 0 to 19, 15 A on 20 to 23), and a
+feed on a robot with no PDH. With a PDH declared, a wired motor controller that doesn't say its
+channel is a doubt said at startup. Both are optional: a robot that declares no PDH says nothing of
+feeds. CTRE's Power Distribution Panel isn't supported yet.
+
+The robot reads the PDH each loop, with the joints: each channel's current, their total and the
+battery's voltage (`PDH/ChannelCurrentAmps`, `PDH/TotalCurrentAmps`, `PDH/Volts`); each device it
+feeds by name (`PDH/Devices/pivot motor 32`, `PDH/Devices/front-left drive`); and each joint's
+motors together (`Joints/<label>/PdhCurrentAmps`), beside its leading controller's own reading
+(`Joints/<label>/SupplyCurrentAmps`), which is its motor's alone. A PDH that doesn't answer is an
+alert. In the simulator, each channel reads what the simulated motor it feeds draws, and a test can
+zero one (`world.pdh().zero(4, true)`), as a tripped breaker leaves it.
+
+**A motor drawing nothing** is flagged: a follower whose breaker tripped, so its leader drives the
+joint alone and nothing else says so, or a controller its block puts on the wrong channel. While a
+joint works, its leading controller drawing more than 2 A from the battery by its own reading, each
+of its motors draws about as much on its own channel; one whose channel reads under 0.5 A for half
+a second is flagged, in `Joints/<label>/DeadChannels` and an alert, saying what to check: "arm motor
+12 draws nothing on channel 5 while arm's motors work: its breaker tripped, its power is unplugged,
+or its block names the wrong channel". The joint's control says otherwise,
+`.withDeadChannel(Amps.of(3), Amps.of(0.5), Seconds.of(1))`. What it's asked doesn't count: a roller
+at a steady speed with no load draws next to nothing, alive or not. A leader that loses power stops
+answering on CAN, and its joint's moves are refused saying so; a lone motor unplugged from a SPARK,
+which then draws nothing whatever it's asked, isn't flagged here.
+
+A joint with no wiring runs in the simulator on the controller its motor runs on, its control
+checked as that controller would take it: a NEO's a SPARK MAX, a NEO Vortex's a SPARK Flex, a
+Minion's a TalonFXS, any other's a TalonFX. On a robot it stays still, and an alert says so.
 
 **On REV's SPARK MAX and SPARK Flex**, a joint is driven the same way, from the same control: its
-SPARK's settings come from the ones a TalonFX would get. A few things differ:
+SPARK's settings are what a TalonFX's are, in a SPARK's terms, and only what a SPARK can't take is
+refused. A few things differ:
 - The SPARK's loop runs kP; the feedforward, gravity and kD are worked out on the robot each loop
   and sent with it as volts.
 - A SPARK limits its motor's current (from the control's stator limit), not the battery's.
-- An absolute encoder goes on the SPARK's data port (`.absoluteEncoder(dataPortEncoder)`), read
-  once at startup, or the SPARK's loop closed on it ([Absolute encoders](#absolute-encoders)); a
+- An absolute encoder goes on the SPARK's data port
+  (`.absoluteEncoder(DATA_PORT.offset(Rotations.of(0.82)))`), read once at startup, or the SPARK's
+  loop closed on it ([Absolute encoders](#absolute-encoders)); a
   SPARK doesn't read a CANcoder. kI isn't carried to a SPARK yet. The robot's configuration refuses
   a joint on a SPARK with either, in the simulator too.
 - Its settings are saved on the SPARK at startup, so a brownout doesn't lose them.
@@ -261,8 +423,8 @@ ways:
 
 | Where it's plugged in | In the block | Seeded once | Closed on it |
 |---|---|---|---|
-| A CANcoder | `.absoluteEncoder(cancoder)` | `Feedback.ROTOR`: the robot reads it at startup and tells the joint's TalonFX | `REMOTE`, `FUSED` or `SYNC`: the TalonFX's own loop, at 1 kHz |
-| A SPARK's data port, such as REV's Through Bore | `.absoluteEncoder(dataPortEncoder)` | The SPARK, read at startup | `dataPortEncoder.closesLoop()`: the SPARK's own loop, at the controller's rate |
+| A CANcoder | `.absoluteEncoder(CANCODER.can(34).offset(Rotations.of(0.82)))`, on its motors' bus | The robot reads it at startup and tells the joint's TalonFX | `.remote()`, `.fused()` or `.sync()` after its offset: the TalonFX's own loop, at 1 kHz |
+| A SPARK's data port, such as REV's Through Bore | `.absoluteEncoder(DATA_PORT.offset(Rotations.of(0.82)))` | The SPARK, read at startup | `DATA_PORT.offset(...).closesLoop()`: the SPARK's own loop, at the controller's rate |
 | A Systemcore port: a duty-cycle encoder, or an analog encoder or potentiometer | `.absoluteEncoder(PortEncoder.dutyCycle(1).offset(Rotations.of(0.82)))`, or `PortEncoder.analog(2, 10)` for a ten-turn pot | The robot, from its first good reading | `PortEncoder.dutyCycle(1).offset(...).closesLoop()`: the robot's own loop, each loop, at 50 Hz |
 
 With no wiring (`.absoluteEncoder()`), only the simulator reads it.
@@ -287,8 +449,8 @@ stop. Where the joint is, logged and for every move, is the encoder's word. None
 confirmed on a SPARK yet: that it applies its offset and direction, and its soft limits, to the
 sensor its loop runs on, as REV documents, and what it does with an encoder that's unplugged. REV's
 simulation runs its loop on the motor's own encoder whatever it's told, and in the template's
-simulator a joint on a SPARK runs as on a TalonFX, its loop on its motor's count, so a slip the
-encoder would correct isn't simulated.
+simulator a joint on a SPARK runs as a SPARK, its kP on the device and its feedforward the robot's,
+but its loop on its motor's count, so a slip the encoder would correct isn't simulated.
 
 **Closed on a Systemcore port encoder**, the robot works out the motor's voltage each loop from
 where the encoder says the joint is: the control's kP and kD, with the feedforward a SPARK gets
@@ -303,19 +465,20 @@ until the encoder's first reading makes it ready again. An analog encoder can't 
 loose wire reads as somewhere, and a loop closed on it drives the joint there.
 
 **Geared**: an encoder that isn't on the joint's axle is written in full, with its turns for each
-of the joint's: `.absoluteEncoder(AbsoluteEncoder.of().ratio(0.536).on(cancoder))`. Where the joint
+of the joint's: `.absoluteEncoder(AbsoluteEncoder.of().ratio(0.536).on(CANCODER.can(34).offset(...)))`. Where the joint
 is, is known within one of the encoder's turns; the robot says if that window doesn't cover the
 joint's travel.
 
 **Counts per turn** are optional. Only a pair of encoders on one joint geared nearly alike reads
 them, a turret's on 17 and 18 teeth decoded by their difference, and the robot refuses that pair
-without each one's, from its datasheet: `.absoluteEncoder(4096, cancoder)`, or
-`AbsoluteEncoder.of(4096)`.
+without each one's, from its datasheet: `.absoluteEncoder(4096, CANCODER.can(34).offset(...))`,
+or `AbsoluteEncoder.of(4096)`.
 
 **Offsets.** Each encoder's offset makes it read zero with the joint at zero, the pose its origin
 gives in CAD. A team's code often holds one already: a CANcoder's `MagnetOffset` is its offset as
-it is. A SPARK's `zeroOffset` is the raw reading at zero, before inverting, so it's the negative
-here, `-zeroOffset`, or `+zeroOffset` with `reversed(true)`; from it, the template tells the SPARK
+it is, and a `SensorDirection` of `Clockwise_Positive` is `CANCODER.can(...).clockwise()`. A SPARK's
+`zeroOffset` is the raw reading at zero, before inverting, so it's the negative here,
+`DATA_PORT.offset(-zeroOffset)`, or `DATA_PORT.offset(+zeroOffset).inverted()`; from it, the template tells the SPARK
 a `zeroOffset` of its own, at the edge of the encoder's window. The same goes for WPILib's
 `DutyCycleEncoder` expected zero.
 
@@ -334,8 +497,9 @@ the loop on the encoder. Closed on a SPARK's encoder, the joint's position is th
 ### Sensors
 
 **A joint's limit switches** are in its block: `.limitSwitch(End.LOWER, Degrees.of(0),
-SensorWiring.Direction.REVERSE, NORMALLY_CLOSED)` on its own controller's limit pin, or with a
-Systemcore port or a CANdi's input in place of the pin. Each is named for its joint and end,
+Direction.REVERSE.normallyClosed())` on its own controller's limit pin, or with a Systemcore port
+(`SensorWiring.port(1).normallyClosed()`) or a CANdi's input (`CANDI.can(30).s1().normallyClosed()`)
+in place of the pin. Each is named for its joint and end,
 "pivot lower limit", and `PIVOT.switchAt(End.LOWER)` is the switch, for a condition. One whose
 position isn't known (`.limitSwitch(End.LOWER)` without an angle) can stop its joint but not home
 it.
@@ -345,10 +509,14 @@ joint's link (the arm a roller rides on, not the roller, which spins), carrying 
 
 ```java
 static final Sensor.Switch CLAW_BEAM =
-    Sensor.Switch.beam("claw beam", PIVOT)
-        .on(new SensorWiring.Candi(CAN, 30, 1), SensorWiring.Polarity.NORMALLY_OPEN);
-static final Sensor.Rangefinder HOPPER = ... .on(new SensorWiring.CanRange(CAN, 31));
+    Sensor.Switch.beam("claw beam", PIVOT).on(CANDI.can(30).s1().normallyOpen());
+static final Sensor.Rangefinder HOPPER =
+    Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))
+        .on(CANRANGE.can(31));
 ```
+
+A device on a CANivore names its bus first, as a motor's controller does:
+`CANDI.can(CANIVORE, 30).s1()`.
 
 Add them to the definition (`.sensors(...)`). A switch is tripped or clear, whatever its wiring;
 its kind says what trips it: a `beam` break, or a `contact` switch nothing in the model closes (a
@@ -359,9 +527,10 @@ guess. What one means is a condition over it, either way: `CLAW_BEAM.tripped()`,
 
 A switch's wiring is where it's connected (a Systemcore port, a CANdi's input, or a limit input on
 a joint's motor controller: a SPARK's, a TalonFXS's or a Falcon's; a Kraken has none) and its
-polarity, normally open or normally closed, which nothing above the wiring sees. Wire a limit
+polarity, normally open or normally closed (`.normallyOpen()` or `.normallyClosed()` after the
+input), which nothing above the wiring sees. Wire a limit
 switch normally closed: a cut wire then reads tripped, and its joint stops. A sensor with no wiring
-runs in the simulator alone. The robot refuses two sensors on one input, a controller's limit input
+runs in the simulator alone. The definition refuses two sensors on one input, a controller's limit input
 where there's none, and a joint's limit switch on another joint's controller, which would stop the
 wrong motor.
 
@@ -377,7 +546,7 @@ tripped limit switches, wherever it's wired: a move past one holds where it trip
 A limit switch is checked against where its homed joint is. Tripped nowhere near where it trips,
 or clear well past it (a tenth of the joint's range either way, for a quarter second), it's
 doubted, in the log (`Joints/<label>/SwitchDoubts`) and an alert, saying what to check: "pivot
-lower limit reads tripped with pivot at 130.0°, nowhere near where it trips, 30.0°: a cut wire, if
+lower limit reads tripped with pivot at 130°, nowhere near where it trips, 30°: a cut wire, if
 it's normally closed, or a switch out of place". A doubted switch still stops its joint. In the
 simulator, `world.sensors().cut(switch, polarity)` cuts its wire.
 
@@ -408,6 +577,21 @@ A move's **default deadline** comes from the model: twice its profile's time fro
 plus half a second. A move that can't get there doesn't hang your auto: it times out, and says
 where it was.
 
+**A position or an output is a name on its joint**, and a move goes where the robot running it
+puts it: on a practice robot, `pivot.goTo(PIVOT_OUT)` goes to its own out. **A name the joint
+doesn't have**, another joint's or one left out of its `.positions(...)`, fails where it's built as
+the robot starts: `pivot.goTo(ELEVATOR_CLEAR)` in a binding, or in an auto built with them, stops
+the robot starting and says why, so the test that builds every robot fails too. So does one of
+its names at a value the joint has never had: with a feeder "feeding" at 1000 rpm and an indexer at
+1500, `feeder.run(INDEXER_FEEDING)` is refused, "feeder's feeding runs at 1000 rpm, and this
+feeding, at 1500 rpm, isn't one it has had: another joint's or another robot's; give feeder's
+own". The competition robot's constant is its practice robot's own wherever that robot re-placed
+it, and two joints' places of one name and value, an elevator's and a hopper's "down" at 0 m, are
+each one's, whichever constant names them. A configuration or a condition naming another joint's
+place is refused the same way, where it's written. Built once the robot runs, in a command or
+anywhere else, a move is `REFUSED` as it starts, with the same reason: a robot on the field is
+never stopped by one.
+
 **On a turret**, a joint whose range spans a whole turn or more (-200° to 200°, say), an angle
 your code works out is a heading: the turret can face it at more than one position. `goTo` and
 `follow` take whichever turn of it, the angle plus or minus whole turns, lies inside its limits
@@ -427,7 +611,7 @@ range at all turns freely and goes the short way round.
 | `ARRIVED` | It got there, or its condition held |
 | `TIMED_OUT` | Its deadline passed. The reason says where the joint was, and what interlock held it |
 | `CANCELED` | Another command took the joint, its button was let go, or its `onlyWhile` gate fell |
-| `REFUSED` | It wouldn't start: a target outside the limits, a joint that isn't answering or failed to home, or its `onlyIf` gate false |
+| `REFUSED` | It wouldn't start: a target outside the limits, a place not the joint's own, a joint that isn't answering or failed to home, or its `onlyIf` gate false |
 
 A configuration's move also says when each joint got there, so the slow one is plain:
 `"→ intaking: ARRIVED in 0.62 s (pivot 0.58 s, roller 0.10 s, elevator 0.62 s)"`, and
@@ -469,16 +653,24 @@ roller.run(co -> { while (true) { roller.setVoltage(pushVolts()); co.yield(); } 
 
 ### Where behavior goes
 
-Write what the robot does in one class: its intake, its shot, its autos. Build it in
-`RobotContainer`, after the joints, and bind it there:
+Write what the robot does in one class, `Controls` (`src/main/java/frc/robot/Controls.java`): its
+intake, its shot, its autos, and the drive team's buttons for them. It's yours: the template never
+changes it, so the template's updates never collide with your code. The robot builds it once,
+after its mechanisms, and hands it everything behavior reaches: the joints, the drivetrain, the
+sensors, and two gamepads, the driver's on port 0 and the operator's on port 1. Write each command
+as a method, and bind it in the constructor:
 
 ```java
-final class Actions {
+public final class Controls {
   private final JointMechanism pivot, roller;
 
-  Actions(Joints joints) {
+  Controls(Scheduler scheduler, Joints joints, Drive drive, Sensors sensors,
+      RecordingGamepad driver, RecordingGamepad operator) {
     pivot = joints.of(PIVOT);
     roller = joints.of(ROLLER);
+
+    operator.rightTrigger().whileTrue(intake());
+    operator.faceRight().onTrue(pivot.goTo(PIVOT_IN));
   }
 
   /** Deploy and roll. The interlock holds the roller until the pivot passes 110°. */
@@ -489,14 +681,23 @@ final class Actions {
     }).named("Intake");
   }
 }
-
-// In RobotContainer:
-operator.rightTrigger().whileTrue(actions.intake());
-operator.faceRight().onTrue(pivot.goTo(PIVOT_IN));
 ```
 
 Each driven joint is its own v3 `Mechanism`, so a command requires exactly the joints it moves.
 Deploying while the shooter spins is fine, and one button can't cancel another's unrelated work.
+
+The driver's sticks drive the robot, field-relative from the driver's end of the field, and the
+driver's back button, with the robot facing straight downfield, resets its heading: the template
+binds those itself, in `RobotContainer`, so they're there whatever `Controls` does.
+
+**The robot knows its bindings.** The gamepads are WPILib's `CommandGamepad`, and bind as it does;
+each binding is recorded as it's made, with its button and its command's name: "operator right
+trigger: while held: Intake", and one made with a gate, "operator right bumper and ready to shoot:
+while held: Shoot" (any other condition is "an unnamed condition": make it a gate to name it). The
+robot logs the list (`Controls/Bindings`), and each loop the bindings a press or a release started
+(`Controls/Fired`). Two commands bound to one button the same way start together, which is
+sometimes meant: the robot says so as it starts, with its other doubts (`Robot/Doubts`). A binding
+made inside a running command lives only while that command runs, and isn't in the list.
 
 ## 4. Gates: wait for things, and know why not
 
@@ -526,7 +727,7 @@ Make gates where you build your commands, not inside one that runs over and over
 with the joints (`joints.sensors()`, logged under `Sensors/<label>`), and any condition on one
 becomes a gate, named for what it means:
 
-```java
+```java fragment
 Gate coralIn = sensors.gate("coral in claw", CLAW_BEAM.tripped());
 Gate hopperFull = sensors.gate("hopper full", HOPPER.nearerThan(Inches.of(6)));
 
@@ -545,7 +746,7 @@ trips where its joint really is; a test says what a beam or a rangefinder sees
 
 Guard a move with one:
 
-```java
+```java fragment
 pivot.goTo(PIVOT_OUT).onlyIf(intakeClear)          // checked once: REFUSED if false
 joints.run(FEEDING).onlyWhile(readyToShoot)       // checked every loop: CANCELED when it falls
 ```
@@ -579,7 +780,7 @@ AdvantageScope or Pitwall, and read them in this order:
 | `Command` | The command driving it this loop, or `idle` |
 | `HeldBy` | The interlock holding it, if one is |
 | `Goal`, `GoalName` and `At` | Where it's headed, and where it is in its names: "between run and out" |
-| `Outcome` | How its last move ended: "pivot → out: TIMED_OUT after 1.60 s, pivot at 40.0°, held: …" |
+| `Outcome` | How its last move ended: "pivot → out: TIMED_OUT after 1.60 s, pivot at 40.3°, held: …" |
 
 "Why isn't it shooting?" is `Gates/ready to shoot/Blocking`: the terms that are false.
 
@@ -601,18 +802,160 @@ Behavior can be tested without a robot.
 
 - **The whole robot:** `RobotSim` runs it, drivetrain and gamepads included ([testing](testing.md)).
 
-`src/test/java/frc/robot/robots2026/` has a real 2026 robot described this way. It runs end to end
-in the simulator, gamepads, interlock, gates and auto included (`Team2611Actions` and
+`src/test/java/frc/robot/examples/` has this guide's robot and its commands, compiled
+(`ExampleRobot`, `ExampleCommands`, `Controls`): the guide's code is theirs, and a test fails when
+the two drift apart. `src/test/java/frc/robot/robots2026/` has a real 2026 robot described this way. It runs end to end
+in the simulator, gamepads, interlock, gates and auto included (`Team2611Controls` and
 `Team2611RobotSimTest`).
 
 The drivetrain has moves too: [driving](driving.md).
+
+## 7. When the template can't drive it
+
+The block says some mechanisms the template can't drive yet: a hood on linear servos, a
+differential's pair. Some it can't say at all, such as an arm a motor swings through a linkage.
+Either way, the joint stays in the definition, and a subsystem of your own drives it with WPILib's
+API or its vendor's.
+
+**Keep the joint in its block, and leave it undriven.** Write its shape, its range, its places,
+what it carries and its sensors as for any joint, and its servos if it has them (`.servo(...)`), or
+a differential's drives in the robot's definition. Leave out `.control(...)`: a control asks the
+template to drive the joint, and one on a joint it can't drive stops the robot starting, saying
+why. Motors in a joint's block are the template's to drive, so motors your own code drives stay out
+of it.
+
+```java
+static final Position HOOD_DOWN = Position.degrees("down", 0);
+static final Position HOOD_LOB = Position.degrees("lob", 30);
+
+static final Actuator.Servo WCP_0408 =
+    Actuator.Servo.builder().from(0.168).to(0.268).force(50).speed(0.032).build();
+
+static final Joint.Revolute HOOD =
+    Joint.pivot("hood", Part.CHASSIS, new Translation3d(-0.2, 0, 0.55), Joint.PITCH_UP)
+        .range(Range.degrees(0, 40), HOOD_DOWN)
+        .positions(HOOD_DOWN, HOOD_LOB)
+        // Each servo's body on the chassis, from the hood's axle, and its rod's end on the hood.
+        .servo(
+            "hood left",
+            WCP_0408,
+            new Translation3d(0.054, 0.1, -0.233),
+            new Translation3d(0.054, 0.1, 0))
+        .servo(
+            "hood right",
+            WCP_0408,
+            new Translation3d(0.054, -0.1, -0.233),
+            new Translation3d(0.054, -0.1, 0)); // no .control(...): Hood drives it
+```
+
+Kept there, it's still the robot's own:
+- **Checked** as every joint is: its places inside its range, each name once, its sensors' wiring
+  against every other device's.
+- **Its sensors are read** with the robot's: a beam on its link, or a switch at its end, is a gate,
+  `sensors.gate("hood down", HOOD.switchAt(End.LOWER).tripped())`, though only your code stops the
+  joint there.
+- **Its places are its constants**, so `HOOD_LOB` means one thing in every file, and a practice
+  robot changes the joint as it changes any (`replaced(...)`, `range(...)`).
+
+What you give up until the template drives it:
+- **Its moves and gates.** `joints.of(HOOD)` says why there's none ("hood has no mechanism: it's
+  moved by hood left and hood right, and the template drives only motors turning a shaft so far"):
+  no outcomes, no `isAt`, no `Joints/hood` in the log. Your subsystem's commands are plain v3
+  commands, and it logs what you need.
+- **Interlocks.** None may name it, as the joint held or the one read: nothing could enforce it,
+  and the robot refuses it. A clash with it is your code's to prevent. A configuration that names
+  it can't run, and the robot says so as it starts.
+- **The simulator's plant.** It isn't simulated, and the template takes it as resting where its
+  block rests it: a camera or a joint riding on it is placed from there. A switch on it is a test's
+  to trip.
+
+**Read the model; don't restate it.** Your subsystem takes the robot's definition and finds its
+own joint there, so a practice robot's range and places are the ones it uses:
+- the joint: `robot.joints().get(robot.joints().indexOf(HOOD))`;
+- a place, by its constant: `hood.own(HOOD_LOB).value()`, in radians, or meters for one that
+  slides;
+- its hard stops: `hood.range()`;
+- each servo's share of its travel at an angle, from where its block puts the servo: each is one of
+  `hood.ownDrives()`, and `servo.command(math.coordinate(drive, Map.of(hood, angle)))` its share,
+  `math` being `robot.math()`;
+- an absolute encoder on a Systemcore port, in its block: its wiring,
+  `hood.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port)`, names the port to read
+  with WPILib's `DutyCycleEncoder`, and its `read(...)` turns what the port reads into the
+  encoder's turns; `math.fromAbsolute(math.absoluteEncoder(hood), turns)` turns those into where
+  the joint is. A CANcoder is read through its joint's motor controller, so a joint without motors
+  in its block can't have one.
+
+Only what the block can't say yet is written in the subsystem: for servos, their PWM ports and the
+pulses their datasheet gives. WPILib 2027's alpha has no `Servo` class: a servo on one of
+Systemcore's ports is a `PWM`, told a pulse in microseconds.
+
+```java
+final class Hood implements Mechanism {
+  private final Scheduler scheduler;
+  private final Joint hood;
+  private final RobotMath math;
+  private final List<Drive> servos;
+  private final List<PWM> pulses;
+
+  /** The angle its servos were last told, in radians: NaN until they're first told. */
+  private double told = Double.NaN;
+
+  Hood(Scheduler scheduler, RobotDefinition robot, PWM left, PWM right) {
+    this.scheduler = scheduler;
+    hood = robot.joints().get(robot.joints().indexOf(HOOD)); // this robot's own hood
+    math = robot.math();
+    servos = hood.ownDrives(); // its servos as its block names them: left, then right
+    pulses = List.of(left, right);
+  }
+
+  @Override
+  public Scheduler getRegisteredScheduler() {
+    return scheduler;
+  }
+
+  /** Goes to one of its places, and ends once its servos have had time to get there. */
+  Command goTo(Position place) {
+    return run(co -> co.wait(Seconds.of(tell(hood.own(place).value()))))
+        .named("Hood to " + place.name());
+  }
+
+  // Tells each servo the share of its travel that puts the hood at an angle, held to its range,
+  // and says how long the slower takes to get there. Nothing reads back where it is: it's assumed
+  // where it was told before, or the first time, at the far end of its range.
+  private double tell(double angle) {
+    Range range = hood.range().orElseThrow();
+    double to = Math.max(range.lower(), Math.min(range.upper(), angle));
+    double far = to - range.lower() > range.upper() - to ? range.lower() : range.upper();
+    double from = Double.isNaN(told) ? far : told;
+    double seconds = 0;
+    for (int i = 0; i < servos.size(); i++) {
+      Drive drive = servos.get(i);
+      Actuator.Servo servo = (Actuator.Servo) drive.actuator();
+      double length = math.coordinate(drive, Map.of(hood, to)); // eye to eye, there
+      // A WCP-0408 takes a pulse of 1000 µs fully retracted, to 2000 µs fully extended.
+      pulses.get(i).setPulseTimeMicroseconds((int) Math.round(1000 + 1000 * servo.command(length)));
+      double travel = Math.abs(length - math.coordinate(drive, Map.of(hood, from)));
+      seconds = Math.max(seconds, travel / servo.speed());
+    }
+    told = to;
+    Logger.recordOutput("Hood/Told", Math.toDegrees(to));
+    return seconds;
+  }
+}
+```
+
+Build it in `Controls`, with the robot it runs on and its servos' ports, `new Hood(scheduler,
+Robots.current().definition(), new PWM(0), new PWM(1))`, and bind its commands as any v3
+mechanism's: `operator.faceUp().onTrue(hood.goTo(HOOD_LOB))`. `src/test/java/frc/robot/examples/`
+has it compiled (`ServoHoodRobot`, `Hood`), and `HoodSimTest` checks the pulses it sends.
 
 ## Not yet
 
 - **Joints the template doesn't drive yet:** a differential's pair, and servos. The robot says
   which, and why. An interlock on one is refused, since nothing could enforce it. A
   configuration naming one is refused whenever it would start, saying why, and the startup's
-  doubts list it, so the rest of the robot still runs.
+  doubts list it, so the rest of the robot still runs. Meanwhile, drive one from a subsystem of
+  your own: [When the template can't drive it](#7-when-the-template-cant-drive-it).
 - **A bench bypass for interlocks.** It waits for a pit mode.
 - **Moving between configurations by a route,** such as first raising the arm so the elevator can
   drop. Until then, write the two steps.

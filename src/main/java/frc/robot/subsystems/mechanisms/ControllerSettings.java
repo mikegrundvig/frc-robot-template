@@ -1,133 +1,191 @@
 package frc.robot.subsystems.mechanisms;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.robot.Actuator;
-import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
-import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.lib.rev.RevMechanism;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
- * What a driven joint's motor controllers are told, from its setup: a TalonFX's or a TalonFXS's
- * settings from the Phoenix helper ({@link PhoenixMechanism}), a SPARK's from the REV helper
- * ({@link RevMechanism}), with the definition's absolute encoder its wiring reads. Pure, as the
- * helpers are: no device is touched, so they're worked out as the robot's configuration is checked
- * ({@link JointSetup#problems}), in the simulator and the tests as on a robot, and what the robot
- * would refuse at startup is refused there first, with the robot's own message; what it would note,
- * the simulator notes too ({@code JointIOSim}). On a robot, the joint's IO applies these same
- * settings ({@link JointIOTalon}, {@link JointIOSpark}).
+ * What a driven joint's motor controllers are told, from its block: how the program drives it
+ * ({@link ControllerPlan}), said by the helper for the controllers its block names, a TalonFX's or
+ * a TalonFXS's by the Phoenix helper ({@link PhoenixMechanism}), a SPARK's by the REV helper
+ * ({@link RevMechanism}), with the definition's absolute encoder its block wires to them. Pure, as
+ * they are: no device is touched, so they're worked out as the robot's configuration is checked
+ * ({@link Joints#problems}), in the simulator and the tests as on a robot, and what the robot would
+ * refuse at startup is refused there first, with the robot's own message; what's doubtful the robot
+ * says at startup, wherever it runs ({@link #findings}). On a robot, the joint's IO applies these
+ * same settings ({@link JointIOTalon}, {@link JointIOSpark}).
  *
- * <p>A joint with no wiring runs in the simulator alone, whose motor controller is a TalonFX's:
- * it's checked on TalonFXs ({@link #notes}).
+ * <p>A joint whose motors aren't wired runs in the simulator alone, on the controller its motor
+ * runs on ({@link #standIn}): it's checked on that, so a NEO Vortex isn't refused for what only a
+ * TalonFX can't take.
  */
 public final class ControllerSettings {
   private ControllerSettings() {}
 
   /**
-   * What's doubtful in a joint's settings, though allowed, each a sentence: what the robot logs at
-   * startup ({@code Joints/<label>/SettingsNotes}), and the simulator with it. Worked out for the
-   * controller its wiring names; for a joint with no wiring, for TalonFXs.
+   * What a joint's motor controllers would make of its settings, from its block's control, worked
+   * out for the controllers its block names, and for its motor's where it names none: what they'd
+   * refuse at startup, as one refusal in the robot's own words, or what's doubtful though they'd
+   * take it, each a doubt about the joint. The robot's configuration refuses the first ({@link
+   * Joints#problems}), and the robot says the rest at startup, in the simulator as on the robot.
+   *
+   * @param joint one the template drives, with a control ({@link Joints#driven})
+   */
+  public static List<Finding> findings(RobotMath math, Joint joint) {
+    List<String> notes;
+    try {
+      notes = notes(math, joint);
+    } catch (IllegalArgumentException e) {
+      // The plan and the helpers refuse by throwing, as the robot does at startup: said here,
+      // once, as found.
+      return List.of(Finding.refused(joint.label(), String.valueOf(e.getMessage())));
+    }
+    return notes.stream().map(note -> Finding.doubt(joint.label(), note)).toList();
+  }
+
+  /**
+   * What's doubtful in a joint's settings, though allowed, each a sentence: the plan's, then the
+   * helper's for the controllers its block names; for a joint whose motors aren't wired, for its
+   * motor's.
    *
    * @throws IllegalArgumentException for what the robot would refuse at startup, saying what and
    *     why as it would
    */
-  public static List<String> notes(RobotMath math, JointSetup setup) {
-    Joint joint = setup.joint();
-    MechanismWiring wiring = setup.wiring().orElse(null);
-    if (wiring == null) {
-      return talon(math, joint, onTalons(math.drivesOf(joint).get(0)), setup.control()).notes();
-    }
-    return switch (wiring.controller()) {
-      case TALON_FX, TALON_FXS -> talon(math, joint, wiring, setup.control()).notes();
-      case SPARK_MAX, SPARK_FLEX -> spark(math, joint, wiring, setup.control()).notes();
+  private static List<String> notes(RobotMath math, Joint joint) {
+    MechanismControl control = control(joint);
+    return switch (controllers(math, joint).get(0).controller()) {
+      case TALON_FX, TALON_FXS -> talon(math, joint, control).notes();
+      case SPARK_MAX, SPARK_FLEX -> spark(math, joint, control).notes();
     };
   }
 
   /**
-   * A TalonFX's or TalonFXS's settings for a joint, from its wiring and a control: its setup's, or
-   * as the pit tunes it. A CANcoder its wiring names is the definition's absolute encoder on it.
+   * How the program drives a joint, for a control, its block's or as the pit tunes it: with the
+   * controllers its block names, or its motor's where it names none ({@link #controllers}).
    *
-   * @throws IllegalArgumentException for a CANcoder the definition doesn't have, and what the
-   *     Phoenix helper refuses
+   * @throws IllegalArgumentException for what no motor controller could do
    */
-  static PhoenixMechanism.Settings talon(
-      RobotMath math, Joint joint, MechanismWiring wiring, MechanismControl control) {
+  static ControllerPlan plan(RobotMath math, Joint joint, MechanismControl control) {
     Drive drive = math.drivesOf(joint).get(0);
-    if (wiring.cancoder().isEmpty()) {
-      return PhoenixMechanism.configure(math, joint, drive, wiring, control);
-    }
-    Sensor.Encoder encoder = JointSetup.absoluteEncoder(math, joint);
-    if (encoder == null) {
+    return ControllerPlan.of(math, joint, drive, controllers(math, joint), control);
+  }
+
+  /**
+   * A TalonFX's or TalonFXS's settings for a joint, from its block and a control: its block's, or
+   * as the pit tunes it. A CANcoder its block names is the definition's absolute encoder on it.
+   *
+   * @throws IllegalArgumentException for an encoder on a TalonFXS's data port, which the template
+   *     doesn't read yet, and what the plan or the Phoenix helper refuses
+   */
+  static PhoenixMechanism.Settings talon(RobotMath math, Joint joint, MechanismControl control) {
+    List<MechanismWiring.Device> controllers = controllers(math, joint);
+    Optional<Driven.AbsoluteEncoder> encoder = joint.driven().absoluteEncoder();
+    if (encoder.flatMap(Driven.AbsoluteEncoder::dataPort).isPresent()
+        && controllers.get(0).controller() == MechanismWiring.Controller.TALON_FXS) {
       throw new IllegalArgumentException(
           joint.label()
-              + "'s wiring names a CANcoder, and its definition has no absolute encoder on it");
+              + "'s wiring names an encoder on a TalonFXS's data port, which the template doesn't"
+              + " read yet: wire it as a CANcoder");
     }
-    return PhoenixMechanism.configure(math, joint, drive, encoder, wiring, control);
+    ControllerPlan plan = plan(math, joint, control);
+    Optional<MechanismWiring.Cancoder> cancoder = encoder.flatMap(Driven.AbsoluteEncoder::cancoder);
+    if (cancoder.isEmpty()) {
+      return PhoenixMechanism.configure(plan);
+    }
+    return PhoenixMechanism.configure(
+        math, plan, Objects.requireNonNull(math.absoluteEncoder(joint)), cancoder.get());
   }
 
   /**
-   * A SPARK MAX's or SPARK Flex's settings for a joint, from its wiring and a control. An encoder
-   * on its data port is the definition's absolute encoder on it.
+   * A SPARK MAX's or SPARK Flex's settings for a joint, from its block and a control. An encoder on
+   * its data port is the definition's absolute encoder on it.
    *
-   * @throws IllegalArgumentException for a data-port encoder the definition doesn't have, and what
-   *     the REV helper refuses
+   * @throws IllegalArgumentException for what the plan or the REV helper refuses
    */
-  static RevMechanism.Settings spark(
-      RobotMath math, Joint joint, MechanismWiring wiring, MechanismControl control) {
-    Drive drive = math.drivesOf(joint).get(0);
-    if (wiring.dataPort().isEmpty()) {
-      return RevMechanism.configure(math, joint, drive, wiring, control);
+  static RevMechanism.Settings spark(RobotMath math, Joint joint, MechanismControl control) {
+    ControllerPlan plan = plan(math, joint, control);
+    Optional<MechanismWiring.DataPortEncoder> port =
+        joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::dataPort);
+    if (port.isEmpty()) {
+      return RevMechanism.configure(plan);
     }
-    Sensor.Encoder encoder = JointSetup.absoluteEncoder(math, joint);
-    if (encoder == null) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a data-port encoder, and its definition has no absolute encoder on"
-              + " it");
-    }
-    return RevMechanism.configure(math, joint, drive, encoder, wiring, control);
+    return RevMechanism.configure(
+        math, plan, Objects.requireNonNull(math.absoluteEncoder(joint)), port.get());
   }
 
   /**
-   * The loop a joint closes itself on its absolute encoder on a Systemcore port, for a control: its
-   * kP and its feedforward, worked out on the robot as a SPARK's feedforward is, for the controller
-   * its wiring names, and a TalonFX for none. Its motor controller's own settings are worked out
-   * beside it: they run the joint while the encoder is lost.
+   * The loop a joint closes itself on its absolute encoder on a Systemcore port, for a control: the
+   * plan's kP, kD and feedforward law, worked out on the robot. Its motor controller's own settings
+   * are worked out beside it: they run the joint while the encoder is lost.
    *
-   * @throws IllegalArgumentException for what the Phoenix helper refuses
+   * @throws IllegalArgumentException for what the plan refuses
    */
-  static EncoderLoop encoderLoop(
-      RobotMath math, Joint joint, Optional<MechanismWiring> wiring, MechanismControl control) {
-    Drive drive = math.drivesOf(joint).get(0);
-    PhoenixMechanism.Settings settings =
-        PhoenixMechanism.configureFeedforwardOnRobot(
-            math, joint, drive, wiring.orElseGet(() -> onTalons(drive)), control);
-    return new EncoderLoop(settings.units(), settings.kP(), settings.feedforward());
+  static EncoderLoop encoderLoop(RobotMath math, Joint joint, MechanismControl control) {
+    return new EncoderLoop(plan(math, joint, control));
   }
 
   /**
-   * What a joint with no wiring is checked as: its motors on TalonFXs, the first leading, each
-   * turning counterclockwise for positive, read by their rotors. Their IDs only tell them apart:
-   * nothing the Phoenix helper refuses or notes reads an ID, a bus or a direction.
+   * A joint's control, from its block.
+   *
+   * @throws IllegalArgumentException for a joint with none, which the template doesn't drive
    */
-  private static MechanismWiring onTalons(Drive drive) {
-    List<MechanismWiring.Motor> motors = new ArrayList<>();
-    for (int id = 0; id < ((Actuator.Motors) drive.actuator()).count(); id++) {
-      motors.add(MechanismWiring.Motor.builder().id(id).clockwise(false).build());
+  public static MechanismControl control(Joint joint) {
+    return joint
+        .driven()
+        .control()
+        .orElseThrow(() -> new IllegalArgumentException(joint.label() + " has no control"));
+  }
+
+  /**
+   * A joint's motor controllers, the leader first: its block's, or, for motors not wired, the
+   * controller each motor runs on ({@link #standIn}), on Systemcore's CAN, each turning
+   * counterclockwise for positive, as the simulator runs them. Their IDs only tell them apart:
+   * nothing the helpers refuse or doubt reads an ID, a bus or a direction.
+   */
+  static List<MechanismWiring.Device> controllers(RobotMath math, Joint joint) {
+    List<MechanismWiring.Device> wired =
+        joint.driven().motors().map(Driven.Motors::controllers).orElse(List.of());
+    if (!wired.isEmpty()) {
+      return wired;
     }
-    return MechanismWiring.builder()
-        .canBus(CanBus.SYSTEMCORE)
-        .controller(MechanismWiring.Controller.TALON_FX)
-        .motors(motors)
-        .cancoder(Optional.empty())
-        .dataPort(Optional.empty())
-        .build();
+    Drive drive = math.drivesOf(joint).get(0);
+    Actuator.Motors motors = (Actuator.Motors) drive.actuator();
+    MechanismWiring.Controller controller = standIn(motors.motor());
+    List<MechanismWiring.Device> standIns = new ArrayList<>();
+    for (int id = 0; id < motors.count(); id++) {
+      standIns.add(controller.can(id));
+    }
+    return standIns;
+  }
+
+  /**
+   * The controller a motor runs on where its block wires none: a NEO's or a NEO 550's a SPARK MAX,
+   * a NEO Vortex's a SPARK Flex, a Minion's a TalonFXS, and a Kraken's, a Falcon's or a motor
+   * described from its datasheet a TalonFX.
+   */
+  static MechanismWiring.Controller standIn(Motor motor) {
+    if (motor.equals(Motor.NEO_VORTEX)) {
+      return MechanismWiring.Controller.SPARK_FLEX;
+    }
+    if (MechanismWiring.Controller.SPARK_MAX.drives(motor)) {
+      return MechanismWiring.Controller.SPARK_MAX;
+    }
+    if (MechanismWiring.Controller.TALON_FXS.drives(motor)) {
+      return MechanismWiring.Controller.TALON_FXS;
+    }
+    return MechanismWiring.Controller.TALON_FX;
   }
 }

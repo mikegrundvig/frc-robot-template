@@ -1,10 +1,13 @@
 package frc.robot.subsystems.mechanisms;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FXS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_MOTOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
+import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
@@ -17,22 +20,17 @@ import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.hardware.TalonFXS;
 import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
-import com.michaelgrundvig.frc.world.robot.MechanismWiring;
-import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
-import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.lib.wiring.ControllerPins;
-import java.util.List;
-import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -51,25 +49,20 @@ class JointIOTalonTest {
     SignalLogger.enableAutoLogging(false);
   }
 
-  private static JointSetup wired(
-      JointSetup setup,
-      Optional<MechanismWiring.Cancoder> cancoder,
-      MechanismWiring.Motor... motors) {
-    return JointSetupBuilder.builder(setup)
-        .wiring(
-            Optional.of(
-                MechanismWiring.builder()
-                    .canBus(CanBus.canivore(BUS))
-                    .controller(MechanismWiring.Controller.TALON_FX)
-                    .motors(List.of(motors))
-                    .cancoder(cancoder)
-                    .dataPort(Optional.empty())
-                    .build()))
-        .build();
+  private static final CanBus CANIVORE = CanBus.canivore(BUS);
+
+  /** The pivot, its motor on a TalonFX at an ID on the test's CANivore. */
+  private static Joint.Revolute pivot(int id) {
+    return PIVOT.motorsOn(TALON_FX.can(CANIVORE, id));
   }
 
-  private static MechanismWiring.Motor motor(int id) {
-    return MechanismWiring.Motor.builder().id(id).clockwise(false).build();
+  /** A joint's IO, on the fixtures' robot with the joint as given. */
+  private static JointIOTalon io(Joint joint, ControllerPins pins) {
+    return new JointIOTalon(ROBOT.with(joint).math(), joint, pins);
+  }
+
+  private static JointIOTalon io(Joint joint) {
+    return io(joint, ControllerPins.NONE);
   }
 
   /** Waits up to two seconds, reading again every few milliseconds, for something to be true. */
@@ -100,8 +93,7 @@ class JointIOTalonTest {
             .with(
                 SensorWiring.Direction.REVERSE,
                 new ControllerPins.OnPin(SensorWiring.Polarity.NORMALLY_CLOSED, true));
-    JointIOTalon io =
-        new JointIOTalon(ROBOT.math(), wired(SETUPS.get(0), Optional.empty(), motor(55)), pins);
+    JointIOTalon io = io(pivot(55), pins);
     TalonFX device = new TalonFX(55, new CANBus(BUS));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
 
@@ -128,8 +120,7 @@ class JointIOTalonTest {
    */
   @Test
   void itReadsItsRotorThroughItsGearingFromWhereItRests() throws InterruptedException {
-    JointIOTalon io =
-        new JointIOTalon(ROBOT.math(), wired(SETUPS.get(0), Optional.empty(), motor(51)));
+    JointIOTalon io = io(pivot(51));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
 
     boolean resting =
@@ -151,9 +142,7 @@ class JointIOTalonTest {
   /** The elevator's two motors: the first leads, and it reads meters through its drum. */
   @Test
   void aSlideReadsMetersThroughItsDrum() throws InterruptedException {
-    JointIOTalon io =
-        new JointIOTalon(
-            ROBOT.math(), wired(SETUPS.get(2), Optional.empty(), motor(53), motor(54)));
+    JointIOTalon io = io(ELEVATOR.motorsOn(TALON_FX.can(CANIVORE, 53), TALON_FX.can(CANIVORE, 54)));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
     eventually(() -> io.updateInputs(inputs), () -> inputs.connected);
 
@@ -172,19 +161,21 @@ class JointIOTalonTest {
   /** A tuned kP reaches the motor controller's slot, in Phoenix's units, without a restart. */
   @Test
   void aTunedGainReachesItsSlot() throws InterruptedException {
-    JointSetup setup = wired(SETUPS.get(0), Optional.empty(), motor(52));
-    JointIOTalon io = new JointIOTalon(ROBOT.math(), setup);
+    Joint.Revolute pivot = pivot(52);
+    JointIOTalon io = io(pivot);
+    MechanismControl control = ControllerSettings.control(pivot);
     MechanismControl tuned =
-        MechanismControlBuilder.builder(setup.control())
-            .gains(MechanismControlGainsBuilder.builder(setup.control().gains()).kP(55).build())
+        MechanismControlBuilder.builder(control)
+            .gains(MechanismControlGainsBuilder.builder(control.gains()).kP(55).build())
             .build();
     double expected =
         PhoenixMechanism.configure(
-                ROBOT.math(),
-                PIVOT,
-                ROBOT.math().drivesOf(PIVOT).get(0),
-                setup.wiring().orElseThrow(),
-                tuned)
+                ControllerPlan.of(
+                    ROBOT.math(),
+                    PIVOT,
+                    ROBOT.math().drivesOf(PIVOT).get(0),
+                    pivot.driven().motors().orElseThrow().controllers(),
+                    tuned))
             .leader()
             .Slot0
             .kP;
@@ -210,27 +201,9 @@ class JointIOTalonTest {
   }
 
   @Test
-  void aSetupWithoutWiringIsRefused() {
-    assertThatThrownBy(() -> new JointIOTalon(ROBOT.math(), SETUPS.get(0)))
+  void aJointWhoseMotorsArentWiredIsRefused() {
+    assertThatThrownBy(() -> new JointIOTalon(ROBOT.math(), PIVOT))
         .hasMessage("pivot has no wiring: wire it");
-  }
-
-  @Test
-  void aCancoderTheDefinitionDoesntHaveIsRefused() {
-    MechanismWiring.Cancoder cancoder =
-        MechanismWiring.Cancoder.builder()
-            .id(52)
-            .offset(Rotations.of(0))
-            .clockwise(false)
-            .feedback(MechanismWiring.Feedback.FUSED)
-            .build();
-
-    assertThatThrownBy(
-            () ->
-                new JointIOTalon(
-                    ROBOT.math(), wired(SETUPS.get(0), Optional.of(cancoder), motor(55))))
-        .hasMessage(
-            "pivot's wiring names a CANcoder, and its definition has no absolute encoder on it");
   }
 
   /**
@@ -240,22 +213,11 @@ class JointIOTalonTest {
    */
   @Test
   void aPivotReadByItsRotorIsToldWhereItIsByItsCancoder() throws InterruptedException {
-    RobotDefinition withEncoder =
-        RobotDefinitionBuilder.builder(ROBOT)
-            .sensors(List.of(Sensor.Encoder.absolute("pivot absolute", PIVOT, 4096)))
-            .build();
-    MechanismWiring.Cancoder cancoder =
-        MechanismWiring.Cancoder.builder()
-            .id(57)
-            .offset(Rotations.of(0))
-            .clockwise(false)
-            .feedback(MechanismWiring.Feedback.ROTOR)
-            .build();
+    Joint.Revolute pivot =
+        pivot(56).absoluteEncoder(4096, CANCODER.can(CANIVORE, 57).offset(Rotations.of(0)));
     new CANcoder(57, new CANBus(BUS)).getSimState().setRawPosition(60.0 / 360);
 
-    JointIOTalon io =
-        new JointIOTalon(
-            withEncoder.math(), wired(SETUPS.get(0), Optional.of(cancoder), motor(56)));
+    JointIOTalon io = io(pivot);
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
     boolean told =
         eventually(
@@ -276,25 +238,10 @@ class JointIOTalonTest {
    */
   @Test
   void aNeoOnATalonFxsReadsItsRotorThroughItsGearing() throws InterruptedException {
-    RobotDefinition onNeo =
-        RobotDefinitionBuilder.builder(ROBOT)
-            .drives(
-                List.of(
-                    JointFixtures.motors(PIVOT, Motor.NEO, 1, JointFixtures.gearing(25)),
-                    JointFixtures.ROLLER_MOTOR,
-                    JointFixtures.ELEVATOR_MOTORS,
-                    JointFixtures.TURRET_MOTOR))
-            .build();
-    JointSetup setup = wired(SETUPS.get(0), Optional.empty(), motor(58));
-    JointSetup onFxs =
-        JointSetupBuilder.builder(setup)
-            .wiring(
-                Optional.of(
-                    MechanismWiringBuilder.builder(setup.wiring().orElseThrow())
-                        .controller(MechanismWiring.Controller.TALON_FXS)
-                        .build()))
-            .build();
-    JointIOTalon io = new JointIOTalon(onNeo.math(), onFxs);
+    JointIOTalon io =
+        io(
+            unmotored(PIVOT)
+                .motor(Motor.NEO, JointFixtures.gearing(25), TALON_FXS.can(CANIVORE, 58)));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
 
     boolean resting =

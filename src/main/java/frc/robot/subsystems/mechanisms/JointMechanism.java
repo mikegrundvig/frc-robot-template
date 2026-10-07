@@ -3,10 +3,13 @@ package frc.robot.subsystems.mechanisms;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Radians;
+import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.world.robot.CanDevice;
 import com.michaelgrundvig.frc.world.robot.Condition;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -43,19 +46,19 @@ import org.wpilib.units.measure.Time;
 
 /**
  * One driven joint, as a Commands v3 {@link Mechanism}: the template builds one for each joint the
- * robot's motors drive ({@link Joints}), from the robot's definition and the joint's setup, and
+ * robot's motors drive ({@link Joints}), from the robot's definition and the joint's block, and
  * behavior code looks it up by its joint ({@code joints.of(PIVOT)}). Nobody writes one.
  *
  * <p>Its commands are pre-built, each a {@link Move} that ends with an outcome:
  *
  * <ul>
- *   <li>{@link #goTo(String)} one of its named positions, profiled from where it is, and {@code
- *       goTo("out").at(0.9)} at a share of its cruise; {@link #goTo(Angle)} or {@link
+ *   <li>{@link #goTo(Position)} one of its named positions, profiled from where it is, and {@code
+ *       goTo(PIVOT_OUT).at(0.9)} at a share of its cruise; {@link #goTo(Angle)} or {@link
  *       #goTo(Distance)} a computed one, inside its limits, and a turret's at the turn of it
  *       nearest where it is;
  *   <li>{@link #follow} a target that changes every loop, which it never stops chasing;
  *   <li>{@link #hold()} its goal, owning the joint;
- *   <li>{@link #run(String)} one of its named outputs, and {@link #runUntil} one until a condition
+ *   <li>{@link #run(Output)} one of its named outputs, and {@link #runUntil} one until a condition
  *       holds;
  *   <li>{@link #home()} its homing recipe again.
  * </ul>
@@ -173,7 +176,7 @@ public final class JointMechanism implements Mechanism {
   /**
    * An interlock on this joint, the joint its condition reads (none for a sensor's), and for a
    * region it keeps out of, the side the joint was last on: the only way it may leave the region,
-   * should it ever be inside.
+   * should it ever be inside; and where it's held inside, once.
    */
   static final class Restriction {
     private final Interlock interlock;
@@ -182,6 +185,13 @@ public final class JointMechanism implements Mechanism {
 
     /** Below the region (-1) or above it (1) when last outside it; 0 before it ever was. */
     private int side;
+
+    /**
+     * Where the joint is held inside the region, worked out once as the hold starts, or NaN when it
+     * isn't: worked out again each loop from how fast it's still going, the point would run ahead
+     * of a joint its loop hasn't yet slowed, and the joint after it through the region.
+     */
+    private double inside = Double.NaN;
 
     Restriction(Interlock interlock, @Nullable JointMechanism other, String shown) {
       this.interlock = interlock;
@@ -211,7 +221,7 @@ public final class JointMechanism implements Mechanism {
 
   /**
    * Its absolute encoder, where the robot reads it itself and tells the motor where the joint is
-   * from it ({@link JointSetup#readsAbsolute}), or null.
+   * from it ({@link Joints#readsAbsolute}), or null.
    */
   private @Nullable AbsoluteEncoderIO absoluteIo;
 
@@ -237,9 +247,6 @@ public final class JointMechanism implements Mechanism {
    * own encoder.
    */
   private @Nullable EncoderLoop encoderLoop;
-
-  /** Its wiring, which its own loop's gains are worked out for as the pit tunes them. */
-  private final Optional<MechanismWiring> wiring;
 
   /**
    * Where the joint is this loop, in its units: its motor controller's reading, or, where its loop
@@ -314,6 +321,12 @@ public final class JointMechanism implements Mechanism {
   /** Where what its limit switches are doubted for is logged. */
   private final String switchDoubtsKey;
 
+  /** Where the current its motors draw on their PDH channels is logged. */
+  private final String pdhCurrentKey;
+
+  /** Where its motor controllers drawing nothing on their channels while it works are logged. */
+  private final String deadChannelsKey;
+
   /** Where its absolute encoder's reading is logged, and where it says the joint is. */
   private final String absoluteKey;
 
@@ -380,6 +393,18 @@ public final class JointMechanism implements Mechanism {
   /** Its limit switches, and the sensors that read them: none until it's told. */
   private List<Sensor.Switch> limitSwitches = List.of();
 
+  /** Its motor controllers the PDH feeds, each with its channel, as its block says them. */
+  private final List<CanDevice> fed;
+
+  /** When one of them reads as drawing nothing while the joint works, from its control. */
+  private final MechanismControl.DeadChannel deadChannel;
+
+  /** Since when each has read as drawing nothing while the joint works, in nanoseconds: -1 not. */
+  private final long[] deadSince;
+
+  /** What each is flagged for, in their order: empty while it draws as it should. */
+  private final String[] dead;
+
   private @Nullable Sensors sensors;
 
   /** How long a limit switch must disagree with where the joint is before it's doubted. */
@@ -415,45 +440,60 @@ public final class JointMechanism implements Mechanism {
 
   /**
    * A joint's control as the pit tunes it: its feedback and friction gains and its motors' current
-   * limits, each within what's safe to dial in on a running robot. Its feedforward, profile and
-   * named positions aren't tunable yet: optional and listed values are beyond what {@link
-   * LiveConfig} reaches.
+   * limits, each within what's safe to dial in on a running robot, and each committed by the call
+   * that writes it in the joint's block: its kP by the factory the control starts from, {@code
+   * MechanismControl.position(31.5)}, the rest by their withers, {@code .withKs(0.25)}. Its
+   * feedforward, profile and named positions aren't tunable yet: optional and listed values are
+   * beyond what {@link LiveConfig} reaches.
    *
-   * @param label the joint's, which names its tuning
+   * @param joint the joint, whose label names its tuning
    * @param committed its control as written in {@code Robots.java}
    */
-  public static LiveConfig<MechanismControl> tuning(String label, MechanismControl committed) {
+  public static LiveConfig<MechanismControl> tuning(Joint joint, MechanismControl committed) {
     MechanismControl.Gains gains = committed.gains();
     MechanismControl.CurrentLimits limits = committed.currentLimits();
     double stator = limits.stator().in(Amps);
     double supply = limits.supply().in(Amps);
-    return LiveConfig.of(label, committed)
+    String factory = joint.holdsPositions() ? "position" : "velocity";
+    return LiveConfig.of(joint.label(), committed)
         // Volts per radian (or meter), and per radian (or meter) per second: up to ten times what's
         // committed, which tells the joint's scale.
-        .number("gains.kP", Limits.between(0, Math.max(10 * gains.kP(), 1)))
-        .number("gains.kD", Limits.between(0, Math.max(10 * gains.kD(), 1)))
-        .number("gains.kS", Limits.between(0, Math.max(gains.kS(), 2))) // volts
+        .number(
+            "gains.kP",
+            Limits.between(0, Math.max(10 * gains.kP(), 1)),
+            "MechanismControl." + factory + "(%s)")
+        .number("gains.kD", Limits.between(0, Math.max(10 * gains.kD(), 1)), ".withKd(%s)")
+        .number("gains.kS", Limits.between(0, Math.max(gains.kS(), 2)), ".withKs(%s)") // volts
         .measure(
-            "currentLimits.stator", Amps.of(Math.min(5, stator)), Amps.of(Math.max(120, stator)))
+            "currentLimits.stator",
+            Amps.of(Math.min(5, stator)),
+            Amps.of(Math.max(120, stator)),
+            ".withStatorLimit(%s)")
         .measure(
-            "currentLimits.supply", Amps.of(Math.min(5, supply)), Amps.of(Math.max(80, supply)));
+            "currentLimits.supply",
+            Amps.of(Math.min(5, supply)),
+            Amps.of(Math.max(80, supply)),
+            ".withSupplyLimit(%s)");
   }
 
+  /**
+   * @param joint one the template drives ({@link Joints#driven}), its block saying how
+   * @param tuned its control as the pit tunes it, read each loop; its block's until it's tuned
+   */
   JointMechanism(
       RobotMath math,
-      JointSetup setup,
+      Joint joint,
       Supplier<MechanismControl> tuned,
       JointIO io,
       Scheduler scheduler) {
-    joint = setup.joint();
+    this.joint = joint;
     this.math = math;
     this.tuned = tuned;
-    retuned = setup.control();
+    MechanismControl control = ControllerSettings.control(joint);
+    retuned = control;
     label = joint.label();
     this.scheduler = scheduler;
     this.io = io;
-    wiring = setup.wiring();
-    MechanismControl control = setup.control();
     positional = joint.holdsPositions();
     holds = positional;
     wraps = joint instanceof Joint.Revolute && joint.range().isEmpty();
@@ -481,9 +521,10 @@ public final class JointMechanism implements Mechanism {
             .profile()
             .map(MechanismControl.Profile::acceleration)
             .orElse(DEFAULT_CRUISE_SHARE * freeSpeed / DEFAULT_RAMP_SECONDS);
-    RobotMath.Gains seed = math.idealGains(joint);
-    kA = control.gains().kA().orElse(seed.kA());
-    kV = control.gains().kV().orElse(seed.kV());
+    // The plan's: tuned, else the definition's seed, as its motor controller has them.
+    ControllerPlan plan = ControllerPlan.of(math, joint, control);
+    kA = plan.kA();
+    kV = plan.kV();
     MechanismControl.Bands kindBands = joint instanceof Joint.Revolute ? ANGLE_BANDS : LENGTH_BANDS;
     positionBands = positional ? control.bands().orElse(kindBands) : kindBands;
     speedBands = positional ? SPEED_BANDS : control.bands().orElse(SPEED_BANDS);
@@ -517,11 +558,19 @@ public final class JointMechanism implements Mechanism {
     atKey = key + "/At";
     heldByKey = key + "/HeldBy";
     switchDoubtsKey = key + "/SwitchDoubts";
+    pdhCurrentKey = key + "/PdhCurrentAmps";
+    deadChannelsKey = key + "/DeadChannels";
     absoluteKey = key + "/Absolute";
     absoluteAtKey = key + "/AbsoluteAt";
     setpointKey = key + "/Setpoint";
     setpointVelocityKey = key + "/SetpointVelocity";
     outcomeKey = key + "/Outcome";
+    fed = joint.devices().stream().filter(device -> device.feed().isPresent()).toList();
+    deadChannel = control.deadChannel();
+    deadSince = new long[fed.size()];
+    java.util.Arrays.fill(deadSince, -1);
+    dead = new String[fed.size()];
+    java.util.Arrays.fill(dead, "");
   }
 
   private static MechanismControl.Bands bands(double enter, double stay) {
@@ -536,12 +585,12 @@ public final class JointMechanism implements Mechanism {
    */
   void seedFrom(AbsoluteEncoderIO encoder) {
     absoluteIo = encoder;
-    absoluteModel = JointSetup.absoluteEncoder(math, joint);
+    absoluteModel = math.absoluteEncoder(joint);
     MechanismWiring.PortEncoder port =
         joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port).orElse(null);
     absolutePort = port;
     if (port != null && port.closedLoop()) {
-      encoderLoop = ControllerSettings.encoderLoop(math, joint, wiring, retuned);
+      encoderLoop = ControllerSettings.encoderLoop(math, joint, retuned);
     }
   }
 
@@ -626,10 +675,25 @@ public final class JointMechanism implements Mechanism {
    * Moves to one of its positions at its cruise, profiled from where it is, and ends when it gets
    * there ({@link Outcome#ARRIVED}) or its deadline passes: twice the profile's time from where it
    * starts, plus half a second, unless {@link Move#within} says otherwise. {@code
-   * pivot.goTo(PIVOT_OUT)}. A position of another joint's is {@link Outcome#REFUSED}, saying so.
+   * pivot.goTo(PIVOT_OUT)}.
+   *
+   * <p>A position is a name on the joint, and it goes where the robot running it puts it: a
+   * practice robot's joint, its position re-placed ({@code replaced}), goes to its own, given the
+   * competition robot's constant. A position that isn't its own ({@link Joint#whyNotOwn}) is
+   * refused, saying so: a name it doesn't have, another joint's or one left out of its {@code
+   * .positions(...)}, or one of its names at a value it has never had, another joint's of the same
+   * name, elsewhere ({@code elevator.goTo(HOPPER_OUT)}, each with an "out"). Built as the robot
+   * starts, as its bindings and the autos built with them are, before the joint's first loop and
+   * outside any command, the move throws: the robot doesn't start, and a test that builds it fails.
+   * Built once the robot runs, in a command or anywhere else, it ends {@link Outcome#REFUSED} as it
+   * starts, its reason logged, so a robot on the field is never stopped by one.
+   *
+   * @throws IllegalArgumentException for a position not its own, built as the robot starts
    */
   public Move goTo(Position position) {
-    return Move.goTo(this, position.value(), position.name(), joint.whyNotOwn(position));
+    String why = refusedAsBuilt(joint.whyNotOwn(position));
+    return Move.goTo(
+        this, (why == null ? joint.own(position) : position).value(), position.name(), why);
   }
 
   /**
@@ -682,10 +746,15 @@ public final class JointMechanism implements Mechanism {
   /**
    * Runs it at one of its outputs, a speed, a voltage or a duty cycle, until canceled: for "while
    * held" and for work in the background. {@code roller.run(INTAKING)}. {@link Output#STOPPED} is
-   * every joint's; an output of another joint's is {@link Outcome#REFUSED}, saying so.
+   * every joint's. An output is a name on the joint, run as the robot running it has it; one it
+   * doesn't have is refused as a position is by {@link #goTo(Position)}: thrown as the robot
+   * starts, {@link Outcome#REFUSED} once it runs.
+   *
+   * @throws IllegalArgumentException for an output not its own, built as the robot starts
    */
   public Move run(Output output) {
-    return Move.run(this, output, null, joint.whyNotOwn(output));
+    String why = refusedAsBuilt(joint.whyNotOwn(output));
+    return Move.run(this, why == null ? joint.own(output) : output, null, why);
   }
 
   /**
@@ -693,10 +762,33 @@ public final class JointMechanism implements Mechanism {
    * Outcome#ARRIVED}, or {@link Outcome#TIMED_OUT} after 3 s unless {@link Move#within} says
    * otherwise. {@code roller.runUntil(INTAKING, coralIn)}. A {@link Gate} names it ("roller:
    * intaking until coral in claw") and, timed out, says why it never held ("coral in claw is false:
-   * claw beam lost"). An output of another joint's is {@link Outcome#REFUSED}, saying so.
+   * claw beam lost"). An output that isn't its own is refused as a position is by {@link
+   * #goTo(Position)}: thrown as the robot starts, {@link Outcome#REFUSED} once it runs.
+   *
+   * @throws IllegalArgumentException for an output not its own, built as the robot starts
    */
   public Move runUntil(Output output, BooleanSupplier condition) {
-    return Move.run(this, output, condition, joint.whyNotOwn(output));
+    String why = refusedAsBuilt(joint.whyNotOwn(output));
+    return Move.run(this, why == null ? joint.own(output) : output, condition, why);
+  }
+
+  /**
+   * Why a move can't run, as it's built: thrown as the robot starts, before the joint's first loop
+   * and outside any command, so a mistake in a binding fails at startup and in the simulator's
+   * tests, not when it's pressed; kept for the move to end {@link Outcome#REFUSED} on once the
+   * robot runs. Commands v3 says whether a command's body is running ({@code
+   * Scheduler.currentCommand}), but outside one isn't only at startup: a team's {@code
+   * autonomousInit}, a periodic method or an auto rebuilt as its chooser changes all run on the
+   * field outside any command, where a throw would stop the robot. So startup is the joint's first
+   * loop not yet read, and a command running never throws.
+   *
+   * @throws IllegalArgumentException with the reason, before the joint's first loop
+   */
+  private @Nullable String refusedAsBuilt(@Nullable String why) {
+    if (why != null && loop == 0 && scheduler.currentCommand() == null) {
+      throw new IllegalArgumentException(why);
+    }
+    return why;
   }
 
   /**
@@ -724,8 +816,9 @@ public final class JointMechanism implements Mechanism {
    * @throws IllegalArgumentException if the position isn't one of its own
    */
   public Gate isAt(Position position) {
-    String name = joint.own(position).name();
-    double target = position.value();
+    Position own = joint.own(position);
+    String name = own.name();
+    double target = own.value();
     boolean[] inside = {false};
     return new Gate(
         scheduler,
@@ -745,7 +838,8 @@ public final class JointMechanism implements Mechanism {
    * @throws IllegalArgumentException if the output isn't one of its own
    */
   public Gate isAt(Output output) {
-    String name = joint.own(output).name();
+    Output own = joint.own(output);
+    String name = own.name();
     boolean[] inside = {false};
     return new Gate(
         scheduler,
@@ -754,17 +848,16 @@ public final class JointMechanism implements Mechanism {
           boolean running = enabled && name.equals(appliedName);
           inside[0] =
               running
-                  && (output.kind() != Output.Kind.VELOCITY
-                      || withinSpeed(output.value(), inside[0]));
+                  && (own.kind() != Output.Kind.VELOCITY || withinSpeed(own.value(), inside[0]));
           return inside[0];
         });
   }
 
   /**
-   * Whether it's past one of its positions, from its reference: "pivot past run". A position isn't
+   * Whether it's past one of its positions, from where it rests: "pivot past run". A position isn't
    * known until the joint is homed: until then, it's false.
    *
-   * @throws IllegalArgumentException if the position isn't one of its own, or it's the reference
+   * @throws IllegalArgumentException if the position isn't one of its own, or it's where it rests
    */
   public Gate isPast(Position position) {
     Condition.Past past = joint.past(position);
@@ -827,7 +920,7 @@ public final class JointMechanism implements Mechanism {
   /**
    * Whether it's stalled: run at an output, it has moved slower than a tenth of the speed it asks
    * for, for a quarter of a second. A jam, for an unjam to start on: {@code
-   * indexer.isStalled().onTrue(indexer.run("reverse").withTimeout(Seconds.of(0.2)))}.
+   * indexer.isStalled().onTrue(indexer.run(INDEXER_UNJAMMING).withTimeout(Seconds.of(0.2)))}.
    */
   public Gate isStalled() {
     Debouncer stalling = new Debouncer(STALL_SECONDS, Debouncer.DebounceType.RISING);
@@ -995,14 +1088,14 @@ public final class JointMechanism implements Mechanism {
     if (choosesTurn && !Double.isNaN(turnInside(position, measured))) {
       return null;
     }
-    return JointSetup.shown(joint, position)
+    return joint.shown(position)
         + (choosesTurn ? ", at every turn of it, is" : " is")
         + " outside "
         + label
         + "'s limits, "
-        + JointSetup.shown(joint, lower)
+        + joint.shown(lower)
         + " to "
-        + JointSetup.shown(joint, upper);
+        + joint.shown(upper);
   }
 
   /**
@@ -1104,7 +1197,6 @@ public final class JointMechanism implements Mechanism {
 
   // ---- Each loop ----
 
-  /** Reads its sensors, and moves its homing on: before the commands run. */
   /** A switch on one of its controller's limit inputs, as its controller read it this loop. */
   void readPin(SensorWiring.Direction direction, SensorIO.SensorIOInputs pin) {
     pin.connected = inputs.connected;
@@ -1112,6 +1204,7 @@ public final class JointMechanism implements Mechanism {
         direction == SensorWiring.Direction.FORWARD ? inputs.forwardLimit : inputs.reverseLimit;
   }
 
+  /** Reads its sensors, and moves its homing on: before the commands run. */
   void read(long nowNanos, boolean enabled) {
     loop++;
     this.nowNanos = nowNanos;
@@ -1122,7 +1215,7 @@ public final class JointMechanism implements Mechanism {
       retuned = control;
       io.retune(control);
       if (encoderLoop != null) {
-        encoderLoop = ControllerSettings.encoderLoop(math, joint, wiring, control);
+        encoderLoop = ControllerSettings.encoderLoop(math, joint, control);
       }
     }
     io.updateInputs(inputs);
@@ -1193,6 +1286,66 @@ public final class JointMechanism implements Mechanism {
   }
 
   /**
+   * What it does with this loop's PDH reading, read after its sensors: the current its motors draw
+   * together on their channels, logged beside its leading controller's own ({@code
+   * SupplyCurrentAmps}), NaN while the PDH isn't read; and each of its motor controllers that reads
+   * as drawing nothing while the joint works, for longer than its control allows ({@link
+   * MechanismControl.DeadChannel}), flagged until it draws again. Nothing for a joint whose block
+   * says no channel.
+   */
+  void powered(Power power) {
+    if (fed.isEmpty()) {
+      return;
+    }
+    // Working: its leading controller answers, and draws from the battery, so each motor does.
+    boolean working =
+        power.reads()
+            && inputs.connected
+            && Math.abs(inputs.supplyCurrentAmps) > deadChannel.drawing().in(Amps);
+    long allowed = Math.round(deadChannel.time().in(Seconds) * 1e9);
+    double together = 0;
+    for (int i = 0; i < fed.size(); i++) {
+      int channel = fed.get(i).feed().orElseThrow().channel();
+      double amps = power.amps(channel);
+      together += amps;
+      if (!working || amps >= deadChannel.dead().in(Amps)) {
+        deadSince[i] = -1;
+        dead[i] = "";
+        continue;
+      }
+      if (deadSince[i] < 0) {
+        deadSince[i] = nowNanos;
+      }
+      if (nowNanos - deadSince[i] >= allowed) {
+        dead[i] =
+            fed.get(i).name()
+                + " draws nothing on channel "
+                + channel
+                + " while "
+                + label
+                + "'s motors work: its breaker tripped, its power is unplugged, or its block"
+                + " names the wrong channel";
+      }
+    }
+    Logger.recordOutput(pdhCurrentKey, together);
+    Logger.recordOutput(deadChannelsKey, dead);
+  }
+
+  /**
+   * Its motor controllers that read as drawing nothing on their PDH channels while it works, as of
+   * this loop: each said, with what to check. Empty while each draws as it should.
+   */
+  List<String> deadChannels() {
+    List<String> flagged = new ArrayList<>();
+    for (String each : dead) {
+      if (!each.isEmpty()) {
+        flagged.add(each);
+      }
+    }
+    return flagged;
+  }
+
+  /**
    * How far from where a limit switch trips its joint must be, past it or short of it, before the
    * switch's reading is doubted: a tenth of the joint's range, or 15° for one that turns freely. A
    * guess at what a switch bent a little, or flex in the mechanism, never reaches.
@@ -1232,9 +1385,9 @@ public final class JointMechanism implements Mechanism {
                   + " reads tripped with "
                   + label
                   + " at "
-                  + JointSetup.shown(joint, measured)
+                  + joint.shown(measured)
                   + ", nowhere near where it trips, "
-                  + JointSetup.shown(joint, at)
+                  + joint.shown(at)
                   + ": a cut wire, if it's normally closed, or a switch out of place";
         } else if (!tripped && past > doubtMargin()) {
           doubt =
@@ -1242,9 +1395,9 @@ public final class JointMechanism implements Mechanism {
                   + " reads clear with "
                   + label
                   + " at "
-                  + JointSetup.shown(joint, measured)
+                  + joint.shown(measured)
                   + ", past where it trips, "
-                  + JointSetup.shown(joint, at)
+                  + joint.shown(at)
                   + ": a cut wire, if it's normally open, or a switch out of place";
         }
       }
@@ -1327,11 +1480,10 @@ public final class JointMechanism implements Mechanism {
       JointMechanism other = restriction.other();
       Sensors read = sensors;
       if (interlock instanceof Interlock.KeepsOut keeps) {
-        // Which side of the region the joint is on, whether the interlock is closed or not.
-        if (measured <= keeps.region().lower()) {
-          restriction.side = -1;
-        } else if (measured >= keeps.region().upper()) {
-          restriction.side = 1;
+        // Which side of the region the joint is on, whether the interlock is closed or not. An
+        // edge at the range's end has no side past it: a joint there is inside.
+        if (!keeps.keepsOut(measured)) {
+          restriction.side = keeps.keptBelow(measured, 0) ? -1 : 1;
         }
       }
       // Whether what it speaks of is known, and holds: a joint that knows where it is, or a
@@ -1343,10 +1495,10 @@ public final class JointMechanism implements Mechanism {
           known = other != null && other.state == State.READY && other.inputs.connected;
           condition = known && other != null && onJoint.holdsAt(other.measured);
         }
-        case Condition.AtLeast atLeast -> {
+        case Condition.UpToSpeed upToSpeed -> {
           // How fast it runs is known from its motors, homed or not.
           known = other != null && other.inputs.connected;
-          condition = known && other != null && atLeast.holdsAt(other.inputs.velocity);
+          condition = known && other != null && upToSpeed.holdsAt(other.inputs.velocity);
         }
         case Condition.OnSensor onSensor -> {
           known = read != null && read.reads(onSensor.sensor());
@@ -1372,7 +1524,7 @@ public final class JointMechanism implements Mechanism {
         }
         case Interlock.KeepsOut keeps -> {
           if (!known || condition) {
-            double kept = keptOut(keeps, restriction.side, asked, target);
+            double kept = keptOut(keeps, restriction, asked, target);
             if (!Double.isNaN(kept)) {
               if (asked != Request.POSITION || kept != target) {
                 held(restriction);
@@ -1381,6 +1533,8 @@ public final class JointMechanism implements Mechanism {
               target = kept;
               fraction = 1;
             }
+          } else {
+            restriction.inside = Double.NaN;
           }
         }
       }
@@ -1447,37 +1601,52 @@ public final class JointMechanism implements Mechanism {
    * position at the region's edge on the side the joint is on, which its profile stops at. A joint
    * inside the region, one that overshot an edge or was there when it closed, may leave it only the
    * way it came, toward a goal outside on the side it was last on (the nearer side, if it was never
-   * outside), and holds where it stops otherwise: never across. Run at an output, it's held at the
-   * edge once its stopping point would reach the region.
+   * outside), and otherwise holds where it would stop as the hold starts: never across. Run at an
+   * output, it's held at the edge once its stopping point would reach the region.
    *
-   * @param side the side the joint was last on: -1 below the region, 1 above, 0 never outside
+   * @param restriction the interlock's: the side the joint was last on, and where it's held inside
    */
-  private double keptOut(Interlock.KeepsOut keeps, int side, Request asked, double target) {
+  private double keptOut(
+      Interlock.KeepsOut keeps, Restriction restriction, Request asked, double target) {
     double from = keeps.region().lower();
     double to = keeps.region().upper();
     double at = measured;
+    // Out of the region, it's held on its side; inside, it may only leave, by the side it's kept
+    // to.
+    boolean inside = keeps.keepsOut(at);
+    boolean below = keeps.keptBelow(at, restriction.side);
+    boolean leaving = asked == Request.POSITION && (below ? target <= from : target >= to);
+    if (!inside || leaving || asked == Request.NEUTRAL) {
+      restriction.inside = Double.NaN;
+    }
     if (asked == Request.POSITION) {
-      if (at <= from) {
-        return Math.min(target, from);
+      if (!inside) {
+        return below ? Math.min(target, from) : Math.max(target, to);
       }
-      if (at >= to) {
-        return Math.max(target, to);
-      }
-      boolean below = side != 0 ? side < 0 : at - from <= to - at;
-      boolean leaving = below ? target <= from : target >= to;
-      return leaving ? target : stoppingPoint();
+      return leaving ? target : heldInside(restriction);
     }
     if (asked == Request.NEUTRAL) {
       return Double.NaN;
     }
-    double stopping = stoppingPoint();
-    if (at <= from) {
-      return stopping >= from ? from : Double.NaN;
-    }
-    if (at >= to) {
+    if (!inside) {
+      double stopping = stoppingPoint();
+      if (below) {
+        return stopping >= from ? from : Double.NaN;
+      }
       return stopping <= to ? to : Double.NaN;
     }
-    return stopping;
+    return heldInside(restriction);
+  }
+
+  /**
+   * Where a joint inside a region it's kept out of is held: where it would stop, worked out once as
+   * the hold starts.
+   */
+  private double heldInside(Restriction restriction) {
+    if (Double.isNaN(restriction.inside)) {
+      restriction.inside = stoppingPoint();
+    }
+    return restriction.inside;
   }
 
   /** Notes an interlock holding the joint this loop. */
@@ -1821,7 +1990,7 @@ public final class JointMechanism implements Mechanism {
       return "unknown";
     }
     if (places.isEmpty()) {
-      return JointSetup.shown(joint, measured);
+      return joint.shown(measured);
     }
     double at = measured;
     for (int i = 0; i < places.size(); i++) {

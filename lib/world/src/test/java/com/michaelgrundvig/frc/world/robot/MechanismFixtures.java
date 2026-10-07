@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.world.robot;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Material;
@@ -66,13 +67,18 @@ final class MechanismFixtures {
         .parent(parent)
         .origin(new Transform3d(at, Rotation3d.ZERO))
         .axis(axis)
-        .range(range)
-        .reference(reference)
         .link(link)
-        .positions(List.of())
-        .outputs(List.of())
-        .driven(Driven.NONE)
+        .range(range)
+        .rest(reference)
         .build();
+  }
+
+  /**
+   * A joint as a test's fixture has it, its motors taken off for the test to give it others: a
+   * block says its motors once, and a joint re-wired keeps its motor.
+   */
+  static Joint.Revolute unmotored(Joint.Revolute joint) {
+    return joint.driven(DrivenBuilder.builder(joint.driven()).motors(Optional.empty()).build());
   }
 
   static Joint.Prismatic prismatic(
@@ -82,12 +88,9 @@ final class MechanismFixtures {
         .parent(parent)
         .origin(new Transform3d(at, Rotation3d.ZERO))
         .axis(axis)
-        .range(Optional.of(range))
-        .reference(range.lower())
         .link(link)
-        .positions(List.of())
-        .outputs(List.of())
-        .driven(Driven.NONE)
+        .range(range)
+        .rest(range.lower())
         .build();
   }
 
@@ -125,13 +128,7 @@ final class MechanismFixtures {
       String label, Joint joint, double ratio, boolean absolute, Optional<Integer> countsPerTurn) {
     return Sensor.Encoder.builder()
         .label(label)
-        .terms(
-            List.of(
-                Transmission.Term.builder()
-                    .joint(joint)
-                    .ratio(ratio)
-                    .pitchRadius(Optional.empty())
-                    .build()))
+        .terms(List.of(Transmission.Term.builder().joint(joint).ratio(ratio).build()))
         .absolute(absolute)
         .countsPerTurn(countsPerTurn)
         .build();
@@ -176,5 +173,37 @@ final class MechanismFixtures {
                 .pitchRadius(pitchRadius)
                 .build())
         .build();
+  }
+
+  /** What a robot's definition says it doesn't know: its notes, each its message. */
+  static List<String> notes(RobotDefinition robot) {
+    return robot.findings().stream()
+        .filter(finding -> finding.level() == Finding.Level.NOTE)
+        .map(Finding::message)
+        .toList();
+  }
+
+  /** What a robot's definition doubts, each its message. */
+  static List<String> doubts(RobotDefinition robot) {
+    return robot.findings().stream()
+        .filter(finding -> finding.level() == Finding.Level.DOUBT)
+        .map(Finding::message)
+        .toList();
+  }
+
+  /** The scope of each note, in order. */
+  static List<Finding.Scope> noteScopes(RobotDefinition robot) {
+    return robot.findings().stream()
+        .filter(finding -> finding.level() == Finding.Level.NOTE)
+        .map(Finding::scope)
+        .toList();
+  }
+
+  /**
+   * A control for a joint held at positions with no absolute encoder: stowed by hand at power on,
+   * its feedback {@code kP}.
+   */
+  static MechanismControl stowed(double kP) {
+    return MechanismControl.position(kP).withHoming(MechanismControl.Homing.assumeAtReference());
   }
 }

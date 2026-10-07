@@ -24,43 +24,29 @@ import com.michaelgrundvig.frc.world.field.Placement;
 import com.michaelgrundvig.frc.world.field.Zone;
 import com.michaelgrundvig.frc.world.field.ZoneTrigger;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import com.michaelgrundvig.frc.world.robot.Configuration;
-import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import com.michaelgrundvig.frc.world.robot.RobotMath;
-import com.michaelgrundvig.frc.world.robot.Sensor;
-import com.michaelgrundvig.frc.world.robot.SensorWiring;
+import frc.robot.behavior.Bindings;
+import frc.robot.behavior.RecordingGamepad;
 import frc.robot.commands.Calibration;
 import frc.robot.dashboard.Dashboard;
 import frc.robot.dashboard.RobotStatus;
+import frc.robot.hardware.Hardware;
+import frc.robot.hardware.RobotHardware;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
 import frc.robot.sim.Scenarios;
+import frc.robot.sim.SimulatedHardware;
 import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
-import frc.robot.subsystems.drive.DriveHardware;
-import frc.robot.subsystems.drive.GyroIO;
-import frc.robot.subsystems.drive.GyroIOSystemcore;
-import frc.robot.subsystems.drive.PhoenixDrivetrain;
 import frc.robot.subsystems.localization.Localization;
-import frc.robot.subsystems.mechanisms.AbsoluteEncoderIO;
-import frc.robot.subsystems.mechanisms.AbsoluteEncoderIOPort;
-import frc.robot.subsystems.mechanisms.JointIO;
-import frc.robot.subsystems.mechanisms.JointIOSpark;
-import frc.robot.subsystems.mechanisms.JointIOTalon;
+import frc.robot.subsystems.mechanisms.ControllerSettings;
 import frc.robot.subsystems.mechanisms.JointMechanism;
-import frc.robot.subsystems.mechanisms.JointSetup;
 import frc.robot.subsystems.mechanisms.Joints;
-import frc.robot.subsystems.mechanisms.SensorIO;
-import frc.robot.subsystems.mechanisms.SensorIOCanRange;
-import frc.robot.subsystems.mechanisms.SensorIOCandi;
-import frc.robot.subsystems.mechanisms.SensorIOPort;
-import frc.robot.subsystems.mechanisms.Sensors;
 import frc.robot.subsystems.vision.CameraIO;
-import frc.robot.subsystems.vision.CameraIOPhotonVision;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.venues.Venues;
 import frc.robot.views.world.WorldView;
@@ -78,8 +64,6 @@ import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
-import org.wpilib.command3.button.CommandGamepad;
-import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
@@ -94,12 +78,16 @@ import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.Alert;
 
 /**
- * The composition root: builds every mechanism with the right hardware for the current mode, and
- * binds controls to commands. This is the one file that shows how the whole robot fits together, so
- * keep it readable.
+ * The composition root: builds every mechanism on the hardware for the mode the program runs in
+ * ({@link Hardware}), runs them each loop, and hands the team's {@link Controls} what behavior
+ * reaches: the joints, the drivetrain, the sensors, and the driver's and operator's gamepads. The
+ * template's, so a team's code goes in {@code Controls} and {@code Robots}, and the template's
+ * updates here never collide with it. This is the one file that shows how the whole robot fits
+ * together, so keep it readable.
  */
 public final class RobotContainer implements AutoCloseable {
   private static final int DRIVER_PORT = 0;
+  private static final int OPERATOR_PORT = 1;
 
   /** How far from a start position, and how far turned from it, still counts as on it. */
   static final double START_TOLERANCE_METERS = 0.10;
@@ -145,9 +133,8 @@ public final class RobotContainer implements AutoCloseable {
   /** Each mechanism's tuning, starting from a robot's committed configuration. */
   static Tunings tunings(RobotConfig robot) {
     Map<String, LiveConfig<MechanismControl>> joints = new LinkedHashMap<>();
-    for (JointSetup setup : robot.joints()) {
-      String label = setup.joint().label();
-      joints.put(label, JointMechanism.tuning(label, setup.control()));
+    for (Joint joint : Joints.driven(robot.definition())) {
+      joints.put(joint.label(), JointMechanism.tuning(joint, ControllerSettings.control(joint)));
     }
     return new Tunings(
         Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()), Map.copyOf(joints));
@@ -186,16 +173,20 @@ public final class RobotContainer implements AutoCloseable {
   /** Whether a camera rides on a joint, so localization needs the joints' positions. */
   private final boolean camerasOnJoints;
 
-  private final Alert jointsUnwired;
-
-  /** Sensors with no wiring on a robot: nothing waiting on them holds. */
-  private final Alert sensorsUnwired;
-
   /** Sensors that stopped answering, named: their conditions hold neither way. */
   private final Alert sensorsLost;
 
   /** Limit switches that disagree with where their joints are: each said, with what to check. */
   private final Alert sensorsDoubted;
+
+  /** The PDH the robot declares, not answering: no channel's current is read. */
+  private final Alert pdhSilent;
+
+  /** Motor controllers drawing nothing on their PDH channels while their joints work: each said. */
+  private final Alert deadChannels;
+
+  /** The motor controllers drawing nothing as of the last loop, as the alert says them. */
+  private List<String> dead = List.of();
 
   /** What the limit switches were doubted for as of the last loop, as the alert says. */
   private List<String> doubted = List.of();
@@ -203,21 +194,17 @@ public final class RobotContainer implements AutoCloseable {
   /** The sensors lost as of the last loop, as the alert names them. */
   private List<String> lost = List.of();
 
-  /** The sensors with no wiring on a robot: said once, by their own alert, not as lost. */
-  private final List<String> unwiredSensors = new ArrayList<>();
-
   private final Vision vision;
   private final Calibration calibration;
-  private final CommandGamepad driver;
-  private final Alert noHardware =
-      new Alert(
-          "Drive",
-          "This robot's configuration has no drivetrain wiring (CAN IDs and encoder offsets), so"
-              + " the drivetrain stays still. Add it to the robot's entry in Robots.",
-          Alert.Level.HIGH);
 
-  /** The drivetrain's CTRE hardware, on a robot whose configuration has its wiring. */
-  private final @Nullable PhoenixDrivetrain hardware;
+  /** Every command bound to the drive team's gamepads, as the bindings were made. */
+  private final Bindings bindings;
+
+  private final RecordingGamepad driver;
+  private final RecordingGamepad operator;
+
+  /** What the robot reads and drives: its devices, the simulator's, or none in a replay. */
+  private final Hardware hardware;
 
   private final Alert allianceUnknown =
       new Alert(
@@ -283,7 +270,6 @@ public final class RobotContainer implements AutoCloseable {
     RobotDefinition definition = robot.definition();
     RobotRules.register(rules, definition, drivetrainTuning, visionTuning);
     rules.checkCommitted();
-    reportDoubts(definition, mode);
     Supplier<DrivetrainControl> drivetrain = drivetrainTuning::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
@@ -295,48 +281,23 @@ public final class RobotContainer implements AutoCloseable {
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
     }
-    driver = new CommandGamepad(scheduler, DRIVER_PORT);
+    bindings = new Bindings(scheduler);
+    driver = bindings.gamepad("driver", DRIVER_PORT);
+    operator = bindings.gamepad("operator", OPERATOR_PORT);
 
-    // The drivetrain's hardware: the simulator's, the robot's own, or none (a replay reads the log,
-    // and a robot without wiring stays still rather than guess at motors, and says so).
-    DriveHardware driveHardware;
-    if (mode == Constants.Mode.SIM) {
-      world =
-          new SimulatedWorld(
-              field,
-              definition.drivetrain(),
-              definition.body(),
-              cameras,
-              definition.imus(),
-              simulatedErrors);
-      hardware = null;
-      driveHardware = world.drivetrainHardware();
-    } else if (mode == Constants.Mode.REAL && robot.drivetrainWiring().isPresent()) {
-      world = null;
-      PhoenixDrivetrain phoenix =
-          new PhoenixDrivetrain(
-              robot.drivetrainWiring().get(),
-              definition.drivetrain(),
-              definition.imus().gyro().orientation());
-      hardware = phoenix;
-      driveHardware =
-          DriveHardware.builder()
-              .modules(List.of(phoenix.modules()))
-              .gyro(phoenix.gyro())
-              .backupImu(
-                  definition
-                      .imus()
-                      .backup()
-                      .<GyroIO>map(backup -> new GyroIOSystemcore(backup.orientation()))
-                      .orElseGet(() -> new GyroIO() {}))
-              .odometryLock(phoenix.odometryLock())
-              .build();
-    } else {
-      world = null;
-      hardware = null;
-      driveHardware = DriveHardware.none();
-      noHardware.set(mode == Constants.Mode.REAL);
-    }
+    // What the robot reads and drives: the simulator's, the robot's own devices, or none (a replay
+    // reads the log).
+    world =
+        mode == Constants.Mode.SIM
+            ? new SimulatedWorld(
+                field,
+                definition.drivetrain(),
+                definition.body(),
+                cameras,
+                definition.imus(),
+                simulatedErrors)
+            : null;
+    hardware = hardware(mode, definition, world);
 
     // Until the robot is placed it could be anywhere: localization starts it in the middle of the
     // field, as unsure as the field is big, so the first camera measurement wins. The simulated
@@ -351,104 +312,48 @@ public final class RobotContainer implements AutoCloseable {
                 robot.estimator(),
                 RobotLoop.PERIOD_SECONDS));
     drive =
-        new Drive("Drive", driveHardware, definition, drivetrain, scheduler, localization::pose);
+        new Drive("Drive", hardware.drive(), definition, drivetrain, scheduler, localization::pose);
     fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (world != null) {
       world.place(middle);
     }
 
-    // Every driven joint, a v3 mechanism the template builds from the definition and the joint's
-    // setup: on its motor controllers, the simulator's, or none (a replay reads the log, and a
-    // joint without wiring stays still rather than guess at motors, and says so).
-    RobotMath math = definition.math();
-    SimulatedWorld simulated = world;
-    List<String> unwired = new ArrayList<>();
+    // Every driven joint, a v3 mechanism the template builds from the definition, the joint's block
+    // saying how it's driven and wired, each as the pit tunes it.
     camerasOnJoints = definition.cameras().stream().anyMatch(camera -> camera.joint().isPresent());
     joints =
         new Joints(
             definition,
-            robot.joints(),
-            setup -> Objects.requireNonNull(tunings.joints().get(setup.joint().label()))::get,
-            setup -> {
-              if (simulated != null) {
-                return simulated.joint(math, setup);
-              }
-              if (mode == Constants.Mode.REAL && setup.wiring().isPresent()) {
-                switch (setup.wiring().get().controller()) {
-                  case TALON_FX, TALON_FXS -> {
-                    return new JointIOTalon(
-                        math, setup, Sensors.pins(definition, robot.sensors(), setup));
-                  }
-                  case SPARK_MAX, SPARK_FLEX -> {
-                    return new JointIOSpark(
-                        math, setup, Sensors.pins(definition, robot.sensors(), setup));
-                  }
-                }
-              } else if (mode == Constants.Mode.REAL) {
-                unwired.add(setup.joint().label());
-              }
-              return new JointIO() {};
-            },
-            setup -> {
-              if (simulated != null) {
-                return simulated.absoluteEncoder(setup);
-              }
-              var port =
-                  setup.joint().driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::port);
-              return mode == Constants.Mode.REAL && port.isPresent()
-                  ? new AbsoluteEncoderIOPort(port.get())
-                  : new AbsoluteEncoderIO() {};
-            },
-            sensor -> {
-              if (simulated != null) {
-                return simulated.sensor(sensor);
-              }
-              if (mode == Constants.Mode.REAL) {
-                SensorIO io = sensorIo(robot, sensor);
-                if (io != null) {
-                  return io;
-                }
-                unwiredSensors.add(sensor.label());
-              }
-              return new SensorIO() {};
-            },
+            hardware,
+            joint -> Objects.requireNonNull(tunings.joints().get(joint.label()))::get,
             scheduler);
-    jointsUnwired =
-        new Alert(
-            "Joints",
-            "unwired",
-            "No wiring for "
-                + String.join(", ", unwired)
-                + ", so they stay still. Add it to the robot's entry in Robots.",
-            Alert.Level.HIGH);
-    jointsUnwired.set(!unwired.isEmpty());
-    this.sensorsUnwired =
-        new Alert(
-            "Sensors",
-            "unwired",
-            "No wiring for "
-                + String.join(", ", unwiredSensors)
-                + ", so nothing waiting on them holds. Add it to the robot's entry in Robots.",
-            Alert.Level.HIGH);
-    this.sensorsUnwired.set(!unwiredSensors.isEmpty());
     sensorsLost = new Alert("Sensors", "lost", "", Alert.Level.HIGH);
     sensorsDoubted = new Alert("Sensors", "doubted", "", Alert.Level.HIGH);
+    pdhSilent =
+        new Alert(
+            "Power",
+            "silent",
+            definition
+                .pdh()
+                .map(
+                    pdh ->
+                        "The PDH isn't answering at CAN ID "
+                            + pdh.id()
+                            + ", so no channel's current is read. Check its CAN wiring, and its ID"
+                            + " in REV's Hardware Client.")
+                .orElse(""),
+            Alert.Level.MEDIUM);
+    deadChannels = new Alert("Power", "dead", "", Alert.Level.HIGH);
 
     // Cameras: PhotonVision on the robot, its simulation in the simulator, the log in a replay.
-    CameraIO[] cameraIOs = new CameraIO[cameras.size()];
-    if (world != null) {
-      cameraIOs = world.cameras();
-    } else {
-      for (int i = 0; i < cameras.size(); i++) {
-        cameraIOs[i] =
-            mode == Constants.Mode.REAL
-                ? new CameraIOPhotonVision(cameras.get(i).name())
-                : new CameraIO() {};
-      }
-    }
     vision =
         new Vision(
-            cameras, cameraIOs, localization.service(), field, visionTuning::get, () -> alliance);
+            cameras,
+            hardware.cameras().toArray(CameraIO[]::new),
+            localization.service(),
+            field,
+            visionTuning::get,
+            () -> alliance);
     calibration =
         new Calibration(
             drive,
@@ -461,13 +366,22 @@ public final class RobotContainer implements AutoCloseable {
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
     // stick turns. Back, with the robot facing straight downfield, resets its heading: the fallback
-    // when the heading has gone wrong. Enabled or not.
+    // when the heading has gone wrong. Enabled or not. The template's own, so they're there
+    // whatever the team's Controls binds, and a second command on back is a doubt at startup.
     drive.setDefaultCommand(
         drive.joystickDrive(
             () -> leftStick().getX(), () -> leftStick().getY(), () -> -driver.getRightX()));
     driver
         .back()
         .onTrue(Command.noRequirements(coroutine -> faceDownfield()).named("Reset heading"));
+
+    // What the robot does, and the drive team's buttons for the rest: the team's own class. Its
+    // constructor builds the commands and binds them, so nothing else needs to hold it.
+    new Controls(scheduler, joints, drive, joints.sensors(), driver, operator);
+
+    // What it doubts or doesn't know, said once its bindings are made: its definition's, and two
+    // commands bound to one button the same way.
+    Doubts.say(definition, Doubts.of(definition, bindings), mode);
   }
 
   /**
@@ -537,7 +451,7 @@ public final class RobotContainer implements AutoCloseable {
       localization.service().joints(read, joints.positions());
     }
     List<String> nowLost = new ArrayList<>(joints.sensors().lost());
-    nowLost.removeAll(unwiredSensors);
+    nowLost.removeAll(hardware.unwiredSensors());
     if (!nowLost.equals(lost)) {
       lost = nowLost;
       sensorsLost.setText(
@@ -547,6 +461,13 @@ public final class RobotContainer implements AutoCloseable {
               + (lost.size() == 1 ? "it" : "them")
               + " holds. Check the wiring and the CAN bus.");
       sensorsLost.set(!lost.isEmpty());
+    }
+    pdhSilent.set(robotDefinition.pdh().isPresent() && !joints.power().reads());
+    List<String> nowDead = joints.deadChannels();
+    if (!nowDead.equals(dead)) {
+      dead = nowDead;
+      deadChannels.setText(String.join("; ", dead));
+      deadChannels.set(!dead.isEmpty());
     }
     List<String> nowDoubted = joints.switchDoubts();
     if (!nowDoubted.equals(doubted)) {
@@ -591,87 +512,23 @@ public final class RobotContainer implements AutoCloseable {
   }
 
   /**
-   * A sensor's hardware on a robot, from its wiring, or null when it has none. A switch on a motor
-   * controller's limit input is read by its joint's controller, with the joint.
+   * What the robot reads and drives, for the mode the program runs in: the simulated world's, the
+   * devices its definition's wiring names on a robot, or nothing in a replay, which reads the log.
+   *
+   * @param world the simulated world, in the simulator
    */
-  private static @Nullable SensorIO sensorIo(RobotConfig robot, Sensor.Placed sensor) {
-    for (SensorWiring wiring : robot.sensors()) {
-      if (!wiring.sensor().equals(sensor.label())) {
-        continue;
-      }
-      if (wiring instanceof SensorWiring.OfSwitch onSwitch) {
-        return switch (onSwitch.input()) {
-          case SensorWiring.Port port -> new SensorIOPort(port.port(), onSwitch.polarity());
-          case SensorWiring.Candi candi -> new SensorIOCandi(onSwitch, candi);
-          case SensorWiring.CanRange range -> null;
-          case SensorWiring.ControllerLimit limit ->
-              SensorIO.onPin(limit.joint(), limit.direction());
-        };
-      }
-      if (wiring.input() instanceof SensorWiring.CanRange range
-          && sensor instanceof Sensor.Rangefinder rangefinder) {
-        return new SensorIOCanRange(rangefinder, range);
-      }
-    }
-    return null;
+  static Hardware hardware(
+      Constants.Mode mode, RobotDefinition definition, @Nullable SimulatedWorld world) {
+    return switch (mode) {
+      case SIM -> new SimulatedHardware(Objects.requireNonNull(world), definition);
+      case REAL -> new RobotHardware(definition);
+      case REPLAY -> Hardware.replay(definition);
+    };
   }
 
   /** One line for the pit: how long loops take, and whether they keep up. */
   String loopStatus() {
     return loopHealth.describe();
-  }
-
-  /**
-   * What's doubtful or unknown in the robot's definition: allowed, but said once at startup, in the
-   * log ({@code Robot/DefinitionDoubts}) and, on a robot, on the Driver Station's console, so
-   * nobody has to run a test to read it. What only the simulator reads, a link's mass, is said only
-   * when it simulates ({@code Robot/SimulatorNotes}).
-   */
-  private static void reportDoubts(RobotDefinition definition, Constants.Mode mode) {
-    List<String> doubts = doubts(definition);
-    Logger.recordOutput("Robot/DefinitionDoubts", doubts.toArray(String[]::new));
-    if (mode == Constants.Mode.SIM) {
-      Logger.recordOutput(
-          "Robot/SimulatorNotes", simulatorNotes(definition).toArray(String[]::new));
-    }
-    if (mode == Constants.Mode.REAL) {
-      for (String doubt : doubts) {
-        DriverStationErrors.reportWarning(definition.name() + ": " + doubt, false);
-      }
-    }
-  }
-
-  /**
-   * The definition's doubts the robot says wherever it runs: its notes, what it doesn't know that
-   * the robot's code reads, and the configurations it can't run.
-   */
-  static List<String> doubts(RobotDefinition definition) {
-    List<String> doubts = new ArrayList<>(definition.notes());
-    for (RobotDefinition.Missing missing : definition.missing()) {
-      if (missing.scope() == RobotDefinition.Missing.Scope.ROBOT) {
-        doubts.add("not known: " + missing);
-      }
-    }
-    for (Configuration configuration : definition.configurations()) {
-      String cantRun = Joints.cantRun(definition, configuration);
-      if (cantRun != null) {
-        doubts.add(cantRun);
-      }
-    }
-    return doubts;
-  }
-
-  /**
-   * What the definition doesn't know that only the simulator reads: said only when it simulates.
-   */
-  static List<String> simulatorNotes(RobotDefinition definition) {
-    List<String> notes = new ArrayList<>();
-    for (RobotDefinition.Missing missing : definition.missing()) {
-      if (missing.scope() == RobotDefinition.Missing.Scope.SIMULATOR) {
-        notes.add("simulator: " + missing);
-      }
-    }
-    return notes;
   }
 
   /**
@@ -896,6 +753,21 @@ public final class RobotContainer implements AutoCloseable {
     return joints;
   }
 
+  /** Every command bound to the drive team's gamepads, as the bindings were made. */
+  Bindings bindings() {
+    return bindings;
+  }
+
+  /** The driver's gamepad, port 0. */
+  RecordingGamepad driver() {
+    return driver;
+  }
+
+  /** The operator's gamepad, port 1. */
+  RecordingGamepad operator() {
+    return operator;
+  }
+
   /** What the World view reads each loop while a page shows it: localization's and the wheels'. */
   private WorldView.Readings worldReadings() {
     return new WorldView.Readings() {
@@ -942,11 +814,6 @@ public final class RobotContainer implements AutoCloseable {
     return sim != null ? sim.drivetrain() : null;
   }
 
-  /** Whether the alert saying the drivetrain has no hardware code is active. */
-  boolean isNoHardwareAlertActive() {
-    return noHardware.get();
-  }
-
   /** Releases what holds global resources (alerts), so a test can build another robot. */
   @Override
   public void close() {
@@ -954,11 +821,10 @@ public final class RobotContainer implements AutoCloseable {
     TunableRegistry.remove(visionTuning);
     drive.close();
     localization.close();
-    noHardware.close();
-    jointsUnwired.close();
-    sensorsUnwired.close();
     sensorsLost.close();
     sensorsDoubted.close();
+    pdhSilent.close();
+    deadChannels.close();
     allianceUnknown.close();
     offField.close();
     venues.close();
@@ -967,9 +833,7 @@ public final class RobotContainer implements AutoCloseable {
     if (world != null) {
       world.close();
     }
-    if (hardware != null) {
-      hardware.close();
-    }
+    hardware.close();
     if (fieldView != null) {
       fieldView.close();
     }

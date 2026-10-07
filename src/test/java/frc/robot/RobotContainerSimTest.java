@@ -1,35 +1,53 @@
 package frc.robot;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.wpilib.units.Units.Amps;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.world.config.Finding.Scope;
 import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Placement;
 import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.Gearing;
+import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.Output;
+import com.michaelgrundvig.frc.world.robot.Part;
+import com.michaelgrundvig.frc.world.robot.Pdh;
+import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
+import frc.robot.behavior.Binding;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
+import org.wpilib.command3.Command;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.RobotMode;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.simulation.PDPSim;
 import org.wpilib.telemetry.MockTelemetryBackend;
+import org.wpilib.util.AlertDataJNI;
 
 /**
  * The whole robot as the simulator runs it: the real composition root, the real controller
@@ -39,6 +57,11 @@ import org.wpilib.telemetry.MockTelemetryBackend;
 @SimulationTest
 class RobotContainerSimTest {
   private static final FieldModel FIELD = RobotSim.FIELD;
+
+  /** What a robot whose configuration has no drivetrain wiring says. */
+  private static final String NO_DRIVETRAIN =
+      "This robot's configuration has no drivetrain wiring (CAN IDs and encoder offsets), so the"
+          + " drivetrain stays still. Add it to the robot's entry in Robots.";
 
   @RegisterExtension final RobotSim sim = new RobotSim();
 
@@ -95,8 +118,9 @@ class RobotContainerSimTest {
         .isCloseTo(0.0, within(0.5));
     assertThat(sim.robot().allianceStation()).isEqualTo("Blue 2");
     assertThat(sim.robot().placement().status()).isEqualTo(Placement.Status.READY);
-    assertFalse(
-        sim.robot().isNoHardwareAlertActive(), "the simulator is the drivetrain's hardware");
+    assertThat(activeAlerts())
+        .as("the simulator is the drivetrain's hardware")
+        .doesNotContain(NO_DRIVETRAIN);
   }
 
   @Test
@@ -322,6 +346,28 @@ class RobotContainerSimTest {
     assertEquals(truth, shown("/Field/Truth")[0]);
   }
 
+  /**
+   * The template's own binding is in the robot's record, as a controller map reads it, and its
+   * press is logged; a second command on its button the same way is said with the robot's doubts.
+   */
+  @Test
+  void theRobotsBindingsAreRecordedAndADuplicateIsDoubted() {
+    RobotContainer robot = sim.robot();
+    sim.loops(1);
+    List<String> recorded = robot.bindings().all().stream().map(Binding::toString).toList();
+
+    pressBack();
+    List<Binding> fired = robot.bindings().fired();
+    robot.driver().back().onTrue(Command.noRequirements(co -> {}).named("Zero arm"));
+
+    assertThat(recorded).containsExactly("driver back: on press: Reset heading");
+    assertThat(fired).containsExactlyElementsOf(robot.bindings().all().subList(0, 1));
+    assertThat(Doubts.lines(Doubts.of(Robots.SIM.definition(), robot.bindings()), Scope.ROBOT))
+        .contains(
+            "driver back starts Reset heading and Zero arm on press: one press runs them together."
+                + " If that's meant, make them one command; if not, bind one to another button");
+  }
+
   @Test
   void replayRunsWithoutTheSimulator() {
     sim.build(Constants.Mode.REPLAY, Robots.SIM, SensorErrors.NONE);
@@ -332,7 +378,7 @@ class RobotContainerSimTest {
         start("Center", Alliance.BLUE),
         sim.robot().drive().getPose(),
         "on its start, as the log's Driver Station says; nothing moves");
-    assertFalse(sim.robot().isNoHardwareAlertActive(), "replay's hardware is the log");
+    assertThat(activeAlerts()).as("replay's hardware is the log").doesNotContain(NO_DRIVETRAIN);
     assertThat(sim.robot().simulation()).as("no physics in a replay").isNull();
   }
 
@@ -348,8 +394,31 @@ class RobotContainerSimTest {
 
     sim.run(0.5);
 
-    assertTrue(sim.robot().isNoHardwareAlertActive());
+    assertThat(activeAlerts()).contains(NO_DRIVETRAIN);
     assertEquals(start("Center", Alliance.BLUE), sim.robot().drive().getPose(), "nothing moved");
+  }
+
+  /** A sensor with no wiring on a robot is said once, by its own alert, not again as lost. */
+  @Test
+  void aRealRobotsUnwiredSensorIsSaidOnceNotAsLost() {
+    Sensor.Switch bumper = Sensor.Switch.contact("bumper", Part.CHASSIS);
+    sim.build(
+        Constants.Mode.REAL,
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .sensors(List.of(bumper))
+                    .build())
+            .build(),
+        SensorErrors.NONE);
+
+    sim.run(0.2);
+
+    assertThat(activeAlerts())
+        .contains(
+            "No wiring for bumper, so nothing waiting on them holds. Add it to the robot's entry"
+                + " in Robots.")
+        .noneMatch(text -> text.contains("lost"));
   }
 
   /**
@@ -364,11 +433,11 @@ class RobotContainerSimTest {
           SwerveWiring.ModuleWiring.builder()
               .driveId(40 + 3 * i)
               .steerId(41 + 3 * i)
-              .encoderId(Optional.of(42 + 3 * i))
               .encoderOffset(Rotations.of(0))
               .driveInverted(false)
               .steerInverted(true)
               .encoderInverted(false)
+              .encoderId(42 + 3 * i)
               .build();
     }
     RobotConfig wired =
@@ -394,8 +463,91 @@ class RobotContainerSimTest {
 
     sim.run(0.5);
 
-    assertFalse(sim.robot().isNoHardwareAlertActive());
+    assertThat(activeAlerts()).doesNotContain(NO_DRIVETRAIN);
     assertThat(sim.robot().estimate().health().gyroConnected()).as("the Pigeon answers").isTrue();
+  }
+
+  /**
+   * A real robot reads the PDH its definition declares, and says when it doesn't answer: here
+   * WPILib's simulated one, its battery cut.
+   */
+  @Test
+  void aRealRobotReadsItsPdhAndSaysWhenItDoesntAnswer() {
+    RobotConfig powered =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition()).pdh(Pdh.can(1)).build())
+            .build();
+    PDPSim pdh = new PDPSim(1);
+    pdh.resetData();
+    pdh.setVoltage(12.2);
+    sim.build(Constants.Mode.REAL, powered, SensorErrors.NONE);
+
+    sim.run(0.5);
+
+    assertThat(sim.robot().joints().power().reads()).isTrue();
+    assertThat(activeAlerts()).noneMatch(text -> text.startsWith("The PDH"));
+
+    pdh.setVoltage(0);
+    sim.run(1);
+
+    assertThat(activeAlerts())
+        .contains(
+            "The PDH isn't answering at CAN ID 1, so no channel's current is read. Check its CAN"
+                + " wiring, and its ID in REV's Hardware Client.");
+  }
+
+  /**
+   * A motor controller drawing nothing on its PDH channel while its joint works is an alert, said
+   * with what to check: here a follower's channel zeroed in the simulator while its arm pushes.
+   */
+  @Test
+  void aControllerDrawingNothingWhileItsJointWorksIsAnAlert() {
+    Output push = Output.volts("push", -3);
+    Joint.Revolute arm =
+        Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
+            .range(Range.degrees(0, 90), Degrees.of(0))
+            .outputs(push)
+            .motors(
+                Motor.KRAKEN_X60,
+                Gearing.of(50),
+                TALON_FX.can(11).pdh(4, Amps.of(40)),
+                TALON_FX.can(12).pdh(5, Amps.of(40)))
+            .control(
+                MechanismControl.position(30)
+                    .withKg(0)
+                    .withHoming(MechanismControl.Homing.assumeAtReference()));
+    sim.build(
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .pdh(Pdh.can(1))
+                    .joints(List.of(arm))
+                    .build())
+            .build(),
+        SensorErrors.NONE);
+    RobotSim.setEnabled(true);
+    sim.scheduler().schedule(sim.robot().joints().of(arm).run(push));
+    sim.run(0.2);
+
+    Objects.requireNonNull(Objects.requireNonNull(sim.robot().world()).pdh()).zero(5, true);
+    sim.run(0.6);
+
+    assertThat(activeAlerts())
+        .contains(
+            "arm motor 12 draws nothing on channel 5 while arm's motors work: its breaker tripped,"
+                + " its power is unplugged, or its block names the wrong channel");
+  }
+
+  /** The alerts a dashboard shows now. */
+  private static List<String> activeAlerts() {
+    List<String> active = new ArrayList<>();
+    for (AlertDataJNI.AlertInfo alert : AlertDataJNI.getAlerts()) {
+      if (alert.activeStartTime != 0) {
+        active.add(alert.text);
+      }
+    }
+    return active;
   }
 
   private Pose2d[] shown(String path) {

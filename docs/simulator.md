@@ -415,15 +415,20 @@ truth. How it's built, and how to add to it: [pitwall/README.md](../pitwall/READ
 The simulated world is in two places, apart so that nothing the robot runs can reach it.
 
 - **The simulation library** (`lib/simulation`, `com.michaelgrundvig.frc.simulation`) holds what
-  doesn't speak the robot program's language: the physics, the IMUs' models (`GyroModel`,
-  `AccelerometerModel`), how the simulated robot's sensors and wheels err (`SensorErrors`), the
-  catalog of what can fail (`FaultCatalog`), and where each random stream starts (`Seeds`). It reads
+  doesn't speak the robot program's language: the physics, each driven joint's plant (`JointPlant`:
+  its motors through its gearing, held to a current limit by `CurrentLimitedMotor`, its inertia,
+  gravity and hard stops, in closed form), the IMUs' models (`GyroModel`, `AccelerometerModel`),
+  how the simulated robot's sensors and wheels err (`SensorErrors`), the catalog of what can fail
+  (`FaultCatalog`), and where each random stream starts (`Seeds`). It reads
   the world model and WPILib's math alone: no hardware layer, robot program, localization, or
   Pitwall, and no clock, unseeded randomness, threads, or static state (its `ArchitectureTest`), so
   worlds run side by side and a run repeats to the bit.
 - **The robot program's adapters** (`frc.robot.sim`) hold what does: the modules' motor controllers
   and encoders (`ModuleIOSim`, a TalonFX's loops and limits and the CANcoder's timing, with the
-  steering in closed form), the IMUs' IO (`GyroIOSim`), the cameras (`CameraIOSim`, over
+  steering in closed form), each joint's motor controller (`JointIOSim`, a TalonFX's slot or a
+  SPARK's loop as its block wires it, `TalonFxEmulator` and `SparkEmulator`, each running the
+  joint's `ControllerPlan` where that controller does, on its plant), the IMUs' IO (`GyroIOSim`),
+  the cameras (`CameraIOSim`, over
   PhotonVision's simulation in `VisionSim`), the coprocessors, the faults' bindings to Pitwall
   (`Faults`), the scenarios, and `DriveSimulation`, which steps them together and takes the
   sensors' readings at 250 Hz. Only these adapters and the program's top level see the library: the
@@ -439,46 +444,45 @@ The simulated world is in two places, apart so that nothing the robot runs can r
  (placed, pushed, tilted by hand, a slick floor, worn tread, the ground)
 ```
 
-`step` moves the world on, in sub-steps of the engine's choosing, asking the actuators at the start
-of each what drives each wheel over it; `chassis()` and `wheel(i)` are the truth (pose, attitude,
+`step` moves the world on, in sub-steps of the physics' own choosing, asking the actuators at the
+start of each what drives each wheel over it; `chassis()` and `wheel(i)` are the truth (pose, attitude,
 velocities, every turn the robot made, and each wheel's turn, spin, angle, radius, current, load,
-and contact); `apply` does something to the world from outside it. Today's engine,
+and contact); `apply` does something to the world from outside it. Its physics,
 `KinematicPhysics`, is the simulator as it has always run: the robot moves as the best fit of its
 wheels' travel, each wheel turning its share of the robot's mass on its own motor (WPILib's
 `DCMotorSim`, worked to the bit, whose matrix exponential, worked once for each length of step, is
 WPILib's native math: the library's tests load it as the robot program's do), within the tread's
 grip, on the plane through its wheels' ground. Putting it behind the interface changed no recorded run by a bit.
 
-**Where a rigid-body engine plugs in.** ODE4j (pure Java) is to take today's engine's place behind
-the same interface: the robot's mass, center of gravity, and yaw inertia in one chassis, a wheel on
-a joint at each module, and Coulomb friction where each tread meets the carpet
-([stand-ins](stand-ins.md#the-simulators-physics)). The interface is shaped for it:
+**What it keeps simple.** The simulator is for testing the robot's code against simple plants: the
+robot as its wheels roll, and each mechanism's joint in closed form. Traction, weight transfer and
+power it leaves out, and the truth suite's known gaps (below) say by how much
+([stand-ins](stand-ins.md#the-simulators-physics)).
 
 - **The drive as a motor's line.** Each wheel's controller gives the voltage it asks of its
-  motor, its velocity loop's gain, and its current limit (`WheelDrive`), and the engine applies the
-  limit: the motor's torque against the wheel's speed, capped at the limit's torque. An engine that
-  integrates implicitly applies that as a joint motor through the whole sub-step, where a torque
-  held from the sub-step's start would ring as a light wheel slips. Today's engine applies the
-  limit at each 4 ms step's start and holds the voltage that gives through the step, which is the
-  F = m a gap below.
+  motor, its velocity loop's gain, and its current limit (`WheelDrive`), and the physics applies
+  the limit: the motor's torque against the wheel's speed, capped at the limit's torque. It
+  applies the limit at each 4 ms step's start and holds the voltage that gives through the step,
+  which is the F = m a gap below.
 - **The steering in closed form.** The steering settles in under a millisecond, so its controller
-  turns it (`CurrentLimitedMotorSim`) and gives the angle; the engine follows it, and hands back the
+  turns it (`CurrentLimitedMotor`) and gives the angle; the physics follows it, and hands back the
   carpet's scrub as a torque on the steering (`WheelTruth.steerLoadNewtonMeters`) for the next
-  sub-step. Nothing reads it yet: today's engine gives none, and the closed form takes it once a
-  real module's scrub is measured, as a torque against the motion that can stop the module
-  (`CurrentLimitedMotorSim` says how).
-- **Sub-steps and determinism.** The simulator steps the physics at 250 Hz, its odometry's rate;
-  the engine sub-steps inside at a fixed length of its own, with no clock, no unseeded randomness,
-  and no order that hangs on identity hash codes, so a run repeats to the bit. The actuators keep
-  time, not count sub-steps: the steering's loop runs every millisecond, and the CANcoder sends
-  every 10 ms, whatever length the engine's sub-steps are.
-- **Disturbances made physical.** A push becomes a force the wheels resist, a slick floor a lower
-  friction, a lifted wheel the ground under it; a tilt by hand and a carry stay declared overrides,
-  and say so (`Disturbance`).
+  step. Nothing reads it yet: the physics gives none, and the closed form takes it once a real
+  module's scrub is measured, as a torque against the motion that can stop the module
+  (`CurrentLimitedMotor` says how).
+- **The joints in closed form.** Each driven joint is its plant (`JointPlant`): its motors through
+  its gearing, held to their current limit, its inertia, gravity and hard stops, stepped every
+  millisecond as its motor controller runs. No joint pushes on another, or on the chassis.
+- **Determinism.** The simulator steps the physics at 250 Hz, its odometry's rate, with no clock,
+  no unseeded randomness, and no order that hangs on identity hash codes, so a run repeats to the
+  bit. The actuators keep time, not count steps: the steering's loop runs every millisecond, and
+  the CANcoder sends every 10 ms.
+- **Disturbances declared.** A push, a slick floor, worn tread, a tilt by hand and a carry are
+  overrides of the physics, and say so (`Disturbance`).
 
-Switching engines moves every recorded run, so it re-records the goldens (`EstimatorGoldenSimTest`,
-`CameraGoldenSimTest`) and reruns the [consistency study](testing.md): the robot moves differently,
-which is the point. The truth suite says whether it moves better.
+A change to the physics moves every recorded run, so it re-records the goldens
+(`EstimatorGoldenSimTest`, `CameraGoldenSimTest`) and reruns the [consistency study](testing.md):
+the robot moves differently, which is the point. The truth suite says whether it moves better.
 
 ## How far to trust it: the truth suite
 

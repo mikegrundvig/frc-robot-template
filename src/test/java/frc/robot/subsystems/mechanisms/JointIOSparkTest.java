@@ -1,27 +1,27 @@
 package frc.robot.subsystems.mechanisms;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_FLEX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_MAX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.DATA_PORT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
-import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.gearing;
+import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Rotations;
 
-import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
-import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
-import com.michaelgrundvig.frc.world.robot.Sensor;
+import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import com.revrobotics.sim.SparkAbsoluteEncoderSim;
 import com.revrobotics.spark.ClosedLoopSlot;
@@ -33,7 +33,6 @@ import com.revrobotics.spark.config.LimitSwitchConfigAccessor;
 import frc.robot.RobotSim;
 import frc.robot.lib.rev.RevMechanism;
 import frc.robot.lib.wiring.ControllerPins;
-import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,40 +40,23 @@ import org.wpilib.math.system.DCMotor;
 
 /**
  * The REV joint against REV's own simulated SPARK: what it tells the SPARK, in the SPARK's units,
- * and what it reads back, in the joint's. The settings are the REV helper's, from the Phoenix
- * helper's, tested there.
+ * and what it reads back, in the joint's. The settings are the REV helper's, from the program's
+ * plan, tested there.
  */
 @ExtendWith(RobotSim.class)
 class JointIOSparkTest {
-  /** The fixtures' robot on REV's motors: a NEO pivot through 25:1, two Vortexes on the slide. */
-  static final RobotDefinition ON_REV =
-      RobotDefinitionBuilder.builder(ROBOT)
-          .drives(
-              List.of(
-                  JointFixtures.motors(PIVOT, Motor.NEO, 1, gearing(25)),
-                  JointFixtures.motors(ROLLER, Motor.NEO_550, 1, gearing(3)),
-                  JointFixtures.motors(ELEVATOR, Motor.NEO_VORTEX, 2, gearing(10), Inches.of(1)),
-                  JointFixtures.motors(TURRET, Motor.NEO, 1, gearing(50))))
-          .build();
+  /** The pivot on a NEO through 25:1, its SPARK MAX at an ID. */
+  private static Joint.Revolute pivot(int id) {
+    return unmotored(PIVOT).motor(Motor.NEO, gearing(25), SPARK_MAX.can(id));
+  }
 
-  private static JointSetup wired(
-      JointSetup setup, MechanismWiring.Controller controller, int... ids) {
-    return JointSetupBuilder.builder(setup)
-        .wiring(
-            Optional.of(
-                MechanismWiring.builder()
-                    .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
-                    .controller(controller)
-                    .motors(
-                        java.util.Arrays.stream(ids)
-                            .mapToObj(
-                                id ->
-                                    MechanismWiring.Motor.builder().id(id).clockwise(false).build())
-                            .toList())
-                    .cancoder(Optional.empty())
-                    .dataPort(Optional.empty())
-                    .build()))
-        .build();
+  /** A joint's IO, on the fixtures' robot with the joint as given. */
+  private static JointIOSpark io(Joint joint, ControllerPins pins) {
+    return new JointIOSpark(ROBOT.with(joint).math(), joint, pins);
+  }
+
+  private static JointIOSpark io(Joint joint) {
+    return io(joint, ControllerPins.NONE);
   }
 
   /**
@@ -83,9 +65,7 @@ class JointIOSparkTest {
    */
   @Test
   void itReadsItsRotorThroughItsGearingFromWhereItRests() {
-    JointIOSpark io =
-        new JointIOSpark(
-            ON_REV.math(), wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 31));
+    JointIOSpark io = io(pivot(31));
     SparkSim sim = new SparkSim(io.leader(), DCMotor.getNEO(1));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
 
@@ -126,9 +106,7 @@ class JointIOSparkTest {
             .with(
                 SensorWiring.Direction.REVERSE,
                 new ControllerPins.OnPin(SensorWiring.Polarity.NORMALLY_CLOSED, true));
-    JointIOSpark io =
-        new JointIOSpark(
-            ON_REV.math(), wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 47), pins);
+    JointIOSpark io = io(pivot(47), pins);
     SparkSim sim = new SparkSim(io.leader(), DCMotor.getNEO(1));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
     LimitSwitchConfigAccessor took = ((SparkMax) io.leader()).configAccessor.limitSwitch;
@@ -159,17 +137,19 @@ class JointIOSparkTest {
    */
   @Test
   void aPositionGoesInRotorTurnsWithItsFeedforwardInVolts() {
-    JointSetup setup = wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 32);
-    JointIOSpark io = new JointIOSpark(ON_REV.math(), setup);
+    Joint.Revolute pivot = pivot(32);
+    RobotMath math = ROBOT.with(pivot).math();
+    JointIOSpark io = io(pivot);
     SparkSim sim = new SparkSim(io.leader(), DCMotor.getNEO(1));
     sim.enable();
     RevMechanism.Settings settings =
         RevMechanism.configure(
-            ON_REV.math(),
-            PIVOT,
-            ON_REV.math().drivesOf(PIVOT).get(0),
-            setup.wiring().orElseThrow(),
-            setup.control());
+            ControllerPlan.of(
+                math,
+                PIVOT,
+                math.drivesOf(PIVOT).get(0),
+                pivot.driven().motors().orElseThrow().controllers(),
+                ControllerSettings.control(pivot)));
 
     // REV's simulation steps its own position into the encoder: start it where the pivot rests.
     sim.setPosition(PIVOT.reference() / (2 * Math.PI) * 25);
@@ -184,7 +164,7 @@ class JointIOSparkTest {
 
     double rest = PIVOT.reference() / (2 * Math.PI) * 25;
     double target = near / (2 * Math.PI) * 25;
-    double feedforward = 0.6 + settings.feedforward().atPosition(near / (2 * Math.PI), 0, 0);
+    double feedforward = 0.6 + settings.plan().feedforward(near, 0, 0);
     // A SPARK holds its setpoint as a float.
     assertThat(far).isCloseTo(25.0 / 8, within(1e-6));
     assertThat(sim.getSetpoint()).isCloseTo(target, within(1e-6));
@@ -195,11 +175,12 @@ class JointIOSparkTest {
   /** The pit's tuning reaches the SPARK's loop, as a TalonFX's slot: its kP, in rotor turns. */
   @Test
   void aTunedGainReachesItsLoop() {
-    JointSetup setup = wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 33);
-    JointIOSpark io = new JointIOSpark(ON_REV.math(), setup);
+    Joint.Revolute pivot = pivot(33);
+    JointIOSpark io = io(pivot);
+    MechanismControl control = ControllerSettings.control(pivot);
     MechanismControl tuned =
-        MechanismControlBuilder.builder(setup.control())
-            .gains(MechanismControlGainsBuilder.builder(setup.control().gains()).kP(60).build())
+        MechanismControlBuilder.builder(control)
+            .gains(MechanismControlGainsBuilder.builder(control.gains()).kP(60).build())
             .build();
 
     io.retune(tuned);
@@ -216,8 +197,14 @@ class JointIOSparkTest {
   @Test
   void aSlideOnTwoSparkFlexesReadsMetersThroughItsDrum() {
     JointIOSpark io =
-        new JointIOSpark(
-            ON_REV.math(), wired(SETUPS.get(2), MechanismWiring.Controller.SPARK_FLEX, 34, 35));
+        io(
+            unmotored(ELEVATOR)
+                .motors(
+                    Motor.NEO_VORTEX,
+                    gearing(10),
+                    Inches.of(1),
+                    SPARK_FLEX.can(34),
+                    SPARK_FLEX.can(35)));
     SparkSim sim = new SparkSim(io.leader(), DCMotor.getNeoVortex(1));
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
 
@@ -235,9 +222,7 @@ class JointIOSparkTest {
   /** A speed goes to the SPARK's speed slot in rotor RPM: the roller's 1 rad/s through 3:1. */
   @Test
   void aSpeedGoesInRotorRpm() {
-    JointIOSpark io =
-        new JointIOSpark(
-            ON_REV.math(), wired(SETUPS.get(1), MechanismWiring.Controller.SPARK_MAX, 36));
+    JointIOSpark io = io(unmotored(ROLLER).motor(Motor.NEO_550, gearing(3), SPARK_MAX.can(36)));
     SparkSim sim = new SparkSim(io.leader(), DCMotor.getNeo550(1));
     sim.enable();
 
@@ -254,11 +239,7 @@ class JointIOSparkTest {
    */
   @Test
   void homingSwitchesItsSoftLimitsOffAndBackOn() {
-    JointSetup setup =
-        JointSetupBuilder.builder(wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 37))
-            .control(SETUPS.get(0).control().withSoftLimits(0.01, 2.3))
-            .build();
-    JointIOSpark io = new JointIOSpark(ON_REV.math(), setup);
+    JointIOSpark io = io(pivot(37).retuned(control -> control.withSoftLimits(0.01, 2.3)));
     SparkMax spark = (SparkMax) io.leader();
     boolean before = spark.configAccessor.softLimit.getForwardSoftLimitEnabled();
 
@@ -283,9 +264,7 @@ class JointIOSparkTest {
    */
   @Test
   void aPivotWithAnEncoderOnItsDataPortIsToldWhereItIs() {
-    JointSetup setup =
-        withDataPort(wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 38), REVERSED);
-    JointIOSpark io = new JointIOSpark(WITH_ENCODER.math(), setup);
+    JointIOSpark io = io(pivot(38).absoluteEncoder(8192, REVERSED));
     SparkMax spark = (SparkMax) io.leader();
     // At 60°, a sixth of a turn past the pivot's zero and so 0.3125 + 1/6 of one past the edge.
     new SparkAbsoluteEncoderSim(spark).setPosition(0.3125 + 60.0 / 360);
@@ -311,12 +290,6 @@ class JointIOSparkTest {
         .isCloseTo(70, within(1e-3));
   }
 
-  /** The fixtures' robot on REV's motors, with an absolute encoder on the pivot's axle. */
-  private static final RobotDefinition WITH_ENCODER =
-      RobotDefinitionBuilder.builder(ON_REV)
-          .sensors(List.of(Sensor.Encoder.absolute("pivot absolute", PIVOT, 8192)))
-          .build();
-
   /**
    * A pivot whose SPARK's loop closes on its data-port encoder is read by the encoder each loop,
    * wherever its motor's count is, and is moved in the encoder's turns from the window's edge: 45°
@@ -327,10 +300,13 @@ class JointIOSparkTest {
    */
   @Test
   void aPivotClosedOnItsDataPortEncoderIsReadByItAndMovedInItsTurns() {
-    JointSetup setup =
-        withDataPort(
-            wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 39), REVERSED.closesLoop());
-    JointIOSpark io = new JointIOSpark(WITH_ENCODER.math(), setup);
+    // Its loop on the encoder, which tells it where it is: no homing recipe.
+    MechanismControl unhomed =
+        MechanismControlBuilder.builder(ControllerSettings.control(PIVOT))
+            .homing(Optional.empty())
+            .build();
+    JointIOSpark io =
+        io(pivot(39).absoluteEncoder(8192, REVERSED.closesLoop()).retuned(old -> unhomed));
     SparkMax spark = (SparkMax) io.leader();
     SparkSim sim = new SparkSim(spark, DCMotor.getNEO(1));
     sim.enable();
@@ -366,20 +342,5 @@ class JointIOSparkTest {
 
   /** The pivot's through-bore on its SPARK's data port, reversed and offset 0.1, seeded once. */
   private static final MechanismWiring.DataPortEncoder REVERSED =
-      MechanismWiring.DataPortEncoder.builder()
-          .offset(Rotations.of(0.1))
-          .reversed(true)
-          .closedLoop(false)
-          .build();
-
-  /** A setup wired to a SPARK, an encoder on the SPARK's data port. */
-  private static JointSetup withDataPort(JointSetup setup, MechanismWiring.DataPortEncoder port) {
-    return JointSetupBuilder.builder(setup)
-        .wiring(
-            Optional.of(
-                MechanismWiringBuilder.builder(setup.wiring().orElseThrow())
-                    .dataPort(Optional.of(port))
-                    .build()))
-        .build();
-  }
+      DATA_PORT.offset(Rotations.of(0.1)).inverted();
 }

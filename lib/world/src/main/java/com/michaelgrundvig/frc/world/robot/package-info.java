@@ -18,9 +18,10 @@
  * com.michaelgrundvig.frc.world.robot.Output}), the configurations the robot takes ({@link
  * com.michaelgrundvig.frc.world.robot.Configuration}: several joints, each at a named place), and
  * joint-to-joint interlocks ({@link com.michaelgrundvig.frc.world.robot.Interlock}, on {@link
- * com.michaelgrundvig.frc.world.robot.Condition}s: a joint past, before, between or at named
- * places). These are facts about the robot, where its intake is out and that its roller mustn't run
- * stowed, which every reader reads alike.
+ * com.michaelgrundvig.frc.world.robot.Condition}s: a joint at a named place, at least or at most a
+ * position, between two, or past or before one from where it rests). These are facts about the
+ * robot, where its intake is out and that its roller mustn't run stowed, which every reader reads
+ * alike.
  *
  * <p>It's a description, read by everything that needs to know the robot: the mechanisms' code,
  * localization (where the wheels and sensors sit), the simulator (all of it), Pitwall, and the
@@ -29,19 +30,27 @@
  * reads anything back: not the field, not localization, not the robot program. Interlocks speak
  * only of the robot's own joints; what the field or the game allows is the robot program's too.
  *
- * <p>A robot design's parts are named once, in code, in a small record of its own that every robot
- * of the design (the competition robot and the practice robot) fills with its joints, and the
- * configurations that name them: {@code record Parts(Joint.Revolute pivot, Joint.Revolute roller,
- * Configuration feeding)}. Behavior code reads {@code parts.pivot()}, so a part missing or misnamed
- * fails to compile, and nothing is ever found by its label.
+ * <p>A robot's joints, their places and its configurations are constants in {@code Robots}, each
+ * joint written in one block: {@code Joint.pivot(...).range(...).positions(...).motor(...)
+ * .control(...)}. Behavior code names the constants themselves ({@code joints.of(PIVOT)}, {@code
+ * pivot.goTo(PIVOT_OUT)}), so a part missing or misnamed fails to compile, and nothing is ever
+ * found by its label. Each block says each thing once. A practice robot of the same design is the
+ * same definition with its differences ({@code COMPETITION.with(PIVOT.motorsOn(...))}), each joint
+ * changed one thing at a time and the rest kept: a joint re-wired or re-tuned is still the same
+ * joint.
  *
  * <p>It's set where the rest of a robot's configuration is, in {@code Robots}, and checked the same
  * way: each record checks its own values with the validation kit ({@code
  * com.michaelgrundvig.frc.world.config}), and {@code RobotDefinition} checks across them (wheels
  * inside the frame, cameras and IMUs inside the robot, a drive's joints among the robot's, named
- * outputs within what its motors can do, configurations obeying the interlocks). How the robot is
- * driven (gains, limits) and how it's wired (CAN IDs, encoder offsets) are the robot program's own
- * configuration around it, since only its mechanisms and IO read them.
+ * outputs within what its motors can do, each joint's control fitting it, one sensor on each input,
+ * configurations obeying the interlocks), each saying what it finds ({@link
+ * com.michaelgrundvig.frc.world.config.Finding}). How each joint is driven (gains, limits: {@link
+ * com.michaelgrundvig.frc.world.robot.MechanismControl}) and wired (CAN IDs, encoder offsets:
+ * {@link com.michaelgrundvig.frc.world.robot.MechanismWiring}, {@link
+ * com.michaelgrundvig.frc.world.robot.SensorWiring}) is in its block too ({@link
+ * com.michaelgrundvig.frc.world.robot.Driven}), and the drivetrain's in its geometry; only the
+ * robot program's mechanisms and IO read them, and they're no part of what a joint is.
  */
 @NullMarked
 package com.michaelgrundvig.frc.world.robot;

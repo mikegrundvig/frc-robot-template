@@ -11,7 +11,6 @@ import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import java.util.List;
-import java.util.Optional;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.math.system.DCMotor;
@@ -32,10 +31,10 @@ final class TestRobot {
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
           .weight(Body.Weight.weighed(Kilograms.of(68)))
-          .cg(Optional.of(new Translation3d(0, 0, 0.15)))
           .inertia(
               Body.Turning.tensor(
                   Inertia.builder().ixx(6.7).iyy(6.7).izz(6.7).ixy(0).ixz(0).iyz(0).build()))
+          .cg(new Translation3d(0, 0, 0.15))
           .build();
 
   static final DrivetrainGeometry DRIVETRAIN =
@@ -46,10 +45,10 @@ final class TestRobot {
               .wheelRadius(Inches.of(2))
               .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
               .steerGearing(Gearing.builder().ratio(150.0 / 7).efficiency(1.0).build())
-              .wheelCoefficientOfFriction(Optional.of(1.2))
-              .driveInertia(Optional.of(KilogramSquareMeters.of(0.001)))
-              .steerInertia(Optional.of(KilogramSquareMeters.of(0.004)))
               .couplingRatio(0)
+              .wheelCoefficientOfFriction(1.2)
+              .driveInertia(KilogramSquareMeters.of(0.001))
+              .steerInertia(KilogramSquareMeters.of(0.004))
               .build(),
           BODY,
           Inches.of(2.625));

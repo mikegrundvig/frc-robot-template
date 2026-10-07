@@ -29,7 +29,17 @@ public record Position(String name, Kind kind, double value) {
     /** An angle, in radians: a revolute joint's. */
     ANGLE,
     /** A length, in meters: a prismatic joint's. */
-    LENGTH
+    LENGTH;
+
+    /** A joint's: an angle for one that turns, a length for one that slides. */
+    static Kind of(Joint joint) {
+      return of(joint instanceof Joint.Revolute);
+    }
+
+    /** An angle for a joint that turns, a length for one that slides. */
+    static Kind of(boolean revolute) {
+      return revolute ? ANGLE : LENGTH;
+    }
   }
 
   public Position {

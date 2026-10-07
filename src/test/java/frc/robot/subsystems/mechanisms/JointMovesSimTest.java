@@ -12,13 +12,11 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_EJECTING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_OUTTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_BACK;
 import static frc.robot.subsystems.mechanisms.JointFixtures.assumed;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.profile;
-import static frc.robot.subsystems.mechanisms.JointFixtures.setup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
@@ -28,6 +26,7 @@ import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Output;
@@ -53,7 +52,7 @@ import org.wpilib.math.geometry.Translation3d;
  */
 @ExtendWith(RobotSim.class)
 class JointMovesSimTest {
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);
   private final JointMechanism elevator = sim.joints.of(ELEVATOR);
@@ -117,7 +116,7 @@ class JointMovesSimTest {
 
     assertThat(tooFar.outcome()).contains(Outcome.REFUSED);
     assertThat(tooFar.reason())
-        .isEqualTo("pivot → 140.0°: REFUSED: 140.0° is outside pivot's limits, 0.0° to 135.0°");
+        .isEqualTo("pivot → 140°: REFUSED: 140° is outside pivot's limits, 0° to 135°");
     assertThat(pivotDegrees()).as("it holds where it was").isCloseTo(1.5, within(1.0));
   }
 
@@ -128,9 +127,11 @@ class JointMovesSimTest {
    */
   @Test
   void aMoveThatCantGetThereTimesOutAtItsDefaultDeadline() {
-    List<JointSetup> weak = new ArrayList<>(SETUPS);
-    weak.set(2, setup(ELEVATOR, assumed(control(60, 2, Optional.empty(), profile(1.2, 5), 1))));
-    JointsSimHarness stuck = new JointsSimHarness(ROBOT, weak);
+    JointsSimHarness stuck =
+        new JointsSimHarness(
+            ROBOT.with(
+                ELEVATOR.retuned(
+                    old -> assumed(control(60, 2, Optional.empty(), profile(1.2, 5), 1)))));
     JointMechanism lift = stuck.joints.of(ELEVATOR);
     Move clear = lift.goTo(ELEVATOR_CLEAR);
 
@@ -139,7 +140,7 @@ class JointMovesSimTest {
 
     assertThat(clear.outcome()).contains(Outcome.TIMED_OUT);
     assertThat(clear.reason())
-        .isEqualTo("elevator → clear: TIMED_OUT after 1.66 s, elevator at 0.000 m (0.00 in)");
+        .isEqualTo("elevator → clear: TIMED_OUT after 1.66 s, elevator at 0 m");
     assertThat(took).isCloseTo(1.68, within(0.001));
     assertThat(lift.goal()).as("it holds where it stopped").isCloseTo(0, within(0.005));
   }
@@ -327,25 +328,58 @@ class JointMovesSimTest {
   }
 
   /**
-   * A place or an output of another joint's is refused as the move starts, saying whose it is and
-   * what the joint has: a misspelling can't be written, and a mixed-up joint never moves.
+   * A place or an output of another joint's, built as the robot starts (a binding, or an auto built
+   * with them), throws there, saying whose it is and what the joint has: the robot doesn't start,
+   * and a test that builds it fails, before anyone presses a button.
    */
   @Test
-  void aPlaceOfAnotherJointsIsRefused() {
-    Move wrongPlace = pivot.goTo(ELEVATOR_CLEAR);
-    Move wrongOutput = roller.run(PIVOT_PUSH);
+  void aPlaceOfAnotherJointsBuiltAsTheRobotStartsThrows() {
+    assertThatThrownBy(() -> pivot.goTo(ELEVATOR_CLEAR))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("pivot has no position clear at 0.4 m: it has in, run, out");
+    assertThatThrownBy(() -> roller.run(PIVOT_PUSH))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("roller has no output push: it has intaking, outtaking, ejecting, and stopped");
+    assertThatThrownBy(() -> roller.runUntil(PIVOT_PUSH, () -> true))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("roller has no output push: it has intaking, outtaking, ejecting, and stopped");
+  }
 
-    runToEnd(wrongPlace, 1);
-    runToEnd(wrongOutput, 1);
+  /**
+   * Built once the robot runs, by a command or anywhere else, the same move is refused as it
+   * starts, its reason logged, and the joint stays where it is: a robot on the field is never
+   * stopped by one.
+   */
+  @Test
+  void aPlaceOfAnotherJointsBuiltWhileTheRobotRunsIsRefused() {
+    List<Move> built = new ArrayList<>();
+    Command wrong =
+        Command.requiring(pivot, roller)
+            .executing(
+                co -> {
+                  built.add(pivot.goTo(ELEVATOR_CLEAR));
+                  built.add(roller.run(PIVOT_PUSH));
+                  for (Move move : built) {
+                    co.await(move);
+                  }
+                })
+            .named("Wrong places");
 
-    assertThat(wrongPlace.outcome()).contains(Outcome.REFUSED);
-    assertThat(wrongPlace.reason())
+    sim.run(wrong, 0.5);
+    Move later = pivot.goTo(ELEVATOR_CLEAR);
+    runToEnd(later, 1);
+
+    assertThat(built).hasSize(2);
+    assertThat(built.get(0).outcome()).contains(Outcome.REFUSED);
+    assertThat(built.get(0).reason())
         .isEqualTo(
             "pivot → clear: REFUSED: pivot has no position clear at 0.4 m: it has in, run, out");
-    assertThat(wrongOutput.reason())
+    assertThat(built.get(1).reason())
         .isEqualTo(
             "roller: push: REFUSED: roller has no output push: it has intaking, outtaking,"
                 + " ejecting, and stopped");
+    assertThat(later.outcome()).as("outside a command, once it runs").contains(Outcome.REFUSED);
+    assertThat(pivot.lastOutcome()).isEqualTo(later.reason());
     assertThat(sim.simulation.position(PIVOT)).isCloseTo(Math.toRadians(1.5), within(0.01));
   }
 
@@ -451,8 +485,8 @@ class JointMovesSimTest {
   @Test
   void movesNameTheirJointAndRequireIt() {
     assertThat(pivot.goTo(PIVOT_OUT).requirements()).containsExactly(pivot);
-    assertThat(pivot.goTo(Degrees.of(45)).name()).isEqualTo("pivot → 45.0°");
-    assertThat(elevator.goTo(Meters.of(0.25)).name()).isEqualTo("elevator → 0.250 m (9.84 in)");
+    assertThat(pivot.goTo(Degrees.of(45)).name()).isEqualTo("pivot → 45°");
+    assertThat(elevator.goTo(Meters.of(0.25)).name()).isEqualTo("elevator → 0.25 m");
     assertThat(roller.run(ROLLER_INTAKING).name()).isEqualTo("roller: intaking");
     assertThat(roller.run(Output.STOPPED).name()).isEqualTo("roller: stopped");
     assertThat(pivot.getName()).isEqualTo("pivot");
@@ -493,6 +527,7 @@ class JointMovesSimTest {
             .label("hatch")
             .origin(new Transform3d(new Translation3d(-0.2, 0, 0.3), Rotation3d.ZERO))
             .link(JointFixtures.link("hatch", 1, new Translation3d()))
+            .driven(Driven.NONE)
             .build();
     Configuration open = Configuration.of("open", PIVOT.at(PIVOT_OUT), hatch.at(PIVOT_OUT));
     RobotDefinition withHatch =
@@ -500,7 +535,7 @@ class JointMovesSimTest {
             .joints(List.of(PIVOT, ROLLER, ELEVATOR, TURRET, hatch))
             .configurations(List.of(INTAKING, open))
             .build();
-    JointsSimHarness hatched = new JointsSimHarness(withHatch, SETUPS);
+    JointsSimHarness hatched = new JointsSimHarness(withHatch);
     hatched.run(0.5);
     double before = hatched.simulation.position(PIVOT);
 
@@ -526,6 +561,7 @@ class JointMovesSimTest {
             .label("hatch")
             .origin(new Transform3d(new Translation3d(-0.2, 0, 0.3), Rotation3d.ZERO))
             .link(JointFixtures.link("hatch", 1, new Translation3d()))
+            .driven(Driven.NONE)
             .build();
     Configuration shut = Configuration.of("shut", hatch.at(PIVOT_IN));
     RobotDefinition withHatch =
@@ -533,7 +569,7 @@ class JointMovesSimTest {
             .joints(List.of(PIVOT, ROLLER, ELEVATOR, TURRET, hatch))
             .configurations(List.of(INTAKING, shut))
             .build();
-    JointsSimHarness hatched = new JointsSimHarness(withHatch, SETUPS);
+    JointsSimHarness hatched = new JointsSimHarness(withHatch);
 
     Move shutting = hatched.joints.goTo(shut);
     hatched.run(shutting, 0.1);

@@ -49,8 +49,6 @@ import org.wpilib.util.Alert;
  * ({@link #simulator()}): the Driver Station, joysticks, pausing and stepping, stopping, and
  * failing the simulated robot's parts live: an API the page's Sim view drives, in the place of
  * WPILib's simulator GUI. On a robot there is no such thing.
- *
- * @param <T> the robot's configuration record
  */
 public final class Pitwall implements AutoCloseable {
   private final Tuning tuning;

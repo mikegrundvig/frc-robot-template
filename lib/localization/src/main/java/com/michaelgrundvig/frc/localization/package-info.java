@@ -38,10 +38,9 @@
  *       to trust them right now, and {@link com.michaelgrundvig.frc.localization.SlipCheck} whether
  *       the IMU sees them sliding together.
  *   <li><b>IMUs:</b> {@link com.michaelgrundvig.frc.localization.YawTrack} places yaw readings in
- *       time, {@link com.michaelgrundvig.frc.localization.ImuCrossCheck} compares two IMUs, and
- *       {@link com.michaelgrundvig.frc.localization.TerrainCrossing} follows the robot over raised
- *       terrain. The service picks which IMU turns odometry: the gyro, the backup while the gyro is
- *       lost, or the wheels.
+ *       time, and {@link com.michaelgrundvig.frc.localization.ImuCrossCheck} compares two IMUs; a
+ *       tilt the field's terrain explains keeps the wheels trusted. The service picks which IMU
+ *       turns odometry: the gyro, the backup while the gyro is lost, or the wheels.
  *   <li><b>Cameras:</b> the raw {@link com.michaelgrundvig.frc.localization.TagDetections} of one
  *       image go through the {@link com.michaelgrundvig.frc.localization.VisionPipeline}, which
  *       solves them (with {@link com.michaelgrundvig.frc.localization.TagSolver}) into a {@link

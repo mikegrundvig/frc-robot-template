@@ -28,7 +28,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -151,7 +150,6 @@ public final class MountOptions {
           .yaw(yaw(way))
           .sensor(sensor)
           .noiseScale(1)
-          .joint(Optional.empty())
           .build();
     }
 

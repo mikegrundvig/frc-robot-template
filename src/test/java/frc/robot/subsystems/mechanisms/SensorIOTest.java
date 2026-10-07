@@ -1,5 +1,7 @@
 package frc.robot.subsystems.mechanisms;
 
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANDI;
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANRANGE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
@@ -17,7 +19,6 @@ import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
-import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -49,15 +50,6 @@ class SensorIOTest {
       Thread.sleep(10);
     }
     return false;
-  }
-
-  private static SensorWiring.OfSwitch onCandi(
-      String sensor, int input, SensorWiring.Polarity polarity) {
-    return SensorWiring.OfSwitch.builder()
-        .sensor(sensor)
-        .input(new SensorWiring.Candi(CanBus.canivore(BUS), 41, input))
-        .polarity(polarity)
-        .build();
   }
 
   /**
@@ -95,12 +87,10 @@ class SensorIOTest {
   void aCandiIsToldWhichStateIsTrippedForEachInput() throws InterruptedException {
     SensorIOCandi open =
         new SensorIOCandi(
-            onCandi("claw beam", 1, SensorWiring.Polarity.NORMALLY_OPEN),
-            new SensorWiring.Candi(CanBus.canivore(BUS), 41, 1));
+            CANDI.can(CanBus.canivore(BUS), 41).s1(), SensorWiring.Polarity.NORMALLY_OPEN);
     SensorIOCandi closed =
         new SensorIOCandi(
-            onCandi("pivot down", 2, SensorWiring.Polarity.NORMALLY_CLOSED),
-            new SensorWiring.Candi(CanBus.canivore(BUS), 41, 2));
+            CANDI.can(CanBus.canivore(BUS), 41).s2(), SensorWiring.Polarity.NORMALLY_CLOSED);
     CANdi device = new CANdi(41, new CANBus(BUS));
     SensorIO.SensorIOInputs a = new SensorIO.SensorIOInputs();
     SensorIO.SensorIOInputs b = new SensorIO.SensorIOInputs();
@@ -132,8 +122,7 @@ class SensorIOTest {
   @Test
   void aCanRangeReadsItsDistance() throws InterruptedException {
     Sensor.Rangefinder hopper = rangefinder(3, 6.75);
-    SensorIOCanRange io =
-        new SensorIOCanRange(hopper, new SensorWiring.CanRange(CanBus.canivore(BUS), 42));
+    SensorIOCanRange io = new SensorIOCanRange(hopper, CANRANGE.can(CanBus.canivore(BUS), 42));
     new CANrange(42, new CANBus(BUS)).getSimState().setDistance(0.3);
     SensorIO.SensorIOInputs inputs = new SensorIO.SensorIOInputs();
 
@@ -164,10 +153,8 @@ class SensorIOTest {
     return Sensor.Rangefinder.builder()
         .label("hopper range")
         .part(Part.CHASSIS)
-        .pose(Optional.empty())
         .range(Meters.of(meters))
         .fieldOfView(Degrees.of(degrees))
-        .wiring(Optional.empty())
         .build();
   }
 }

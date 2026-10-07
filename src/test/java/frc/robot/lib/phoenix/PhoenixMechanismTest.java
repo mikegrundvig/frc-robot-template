@@ -1,5 +1,6 @@
 package frc.robot.lib.phoenix;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
@@ -12,6 +13,7 @@ import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.Seconds;
 
 import com.ctre.phoenix6.configs.CANcoderConfiguration;
+import com.ctre.phoenix6.configs.SlotConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
 import com.ctre.phoenix6.signals.GravityTypeValue;
@@ -25,15 +27,14 @@ import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Coupling;
 import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
-import com.michaelgrundvig.frc.world.robot.MechanismWiringBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.Range;
@@ -92,12 +93,8 @@ class PhoenixMechanismTest {
           .parent(Part.CHASSIS)
           .origin(new Transform3d(new Translation3d(-0.2, 0, 0.1), Rotation3d.ZERO))
           .axis(Vector3.UP)
-          .range(Optional.of(Range.meters(0, 1.2)))
-          .reference(0)
           .link(weighed("carriage", 5, Translation3d.ZERO))
-          .positions(List.of())
-          .outputs(List.of())
-          .driven(Driven.NONE)
+          .range(Range.meters(0, 1.2))
           .build();
 
   /** A turret, unweighed, on 340° of travel. */
@@ -139,7 +136,7 @@ class PhoenixMechanismTest {
           .label("turret cancoder")
           .terms(List.of(term(TURRET, -1)))
           .absolute(true)
-          .countsPerTurn(Optional.of(4096))
+          .countsPerTurn(4096)
           .build();
 
   /** The arm's CANcoder, on its shaft. */
@@ -157,8 +154,7 @@ class PhoenixMechanismTest {
 
   @Test
   void anArmsRotorReadsItThroughItsGearingInItsRotations() {
-    PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), control());
+    PhoenixMechanism.Settings arm = configure(math, ARM, ARM_MOTORS, wiring(11, 12), control());
     TalonFXConfiguration leader = arm.leader();
 
     assertThat(leader.Feedback.FeedbackSensorSource)
@@ -174,7 +170,7 @@ class PhoenixMechanismTest {
   @Test
   void everyCurrentLimitIsSetWhereItShows() {
     TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), control()).leader();
+        configure(math, ARM, ARM_MOTORS, wiring(11, 12), control()).leader();
 
     assertThat(leader.CurrentLimits.StatorCurrentLimitEnable).isTrue();
     assertThat(leader.CurrentLimits.StatorCurrentLimit).isEqualTo(60);
@@ -186,10 +182,9 @@ class PhoenixMechanismTest {
 
   @Test
   void aMotorTurningClockwiseToRaiseTheJointIsInverted() {
-    MechanismWiring wiring = wiring(motor(11, true), motor(12, true));
+    List<MechanismWiring.Device> wiring = wiring(motor(11, true), motor(12, true));
 
-    TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring, coasting()).leader();
+    TalonFXConfiguration leader = configure(math, ARM, ARM_MOTORS, wiring, coasting()).leader();
 
     assertThat(leader.MotorOutput.Inverted).isEqualTo(InvertedValue.Clockwise_Positive);
     assertThat(leader.MotorOutput.NeutralMode).isEqualTo(NeutralModeValue.Coast);
@@ -202,11 +197,9 @@ class PhoenixMechanismTest {
   @Test
   void followersAreAlignedOrOpposedByWhichWayTheyTurn() {
     PhoenixMechanism.Settings same =
-        PhoenixMechanism.configure(
-            math, ARM, ARM_MOTORS, wiring(motor(11, false), motor(12, false)), control());
+        configure(math, ARM, ARM_MOTORS, wiring(motor(11, false), motor(12, false)), control());
     PhoenixMechanism.Settings facing =
-        PhoenixMechanism.configure(
-            math, ARM, ARM_MOTORS, wiring(motor(11, false), motor(12, true)), control());
+        configure(math, ARM, ARM_MOTORS, wiring(motor(11, false), motor(12, true)), control());
     PhoenixMechanism.FollowerSettings follower = facing.followers().get(0);
 
     assertThat(same.followers().get(0).request().MotorAlignment)
@@ -225,16 +218,17 @@ class PhoenixMechanismTest {
   @Test
   void aDrivesMotorsAreAllWired() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11), control()))
+        .isThrownBy(() -> configure(math, ARM, ARM_MOTORS, wiring(11), control()))
         .withMessage("arm is 2 motors, and its wiring names 1");
   }
 
+  /** Soft limits past the stops are the definition's to refuse, before a helper sees them. */
   @Test
-  void aSoftLimitIsInPhoenixsRotationsAndInsideTheStops() {
+  void aSoftLimitIsInPhoenixsRotations() {
     MechanismControl limited = control(soft(Math.toRadians(-20), Math.toRadians(110)));
 
     TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), limited).leader();
+        configure(math, ARM, ARM_MOTORS, wiring(11, 12), limited).leader();
 
     assertThat(leader.SoftwareLimitSwitch.ForwardSoftLimitEnable).isTrue();
     assertThat(leader.SoftwareLimitSwitch.ForwardSoftLimitThreshold)
@@ -242,23 +236,12 @@ class PhoenixMechanismTest {
     assertThat(leader.SoftwareLimitSwitch.ReverseSoftLimitEnable).isTrue();
     assertThat(leader.SoftwareLimitSwitch.ReverseSoftLimitThreshold)
         .isCloseTo(-20.0 / 360, within(1e-12));
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                PhoenixMechanism.configure(
-                    math,
-                    ARM,
-                    ARM_MOTORS,
-                    wiring(11, 12),
-                    control(soft(Math.toRadians(-40), Math.toRadians(110)))))
-        .withMessage(
-            "arm's soft limits, -40.0° to 110.0°, must be inside its hard stops, -30.0° to 120.0°");
   }
 
   @Test
   void noSoftLimitsLeavesPhoenixsOff() {
     TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), control()).leader();
+        configure(math, ARM, ARM_MOTORS, wiring(11, 12), control()).leader();
 
     assertThat(leader.SoftwareLimitSwitch.ForwardSoftLimitEnable).isFalse();
     assertThat(leader.SoftwareLimitSwitch.ReverseSoftLimitEnable).isFalse();
@@ -267,7 +250,7 @@ class PhoenixMechanismTest {
   @Test
   void aJointThatTurnsFreelyTakesTheShortWayRound() {
     TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, FLYWHEEL, FLYWHEEL_MOTOR, wiring(20), control()).leader();
+        configure(math, FLYWHEEL, FLYWHEEL_MOTOR, wiring(20), control()).leader();
 
     assertThat(leader.ClosedLoopGeneral.ContinuousWrap).isTrue();
     assertThat(leader.Feedback.SensorToMechanismRatio).isEqualTo(1);
@@ -276,16 +259,18 @@ class PhoenixMechanismTest {
   @Test
   void anElevatorIsInItsDrumsRotations() {
     PhoenixMechanism.Settings elevator =
-        PhoenixMechanism.configure(
+        configure(
             math,
             ELEVATOR,
             ELEVATOR_MOTORS,
             wiring(30, 31),
-            control(seeded(), Optional.of(soft(0.1, 1.0)), Optional.of(profile(1, 3, 0)), BRAKE));
+            control(seeded(), Optional.of(soft(0.1, 1.0)), Optional.of(profile(1, 3)), BRAKE));
     TalonFXConfiguration leader = elevator.leader();
     double drum = TURN * 0.02;
 
-    assertThat(elevator.units().name()).isEqualTo("rotations of elevator's drum");
+    assertThat(elevator.rotations().perRotation())
+        .as("a turn of its drum")
+        .isCloseTo(drum, within(1e-15));
     assertThat(leader.Feedback.SensorToMechanismRatio)
         .as("the gearing")
         .isCloseTo(10, within(1e-12));
@@ -293,15 +278,13 @@ class PhoenixMechanismTest {
         .isCloseTo(0.1 / drum, within(1e-12));
     assertThat(leader.SoftwareLimitSwitch.ForwardSoftLimitThreshold)
         .isCloseTo(1.0 / drum, within(1e-12));
-    assertThat(leader.MotionMagic.MotionMagicCruiseVelocity).isCloseTo(1 / drum, within(1e-12));
-    assertThat(leader.MotionMagic.MotionMagicAcceleration).isCloseTo(3 / drum, within(1e-12));
     assertThat(leader.ClosedLoopGeneral.ContinuousWrap).isFalse();
   }
 
   /**
    * A winch, 100:1 on a ½ in spool: its rotor turns 2506 times a meter, past Phoenix's 1000, but
-   * its Phoenix unit is the spool's rotation, so its ratio is the gearing, 100. Its soft limit and
-   * its cruise, in meters in its control, are in spool rotations in Phoenix.
+   * its Phoenix unit is the spool's rotation, so its ratio is the gearing, 100. Its soft limit, in
+   * meters in its control, is in spool rotations in Phoenix.
    */
   @Test
   void aWinchIsInItsSpoolsRotations() {
@@ -311,52 +294,29 @@ class PhoenixMechanismTest {
             .parent(Part.CHASSIS)
             .origin(Transform3d.ZERO)
             .axis(Vector3.UP)
-            .range(Optional.of(Range.meters(0, 0.5)))
-            .reference(0)
             .link(unseen("hook"))
-            .positions(List.of())
-            .outputs(List.of())
-            .driven(Driven.NONE)
+            .range(Range.meters(0, 0.5))
             .build();
     Drive slow = JointFixtures.motors(winch, Motor.KRAKEN_X60, 1, gearing(100), Inches.of(0.25));
     RobotMath robot = RobotMath.of(BODY, List.of(winch), List.of(), List.of(slow), List.of());
     double spool = TURN * 0.25 * 0.0254;
-    double free = robot.freeSpeed(winch);
 
     TalonFXConfiguration leader =
-        PhoenixMechanism.configure(
+        configure(
                 robot,
                 winch,
                 slow,
                 wiring(1),
-                control(
-                    seeded(),
-                    Optional.of(soft(0, 0.5)),
-                    Optional.of(profile(free / 2, 1, 0)),
-                    BRAKE))
+                control(seeded(), Optional.of(soft(0, 0.5)), Optional.empty(), BRAKE))
             .leader();
 
     assertThat(slow.rotor().ratio(winch)).isGreaterThan(PhoenixMechanism.MAX_RATIO);
     assertThat(leader.Feedback.SensorToMechanismRatio).isCloseTo(100, within(1e-9));
     assertThat(leader.SoftwareLimitSwitch.ForwardSoftLimitThreshold)
         .isCloseTo(0.5 / spool, within(1e-9));
-    assertThat(leader.MotionMagic.MotionMagicCruiseVelocity)
-        .as("half the spool's free speed, a Kraken's 100 rps through 100:1")
-        .isCloseTo(0.5, within(1e-9));
-    assertThat(leader.Slot0.kV).as("12 V for the spool's 1 rps").isCloseTo(12, within(1e-9));
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                PhoenixMechanism.configure(
-                    robot,
-                    winch,
-                    slow,
-                    wiring(1),
-                    control(
-                        seeded(), Optional.empty(), Optional.of(profile(free * 2, 1, 0)), BRAKE)))
-        .withMessage(
-            "winch's Motion Magic cruise, 2 drum rot/s, is 2 times its free speed, 1 drum rot/s:"
-                + " the profile would ask more than its motors turn it at 12 V");
+    assertThat(leader.Slot0.kV)
+        .as("12 V for the spool's 1 rps, a Kraken's 100 rps through 100:1")
+        .isCloseTo(12, within(1e-9));
   }
 
   /** Geared past 1000:1, a ratio Phoenix can't hold is refused. */
@@ -366,7 +326,7 @@ class PhoenixMechanismTest {
     RobotMath robot = RobotMath.of(BODY, List.of(TURRET), List.of(), List.of(crawl), List.of());
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(robot, TURRET, crawl, wiring(1), control()))
+        .isThrownBy(() -> configure(robot, TURRET, crawl, wiring(1), control()))
         .withMessage(
             "turret's SensorToMechanismRatio would be 1500, and Phoenix holds from -1000 to 1000,"
                 + " never 0");
@@ -382,15 +342,14 @@ class PhoenixMechanismTest {
             .build();
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(math, ARM, servo, wiring(11), control()))
-        .withMessage("arm servo isn't motors: Phoenix drives motors");
+        .isThrownBy(() -> configure(math, ARM, servo, wiring(11), control()))
+        .withMessage("arm servo isn't motors: a motor controller drives motors");
   }
 
   @Test
   void theDriveMustMoveTheJoint() {
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () -> PhoenixMechanism.configure(math, WRIST, ARM_MOTORS, wiring(1, 2), control()))
+        .isThrownBy(() -> configure(math, WRIST, ARM_MOTORS, wiring(1, 2), control()))
         .withMessage("arm doesn't move wrist");
   }
 
@@ -406,8 +365,7 @@ class PhoenixMechanismTest {
     MechanismControl tuned =
         control(gains(2, 0.5, 0.1, 0.2, Optional.empty(), Optional.empty(), Optional.empty()));
 
-    TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).leader();
+    TalonFXConfiguration leader = configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).leader();
     RobotMath.Gains seed = math.idealGains(ARM);
 
     assertThat(leader.Slot0.kV).isCloseTo(7.2, within(1e-9));
@@ -421,8 +379,7 @@ class PhoenixMechanismTest {
 
   @Test
   void anArmHoldsAgainstOneCosineFromItsDefinition() {
-    PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), control());
+    PhoenixMechanism.Settings arm = configure(math, ARM, ARM_MOTORS, wiring(11, 12), control());
     RobotMath.Gains seed = math.idealGains(ARM);
 
     assertThat(arm.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
@@ -439,8 +396,7 @@ class PhoenixMechanismTest {
     MechanismControl tuned =
         control(gains(0, 0, 0, 0, Optional.of(idealKv * 1.1), Optional.of(0.05), Optional.of(0.3)));
 
-    PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned);
+    PhoenixMechanism.Settings arm = configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned);
 
     assertThat(arm.leader().Slot0.kV).isCloseTo(idealKv * 1.1 * TURN, within(1e-12));
     assertThat(arm.leader().Slot0.kA).isCloseTo(0.05 * TURN, within(1e-12));
@@ -461,16 +417,13 @@ class PhoenixMechanismTest {
             gains(
                 0, 0, 0, 0, Optional.of(enteredPerRotorTurn), Optional.empty(), Optional.empty()));
 
-    List<String> notes =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).notes();
+    List<String> notes = configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).notes();
 
     assertThat(notes)
         .containsExactly(
             "arm's tuned kV, 68.75 V/(rad/s), is 60 times the ideal, 1.146 V/(rad/s), from its"
                 + " motors and what it moves: the ideal per turn of arm, within 1%, entered as if"
-                + " per turn of its rotor, by the look of it",
-            "arm's kV and kA, 432 and 0.08436, are outside what Motion Magic Expo takes (0.001 to"
-                + " 100, 0.00001 to 100): Expo is left at Phoenix's defaults, a bare rotor's");
+                + " per turn of its rotor, by the look of it");
   }
 
   @Test
@@ -479,7 +432,7 @@ class PhoenixMechanismTest {
     MechanismControl tuned =
         control(gains(0, 0, 0, 0, Optional.of(ideal * 3.7), Optional.empty(), Optional.empty()));
 
-    assertThat(PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).notes())
+    assertThat(configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).notes())
         .singleElement()
         .asString()
         .startsWith("arm's tuned kV, 4.24 V/(rad/s), is 3.7 times the ideal")
@@ -492,7 +445,7 @@ class PhoenixMechanismTest {
     MechanismControl tuned =
         control(gains(0, 0, 0, 0, Optional.empty(), Optional.empty(), Optional.of(ideal / 3)));
 
-    assertThat(PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).notes())
+    assertThat(configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned).notes())
         .singleElement()
         .asString()
         .startsWith("arm's tuned kG, ")
@@ -502,8 +455,7 @@ class PhoenixMechanismTest {
   @Test
   void anElevatorHoldsItsCarriagesWeightEverywhere() {
     TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ELEVATOR, ELEVATOR_MOTORS, wiring(30, 31), control())
-            .leader();
+        configure(math, ELEVATOR, ELEVATOR_MOTORS, wiring(30, 31), control()).leader();
     RobotMath.Gains seed = math.idealGains(ELEVATOR);
 
     assertThat(leader.Slot0.GravityType).isEqualTo(GravityTypeValue.Elevator_Static);
@@ -516,14 +468,13 @@ class PhoenixMechanismTest {
 
   @Test
   void aWristOnAnArmIsHeldOnlyWithTheArmAtItsReference() {
-    PhoenixMechanism.Settings wrist =
-        PhoenixMechanism.configure(math, WRIST, WRIST_MOTOR, wiring(40), control());
+    PhoenixMechanism.Settings wrist = configure(math, WRIST, WRIST_MOTOR, wiring(40), control());
 
     assertThat(wrist.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
     assertThat(wrist.notes())
         .containsExactly(
-            "wrist rides arm, whose turning tilts its gravity: Phoenix's onboard gravity holds it"
-                + " only with arm at its reference, so feed RobotMath.gravityTorque at the joints'"
+            "wrist rides arm, whose turning tilts its gravity: a controller's gravity term holds it"
+                + " only with arm at rest, so feed RobotMath.gravityTorque at the joints'"
                 + " positions as the request's feedforward");
   }
 
@@ -538,20 +489,14 @@ class PhoenixMechanismTest {
     Joint.Revolute bare = bareArm();
     Drive motor = JointFixtures.motors(bare, Motor.KRAKEN_X60, 1, gearing(40));
     RobotMath robot = RobotMath.of(BODY, List.of(bare), List.of(), List.of(motor), List.of());
-    PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configure(robot, bare, motor, wiring(1), control());
+    PhoenixMechanism.Settings arm = configure(robot, bare, motor, wiring(1), control());
 
     assertThat(arm.leader().Slot0.kG).isZero();
     assertThat(arm.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
     assertThat(arm.leader().Slot0.GravityArmPositionOffset).isZero();
     assertThat(arm.notes()).isEmpty();
-    assertThat(
-            PhoenixMechanism.configure(math, TURRET, TURRET_MOTOR, wiring(50), control()).notes())
-        .isEmpty();
-    assertThat(
-            PhoenixMechanism.configure(math, FLYWHEEL, FLYWHEEL_MOTOR, wiring(20), control())
-                .notes())
-        .isEmpty();
+    assertThat(configure(math, TURRET, TURRET_MOTOR, wiring(50), control()).notes()).isEmpty();
+    assertThat(configure(math, FLYWHEEL, FLYWHEEL_MOTOR, wiring(20), control()).notes()).isEmpty();
   }
 
   /**
@@ -565,13 +510,11 @@ class PhoenixMechanismTest {
     RobotMath robot = RobotMath.of(BODY, List.of(bare), List.of(), List.of(motor), List.of());
 
     PhoenixMechanism.Settings atZero =
-        PhoenixMechanism.configure(robot, bare, motor, wiring(1), control().withKg(0.4));
+        configure(robot, bare, motor, wiring(1), control().withKg(0.4));
     PhoenixMechanism.Settings hanging =
-        PhoenixMechanism.configure(
-            robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(-90)));
+        configure(robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(-90)));
     PhoenixMechanism.Settings tipped =
-        PhoenixMechanism.configure(
-            robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(30)));
+        configure(robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(30)));
 
     assertThat(atZero.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
     assertThat(atZero.leader().Slot0.kG).isEqualTo(0.4);
@@ -585,40 +528,38 @@ class PhoenixMechanismTest {
   }
 
   /**
-   * The feedforward the robot works out itself is the slot's in volts: at rest at the angle where
-   * gravity pulls hardest, it holds with kG; moving, kS and kV too, and kD toward the speed.
+   * The slot is the plan's law, per rotation: its gains, the plan's feedforward gains, and its
+   * gravity's kG and where it pulls hardest, so a TalonFX runs what the robot would work out
+   * itself.
    */
   @Test
-  void theFeedforwardOnTheRobotIsTheSlotsInVolts() {
-    PhoenixMechanism.Feedforward feedforward =
-        new PhoenixMechanism.Feedforward(0.1, 2, 0, 0.5, true, 0, 1);
-    PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configureFeedforwardOnRobot(
-            math, ARM, ARM_MOTORS, wiring(11, 12), control().withKg(0.3, Degrees.of(10)));
+  void theSlotIsThePlansLawPerRotation() {
+    ControllerPlan plan =
+        ControllerPlan.of(
+            math,
+            ARM,
+            ARM_MOTORS,
+            wiring(11, 12),
+            control(gains(2, 0, 0.5, 0.1, Optional.empty(), Optional.empty(), Optional.of(0.3)))
+                .withKg(0.3, Degrees.of(10)));
+    SlotConfigs slot = SlotConfigs.from(PhoenixMechanism.configure(plan).leader().Slot0);
 
-    assertThat(feedforward.atPosition(0, 0, 0)).isCloseTo(0.5, within(1e-12));
-    assertThat(feedforward.atPosition(0.25, 0, 0)).as("straight up").isCloseTo(0, within(1e-12));
-    assertThat(feedforward.atPosition(0, 1, 0.5)).isCloseTo(0.1 + 2 + 0.5 + 0.5, within(1e-12));
-    assertThat(feedforward.atSpeed(0, -1)).isCloseTo(-0.1 - 2 + 0.5, within(1e-12));
-    assertThat(arm.feedforward())
-        .isEqualTo(
-            new PhoenixMechanism.Feedforward(
-                arm.leader().Slot0.kS,
-                arm.leader().Slot0.kV,
-                arm.leader().Slot0.kA,
-                0.3,
-                true,
-                -10.0 / 360,
-                arm.leader().Slot0.kD));
-    assertThat(arm.kP()).isEqualTo(arm.leader().Slot0.kP);
+    assertThat(slot.kP).isCloseTo(plan.kP() * TURN, within(1e-12));
+    assertThat(slot.kD).isCloseTo(plan.kD() * TURN, within(1e-12));
+    assertThat(slot.kS).isEqualTo(plan.kS());
+    assertThat(slot.kV).isCloseTo(plan.kV() * TURN, within(1e-12));
+    assertThat(slot.kA).isCloseTo(plan.kA() * TURN, within(1e-12));
+    assertThat(slot.kG).isEqualTo(plan.gravity().kG());
+    assertThat(slot.GravityArmPositionOffset)
+        .isCloseTo(plan.gravity().offset() / TURN, within(1e-12))
+        .isCloseTo(-10.0 / 360, within(1e-12));
   }
 
   /** A gravity angle given wins over where the links' mass puts the arm's weight. */
   @Test
   void aGivenGravityAngleWinsOverTheMasses() {
     PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configure(
-            math, ARM, ARM_MOTORS, wiring(11, 12), control().withKg(0.3, Degrees.of(10)));
+        configure(math, ARM, ARM_MOTORS, wiring(11, 12), control().withKg(0.3, Degrees.of(10)));
 
     assertThat(math.gravityOffset(ARM)).as("its mass on its zero").isCloseTo(0, within(1e-12));
     assertThat(arm.leader().Slot0.GravityArmPositionOffset).isCloseTo(-10.0 / 360, within(1e-12));
@@ -634,18 +575,15 @@ class PhoenixMechanismTest {
 
     assertThatIllegalArgumentException()
         .isThrownBy(
-            () ->
-                PhoenixMechanism.configure(
-                    robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(120))))
+            () -> configure(robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(120))))
         .withMessage(
-            "bare arm's gravity angle, 120.0°, is more than a quarter turn from its zero, past"
+            "bare arm's gravity angle, 120°, is more than a quarter turn from its zero, past"
                 + " Phoenix's gravity offset of ±0.25 rotations: its positive direction lowers it"
                 + " at its zero. Turn its axis around in the definition (and its motors' and"
                 + " encoder's directions in the wiring), so that positive raises it; its gravity"
-                + " angle is then 60.0°");
+                + " angle is then 60°");
     assertThat(
-            PhoenixMechanism.configure(
-                    robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(270)))
+            configure(robot, bare, motor, wiring(1), control().withKg(0.4, Degrees.of(270)))
                 .leader()
                 .Slot0
                 .GravityArmPositionOffset)
@@ -659,10 +597,9 @@ class PhoenixMechanismTest {
     Joint.Prismatic slide = slide("slide", Vector3.UP);
     Drive motor = JointFixtures.motors(slide, Motor.KRAKEN_X60, 1, gearing(5), Meters.of(0.02));
     RobotMath robot = RobotMath.of(BODY, List.of(slide), List.of(), List.of(motor), List.of());
-    PhoenixMechanism.Settings seeded =
-        PhoenixMechanism.configure(robot, slide, motor, wiring(1), control());
+    PhoenixMechanism.Settings seeded = configure(robot, slide, motor, wiring(1), control());
     PhoenixMechanism.Settings tuned =
-        PhoenixMechanism.configure(robot, slide, motor, wiring(1), control().withKg(0.5));
+        configure(robot, slide, motor, wiring(1), control().withKg(0.5));
 
     assertThat(seeded.leader().Slot0.kG).isZero();
     assertThat(seeded.notes()).isEmpty();
@@ -682,21 +619,17 @@ class PhoenixMechanismTest {
     RobotMath robot = RobotMath.of(BODY, List.of(level), List.of(), List.of(motor), List.of());
 
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                PhoenixMechanism.configure(
-                    math, TURRET, TURRET_MOTOR, wiring(50), control().withKg(0.3)))
+        .isThrownBy(() -> configure(math, TURRET, TURRET_MOTOR, wiring(50), control().withKg(0.3)))
         .withMessage(
             "turret has a tuned kG of 0.3 V, but gravity can't move it: it turns about the"
                 + " vertical. Leave its kG out, or write 0");
     assertThatIllegalArgumentException()
-        .isThrownBy(
-            () -> PhoenixMechanism.configure(robot, level, motor, wiring(1), control().withKg(0.3)))
+        .isThrownBy(() -> configure(robot, level, motor, wiring(1), control().withKg(0.3)))
         .withMessage(
             "hopper has a tuned kG of 0.3 V, but gravity can't move it: it slides level. Leave its"
                 + " kG out, or write 0");
     assertThat(
-            PhoenixMechanism.configure(math, TURRET, TURRET_MOTOR, wiring(50), control().withKg(0))
+            configure(math, TURRET, TURRET_MOTOR, wiring(50), control().withKg(0))
                 .leader()
                 .Slot0
                 .kG)
@@ -710,7 +643,7 @@ class PhoenixMechanismTest {
         control(gains(0, 0, 0, 200, Optional.empty(), Optional.empty(), Optional.empty()));
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned))
+        .isThrownBy(() -> configure(math, ARM, ARM_MOTORS, wiring(11, 12), tuned))
         .withMessage("arm's kS, 200 V, is past what Phoenix holds, -128 to 127 V");
   }
 
@@ -724,14 +657,13 @@ class PhoenixMechanismTest {
     Drive motor = JointFixtures.motors(upright, Motor.KRAKEN_X60, 1, gearing(25));
     RobotMath robot = RobotMath.of(BODY, List.of(upright), List.of(), List.of(motor), List.of());
 
-    PhoenixMechanism.Settings settings =
-        PhoenixMechanism.configure(robot, upright, motor, wiring(1), control());
+    PhoenixMechanism.Settings settings = configure(robot, upright, motor, wiring(1), control());
 
     assertThat(settings.leader().Slot0.GravityArmPositionOffset).isCloseTo(0.25, within(1e-12));
     assertThat(settings.notes())
         .containsExactly(
             "upright's gravity offset is 0.25 rotations, at Phoenix's limit of ±0.25: its center of"
-                + " mass is 0.0° from straight above or below the pivot at its zero, and a CAD"
+                + " mass is 0° from straight above or below the pivot at its zero, and a CAD"
                 + " change that moves it past makes the offset one Phoenix can't take. Zero"
                 + " upright nearer horizontal in CAD");
   }
@@ -747,7 +679,7 @@ class PhoenixMechanismTest {
     RobotMath robot = RobotMath.of(BODY, List.of(upright), List.of(), List.of(motor), List.of());
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(robot, upright, motor, wiring(1), control()))
+        .isThrownBy(() -> configure(robot, upright, motor, wiring(1), control()))
         .withMessage(
             "upright's gravity offset is 0.2556 rotations, past Phoenix's ±0.25: its positive"
                 + " direction lowers it. Turn its axis around in the definition (and its motors'"
@@ -771,7 +703,7 @@ class PhoenixMechanismTest {
     RobotMath robot = RobotMath.of(BODY, List.of(lowering), List.of(), List.of(motor), List.of());
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(robot, lowering, motor, wiring(1), control()))
+        .isThrownBy(() -> configure(robot, lowering, motor, wiring(1), control()))
         .withMessageContaining("is 0.5 rotations, past Phoenix's ±0.25")
         .withMessageEndingWith("the offset is then 0");
   }
@@ -796,73 +728,16 @@ class PhoenixMechanismTest {
     RobotMath robot =
         RobotMath.of(BODY, List.of(ARM, flap), List.of(linkage), List.of(ARM_MOTORS), List.of());
 
-    List<String> notes =
-        PhoenixMechanism.configure(robot, ARM, ARM_MOTORS, wiring(11, 12), control()).notes();
+    List<String> notes = configure(robot, ARM, ARM_MOTORS, wiring(11, 12), control()).notes();
 
-    assertThat(robot.gravityFit(ARM).misfit()).isGreaterThan(PhoenixMechanism.MISFIT);
+    assertThat(robot.gravityFit(ARM).misfit()).isGreaterThan(ControllerPlan.MISFIT);
     assertThat(notes)
         .singleElement()
         .asString()
         .startsWith("one cosine misses arm's gravity by ")
         .endsWith(
-            "Phoenix's Arm_Cosine can't follow it, so feed RobotMath.gravityTorque at the joint's"
-                + " angle as the request's feedforward");
-  }
-
-  // ---- Motion Magic ----
-
-  @Test
-  void aProfileIsInPhoenixsRotationsAndExpoFollowsTheSlot() {
-    MechanismControl profiled = control(profile(1.0, 4.0, 40));
-
-    TalonFXConfiguration leader =
-        PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wiring(11, 12), profiled).leader();
-
-    assertThat(leader.MotionMagic.MotionMagicCruiseVelocity).isCloseTo(1 / TURN, within(1e-12));
-    assertThat(leader.MotionMagic.MotionMagicAcceleration).isCloseTo(4 / TURN, within(1e-12));
-    assertThat(leader.MotionMagic.MotionMagicJerk).isCloseTo(40 / TURN, within(1e-12));
-    assertThat(leader.MotionMagic.MotionMagicExpo_kV).isEqualTo(leader.Slot0.kV);
-    assertThat(leader.MotionMagic.MotionMagicExpo_kA).isEqualTo(leader.Slot0.kA);
-  }
-
-  /** The arm's free speed through 60:1 is 1/0.6 of a turn a second: a cruise past it is refused. */
-  @Test
-  void aCruiseAboveTheFreeSpeedIsRefused() {
-    double free = math.freeSpeed(ARM);
-
-    assertThat(free / TURN).isCloseTo(100.0 / 60, within(1e-9));
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                PhoenixMechanism.configure(
-                    math, ARM, ARM_MOTORS, wiring(11, 12), control(profile(free * 1.5, 4, 0))))
-        .withMessage(
-            "arm's Motion Magic cruise, 2.5 rot/s, is 1.5 times its free speed, 1.667 rot/s: the"
-                + " profile would ask more than its motors turn it at 12 V");
-  }
-
-  @Test
-  void aProfilePhoenixCantHoldIsRefused() {
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                PhoenixMechanism.configure(
-                    math, ELEVATOR, ELEVATOR_MOTORS, wiring(30, 31), control(profile(1, 2000, 0))))
-        .withMessage(
-            "elevator's Motion Magic acceleration, 15920, is past the most Phoenix holds, 9999");
-  }
-
-  @Test
-  void anExpoProfilePhoenixCantTakeIsLeftAtItsDefaultAndNoted() {
-    MechanismControl untuned =
-        control(gains(0, 0, 0, 0, Optional.of(0.0), Optional.empty(), Optional.empty()));
-
-    PhoenixMechanism.Settings flywheel =
-        PhoenixMechanism.configure(math, FLYWHEEL, FLYWHEEL_MOTOR, wiring(20), untuned);
-
-    assertThat(flywheel.leader().MotionMagic.MotionMagicExpo_kV).isEqualTo(0.12);
-    assertThat(flywheel.notes())
-        .anySatisfy(note -> assertThat(note).startsWith("flywheel's kV and kA, 0 and "));
+            "cosine can't follow it, so feed RobotMath.gravityTorque at the joint's angle as the"
+                + " request's feedforward");
   }
 
   // ---- CANcoders ----
@@ -874,12 +749,13 @@ class PhoenixMechanismTest {
   @Test
   void aRemoteCancoderReadsTheJointAndItsRotorTheGearing() {
     PhoenixMechanism.Settings arm =
-        PhoenixMechanism.configure(
+        configure(
             math,
             ARM,
             ARM_MOTORS,
             ARM_CANCODER,
-            wiring(cancoder(MechanismWiring.Feedback.REMOTE), 11, 12),
+            cancoder(MechanismWiring.Feedback.REMOTE),
+            wiring(11, 12),
             control());
     TalonFXConfiguration leader = arm.leader();
     CANcoderConfiguration cancoder = arm.cancoder().orElseThrow();
@@ -905,12 +781,13 @@ class PhoenixMechanismTest {
   void eachFeedbackIsItsSource() {
     for (var feedback : MechanismWiring.Feedback.values()) {
       TalonFXConfiguration leader =
-          PhoenixMechanism.configure(
+          configure(
                   math,
                   ARM,
                   ARM_MOTORS,
                   ARM_CANCODER,
-                  wiring(cancoder(feedback), 11, 12),
+                  cancoder(feedback),
+                  wiring(11, 12),
                   control())
               .leader();
       FeedbackSensorSourceValue expected =
@@ -937,12 +814,13 @@ class PhoenixMechanismTest {
   void aCancoderGearedBackwardsWrapsWhereTheDefinitionsTurnedRoundDoes() {
     double definitions = math.discontinuityPoint(TURRET_CANCODER);
     PhoenixMechanism.Settings turret =
-        PhoenixMechanism.configure(
+        configure(
             math,
             TURRET,
             TURRET_MOTOR,
             TURRET_CANCODER,
-            wiring(cancoder(MechanismWiring.Feedback.FUSED), 50),
+            cancoder(MechanismWiring.Feedback.FUSED),
+            wiring(50),
             control());
 
     assertThat(turret.leader().Feedback.SensorToMechanismRatio).isEqualTo(1);
@@ -959,51 +837,47 @@ class PhoenixMechanismTest {
             .MagnetSensor
             .AbsoluteSensorDiscontinuityPoint;
 
-    assertThat(PhoenixMechanism.wrapMargin(TURRET_CANCODER, point))
+    assertThat(ControllerPlan.wrapMargin(TURRET_CANCODER, point))
         .isCloseTo(10.0 / 360, within(1e-12));
-    assertThat(PhoenixMechanism.wrapProblem(TURRET_CANCODER, point)).isNull();
-    assertThat(PhoenixMechanism.wrapProblem(TURRET_CANCODER, point + 0.01))
+    assertThat(ControllerPlan.wrapProblem(TURRET_CANCODER, point)).isNull();
+    assertThat(ControllerPlan.wrapProblem(TURRET_CANCODER, point + 0.01))
         .isEqualTo(
-            "turret cancoder wraps at 0.5378 of its turn, 6.4° from turret's range (-160.0° to"
-                + " 180.0°), and 166.4° from where it stows (0.0°): a reading a hair past the"
+            "turret cancoder wraps at 0.5378 of its turn, 6.4° from turret's range (-160° to"
+                + " 180°), and 166.4° from where it stows (0°): a reading a hair past the"
                 + " wrap reads a turn away");
   }
 
   /** A team's own wrap, across the range: where the arm reads a turn away inside its travel. */
   @Test
   void aWrapInsideTheRangeIsNamed() {
-    assertThat(PhoenixMechanism.wrapMargin(ARM_CANCODER, 1.0)).isNegative();
-    assertThat(PhoenixMechanism.wrapProblem(ARM_CANCODER, 1.0))
+    assertThat(ControllerPlan.wrapMargin(ARM_CANCODER, 1.0)).isNegative();
+    assertThat(ControllerPlan.wrapProblem(ARM_CANCODER, 1.0))
         .startsWith("arm cancoder wraps at 1 of its turn, inside arm's range");
-    assertThat(PhoenixMechanism.wrapMargin(encoder("flywheel encoder", FLYWHEEL, 1), 0.5))
+    assertThat(ControllerPlan.wrapMargin(encoder("flywheel encoder", FLYWHEEL, 1), 0.5))
         .as("nothing to keep clear")
         .isInfinite();
   }
 
   @Test
-  void aCancoderMustBeWiredAndAbsolute() {
+  void aCancoderMustBeAbsolute() {
     Sensor.Encoder relative =
         Sensor.Encoder.builder()
             .label("arm quadrature")
             .terms(List.of(term(ARM, 1)))
             .absolute(false)
-            .countsPerTurn(Optional.of(2048))
+            .countsPerTurn(2048)
             .build();
-    MechanismWiring wired = wiring(cancoder(MechanismWiring.Feedback.REMOTE), 11, 12);
-
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
-                PhoenixMechanism.configure(
-                    math, ARM, ARM_MOTORS, ARM_CANCODER, wiring(11, 12), control()))
-        .withMessage("arm's wiring names no CANcoder for arm cancoder: wire it");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> PhoenixMechanism.configure(math, ARM, ARM_MOTORS, wired, control()))
-        .withMessage(
-            "arm's wiring names a CANcoder: give the definition's encoder it is, or wire none");
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () -> PhoenixMechanism.configure(math, ARM, ARM_MOTORS, relative, wired, control()))
+                configure(
+                    math,
+                    ARM,
+                    ARM_MOTORS,
+                    relative,
+                    cancoder(MechanismWiring.Feedback.REMOTE),
+                    wiring(11, 12),
+                    control()))
         .withMessage("arm quadrature must be an absolute encoder on arm alone, as a CANcoder is");
   }
 
@@ -1038,10 +912,10 @@ class PhoenixMechanismTest {
 
   @Test
   void aMotorTurningTwoJointsSaysPhoenixReadsBoth() {
-    assertThat(PhoenixMechanism.configure(wrist, PITCH, LEFT, wiring(1), control()).notes().get(0))
+    assertThat(configure(wrist, PITCH, LEFT, wiring(1), control()).notes().get(0))
         .isEqualTo(
-            "left's rotor turns 12 times for each turn of roll too, which Phoenix reads as pitch"
-                + " moving: take it out in code, as a swerve module's coupling is");
+            "left's rotor turns 12 times for each turn of roll too, which the controller reads as"
+                + " pitch moving: take it out in code, as a swerve module's coupling is");
   }
 
   @Test
@@ -1066,12 +940,9 @@ class PhoenixMechanismTest {
         .parent(parent)
         .origin(new Transform3d(at, Rotation3d.ZERO))
         .axis(axis)
-        .range(range)
-        .reference(reference)
         .link(link)
-        .positions(List.of())
-        .outputs(List.of())
-        .driven(Driven.NONE)
+        .range(range)
+        .rest(reference)
         .build();
   }
 
@@ -1102,12 +973,11 @@ class PhoenixMechanismTest {
                 .cg(cg)
                 .inertia(Inertia.box(Kilograms.of(kilograms), new Translation3d(0.1, 0.1, 0.1)))
                 .build())
-        .shapes(List.of())
         .build();
   }
 
   private static Link unseen(String label) {
-    return Link.builder().label(label).mass(MassProperties.NONE).shapes(List.of()).build();
+    return Link.builder().label(label).mass(MassProperties.NONE).build();
   }
 
   private static Gearing gearing(double ratio) {
@@ -1115,11 +985,7 @@ class PhoenixMechanismTest {
   }
 
   private static Transmission.Term term(Joint joint, double ratio) {
-    return Transmission.Term.builder()
-        .joint(joint)
-        .ratio(ratio)
-        .pitchRadius(Optional.empty())
-        .build();
+    return Transmission.Term.builder().joint(joint).ratio(ratio).build();
   }
 
   private static Sensor.Encoder encoder(String label, Joint joint, double ratio) {
@@ -1127,7 +993,7 @@ class PhoenixMechanismTest {
         .label(label)
         .terms(List.of(term(joint, ratio)))
         .absolute(true)
-        .countsPerTurn(Optional.of(4096))
+        .countsPerTurn(4096)
         .build();
   }
 
@@ -1163,49 +1029,38 @@ class PhoenixMechanismTest {
         .parent(Part.CHASSIS)
         .origin(Transform3d.ZERO)
         .axis(axis)
-        .range(Optional.of(Range.meters(0, 0.5)))
-        .reference(0)
         .link(unseen(label + " carriage"))
-        .positions(List.of())
-        .outputs(List.of())
-        .driven(Driven.NONE)
+        .range(Range.meters(0, 0.5))
         .build();
   }
 
-  private static MechanismWiring.Motor motor(int id, boolean clockwise) {
-    return MechanismWiring.Motor.builder().id(id).clockwise(clockwise).build();
+  private static MechanismWiring.Device motor(int id, boolean clockwise) {
+    MechanismWiring.Device talon = MechanismWiring.Controller.TALON_FX.can(id);
+    return clockwise ? talon.clockwise() : talon;
   }
 
-  private static MechanismWiring wiring(int... ids) {
-    List<MechanismWiring.Motor> motors = new ArrayList<>();
+  /** TalonFXs at these IDs, the first leading, each turning counterclockwise for positive. */
+  private static List<MechanismWiring.Device> wiring(int... ids) {
+    List<MechanismWiring.Device> motors = new ArrayList<>();
     for (int id : ids) {
       motors.add(motor(id, false));
     }
-    return wiring(motors.toArray(MechanismWiring.Motor[]::new));
+    return motors;
   }
 
-  private static MechanismWiring wiring(MechanismWiring.Motor... motors) {
-    return MechanismWiring.builder()
-        .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
-        .controller(MechanismWiring.Controller.TALON_FX)
-        .motors(List.of(motors))
-        .cancoder(Optional.empty())
-        .dataPort(Optional.empty())
-        .build();
-  }
-
-  private static MechanismWiring wiring(MechanismWiring.Cancoder cancoder, int... ids) {
-    return MechanismWiringBuilder.builder(wiring(ids)).cancoder(Optional.of(cancoder)).build();
+  private static List<MechanismWiring.Device> wiring(MechanismWiring.Device... motors) {
+    return List.of(motors);
   }
 
   private static MechanismWiring.Cancoder cancoder(MechanismWiring.Feedback feedback) {
     Angle offset = Rotations.of(-0.125);
-    return MechanismWiring.Cancoder.builder()
-        .id(9)
-        .offset(offset)
-        .clockwise(true)
-        .feedback(feedback)
-        .build();
+    MechanismWiring.Cancoder cancoder = CANCODER.can(9).clockwise().offset(offset);
+    return switch (feedback) {
+      case ROTOR -> cancoder;
+      case REMOTE -> cancoder.remote();
+      case FUSED -> cancoder.fused();
+      case SYNC -> cancoder.sync();
+    };
   }
 
   private static MechanismControl.Gains gains(
@@ -1224,7 +1079,6 @@ class PhoenixMechanismTest {
         .kV(kV)
         .kA(kA)
         .kG(kG)
-        .gravityAngle(Optional.empty())
         .build();
   }
 
@@ -1236,11 +1090,10 @@ class PhoenixMechanismTest {
     return MechanismControl.SoftLimits.builder().lower(lower).upper(upper).build();
   }
 
-  private static MechanismControl.Profile profile(double cruise, double acceleration, double jerk) {
+  private static MechanismControl.Profile profile(double cruise, double acceleration) {
     return MechanismControl.Profile.builder()
         .cruiseVelocity(cruise)
         .acceleration(acceleration)
-        .jerk(jerk)
         .build();
   }
 
@@ -1275,8 +1128,6 @@ class PhoenixMechanismTest {
       MechanismControl.NeutralMode neutral) {
     return MechanismControl.builder()
         .gains(gains)
-        .softLimits(limits)
-        .profile(profile)
         .currentLimits(
             MechanismControl.CurrentLimits.builder()
                 .stator(Amps.of(60))
@@ -1285,8 +1136,32 @@ class PhoenixMechanismTest {
                 .supplyLowerTime(Seconds.of(0.5))
                 .build())
         .neutralMode(neutral)
-        .bands(Optional.empty())
-        .homing(Optional.empty())
+        .deadChannel(MechanismControl.DeadChannel.DEFAULTS)
+        .softLimits(limits)
+        .profile(profile)
         .build();
+  }
+
+  /** The helper's settings for a mechanism's parts, through the plan the program works out. */
+  private static PhoenixMechanism.Settings configure(
+      RobotMath math,
+      Joint joint,
+      Drive drive,
+      List<MechanismWiring.Device> controllers,
+      MechanismControl control) {
+    return PhoenixMechanism.configure(ControllerPlan.of(math, joint, drive, controllers, control));
+  }
+
+  /** The same, with a CANcoder. */
+  private static PhoenixMechanism.Settings configure(
+      RobotMath math,
+      Joint joint,
+      Drive drive,
+      Sensor.Encoder encoder,
+      MechanismWiring.Cancoder cancoder,
+      List<MechanismWiring.Device> controllers,
+      MechanismControl control) {
+    return PhoenixMechanism.configure(
+        math, ControllerPlan.of(math, joint, drive, controllers, control), encoder, cancoder);
   }
 }

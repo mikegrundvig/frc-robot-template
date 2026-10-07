@@ -1,8 +1,11 @@
 package frc.robot.subsystems.mechanisms;
 
 import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -19,7 +22,6 @@ import com.revrobotics.spark.SparkLowLevel;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.util.Signal;
-import frc.robot.lib.phoenix.PhoenixUnits;
 import frc.robot.lib.rev.RevMechanism;
 import frc.robot.lib.wiring.CanPorts;
 import frc.robot.lib.wiring.ControllerPins;
@@ -28,8 +30,6 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
-import org.littletonrobotics.junction.Logger;
-import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.hardware.bus.CANPort;
 import org.wpilib.math.filter.Debouncer;
 
@@ -40,11 +40,11 @@ import org.wpilib.math.filter.Debouncer;
  * ControllerSettings#spark}), as a TalonFX's come from the Phoenix helper: nothing is retyped here.
  *
  * <p>Positions go to the SPARK's loop with the profile's point and the feedforward the robot works
- * out in volts ({@code PhoenixMechanism.Feedforward}); speeds the same way. A joint is read by its
- * rotor: one with an absolute encoder on the SPARK's data port is told where it is from that
- * encoder's first good reading; one without takes its reference as where it is at power on, until
- * it homes. One whose loop closes on that encoder is read by it instead, each loop, and its
- * positions go to the SPARK's loop in the encoder's turns ({@link
+ * out in volts, the plan's law and its kD ({@code ControllerPlan#feedforward}); speeds the same
+ * way. A joint is read by its rotor: one with an absolute encoder on the SPARK's data port is told
+ * where it is from that encoder's first good reading; one without takes its reference as where it
+ * is at power on, until it homes. One whose loop closes on that encoder is read by it instead, each
+ * loop, and its positions go to the SPARK's loop in the encoder's turns ({@link
  * RevMechanism.Settings#loopRatio}). Its settings are kept through a brownout: REV's controllers
  * fall back to what's saved on them.
  */
@@ -56,15 +56,18 @@ public final class JointIOSpark implements JointIO {
   private final List<SparkBase> followers = new ArrayList<>();
   private final RelativeEncoder encoder;
   private final SparkClosedLoopController loop;
-  private final MechanismWiring wiring;
-  private final PhoenixUnits units;
+
+  /** The kind of SPARK its motors are on: a SPARK MAX or a SPARK Flex. */
+  private final MechanismWiring.Controller controller;
+
+  private final MechanismRotations rotations;
   private final double rotorRatio;
   private final String unconfigured;
 
   /** A controller counts as silent once it has been for half a second, not at one glitch. */
   private final Debouncer connected = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
-  /** The REV settings for a control: the joint's, its drive's and its wiring's, with it. */
+  /** The REV settings for a control: the joint's, its drive's and its block's, with it. */
   private final Function<MechanismControl, RevMechanism.Settings> configure;
 
   private RevMechanism.Settings settings;
@@ -92,12 +95,12 @@ public final class JointIOSpark implements JointIO {
    * Configures every device of the joint, waiting for each, at startup.
    *
    * @param math what the robot's definition derives: the joint's drive, ratios and seeds
-   * @param setup the joint, its control, and its wiring, which it must have, on a SPARK
-   * @throws IllegalArgumentException for a setup without wiring, and what its settings refuse
-   *     ({@link ControllerSettings#spark})
+   * @param joint the joint, its block naming its control and its motors' SPARKs, which it must
+   * @throws IllegalArgumentException for a joint whose motors aren't wired, and what its settings
+   *     refuse ({@link ControllerSettings#spark})
    */
-  public JointIOSpark(RobotMath math, JointSetup setup) {
-    this(math, setup, ControllerPins.NONE);
+  public JointIOSpark(RobotMath math, Joint joint) {
+    this(math, joint, ControllerPins.NONE);
   }
 
   /**
@@ -105,39 +108,36 @@ public final class JointIOSpark implements JointIO {
    *
    * @param pins its switches there, from the robot's sensor wiring
    */
-  public JointIOSpark(RobotMath math, JointSetup setup, ControllerPins pins) {
-    Joint joint = setup.joint();
-    wiring =
-        setup
-            .wiring()
-            .orElseThrow(
-                () -> new IllegalArgumentException(joint.label() + " has no wiring: wire it"));
-    this.math = math;
-    configure = control -> ControllerSettings.spark(math, joint, wiring, control);
-    settings = configure.apply(setup.control());
-    // On Systemcore's own CAN, as the settings require, and the definition's encoder on the data
-    // port, which they found.
-    CanBus.Port bus = (CanBus.Port) wiring.canBus();
-    Sensor.Encoder model =
-        wiring.dataPort().isPresent() ? JointSetup.absoluteEncoder(math, joint) : null;
-    absoluteModel = model;
-    units = settings.units();
-    rotorRatio = settings.rotorRatio();
-    // What's doubtful in the settings, though allowed: said once, in the log and on the console.
-    Logger.recordOutput(
-        "Joints/" + joint.label() + "/SettingsNotes", settings.notes().toArray(String[]::new));
-    for (String note : settings.notes()) {
-      DriverStationErrors.reportWarning(joint.label() + ": " + note, false);
+  public JointIOSpark(RobotMath math, Joint joint, ControllerPins pins) {
+    List<MechanismWiring.Device> controllers =
+        joint.driven().motors().map(Driven.Motors::controllers).orElse(List.of());
+    if (controllers.isEmpty()) {
+      throw new IllegalArgumentException(joint.label() + " has no wiring: wire it");
     }
+    MechanismWiring.Device wiredLeader = controllers.get(0);
+    controller = wiredLeader.controller();
+    this.math = math;
+    configure = control -> ControllerSettings.spark(math, joint, control);
+    settings = configure.apply(ControllerSettings.control(joint));
+    // On Systemcore's own CAN, as the definition requires of a SPARK, and the definition's encoder
+    // on the data port, which the settings found.
+    CanBus.Port bus = (CanBus.Port) wiredLeader.bus();
+    Sensor.Encoder model =
+        joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::dataPort).isPresent()
+            ? math.absoluteEncoder(joint)
+            : null;
+    absoluteModel = model;
+    rotations = settings.rotations();
+    rotorRatio = settings.rotorRatio();
     List<String> failed = new ArrayList<>();
-    leader = spark(CanPorts.of(bus.port()), wiring.leader().id());
+    leader = spark(CanPorts.of(bus.port()), wiredLeader.id());
     SparkBaseConfig leading = settings.leader();
     RevMechanism.limits(leading.limitSwitch, pins);
     if (!applied(
         () ->
             leader.configure(
                 leading, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters))) {
-      failed.add("motor " + wiring.leader().id());
+      failed.add("motor " + wiredLeader.id());
     }
     for (RevMechanism.Follower each : settings.followers()) {
       SparkBase follower = spark(CanPorts.of(bus.port()), each.id());
@@ -153,7 +153,7 @@ public final class JointIOSpark implements JointIO {
     encoder = leader.getEncoder();
     loop = leader.getClosedLoopController();
     absolute = model != null ? leader.getAbsoluteEncoder() : null;
-    encoder.setPosition(units.toPhoenix(joint.reference()) * rotorRatio);
+    encoder.setPosition(rotations.toRotations(joint.reference()) * rotorRatio);
   }
 
   /** The leading SPARK: for the tests, which read what it was told through REV's simulation. */
@@ -162,7 +162,7 @@ public final class JointIOSpark implements JointIO {
   }
 
   private SparkBase spark(CANPort port, int id) {
-    return wiring.controller() == MechanismWiring.Controller.SPARK_FLEX
+    return controller == MechanismWiring.Controller.SPARK_FLEX
         ? new SparkFlex(port, id, SparkLowLevel.MotorType.kBrushless)
         : new SparkMax(port, id, SparkLowLevel.MotorType.kBrushless);
   }
@@ -181,7 +181,7 @@ public final class JointIOSpark implements JointIO {
   public void retune(MechanismControl control) {
     settings = configure.apply(control);
     // Without waiting, as the loop runs, and not saved: the pit's tuning is the session's.
-    SparkBaseConfig tuning = settings.tuning(wiring, control);
+    SparkBaseConfig tuning = settings.tuning(controller, control);
     leader.configureAsync(
         tuning, ResetMode.kNoResetSafeParameters, PersistMode.kNoPersistParameters);
     for (SparkBase follower : followers) {
@@ -212,9 +212,9 @@ public final class JointIOSpark implements JointIO {
     }
     velocity = rpm.get(0.0) / 60 / rotorRatio;
     inputs.absolutePosition =
-        Double.isNaN(fromEncoder) ? Double.NaN : units.fromPhoenix(fromEncoder);
-    inputs.position = units.fromPhoenix(position);
-    inputs.velocity = units.fromPhoenix(velocity);
+        Double.isNaN(fromEncoder) ? Double.NaN : rotations.fromRotations(fromEncoder);
+    inputs.position = rotations.fromRotations(position);
+    inputs.velocity = rotations.fromRotations(velocity);
     inputs.appliedVolts = share * leader.getBusVoltage().get(0.0);
     inputs.statorCurrentAmps = current;
     // A SPARK doesn't measure what it draws from the battery: its share of the motor's current.
@@ -254,30 +254,35 @@ public final class JointIOSpark implements JointIO {
     }
     Signal<Double> fromEdge = reading.getPosition();
     return fromEdge.isValid()
-        ? units.toPhoenix(math.fromAbsolute(model, settings.windowEdge() + fromEdge.get()))
+        ? rotations.toRotations(math.fromAbsolute(model, settings.windowEdge() + fromEdge.get()))
         : Double.NaN;
   }
 
+  /**
+   * The profile's point to the SPARK's loop, which runs its kP on it, with the plan's feedforward
+   * and kD toward the profile's speed from the speed last read, worked out here in volts.
+   */
   @Override
   public void setPosition(double position, double velocity, double feedforwardVolts) {
-    double at = units.toPhoenix(position);
-    double moving = units.toPhoenix(velocity);
+    ControllerPlan plan = settings.plan();
     loop.setSetpoint(
-        at * settings.loopRatio() + settings.loopZero(),
+        rotations.toRotations(position) * settings.loopRatio() + settings.loopZero(),
         SparkLowLevel.ControlType.kPosition,
         ClosedLoopSlot.kSlot0,
-        feedforwardVolts + settings.feedforward().atPosition(at, moving, this.velocity),
+        feedforwardVolts
+            + plan.feedforward(position, velocity, 0)
+            + plan.kD() * (velocity - rotations.fromRotations(this.velocity)),
         SparkClosedLoopController.ArbFFUnits.kVoltage);
   }
 
+  /** A speed to the SPARK's loop, with the plan's feedforward at where the joint was last read. */
   @Override
   public void setVelocity(double velocity) {
-    double moving = units.toPhoenix(velocity);
     loop.setSetpoint(
-        moving * settings.loopRatio() * 60,
+        rotations.toRotations(velocity) * settings.loopRatio() * 60,
         SparkLowLevel.ControlType.kVelocity,
         ClosedLoopSlot.kSlot1,
-        settings.feedforward().atSpeed(position, moving),
+        settings.plan().feedforward(rotations.fromRotations(position), velocity, 0),
         SparkClosedLoopController.ArbFFUnits.kVoltage);
   }
 
@@ -301,7 +306,7 @@ public final class JointIOSpark implements JointIO {
   public void home(double volts) {
     if (settings.softLimits().isPresent() && !softLimitsOff) {
       leader.configureAsync(
-          settings.softLimitsEnabled(wiring, false),
+          settings.softLimitsEnabled(controller, false),
           ResetMode.kNoResetSafeParameters,
           PersistMode.kNoPersistParameters);
       softLimitsOff = true;
@@ -312,10 +317,10 @@ public final class JointIOSpark implements JointIO {
   /** Sets where the joint is, and its soft limits back on if homing switched them off. */
   @Override
   public void resetPosition(double position) {
-    encoder.setPosition(units.toPhoenix(position) * rotorRatio);
+    encoder.setPosition(rotations.toRotations(position) * rotorRatio);
     if (softLimitsOff) {
       leader.configureAsync(
-          settings.softLimitsEnabled(wiring, true),
+          settings.softLimitsEnabled(controller, true),
           ResetMode.kNoResetSafeParameters,
           PersistMode.kNoPersistParameters);
       softLimitsOff = false;

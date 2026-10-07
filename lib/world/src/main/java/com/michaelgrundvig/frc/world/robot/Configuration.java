@@ -17,11 +17,13 @@ import org.jspecify.annotations.Nullable;
  * it names only the joints it sets, and leaves the rest where they are, so the joints it names are
  * what a command moving to it requires.
  *
- * <pre>{@code
- * static final Configuration AMP = Configuration.of("amp", ELEVATOR.at("clear"), ARM.at("level"));
+ * {@snippet :
  * static final Configuration FEEDING =
- *     Configuration.of("feeding", FULL_SEND.at("feeding"), TRANSITION.at("feeding"));
- * }</pre>
+ *     Configuration.of("feeding", FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING));
+ * static final Configuration STOWED =
+ *     Configuration.of(
+ *         "stowed", PIVOT.at(PIVOT_IN), ELEVATOR.at(ELEVATOR_DOWN), ARM.at(ARM_STOWED));
+ * }
  *
  * <p>The robot's definition checks each against the rest of it: every joint one of the robot's,
  * none that follows another (its leader is set instead), every interlock obeyed with the joints it
@@ -47,7 +49,10 @@ public record Configuration(String name, List<Condition.At> targets) {
     return ConfigurationBuilder.builder();
   }
 
-  /** A configuration of joints at named places: {@code of("amp", arm.at("level"), ...)}. */
+  /**
+   * A configuration of joints at named places: {@code Configuration.of("feeding",
+   * FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING))}.
+   */
   public static Configuration of(String name, Condition.At... targets) {
     return builder().name(name).targets(List.of(targets)).build();
   }

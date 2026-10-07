@@ -2,6 +2,7 @@ package frc.robot.subsystems.mechanisms;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR_CLEAR;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR_DOWN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
@@ -9,7 +10,6 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.profile;
@@ -21,6 +21,7 @@ import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Range;
@@ -58,7 +59,7 @@ class InterlocksSimTest {
           .interlocks(List.of(ROLLER_ONLY_WHEN_OUT, PIVOT_CLEARS_ELEVATOR))
           .build();
 
-  private final JointsSimHarness sim = new JointsSimHarness(GUARDED, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(GUARDED);
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);
 
@@ -168,12 +169,8 @@ class InterlocksSimTest {
   void aJointThatOvershootsTheEdgeNeverGoesOnAcross() {
     JointsSimHarness swinging =
         new JointsSimHarness(
-            GUARDED,
-            List.of(
-                JointFixtures.setup(PIVOT, JointFixtures.assumed(control(20, 0, profile(12, 200)))),
-                SETUPS.get(1),
-                SETUPS.get(2),
-                SETUPS.get(3)));
+            GUARDED.with(
+                PIVOT.retuned(old -> JointFixtures.assumed(control(20, 0, profile(12, 200))))));
     JointMechanism swung = swinging.joints.of(PIVOT);
     Move out = swung.goTo(PIVOT_OUT);
     swinging.scheduler.schedule(out);
@@ -191,6 +188,48 @@ class InterlocksSimTest {
   }
 
   /**
+   * A pair kept out of each other's way, as an arm and its elevator are: the pivot out of 40° to
+   * 80° while the elevator is below "clear", and the elevator out of its lowest 0.3 m while the
+   * pivot is at 90° or beyond. The definition takes it, since neither holds the other for good, and
+   * each rule holds as it says: the elevator, sent down with the pivot out, waits at 0.3 m; the
+   * pivot, sent in with the elevator that low, waits at 80°, and short of 90°, lets the elevator
+   * down.
+   */
+  @Test
+  void aPairKeptOutOfEachOthersWayHoldsEachAndNeverDeadlocks() {
+    Interlock elevatorUpWhilePivotOut =
+        Interlock.that(ELEVATOR).keepsOut(Range.meters(0, 0.3)).when(PIVOT.atLeast(Degrees.of(90)));
+    RobotDefinition pair =
+        RobotDefinitionBuilder.builder(GUARDED)
+            .name("pair")
+            .interlocks(List.of(PIVOT_CLEARS_ELEVATOR, elevatorUpWhilePivotOut))
+            .build();
+    JointsSimHarness both = new JointsSimHarness(pair);
+    JointMechanism elevator = both.joints.of(ELEVATOR);
+    JointMechanism held = both.joints.of(PIVOT);
+    Move deploy = both.joints.goTo(DEPLOYED);
+    Move down = elevator.goTo(ELEVATOR_DOWN);
+    Move in = held.goTo(PIVOT_IN);
+    Move downAgain = elevator.goTo(ELEVATOR_DOWN);
+
+    for (Move move : List.of(deploy, down, in, downAgain)) {
+      both.scheduler.schedule(move);
+      both.runUntil(() -> move.outcome().isPresent(), 3);
+    }
+
+    assertThat(deploy.arrived()).isTrue();
+    assertThat(down.outcome()).contains(Outcome.TIMED_OUT);
+    assertThat(down.reason())
+        .endsWith("held: elevator keeps out of 0 m to 0.3 m while pivot at least 90°");
+    assertThat(in.outcome()).contains(Outcome.TIMED_OUT);
+    assertThat(in.reason())
+        .endsWith("held: pivot keeps out of 40° to 80° while elevator before clear");
+    assertThat(Math.toDegrees(both.simulation.position(PIVOT))).isCloseTo(80, within(2.0));
+    assertThat(downAgain.arrived()).as("the pivot's hold let the elevator go").isTrue();
+    assertThat(both.simulation.position(ELEVATOR)).isCloseTo(0, within(0.02));
+  }
+
+  /**
    * The same rules written in the restricted joints' blocks hold the same: the roller, asked to run
    * with the pivot stowed, stays still and says what holds it.
    */
@@ -204,7 +243,7 @@ class InterlocksSimTest {
             .with(
                 ROLLER.runsOnlyWhen(PIVOT.past(PIVOT_RUN)),
                 PIVOT.keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(ELEVATOR_CLEAR)));
-    JointsSimHarness blocks = new JointsSimHarness(inBlocks, SETUPS);
+    JointsSimHarness blocks = new JointsSimHarness(inBlocks);
     JointMechanism held = blocks.joints.of(ROLLER);
 
     blocks.run(held.run(ROLLER_INTAKING), 0.5);
@@ -225,7 +264,7 @@ class InterlocksSimTest {
             .configurations(List.of())
             .interlocks(List.of(Interlock.that(PIVOT).runsOnlyWhen(ROLLER.atLeast(RPM.of(1000)))))
             .build();
-    JointsSimHarness spun = new JointsSimHarness(robot, SETUPS);
+    JointsSimHarness spun = new JointsSimHarness(robot);
     JointMechanism held = spun.joints.of(PIVOT);
     Move out = held.goTo(PIVOT_OUT);
     spun.scheduler.schedule(out);
@@ -242,6 +281,37 @@ class InterlocksSimTest {
     assertThat(Math.toDegrees(spun.simulation.position(PIVOT))).isCloseTo(130, within(2.0));
   }
 
+  /**
+   * A region reaching the end of the joint's range leaves no room past that end: a pivot sitting at
+   * its 135° stop, inside a region of 100° to 135° closed while the elevator is low, is inside it,
+   * and leaves by the region's other edge, down to where it was sent. Until 2026-10-07 it read as
+   * past the region and was held at its stop.
+   */
+  @Test
+  void aJointAtItsEndInsideARegionReachingItLeavesByTheOtherEdge() {
+    RobotDefinition robot =
+        RobotDefinitionBuilder.builder(ROBOT)
+            .name("end region")
+            .configurations(List.of())
+            .interlocks(
+                List.of(
+                    Interlock.that(PIVOT)
+                        .keepsOut(Range.degrees(100, 135))
+                        .when(ELEVATOR.before(ELEVATOR_CLEAR))))
+            .build();
+    JointsSimHarness atEnd = new JointsSimHarness(robot);
+    JointMechanism held = atEnd.joints.of(PIVOT);
+    atEnd.simulation.place(PIVOT, Math.toRadians(135));
+    atEnd.run(0.1);
+    Move down = held.goTo(PIVOT_IN);
+    atEnd.scheduler.schedule(down);
+
+    atEnd.runUntil(() -> down.outcome().isPresent(), 3);
+
+    assertThat(down.arrived()).isTrue();
+    assertThat(Math.toDegrees(atEnd.simulation.position(PIVOT))).isCloseTo(1.5, within(2.0));
+  }
+
   /** An interlock about a joint the template doesn't drive can't be enforced, so it's refused. */
   @Test
   void anInterlockTheTemplateCantEnforceIsRefused() {
@@ -249,6 +319,7 @@ class InterlocksSimTest {
         JointRevoluteBuilder.builder(PIVOT)
             .label("hatch")
             .link(JointFixtures.link("hatch", 1, new Translation3d()))
+            .driven(Driven.NONE)
             .build();
     RobotDefinition robot =
         RobotDefinitionBuilder.builder(ROBOT)
@@ -261,8 +332,8 @@ class InterlocksSimTest {
             () ->
                 new Joints(
                     robot,
-                    SETUPS,
-                    setup -> new JointIO() {},
+                    joint -> new JointIO() {},
+                    Joints.untuned(),
                     Scheduler.createIndependentScheduler()))
         .hasMessage(
             "\"roller runs only when hatch past run\" can't be enforced: hatch has no mechanism, as"

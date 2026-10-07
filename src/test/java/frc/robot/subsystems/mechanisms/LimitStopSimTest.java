@@ -1,6 +1,5 @@
 package frc.robot.subsystems.mechanisms;
 
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_BACK;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_FRONT;
@@ -33,7 +32,7 @@ class LimitStopSimTest {
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(JointFixtures.ROBOT).sensors(List.of(TURRET_RIGHT)).build();
 
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final JointMechanism turret = sim.joints.of(TURRET);
 
   private double turretDegrees() {

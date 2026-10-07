@@ -1,0 +1,135 @@
+package frc.robot.examples;
+
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_FLEX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_MAX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.DATA_PORT;
+import static frc.robot.examples.ExampleRobot.ARM;
+import static frc.robot.examples.ExampleRobot.ARM_SCORING;
+import static frc.robot.examples.ExampleRobot.ELEVATOR;
+import static frc.robot.examples.ExampleRobot.ELEVATOR_CLEAR;
+import static frc.robot.examples.ExampleRobot.FEEDING;
+import static frc.robot.examples.ExampleRobot.HOOD;
+import static frc.robot.examples.ExampleRobot.INTAKE;
+import static frc.robot.examples.ExampleRobot.PIVOT;
+import static frc.robot.examples.ExampleRobot.ROLLER;
+import static frc.robot.examples.ExampleRobot.SHOOTER;
+import static frc.robot.examples.ExampleRobot.STOWED;
+import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
+import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.RPM;
+import static org.wpilib.units.Units.Rotations;
+
+import com.michaelgrundvig.frc.world.robot.Gearing;
+import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import frc.robot.GoldenFile;
+import frc.robot.RobotConfig;
+import frc.robot.RobotSim;
+import frc.robot.SimulationTest;
+import frc.robot.sim.JointsSimHarness;
+import frc.robot.subsystems.mechanisms.JointRecordings;
+import frc.robot.subsystems.mechanisms.Joints;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+/**
+ * The guide's robot, recorded ({@code JointRecordings}): what its motor controllers are told, the
+ * competition robot's and the practice robot's, its arm's CANcoder fused, and its pivot, arm,
+ * elevator and shooter on SPARKs; and a session in the simulator, its elevator homing on a hard
+ * stop. Both must come out as recorded: a change meant to change neither is shown to change
+ * nothing. When a change is meant to move them, record them again with {@code GOLDEN_UPDATE=1} and
+ * say why they moved (docs/testing.md).
+ */
+@SimulationTest
+@ExtendWith(RobotSim.class)
+class ExampleRobotRecordedSimTest {
+  /** Its arm's loop closed on its CANcoder, fused. */
+  private static RobotDefinition fused() {
+    return ExampleRobot.COMPETITION
+        .definition()
+        .with(ARM.encoderOn(CANCODER.can(23).offset(Rotations.of(0.12)).fused()));
+  }
+
+  /**
+   * Its pivot on a NEO with its encoder on the SPARK's data port, its loop closed on it; its arm on
+   * a NEO, read once from the data port, its weight pulling hardest a quarter turn back, which the
+   * robot works out each loop; its elevator and shooter on two Vortexes each.
+   */
+  private static RobotDefinition sparks() {
+    Joint.Revolute pivot =
+        unmotored(PIVOT)
+            .motor(Motor.NEO, Gearing.of(25), SPARK_MAX.can(32))
+            .encoderOn(DATA_PORT.offset(Rotations.of(0.82)).closesLoop());
+    Joint.Revolute arm =
+        unmotored(ARM)
+            .motor(Motor.NEO, Gearing.of(60), SPARK_MAX.can(22))
+            .encoderOn(DATA_PORT.offset(Rotations.of(0.12)));
+    Joint.Prismatic elevator =
+        unmotored(ELEVATOR)
+            .motors(
+                Motor.NEO_VORTEX,
+                Gearing.of(5),
+                Inches.of(0.75),
+                SPARK_FLEX.can(20),
+                SPARK_FLEX.can(21).clockwise());
+    Joint.Revolute shooter =
+        unmotored(SHOOTER)
+            .motors(
+                Motor.NEO_VORTEX,
+                Gearing.of(1),
+                SPARK_FLEX.can(52),
+                SPARK_FLEX.can(53).clockwise());
+    return ExampleRobot.COMPETITION.definition().with(pivot, arm, elevator, shooter);
+  }
+
+  @Test
+  void itsSettingsAreAsRecorded() throws IOException {
+    List<String> rows = new ArrayList<>();
+    for (RobotConfig robot : ExampleRobot.all()) {
+      rows.addAll(JointRecordings.settings(robot.definition()));
+    }
+    rows.addAll(JointRecordings.settings(fused()));
+    rows.addAll(JointRecordings.settings(sparks()));
+    GoldenFile.check(getClass(), "example-settings.csv", JointRecordings.SETTINGS, rows);
+  }
+
+  /**
+   * The elevator homes on its lower stop as the robot enables; the robot stows, intakes (its roller
+   * held until the pivot is out), raises its elevator clear and its arm to score, spins its shooter
+   * and feeds, then stows again and disables: 8 s.
+   */
+  @Test
+  void itsSessionIsAsRecorded() throws IOException {
+    RobotDefinition robot = ExampleRobot.COMPETITION.definition();
+    List<Joint> joints = Joints.driven(robot);
+    JointsSimHarness sim = new JointsSimHarness(robot);
+    JointRecordings.Session session = new JointRecordings.Session(sim, joints);
+
+    session.run(1.5);
+    sim.scheduler.schedule(sim.joints.goTo(STOWED));
+    session.run(1);
+    sim.scheduler.schedule(sim.joints.run(INTAKE));
+    sim.scheduler.schedule(sim.joints.of(HOOD).goTo(Degrees.of(30)));
+    session.run(1.5);
+    sim.scheduler.schedule(sim.joints.of(ELEVATOR).goTo(ELEVATOR_CLEAR));
+    session.run(1);
+    sim.scheduler.schedule(sim.joints.of(ARM).goTo(ARM_SCORING));
+    sim.scheduler.schedule(sim.joints.of(SHOOTER).follow(() -> RPM.of(3000)));
+    session.run(1);
+    sim.scheduler.schedule(sim.joints.run(FEEDING));
+    session.run(0.5);
+    sim.scheduler.schedule(sim.joints.of(ROLLER).run(ExampleRobot.OUTTAKING));
+    sim.scheduler.schedule(sim.joints.goTo(STOWED));
+    session.run(1);
+    sim.setEnabled(false);
+    session.run(0.5);
+
+    GoldenFile.check(getClass(), "example-session.csv", session.rows().get(0), session.rows());
+  }
+}

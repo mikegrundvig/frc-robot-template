@@ -18,7 +18,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.Mass;
 
@@ -26,8 +25,8 @@ import org.wpilib.units.measure.Mass;
  * What a season's game manual allows a robot to be: how big around, how tall at the start, how far
  * it may reach out, where its bumpers go, and how much it may weigh. The season's game class holds
  * its numbers; every robot's definition is checked against them in the tests ({@link #problems}),
- * its named configurations too, and a mechanism's guard can ask how far the robot reaches at a set
- * of positions ({@link #whyTooFar}).
+ * its named configurations too. Where the robot reaches between its configurations, mid-move, isn't
+ * checked: no guard reads the limits while the robot runs.
  *
  * @param framePerimeter the most the frame may measure around
  * @param startingHeight the tallest the robot may be in its starting configuration: every joint at
@@ -174,20 +173,5 @@ public record SeasonLimits(
       }
     }
     return positions;
-  }
-
-  /**
-   * Why a robot at a set of positions reaches too far beyond its frame perimeter, or null when it
-   * doesn't: what a mechanism's guard checks a move against.
-   */
-  public @Nullable String whyTooFar(RobotDefinition definition, Map<Joint, Double> positions) {
-    double reach = definition.math().extension(positions);
-    return reach > extension.in(Meters)
-        ? String.format(
-            Locale.ROOT,
-            "it would reach %.3f m beyond its frame perimeter, more than the %.3f m allowed",
-            reach,
-            extension.in(Meters))
-        : null;
   }
 }

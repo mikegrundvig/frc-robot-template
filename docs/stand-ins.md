@@ -7,7 +7,6 @@ delete the row when you replace it.
 | Stand-in | Stands in for | Replace when |
 |---|---|---|
 | The swerve drivetrain, `src/main/java/frc/robot/subsystems/drive/`, including its CTRE hardware code (`PhoenixDrivetrain`: TalonFX drive and steering, CANcoders, a Pigeon 2, and the thread that reads them at 250 Hz) | AdvantageKit's swerve templates, which bring the same for CTRE and REV hardware. Only the drivetrain goes: where the robot is belongs to localization (`LocalizationService` in `lib/localization`: the estimator, choosing between the gyro and the backup IMU, trusting the wheels; fed and logged by `subsystems/localization`), and the simulated world to `frc.robot.sim`, and both stay. Theirs needs one addition, an adapter that reports `DrivetrainReadings` each loop (every wheel reading, both IMUs, and the velocity), and to take its pose from `Localization` rather than its own estimator. Keep what ours adds if theirs lacks it: the steer-drive coupling, the IMU's attitude and acceleration (localization checks the wheels against them for slip), and not a number for an acceleration an IMU can't read. | AdvantageKit publishes its 2027 swerve templates, planned for WPILib's 2027 beta (AdvantageKit 27.0.0-alpha-6 release notes) |
-| The simulator's physics, `KinematicPhysics` (`lib/simulation`): the robot moving as its wheels roll, kinematically ([below](#the-simulators-physics)) | A rigid-body engine (ODE4j, pure Java) behind the same `Physics` interface: traction, weight transfer, yaw inertia, wheels that scrub and lift | The engine passes the truth suite's known gaps ([the simulator's guide](simulator.md#how-far-to-trust-it-the-truth-suite)) |
 | PhotonLib, pinned to a development build (`vendordeps/photonlib.json`, dev-v2027.0.0-alpha-2-69-g71416112) | A PhotonLib release for WPILib alpha 7. Its one 2027 release (alpha-2, May 2026) targets alpha 5, and GradleRIO alpha 7 refuses it. The coprocessor must run the same PhotonVision version as the pinned library. | PhotonVision releases a build for the WPILib version in use |
 
 ## Alpha dependencies
@@ -36,21 +35,16 @@ Released, but alpha: each is tied to one WPILib alpha, and moves with it.
 Not built here at all, because the library has no 2027 build yet. Add these when it does.
 
 - **Autos:** PathPlannerLib. (ChoreoLib already has a 2027 alpha build.)
-- **Game pieces and other robots in the simulator,** as bodies the robot's physics can touch: they
-  wait for the rigid-body engine ([below](#the-simulators-physics)) and the game.
 
 ## The simulator's physics
 
-Today's physics (`KinematicPhysics`, in the simulation library, `lib/simulation`) moves the robot as
-its wheels roll, kinematically: the simulator tests the code, not the robot's traction or power. A
-rigid-body engine, ODE4j (pure Java), is to take its place behind the same interface (`Physics`):
-the robot's mass, center of gravity, and yaw inertia in one chassis, a wheel on a joint at each
-module, and Coulomb friction where each tread meets the carpet, so traction, weight transfer, and a
-wheel that slips or lifts on its own come from the physics. The [truth
-suite](simulator.md#how-far-to-trust-it-the-truth-suite) says how far today's falls short, number by
-number, and judges the engine that replaces it: replace it when the engine passes those checks,
-re-recording the goldens and rerunning the consistency study. [The simulator's
-guide](simulator.md#how-its-built) says where the engine plugs in.
+The simulator's physics (`KinematicPhysics`, in the simulation library, `lib/simulation`) moves the
+robot as its wheels roll, kinematically, and each driven joint in closed form (`JointPlant`): the
+simulator tests the robot's code against simple plants, not the robot's traction or power. The
+[truth suite](simulator.md#how-far-to-trust-it-the-truth-suite) says how far that falls short,
+number by number. Game pieces are what the robot's sensors read of them, as a test sets them
+(`world.sensors().trip(...)`, `see(...)`): no game piece, and no other robot, is a body the robot
+touches. [The simulator's guide](simulator.md#how-its-built) says how it's built.
 
 Power isn't simulated either: the simulator models neither the drive motors' supply current limit
 nor Phoenix's step-down from it (`DrivetrainControl.Limits.driveSupplyLowerCurrent` and
@@ -73,7 +67,7 @@ Wheels still never slip on their own, and no one wheel can leave the floor: `whe
 the robot by hand (which holds over any bump for the rest of the run) and scales every wheel's
 grip alike, so its wheels never disagree as a lifted one's would, and the robot isn't raised. The
 steering has no friction: a wheel's scrub on the carpet and its gearbox's drag need measuring on a
-real module first (`CurrentLimitedMotorSim` says where they go). And it hears its CANcoder at the
+real module first (`CurrentLimitedMotor` says where they go). And it hears its CANcoder at the
 rate the code asks for (`PhoenixDrivetrain.ENCODER_FREQUENCY_HZ`), which no robot has yet
 confirmed.
 

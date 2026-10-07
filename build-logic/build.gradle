@@ -35,7 +35,9 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = "UTF-8"
     options.compilerArgs.addAll([
         "-Xlint:cast,divzero,empty,fallthrough,finally,overrides,rawtypes,unchecked",
-        "-Werror"
+        "-Werror",
+        // Javadoc's references checked as it compiles, as the robot program's are (gradle/quality.gradle).
+        "-Xdoclint:reference"
     ])
 }
 

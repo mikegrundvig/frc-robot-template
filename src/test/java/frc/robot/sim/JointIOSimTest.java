@@ -7,7 +7,6 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.assumed;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.profile;
-import static frc.robot.subsystems.mechanisms.JointFixtures.setup;
 import static frc.robot.subsystems.mechanisms.JointFixtures.soft;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -16,7 +15,8 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
 
-import com.michaelgrundvig.frc.world.robot.CanBus;
+import com.michaelgrundvig.frc.world.config.Finding;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
@@ -29,13 +29,14 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.Robots;
 import frc.robot.lib.phoenix.PhoenixMechanism;
+import frc.robot.subsystems.mechanisms.ControllerSettings;
 import frc.robot.subsystems.mechanisms.JointIO;
-import frc.robot.subsystems.mechanisms.JointSetup;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.math.system.DCMotor;
 
 /**
  * One simulated joint, its motor controller and its physics, from the fixtures' robot: gravity as
@@ -50,14 +51,22 @@ class JointIOSimTest {
       Joint.pivot("bare arm", Part.CHASSIS, new Translation3d(0.1, 0, 0.4), Joint.PITCH_UP)
           .range(Range.degrees(-120, 90), Degrees.of(0))
           .motor(Motor.KRAKEN_X60, Gearing.of(50))
-          .control(MechanismControl.position(30).withKd(1).withKg(0.4));
+          .control(
+              MechanismControl.position(30)
+                  .withKd(1)
+                  .withKg(0.4)
+                  .withHoming(MechanismControl.Homing.assumeAtReference()));
 
   /** An elevator with no mass, its kG tuned: 0.5 V all along it. */
   private static final Joint.Prismatic BARE_LIFT =
       Joint.elevator("bare lift", Part.CHASSIS, new Translation3d(-0.2, 0, 0.1))
           .range(Range.meters(0, 1), Meters.of(0))
           .motor(Motor.KRAKEN_X60, Gearing.of(10), Inches.of(1))
-          .control(MechanismControl.position(60).withKd(2).withKg(0.5));
+          .control(
+              MechanismControl.position(60)
+                  .withKd(2)
+                  .withKg(0.5)
+                  .withHoming(MechanismControl.Homing.assumeAtReference()));
 
   private static final RobotDefinition MASSLESS =
       RobotDefinitionBuilder.builder(Robots.SIM.definition())
@@ -69,7 +78,7 @@ class JointIOSimTest {
   private static final double KG = ROBOT.math().idealGains(PIVOT).kG();
 
   private static JointIOSim joint(Joint joint, MechanismControl control) {
-    return new JointIOSim(ROBOT.math(), setup(joint, assumed(control)));
+    return new JointIOSim(ROBOT.math(), joint.retuned(old -> assumed(control)));
   }
 
   /** Runs one joint alone for a time, gravity worked out where it is at each step. */
@@ -87,7 +96,7 @@ class JointIOSimTest {
    */
   private static double held(Joint joint, MechanismControl control, double target) {
     JointSimulation simulation = new JointSimulation(MASSLESS.with(joint).math());
-    JointIO io = simulation.add(JointSetup.of(joint, control));
+    JointIO io = simulation.add(joint.retuned(old -> control));
     simulation.place(joint, target);
     io.setPosition(target, 0, 0);
     for (int i = 0; i < 100; i++) {
@@ -103,21 +112,12 @@ class JointIOSimTest {
   private static MechanismControl pivotControl(Optional<Double> kG) {
     MechanismControl seeded = control(30, 1, profile(8, 30));
     return MechanismControl.builder()
-        .gains(
-            MechanismControl.Gains.builder()
-                .kP(30)
-                .kI(0)
-                .kD(1)
-                .kS(0)
-                .kV(Optional.empty())
-                .kA(Optional.empty())
-                .kG(kG)
-                .gravityAngle(Optional.empty())
-                .build())
-        .softLimits(seeded.softLimits())
-        .profile(seeded.profile())
+        .gains(MechanismControl.Gains.builder().kP(30).kI(0).kD(1).kS(0).kG(kG).build())
         .currentLimits(seeded.currentLimits())
         .neutralMode(seeded.neutralMode())
+        .deadChannel(seeded.deadChannel())
+        .softLimits(seeded.softLimits())
+        .profile(seeded.profile())
         .bands(seeded.bands())
         .homing(seeded.homing())
         .build();
@@ -246,6 +246,30 @@ class JointIOSimTest {
   }
 
   /**
+   * Pushed into its upper stop at 3 V, the pivot is held there, its Kraken stalled at its 40 A
+   * limit: what the motor's model says it draws from the battery standing still, 40 A through its
+   * windings at 1.3 V, 4.4 A, and no more. Its controller and its PDH channel read that.
+   */
+  @Test
+  void pushedIntoItsStopItDrawsWhatItsStalledMotorDraws() {
+    JointIOSim sim = joint(PIVOT, pivotControl(Optional.empty()));
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    sim.place(Math.toRadians(130));
+
+    sim.setVoltage(3);
+    run(sim, 1);
+    sim.updateInputs(inputs);
+
+    double stalled = 40 * 40 * DCMotor.getKrakenX60(1).R / 12;
+    assertThat(sim.position()).isEqualTo(Math.toRadians(135));
+    assertThat(inputs.statorCurrentAmps).isCloseTo(40, within(1e-9));
+    assertThat(inputs.supplyCurrentAmps)
+        .isCloseTo(stalled, within(1e-9))
+        .isCloseTo(4.4, within(0.1));
+    assertThat(sim.supplyAmps()).isEqualTo(inputs.supplyCurrentAmps);
+  }
+
+  /**
    * A tuned kG holds an arm with no mass: the simulator's gravity is what that kG holds, so its
    * control's kG holds it where it's put. With kG 0 in its motor controller, it sags until its
    * feedback makes up the volts: kG times the cosine, over kP. Told nothing, it falls.
@@ -258,7 +282,7 @@ class JointIOSimTest {
     double holding = held(BARE_ARM, tuned, target);
     double sagging = held(BARE_ARM, tuned.withKg(0), target);
     JointSimulation simulation = new JointSimulation(MASSLESS.math());
-    simulation.add(JointSetup.of(BARE_ARM, tuned)).stop();
+    simulation.add(BARE_ARM).stop();
     simulation.place(BARE_ARM, target);
     for (int i = 0; i < 25; i++) {
       simulation.step(STEP);
@@ -288,7 +312,7 @@ class JointIOSimTest {
    */
   @Test
   void anArmsWeightPullsHardestAtTheAngleGiven() {
-    Joint.Revolute arm = BARE_ARM.control(blocks(BARE_ARM).withKg(0.4, Degrees.of(-90)));
+    Joint.Revolute arm = BARE_ARM.retuned(control -> control.withKg(0.4, Degrees.of(-90)));
     MechanismControl feedbackAlone = blocks(arm).withKg(0);
     double hardest = Math.toRadians(-90);
 
@@ -299,57 +323,56 @@ class JointIOSimTest {
   }
 
   /**
-   * What the robot's settings for a joint would note, the simulator logs too, in the robot's words:
-   * a pivot whose tuned kG is a third of what its arm's weight takes notes it, wired to nothing, as
-   * it would on the TalonFX it's wired to on a robot.
+   * What the robot's settings for a joint would doubt, the robot says at startup wherever it runs,
+   * in the robot's words: a pivot whose tuned kG is a third of what its arm's weight takes is
+   * doubted wired to nothing, run as the TalonFX it's wired to on a robot.
    */
   @Test
-  void itNotesWhatTheRobotsSettingsWould() {
+  void itDoubtsWhatTheRobotsSettingsWould() {
     MechanismControl light = assumed(pivotControl(Optional.of(KG / 3)));
-    MechanismWiring onTalon =
-        MechanismWiring.builder()
-            .canBus(CanBus.SYSTEMCORE)
-            .controller(MechanismWiring.Controller.TALON_FX)
-            .motors(List.of(MechanismWiring.Motor.builder().id(32).clockwise(true).build()))
-            .cancoder(Optional.empty())
-            .dataPort(Optional.empty())
-            .build();
+    MechanismWiring.Device onTalon = MechanismWiring.Controller.TALON_FX.can(32).clockwise();
     List<String> robots =
-        PhoenixMechanism.configure(ROBOT.math(), PIVOT, PIVOT_MOTOR, onTalon, light).notes();
+        PhoenixMechanism.configure(
+                ControllerPlan.of(ROBOT.math(), PIVOT, PIVOT_MOTOR, List.of(onTalon), light))
+            .notes();
+    Joint unwiredPivot = PIVOT.retuned(old -> light);
+    Joint wiredPivot = PIVOT.motorsOn(onTalon).retuned(old -> light);
 
-    JointIOSim unwired = new JointIOSim(ROBOT.math(), setup(PIVOT, light));
-    JointIOSim wired =
-        new JointIOSim(
-            ROBOT.math(),
-            JointSetup.builder().joint(PIVOT).control(light).wiring(Optional.of(onTalon)).build());
+    List<Finding> unwired =
+        ControllerSettings.findings(ROBOT.with(unwiredPivot).math(), unwiredPivot);
+    List<Finding> wired = ControllerSettings.findings(ROBOT.with(wiredPivot).math(), wiredPivot);
 
     assertThat(robots)
         .singleElement()
         .asString()
         .startsWith("pivot's tuned kG, ")
         .contains("is 0.3333 times the ideal");
-    assertThat(unwired.notes()).isEqualTo(robots);
-    assertThat(wired.notes()).isEqualTo(robots);
+    assertThat(unwired).extracting(Finding::message).isEqualTo(robots);
+    assertThat(unwired).allMatch(finding -> finding.level() == Finding.Level.DOUBT);
+    assertThat(wired).extracting(Finding::message).isEqualTo(robots);
   }
 
   /**
    * The simulator refuses a joint the robot would refuse at startup, in the robot's words, though
-   * its own motor controller could run it: an arm whose profile cruises faster than its motors turn
-   * it, on the TalonFX the simulator stands in for, wired to nothing.
+   * its own motor controller could run it: an arm whose weight pulls hardest a third of a turn from
+   * its zero, past the quarter turn Phoenix takes, on the TalonFX the simulator stands in for,
+   * wired to nothing.
    */
   @Test
   void itRefusesAJointTheRobotWouldRefuse() {
-    Joint.Revolute fast =
-        BARE_ARM.control(
-            blocks(BARE_ARM)
-                .withProfile(20, 40)
-                .withHoming(MechanismControl.Homing.assumeAtReference()));
-    RobotDefinition robot = RobotDefinitionBuilder.builder(MASSLESS).joints(List.of(fast)).build();
+    Joint.Revolute turned =
+        BARE_ARM.retuned(
+            control ->
+                control
+                    .withKg(0.4, Degrees.of(-120))
+                    .withHoming(MechanismControl.Homing.assumeAtReference()));
+    RobotDefinition robot =
+        RobotDefinitionBuilder.builder(MASSLESS).joints(List.of(turned)).build();
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> new JointsSimHarness(robot))
-        .withMessage(
-            "bare arm's Motion Magic cruise, 3.183 rot/s, is 1.592 times its free speed, 2 rot/s:"
-                + " the profile would ask more than its motors turn it at 12 V");
+        .withMessageStartingWith(
+            "bare arm's gravity angle, -120°, is more than a quarter turn from its zero, past"
+                + " Phoenix's gravity offset of ±0.25 rotations");
   }
 }

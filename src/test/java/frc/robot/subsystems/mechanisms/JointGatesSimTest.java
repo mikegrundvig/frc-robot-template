@@ -9,7 +9,6 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_OUTTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
@@ -25,7 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 /** A joint's gates, read from the simulator: each on what the joint measured this loop. */
 @ExtendWith(RobotSim.class)
 class JointGatesSimTest {
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);
 

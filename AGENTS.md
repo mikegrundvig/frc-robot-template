@@ -11,7 +11,7 @@ list below before writing anything from memory, and read the code next to what y
 | `edu.wpi.first.*` | `org.wpilib.*`: `org.wpilib.math.geometry.Pose2d`, `org.wpilib.command3.Command` |
 | `SubsystemBase`, `CommandScheduler.getInstance()` | Commands v3 (`org.wpilib.command3`): a `Mechanism` holds what a command requires; the one `Scheduler` is passed in, `Scheduler.getDefault()` only in `Robot` |
 | `InstantCommand`, `SequentialCommandGroup`, `andThen` chains | `Command.requiring(mechanism).executing(co -> { ... }).named("...")`, its steps written in order with its `Coroutine`: `co.await(command)`, `co.waitUntil(condition)`, `co.fork(command)` |
-| `CommandXboxController` | `org.wpilib.command3.button.CommandGamepad`, built with the scheduler |
+| `CommandXboxController`, bindings in `RobotContainer` | Commands and bindings in `Controls`, the team's own file: the robot hands it the joints, the drivetrain, the sensors and both gamepads (`RecordingGamepad`, a v3 `CommandGamepad` that records each binding) |
 | `ChassisSpeeds`, `SwerveModuleState` | `ChassisVelocities`, `SwerveModuleVelocity` |
 | `SmartDashboard.putX` | `Telemetry.log(name, value)`, and AdvantageKit's `Logger.recordOutput` |
 | `Timer.getFPGATimestamp()` seconds | `RobotController.getTime()` nanoseconds; the DataLog API takes nanoseconds too |
@@ -31,8 +31,11 @@ implementation per kind of hardware, and one for the simulator.
 ```
 
 `ci` runs the formatter, Error Prone and NullAway, the architecture tests (`ArchitectureTest`), the
-coverage floor, and the values register's test, which fails until every configuration value has its
-row. When a check fails, its message says what to do: do that. Never suppress a warning, loosen an
+coverage floor, the values register's test, which fails until every configuration value has its
+row, and the documentation's examples' test (`DocExamplesTest`): every Java block in a guide, and
+every `{@snippet}` in Javadoc, is code a compiled source has. Write an example in
+`src/test/java/frc/robot/examples` and copy it out; a block that needs code around it says `java
+fragment` on its fence. Javadoc's `{@link}`s are checked as the code compiles. When a check fails, its message says what to do: do that. Never suppress a warning, loosen an
 architecture rule, or delete a test to get green; if a rule looks wrong, say so instead.
 
 The simulator's tests (`*SimTest`) are deterministic. One that fails sometimes is a bug: find its

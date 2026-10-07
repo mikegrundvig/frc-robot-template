@@ -6,6 +6,7 @@ import static com.michaelgrundvig.frc.world.config.Rules.positive;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import io.soabase.recordbuilder.core.RecordBuilder;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -25,11 +26,18 @@ import org.wpilib.units.measure.Distance;
  * <p>It isn't part of the joint's identity: a joint that differs only here is the same joint,
  * re-tuned or re-wired, so a practice robot's, or a test's, still matches everything that names it.
  *
+ * <p>Each of its parts checks its own values as it's written; how they fit each other and the joint
+ * (an encoder read through motors that aren't wired, soft limits past the stops, a homing recipe
+ * the joint can't carry out) the robot's definition checks once the block is whole, so the order of
+ * its calls never matters.
+ *
  * @param motors its motors, through its gearing; empty if none turn it
  * @param servos its servos, each pushing between its parent and its link
  * @param absoluteEncoder an absolute encoder on its axle, if it has one
  * @param limitSwitches the switches it presses at the ends of its travel
- * @param control how the program drives it; needed for a joint with motors
+ * @param control how the program drives it: what its program needs of a joint with motors, which
+ *     refuses one without ({@code RobotDefinition.findings}); the definition checks it fits the
+ *     joint, its soft limits, homing and loop
  * @param interlocks what restricts it by where another joint is, how fast one runs, or what a
  *     sensor reads, written in its block ({@code .keepsOut(...).when(...)}, {@code
  *     .runsOnlyWhen(...)}); the robot's definition can list more beside them
@@ -37,74 +45,25 @@ import org.wpilib.units.measure.Distance;
 @ConfigRecord
 public record Driven(
     Optional<Motors> motors,
-    List<Servo> servos,
+    @RecordBuilder.Initializer(value = "of", source = List.class) List<Servo> servos,
     Optional<AbsoluteEncoder> absoluteEncoder,
-    List<LimitSwitch> limitSwitches,
+    @RecordBuilder.Initializer(value = "of", source = List.class) List<LimitSwitch> limitSwitches,
     Optional<MechanismControl> control,
-    List<Interlock> interlocks) {
+    @RecordBuilder.Initializer(value = "of", source = List.class) List<Interlock> interlocks) {
   /** A joint nothing drives: a follower, a passive hinge, or one not described yet. */
-  public static final Driven NONE =
-      DrivenBuilder.builder()
-          .motors(Optional.empty())
-          .servos(List.of())
-          .absoluteEncoder(Optional.empty())
-          .limitSwitches(List.of())
-          .control(Optional.empty())
-          .interlocks(List.of())
-          .build();
+  public static final Driven NONE = DrivenBuilder.builder().build();
 
   public Driven {
     servos = List.copyOf(servos);
     limitSwitches = List.copyOf(limitSwitches);
     interlocks = List.copyOf(interlocks);
-    Optional<Motors> turning = motors;
-    Optional<AbsoluteEncoder> encoder = absoluteEncoder;
     List<LimitSwitch> switches = limitSwitches;
-    Checks.on(Driven.class)
-        .check(
-            "absoluteEncoder",
-            () ->
-                encoder.isPresent()
-                        && encoder.get().readByController()
-                        && (turning.isEmpty() || turning.get().controllers().isEmpty())
-                    ? "its absolute encoder is wired, and its motors aren't: it's read through"
-                        + " their controller, so wire them too"
-                    : null)
-        .check("limitSwitches", () -> twice(switches))
-        .orThrow();
+    Checks.on(Driven.class).check("limitSwitches", () -> twice(switches)).orThrow();
   }
 
   /** Starts describing how a joint is driven, one named value at a time. */
-  public static DrivenBuilder.MotorsStage builder() {
+  public static DrivenBuilder.DrivenBuilderStage builder() {
     return DrivenBuilder.builder();
-  }
-
-  /**
-   * Its devices' wiring, as the program reads it: its motors' controllers, and the absolute encoder
-   * read through them; empty for a joint that runs in the simulator alone.
-   */
-  public Optional<MechanismWiring> wiring() {
-    if (motors.isEmpty() || motors.get().controllers().isEmpty()) {
-      return Optional.empty();
-    }
-    List<MechanismWiring.Device> controllers = motors.get().controllers();
-    MechanismWiring.Device leader = controllers.get(0);
-    return Optional.of(
-        MechanismWiring.builder()
-            .canBus(leader.bus())
-            .controller(leader.controller())
-            .motors(
-                controllers.stream()
-                    .map(
-                        each ->
-                            MechanismWiringMotorBuilder.builder()
-                                .id(each.id())
-                                .clockwise(each.turnsClockwise())
-                                .build())
-                    .toList())
-            .cancoder(absoluteEncoder.flatMap(AbsoluteEncoder::cancoder))
-            .dataPort(absoluteEncoder.flatMap(AbsoluteEncoder::dataPort))
-            .build());
   }
 
   /**
@@ -123,7 +82,8 @@ public record Driven(
       int count,
       Gearing gearing,
       Optional<Distance> pitchRadius,
-      List<MechanismWiring.Device> controllers) {
+      @RecordBuilder.Initializer(value = "of", source = List.class)
+          List<MechanismWiring.Device> controllers) {
     public Motors {
       controllers = List.copyOf(controllers);
       List<MechanismWiring.Device> each = controllers;
@@ -163,9 +123,22 @@ public record Driven(
               + " isn't the same";
         }
       }
-      return leader.controller().drives(motor)
-          ? null
-          : leader.controller().shown() + " doesn't drive " + motor.name();
+      if (leader.controller().drives(motor)) {
+        return null;
+      }
+      List<String> could = new ArrayList<>();
+      for (MechanismWiring.Controller each : MechanismWiring.Controller.values()) {
+        if (each.drives(motor)) {
+          could.add(each.shown());
+        }
+      }
+      return "its "
+          + motor.name()
+          + " is on "
+          + leader.controller().shown()
+          + ", which doesn't drive one: "
+          + String.join(" or ", could)
+          + " does";
     }
   }
 
@@ -240,13 +213,7 @@ public record Driven(
      * AbsoluteEncoder.of().ratio(0.536).on(cancoder)}.
      */
     public static AbsoluteEncoder of() {
-      return DrivenAbsoluteEncoderBuilder.builder()
-          .countsPerTurn(Optional.empty())
-          .ratio(1)
-          .cancoder(Optional.empty())
-          .dataPort(Optional.empty())
-          .port(Optional.empty())
-          .build();
+      return DrivenAbsoluteEncoderBuilder.builder().ratio(1).build();
     }
 
     /**
@@ -255,13 +222,7 @@ public record Driven(
      * difference, which reads it.
      */
     public static AbsoluteEncoder of(int countsPerTurn) {
-      return DrivenAbsoluteEncoderBuilder.builder()
-          .countsPerTurn(Optional.of(countsPerTurn))
-          .ratio(1)
-          .cancoder(Optional.empty())
-          .dataPort(Optional.empty())
-          .port(Optional.empty())
-          .build();
+      return DrivenAbsoluteEncoderBuilder.builder().ratio(1).countsPerTurn(countsPerTurn).build();
     }
 
     /** The same encoder, geared: its turns for each of the joint's. */
@@ -271,17 +232,17 @@ public record Driven(
 
     /** The same encoder, read by a CANcoder through the joint's TalonFX. */
     public AbsoluteEncoder on(MechanismWiring.Cancoder cancoder) {
-      return DrivenAbsoluteEncoderBuilder.builder(this).cancoder(Optional.of(cancoder)).build();
+      return DrivenAbsoluteEncoderBuilder.builder(this).cancoder(cancoder).build();
     }
 
     /** The same encoder, on the joint's SPARK's data port. */
     public AbsoluteEncoder on(MechanismWiring.DataPortEncoder dataPort) {
-      return DrivenAbsoluteEncoderBuilder.builder(this).dataPort(Optional.of(dataPort)).build();
+      return DrivenAbsoluteEncoderBuilder.builder(this).dataPort(dataPort).build();
     }
 
     /** The same encoder, on one of Systemcore's ports, read by the robot. */
     public AbsoluteEncoder on(MechanismWiring.PortEncoder port) {
-      return DrivenAbsoluteEncoderBuilder.builder(this).port(Optional.of(port)).build();
+      return DrivenAbsoluteEncoderBuilder.builder(this).port(port).build();
     }
 
     /** Whether it's wired at all: a CANcoder, a data port or a Systemcore port. */

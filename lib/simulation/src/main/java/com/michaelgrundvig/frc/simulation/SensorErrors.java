@@ -8,6 +8,7 @@ import static com.michaelgrundvig.frc.world.config.Rules.size;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import io.soabase.recordbuilder.core.RecordBuilder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -50,8 +51,10 @@ public record SensorErrors(
     GyroErrors backupGyro,
     AccelErrors accelerometer,
     AccelErrors backupAccelerometer,
-    Map<String, Transform3d> cameraMountErrors,
-    Map<Integer, Translation3d> tagErrors,
+    @RecordBuilder.Initializer(value = "of", source = Map.class)
+        Map<String, Transform3d> cameraMountErrors,
+    @RecordBuilder.Initializer(value = "of", source = Map.class)
+        Map<Integer, Translation3d> tagErrors,
     long seed) {
   /**
    * Wheels and sensors exactly as configured: odometry is the truth. For tests of exact numbers.
@@ -64,8 +67,6 @@ public record SensorErrors(
           .backupGyro(GyroErrors.EXACT)
           .accelerometer(AccelErrors.IDEAL)
           .backupAccelerometer(AccelErrors.IDEAL)
-          .cameraMountErrors(Map.of())
-          .tagErrors(Map.of())
           .seed(1)
           .build();
 
@@ -94,8 +95,6 @@ public record SensorErrors(
                   .build())
           .accelerometer(AccelErrors.PIGEON_2)
           .backupAccelerometer(AccelErrors.PIGEON_2)
-          .cameraMountErrors(Map.of())
-          .tagErrors(Map.of())
           .seed(1)
           .build();
 
@@ -227,6 +226,10 @@ public record SensorErrors(
   }
 
   public SensorErrors {
+    wheelRadiusScale = List.copyOf(wheelRadiusScale);
+    steerOffsetDegrees = List.copyOf(steerOffsetDegrees);
+    cameraMountErrors = Map.copyOf(cameraMountErrors);
+    tagErrors = Map.copyOf(tagErrors);
     Checks.on(SensorErrors.class)
         .field("wheelRadiusScale", wheelRadiusScale, size(4)) // one per module
         .field("wheelRadiusScale", wheelRadiusScale, each(positive()))

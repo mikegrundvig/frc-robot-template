@@ -26,7 +26,6 @@ class LiveConfigTest {
     TunableRegistry.reset();
   }
 
-  /** The test machine, its drive's gains and limits and its travel tunable. */
   /** A property of a published tunable, from the JSON its configuration carries them in. */
   private static String property(MockTunableBackend dashboard, String path, String name) {
     Object properties =
@@ -37,6 +36,7 @@ class LiveConfigTest {
     return String.valueOf(((Map<?, ?>) properties).get(name));
   }
 
+  /** The test machine, its drive's gains and limits and its travel tunable. */
   private static LiveConfig<Fixtures.Machine> live() {
     return LiveConfig.of("machine", machine())
         .number(KP, Limits.between(0, 100))
@@ -299,6 +299,27 @@ class LiveConfigTest {
         .asString()
         .contains("committed machine configuration")
         .contains("builder calls");
+  }
+
+  /**
+   * A configuration written by more than its builder names, for a value, the call that commits it,
+   * the value in its place as written: a measure with its unit.
+   */
+  @Test
+  void aValueMayNameTheCallThatCommitsIt() {
+    var live =
+        LiveConfig.of("machine", machine())
+            .number(KP, Limits.between(0, 100), "Machine.tuned(%s)")
+            .measure("drive.limits.current", Amps.of(1), Amps.of(80), ".withCurrent(%s)");
+    live.set(Map.of(KP, 18.5, "drive.limits.current", 35.0));
+
+    assertThat(live.changes())
+        .extracting(LiveConfig.Change::builderCall)
+        .containsExactly("Machine.tuned(18.5)", ".withCurrent(Amps.of(35.0))");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> LiveConfig.of("machine", machine()).number(KP, Limits.NONE, ".withKp(kP)"))
+        .withMessage("machine: drive.gains.kP's call, .withKp(kP), has no %s for its value");
   }
 
   @Test

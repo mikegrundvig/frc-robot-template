@@ -4,7 +4,6 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
@@ -20,7 +19,6 @@ import frc.robot.RobotSim;
 import frc.robot.behavior.Gate;
 import frc.robot.sim.JointsSimHarness;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
@@ -42,10 +40,8 @@ class SensorGatesSimTest {
       Sensor.Rangefinder.builder()
           .label("hopper range")
           .part(Part.CHASSIS)
-          .pose(Optional.empty())
           .range(Meters.of(1))
           .fieldOfView(Degrees.of(27))
-          .wiring(Optional.empty())
           .build();
 
   private static final RobotDefinition ROBOT =
@@ -53,7 +49,7 @@ class SensorGatesSimTest {
           .sensors(List.of(CLAW_BEAM, PIVOT_DOWN, HOPPER))
           .build();
 
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final Sensors sensors = sim.joints.sensors();
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);

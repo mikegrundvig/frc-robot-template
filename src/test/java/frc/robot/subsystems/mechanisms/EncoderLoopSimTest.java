@@ -33,14 +33,14 @@ class EncoderLoopSimTest {
 
   /** Its encoder tells its motor where it is, once. */
   private static final Joint.Revolute SEEDED =
-      PIVOT.absoluteEncoder(1024, PORT_1).control(control(30, 1, profile(8, 30)));
+      PIVOT.absoluteEncoder(1024, PORT_1).retuned(old -> control(30, 1, profile(8, 30)));
 
   /** Its loop closes on its encoder. */
-  private static final Joint.Revolute CLOSED = SEEDED.absoluteEncoder(1024, PORT_1.closesLoop());
+  private static final Joint.Revolute CLOSED = SEEDED.encoderOn(PORT_1.closesLoop());
 
   private static JointsSimHarness sim(Joint.Revolute pivot) {
     RobotDefinition robot = ROBOT.with(pivot);
-    return new JointsSimHarness(robot, JointSetup.all(robot));
+    return new JointsSimHarness(robot);
   }
 
   /** Runs a move to an end, at most 3 s. */

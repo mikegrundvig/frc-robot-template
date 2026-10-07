@@ -2,13 +2,13 @@ package frc.robot.robots2026;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
-import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import frc.robot.RobotSim;
+import frc.robot.behavior.Binding;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.JointSimulation;
 import frc.robot.subsystems.mechanisms.JointMechanism;
@@ -19,25 +19,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.wpilib.command3.Command;
-import org.wpilib.command3.button.CommandGamepad;
 import org.wpilib.hardware.hal.RobotMode;
-import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Rotation2d;
-import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.simulation.GamepadSim;
 
 /**
  * 2611's 2026 robot end to end in the template's simulator: their definition, their behavior
- * ({@link Team2611Actions}) bound to two gamepads, run by the robot program's own loop, the drive
- * and localization included. The behavior design's checkpoint C (docs/design/robot-behavior.md).
- * Checked against the simulator's truth throughout: the intake's roller is never driven up to speed
- * while the pivot is short of 110°. A test fixture, not 2026 play.
+ * ({@link Team2611Controls}) built as the robot builds its controls and bound to its two gamepads,
+ * run by the robot program's own loop, the drive and localization included. The behavior design's
+ * checkpoint C (docs/design/robot-behavior.md). Checked against the simulator's truth throughout:
+ * the intake's roller is never driven up to speed while the pivot is short of 110°. A test fixture,
+ * not 2026 play.
  */
 class Team2611RobotSimTest {
-  /** The blue hub's center, as their code has it (Constants.java:178-182: 182.11 in, 158.84 in). */
-  static final Translation2d HUB = new Translation2d(Inches.of(182.11), Inches.of(158.84));
-
   /**
    * Their paths' times, standing in for a path follower (the path tool is the team's open
    * decision): each path's length between its points, at its own speed and acceleration limits, as
@@ -49,7 +43,7 @@ class Team2611RobotSimTest {
   @RegisterExtension final RobotSim sim = new RobotSim();
 
   private GamepadSim operator;
-  private Team2611Actions actions;
+  private Team2611Controls controls;
   private JointMechanism pivot;
   private JointMechanism roller;
   private JointMechanism fullSend;
@@ -63,25 +57,17 @@ class Team2611RobotSimTest {
   @BeforeEach
   void build() {
     sim.build(Team2611.CONFIG, SensorErrors.NONE);
-    operator = new GamepadSim(1);
-    actions = new Team2611Actions(sim.joints(), sim.scheduler(), this::aimError);
-    actions.bind(new CommandGamepad(sim.scheduler(), 0), new CommandGamepad(sim.scheduler(), 1));
+    operator = sim.operator();
+    controls = sim.controls(Team2611Controls::new);
     pivot = sim.joints().of(Team2611.PIVOT);
     roller = sim.joints().of(Team2611.INTAKE);
     fullSend = sim.joints().of(Team2611.FULL_SEND);
     truth = Objects.requireNonNull(sim.world().joints());
   }
 
-  /**
-   * How far off aim the robot is, in degrees, from where it thinks it is: their shooter faces the
-   * robot's back (inferred: their paths end facing away from the hub to shoot, EXP Left 2 at 135°).
-   */
+  /** How far off aim the robot is, in degrees, from where it thinks it is. */
   private double aimError() {
-    Pose2d pose = sim.estimate().pose();
-    Translation2d toHub = HUB.minus(pose.getTranslation());
-    Rotation2d bearing = new Rotation2d(Math.atan2(toHub.getY(), toHub.getX()));
-    Rotation2d shooting = pose.getRotation().plus(new Rotation2d(Math.PI));
-    return shooting.minus(bearing).getDegrees();
+    return Team2611Controls.aimError(sim.estimate().pose());
   }
 
   /** Robot loops for a time, checking the interlock against the simulator's truth each loop. */
@@ -107,6 +93,25 @@ class Team2611RobotSimTest {
     return RPM.convertFrom(truth.velocity(joint), RadiansPerSecond);
   }
 
+  /**
+   * Their bindings are the robot's, beside the template's own, each with its button and command, as
+   * a controller map reads them; none two to a button the same way.
+   */
+  @Test
+  void theirBindingsAreRecorded() {
+    assertThat(sim.bindings().all().stream().map(Binding::toString))
+        .containsExactly(
+            "driver back: on press: Reset heading",
+            "operator right trigger: while held: Intake",
+            "operator left trigger: while held: intake: outtaking",
+            "operator face down: on press: pivot → out",
+            "operator face right: on press: pivot → in",
+            "driver left bumper: while held: Shoot",
+            "driver right trigger: while held: at feeding",
+            "driver right bumper: while held: at unjamming");
+    assertThat(sim.bindings().doubts()).isEmpty();
+  }
+
   @Test
   void theOperatorsIntakeDeploysThePivotAndTheRollerWaitsForIt() {
     RobotSim.setEnabled(true);
@@ -120,7 +125,7 @@ class Team2611RobotSimTest {
     press(() -> operator.setRightTriggerAxis(0));
     run(1);
 
-    assertThat(held).isEqualTo("intake runs only when pivot past 110°");
+    assertThat(held).isEqualTo("intake runs only when pivot at least 110°");
     assertThat(intaking).as("near 2000 rpm, its free speed").isGreaterThan(1900);
     assertThat(Math.abs(rpm(Team2611.INTAKE))).as("let go: stopped").isLessThan(10);
     assertThat(Math.toDegrees(truth.position(Team2611.PIVOT)))
@@ -138,7 +143,7 @@ class Team2611RobotSimTest {
     press(() -> operator.setLeftTriggerAxis(1));
     run(1);
 
-    assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot past 110°");
+    assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot at least 110°");
     assertThat(Math.abs(rpm(Team2611.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }
@@ -177,7 +182,7 @@ class Team2611RobotSimTest {
     press(() -> sim.driver().setLeftBumperButton(true));
     run(1);
     double unaimed = rpm(Team2611.FULL_SEND);
-    var blocking = actions.readyToShoot().blocking();
+    var blocking = controls.readyToShoot().blocking();
     double shooter = rpm(Team2611.SHOOTER);
     press(() -> sim.driver().setRightX(0.5));
     for (int i = 0; i < RobotLoop.loops(4) && Math.abs(aimError()) > 1.5; i++) {
@@ -196,7 +201,7 @@ class Team2611RobotSimTest {
     run(1);
     double overridden = rpm(Team2611.FULL_SEND);
 
-    assertThat(shooter).isCloseTo(Team2611Actions.SHOT_RPM, within(0.03 * 3000));
+    assertThat(shooter).isCloseTo(Team2611Controls.SHOT_RPM, within(0.03 * 3000));
     assertThat(unaimed).isCloseTo(0, within(5.0));
     assertThat(blocking).containsExactly("aimed");
     assertThat(aimed).isCloseTo(1000, within(30.0));
@@ -215,7 +220,7 @@ class Team2611RobotSimTest {
    */
   @Test
   void leftDoubleRunsItsStepsInsideAuto() {
-    Team2611Actions auto = new Team2611Actions(sim.joints(), sim.scheduler(), () -> 0);
+    Team2611Controls auto = new Team2611Controls(sim.scheduler(), sim.joints(), () -> 0);
     Function<String, Command> path =
         name ->
             sim.drive()

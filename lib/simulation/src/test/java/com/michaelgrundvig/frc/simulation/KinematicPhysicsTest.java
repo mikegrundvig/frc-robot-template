@@ -38,7 +38,7 @@ class KinematicPhysicsTest {
 
   /**
    * From rest, every motor at a 30 A stator limit, the robot speeds up straight ahead at the four
-   * wheels' push over its mass and its wheels' own: within 3% (today's engine holds each step's
+   * wheels' push over its mass and its wheels' own: within 3% (the physics holds each step's
    * voltage, so it runs about 2% short).
    */
   @Test
@@ -106,8 +106,8 @@ class KinematicPhysicsTest {
   }
 
   /**
-   * WPILib's motor model, as today's engine keeps it: a motor's current is signed by its voltage,
-   * so a motor at 0 V reads none, though it brakes a spinning wheel.
+   * WPILib's motor model, as the physics keeps it: a motor's current is signed by its voltage, so a
+   * motor at 0 V reads none, though it brakes a spinning wheel.
    */
   @Test
   void aMotorAtZeroVoltsReadsNoCurrentWhileItBrakes() {

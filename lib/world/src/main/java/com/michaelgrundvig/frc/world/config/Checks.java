@@ -10,29 +10,31 @@ import org.jspecify.annotations.Nullable;
 /**
  * Checks a record's values when it is built, and reports everything wrong with them at once. A
  * record lists each value with its {@link Rule}, then any checks across its values, in its compact
- * constructor:
+ * constructor, as a port encoder's wiring does:
  *
- * <pre>{@code
- * public Gains {
- *   Checks.on(Gains.class)
- *       .field("steerKp", steerKp, nonNegative())
- *       .field("steerKd", steerKd, nonNegative())
- *       .field("skewLookahead", skewLookahead, between(Seconds.of(0), Seconds.of(0.2)))
- *       .check("steerKd", () -> steerKd <= steerKp ? null
- *           : shown(steerKd) + " must be at most steerKp (" + shown(steerKp) + ")")
+ * {@snippet :
+ * public PortEncoder {
+ *   Checks.on(PortEncoder.class)
+ *       .field("port", port, between(0, 5))
+ *       .field("turnsPerRange", turnsPerRange, positive())
+ *       .check("offset", () -> Math.abs(offset.in(Rotations)) <= turnsPerRange ? null
+ *           : offset.in(Rotations) + " turns is more than its range, " + turnsPerRange
+ *               + " turns, either way")
  *       .orThrow();
  * }
- * }</pre>
+ * }
  *
  * <p>Every value is checked, and {@link #orThrow()} throws one {@link ConfigException} naming every
  * value that broke a rule: a configuration with three bad values reports three. A value may be
  * listed more than once, with a rule each time; once it breaks one, its later rules are skipped.
  * The checks across values run last, and only once every value has passed its own rule, so they
  * never compare a value that's already reported. Values are named from the record that checks them
- * ({@code Gains.steerKp}): a nested record is built, and checked, before the record that holds it.
+ * ({@code PortEncoder.port}): a nested record is built, and checked, before the record that holds
+ * it.
  */
 public final class Checks {
-  private record Across(String name, Supplier<@Nullable String> why) {}
+  /** A check across values: what's wrong, each a refusal or not. */
+  private record Across(String name, Supplier<List<Finding>> found) {}
 
   private final String where;
   private final List<Violation> violations = new ArrayList<>();
@@ -78,7 +80,23 @@ public final class Checks {
    * @param why what's wrong, written to follow the name, or null when it's fine
    */
   public Checks check(String name, Supplier<@Nullable String> why) {
-    checks.add(new Across(name, why));
+    checks.add(
+        new Across(
+            name,
+            () -> {
+              String problem = why.get();
+              return problem == null ? List.of() : List.of(Finding.refused(where, problem));
+            }));
+    return this;
+  }
+
+  /**
+   * A check across values that says what it finds ({@link Finding}), reported under {@code name}:
+   * each refusal a violation of its own. Doubts and notes aren't refusals: the program says them at
+   * startup. It runs in {@link #orThrow()}, only if every value passed its own rule.
+   */
+  public Checks findings(String name, Supplier<List<Finding>> found) {
+    checks.add(new Across(name, found));
     return this;
   }
 
@@ -91,7 +109,19 @@ public final class Checks {
   public void orThrow() {
     if (violations.isEmpty()) {
       for (Across check : checks) {
-        run(check.name(), check.why());
+        List<Finding> found;
+        try {
+          found = check.found().get();
+        } catch (RuntimeException e) {
+          // A check that throws is a bug in the check; report it with the rest rather than lose
+          // them.
+          found = List.of(Finding.refused(where, "couldn't be checked: " + e));
+        }
+        for (Finding finding : found) {
+          if (finding.refused()) {
+            violations.add(new Violation(where + "." + check.name(), finding.message()));
+          }
+        }
       }
     }
     if (!violations.isEmpty()) {

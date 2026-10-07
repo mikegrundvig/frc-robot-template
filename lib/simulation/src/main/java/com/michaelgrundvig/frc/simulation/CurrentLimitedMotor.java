@@ -1,10 +1,11 @@
-package frc.robot.sim;
+package com.michaelgrundvig.frc.simulation;
 
 import org.wpilib.math.system.DCMotor;
 
 /**
  * A motor turning a load through its gearing, its motor controller holding the current through it
- * to a limit: a swerve module's steering, or one of the robot's joints, which gravity pulls on too.
+ * to a limit: a swerve module's steering, or one of the robot's joints ({@link JointPlant}), which
+ * gravity pulls on too.
  *
  * <p>Its motion is worked out exactly rather than stepped, because a steering motor is quick: with
  * the simulated inertia, its speed closes on the speed its voltage gives with a time constant under
@@ -14,7 +15,7 @@ import org.wpilib.math.system.DCMotor;
  * the limit the whole time. So here, at the limit, the motor gives a steady torque until its back
  * EMF leaves no more than the limit's worth of voltage across its windings; below the limit, the
  * load's speed closes on the speed the voltage gives, exponentially, exactly as in {@code
- * DCMotorSim}. The drive's limit is the physics' to hold ({@code WheelDrive}): its motor is about
+ * DCMotorSim}. The drive's limit is the physics' to hold ({@link WheelDrive}): its motor is about
  * sixty times slower, and today's physics holds the limit at each step's start, so it falls a
  * little short of the limit within each step (the truth suite's F = m a gap).
  *
@@ -30,7 +31,7 @@ import org.wpilib.math.system.DCMotor;
  * takes {@code torque / (gearing * Kt)} amps of the motor's current, both at the limit and below
  * it, and the module stays put while the motor's torque can't beat it.
  */
-final class CurrentLimitedMotorSim {
+public final class CurrentLimitedMotor {
   private final DCMotor motor;
   private final double gearing;
   private final double inertia;
@@ -54,7 +55,7 @@ final class CurrentLimitedMotorSim {
    * @param gearing motor rotations per rotation of the load, or radians per meter of one that
    *     slides
    */
-  CurrentLimitedMotorSim(DCMotor motor, double inertiaKgM2, double gearing) {
+  public CurrentLimitedMotor(DCMotor motor, double inertiaKgM2, double gearing) {
     this.motor = motor;
     this.gearing = gearing;
     this.inertia = inertiaKgM2;
@@ -72,7 +73,7 @@ final class CurrentLimitedMotorSim {
    * @return the most current through the motor in that time, in amps: the current at the start,
    *     since it only falls as the motor's speed catches up with its voltage
    */
-  double run(double volts, double limitAmps, double seconds) {
+  public double run(double volts, double limitAmps, double seconds) {
     return run(volts, limitAmps, 0, seconds);
   }
 
@@ -84,7 +85,7 @@ final class CurrentLimitedMotorSim {
    *     slides), positive turning the load forward
    * @return the current through the motor at the start, held to the limit
    */
-  double run(double volts, double limitAmps, double loadTorque, double seconds) {
+  public double run(double volts, double limitAmps, double loadTorque, double seconds) {
     coasting = false;
     double pulled = loadTorque / inertia;
     double amps = motor.getCurrent(velocityRadPerSec * gearing, volts);
@@ -118,7 +119,7 @@ final class CurrentLimitedMotorSim {
    * Lets the load turn freely for a time, no current through the motor, as a motor controller in
    * coast leaves it: only the torque from outside moves it.
    */
-  void coast(double loadTorque, double seconds) {
+  public void coast(double loadTorque, double seconds) {
     double acceleration = loadTorque / inertia;
     positionRadians += (velocityRadPerSec + acceleration * seconds / 2) * seconds;
     velocityRadPerSec += acceleration * seconds;
@@ -126,29 +127,45 @@ final class CurrentLimitedMotorSim {
     appliedVolts = 0;
   }
 
+  /**
+   * Holds the load still, as a hard stop does that it was driven into: its speed zero, and the
+   * current its controller's voltage drives through the stalled motor, held to the limit. With no
+   * speed there's no back EMF, so the voltage across the motor is what drives that current through
+   * its windings: the controller's, or at the limit, the limit's worth.
+   *
+   * @param volts the voltage the controller asks for
+   * @param limitAmps the most current it lets through the motor, either way
+   */
+  public void stall(double volts, double limitAmps) {
+    velocityRadPerSec = 0;
+    double amps = motor.getCurrent(0, volts);
+    appliedVolts = Math.abs(amps) <= limitAmps ? volts : Math.copySign(limitAmps, amps) * motor.R;
+    coasting = false;
+  }
+
   /** Puts the load at a position and speed: against a hard stop, where it's held still. */
-  void place(double position, double velocity) {
+  public void place(double position, double velocity) {
     positionRadians = position;
     velocityRadPerSec = velocity;
   }
 
   /** The load's angle, in radians from where it started. */
-  double positionRadians() {
+  public double positionRadians() {
     return positionRadians;
   }
 
   /** The load's speed, in radians per second. */
-  double velocityRadPerSec() {
+  public double velocityRadPerSec() {
     return velocityRadPerSec;
   }
 
   /** The voltage across the motor now: less than the controller asks for, at the limit. */
-  double appliedVolts() {
+  public double appliedVolts() {
     return appliedVolts;
   }
 
   /** The current through the motor now, in amps: none while it coasts. */
-  double currentAmps() {
+  public double currentAmps() {
     return coasting ? 0 : motor.getCurrent(velocityRadPerSec * gearing, appliedVolts);
   }
 }

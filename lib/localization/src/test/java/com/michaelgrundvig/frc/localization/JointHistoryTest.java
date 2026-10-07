@@ -6,14 +6,11 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
-import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.Part;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Transform3d;
 
@@ -24,12 +21,8 @@ class JointHistoryTest {
         .parent(Part.CHASSIS)
         .origin(new Transform3d())
         .axis(new Vector3(0, 0, 1))
-        .range(Optional.empty())
-        .reference(reference)
-        .link(Link.builder().label(label).mass(MassProperties.NONE).shapes(List.of()).build())
-        .positions(List.of())
-        .outputs(List.of())
-        .driven(Driven.NONE)
+        .link(Link.builder().label(label).mass(MassProperties.NONE).build())
+        .rest(reference)
         .build();
   }
 

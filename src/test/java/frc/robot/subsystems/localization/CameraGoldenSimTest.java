@@ -13,6 +13,7 @@ import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.VisionResult;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import frc.robot.GoldenFile;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;

@@ -1,7 +1,6 @@
 package frc.robot;
 
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
-import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_MOTOR;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
@@ -14,10 +13,8 @@ import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.JointSimulation;
-import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.wpilib.math.geometry.Pose2d;
@@ -40,7 +37,7 @@ class TurretCameraSimTest {
           .roll(Degrees.of(0))
           .tiltUp(Degrees.of(10))
           .yaw(Degrees.of(0))
-          .joint(Optional.of(TURRET))
+          .joint(TURRET)
           .build();
 
   /** The template's robot with a turret, its one camera on it. */
@@ -49,8 +46,7 @@ class TurretCameraSimTest {
           .definition(
               RobotDefinitionBuilder.builder(Robots.SIM.definition())
                   .name("turret camera")
-                  .joints(List.of(TURRET.control(JointFixtures.SETUPS.get(3).control())))
-                  .drives(List.of(TURRET_MOTOR))
+                  .joints(List.of(TURRET))
                   .cameras(List.of(TURRET_CAMERA))
                   .build())
           .build();

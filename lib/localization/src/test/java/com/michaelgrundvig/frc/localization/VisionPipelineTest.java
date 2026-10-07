@@ -15,7 +15,6 @@ import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.wpilib.fields.Fields;
@@ -66,7 +65,6 @@ class VisionPipelineTest {
                 .sightRange(Meters.of(7))
                 .build())
         .noiseScale(noiseScale)
-        .joint(Optional.empty())
         .build();
   }
 

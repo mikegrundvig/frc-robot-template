@@ -4,6 +4,7 @@ import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Shape;
 import com.michaelgrundvig.frc.world.physical.Vector3;
@@ -144,9 +145,9 @@ public final class RobotMath {
       List<Coupling> couplings,
       List<Drive> drives,
       List<Sensor> sensors) {
-    String problems = structure(joints, couplings, drives, sensors, List.of());
-    if (problems != null) {
-      throw new IllegalArgumentException(problems);
+    List<String> problems = structure(joints, couplings, drives, sensors, List.of());
+    if (!problems.isEmpty()) {
+      throw new IllegalArgumentException(String.join("; ", problems));
     }
     return new RobotMath(body, joints, couplings, drives, sensors);
   }
@@ -161,7 +162,7 @@ public final class RobotMath {
       List<Coupling> couplings,
       List<Drive> drives,
       List<Sensor> sensors) {
-    return structure(joints, couplings, drives, sensors, List.of()) == null
+    return structure(joints, couplings, drives, sensors, List.of()).isEmpty()
         ? new RobotMath(body, joints, couplings, drives, sensors)
         : null;
   }
@@ -194,6 +195,37 @@ public final class RobotMath {
   /** The sensors. */
   public List<Sensor> sensors() {
     return sensors;
+  }
+
+  /**
+   * The absolute encoder on a joint alone, its block's or one of the robot's, or null when it has
+   * none: what tells the joint where it is at power on.
+   */
+  public Sensor.@Nullable Encoder absoluteEncoder(Joint joint) {
+    for (Sensor sensor : sensors) {
+      if (sensor instanceof Sensor.Encoder encoder
+          && encoder.absolute()
+          && encoder.joints().equals(List.of(joint))) {
+        return encoder;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * A joint's limit switch at one end, its block's or one of the robot's, or null when it has none
+   * there: what homing to a switch drives the joint onto.
+   */
+  public Sensor.@Nullable Switch limitSwitch(Joint joint, Sensor.Switch.Limit.End end) {
+    for (Sensor sensor : sensors) {
+      if (sensor instanceof Sensor.Switch onSwitch
+          && onSwitch.kind() instanceof Sensor.Switch.Limit limit
+          && limit.joint().equals(joint)
+          && limit.end() == end) {
+        return onSwitch;
+      }
+    }
+    return null;
   }
 
   /**
@@ -419,8 +451,8 @@ public final class RobotMath {
 
   /**
    * How fast the joint can move at its motors' nominal voltage ({@link #drivesOf}), with nothing on
-   * it: the ceiling for a profile's cruise velocity and Motion Magic's, and for its named speeds.
-   * In its units per second.
+   * it: the ceiling for its profile's cruise velocity, and for its named speeds. In its units per
+   * second.
    *
    * @throws IllegalArgumentException if no motors move it, or it follows another joint
    */
@@ -678,12 +710,12 @@ public final class RobotMath {
       double ratio = encoder.ratio(joint);
       double from = (point - 1) / ratio * perTurn;
       double to = point / ratio * perTurn;
-      return Range.builder().lower(Math.min(from, to)).upper(Math.max(from, to)).build();
+      return Range.in(joint, Math.min(from, to), Math.max(from, to));
     }
     double middle =
         joint.range().map(range -> (range.lower() + range.upper()) / 2).orElse(joint.reference());
     double span = decoding.span();
-    return Range.builder().lower(middle - span / 2).upper(middle + span / 2).build();
+    return Range.in(joint, middle - span / 2, middle + span / 2);
   }
 
   /**
@@ -806,23 +838,29 @@ public final class RobotMath {
     return points;
   }
 
-  /** What the definition's parts make together, checked: null when they're one robot. */
-  static @Nullable String problems(
+  /**
+   * What the definition's parts make together, checked: nothing when they're one robot. What's
+   * about a joint or a camera is about it; the rest, the robot's.
+   *
+   * @param robot the robot's name: what's about the whole of it is about this
+   */
+  static List<Finding> problems(
+      String robot,
       Body body,
       List<Joint> joints,
       List<Coupling> couplings,
       List<Drive> drives,
       List<Sensor> sensors,
       List<CameraConfig> cameras) {
-    String structure = structure(joints, couplings, drives, sensors, cameras);
-    if (structure != null) {
-      return structure;
+    List<String> structure = structure(joints, couplings, drives, sensors, cameras);
+    if (!structure.isEmpty()) {
+      return structure.stream().map(problem -> Finding.refused(robot, problem)).toList();
     }
     RobotMath math = new RobotMath(body, joints, couplings, drives, sensors);
-    List<String> problems = new ArrayList<>();
+    List<Finding> problems = new ArrayList<>();
     String budget = math.overBudget();
     if (budget != null) {
-      problems.add(budget);
+      problems.add(Finding.refused(robot, budget));
     } else if (!joints.isEmpty()) {
       String chassis;
       try {
@@ -832,17 +870,22 @@ public final class RobotMath {
       }
       if (chassis != null) {
         problems.add(
-            "the chassis, the body less its links at their references, isn't a body: " + chassis);
+            Finding.refused(
+                robot, "the chassis, the body less its links at rest, isn't a body: " + chassis));
       }
     }
     for (Joint joint : joints) {
-      math.encoderProblems(joint, problems);
+      List<String> encoders = new ArrayList<>();
+      math.encoderProblems(joint, encoders);
+      encoders.forEach(problem -> problems.add(Finding.refused(joint.label(), problem)));
     }
     Places.jointProblems(math, problems);
     for (CameraConfig camera : cameras) {
-      camera.joint().ifPresent(joint -> math.cameraProblems(camera, joint, problems));
+      List<String> mounted = new ArrayList<>();
+      camera.joint().ifPresent(joint -> math.cameraProblems(camera, joint, mounted));
+      mounted.forEach(problem -> problems.add(Finding.refused(camera.name(), problem)));
     }
-    return problems.isEmpty() ? null : String.join("; ", problems);
+    return problems;
   }
 
   /**
@@ -898,17 +941,14 @@ public final class RobotMath {
       problems.add(String.valueOf(e.getMessage()));
       return;
     }
-    String units = joint instanceof Joint.Revolute ? "radians" : "meters";
     if (!(span > range.width())) {
       problems.add(
           String.format(
               Locale.ROOT,
-              "%s's absolute encoders tell %.4g of its %.4g %s apart: gear one differently, or"
-                  + " add one",
+              "%s's absolute encoders tell %s of its %s apart: gear one differently, or add one",
               joint.label(),
-              span,
-              range.width(),
-              units));
+              joint.shown(span),
+              joint.shown(range.width())));
       return;
     }
     Range window = absoluteWindow(absolute);
@@ -917,28 +957,27 @@ public final class RobotMath {
       problems.add(
           String.format(
               Locale.ROOT,
-              "%s's absolute encoders read it from %.4g to %.4g %s, and its range, %.4g to %.4g,"
-                  + " crosses where they wrap",
+              "%s's absolute encoders read it from %s to %s, and its range, %s to %s, crosses where"
+                  + " they wrap",
               joint.label(),
-              window.lower(),
-              window.upper(),
-              units,
-              range.lower(),
-              range.upper()));
+              joint.shown(window.lower()),
+              joint.shown(window.upper()),
+              joint.shown(range.lower()),
+              joint.shown(range.upper())));
     } else if (range.lower() < window.lower() + margin || range.upper() > window.upper() - margin) {
       problems.add(
           String.format(
               Locale.ROOT,
-              "%s's absolute encoders read it from %.4g to %.4g %s, and its range, %.4g to %.4g,"
-                  + " comes within %.4g of where they wrap, a fortieth of their turn: a reading"
-                  + " a hair past the wrap reads a turn away",
+              "%s's absolute encoders read it from %s to %s, and its range, %s to %s, comes within"
+                  + " %s of where they wrap, a fortieth of their turn: a reading a hair past the"
+                  + " wrap reads a turn away",
               joint.label(),
-              window.lower(),
-              window.upper(),
-              units,
-              range.lower(),
-              range.upper(),
-              Math.min(range.lower() - window.lower(), window.upper() - range.upper())));
+              joint.shown(window.lower()),
+              joint.shown(window.upper()),
+              joint.shown(range.lower()),
+              joint.shown(range.upper()),
+              joint.shown(
+                  Math.min(range.lower() - window.lower(), window.upper() - range.upper()))));
     }
   }
 
@@ -968,8 +1007,8 @@ public final class RobotMath {
     }
   }
 
-  /** What's wrong with how the parts refer to each other, or null when nothing is. */
-  private static @Nullable String structure(
+  /** What's wrong with how the parts refer to each other: nothing when nothing is. */
+  private static List<String> structure(
       List<Joint> joints,
       List<Coupling> couplings,
       List<Drive> drives,
@@ -1014,7 +1053,7 @@ public final class RobotMath {
               joint -> known(joint, "camera " + camera.name() + "'s joint", known, problems));
     }
     if (!problems.isEmpty()) {
-      return String.join("; ", problems);
+      return problems;
     }
     Map<Joint, Coupling> leading = new HashMap<>();
     for (Coupling each : couplings) {
@@ -1043,14 +1082,14 @@ public final class RobotMath {
         problems.add(
             String.format(
                 Locale.ROOT,
-                "%s's reference (%.4g) isn't where its coupling puts it with %s at its own (%.4g)",
+                "%s's rest (%.4g) isn't where its coupling puts it with %s at its own (%.4g)",
                 each.follower().label(),
                 each.follower().reference(),
                 each.leader().label(),
                 expected));
       }
     }
-    return problems.isEmpty() ? null : String.join("; ", problems);
+    return problems;
   }
 
   private static void unique(String what, List<String> labels, List<String> problems) {

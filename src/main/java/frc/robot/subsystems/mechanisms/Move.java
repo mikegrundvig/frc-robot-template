@@ -47,15 +47,15 @@ import org.wpilib.units.measure.Time;
  * and for background work. A move on a joint that's homing waits for it, and its deadline starts
  * once it has. Recovery is an {@code if}:
  *
- * <pre>{@code
+ * {@snippet :
  * Command.requiring(pivot).executing(co -> {
- *   var deploy = pivot.goTo("out");
+ *   var deploy = pivot.goTo(PIVOT_OUT);
  *   co.await(deploy);
  *   if (!deploy.arrived()) {      // its outcome and reason are already logged
- *     co.await(pivot.goTo("in"));
+ *     co.await(pivot.goTo(PIVOT_IN));
  *   }
  * }).named("Deploy or back off");
- * }</pre>
+ * }
  *
  * <p>A move can be bound to a trigger and run again and again: each run starts afresh, and its
  * outcome is its latest run's. Its requirements are exactly the joints it moves.
@@ -169,11 +169,11 @@ public final class Move implements Command {
   // ---- Made by the joints ----
 
   /**
-   * @param refused why it can't run, or null: a position of another joint's
+   * @param refused why it can't run, or null: a position the joint has no name for
    */
   static Move goTo(
       JointMechanism joint, double position, @Nullable String named, @Nullable String refused) {
-    String where = named != null ? named : JointSetup.shown(joint.joint(), position);
+    String where = named != null ? named : joint.joint().shown(position);
     return new Move(
         new Plan(
             Kind.GO_TO,
@@ -189,7 +189,7 @@ public final class Move implements Command {
   }
 
   /**
-   * @param refused why it can't run, or null: an output of another joint's
+   * @param refused why it can't run, or null: an output the joint has no name for
    */
   static Move run(
       JointMechanism joint,
@@ -237,9 +237,10 @@ public final class Move implements Command {
   }
 
   /**
-   * A configuration's joints, each to its named position or at its named output: to it, ending when
-   * every joint is there; or held at it, until canceled. One that names a joint the template
-   * doesn't drive is refused whenever it would start, saying why, rather than when it's made.
+   * A configuration's joints, each to its named position or at its named output, where the running
+   * robot's joint puts it: to it, ending when every joint is there; or held at it, until canceled.
+   * One that names a joint the template doesn't drive is refused whenever it would start, saying
+   * why, rather than when it's made.
    *
    * @param joints each target's joint's mechanism, in the configuration's order; null for a joint
    *     the template doesn't drive
@@ -257,8 +258,8 @@ public final class Move implements Command {
       if (joint != null) {
         legs.add(
             at.isOutput()
-                ? new Leg(joint, at.joint().output(at.name()), Double.NaN, at.name())
-                : new Leg(joint, null, at.joint().position(at.name()).value(), at.name()));
+                ? new Leg(joint, joint.joint().output(at.name()), Double.NaN, at.name())
+                : new Leg(joint, null, joint.joint().position(at.name()).value(), at.name()));
       }
     }
     Kind kind = toIt ? Kind.GO_TO : Kind.RUN;
@@ -271,7 +272,7 @@ public final class Move implements Command {
   // ---- Its options ----
 
   /**
-   * The same move at a share of each joint's cruise: {@code goTo("out").at(0.9)}. Its default
+   * The same move at a share of each joint's cruise: {@code goTo(PIVOT_OUT).at(0.9)}. Its default
    * deadline grows to match.
    *
    * @param fraction above 0, at most 1
@@ -301,7 +302,7 @@ public final class Move implements Command {
 
   /**
    * The same move with a deadline of its own, tighter or looser than the model's: {@code
-   * goTo("out").within(Seconds.of(1))}.
+   * goTo(PIVOT_OUT).within(Seconds.of(1))}.
    *
    * @throws IllegalArgumentException for a move that never ends on its own, which v3's {@code
    *     withTimeout} cancels instead
@@ -327,7 +328,7 @@ public final class Move implements Command {
 
   /**
    * The same move, started only if a gate holds as it would start; otherwise it's {@link
-   * Outcome#REFUSED}, with the gate's reason: {@code pivot.goTo("out").onlyIf(intakeClear)}.
+   * Outcome#REFUSED}, with the gate's reason: {@code pivot.goTo(PIVOT_OUT).onlyIf(intakeClear)}.
    */
   public Move onlyIf(Gate gate) {
     return new Move(
@@ -672,7 +673,7 @@ public final class Move implements Command {
             text.append(", ")
                 .append(leg.joint.getName())
                 .append(" at ")
-                .append(JointSetup.shown(leg.joint.joint(), leg.joint.position()));
+                .append(leg.joint.joint().shown(leg.joint.position()));
           }
         }
         if (how == Outcome.TIMED_OUT) {

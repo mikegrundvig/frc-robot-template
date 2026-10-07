@@ -273,7 +273,6 @@ class EventsTest {
         .containsEntry("builderCall", ".kP(18.5)");
   }
 
-  /** An event, not a comment line: a browser's EventSource never shows the page a comment. */
   /**
    * The documentation section is built when the set of configurations changes, never for a value:
    * it was read when they were published.
@@ -293,6 +292,7 @@ class EventsTest {
     assertThat(after.get("configs")).isSameAs(before.get("configs"));
   }
 
+  /** An event, not a comment line: a browser's EventSource never shows the page a comment. */
   @Test
   void aQuietStreamSaysItsStillThereWithAHeartbeat() throws Exception {
     Listener page = new Listener(start(Duration.ofMillis(50)));

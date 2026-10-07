@@ -1,8 +1,8 @@
 package frc.robot.robots2026;
 
-import static frc.robot.robots2026.Parts.CANCODER;
-import static frc.robot.robots2026.Parts.encoder;
-import static frc.robot.robots2026.PhoenixParts.cancoder;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
+import static frc.robot.robots2026.Parts.CANCODER_COUNTS;
+import static frc.robot.robots2026.PhoenixParts.configure;
 import static frc.robot.robots2026.PhoenixParts.control;
 import static frc.robot.robots2026.PhoenixParts.corner;
 import static frc.robot.robots2026.PhoenixParts.gains;
@@ -17,6 +17,7 @@ import static frc.robot.robots2026.Team2611.ROBOT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Kilograms;
+import static org.wpilib.units.Units.Rotations;
 
 import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
 import com.ctre.phoenix6.signals.GravityTypeValue;
@@ -25,8 +26,10 @@ import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
 import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Link;
@@ -88,7 +91,7 @@ class Team2611PhoenixTest {
             new Loop(Team2611.FULL_SEND, motors(Team2611.FULL_SEND), 0.13, 4),
             new Loop(Team2611.TRANSITION, motors(Team2611.TRANSITION), 0.14, 2))) {
       PhoenixMechanism.Settings settings =
-          PhoenixMechanism.configure(
+          configure(
               math,
               loop.joint(),
               loop.drive(),
@@ -116,12 +119,11 @@ class Team2611PhoenixTest {
    */
   @Test
   void theShootersFollowersAreAlignedAsTheirs() {
-    MechanismWiring wired =
+    List<MechanismWiring.Device> wired =
         wiring(motor(41, false), motor(42, false), motor(43, true), motor(44, true));
 
     PhoenixMechanism.Settings shooter =
-        PhoenixMechanism.configure(
-            math, Team2611.SHOOTER, motors(Team2611.SHOOTER), wired, control());
+        configure(math, Team2611.SHOOTER, motors(Team2611.SHOOTER), wired, control());
 
     assertThat(shooter.leader().MotorOutput.Inverted)
         .isEqualTo(InvertedValue.CounterClockwise_Positive);
@@ -145,19 +147,19 @@ class Team2611PhoenixTest {
     Sensor.Encoder encoder = absolute(Team2611.PIVOT);
     double ours =
         PhoenixMechanism.cancoder(
-                math, encoder, cancoder(1, 0, false, MechanismWiring.Feedback.ROTOR))
+                math, encoder, CANCODER.can(Team2611.CANIVORE, 1).offset(Rotations.of(0)))
             .MagnetSensor
             .AbsoluteSensorDiscontinuityPoint;
 
-    assertThat(PhoenixMechanism.wrapProblem(encoder, 1.0))
+    assertThat(ControllerPlan.wrapProblem(encoder, 1.0))
         .isEqualTo(
-            "pivot absolute encoder wraps at 1 of its turn, 0.0° from pivot's range (0.0° to 135.0°), and"
+            "pivot absolute encoder wraps at 1 of its turn, 0° from pivot's range (0° to 135°), and"
                 + " 1.5° from where it stows (1.5°): a reading a hair past the wrap reads a turn"
                 + " away");
-    assertThat(PhoenixMechanism.wrapMargin(encoder, 1.0)).isCloseTo(0, within(1e-12));
+    assertThat(ControllerPlan.wrapMargin(encoder, 1.0)).isCloseTo(0, within(1e-12));
     assertThat(ours).isCloseTo(0.6875, within(1e-12));
-    assertThat(PhoenixMechanism.wrapProblem(encoder, ours)).isNull();
-    assertThat(PhoenixMechanism.wrapMargin(encoder, ours)).isCloseTo(0.3125, within(1e-12));
+    assertThat(ControllerPlan.wrapProblem(encoder, ours)).isNull();
+    assertThat(ControllerPlan.wrapMargin(encoder, ours)).isCloseTo(0.3125, within(1e-12));
   }
 
   /**
@@ -167,8 +169,7 @@ class Team2611PhoenixTest {
   @Test
   void thePivotHasNoGravitySeedUnweighed() {
     PhoenixMechanism.Settings pivot =
-        PhoenixMechanism.configure(
-            math, PIVOT, motors(Team2611.PIVOT), wiring(motor(32, true)), control());
+        configure(math, PIVOT, motors(Team2611.PIVOT), wiring(motor(32, true)), control());
 
     assertThat(pivot.leader().MotorOutput.Inverted).isEqualTo(InvertedValue.Clockwise_Positive);
     assertThat(pivot.leader().Slot0.kG).isZero();
@@ -197,14 +198,13 @@ class Team2611PhoenixTest {
                                   Inertia.box(
                                       Kilograms.of(kilograms), new Translation3d(0.05, 0.55, 0.36)))
                               .build())
-                      .shapes(List.of())
                       .build())
               .build();
-      Drive motor = JointFixtures.motors(weighed, Motor.KRAKEN_X60, 1, Parts.gearing(25));
+      Drive motor = JointFixtures.motors(weighed, Motor.KRAKEN_X60, 1, Gearing.of(25));
       RobotMath alone = RobotMath.of(BODY, List.of(weighed), List.of(), List.of(motor), List.of());
 
       PhoenixMechanism.Settings pivot =
-          PhoenixMechanism.configure(alone, weighed, motor, wiring(motor(32, true)), control());
+          configure(alone, weighed, motor, wiring(motor(32, true)), control());
 
       assertThat(pivot.leader().Slot0.GravityType).isEqualTo(GravityTypeValue.Arm_Cosine);
       assertThat(pivot.leader().Slot0.GravityArmPositionOffset)
@@ -231,13 +231,14 @@ class Team2611PhoenixTest {
   @Test
   void theSwerveModulesAreTunersOwn() {
     DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
-    Sensor.Encoder cancoder = encoder("front-left cancoder", frontLeft.steer(), 1, true, CANCODER);
+    Sensor.Encoder cancoder =
+        Sensor.Encoder.absolute("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     RobotMath corner = corner(BODY, frontLeft, cancoder);
     double driveGearing = Team2611.MODULES.driveGearing().ratio();
     double steerGearing = Team2611.MODULES.steerGearing().ratio();
 
     PhoenixMechanism.Settings drive =
-        PhoenixMechanism.configure(
+        configure(
             corner,
             frontLeft.wheel(),
             frontLeft.drive(),
@@ -246,13 +247,13 @@ class Team2611PhoenixTest {
                 gains(
                     units(frontLeft.wheel(), frontLeft.drive()), 0.1, 0, 0.72373, Double.NaN, 1)));
     PhoenixMechanism.Settings steer =
-        PhoenixMechanism.configure(
+        configure(
             corner,
             frontLeft.steer(),
             frontLeft.steering(),
             cancoder,
-            wiring(
-                cancoder(3, 0.3779296875, false, MechanismWiring.Feedback.FUSED), motor(2, false)),
+            CANCODER.can(Team2611.CANIVORE, 3).offset(Rotations.of(0.3779296875)).fused(),
+            wiring(motor(2, false)),
             control(
                 gains(
                     units(frontLeft.steer(), frontLeft.steering()),
@@ -267,8 +268,8 @@ class Team2611PhoenixTest {
     assertThat(drive.notes())
         .containsExactly(
             "front-left drive's rotor turns 3.857 times for each turn of front-left steer too,"
-                + " which Phoenix reads as front-left wheel moving: take it out in code, as a"
-                + " swerve module's coupling is");
+                + " which the controller reads as front-left wheel moving: take it out in code,"
+                + " as a swerve module's coupling is");
     assertThat(steer.leader().Feedback.FeedbackSensorSource)
         .isEqualTo(FeedbackSensorSourceValue.FusedCANcoder);
     assertThat(steer.leader().Feedback.FeedbackRemoteSensorID).isEqualTo(3);

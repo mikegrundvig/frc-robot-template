@@ -7,15 +7,14 @@ import org.wpilib.math.geometry.Translation2d;
 /**
  * Something done to the physics' world from outside it ({@link Physics#apply}): the robot carried
  * somewhere, pushed, tilted by hand, the floor gone slick, a tread worn, the ground itself. Each is
- * made physically where the engine can (a push a force the wheels resist, a slick floor a lower
- * friction); what it can't stays a declared override, saying so.
+ * a declared override of the kinematic physics, saying so: a push a speed the wheels skid under, a
+ * slick floor a share of their rolling.
  */
 public sealed interface Disturbance {
   /**
    * Carried and set down here, as the drive team does: its wheels don't turn, but the turn counts
-   * as one the robot truly made, so its gyro feels it. Today's engine keeps the robot's velocity
-   * through it, so a shove mid-drive carries on; one that sets it down at rest is the step a
-   * rigid-body engine takes.
+   * as one the robot truly made, so its gyro feels it. The physics keeps the robot's velocity
+   * through it, so a shove mid-drive carries on.
    */
   record Placed(Pose2d pose) implements Disturbance {}
 
@@ -45,7 +44,7 @@ public sealed interface Disturbance {
 
   /**
    * Only this share of the wheels' rolling moves the robot, as on a slick floor or with wheels in
-   * the air: a declared override today, every wheel alike; an engine with friction lowers μ.
+   * the air: a declared override, every wheel alike.
    *
    * @param share from 0 to 1: 1 is full grip
    */

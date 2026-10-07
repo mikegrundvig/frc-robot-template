@@ -23,9 +23,9 @@ import org.wpilib.units.measure.Time;
 
 /**
  * How the swerve drivetrain is driven: its current and speed limits, and its control gains, all
- * tunable on a running robot ({@link Drive#tuning}). What the drivetrain is (its modules, its
- * motors, where its wheels sit) is its geometry, in the robot's definition; this is what the pit
- * dials in on top of it.
+ * tunable on a running robot (the robot program's {@code Drive.tuning}). What the drivetrain is
+ * (its modules, its motors, where its wheels sit) is its geometry, in the robot's definition; this
+ * is what the pit dials in on top of it.
  *
  * @param limits current and speed limits
  * @param gains control gains
@@ -37,11 +37,6 @@ public record DrivetrainControl(Limits limits, Gains gains) {
     return DrivetrainControlBuilder.builder();
   }
 
-  /**
-   * Why the top speed asked for is past what this drivetrain can reach, or null when it isn't:
-   * velocity control needs room under the free speed to correct with. The robot's configuration
-   * checks it as committed, and its rules ({@code RobotRules}) as the pit tunes it.
-   */
   /**
    * Why a drivetrain's wiring can't drive its modules, or null when it can: a controller that
    * doesn't drive the definition's motor (a NEO on a TalonFX, say), or SPARKs on a CANivore, where
@@ -81,6 +76,11 @@ public record DrivetrainControl(Limits limits, Gains gains) {
     return problems.isEmpty() ? null : "the drivetrain's wiring: " + String.join("; ", problems);
   }
 
+  /**
+   * Why the top speed asked for is past what this drivetrain can reach, or null when it isn't:
+   * velocity control needs room under the free speed to correct with. The robot's definition checks
+   * it as committed, and the robot's rules ({@code RobotRules}) as the pit tunes it.
+   */
   public @Nullable String whyTooFastFor(DrivetrainGeometry drivetrain) {
     LinearVelocity freeSpeed = drivetrain.freeSpeed();
     return limits.maxLinearSpeed().lte(freeSpeed)

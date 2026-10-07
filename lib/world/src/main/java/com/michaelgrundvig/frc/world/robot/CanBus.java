@@ -36,6 +36,14 @@ public sealed interface CanBus {
     }
   }
 
+  /** As a sentence names it: "Systemcore's CAN_S0 port", "the CANivore canivore". */
+  default String shown() {
+    return switch (this) {
+      case Port port -> "Systemcore's " + port.port() + " port";
+      case Canivore canivore -> "the CANivore " + canivore.name();
+    };
+  }
+
   static CanBus port(Systemcore port) {
     return new Port(port);
   }

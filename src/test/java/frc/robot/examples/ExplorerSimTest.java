@@ -33,8 +33,7 @@ import org.wpilib.math.geometry.Transform2d;
 class ExplorerSimTest {
   /** The bumper switch: a contact switch on the chassis, on Systemcore's port 0. */
   static final Sensor.Switch FRONT_BUMPER =
-      Sensor.Switch.contact("front bumper", Part.CHASSIS)
-          .on(new SensorWiring.Port(0), SensorWiring.Polarity.NORMALLY_OPEN);
+      Sensor.Switch.contact("front bumper", Part.CHASSIS).on(SensorWiring.port(0).normallyOpen());
 
   /** The template's robot with the bumper switch. */
   static final RobotConfig ROBOT =

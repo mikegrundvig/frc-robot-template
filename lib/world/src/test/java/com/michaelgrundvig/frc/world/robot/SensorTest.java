@@ -11,7 +11,6 @@ import static org.wpilib.units.Units.Meters;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Rotation3d;
@@ -68,10 +67,8 @@ class SensorTest {
         Sensor.Rangefinder.builder()
             .label("hopper range")
             .part(Part.CHASSIS)
-            .pose(Optional.empty())
             .range(Meters.of(1.3))
             .fieldOfView(Degrees.of(27))
-            .wiring(Optional.empty())
             .build();
 
     assertThat(claw.tripped()).hasToString("claw beam tripped");
@@ -116,13 +113,12 @@ class SensorTest {
     assertThat(robot.math().sensorPose(unplaced, Map.of()))
         .as("at its part's origin")
         .isEqualTo(Pose3d.ZERO);
-    assertThat(robot.missing())
-        .extracting(RobotDefinition.Missing::what)
+    assertThat(MechanismFixtures.notes(robot))
         .contains(
-            "cage isn't placed on its part",
-            "pivot down isn't placed on its part",
-            "pivot down's position on pivot isn't known")
-        .doesNotContain("claw beam isn't placed on its part");
+            "cage isn't placed on its part: it's drawn, and simulated, at its part's origin",
+            "pivot down isn't placed on its part: it's drawn, and simulated, at its part's origin",
+            "pivot down's position on pivot isn't known: it can stop pivot but not home it")
+        .noneMatch(note -> note.startsWith("claw beam isn't placed"));
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->

@@ -19,7 +19,7 @@ import org.wpilib.math.system.DCMotor;
  *
  * <p>Each is a law of force along its transmission's coordinate ({@link #forceOrTorque}): on a line
  * between two points, newtons along it as its length changes; on a geared shaft, newton meters as
- * the shaft turns. The simulator reads every one.
+ * the shaft turns. The simulator runs the motors'; it doesn't simulate servos yet.
  */
 public sealed interface Actuator {
   /**
@@ -89,7 +89,7 @@ public sealed interface Actuator {
    * ({@link #command}), the share of its pulse between the shortest and the longest.
    *
    * <p>Its loop is the servo's own, so only how it's told and how hard and fast it goes are here.
-   * The simulator takes the loop as a stiff one ({@link #forceOrTorque}): its full push until
+   * Its force law takes the loop as a stiff one ({@link #forceOrTorque}): its full push until
    * within a fiftieth of its travel of where it's told, less as it nears its top speed.
    *
    * @param from its transmission's coordinate at the shortest pulse, the command 0: its length eye
@@ -121,7 +121,8 @@ public sealed interface Actuator {
 
     /**
      * What to tell it to put it at a coordinate: the share of its travel, 0 at {@code from} and 1
-     * at {@code to}, as WPILib's {@code Servo.set} takes it. Outside 0 to 1 it can't reach.
+     * at {@code to}: its pulse that share of the way from its shortest to its longest, which WPILib
+     * 2027 sends as a {@code PWM}'s pulse in microseconds. Outside 0 to 1 it can't reach.
      */
     public double command(double coordinate) {
       return (coordinate - from) / (to - from);

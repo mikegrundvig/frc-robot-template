@@ -51,6 +51,35 @@ class ChecksTest {
             new Violation("Gains.lookahead", "0.5 s must be from 0 s to 0.2 s"));
   }
 
+  /**
+   * A check across values that says what it finds: each refusal is a violation of its own, under
+   * the check's name; a doubt or a note is the program's to say, never a refusal.
+   */
+  @Test
+  void eachRefusalAFindingSaysIsAViolationOfItsOwn() {
+    List<Finding> found =
+        List.of(
+            Finding.refused("pivot", "pivot's soft limits reach past its stops"),
+            Finding.doubt("pivot", "pivot's kG is far from its weight's"),
+            Finding.note(Finding.Scope.SIMULATOR, "pivot", "pivot's arm has no mass"),
+            Finding.refused("roller", "roller has motors and no control"));
+
+    assertThat(
+            violations(
+                () -> Checks.on(Gains.class, "robot").findings("joints", () -> found).orThrow()))
+        .containsExactly(
+            new Violation("Gains[robot].joints", "pivot's soft limits reach past its stops"),
+            new Violation("Gains[robot].joints", "roller has motors and no control"));
+    assertThatCode(
+            () -> Checks.on(Gains.class).findings("joints", () -> found.subList(1, 3)).orThrow())
+        .doesNotThrowAnyException();
+    assertThat(found.get(1).refused()).isFalse();
+    assertThat(found.get(0)).hasToString("pivot's soft limits reach past its stops");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Finding.doubt(" ", "nothing"))
+        .withMessage("Finding[ ].subject: must not be blank");
+  }
+
   @Test
   void theMessageIsOneViolationPerLine() {
     assertThatIllegalArgumentException()

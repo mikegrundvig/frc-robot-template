@@ -31,12 +31,12 @@ public final class SensorIOCandi implements SensorIO {
   private final Debouncer connected = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   /**
-   * @param wiring where it's connected and which state is tripped
    * @param candi its input
+   * @param polarity which state is tripped
    */
-  public SensorIOCandi(SensorWiring.OfSwitch wiring, SensorWiring.Candi candi) {
+  public SensorIOCandi(SensorWiring.Candi candi, SensorWiring.Polarity polarity) {
     CANdi device = new CANdi(candi.id(), PhoenixMechanism.bus(candi.bus()));
-    boolean open = wiring.polarity() == SensorWiring.Polarity.NORMALLY_OPEN;
+    boolean open = polarity == SensorWiring.Polarity.NORMALLY_OPEN;
     DigitalInputsConfigs config = new DigitalInputsConfigs();
     for (int i = 0; i < TRIES; i++) {
       if (device.getConfigurator().refresh(config, STARTUP_TIMEOUT_SECONDS).isOK()) {

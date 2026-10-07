@@ -5,7 +5,6 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
@@ -19,7 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 /** A move's guards: a gate checked once as it starts, and a gate checked every loop. */
 @ExtendWith(RobotSim.class)
 class MoveGuardsSimTest {
-  private final JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+  private final JointsSimHarness sim = new JointsSimHarness(ROBOT);
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);
   private final boolean[] clear = {false};

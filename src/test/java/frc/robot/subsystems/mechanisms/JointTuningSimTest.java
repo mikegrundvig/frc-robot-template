@@ -3,7 +3,6 @@ package frc.robot.subsystems.mechanisms;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_IN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.wpilib.units.Units.Amps;
@@ -28,10 +27,10 @@ class JointTuningSimTest {
   private final JointsSimHarness sim =
       new JointsSimHarness(
           ROBOT,
-          SETUPS,
-          setup ->
+          joint ->
               tunings.computeIfAbsent(
-                      setup.joint().label(), label -> JointMechanism.tuning(label, setup.control()))
+                      joint.label(),
+                      label -> JointMechanism.tuning(joint, ControllerSettings.control(joint)))
                   ::get);
 
   /** How long the pivot takes to swing out, from in. */
@@ -55,7 +54,8 @@ class JointTuningSimTest {
     assertThat(starved).as("5 A against 40 A").isGreaterThan(asCommitted + 0.05);
     assertThat(pivot.changes())
         .singleElement()
-        .satisfies(change -> assertThat(change.builderCall()).contains("5"));
+        .satisfies(
+            change -> assertThat(change.builderCall()).isEqualTo(".withStatorLimit(Amps.of(5.0))"));
     pivot.revert();
     assertThat(swingOut(sim)).isEqualTo(asCommitted);
   }
@@ -63,9 +63,9 @@ class JointTuningSimTest {
   @Test
   void aJointsTuningIsItsGainsAndCurrentLimitsWithinWhatsSafe() {
     MechanismControl control = MechanismControl.position(30).withStatorLimit(Amps.of(150));
-    LiveConfig<MechanismControl> tuning = JointMechanism.tuning("arm", control);
+    LiveConfig<MechanismControl> tuning = JointMechanism.tuning(JointFixtures.PIVOT, control);
 
-    assertThat(tuning.name()).isEqualTo("arm");
+    assertThat(tuning.name()).isEqualTo("pivot");
     assertThat(tuning.knobs())
         .extracting(LiveConfig.Knob::path)
         .containsExactly(

@@ -1,14 +1,19 @@
 package frc.robot.subsystems.mechanisms;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_MAX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANDI;
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANRANGE;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
+import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.world.robot.CanBus;
-import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
@@ -17,15 +22,12 @@ import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotConfigBuilder;
 import frc.robot.Robots;
 import frc.robot.lib.wiring.ControllerPins;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * Where a robot's switches and rangefinders are connected, checked against what its definition says
- * they are and against its joints' wiring, as its configuration is built.
+ * Where a robot's switches and rangefinders are connected, each carrying its wiring: what a joint's
+ * motor controller reads on its limits, and the IDs the definition holds them to.
  */
 class SensorsTest {
   private static final CanBus BUS = CanBus.port(CanBus.Systemcore.CAN_S0);
@@ -33,181 +35,73 @@ class SensorsTest {
   private static final Sensor.Rangefinder HOPPER_RANGE = range("hopper range");
   private static final Sensor.Rangefinder SHOOTER_RANGE = range("shooter range");
 
-  private static final RobotDefinition ROBOT =
-      RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
-          .sensors(
-              List.of(
-                  Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER),
-                  Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER),
-                  Sensor.Switch.beam("claw beam", PIVOT),
-                  Sensor.Switch.contact("cage", Part.CHASSIS),
-                  HOPPER_RANGE,
-                  SHOOTER_RANGE))
-          .build();
-
-  /** The pivot on a SPARK and the roller on a TalonFX; the others unwired. */
-  private static final List<JointSetup> JOINTS =
-      List.of(
-          wired(SETUPS.get(0), MechanismWiring.Controller.SPARK_MAX, 21),
-          wired(SETUPS.get(1), MechanismWiring.Controller.TALON_FX, 22),
-          SETUPS.get(2),
-          SETUPS.get(3));
-
   /**
-   * Each switch on one of the inputs a switch can be on (a SPARK's limit inputs, a joint's own
-   * limit switch on one and a beam on the other; a CANdi's; a Systemcore port), either polarity,
-   * and the rangefinders on CANranges: nothing to say.
+   * The definition holds a CANdi's and a CANrange's IDs to the rest of the bus's: a CANdi's two
+   * inputs are one device, two CANranges on one ID aren't.
    */
   @Test
-  void aSwitchGoesOnAnySwitchInputAndARangefinderOnACanRange() {
-    assertThat(Sensors.wiringProblems(ROBOT, wired(JOINTS), everySensor())).isNull();
-  }
-
-  /**
-   * A wiring for a sensor the robot doesn't have, a switch wired as a rangefinder, a sensor wired
-   * twice, two on one port, a controller's limit input on a Kraken's TalonFX, which has none, or on
-   * a joint that isn't wired, and a joint's limit switch on another's: each named. A beam on a
-   * SPARK's limit input is fine.
-   */
-  @Test
-  void itNamesEachSensorItCantRead() {
-    List<SensorWiring> wrong =
-        List.of(
-            onPort("stray", 0),
-            SensorWiring.OfRangefinder.builder()
-                .sensor("cage")
-                .input(new SensorWiring.CanRange(BUS, 40))
-                .build(),
-            onPort("claw beam", 2),
-            onPort("claw beam", 3),
-            onCandi("pivot down", 1),
-            onCandi("pivot up", 1),
-            SensorWiring.OfSwitch.builder()
-                .sensor("pivot down")
-                .input(new SensorWiring.ControllerLimit("roller", SensorWiring.Direction.REVERSE))
-                .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-                .build(),
-            SensorWiring.OfSwitch.builder()
-                .sensor("pivot up")
-                .input(new SensorWiring.ControllerLimit("elevator", SensorWiring.Direction.FORWARD))
-                .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-                .build());
-
-    assertThat(Sensors.wiringProblems(ROBOT, wired(JOINTS), wrong))
-        .isEqualTo(
-            "stray is wired, and isn't one of joints's sensors; cage is wired as a rangefinder,"
-                + " and the definition's isn't one; claw beam is wired twice; pivot down and"
-                + " pivot up are on one input: CANdi 31's S1; pivot down is wired twice; pivot down"
-                + " is pivot's limit switch, on roller's controller, which would stop roller: wire"
-                + " it to pivot's; pivot down is on roller's TalonFX's limit input, and a Kraken's"
-                + " TalonFX has none: put it on a CANdi; pivot up is wired twice; pivot up is"
-                + " pivot's limit switch, on elevator's controller, which would stop elevator: wire"
-                + " it to pivot's; pivot up is on elevator's controller's limit input, and elevator"
-                + " isn't wired");
-  }
-
-  /**
-   * A joint's absolute encoder on a Systemcore port holds that port: a switch on it, or a second
-   * encoder, is named with it.
-   */
-  @Test
-  void aPortEncodersPortIsNoOtherSensors() {
-    RobotDefinition robot =
-        ROBOT.with(PIVOT.absoluteEncoder(1024, MechanismWiring.PortEncoder.dutyCycle(2)));
-
-    assertThat(Sensors.wiringProblems(robot, wired(JOINTS), List.of(onPort("claw beam", 2))))
-        .isEqualTo("pivot absolute encoder and claw beam are on one input: Systemcore's port 2");
-    assertThat(Sensors.wiringProblems(robot, wired(JOINTS), List.of(onPort("claw beam", 3))))
-        .isNull();
-  }
-
-  /**
-   * What an input can't be is refused as its wiring is built: a switch on a CANrange, a rangefinder
-   * on a CANdi, a seventh Systemcore port.
-   */
-  @Test
-  void aWiringRefusesAnInputItsSensorCantBeOn() {
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                SensorWiring.OfSwitch.builder()
-                    .sensor("claw beam")
-                    .input(new SensorWiring.CanRange(BUS, 30))
-                    .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-                    .build())
-        .withMessageContaining("a switch isn't on a CANrange: a CANrange is a rangefinder");
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                SensorWiring.OfRangefinder.builder()
-                    .sensor("hopper range")
-                    .input(new SensorWiring.Candi(BUS, 30, 1))
-                    .build())
-        .withMessageContaining("a rangefinder is on a CANrange");
-    assertThatIllegalArgumentException().isThrownBy(() -> port(6));
-  }
-
-  /**
-   * The configuration asks the same of the wiring its sensors carry, and holds a CANdi's and a
-   * CANrange's IDs to the rest of the bus's: a CANdi's two inputs are one device, two CANranges on
-   * one ID aren't.
-   */
-  @Test
-  void theConfigurationRefusesSensorsItCantRead() {
+  void aCandisAndACanRangesIdsAreTheBussOwn() {
     Sensor.Switch down =
         Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
-            .on(new SensorWiring.Candi(BUS, 31, 1), SensorWiring.Polarity.NORMALLY_CLOSED);
+            .on(CANDI.can(BUS, 31).s1().normallyClosed());
     Sensor.Switch up =
         Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
-            .on(new SensorWiring.Candi(BUS, 31, 2), SensorWiring.Polarity.NORMALLY_CLOSED);
+            .on(CANDI.can(BUS, 31).s2().normallyClosed());
     RobotDefinition wired =
         RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
-            .sensors(List.of(down, up, HOPPER_RANGE.on(new SensorWiring.CanRange(BUS, 30))))
-            .build();
-    RobotDefinition shared =
-        RobotDefinitionBuilder.builder(wired)
-            .sensors(
-                List.of(
-                    down,
-                    up,
-                    HOPPER_RANGE.on(new SensorWiring.CanRange(BUS, 30)),
-                    SHOOTER_RANGE.on(new SensorWiring.CanRange(BUS, 30))))
+            .sensors(List.of(down, up, HOPPER_RANGE.on(CANRANGE.can(BUS, 30))))
             .build();
 
-    assertThat(RobotConfigBuilder.builder(Robots.SIM).definition(wired).build().sensors())
-        .hasSize(3);
+    assertThat(RobotConfigBuilder.builder(Robots.SIM).definition(wired).build().definition())
+        .isEqualTo(wired);
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> RobotConfigBuilder.builder(Robots.SIM).definition(shared).build())
+        .isThrownBy(
+            () ->
+                RobotDefinitionBuilder.builder(wired)
+                    .sensors(
+                        List.of(
+                            down,
+                            up,
+                            HOPPER_RANGE.on(CANRANGE.can(BUS, 30)),
+                            SHOOTER_RANGE.on(CANRANGE.can(BUS, 30))))
+                    .build())
         .withMessage(
-            "RobotConfig[joints].sensors: two CANranges on Systemcore's CAN_S0 port share CAN ID"
-                + " 30, hopper range and shooter range: give each its own");
+            "RobotDefinition[joints].devices: two CANranges on Systemcore's CAN_S0 port share CAN"
+                + " ID 30, hopper range and shooter range: give each its own");
   }
 
   /**
-   * A joint's controller's limits come from the wiring: its own limit switch on its pin, stopped
-   * on; a beam on its other pin, read only; and on a TalonFX, its limit switch on a CANdi on its
-   * bus, read over CAN as the limit for the switch's end. A SPARK can't read a CANdi, and a joint
-   * with nothing on it has nothing.
+   * A joint's controller's limits come from the wiring its switches carry: its own limit switch on
+   * its pin, stopped on; a beam on its other pin, read only; and on a TalonFX, its limit switch on
+   * a CANdi on its bus, read over CAN as the limit for the switch's end. A SPARK can't read a
+   * CANdi, and a joint with nothing on it has nothing.
    */
   @Test
   void eachJointsControllerLimitsComeFromTheWiring() {
-    List<SensorWiring> wiring =
+    Joint.Revolute onSpark =
+        unmotored(PIVOT).motor(Motor.NEO, JointFixtures.gearing(25), SPARK_MAX.can(21));
+    Joint.Revolute onTalon =
+        unmotored(PIVOT).motor(Motor.FALCON_500, JointFixtures.gearing(25), TALON_FX.can(21));
+    Joint.Revolute roller = JointFixtures.ROLLER.motorsOn(TALON_FX.can(22));
+    Sensor.Switch up =
+        Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
+            .on(CANDI.can(BUS, 31).s2().normallyClosed());
+    List<Sensor> wired =
         List.of(
-            SensorWiring.OfSwitch.builder()
-                .sensor("pivot down")
-                .input(new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.REVERSE))
-                .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-                .build(),
-            SensorWiring.OfSwitch.builder()
-                .sensor("claw beam")
-                .input(new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.FORWARD))
-                .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-                .build(),
-            onCandi("pivot up", 2));
-    JointSetup onTalon = wired(SETUPS.get(0), MechanismWiring.Controller.TALON_FX, 21);
+            Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
+                .on(
+                    SensorWiring.ControllerLimit.of(PIVOT, SensorWiring.Direction.REVERSE)
+                        .normallyClosed()),
+            Sensor.Switch.beam("claw beam", PIVOT)
+                .on(
+                    SensorWiring.ControllerLimit.of(PIVOT, SensorWiring.Direction.FORWARD)
+                        .normallyOpen()),
+            up);
+    RobotDefinition onSparks = robot(List.of(onSpark, roller), wired);
+    RobotDefinition onTalons = robot(List.of(onTalon, roller), wired);
 
-    ControllerPins spark = Sensors.pins(ROBOT, wiring, JOINTS.get(0));
-    ControllerPins talon = Sensors.pins(ROBOT, wiring, onTalon);
+    ControllerPins spark = Sensors.pins(onSparks, onSpark);
+    ControllerPins talon = Sensors.pins(onTalons, onTalon);
 
     assertThat(spark.reverse())
         .contains(new ControllerPins.OnPin(SensorWiring.Polarity.NORMALLY_CLOSED, true));
@@ -218,72 +112,21 @@ class SensorsTest {
         .as(
             "its pin's beam: the CANdi's upper switch would be its forward too, and the pin keeps it")
         .contains(new ControllerPins.OnPin(SensorWiring.Polarity.NORMALLY_OPEN, false));
-    assertThat(Sensors.pins(ROBOT, List.of(onCandi("pivot up", 2)), onTalon).forward())
+    assertThat(Sensors.pins(robot(List.of(onTalon, roller), List.of(up)), onTalon).forward())
         .contains(new ControllerPins.OnCandi(31, 2));
-    assertThat(Sensors.pins(ROBOT, wiring, JOINTS.get(1))).isEqualTo(ControllerPins.NONE);
+    assertThat(Sensors.pins(onSparks, roller)).isEqualTo(ControllerPins.NONE);
   }
 
-  private static List<SensorWiring> everySensor() {
-    return List.of(
-        SensorWiring.OfSwitch.builder()
-            .sensor("pivot down")
-            .input(new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.REVERSE))
-            .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-            .build(),
-        onCandi("pivot up", 1),
-        SensorWiring.OfSwitch.builder()
-            .sensor("claw beam")
-            .input(new SensorWiring.ControllerLimit("pivot", SensorWiring.Direction.FORWARD))
-            .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-            .build(),
-        onPort("cage", 4),
-        SensorWiring.OfRangefinder.builder()
-            .sensor("hopper range")
-            .input(new SensorWiring.CanRange(BUS, 30))
-            .build());
-  }
-
-  private static SensorWiring onPort(String sensor, int port) {
-    return SensorWiring.OfSwitch.builder()
-        .sensor(sensor)
-        .input(port(port))
-        .polarity(SensorWiring.Polarity.NORMALLY_OPEN)
-        .build();
-  }
-
-  private static SensorWiring onCandi(String sensor, int input) {
-    return SensorWiring.OfSwitch.builder()
-        .sensor(sensor)
-        .input(new SensorWiring.Candi(BUS, 31, input))
-        .polarity(SensorWiring.Polarity.NORMALLY_CLOSED)
-        .build();
-  }
-
-  private static SensorWiring.Port port(int port) {
-    return new SensorWiring.Port(port);
-  }
-
-  private static Map<String, MechanismWiring> wired(List<JointSetup> joints) {
-    Map<String, MechanismWiring> wired = new HashMap<>();
-    for (JointSetup setup : joints) {
-      setup.wiring().ifPresent(wiring -> wired.put(setup.joint().label(), wiring));
-    }
-    return wired;
-  }
-
-  private static JointSetup wired(JointSetup setup, MechanismWiring.Controller controller, int id) {
-    return JointSetup.builder()
-        .joint(setup.joint())
-        .control(setup.control())
-        .wiring(
-            Optional.of(
-                MechanismWiring.builder()
-                    .canBus(BUS)
-                    .controller(controller)
-                    .motors(List.of(MechanismWiring.Motor.builder().id(id).clockwise(true).build()))
-                    .cancoder(Optional.empty())
-                    .dataPort(Optional.empty())
-                    .build()))
+  /** The fixtures' robot with its pivot and roller as given, and these sensors. */
+  private static RobotDefinition robot(List<Joint> pivotAndRoller, List<Sensor> sensors) {
+    return RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
+        .joints(
+            List.of(
+                pivotAndRoller.get(0),
+                pivotAndRoller.get(1),
+                JointFixtures.ELEVATOR,
+                JointFixtures.TURRET))
+        .sensors(sensors)
         .build();
   }
 
@@ -291,10 +134,8 @@ class SensorsTest {
     return Sensor.Rangefinder.builder()
         .label(label)
         .part(Part.CHASSIS)
-        .pose(Optional.empty())
         .range(Meters.of(1.3))
         .fieldOfView(Degrees.of(27))
-        .wiring(Optional.empty())
         .build();
   }
 }

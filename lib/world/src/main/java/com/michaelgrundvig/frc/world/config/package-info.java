@@ -35,9 +35,10 @@
  *       every loop converts once, when it is built, and keeps plain SI values.
  *   <li>Every value is set by name, through the builder generated for each {@link
  *       com.michaelgrundvig.frc.world.config.ConfigRecord}: {@code
- *       Body.builder().frameLength(...)...build()}. The builder asks for each value in turn, so
- *       none can be left out or put in the wrong place, and the architecture tests reject building
- *       one any other way.
+ *       Body.builder().frameLength(...)...build()}. The builder asks in turn for each value the
+ *       record can't do without, so none can be left out or put in the wrong place; one a robot may
+ *       not have (an {@code Optional}, a list its record lets be empty) is set by name after them,
+ *       or left out. The architecture tests reject building one any other way.
  *   <li>Every record checks its values when it is built, with {@link
  *       com.michaelgrundvig.frc.world.config.Checks}: each value with its {@link
  *       com.michaelgrundvig.frc.world.config.Rule} ({@code positive()}, {@code

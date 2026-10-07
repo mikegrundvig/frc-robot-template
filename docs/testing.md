@@ -129,7 +129,7 @@ class DrivingSimTest {
 
     sim.run(1.5); // seconds of robot time, loop by loop
 
-    assertThat(sim.robot().drive().getPose().getX()).isGreaterThan(5.0);
+    assertThat(sim.drive().getPose().getX()).isGreaterThan(5.0);
   }
 }
 ```
@@ -146,7 +146,10 @@ What it offers:
 - **The Driver Station:** `RobotSim.setEnabled(true)`, `RobotSim.enable(RobotMode.AUTONOMOUS,
   true)`, `RobotSim.station(AllianceStationID.RED_1)`. Change it through these, or call
   `DriverStationSim.notifyNewData()` after changing it yourself, or the change never arrives.
-- **The drivers:** `sim.driver()`, the gamepad on port 0.
+- **The drivers:** `sim.driver()` and `sim.operator()`, the gamepads on ports 0 and 1, which the
+  robot's `Controls` is bound to; `sim.bindings()`, every binding it made, by button and command.
+  Another class shaped as `Controls`, a fixture's, is bound to them too by
+  `sim.controls(Team2611Controls::new)`.
 - **The truth:** `sim.simulation()` knows where the robot really is (`truePose()`), and can move
   it, tilt it, or hit it.
 - **Faults and scenarios:** what can fail in the simulated world while it runs (the catalog,
@@ -179,8 +182,8 @@ What it offers:
   time; step the loop. To wait for the network (an answer, an event on a stream), wait on it with
   a timeout, a loop at a time; to show nothing else arrived, send a change and check it's the next
   thing to.
-- **Recorded behavior stays recorded.** Two seeded sessions are recorded loop by loop, and must
-  come out the same, numbers within a millionth. Each guards its own part, and neither the other's:
+- **Recorded behavior stays recorded.** Some behavior is recorded, row by row, and must come out
+  the same, numbers within a millionth. Each recording guards its own part, and none another's:
   - `EstimatorGoldenSimTest` (`estimator-golden.csv`) guards the pose estimator. It's fed
     measurements already solved (driving, a misread tag, a collision, an unfelt shove, a tilt), so
     it never reaches the camera path.
@@ -188,6 +191,13 @@ What it offers:
     cameras' raw tag images, each solved by `LocalizationService` as the robot was when it was taken
     (its heading, attitude and turning then), with a camera's mount doubt and a task's tags, and
     every image's solve and every measurement's verdict recorded.
+  - The joints' recordings guard what each joint's motor controllers are told and what the joint
+    does in the simulator (`JointRecordings`): `JointsRecordedSimTest` for the runtime tests'
+    joints, `ExampleRobotRecordedSimTest` for the guide's robot, and `Team2611RecordedSimTest` for
+    2611's 2026 robot each record their joints' doubts and refusals, every setting their TalonFXs,
+    CANcoders and SPARKs are told (wired as their robots have them, and otherwise), and a session
+    in the simulator, every second loop. `SparkRequestsRecordedTest` records what a joint on a
+    SPARK asks of it each loop: its setpoint, its slot, and the feedforward the robot sends with it.
 
   When a change is meant to move one, run its test with the environment variable `GOLDEN_UPDATE=1`
   to record it again, and commit the recording with the change, saying why it moved.

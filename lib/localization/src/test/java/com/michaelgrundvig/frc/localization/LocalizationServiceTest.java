@@ -22,7 +22,6 @@ import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
-import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Imus;
@@ -37,7 +36,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -95,7 +93,6 @@ class LocalizationServiceTest {
                   .sightRange(Meters.of(7))
                   .build())
           .noiseScale(1.0)
-          .joint(Optional.empty())
           .build();
 
   /** A 28 x 24 in frame, 60 kg. */
@@ -109,10 +106,10 @@ class LocalizationServiceTest {
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
           .weight(Body.Weight.weighed(Kilograms.of(60)))
-          .cg(Optional.of(new Translation3d(0, 0, 0.2)))
           .inertia(
               Body.Turning.tensor(
                   Inertia.builder().ixx(6).iyy(6).izz(6).ixy(0).ixz(0).iyz(0).build()))
+          .cg(new Translation3d(0, 0, 0.2))
           .build();
 
   /** A 28 x 24 in swerve robot with the front camera, its IMUs not yet measured. */
@@ -128,21 +125,15 @@ class LocalizationServiceTest {
                       .wheelRadius(Inches.of(2))
                       .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
                       .steerGearing(Gearing.builder().ratio(12.8).efficiency(1.0).build())
-                      .wheelCoefficientOfFriction(Optional.of(1.2))
-                      .driveInertia(Optional.of(KilogramSquareMeters.of(0.001)))
-                      .steerInertia(Optional.of(KilogramSquareMeters.of(0.004)))
                       .couplingRatio(0)
+                      .wheelCoefficientOfFriction(1.2)
+                      .driveInertia(KilogramSquareMeters.of(0.001))
+                      .steerInertia(KilogramSquareMeters.of(0.004))
                       .build(),
                   BODY,
                   Inches.of(2.625)))
-          .cameras(List.of(FRONT))
           .imus(Imus.UNCHECKED)
-          .joints(List.of())
-          .couplings(List.of())
-          .drives(List.of())
-          .sensors(List.of())
-          .configurations(List.of())
-          .interlocks(List.of())
+          .cameras(List.of(FRONT))
           .build();
 
   /** Localization with the robot placed in front of the hub, to 5 cm and half a degree. */
@@ -182,12 +173,7 @@ class LocalizationServiceTest {
           .parent(Part.CHASSIS)
           .origin(new Transform3d(0, 0, 0.1, Rotation3d.ZERO))
           .axis(new Vector3(0, 0, 1))
-          .range(Optional.empty())
-          .reference(0)
-          .link(Link.builder().label("turret").mass(MassProperties.NONE).shapes(List.of()).build())
-          .positions(List.of())
-          .outputs(List.of())
-          .driven(Driven.NONE)
+          .link(Link.builder().label("turret").mass(MassProperties.NONE).build())
           .build();
 
   /**
@@ -198,8 +184,7 @@ class LocalizationServiceTest {
    */
   @Test
   void aCameraOnAJointIsSolvedFromWhereItsJointCarriedIt() {
-    CameraConfig riding =
-        CameraConfigBuilder.builder(FRONT).name("turret").joint(Optional.of(TURRET)).build();
+    CameraConfig riding = CameraConfigBuilder.builder(FRONT).name("turret").joint(TURRET).build();
     RobotDefinition turreted =
         RobotDefinitionBuilder.builder(DEFINITION)
             .joints(List.of(TURRET))

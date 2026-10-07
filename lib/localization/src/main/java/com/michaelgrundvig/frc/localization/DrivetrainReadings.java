@@ -27,6 +27,10 @@ public record DrivetrainReadings(
     ImuReadings gyro,
     ImuReadings backupImu,
     ChassisVelocities velocities) {
+  public DrivetrainReadings {
+    wheels = List.copyOf(wheels);
+  }
+
   public static DrivetrainReadingsBuilder.WheelsStage builder() {
     return DrivetrainReadingsBuilder.builder();
   }

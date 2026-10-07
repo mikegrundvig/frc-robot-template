@@ -30,7 +30,6 @@ import frc.robot.sim.DriveSimHarness;
 import frc.robot.sim.FakeCamera;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -537,7 +536,7 @@ class LocalizationSimTest {
     return RobotConfigBuilder.builder(Robots.SIM)
         .definition(
             RobotDefinitionBuilder.builder(Robots.SIM.definition())
-                .imus(Imus.builder().gyro(gyro).backup(Optional.of(backup)).build())
+                .imus(Imus.builder().gyro(gyro).backup(backup).build())
                 .build())
         .build();
   }

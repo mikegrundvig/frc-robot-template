@@ -87,15 +87,16 @@ DriveMove leg = drive.follow(
 
 A named keyframe is something code can wait for. `leg.at("pickup")` is a
 [gate](mechanisms.md#4-gates-wait-for-things-and-know-why-not): it opens when the path passes the
-keyframe, and stays open until the move starts again.
+keyframe, and stays open until the move starts again. `src/test/java/frc/robot/examples/PickUp.java`
+has it whole:
 
-```java
+```java fragment
 Command pickUp() {
   return Command.requiring(drive, pivot).executing(co -> {
     DriveMove leg = drive.follow(...);
     co.fork(leg);                       // drive the path...
     co.waitUntil(leg.at("pickup"));     // ...and as it passes pickup,
-    co.await(pivot.goTo("out"));        // swing the intake out
+    co.await(pivot.goTo(PIVOT_OUT));    // swing the intake out
     co.await(leg);                      // then wait for the path's end
   }).named("Pick up");
 }

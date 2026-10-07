@@ -7,14 +7,13 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
-import static frc.robot.subsystems.mechanisms.JointFixtures.SETUPS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.homed;
-import static frc.robot.subsystems.mechanisms.JointFixtures.setup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Interlock;
+import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl.Homing;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
@@ -22,7 +21,6 @@ import frc.robot.RobotSim;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
 import frc.robot.sim.JointsSimHarness;
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,16 +31,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
  */
 @ExtendWith(RobotSim.class)
 class HomingSimTest {
-  /** The fixtures' joints, with one homed by a recipe instead of stowed by hand. */
-  private static List<JointSetup> homing(int index, Homing recipe) {
-    List<JointSetup> setups = new ArrayList<>(SETUPS);
-    JointSetup setup = setups.get(index);
-    setups.set(index, setup(setup.joint(), homed(setup.control(), recipe)));
-    return setups;
+  /** A robot with one of its joints homed by a recipe instead of stowed by hand. */
+  private static RobotDefinition homing(RobotDefinition robot, Joint joint, Homing recipe) {
+    return robot.with(joint.retuned(control -> homed(control, recipe)));
   }
-
-  private static final int PIVOT_SETUP = 0;
-  private static final int ELEVATOR_SETUP = 2;
 
   /**
    * Powered on 0.3 m up, the elevator reads 0 m, its reference. Homing pushes it down into its stop
@@ -51,7 +43,7 @@ class HomingSimTest {
   @Test
   void aJointHomesIntoItsStopOnTheFirstEnableAndMovesWaitForIt() {
     JointsSimHarness sim =
-        new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, Homing.toHardStop(Homing.Stop.LOWER)));
+        new JointsSimHarness(homing(ROBOT, ELEVATOR, Homing.toHardStop(Homing.Stop.LOWER)));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     Gate ready = elevator.isReady();
     sim.simulation.powerOnAt(ELEVATOR, 0.3);
@@ -81,7 +73,7 @@ class HomingSimTest {
   @Test
   void aJointHomesFromItsFarEndWithinTheTimeItsTravelTakes() {
     JointsSimHarness sim =
-        new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, Homing.toHardStop(Homing.Stop.LOWER)));
+        new JointsSimHarness(homing(ROBOT, ELEVATOR, Homing.toHardStop(Homing.Stop.LOWER)));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     sim.simulation.powerOnAt(ELEVATOR, 1.2);
 
@@ -102,7 +94,7 @@ class HomingSimTest {
   @Test
   void itHomesOnlyOnceEnabled() {
     JointsSimHarness sim =
-        new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, Homing.toHardStop(Homing.Stop.LOWER)));
+        new JointsSimHarness(homing(ROBOT, ELEVATOR, Homing.toHardStop(Homing.Stop.LOWER)));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     sim.setEnabled(false);
     Move clear = elevator.goTo(ELEVATOR_CLEAR);
@@ -125,7 +117,7 @@ class HomingSimTest {
   @Test
   void aHomingThatFindsNoStopFaultsTheJointUntilItHomesAgain() {
     Homing quick = Homing.toHardStop(Homing.Stop.LOWER, Seconds.of(0.3));
-    JointsSimHarness sim = new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, quick));
+    JointsSimHarness sim = new JointsSimHarness(homing(ROBOT, ELEVATOR, quick));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
     sim.simulation.powerOnAt(ELEVATOR, 1.1);
 
@@ -148,7 +140,7 @@ class HomingSimTest {
 
   @Test
   void aJointThatNeedsNoHomingIsHomeAtOnce() {
-    JointsSimHarness sim = new JointsSimHarness(ROBOT, SETUPS);
+    JointsSimHarness sim = new JointsSimHarness(ROBOT);
     Move home = sim.joints.of(PIVOT).home();
 
     sim.run(home, 0.1);
@@ -167,7 +159,7 @@ class HomingSimTest {
             .interlocks(List.of(Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_RUN))))
             .build();
     JointsSimHarness sim =
-        new JointsSimHarness(guarded, homing(PIVOT_SETUP, Homing.toHardStop(Homing.Stop.UPPER)));
+        new JointsSimHarness(homing(guarded, PIVOT, Homing.toHardStop(Homing.Stop.UPPER)));
     JointMechanism pivot = sim.joints.of(PIVOT);
     JointMechanism roller = sim.joints.of(ROLLER);
     sim.simulation.powerOnAt(PIVOT, Math.toRadians(120));
@@ -190,7 +182,7 @@ class HomingSimTest {
   @Test
   void aStillJointAtItsStopHomesInAQuarterSecond() {
     JointsSimHarness sim =
-        new JointsSimHarness(ROBOT, homing(ELEVATOR_SETUP, Homing.toHardStop(Homing.Stop.LOWER)));
+        new JointsSimHarness(homing(ROBOT, ELEVATOR, Homing.toHardStop(Homing.Stop.LOWER)));
     JointMechanism elevator = sim.joints.of(ELEVATOR);
 
     double took = sim.runUntil(() -> elevator.state() == JointMechanism.State.READY, 1);

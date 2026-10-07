@@ -6,7 +6,6 @@ import static org.wpilib.units.Units.Rotations;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /** A drivetrain's wiring is checked when it's written down, not when the robot won't drive. */
@@ -15,11 +14,11 @@ class SwerveWiringTest {
     return SwerveWiring.ModuleWiring.builder()
         .driveId(drive)
         .steerId(steer)
-        .encoderId(Optional.of(encoder))
         .encoderOffset(Rotations.of(-0.125))
         .driveInverted(false)
         .steerInverted(true)
         .encoderInverted(false)
+        .encoderId(encoder)
         .build();
   }
 
@@ -74,11 +73,11 @@ class SwerveWiringTest {
                 SwerveWiring.ModuleWiring.builder()
                     .driveId(1)
                     .steerId(2)
-                    .encoderId(Optional.of(3))
                     .encoderOffset(Rotations.of(1.5))
                     .driveInverted(false)
                     .steerInverted(false)
                     .encoderInverted(false)
+                    .encoderId(3)
                     .build())
         .hasMessage("ModuleWiring.encoderOffset: 1.5 R must be from -1 R to 1 R");
   }

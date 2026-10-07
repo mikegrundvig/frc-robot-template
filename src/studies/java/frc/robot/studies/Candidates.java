@@ -9,7 +9,6 @@ import frc.robot.RobotConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Distance;
 
@@ -140,7 +139,6 @@ public final class Candidates {
                     .yaw(Degrees.of(spot.yawDegrees()))
                     .sensor(sensor)
                     .noiseScale(1.0)
-                    .joint(Optional.empty())
                     .build());
           }
           family.add(

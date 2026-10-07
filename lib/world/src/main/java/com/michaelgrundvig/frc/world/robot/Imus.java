@@ -19,10 +19,7 @@ public record Imus(ImuMount gyro, Optional<ImuMount> backup) {
    * neither accelerometer checked.
    */
   public static final Imus UNCHECKED =
-      ImusBuilder.builder()
-          .gyro(ImuMount.UNCHECKED)
-          .backup(Optional.of(ImuMount.UNCHECKED))
-          .build();
+      ImusBuilder.builder().gyro(ImuMount.UNCHECKED).backup(ImuMount.UNCHECKED).build();
 
   /** Starts describing the robot's IMUs, one named value at a time. */
   public static ImusBuilder.GyroStage builder() {

@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Finding.Scope.ROBOT;
+import static com.michaelgrundvig.frc.world.config.Finding.Scope.SIMULATOR;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.PITCH_UP;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.UP;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.definition;
@@ -10,8 +12,6 @@ import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.link;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.point;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.prismatic;
 import static com.michaelgrundvig.frc.world.robot.MechanismFixtures.revolute;
-import static com.michaelgrundvig.frc.world.robot.RobotDefinition.Missing.Scope.ROBOT;
-import static com.michaelgrundvig.frc.world.robot.RobotDefinition.Missing.Scope.SIMULATOR;
 import static com.michaelgrundvig.frc.world.robot.RobotMath.GRAVITY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -24,6 +24,7 @@ import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
 import java.util.ArrayList;
@@ -368,7 +369,7 @@ class RobotMathTest {
             Part.CHASSIS,
             point(0.25, 0, 0.15),
             PITCH_UP,
-            Optional.of(Range.builder().lower(0).upper(1.5).build()),
+            Optional.of(Range.builder().kind(Position.Kind.ANGLE).lower(0).upper(1.5).build()),
             0,
             link("intake", 2.5, point(0.15, 0, 0), point(0.3, 0.4, 0.05)));
     Joint.Prismatic hopper =
@@ -392,7 +393,7 @@ class RobotMathTest {
             .build();
     CameraConfig camera =
         CameraConfigBuilder.builder(ConfigFixtures.camera("hopper", point(0.05, 0, 0.15)))
-            .joint(Optional.of(hopper))
+            .joint(hopper)
             .build();
     RobotDefinition robot =
         definition(
@@ -476,7 +477,7 @@ class RobotMathTest {
     assertThatIllegalArgumentException()
         .as("one encoder can't tell its range apart")
         .isThrownBy(() -> definition(List.of(turret), List.of(), List.of(drive), List.of(a)))
-        .withMessageContaining("turret's absolute encoders tell 1.229 of its 7.505 radians apart");
+        .withMessageContaining("turret's absolute encoders tell 70.43° of its 430° apart");
   }
 
   /**
@@ -620,7 +621,7 @@ class RobotMathTest {
                     .label("wrist cancoder")
                     .terms(rotorB.terms())
                     .absolute(true)
-                    .countsPerTurn(Optional.of(4096))
+                    .countsPerTurn(4096)
                     .build())
         .withMessageContaining("an absolute encoder reads one joint, not 2");
     RobotMath.Gains pitching = math.idealGains(pitch);
@@ -867,7 +868,7 @@ class RobotMathTest {
             PITCH_UP,
             Optional.of(Range.degrees(-10, 110)),
             0,
-            Link.builder().label("arm").mass(MassProperties.NONE).shapes(List.of()).build());
+            Link.builder().label("arm").mass(MassProperties.NONE).build());
     Drive motors = MechanismFixtures.motors(arm, Motor.KRAKEN_X60, 2, gearing(60, 0.9));
     RobotDefinition robot = definition(List.of(arm), List.of(), List.of(motors), List.of());
     RobotMath math = robot.math();
@@ -958,7 +959,7 @@ class RobotMathTest {
             PITCH_UP,
             Optional.of(Range.degrees(-10, 110)),
             0,
-            Link.builder().label("arm").mass(MassProperties.NONE).shapes(List.of()).build());
+            Link.builder().label("arm").mass(MassProperties.NONE).build());
     Joint.Revolute roller =
         revolute(
             "roller",
@@ -993,28 +994,48 @@ class RobotMathTest {
                     .build())
             .build();
 
-    assertThat(ConfigFixtures.definition(List.of()).missing())
-        .extracting(RobotDefinition.Missing::what, RobotDefinition.Missing::scope)
-        .containsExactly(tuple("60.00 kg of the robot's 60.00 kg is in no link", SIMULATOR));
-    assertThat(unweighed.missing())
-        .extracting(RobotDefinition.Missing::what, RobotDefinition.Missing::scope)
+    assertThat(notes(ConfigFixtures.definition(List.of())))
+        .extracting(Finding::message, Finding::scope)
         .containsExactly(
-            tuple("the robot isn't weighed: its mass is the season's most, 68 Kg", ROBOT),
+            tuple(
+                "60.00 kg of the robot's 60.00 kg is in no link: the chassis, its electronics,"
+                    + " bumpers and battery: carried as one rigid body",
+                SIMULATOR));
+    assertThat(notes(unweighed))
+        .extracting(Finding::message, Finding::scope)
+        .containsExactly(
+            tuple(
+                "the robot isn't weighed: its mass is the season's most, 68 Kg: the drive's moves"
+                    + " and feedforward, the simulator's acceleration and the links' mass budget"
+                    + " rest on the rules, not the robot",
+                ROBOT),
             tuple(
                 "the body's inertia is a box's, its mass spread through its bumpers' outline and"
-                    + " height",
+                    + " height: how fast the drive's moves turn, its turning feedforward, and how"
+                    + " the simulator tips and turns the robot are approximate",
                 ROBOT),
-            tuple("67.50 kg of the robot's 68.00 kg is in no link", SIMULATOR),
-            tuple("arm has no mass", SIMULATOR),
-            tuple("arm has no shape", ROBOT),
-            tuple("roller has mass but no inertia", SIMULATOR),
-            tuple("roller has nothing moving it", ROBOT));
-    assertThat(unweighed.missing().get(3).toString())
-        .isEqualTo(
-            "arm has no mass: arm's gravity comes from its kG, and arm adds nothing to arm's"
-                + " inertia");
-    assertThat(unweighed.missing().get(5).costs())
-        .isEqualTo("its own turning adds nothing to roller's inertia");
+            tuple(
+                "67.50 kg of the robot's 68.00 kg is in no link: the chassis, its electronics,"
+                    + " bumpers and battery: carried as one rigid body",
+                SIMULATOR),
+            tuple(
+                "arm has no mass: arm's gravity comes from its kG, and arm adds nothing to arm's"
+                    + " inertia",
+                SIMULATOR),
+            tuple(
+                "arm has no shape: it isn't drawn, nor checked against the starting height and the"
+                    + " extension limit",
+                ROBOT),
+            tuple(
+                "roller has mass but no inertia: its own turning adds nothing to roller's inertia",
+                SIMULATOR),
+            tuple(
+                "roller has nothing moving it: no drive turns it and no coupling leads it: no ideal"
+                    + " gains, and the simulator leaves it where it is",
+                ROBOT));
+    assertThat(notes(unweighed))
+        .extracting(Finding::subject)
+        .containsExactly("test", "test", "test", "arm", "arm", "roller", "roller");
   }
 
   /**
@@ -1044,8 +1065,8 @@ class RobotMathTest {
             .drivetrain(DrivetrainGeometry.inset(steerUnmeasured, robot.body(), Inches.of(2.625)))
             .build();
 
-    assertThat(defaulted.missing())
-        .extracting(RobotDefinition.Missing::toString, RobotDefinition.Missing::scope)
+    assertThat(notes(defaulted))
+        .extracting(Finding::message, Finding::scope)
         .containsExactly(
             tuple(
                 "60.00 kg of the robot's 60.00 kg is in no link: the chassis, its electronics,"
@@ -1066,12 +1087,13 @@ class RobotMathTest {
                     + " simulation value: how fast the simulator's modules steer at their current"
                     + " limit is a guess",
                 SIMULATOR));
-    assertThat(steerDefaulted.missing())
-        .extracting(RobotDefinition.Missing::what)
-        .containsExactly(
-            "60.00 kg of the robot's 60.00 kg is in no link",
+    assertThat(MechanismFixtures.notes(steerDefaulted))
+        .hasSize(2)
+        .last()
+        .asString()
+        .startsWith(
             "the steering's inertia isn't measured: it's 0.004 kg m², Phoenix Tuner X's simulation"
-                + " value");
+                + " value:");
   }
 
   /**
@@ -1081,7 +1103,7 @@ class RobotMathTest {
    */
   @Test
   void aJointGravityActsOnWithNoKgWrittenIsDoubted() {
-    MechanismControl control = MechanismControl.position(30);
+    MechanismControl control = MechanismFixtures.stowed(30);
     Joint.Revolute bare =
         revolute(
                 "bare",
@@ -1171,9 +1193,9 @@ class RobotMathTest {
     }
     RobotDefinition robot = definition(joints, List.of(), drives, List.of());
 
-    assertThat(robot.missing())
-        .filteredOn(missing -> missing.what().contains("kG"))
-        .extracting(RobotDefinition.Missing::toString, RobotDefinition.Missing::scope)
+    assertThat(robot.findings())
+        .filteredOn(finding -> finding.scope() == ROBOT && finding.message().contains("kG"))
+        .extracting(Finding::message, Finding::scope)
         .containsExactly(
             tuple(
                 "bare has no kG: it holds against gravity by kP alone, so it sits below its"
@@ -1190,9 +1212,8 @@ class RobotMathTest {
                     + " targets until its kG is tuned and written, withKg(...), or written as 0"
                     + " for a counterbalanced joint",
                 ROBOT));
-    assertThat(robot.with(bare.control(control.withKg(0.4))).missing())
-        .extracting(RobotDefinition.Missing::what)
-        .doesNotContain("bare has no kG");
+    assertThat(MechanismFixtures.notes(robot.with(bare.retuned(tuned -> tuned.withKg(0.4)))))
+        .noneMatch(note -> note.startsWith("bare has no kG"));
   }
 
   private static Coupling.Curve curve(
@@ -1209,11 +1230,7 @@ class RobotMathTest {
   }
 
   private static Transmission.Term term(Joint joint, double ratio) {
-    return Transmission.Term.builder()
-        .joint(joint)
-        .ratio(ratio)
-        .pitchRadius(Optional.empty())
-        .build();
+    return Transmission.Term.builder().joint(joint).ratio(ratio).build();
   }
 
   private static Drive differential(
@@ -1227,5 +1244,12 @@ class RobotMathTest {
                 .efficiency(1)
                 .build())
         .build();
+  }
+
+  /** What a definition says it doesn't know. */
+  private static List<Finding> notes(RobotDefinition robot) {
+    return robot.findings().stream()
+        .filter(finding -> finding.level() == Finding.Level.NOTE)
+        .toList();
   }
 }

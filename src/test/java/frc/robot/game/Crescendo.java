@@ -176,7 +176,7 @@ final class Crescendo {
     return new Translation2d(x, point.getY() + run * along.getSin());
   }
 
-  /** The corners of the stage's three legs, seen from above, as {@link #stage} draws them. */
+  /** The corners of the stage's three legs, seen from above: the stage zone's outline. */
   private static List<Translation2d> legCorners() {
     Translation2d center = new Translation2d(STAGE_X, STAGE_Y);
     List<Translation2d> corners = new ArrayList<>();

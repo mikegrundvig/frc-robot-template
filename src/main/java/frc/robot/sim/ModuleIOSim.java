@@ -11,6 +11,7 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.simulation.CurrentLimitedMotor;
 import com.michaelgrundvig.frc.simulation.Physics;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.simulation.WheelDrive;
@@ -30,7 +31,7 @@ import org.wpilib.math.util.MathUtil;
  * #actuate}), the drive's controller works out the voltage it asks for from its loop, at the
  * wheel's true speed, and hands it on with its stator current limit, which the physics holds the
  * motor to; the steering's runs its loop and turns the module in closed form ({@link
- * CurrentLimitedMotorSim}); the physics turns the wheel and moves the robot. The motors and their
+ * CurrentLimitedMotor}); the physics turns the wheel and moves the robot. The motors and their
  * gearing are the robot's definition's ({@code DrivetrainGeometry.ModuleType}). Its absolute
  * encoder can read off true ({@link SensorErrors}), and its zero can be knocked further off while
  * it runs. Its encoders' readings can go stale: the wheel turns on, and what the robot's code reads
@@ -89,7 +90,7 @@ final class ModuleIOSim implements ModuleIO {
   }
 
   private final WheelTruth wheel;
-  private final CurrentLimitedMotorSim steerSim;
+  private final CurrentLimitedMotor steerSim;
   private final double wheelRadiusMeters;
 
   /** How far the absolute encoder's zero is off: it reads the true angle minus this. */
@@ -174,7 +175,7 @@ final class ModuleIOSim implements ModuleIO {
     this.wheel = wheel;
     wheelRadiusMeters = modules.wheelRadius().in(Meters);
     steerSim =
-        new CurrentLimitedMotorSim(
+        new CurrentLimitedMotor(
             modules.steerMotors().model(modules.steerGearing().efficiency()),
             modules.steerInertiaOrDefault().in(KilogramSquareMeters),
             modules.steerGearing().ratio());
@@ -268,8 +269,7 @@ final class ModuleIOSim implements ModuleIO {
    *
    * <p>The physics' scrub on the steering ({@link WheelTruth#steerLoadNewtonMeters}) isn't felt
    * yet: today's physics models none, and a real module's needs measuring first, as a torque
-   * against the motion that can stop the module, which {@link CurrentLimitedMotorSim} says how to
-   * add.
+   * against the motion that can stop the module, which {@link CurrentLimitedMotor} says how to add.
    */
   private void steer(long nanos) {
     long remaining = nanos;
@@ -347,8 +347,7 @@ final class ModuleIOSim implements ModuleIO {
         stale ? staleVelocityRadPerSec : wheel.spinRadPerSec() + spinRadPerSec;
     inputs.driveAppliedVolts = wheel.driveVolts();
     inputs.driveStatorCurrentAmps = Math.abs(wheel.driveCurrentAmps());
-    inputs.driveSupplyCurrentAmps =
-        Math.abs(wheel.driveVolts() * wheel.driveCurrentAmps()) / MAX_VOLTS;
+    inputs.driveSupplyCurrentAmps = driveSupplyAmps();
     readLastSubStep();
     inputs.driveTorqueLimited = driveLimited;
     driveLimited = false;
@@ -365,6 +364,16 @@ final class ModuleIOSim implements ModuleIO {
     // shows it, and driveTorqueLimited says whether it reached the limit since the last loop.
     inputs.steerStatorCurrentAmps = steerPeakAmps;
     steerPeakAmps = 0;
+  }
+
+  /** The current the drive motor draws from the battery, in amps: what its PDH channel reads. */
+  double driveSupplyAmps() {
+    return Math.abs(wheel.driveVolts() * wheel.driveCurrentAmps()) / MAX_VOLTS;
+  }
+
+  /** The current the steering motor draws from the battery now, in amps. */
+  double steerSupplyAmps() {
+    return Math.abs(steerSim.appliedVolts() * steerSim.currentAmps()) / BATTERY_VOLTS;
   }
 
   /** What the drive encoder reads: every turn of the wheel, slips too, unless it's stale. */

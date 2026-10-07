@@ -28,10 +28,10 @@ class DrivetrainControlTest {
               .wheelRadius(Inches.of(2))
               .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
               .steerGearing(Gearing.builder().ratio(150.0 / 7.0).efficiency(1.0).build())
-              .wheelCoefficientOfFriction(Optional.of(1.2))
-              .driveInertia(Optional.of(KilogramSquareMeters.of(0.001)))
-              .steerInertia(Optional.of(KilogramSquareMeters.of(0.004)))
               .couplingRatio(50.0 / 14.0)
+              .wheelCoefficientOfFriction(1.2)
+              .driveInertia(KilogramSquareMeters.of(0.001))
+              .steerInertia(KilogramSquareMeters.of(0.004))
               .build(),
           Inches.of(10.375),
           Inches.of(10.375));
@@ -232,11 +232,11 @@ class DrivetrainControlTest {
           SwerveWiring.ModuleWiring.builder()
               .driveId(1 + 2 * i)
               .steerId(2 + 2 * i)
-              .encoderId(cancoders ? Optional.of(20 + i) : Optional.empty())
               .encoderOffset(Rotations.of(0))
               .driveInverted(false)
               .steerInverted(true)
               .encoderInverted(false)
+              .encoderId(cancoders ? Optional.of(20 + i) : Optional.empty())
               .build());
     }
     return SwerveWiring.builder()

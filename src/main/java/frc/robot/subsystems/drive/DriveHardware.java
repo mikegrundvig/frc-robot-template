@@ -24,6 +24,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public record DriveHardware(
     List<ModuleIO> modules, GyroIO gyro, GyroIO backupImu, Lock odometryLock) {
   public DriveHardware {
+    modules = List.copyOf(modules);
     Checks.on(DriveHardware.class).field("modules", modules, size(4)).orThrow(); // swerve's four
   }
 

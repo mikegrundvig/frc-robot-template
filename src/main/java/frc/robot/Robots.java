@@ -24,7 +24,6 @@ import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.game.Rebuilt;
 import java.util.List;
-import java.util.Optional;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Translation3d;
 
@@ -32,8 +31,10 @@ import org.wpilib.math.geometry.Translation3d;
  * The team's robots, one {@link RobotConfig} each. A test builds every one, so an invalid value
  * fails the build rather than the robot.
  *
- * <p>Every value is set by name through a builder, which asks for each in turn: none can be left
- * out or land in the wrong place.
+ * <p>Every value is set by name through a builder, which asks in turn for each one the robot can't
+ * do without: none can be left out or land in the wrong place. What a robot may not have (a PDH,
+ * its joints, a camera's joint, a center of gravity) comes after them, given as itself ({@code
+ * .pdh(Pdh.can(1))}), or is left out.
  *
  * <p>The template's robot is a typical competition build, at the 2026 rule maximums where the rules
  * set one (the next season's rules replace them at kickoff). Replace each value with your robot's
@@ -45,9 +46,10 @@ import org.wpilib.math.geometry.Translation3d;
  * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
  * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
  * its interlocks, which hold beneath every command. The configurations the robot takes name the
- * joints and their places. The template's robot has none; an intake would read:
+ * joints and their places. The template's robot has none; an intake would read (the guide's robot,
+ * src/test/java/frc/robot/examples/ExampleRobot.java, has it whole):
  *
- * <pre>{@code
+ * {@snippet :
  * static final Position PIVOT_IN = Position.degrees("in", 1.5);
  * static final Position PIVOT_OUT = Position.degrees("out", 130);
  *
@@ -55,34 +57,56 @@ import org.wpilib.math.geometry.Translation3d;
  *     Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
  *         .range(Range.degrees(0, 135), PIVOT_IN)
  *         .positions(PIVOT_IN, PIVOT_OUT)
- *         .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32))
- *         .control(MechanismControl.position(30).withProfile(8, 30));
+ *         .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).pdh(4, Amps.of(40)))
+ *         .absoluteEncoder(CANCODER.can(34).offset(Rotations.of(0.82)))
+ *         .control(MechanismControl.position(30)
+ *             .withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700)));
  *
  * static final Output INTAKING = Output.rpm("intaking", 2000);
+ * static final Output OUTTAKING = Output.volts("outtaking", -4);
+ *
  * static final Joint.Revolute ROLLER =
  *     Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))
- *         .outputs(INTAKING)
- *         .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31))
- *         .runsOnlyWhen(PIVOT.past(Degrees.of(110)))   // only once the pivot is out of the frame
+ *         .outputs(INTAKING, OUTTAKING)
+ *         .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31).pdh(5, Amps.of(40)))
+ *         .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))   // only once the pivot is out of the frame
  *         .control(MechanismControl.velocity(0.02));
  *
  * static final Configuration INTAKE =
  *     Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
- * }</pre>
+ * }
  *
  * <p>The definition refuses what can't be: a position outside its joint's range, a speed past what
  * its motors turn it at or a voltage past what they're rated for, a configuration that breaks an
- * interlock, interlocks that hold two joints by each other. {@code RobotDefinition.notes()} lists
- * what's doubtful, a speed so near its motors' free speed that its loop can't hold it, and the
- * program says it at startup: in the log ({@code Robot/DefinitionDoubts}) and, on a robot, on the
- * Driver Station's console.
+ * interlock, interlocks that hold two joints by each other. {@code RobotDefinition.findings()}
+ * lists what's doubtful, a speed so near its motors' free speed that its loop can't hold it, and
+ * the program says it at startup: in the log ({@code Robot/Doubts}) and, on a robot, on the Driver
+ * Station's console.
  *
  * <p>Behavior code names the constants themselves: {@code joints.of(PIVOT)}, {@code
- * pivot.goTo(PIVOT_OUT)}. A practice robot of the same design is the same definition with its
- * differences, {@code COMPETITION.with(PIVOT.motor(Motor.KRAKEN_X60, Gearing.of(25),
- * TALON_FX.can(33)))}: a joint wired or tuned otherwise is still the same joint, so the same code
- * runs on either. 2611's 2026 robot shows it (src/test/java/frc/robot/robots2026/Team2611.java).
- * docs/mechanisms.md says how to describe a mechanism and use its commands.
+ * pivot.goTo(PIVOT_OUT)}. A practice robot of the same design is the competition robot under its
+ * own name, with its differences, each joint, sensor, camera or the drivetrain re-wired, re-tuned
+ * or placed otherwise and the rest of it kept: a joint wired or tuned otherwise, or its named
+ * places elsewhere, is still the same joint, so the same code runs on either, {@code
+ * pivot.goTo(PIVOT_OUT)} to each robot's own out, and a revision of the competition robot's blocks
+ * reaches it. It's listed beside the competition robot:
+ *
+ * {@snippet :
+ * static final RobotConfig PRACTICE =
+ *     COMPETITION.named("practice")
+ *         .with(
+ *             PIVOT.motorsOn(TALON_FX.can(33).pdh(4, Amps.of(40)))
+ *                 .replaced(PIVOT_OUT, Degrees.of(128)),
+ *             ...)
+ *         .with(CLAW_BEAM.on(CANDI.can(36).s1().normallyOpen()))
+ *         .with(CameraConfigBuilder.builder(BACK_LEFT).up(Inches.of(20.5)).build());
+ * ...
+ * return List.of(COMPETITION, PRACTICE);
+ * }
+ *
+ * <p>2611's 2026 robot is a whole robot described this way
+ * (src/test/java/frc/robot/robots2026/Team2611.java). docs/mechanisms.md says how to describe a
+ * mechanism and use its commands, and how to write a practice robot.
  */
 public final class Robots {
   private Robots() {}
@@ -113,8 +137,8 @@ public final class Robots {
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
           .weight(WEIGHT)
-          .cg(Optional.of(new Translation3d(0, 0, 0.15)))
           .inertia(Body.Turning.yaw(KilogramSquareMeters.of(6.7)))
+          .cg(new Translation3d(0, 0, 0.15))
           .build();
 
   /**
@@ -134,9 +158,6 @@ public final class Robots {
           .wheelRadius(Inches.of(2))
           .driveGearing(Gearing.builder().ratio(6.75).efficiency(1.0).build())
           .steerGearing(Gearing.builder().ratio(150.0 / 7.0).efficiency(1.0).build())
-          .wheelCoefficientOfFriction(Optional.empty())
-          .driveInertia(Optional.empty())
-          .steerInertia(Optional.empty())
           .couplingRatio(50.0 / 14.0)
           .build();
 
@@ -230,7 +251,6 @@ public final class Robots {
               .yaw(Degrees.of(23.162))
               .sensor(APRILTAG_CAMERA)
               .noiseScale(1.0)
-              .joint(Optional.empty())
               .build(),
           CameraConfig.builder()
               .name("front-right")
@@ -242,7 +262,6 @@ public final class Robots {
               .yaw(Degrees.of(-23.162))
               .sensor(APRILTAG_CAMERA)
               .noiseScale(1.0)
-              .joint(Optional.empty())
               .build(),
           CameraConfig.builder()
               .name("back-left")
@@ -254,7 +273,6 @@ public final class Robots {
               .yaw(Degrees.of(180.985))
               .sensor(APRILTAG_CAMERA)
               .noiseScale(1.0)
-              .joint(Optional.empty())
               .build(),
           CameraConfig.builder()
               .name("back-right")
@@ -266,7 +284,6 @@ public final class Robots {
               .yaw(Degrees.of(180.985))
               .sensor(APRILTAG_CAMERA)
               .noiseScale(1.0)
-              .joint(Optional.empty())
               .build());
 
   /**
@@ -293,18 +310,15 @@ public final class Robots {
                   .name("sim")
                   .body(BODY)
                   .drivetrain(DRIVETRAIN)
-                  .cameras(CAMERAS)
                   // The simulator's IMUs sit at the center on the belly pan, level, x forward, and
                   // read along their axes by construction. A real robot starts from
                   // Imus.UNCHECKED, its IMUs measured where they're mounted, until each passes the
                   // accelerometer check (docs/calibration.md).
-                  .imus(Imus.builder().gyro(SIM_IMU).backup(Optional.of(SIM_IMU)).build())
-                  .joints(List.of())
-                  .couplings(List.of())
-                  .drives(List.of())
-                  .sensors(List.of())
-                  .configurations(List.of())
-                  .interlocks(List.of())
+                  .imus(Imus.builder().gyro(SIM_IMU).backup(SIM_IMU).build())
+                  .cameras(CAMERAS)
+                  // No PDH: the template's robot has no wiring. A real robot declares its own,
+                  // .pdh(Pdh.can(1)), and each motor controller its channel where it's wired,
+                  // TALON_FX.can(32).pdh(4, Amps.of(40)).
                   .build())
           .vision(VisionConfig.DEFAULTS)
           .estimator(EstimatorConfig.DEFAULTS)

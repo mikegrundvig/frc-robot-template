@@ -6,15 +6,20 @@
  * <p>Where to start reading:
  *
  * <ul>
- *   <li><b>Physics:</b> {@link com.michaelgrundvig.frc.simulation.Physics} is the engine apart from
- *       the sensors and faults: the {@link com.michaelgrundvig.frc.simulation.Actuators} drive it,
- *       sub-step by sub-step, each wheel through a {@link
+ *   <li><b>Physics:</b> {@link com.michaelgrundvig.frc.simulation.Physics} is the physics apart
+ *       from the sensors and faults: the {@link com.michaelgrundvig.frc.simulation.Actuators} drive
+ *       it, sub-step by sub-step, each wheel through a {@link
  *       com.michaelgrundvig.frc.simulation.WheelDrive}; it keeps the {@link
  *       com.michaelgrundvig.frc.simulation.ChassisTruth} and each {@link
  *       com.michaelgrundvig.frc.simulation.WheelTruth}; and a {@link
- *       com.michaelgrundvig.frc.simulation.Disturbance} acts on it from outside. Today's engine is
- *       {@link com.michaelgrundvig.frc.simulation.KinematicPhysics}; a rigid-body engine takes its
- *       place behind the same interface.
+ *       com.michaelgrundvig.frc.simulation.Disturbance} acts on it from outside. Its physics is
+ *       {@link com.michaelgrundvig.frc.simulation.KinematicPhysics}: the robot moves as its wheels
+ *       roll.
+ *   <li><b>Joints:</b> {@link com.michaelgrundvig.frc.simulation.JointPlant} moves each driven
+ *       joint in closed form, from the robot's definition: its motors through its gearing, held to
+ *       their current limit ({@link com.michaelgrundvig.frc.simulation.CurrentLimitedMotor}, which
+ *       turns a swerve module's steering too), its inertia, gravity and hard stops. Its motor
+ *       controller is the robot program's adapters' to emulate.
  *   <li><b>Sensors:</b> {@link com.michaelgrundvig.frc.simulation.SensorErrors} says how the
  *       simulated robot's sensors and wheels differ from what its code believes; {@link
  *       com.michaelgrundvig.frc.simulation.GyroModel} and its {@link

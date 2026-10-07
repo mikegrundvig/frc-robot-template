@@ -2,7 +2,6 @@ package frc.robot.lib.phoenix;
 
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Amps;
-import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.Rotations;
 import static org.wpilib.units.Units.Seconds;
 
@@ -27,19 +26,16 @@ import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.ReverseLimitSourceValue;
 import com.ctre.phoenix6.signals.ReverseLimitTypeValue;
 import com.ctre.phoenix6.signals.SensorDirectionValue;
-import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.CanBus;
-import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
+import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
-import com.michaelgrundvig.frc.world.robot.Part;
-import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
-import com.michaelgrundvig.frc.world.robot.Transmission;
 import frc.robot.lib.wiring.CanPorts;
 import frc.robot.lib.wiring.ControllerPins;
 import java.util.ArrayList;
@@ -48,24 +44,27 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
-import org.wpilib.units.measure.Angle;
 
 /**
- * A mechanism's Phoenix 6 settings, from what it is (the robot's definition), how it's wired, and
- * how it's driven: its TalonFX's ratios, gains, gravity, limits, profile, direction and followers,
- * and its CANcoder's, so a mechanism is described once and nothing is retyped. Pure functions: the
- * configurations are new objects for the caller to apply, and no device is touched here.
+ * A mechanism's Phoenix 6 settings, translated from how the program drives its joint ({@link
+ * ControllerPlan}): its TalonFX's ratios, gains, gravity, limits, direction and followers, in
+ * Phoenix's units and terms, and its CANcoder's. The plan owns every value; this says them as
+ * Phoenix holds them. Pure functions: the configurations are new objects for the caller to apply,
+ * and no device is touched here.
  *
- * <p>Positions are in {@link PhoenixUnits}: a revolute joint's rotations, a prismatic joint's
- * drum's rotations. Every ratio Phoenix is given is a magnitude, and every direction is the
- * wiring's, as the joint moves forward ({@link MechanismWiring}). The gains go in slot 0.
+ * <p>Positions are in the joint's rotations ({@link MechanismRotations}): a revolute joint's
+ * rotations, a prismatic joint's drum's rotations. Every ratio Phoenix is given is a magnitude, and
+ * every direction is the wiring's, as the joint moves forward ({@link MechanismWiring}): each motor
+ * controller's, the leader first, as the joint's block names them. The gains go in slot 0, which
+ * runs the plan's feedforward law itself, but for its kA term, which the program adds with each
+ * request.
  *
- * <p>What's wrong is refused, by an {@link IllegalArgumentException} saying what and why: a ratio,
- * a cruise, a soft limit or a gravity offset Phoenix can't hold or the mechanism can't reach.
- * What's doubtful is noted, beside the settings ({@link Settings#notes}): a tuned gain far from
- * what the definition derives, an encoder wrapping close to the joint's range, a gravity one cosine
- * fits badly. A joint with no kG written is the definition's doubt ({@code
- * RobotDefinition.missing}), not noted here.
+ * <p>What Phoenix can't hold is refused, by an {@link IllegalArgumentException} saying what and
+ * why: a ratio, a gain or a gravity offset past its limits. What no motor controller could do the
+ * plan refuses, and what the definition refuses of the joint's own block, soft limits past its
+ * stops among them, never gets here. What's doubtful is noted, beside the settings ({@link
+ * Settings#notes}): the plan's doubts, then Phoenix's own, an encoder wrapping close to the joint's
+ * range and a gravity offset at Phoenix's limit.
  */
 public final class PhoenixMechanism {
   private PhoenixMechanism() {}
@@ -90,19 +89,6 @@ public final class PhoenixMechanism {
 
   static final double MAX_VOLTS = 127;
 
-  /** Motion Magic's cruise, acceleration and jerk: at most 9999 rotations per second, and so on. */
-  static final double MAX_PROFILE = 9999;
-
-  /** {@code MotionMagicExpo_kV}, in volts per rotation per second. */
-  static final double MIN_EXPO_KV = 0.001;
-
-  static final double MAX_EXPO_KV = 100;
-
-  /** {@code MotionMagicExpo_kA}, in volts per rotation per second squared. */
-  static final double MIN_EXPO_KA = 1e-5;
-
-  static final double MAX_EXPO_KA = 100;
-
   // The helper's own judgment: chosen, each with its reason.
 
   /**
@@ -113,108 +99,29 @@ public final class PhoenixMechanism {
   static final double GRAVITY_OFFSET_MARGIN = 5.0 / 360;
 
   /**
-   * How far one cosine may miss gravity's torque, as a share of its peak, before it's noted: beyond
-   * a few percent, the joint's feedforward wants {@code RobotMath.gravityTorque} instead.
-   */
-  static final double MISFIT = 0.05;
-
-  /**
-   * How far a tuned gain may be from the definition's ideal one and still be noted as the same
-   * mechanism: from half to twice. Friction and losses put real gains above the ideal, rarely past
-   * twice it; past that, a unit or a ratio is likelier than the mechanism.
-   */
-  static final double SANITY_LOW = 0.5;
-
-  static final double SANITY_HIGH = 2.0;
-
-  /** How close a tuned gain's ratio to the ideal must come to a frame's to be named as one. */
-  static final double FRAME_TOLERANCE = 0.1;
-
-  /** Meters in an inch, for naming a gain worked out per inch. */
-  private static final double INCH = 0.0254;
-
-  /**
    * One mechanism's settings.
    *
+   * @param plan how the program drives its joint, which they say in Phoenix's terms: its units are
+   *     what its code converts the joint's positions with, to and from Phoenix's
    * @param leader the leading TalonFX's: everything Phoenix needs to drive the joint
    * @param followers each following TalonFX's, in the wiring's order
    * @param cancoder the CANcoder's, if the mechanism has one
-   * @param units the units its positions, speeds and gains are in: what its code converts the
-   *     joint's positions with, to and from Phoenix's
    * @param notes what's doubtful about them, each a sentence for a log or a test
    */
   public record Settings(
+      ControllerPlan plan,
       TalonFXConfiguration leader,
       List<FollowerSettings> followers,
       Optional<CANcoderConfiguration> cancoder,
-      PhoenixUnits units,
       List<String> notes) {
     public Settings {
       followers = List.copyOf(followers);
       notes = List.copyOf(notes);
     }
 
-    /** The slot's kP: volts per rotation of error ({@link PhoenixUnits}). */
-    public double kP() {
-      return leader.Slot0.kP;
-    }
-
-    /**
-     * The slot's feedforward and kD, as the robot works them out each loop where Phoenix's slot
-     * doesn't run them. Settings worked out with the feedforward on the robot ({@link
-     * #configureFeedforwardOnRobot}) give an arm's gravity offset as it is.
-     */
-    public Feedforward feedforward() {
-      SlotConfigs slot = SlotConfigs.from(leader.Slot0);
-      return new Feedforward(
-          slot.kS,
-          slot.kV,
-          slot.kA,
-          slot.kG,
-          slot.GravityType == GravityTypeValue.Arm_Cosine,
-          slot.GravityArmPositionOffset,
-          slot.kD);
-    }
-  }
-
-  /**
-   * What the robot works out each loop in volts and sends with its request, where the motor
-   * controller's own slot doesn't: beside a SPARK's loop ({@code RevMechanism}), and in a loop the
-   * robot closes itself on an encoder it reads. The slot's feedforward and kD, in the mechanism's
-   * rotations ({@link PhoenixUnits}), as Phoenix's slot holds them.
-   *
-   * @param kS volts to overcome friction, in the direction of travel
-   * @param kV volts per rotation a second
-   * @param kA volts per rotation a second squared: in the program's own feedforward, as on a
-   *     TalonFX, and so unused here
-   * @param kG volts to hold against gravity: always, for an elevator, or at the arm's angle
-   * @param arm whether gravity turns with the joint, as an arm's does
-   * @param armOffset what's added to the position for its angle to gravity, in rotations
-   * @param kD volts per rotation a second of speed error
-   */
-  public record Feedforward(
-      double kS, double kV, double kA, double kG, boolean arm, double armOffset, double kD) {
-    /**
-     * Volts to follow a profile's point: friction, speed, gravity, and damping toward its speed.
-     *
-     * @param position where the profile is, in the mechanism's rotations
-     * @param velocity how fast it moves there, in rotations a second
-     * @param measured how fast the mechanism moves now, in rotations a second
-     */
-    public double atPosition(double position, double velocity, double measured) {
-      return kS * Math.signum(velocity)
-          + kV * velocity
-          + gravity(position)
-          + kD * (velocity - measured);
-    }
-
-    /** Volts to run at a speed: friction, speed and gravity; the loop's kP closes the rest. */
-    public double atSpeed(double position, double velocity) {
-      return kS * Math.signum(velocity) + kV * velocity + gravity(position);
-    }
-
-    private double gravity(double position) {
-      return arm ? kG * Math.cos(2 * Math.PI * (position + armOffset)) : kG;
+    /** The joint's rotations, which Phoenix's positions, speeds and gains are in. */
+    public MechanismRotations rotations() {
+      return plan.rotations();
     }
   }
 
@@ -232,58 +139,29 @@ public final class PhoenixMechanism {
   /**
    * A mechanism read by its motors' rotors alone.
    *
-   * @param math what the robot's definition derives ({@code RobotDefinition.math()})
-   * @param joint the joint whose units the motor controller works in
-   * @param drive the motors that move it, as many as the wiring names
-   * @throws IllegalArgumentException for what Phoenix can't hold or the mechanism can't do, and for
-   *     wiring that names a CANcoder: give the definition's encoder it is
+   * @param plan how the program drives its joint, its motors' controllers named, the leader first
+   * @throws IllegalArgumentException for what Phoenix can't hold
    */
-  public static Settings configure(
-      RobotMath math, Joint joint, Drive drive, MechanismWiring wiring, MechanismControl control) {
-    if (wiring.cancoder().isPresent()) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a CANcoder: give the definition's encoder it is, or wire none");
-    }
-    return build(math, joint, drive, null, wiring, control, true);
-  }
-
-  /**
-   * The same settings for a motor controller whose feedforward the robot works out each loop and
-   * sends with its request, as a SPARK's is ({@code RevMechanism}): an arm's gravity offset is its
-   * own, not held to the ±0.25 rotations only Phoenix's onboard gravity can take.
-   *
-   * @throws IllegalArgumentException as the other does, but for the gravity offset
-   */
-  public static Settings configureFeedforwardOnRobot(
-      RobotMath math, Joint joint, Drive drive, MechanismWiring wiring, MechanismControl control) {
-    if (wiring.cancoder().isPresent()) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names a CANcoder: give the definition's encoder it is, or wire none");
-    }
-    return build(math, joint, drive, null, wiring, control, false);
+  public static Settings configure(ControllerPlan plan) {
+    return build(plan, null, null, null);
   }
 
   /**
    * A mechanism with a CANcoder: the definition's absolute encoder on the joint, wired as its
-   * {@code MechanismWiring.cancoder} says, and read as its feedback says.
+   * block's CANcoder says, and read as its feedback says.
    *
-   * @throws IllegalArgumentException as the other does, and for an encoder that isn't absolute, or
-   *     wiring without a CANcoder
+   * @param math what the robot's definition derives: where the encoder's reading wraps
+   * @param encoder the definition's absolute encoder the CANcoder is
+   * @param cancoder where it's wired, and how the TalonFX reads it
+   * @throws IllegalArgumentException as the other does, and for an encoder that isn't absolute on
+   *     the joint alone
    */
   public static Settings configure(
       RobotMath math,
-      Joint joint,
-      Drive drive,
-      Sensor.Encoder cancoder,
-      MechanismWiring wiring,
-      MechanismControl control) {
-    if (wiring.cancoder().isEmpty()) {
-      throw new IllegalArgumentException(
-          joint.label() + "'s wiring names no CANcoder for " + cancoder.label() + ": wire it");
-    }
-    return build(math, joint, drive, cancoder, wiring, control, true);
+      ControllerPlan plan,
+      Sensor.Encoder encoder,
+      MechanismWiring.Cancoder cancoder) {
+    return build(plan, math, encoder, cancoder);
   }
 
   /** The TalonFXS's motor arrangement for each catalog motor it drives, by its JST connector. */
@@ -312,7 +190,6 @@ public final class PhoenixMechanism {
     fxs.CurrentLimits = fx.CurrentLimits;
     fxs.SoftwareLimitSwitch = fx.SoftwareLimitSwitch;
     fxs.HardwareLimitSwitch = fx.HardwareLimitSwitch;
-    fxs.MotionMagic = fx.MotionMagic;
     fxs.ClosedLoopGeneral = fx.ClosedLoopGeneral;
     fxs.Slot0 = fx.Slot0;
     fxs.Commutation.MotorArrangement = arrangement;
@@ -331,8 +208,8 @@ public final class PhoenixMechanism {
 
   /**
    * A CANcoder's settings: its offset and direction from the wiring, and its discontinuity point
-   * from the definition ({@code RobotMath.discontinuityPoint}), where its reading wraps as far from
-   * the joint's range as a turn allows.
+   * from the definition ({@link ControllerPlan#wrapPoint}), where its reading wraps as far from the
+   * joint's range as a turn allows.
    *
    * @throws IllegalArgumentException for an encoder that isn't absolute, or whose joint's range is
    *     more of its turn than one turn holds: a pair decoded together is read in code ({@code
@@ -346,56 +223,10 @@ public final class PhoenixMechanism {
         wiring.clockwise()
             ? SensorDirectionValue.Clockwise_Positive
             : SensorDirectionValue.CounterClockwise_Positive;
-    config.MagnetSensor.AbsoluteSensorDiscontinuityPoint = discontinuityPoint(math, encoder);
+    config.MagnetSensor.AbsoluteSensorDiscontinuityPoint = ControllerPlan.wrapPoint(math, encoder);
     return config;
   }
 
-  /**
-   * How far inside an absolute encoder's turn its joint's range sits when the encoder wraps at a
-   * discontinuity point, in the encoder's turns, at the nearer end: negative when the range crosses
-   * the wrap. The encoder reads zero with the joint at zero and grows with it, as its wiring sets
-   * it: the definition's {@code RobotMath.wrapMargin}, for Phoenix's point. Infinite for a joint
-   * that turns freely, which has no range to keep clear.
-   */
-  public static double wrapMargin(Sensor.Encoder encoder, double discontinuityPoint) {
-    // The definition reads the encoder as its ratio's sign says; Phoenix, as its wiring sets it,
-    // growing with the joint: an encoder geared to turn back wraps at the other end of its turn.
-    return RobotMath.wrapMargin(
-        encoder, encoder.ratio(encoder.joint()) < 0 ? 1 - discontinuityPoint : discontinuityPoint);
-  }
-
-  /**
-   * What's wrong with an absolute encoder wrapping at a discontinuity point, or null when nothing
-   * is: its joint's range crossing the wrap, or within the definition's margin of it ({@code
-   * RobotMath.WRAP_MARGIN}, a fortieth of a turn). A team's own point is checked as the helper's
-   * is.
-   */
-  public static @Nullable String wrapProblem(Sensor.Encoder encoder, double discontinuityPoint) {
-    double margin = wrapMargin(encoder, discontinuityPoint);
-    if (margin >= RobotMath.WRAP_MARGIN) {
-      return null;
-    }
-    Joint joint = encoder.joint();
-    Range range = joint.range().orElseThrow();
-    double atStow =
-        Math.min(
-            reading(encoder, joint.reference()) - (discontinuityPoint - 1),
-            discontinuityPoint - reading(encoder, joint.reference()));
-    return String.format(
-        Locale.ROOT,
-        "%s wraps at %s of its turn, %s %s's range (%s to %s), and %s from where it stows (%s): a"
-            + " reading a hair past the wrap reads a turn away",
-        encoder.label(),
-        shown(discontinuityPoint),
-        margin < 0 ? "inside" : shownJoint(joint, alongJoint(encoder, margin)) + " from",
-        joint.label(),
-        shownJoint(joint, range.lower()),
-        shownJoint(joint, range.upper()),
-        shownJoint(joint, alongJoint(encoder, atStow)),
-        shownJoint(joint, joint.reference()));
-  }
-
-  /** Phoenix's bus for the wiring's. */
   /**
    * A TalonFX's or TalonFXS's limits, from what's on them ({@link ControllerPins}): a switch on its
    * pin, its polarity told; a limit switch on a CANdi on its bus, read over CAN, the CANdi's closed
@@ -443,6 +274,7 @@ public final class PhoenixMechanism {
     }
   }
 
+  /** Phoenix's bus for the wiring's. */
   public static CANBus bus(CanBus bus) {
     return switch (bus) {
       case CanBus.Port port -> new CANBus(CanPorts.of(port.port()));
@@ -451,56 +283,29 @@ public final class PhoenixMechanism {
   }
 
   private static Settings build(
-      RobotMath math,
-      Joint joint,
-      Drive drive,
+      ControllerPlan plan,
+      @Nullable RobotMath math,
       Sensor.@Nullable Encoder encoder,
-      MechanismWiring wiring,
-      MechanismControl control,
-      boolean onboardGravity) {
-    List<String> notes = new ArrayList<>();
-    if (!(drive.actuator() instanceof Actuator.Motors motors)) {
-      throw new IllegalArgumentException(drive.label() + " isn't motors: Phoenix drives motors");
-    }
-    if (wiring.motors().size() != motors.count()) {
+      MechanismWiring.@Nullable Cancoder wired) {
+    Joint joint = plan.joint();
+    List<MechanismWiring.Device> controllers = plan.controllers();
+    if (controllers.isEmpty()) {
       throw new IllegalArgumentException(
-          String.format(
-              Locale.ROOT,
-              "%s is %d motors, and its wiring names %d",
-              drive.label(),
-              motors.count(),
-              wiring.motors().size()));
+          joint.label() + "'s motors aren't wired: Phoenix needs a TalonFX for each");
     }
-    Sensor.Encoder rotor = drive.rotor();
-    double rotorRatio = Math.abs(rotor.ratio(joint));
-    if (rotorRatio == 0) {
-      throw new IllegalArgumentException(drive.label() + " doesn't move " + joint.label());
-    }
-    for (Transmission.Term term : rotor.terms()) {
-      if (!term.joint().equals(joint)) {
-        notes.add(
-            String.format(
-                Locale.ROOT,
-                "%s's rotor turns %s times for each %s of %s too, which Phoenix reads as %s"
-                    + " moving: take it out in code, as a swerve module's coupling is",
-                drive.label(),
-                shown(Math.abs(rotor.ratio(term.joint()))),
-                term.joint() instanceof Joint.Revolute ? "turn" : "meter",
-                term.joint().label(),
-                joint.label()));
-      }
-    }
-
-    PhoenixUnits units = PhoenixUnits.of(joint, drive);
+    List<String> notes = new ArrayList<>(plan.notes());
+    MechanismRotations rotations = plan.rotations();
+    double rotorRatio = plan.rotorRatio();
     TalonFXConfiguration leader = new TalonFXConfiguration();
-    output(leader, wiring.leader(), control);
+    MechanismWiring.Device leading = controllers.get(0);
+    output(leader, leading, plan);
     Optional<CANcoderConfiguration> cancoder = Optional.empty();
     String ratioName = joint.label() + "'s SensorToMechanismRatio";
-    if (encoder == null) {
+    if (math == null || encoder == null || wired == null) {
       leader.Feedback.FeedbackSensorSource = FeedbackSensorSourceValue.RotorSensor;
-      leader.Feedback.SensorToMechanismRatio = ratio(ratioName, units.ratioToPhoenix(rotorRatio));
+      leader.Feedback.SensorToMechanismRatio =
+          ratio(ratioName, rotations.ratioPerRotation(rotorRatio));
     } else {
-      MechanismWiring.Cancoder wired = wiring.cancoder().orElseThrow();
       if (!encoder.absolute() || !encoder.joints().equals(List.of(joint))) {
         throw new IllegalArgumentException(
             encoder.label()
@@ -509,74 +314,58 @@ public final class PhoenixMechanism {
                 + " alone, as a CANcoder is");
       }
       CANcoderConfiguration config = cancoder(math, encoder, wired);
-      String wraps = wrapProblem(encoder, config.MagnetSensor.AbsoluteSensorDiscontinuityPoint);
+      String wraps =
+          ControllerPlan.wrapProblem(encoder, config.MagnetSensor.AbsoluteSensorDiscontinuityPoint);
       if (wraps != null) {
         notes.add(wraps);
       }
       cancoder = Optional.of(config);
-      double sensor = sensorRatio(encoder);
+      double sensor = Math.abs(encoder.ratio(joint));
       switch (wired.feedback()) {
         case ROTOR -> {
           leader.Feedback.FeedbackSensorSource = FeedbackSensorSourceValue.RotorSensor;
           leader.Feedback.SensorToMechanismRatio =
-              ratio(ratioName, units.ratioToPhoenix(rotorRatio));
+              ratio(ratioName, rotations.ratioPerRotation(rotorRatio));
         }
         case REMOTE, FUSED, SYNC -> {
           leader.Feedback.FeedbackSensorSource = source(wired.feedback());
           leader.Feedback.FeedbackRemoteSensorID = wired.id();
-          leader.Feedback.SensorToMechanismRatio = ratio(ratioName, units.ratioToPhoenix(sensor));
+          leader.Feedback.SensorToMechanismRatio =
+              ratio(ratioName, rotations.ratioPerRotation(sensor));
           leader.Feedback.RotorToSensorRatio =
               ratio(joint.label() + "'s RotorToSensorRatio", rotorRatio / sensor);
         }
       }
     }
-    leader.Slot0 =
-        Slot0Configs.from(slot(math, units, control.gains(), rotorRatio, onboardGravity, notes));
+    leader.Slot0 = Slot0Configs.from(slot(plan, notes));
     // A joint that turns freely takes the short way round to a position, a turn being a turn.
-    leader.ClosedLoopGeneral.ContinuousWrap =
-        joint instanceof Joint.Revolute && joint.range().isEmpty();
-    control
-        .softLimits()
+    leader.ClosedLoopGeneral.ContinuousWrap = plan.turnsFreely();
+    plan.softLimits()
         .ifPresent(
             limits -> {
-              joint
-                  .range()
-                  .ifPresent(
-                      range -> {
-                        if (limits.lower() < range.lower() || limits.upper() > range.upper()) {
-                          throw new IllegalArgumentException(
-                              String.format(
-                                  Locale.ROOT,
-                                  "%s's soft limits, %s to %s, must be inside its hard stops, %s"
-                                      + " to %s",
-                                  joint.label(),
-                                  shownJoint(joint, limits.lower()),
-                                  shownJoint(joint, limits.upper()),
-                                  shownJoint(joint, range.lower()),
-                                  shownJoint(joint, range.upper())));
-                        }
-                      });
               leader.SoftwareLimitSwitch.ForwardSoftLimitEnable = true;
               leader.SoftwareLimitSwitch.ForwardSoftLimitThreshold =
-                  units.toPhoenix(limits.upper());
+                  rotations.toRotations(limits.upper());
               leader.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
               leader.SoftwareLimitSwitch.ReverseSoftLimitThreshold =
-                  units.toPhoenix(limits.lower());
+                  rotations.toRotations(limits.lower());
             });
-    profile(math, units, control, leader, notes);
 
     List<FollowerSettings> followers = new ArrayList<>();
-    for (MechanismWiring.Motor motor : wiring.motors().subList(1, wiring.motors().size())) {
+    for (MechanismWiring.Device motor : controllers.subList(1, controllers.size())) {
       TalonFXConfiguration config = new TalonFXConfiguration();
-      output(config, motor, control);
-      config.Feedback.SensorToMechanismRatio = ratio(ratioName, units.ratioToPhoenix(rotorRatio));
+      output(config, motor, plan);
+      config.Feedback.SensorToMechanismRatio =
+          ratio(ratioName, rotations.ratioPerRotation(rotorRatio));
       followers.add(
           new FollowerSettings(
               motor.id(),
-              new Follower(wiring.leader().id(), alignment(wiring.leader(), motor)),
+              new Follower(
+                  leading.id(),
+                  plan.opposes(motor) ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned),
               config));
     }
-    return new Settings(leader, followers, cancoder, units, notes);
+    return new Settings(plan, leader, followers, cancoder, notes);
   }
 
   /** Phoenix's feedback source for how the wiring reads the CANcoder. */
@@ -591,16 +380,14 @@ public final class PhoenixMechanism {
 
   /** A motor's direction, neutral mode and current limits. */
   private static void output(
-      TalonFXConfiguration config, MechanismWiring.Motor motor, MechanismControl control) {
+      TalonFXConfiguration config, MechanismWiring.Device motor, ControllerPlan plan) {
     config.MotorOutput.Inverted =
-        motor.clockwise()
+        motor.turnsClockwise()
             ? InvertedValue.Clockwise_Positive
             : InvertedValue.CounterClockwise_Positive;
     config.MotorOutput.NeutralMode =
-        control.neutralMode() == MechanismControl.NeutralMode.BRAKE
-            ? NeutralModeValue.Brake
-            : NeutralModeValue.Coast;
-    MechanismControl.CurrentLimits limits = control.currentLimits();
+        plan.brakes() ? NeutralModeValue.Brake : NeutralModeValue.Coast;
+    MechanismControl.CurrentLimits limits = plan.currentLimits();
     CurrentLimitsConfigs current = config.CurrentLimits;
     current.StatorCurrentLimitEnable = true;
     current.StatorCurrentLimit = limits.stator().in(Amps);
@@ -610,135 +397,46 @@ public final class PhoenixMechanism {
     current.SupplyCurrentLowerTime = limits.supplyLowerTime().in(Seconds);
   }
 
-  private static MotorAlignmentValue alignment(
-      MechanismWiring.Motor leader, MechanismWiring.Motor follower) {
-    return leader.clockwise() == follower.clockwise()
-        ? MotorAlignmentValue.Aligned
-        : MotorAlignmentValue.Opposed;
-  }
-
   /**
-   * A slot's gains in Phoenix's units: the team's where given, the definition's seeds where not,
-   * and gravity's type and offset.
-   *
-   * @param rotorRatio the rotor's turns for each turn (or meter) of the joint, as the definition
-   *     writes it, for naming a gain in its frame
+   * A slot's gains in Phoenix's units, per rotation: the plan's, tuned where given and seeded where
+   * not, and gravity's type, offset and kG.
    */
-  private static SlotConfigs slot(
-      RobotMath math,
-      PhoenixUnits units,
-      MechanismControl.Gains gains,
-      double rotorRatio,
-      boolean onboardGravity,
-      List<String> notes) {
-    Joint joint = units.joint();
-    RobotMath.Gains seed = math.idealGains(joint);
+  private static SlotConfigs slot(ControllerPlan plan, List<String> notes) {
+    Joint joint = plan.joint();
+    MechanismRotations rotations = plan.rotations();
     SlotConfigs slot = new SlotConfigs();
-    slot.kP = units.gainToPhoenix(gains.kP());
-    slot.kI = units.gainToPhoenix(gains.kI());
-    slot.kD = units.gainToPhoenix(gains.kD());
-    slot.kS = volts(joint, "kS", gains.kS());
-    double kV = gains.kV().orElse(seed.kV());
-    if (gains.kV().isPresent()) {
-      String far = farFromIdeal(units, "kV", kV, seed.kV(), rotorRatio);
-      if (far != null) {
-        notes.add(far);
+    slot.kP = rotations.gainPerRotation(plan.kP());
+    slot.kI = rotations.gainPerRotation(plan.kI());
+    slot.kD = rotations.gainPerRotation(plan.kD());
+    slot.kS = volts(joint, "kS", plan.kS());
+    slot.kV = rotations.gainPerRotation(plan.kV());
+    slot.kA = rotations.gainPerRotation(plan.kA());
+    ControllerPlan.Gravity gravity = plan.gravity();
+    switch (gravity.kind()) {
+      case NONE -> {}
+      case STEADY -> {
+        slot.GravityType = GravityTypeValue.Elevator_Static;
+        slot.kG = volts(joint, "kG", gravity.kG());
+      }
+      case COSINE -> {
+        // Phoenix's onboard gravity takes an offset within ±0.25 rotations.
+        slot.GravityType = GravityTypeValue.Arm_Cosine;
+        slot.GravityArmPositionOffset =
+            plan.control().gains().gravityAngle().isPresent()
+                ? givenOffset(joint, -gravity.offset())
+                : gravityOffset(joint, gravity.offset() / (2 * Math.PI), notes);
+        slot.kG = volts(joint, "kG", gravity.kG());
       }
     }
-    slot.kV = units.gainToPhoenix(kV);
-    slot.kA = units.gainToPhoenix(gains.kA().orElse(seed.kA()));
-    gravity(math, units, gains, seed.kG(), onboardGravity, slot, notes);
     return slot;
   }
 
   /**
-   * Gravity's type, offset and kG in a slot: the tuned kG where given, else the definition's seed
-   * from its links' mass, 0 without it. An arm's weight pulls hardest where its control says
-   * ({@code gravityAngle}), else where its links' mass puts it, else at its zero. Phoenix's onboard
-   * gravity takes an offset within ±0.25 rotations; worked out on the robot, any offset.
+   * Phoenix's {@code GravityArmPositionOffset} for an arm's gravity angle as its control gives it,
+   * within half a turn of its zero, in radians: refused more than a quarter turn from its zero,
+   * where Phoenix can't take it.
    */
-  private static void gravity(
-      RobotMath math,
-      PhoenixUnits units,
-      MechanismControl.Gains gains,
-      double seed,
-      boolean onboardGravity,
-      SlotConfigs slot,
-      List<String> notes) {
-    Joint joint = units.joint();
-    Optional<Double> tuned = gains.kG();
-    if (!math.gravityActsOn(joint)) {
-      if (tuned.isPresent() && tuned.get() != 0) {
-        throw new IllegalArgumentException(
-            String.format(
-                Locale.ROOT,
-                "%s has a tuned kG of %s V, but gravity can't move it: it %s. Leave its kG out, or"
-                    + " write 0",
-                joint.label(),
-                shown(tuned.get()),
-                joint instanceof Joint.Revolute ? "turns about the vertical" : "slides level"));
-      }
-      return;
-    }
-    double kG = tuned.orElse(seed);
-    if (joint instanceof Joint.Revolute) {
-      slot.GravityType = GravityTypeValue.Arm_Cosine;
-      double angle = gains.gravityAngle().map(given -> given.in(Radians)).orElse(Double.NaN);
-      double offset =
-          gains.gravityAngle().isPresent()
-              ? -Math.IEEEremainder(angle, 2 * Math.PI) / (2 * Math.PI)
-              : math.gravityOffset(joint) / (2 * Math.PI);
-      slot.GravityArmPositionOffset =
-          !onboardGravity
-              ? offset
-              : gains.gravityAngle().isPresent()
-                  ? givenOffset(joint, gains.gravityAngle().get())
-                  : gravityOffset(joint, offset, notes);
-      RobotMath.GravityFit fit = math.gravityFit(joint);
-      if (fit.misfit() > MISFIT) {
-        notes.add(
-            String.format(
-                Locale.ROOT,
-                "one cosine misses %s's gravity by %.0f%% of its peak, at %s: Phoenix's Arm_Cosine"
-                    + " can't follow it, so feed RobotMath.gravityTorque at the joint's angle as"
-                    + " the request's feedforward",
-                joint.label(),
-                fit.misfit() * 100,
-                shownJoint(joint, fit.worstAt())));
-      }
-    } else {
-      slot.GravityType = GravityTypeValue.Elevator_Static;
-    }
-    slot.kG = volts(joint, "kG", kG);
-    if (tuned.isPresent()) {
-      String far = farFromIdeal(units, "kG", kG, seed, 0);
-      if (far != null) {
-        notes.add(far);
-      }
-    }
-    if (kG == 0) {
-      return;
-    }
-    Joint tilting = tilting(math, joint);
-    if (tilting != null) {
-      notes.add(
-          String.format(
-              Locale.ROOT,
-              "%s rides %s, whose turning tilts its gravity: Phoenix's onboard gravity holds it only"
-                  + " with %s at its reference, so feed RobotMath.gravityTorque at the joints'"
-                  + " positions as the request's feedforward",
-              joint.label(),
-              tilting.label(),
-              tilting.label()));
-    }
-  }
-
-  /**
-   * Phoenix's {@code GravityArmPositionOffset} for an arm's gravity angle as its control gives it:
-   * refused more than a quarter turn from its zero, where Phoenix can't take it.
-   */
-  private static double givenOffset(Joint joint, Angle gravityAngle) {
-    double angle = Math.IEEEremainder(gravityAngle.in(Radians), 2 * Math.PI);
+  private static double givenOffset(Joint joint, double angle) {
     double offset = -angle / (2 * Math.PI);
     if (Math.abs(offset) > MAX_GRAVITY_OFFSET + 1e-9) {
       throw new IllegalArgumentException(
@@ -750,8 +448,8 @@ public final class PhoenixMechanism {
                   + " directions in the wiring), so that positive raises it; its gravity angle is"
                   + " then %s",
               joint.label(),
-              shownDegrees(angle),
-              shownDegrees(Math.IEEEremainder(Math.PI - angle, 2 * Math.PI))));
+              joint.shown(angle),
+              joint.shown(Math.IEEEremainder(Math.PI - angle, 2 * Math.PI))));
     }
     return Math.max(-MAX_GRAVITY_OFFSET, Math.min(MAX_GRAVITY_OFFSET, offset));
   }
@@ -785,83 +483,10 @@ public final class PhoenixMechanism {
                   + " horizontal in CAD",
               joint.label(),
               shown(offset),
-              shownDegrees((MAX_GRAVITY_OFFSET - Math.abs(offset)) * 2 * Math.PI),
+              joint.shown((MAX_GRAVITY_OFFSET - Math.abs(offset)) * 2 * Math.PI),
               joint.label()));
     }
     return Math.max(-MAX_GRAVITY_OFFSET, Math.min(MAX_GRAVITY_OFFSET, offset));
-  }
-
-  /** Motion Magic's limits, held under the joint's free speed, and Expo's from the slot. */
-  private static void profile(
-      RobotMath math,
-      PhoenixUnits units,
-      MechanismControl control,
-      TalonFXConfiguration config,
-      List<String> notes) {
-    Joint joint = units.joint();
-    control
-        .profile()
-        .ifPresent(
-            profile -> {
-              double free = math.freeSpeed(joint);
-              if (profile.cruiseVelocity() > free) {
-                throw new IllegalArgumentException(
-                    String.format(
-                        Locale.ROOT,
-                        "%s's Motion Magic cruise, %s %s/s, is %s times its free speed, %s %s/s:"
-                            + " the profile would ask more than its motors turn it at 12 V",
-                        joint.label(),
-                        shown(units.toPhoenix(profile.cruiseVelocity())),
-                        units.symbol(),
-                        shown(profile.cruiseVelocity() / free),
-                        shown(units.toPhoenix(free)),
-                        units.symbol()));
-              }
-              config.MotionMagic.MotionMagicCruiseVelocity =
-                  profiled(units, "cruise", profile.cruiseVelocity());
-              config.MotionMagic.MotionMagicAcceleration =
-                  profiled(units, "acceleration", profile.acceleration());
-              config.MotionMagic.MotionMagicJerk = profiled(units, "jerk", profile.jerk());
-            });
-    // Expo's profile from the slot's own kV and kA, in the same units: its defaults are a bare
-    // rotor's, which in a mechanism's units profile it far faster than it goes.
-    SlotConfigs slot = SlotConfigs.from(config.Slot0);
-    if (slot.kV >= MIN_EXPO_KV
-        && slot.kV <= MAX_EXPO_KV
-        && slot.kA >= MIN_EXPO_KA
-        && slot.kA <= MAX_EXPO_KA) {
-      config.MotionMagic.MotionMagicExpo_kV = slot.kV;
-      config.MotionMagic.MotionMagicExpo_kA = slot.kA;
-    } else {
-      notes.add(
-          String.format(
-              Locale.ROOT,
-              "%s's kV and kA, %s and %s, are outside what Motion Magic Expo takes (%s to %s, %s to"
-                  + " %s): Expo is left at Phoenix's defaults, a bare rotor's",
-              joint.label(),
-              shown(slot.kV),
-              shown(slot.kA),
-              shown(MIN_EXPO_KV),
-              shown(MAX_EXPO_KV),
-              shown(MIN_EXPO_KA),
-              shown(MAX_EXPO_KA)));
-    }
-  }
-
-  private static double profiled(PhoenixUnits units, String what, double value) {
-    Joint joint = units.joint();
-    double phoenix = units.toPhoenix(value);
-    if (phoenix > MAX_PROFILE) {
-      throw new IllegalArgumentException(
-          String.format(
-              Locale.ROOT,
-              "%s's Motion Magic %s, %s, is past the most Phoenix holds, %s",
-              joint.label(),
-              what,
-              shown(phoenix),
-              shown(MAX_PROFILE)));
-    }
-    return phoenix;
   }
 
   /** A ratio Phoenix holds, or a refusal naming it. */
@@ -889,150 +514,5 @@ public final class PhoenixMechanism {
               shown(volts)));
     }
     return volts;
-  }
-
-  /** A frame a gain may have been worked out in: how many of its units make the joint's one. */
-  private record Frame(String name, double perJointUnit) {}
-
-  /**
-   * Why a tuned gain looks wrong beside the definition's ideal, or null when it's within {@link
-   * #SANITY_LOW} to {@link #SANITY_HIGH} of it. When the two differ by about the ratio between two
-   * frames, the frames are named: a gain worked out per turn of the joint and entered per turn of
-   * its rotor is the rotor's ratio times too high.
-   *
-   * @param rotorRatio the rotor's turns for each turn (or meter) of the joint, or 0 for a gain in
-   *     volts
-   */
-  private static @Nullable String farFromIdeal(
-      PhoenixUnits units, String gain, double tuned, double ideal, double rotorRatio) {
-    Joint joint = units.joint();
-    if (ideal == 0) {
-      return null;
-    }
-    double ratio = tuned / ideal;
-    if (ratio >= SANITY_LOW && ratio <= SANITY_HIGH) {
-      return null;
-    }
-    String why =
-        String.format(
-            Locale.ROOT,
-            "%s's tuned %s, %s, is %s times the ideal, %s, from its motors and what it moves",
-            joint.label(),
-            gain,
-            shownGain(joint, gain, tuned),
-            shown(ratio),
-            shownGain(joint, gain, ideal));
-    if (rotorRatio == 0) {
-      return why;
-    }
-    List<Frame> frames = frames(units, rotorRatio);
-    double best = FRAME_TOLERANCE;
-    String named = null;
-    for (Frame meant : frames) {
-      for (Frame entered : frames) {
-        if (meant.equals(entered)) {
-          continue;
-        }
-        double off = Math.abs(ratio / (entered.perJointUnit() / meant.perJointUnit()) - 1);
-        if (off < best) {
-          best = off;
-          named =
-              String.format(
-                  Locale.ROOT,
-                  ": the ideal per %s, within %d%%, entered as if per %s, by the look of it",
-                  meant.name(),
-                  Math.max(1, (int) Math.ceil(off * 100)),
-                  entered.name());
-        }
-      }
-    }
-    return named == null ? why : why + named;
-  }
-
-  private static List<Frame> frames(PhoenixUnits units, double rotorRatio) {
-    Joint joint = units.joint();
-    if (joint instanceof Joint.Revolute) {
-      return List.of(
-          new Frame("radian", 1),
-          new Frame("degree", 180 / Math.PI),
-          new Frame("turn of " + joint.label(), 1 / (2 * Math.PI)),
-          new Frame("turn of its rotor", rotorRatio / (2 * Math.PI)));
-    }
-    List<Frame> frames = new ArrayList<>();
-    frames.add(new Frame("meter", 1));
-    frames.add(new Frame("inch", 1 / INCH));
-    frames.add(new Frame("turn of its rotor", rotorRatio));
-    if (units.perPhoenixUnit() != 1) {
-      frames.add(new Frame("turn of its drum", 1 / units.perPhoenixUnit()));
-    }
-    return frames;
-  }
-
-  /**
-   * The first joint above this one whose turning tilts gravity at it: a revolute joint about an
-   * axis that isn't vertical, with the joints at their references. Null when none does.
-   */
-  private static @Nullable Joint tilting(RobotMath math, Joint joint) {
-    Part up = joint.parent();
-    while (up instanceof Joint parent) {
-      if (parent instanceof Joint.Revolute && math.gravityActsOn(parent)) {
-        return parent;
-      }
-      up = parent.parent();
-    }
-    return null;
-  }
-
-  /**
-   * Phoenix's discontinuity point for an absolute encoder, read as its wiring sets it, growing with
-   * the joint: the definition's, which reads it as its ratio's sign says, turned round for an
-   * encoder geared to turn back.
-   */
-  private static double discontinuityPoint(RobotMath math, Sensor.Encoder encoder) {
-    double point = math.discontinuityPoint(encoder);
-    return encoder.ratio(encoder.joint()) < 0 ? 1 - point : point;
-  }
-
-  /** The encoder's turns for each of its joint's Phoenix units: a magnitude. */
-  private static double sensorRatio(Sensor.Encoder encoder) {
-    return Math.abs(encoder.ratio(encoder.joint()));
-  }
-
-  /** How far its joint moves, in the joint's units, as an encoder turns this much. */
-  private static double alongJoint(Sensor.Encoder encoder, double turns) {
-    return turns / sensorRatio(encoder) * perRatioUnit(encoder.joint());
-  }
-
-  /** What an encoder reads, in its turns, with its joint at a position. */
-  private static double reading(Sensor.Encoder encoder, double position) {
-    return sensorRatio(encoder) * position / perRatioUnit(encoder.joint());
-  }
-
-  /**
-   * The joint's units in each of the units the definition's ratios are per: 2π radians in a turn of
-   * a revolute joint, a meter in a meter of a prismatic one.
-   */
-  private static double perRatioUnit(Joint joint) {
-    return joint instanceof Joint.Revolute ? 2 * Math.PI : 1;
-  }
-
-  /** A position or a distance in the joint's units, as people read it: degrees, or meters. */
-  private static String shownJoint(Joint joint, double inJointUnits) {
-    return joint instanceof Joint.Revolute
-        ? shownDegrees(inJointUnits)
-        : shown(inJointUnits) + " m";
-  }
-
-  private static String shownDegrees(double radians) {
-    return String.format(Locale.ROOT, "%.1f°", Math.toDegrees(radians));
-  }
-
-  private static String shownGain(Joint joint, String gain, double value) {
-    String per = joint instanceof Joint.Revolute ? "rad" : "m";
-    return switch (gain) {
-      case "kV" -> shown(value) + " V/(" + per + "/s)";
-      case "kA" -> shown(value) + " V/(" + per + "/s²)";
-      default -> shown(value) + " V";
-    };
   }
 }

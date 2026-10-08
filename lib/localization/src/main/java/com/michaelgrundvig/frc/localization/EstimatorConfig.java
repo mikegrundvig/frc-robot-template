@@ -86,7 +86,8 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  * @param recoveryStdDevMeters the position uncertainty after a recovery
  * @param recoveryAgreementDegrees how closely rejected measurements' headings must agree before the
  *     gyro's heading is judged wrong (a bad heading reset, a robot placed backwards, a gyro that
- *     jumped) and the estimate turns to them
+ *     jumped) and the estimate turns to them; and how closely a camera's heading must agree with a
+ *     driver's heading reset to back it
  * @param recoveryHeadingStdDevDegrees the heading uncertainty after a heading recovery
  * @param lostAfterRejections this many camera measurements rejected in a row, with none accepted
  *     between, and the estimate is lost: the cameras keep disagreeing with it

@@ -8,6 +8,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.gearing;
 import static frc.robot.subsystems.mechanisms.JointFixtures.homed;
@@ -193,6 +194,36 @@ class ControllerRestartSimTest {
     assertThat(pivot.state()).isEqualTo(JointMechanism.State.READY);
     assertThat(degrees(pivot.position())).isCloseTo(130, within(1.0));
     assertThat(degrees(sim.simulation.position(PIVOT))).isCloseTo(130, within(1.0));
+  }
+
+  /**
+   * The fixtures' turret, which turns freely, on a TalonFX that reads a CANcoder turning with it.
+   */
+  private static final Joint.Revolute TURRET_ON_CANCODER =
+      TURRET
+          .motorsOn(TALON_FX.can(23))
+          .absoluteEncoder(CANCODER.can(35).offset(Rotations.of(0)))
+          .retuned(old -> control(20, 0.5, profile(3, 10)));
+
+  /**
+   * The turret, held a turn and a quarter round from where it rests, is seeded again from its
+   * CANcoder as its controller restarts: at 90°, inside the CANcoder's turn. It holds where it is,
+   * its profile starting again from there. Until 2026-10-08 its profile went on from 450°, a turn
+   * away as the controller now counted, and the turret spun a whole turn to get there.
+   */
+  @Test
+  void aJointThatTurnsPastItsEncodersTurnHoldsWhereItIsAsItsControllerRestarts() {
+    JointsSimHarness sim = new JointsSimHarness(ROBOT.with(TURRET_ON_CANCODER));
+    JointMechanism turret = sim.joints.of(TURRET);
+    sim.simulation.place(TURRET, Math.toRadians(450));
+    sim.run(0.5);
+
+    sim.simulation.restart(TURRET);
+    sim.run(1);
+
+    assertThat(turret.state()).isEqualTo(JointMechanism.State.READY);
+    assertThat(degrees(turret.position())).isCloseTo(90, within(1.0));
+    assertThat(degrees(sim.simulation.position(TURRET))).isCloseTo(450, within(1.0));
   }
 
   /** A roller restarted while it runs runs on: it has no place to lose. */

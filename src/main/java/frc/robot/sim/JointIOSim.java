@@ -129,12 +129,16 @@ final class JointIOSim implements JointIO {
   private boolean restarted;
 
   /**
-   * The absolute encoder it reads beside its count, where the robot's IO reads it so, and its
-   * signal's turns for each of the joint's units; null for none.
+   * The absolute encoder it reads beside its count, where the robot's IO reads it so; null for
+   * none.
    */
   private final Sensor.@Nullable Encoder absolute;
 
-  private final double absolutePerUnit;
+  /**
+   * The absolute encoder its motor controller reads and is seeded from, as a real one is at power
+   * on and after it restarts: inside the window its turn tells apart. Null for none.
+   */
+  private final Sensor.@Nullable Encoder seedsFrom;
 
   /**
    * Whether its motor controller's own loop runs on the absolute encoder it reads, not on its
@@ -212,10 +216,7 @@ final class JointIOSim implements JointIO {
                             .filter(on -> on.feedback() != MechanismWiring.Feedback.ROTOR)
                             .isPresent())
             .orElse(false);
-    absolutePerUnit =
-        absolute == null
-            ? 0
-            : Math.abs(absolute.ratio(joint)) / (joint instanceof Joint.Revolute ? 2 * Math.PI : 1);
+    seedsFrom = readsEncoder() ? math.absoluteEncoder(joint) : null;
   }
 
   /** The joint. */
@@ -309,12 +310,15 @@ final class JointIOSim implements JointIO {
 
   /**
    * Restarts it: neutral until it's asked again, it counts from 0, or reads where the joint is from
-   * the absolute encoder its controller reads, and it says it restarted the next time it's read.
+   * the absolute encoder its controller reads, inside the window the encoder's turn tells apart, as
+   * a real one is seeded, a joint that turns past it included; and it says it restarted the next
+   * time it's read.
    */
   void restart() {
     mode = Mode.NEUTRAL;
     restarted = true;
-    offset = readsEncoder() ? encoderReads() - plant.position() : -plant.position();
+    Sensor.Encoder seeds = seedsFrom;
+    offset = (seeds != null ? inWindow(seeds) : 0) - plant.position();
   }
 
   /** Whether its motor controller reads an absolute encoder, and is seeded from it. */
@@ -352,11 +356,13 @@ final class JointIOSim implements JointIO {
 
   /**
    * Powers it on somewhere other than where it rests, still: its motor controller reads it where it
-   * rests anyway, as a joint read by its motor alone does, until it's homed.
+   * rests anyway, as a joint read by its motor alone does, until it's homed; or, seeded from the
+   * absolute encoder it reads, inside the window the encoder's turn tells apart.
    */
   void powerOnAt(double position) {
     plant.place(position);
-    offset = readsEncoder() ? encoderReads() - position : joint.restPosition() - position;
+    Sensor.Encoder seeds = seedsFrom;
+    offset = (seeds != null ? inWindow(seeds) : joint.restPosition()) - position;
   }
 
   /**
@@ -492,10 +498,18 @@ final class JointIOSim implements JointIO {
    */
   private double absolutePosition() {
     Sensor.Encoder model = absolute;
-    if (model == null) {
-      return Double.NaN;
-    }
-    double reading = encoderReads() * absolutePerUnit;
+    return model == null ? Double.NaN : inWindow(model);
+  }
+
+  /**
+   * Where an absolute encoder the joint's motor controller reads says the joint is, wrapped into
+   * the window its turn tells apart, as a real one reads it.
+   */
+  private double inWindow(Sensor.Encoder model) {
+    double reading =
+        encoderReads()
+            * Math.abs(model.ratio(joint))
+            / (joint instanceof Joint.Revolute ? 2 * Math.PI : 1);
     return math.fromAbsolute(model, reading - Math.floor(reading));
   }
 

@@ -2,6 +2,7 @@ package frc.robot.subsystems.drive;
 
 import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Scheduler;
@@ -14,11 +15,17 @@ import org.wpilib.command3.SchedulerEvent;
  * disabled, the robot doesn't move, and its move times out.
  */
 public final class DriveInvariants {
+  /** Its check's name. */
+  static final String NAME = "drive moves end";
+
   /** The drive moves running now, in the order they started. */
   private final Set<DriveMove> running = new LinkedHashSet<>();
 
   /** A move that ended without an outcome, said as it ended. */
   private @Nullable String endedWithout;
+
+  /** How many loops a drive move was running, or ended, for the check to judge. */
+  private int judged;
 
   /** The checks on the drivetrain's moves, watching its scheduler from now on. */
   public DriveInvariants(Scheduler scheduler) {
@@ -53,6 +60,9 @@ public final class DriveInvariants {
   public @Nullable String broken(long now) {
     String found = endedWithout;
     endedWithout = null;
+    if (found != null || !running.isEmpty()) {
+      judged++;
+    }
     for (DriveMove move : running) {
       long deadline = move.deadlineNanos();
       if (found == null && deadline != Long.MAX_VALUE && now >= deadline) {
@@ -64,6 +74,11 @@ public final class DriveInvariants {
                 (now - deadline) / 1e9);
       }
     }
-    return found == null ? null : "drive moves end: " + found;
+    return found == null ? null : NAME + ": " + found;
+  }
+
+  /** How many loops its check had something to judge, by its name: a drive move running. */
+  public Map<String, Integer> judged() {
+    return Map.of(NAME, judged);
   }
 }

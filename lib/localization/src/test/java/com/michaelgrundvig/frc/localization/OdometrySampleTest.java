@@ -54,14 +54,24 @@ class OdometrySampleTest {
     assertThat(one.toString()).contains("t=1 ns", "[1.0, 2.0]");
   }
 
+  /** A wheel that didn't report reads a value that isn't a number, its distance or its angle. */
+  @Test
+  void aWheelThatReadsNoNumberDidntReport() {
+    OdometrySample sample =
+        new OdometrySample(
+            0, new double[] {1, Double.NaN, 2}, new double[] {0, 0, Double.POSITIVE_INFINITY});
+
+    assertThat(sample.reported(0)).isTrue();
+    assertThat(sample.reported(1)).isFalse();
+    assertThat(sample.reported(2)).isFalse();
+  }
+
   @Test
   void everyWheelNeedsADistanceAndAnAngle() {
     assertThatThrownBy(() -> new OdometrySample(0, new double[] {}, new double[] {}))
         .hasMessageContaining("each wheel");
     assertThatThrownBy(() -> new OdometrySample(0, new double[] {1, 2}, new double[] {0}))
         .hasMessageContaining("2 distances, 1 angles");
-    assertThatThrownBy(() -> new OdometrySample(0, new double[] {Double.NaN}, new double[] {0}))
-        .hasMessageContaining("wheel 0");
     assertThatThrownBy(() -> new OdometrySample(-1, new double[] {0}, new double[] {0}))
         .hasMessageContaining("robot's clock");
   }

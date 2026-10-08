@@ -33,10 +33,12 @@ import org.wpilib.math.util.MathUtil;
  * at the moment its image was taken, however late it arrives: the estimator keeps {@link
  * EstimatorConfig#historySeconds} of steps, rewinds to the measurement, applies it, and replays the
  * steps since, so measurements give the same result in any order of arrival. Each is gated against
- * the estimate first; when several rejected ones agree with each other, odometry was the one that
- * was wrong (a collision, a spin), and the estimate recovers to them: to their heading first, if
- * that is what they agree is wrong (a bad heading reset, a robot placed backwards), since every
- * position worked out with a wrong heading is wrong too.
+ * the estimate first, and again whenever a replay applies it anew: one a later-arriving, earlier
+ * image rules out is taken back, as it would have been rejected had the two come in order. When
+ * several rejected ones agree with each other, odometry was the one that was wrong (a collision, a
+ * spin), and the estimate recovers to them: to their heading first, if that is what they agree is
+ * wrong (a bad heading reset, a robot placed backwards), since every position worked out with a
+ * wrong heading is wrong too.
  *
  * <p>Its uncertainty is meant to be honest, since gates, χ² tests, and any bound on the error trust
  * it: the error should go past 3.72 times the spread it claims no more than once in a thousand
@@ -120,6 +122,15 @@ public final class PoseEstimator {
   private boolean placed;
   private long lastResetNanos = Long.MIN_VALUE;
 
+  /**
+   * Whether the heading is a driver's reset no camera has backed yet: a camera's own heading
+   * agreeing with it, or the cameras' headings turning it. Until then a position solved with it
+   * can't vote to move the estimate: wrong, it puts every such position off alike, and they agree.
+   */
+  private boolean headingInDoubt;
+
+  private final double agreementRadians;
+
   private final List<VisionMeasurement> pending = new ArrayList<>();
   private final List<CameraCorrection> applied = new ArrayList<>();
   private final List<Agreement> agreements = new ArrayList<>();
@@ -133,7 +144,11 @@ public final class PoseEstimator {
   /** A camera's measurement the history applies at its time. */
   private record CameraCorrection(long time, VisionMeasurement measurement) {}
 
-  /** A correction to apply during a replay: a fresh one is gated, one applied before is not. */
+  /**
+   * A correction to apply during a replay: a fresh one, or one applied before. Both are gated
+   * against the estimate as the replay has it: one applied before that an earlier image, new this
+   * update, now rules out is taken back, as it would have been rejected had the two come in order.
+   */
   private record Event(CameraCorrection correction, boolean fresh) {
     long time() {
       return correction.time();
@@ -178,6 +193,7 @@ public final class PoseEstimator {
     collisionWindowNanos = Timestamps.fromSeconds(config.collisionWindowSeconds());
     handlingVariancePerSecond = square(config.handlingStdDevPerSqrtSecond());
     disagreementWindowNanos = Timestamps.fromSeconds(config.disagreementWindowSeconds());
+    agreementRadians = Math.toRadians(config.recoveryAgreementDegrees());
     for (int id : new TreeSet<>(tags)) {
       tagSlots.put(id, tagSlots.size());
     }
@@ -393,6 +409,9 @@ public final class PoseEstimator {
    */
   public void reset(PoseReset reset) {
     placed = true;
+    if (reset.covariance().hasHeading()) {
+      headingInDoubt = false;
+    }
     recovery.clear();
     consecutiveRejections = 0;
     suspectTravel = 0;
@@ -406,8 +425,21 @@ public final class PoseEstimator {
   }
 
   /**
+   * Whether the heading is a driver's reset no camera has backed yet ({@link #resetHeading}): an
+   * image solved with it would land off by its error, and could never back it.
+   */
+  boolean headingInDoubt() {
+    return headingInDoubt;
+  }
+
+  /**
    * Tells the estimator which way the robot faces, now, keeping where it is: a driver's "facing
    * straight downfield" when the heading has gone wrong. History before it is dropped.
+   *
+   * <p>The driver may be wrong: facing elsewhere, or pressing at the wrong moment. Until a camera's
+   * own heading agrees with it (within {@link EstimatorConfig#recoveryAgreementDegrees}), a
+   * position solved with it can't vote to move the estimate, since a wrong heading puts every such
+   * position off alike; if the cameras' headings agree on another, the estimate turns to theirs.
    *
    * @param stdDevRadians how sure: how straight a driver lines the robot up by eye
    */
@@ -415,6 +447,7 @@ public final class PoseEstimator {
     if (!(stdDevRadians > 0) || Double.isInfinite(stdDevRadians)) {
       throw new IllegalArgumentException("a heading reset's uncertainty: " + stdDevRadians);
     }
+    headingInDoubt = true;
     recovery.clear();
     consecutiveRejections = 0;
     double variance = square(stdDevRadians);
@@ -604,7 +637,7 @@ public final class PoseEstimator {
     applyCamera(event.correction(), event.fresh(), yawThen, decisions);
   }
 
-  /** Gates a fresh camera measurement, then applies it as a Kalman update; applies an old one. */
+  /** Gates a camera measurement, then applies it as a Kalman update. */
   private void applyCamera(
       CameraCorrection camera, boolean fresh, double yawThen, List<VisionDecision> decisions) {
     VisionMeasurement measurement = camera.measurement();
@@ -620,7 +653,7 @@ public final class PoseEstimator {
     if (innovation == null) {
       return;
     }
-    if (fresh && !gateCamera(camera, innovation, decisions)) {
+    if (!gateCamera(camera, fresh, innovation, decisions)) {
       return;
     }
     filter.correct(innovation);
@@ -628,27 +661,40 @@ public final class PoseEstimator {
   }
 
   /**
-   * Whether a fresh camera measurement passes the gate, keeping the books either way: the counts,
-   * the agreement, and what recovery needs from a rejection.
+   * Whether a camera measurement passes the gate, keeping the books: for a rejection, fresh or
+   * taken back, the counts and what recovery needs; for a fresh one accepted, the counts and the
+   * agreement. One applied before that passes again was counted then.
    */
   private boolean gateCamera(
-      CameraCorrection camera, PoseFilter.Innovation innovation, List<VisionDecision> decisions) {
+      CameraCorrection camera,
+      boolean fresh,
+      PoseFilter.Innovation innovation,
+      List<VisionDecision> decisions) {
     VisionMeasurement measurement = camera.measurement();
     double gate =
         innovation.withHeading() ? config.gateChiSquaredPose() : config.gateChiSquaredPosition();
     double chiSquared = innovation.chiSquared();
+    if (!fresh && chiSquared <= gate) {
+      return true;
+    }
     lastInnovationMeters = innovation.meters();
+    // A camera's own heading that agrees with a driver's reset backs it.
+    if (innovation.withHeading() && Math.abs(innovation.heading()) <= agreementRadians) {
+      headingInDoubt = false;
+    }
     // Written so a measurement that isn't a number fails the gate instead of passing it.
     if (!(chiSquared <= gate)) {
       rejectedCount++;
       consecutiveRejections++;
+      boolean leansOnHeading = !measurement.lever().equals(VisionMeasurement.Lever.NONE);
       recovery.rejected(
           new Recovery.Rejected(
               camera.time(),
               innovation.x(),
               innovation.y(),
               innovation.heading(),
-              innovation.positionChiSquared() <= config.gateChiSquaredPosition()));
+              innovation.positionChiSquared() <= config.gateChiSquaredPosition(),
+              !(leansOnHeading && headingInDoubt)));
       decisions.add(
           new VisionDecision(measurement, Verdict.GATED, innovation.meters(), chiSquared, gate));
       return false;
@@ -683,16 +729,19 @@ public final class PoseEstimator {
           turn,
           square(config.lostPositionStdDevMeters()),
           square(Math.toRadians(config.recoveryHeadingStdDevDegrees())));
+      headingInDoubt = false;
       recovered();
       return;
     }
-    Translation2d move = recovery.positionCorrection();
+    Recovery.Move move = recovery.positionCorrection();
     if (move == null) {
       return;
     }
-    filter.shift(move.getX(), move.getY(), square(config.recoveryStdDevMeters()));
+    filter.shift(move.by().getX(), move.by().getY(), square(config.recoveryStdDevMeters()));
     recovered();
-    lastAcceptedNanos = newest;
+    // As recent as the images it rests on: a recovery made later, as an older image that held it
+    // back ages out of the window, mustn't make them new.
+    lastAcceptedNanos = Math.max(lastAcceptedNanos, move.newestTaken());
     placed = true;
   }
 

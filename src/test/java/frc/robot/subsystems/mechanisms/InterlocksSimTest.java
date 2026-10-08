@@ -331,6 +331,80 @@ class InterlocksSimTest {
     assertThat(Math.toDegrees(spun.simulation.position(PIVOT))).isCloseTo(130, within(2.0));
   }
 
+  /** The elevator, that runs only with the pivot out past "run". */
+  static final RobotDefinition LIFT_WAITS =
+      RobotDefinitionBuilder.builder(ROBOT)
+          .name("lift waits")
+          .configurations(List.of())
+          .interlocks(List.of(Interlock.that(ELEVATOR).runsOnlyWhen(PIVOT.atLeast(PIVOT_RUN))))
+          .build();
+
+  /**
+   * The elevator, jammed on its way up at 0.3 m while its profile runs on to the top, is held as
+   * the pivot swings in past "run": held where it stops, where it's stuck. Freed, it stays there:
+   * its profile brakes from where the joint is, not from where it had it, 0.8 m higher. Until
+   * 2026-10-08 the profile came back down from the top, and the freed elevator rose to meet it,
+   * 0.37 m past where it was held.
+   */
+  @Test
+  void aRunsOnlyWhenHoldBrakesFromWhereTheJointIsNotItsProfile() {
+    JointsSimHarness lagging = new JointsSimHarness(LIFT_WAITS);
+    JointMechanism lift = lagging.joints.of(ELEVATOR);
+    lagging.simulation.place(PIVOT, Math.toRadians(130));
+    lagging.loop();
+    lagging.scheduler.schedule(lift.goTo(JointFixtures.ELEVATOR_TOP));
+    lagging.runUntil(() -> lagging.simulation.position(ELEVATOR) >= 0.3, 2);
+    lagging.simulation.jam(ELEVATOR, true);
+    lagging.run(1);
+
+    lagging.scheduler.schedule(lagging.joints.of(PIVOT).goTo(PIVOT_IN));
+    lagging.runUntil(() -> !lift.heldBy().isEmpty(), 1);
+    double held = lift.goal();
+    lagging.simulation.jam(ELEVATOR, false);
+    double highest = Double.NEGATIVE_INFINITY;
+    for (int i = 0; i < RobotLoop.loops(1); i++) {
+      lagging.loop();
+      highest = Math.max(highest, lagging.simulation.position(ELEVATOR));
+    }
+
+    assertThat(held).as("where it's stuck").isCloseTo(0.3, within(0.03));
+    assertThat(lift.heldBy()).isEqualTo("elevator runs only when pivot at least run");
+    assertThat(highest).as("no further than where it's held").isCloseTo(held, within(0.01));
+  }
+
+  /**
+   * The pivot, jammed at 65° on its way in while the region's open, its profile running on to "in",
+   * is held where it's stuck, inside the region, as the elevator comes down and closes it. Freed,
+   * it stays there: its profile brakes from where the joint is, not from where it had it, 63°
+   * lower. Until 2026-10-08 the profile came back up from "in", and the freed pivot fell to meet
+   * it, on through the closed region and out its far side.
+   */
+  @Test
+  void aJointHeldInsideAClosedRegionBrakesFromWhereItIsNotItsProfile() {
+    sim.simulation.place(PIVOT, Math.toRadians(130));
+    sim.simulation.place(ELEVATOR, 0.45);
+    sim.loop();
+    sim.scheduler.schedule(pivot.goTo(PIVOT_IN));
+    sim.runUntil(() -> pivotDegrees() <= 70, 2);
+    sim.simulation.jam(PIVOT, true);
+    sim.run(0.3);
+
+    sim.scheduler.schedule(sim.joints.of(ELEVATOR).goTo(ELEVATOR_DOWN));
+    sim.runUntil(() -> !pivot.heldBy().isEmpty(), 2);
+    double held = Math.toDegrees(pivot.goal());
+    String heldBy = pivot.heldBy();
+    sim.simulation.jam(PIVOT, false);
+    double lowest = Double.POSITIVE_INFINITY;
+    for (int i = 0; i < RobotLoop.loops(1); i++) {
+      sim.loop();
+      lowest = Math.min(lowest, pivotDegrees());
+    }
+
+    assertThat(held).as("inside, where it's stuck").isBetween(40.0, 80.0);
+    assertThat(heldBy).isEqualTo("pivot keeps out of 40° to 80° while elevator at most clear");
+    assertThat(lowest).as("no deeper than where it's held").isCloseTo(held, within(1.0));
+  }
+
   /**
    * A region reaching the end of the joint's range leaves no room past that end: a pivot sitting at
    * its 135° stop, inside a region of 100° to 135° closed while the elevator is low, is inside it,
@@ -713,6 +787,52 @@ class InterlocksSimTest {
     assertThat(waiting).as("at the region's edge").isBetween(38.0, 41.0);
     assertThat(home.arrived()).isTrue();
     assertThat(out.arrived()).as("let go").isTrue();
+  }
+
+  /**
+   * A turret that turns freely, with no profile, kept out of its back half turn, 180° to 360°,
+   * while the elevator is low. At 90°, sent to -170° at 98% of its cruise, or chasing it, it goes
+   * the short way round, toward 190°: it's held at 180°, the edge, and says so. Until 2026-10-08
+   * the region judged -170° as it was given, below the region and left alone, and the turret's
+   * profile took it to 190°, 10° inside.
+   */
+  @Test
+  void aJointThatTurnsFreelyIsKeptOutTheWayItsProfileGoes() {
+    Joint.Revolute turret =
+        TURRET.retuned(
+            old -> JointFixtures.assumed(control(20, 0.5, Optional.empty(), Optional.empty(), 40)));
+    RobotDefinition robot =
+        RobotDefinitionBuilder.builder(ROBOT)
+            .name("turret kept out")
+            .joints(List.of(PIVOT, ROLLER, ELEVATOR, turret))
+            .configurations(List.of())
+            .interlocks(
+                List.of(
+                    Interlock.that(turret)
+                        .keepsOut(Range.degrees(180, 360))
+                        .when(ELEVATOR.atMost(ELEVATOR_CLEAR))))
+            .build();
+    for (boolean chasing : new boolean[] {false, true}) {
+      JointsSimHarness kept = new JointsSimHarness(robot);
+      kept.simulation.place(TURRET, Math.toRadians(90));
+      kept.loop();
+      JointMechanism held = kept.joints.of(TURRET);
+      Command toward =
+          chasing
+              ? held.follow(() -> Degrees.of(-170))
+              : held.goTo(Degrees.of(-170)).atSpeed(Percent.of(98));
+
+      double furthest = furthest(kept, TURRET, toward, 2);
+
+      String how = chasing ? "chasing" : "a move";
+      assertThat(furthest).as(how).isCloseTo(180, within(1.0));
+      assertThat(Math.toDegrees(kept.simulation.position(TURRET)))
+          .as(how)
+          .isCloseTo(180, within(1.0));
+      assertThat(held.heldBy())
+          .as(how)
+          .isEqualTo("turret keeps out of 180° to 360° while elevator at most clear");
+    }
   }
 
   /** An interlock about a joint the template doesn't drive can't be enforced, so it's refused. */

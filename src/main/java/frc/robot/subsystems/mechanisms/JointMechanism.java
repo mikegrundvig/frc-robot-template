@@ -526,7 +526,8 @@ public final class JointMechanism implements Mechanism {
     Driven.AbsoluteEncoder encoder = joint.driven().absoluteEncoder().orElse(null);
     gap =
         standsIn == null && positional && encoder != null && math.absoluteEncoder(joint) != null
-            ? new EncoderGap(joint, EncoderGap.margin(math, joint, control))
+            ? new EncoderGap(
+                joint, EncoderGap.margin(math, joint, control), EncoderGap.turn(math, joint))
             : null;
     loopOnMotor =
         encoder == null
@@ -1245,8 +1246,11 @@ public final class JointMechanism implements Mechanism {
       homing.start(nowNanos);
     }
     if (inputs.restarted) {
-      // Its leading motor controller restarted, and counts from 0, or from the encoder it reads.
+      // Its leading motor controller restarted, and counts from 0, or from the encoder it reads:
+      // inside the encoder's turn, a turn or more from where it counted a joint that turns past it.
+      // Its profile starts again from where the joint is now read, not from a point a turn away.
       homing.restarted(nowNanos, homingSwitch());
+      profile.restart();
     }
     countRestarts();
     if (!inputs.unconfigured.isEmpty() && homing.state() != State.FAULTED) {

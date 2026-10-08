@@ -1,10 +1,12 @@
 package frc.robot.sim;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_MOTOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.assumed;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.profile;
@@ -16,6 +18,7 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
@@ -409,6 +412,35 @@ class JointIOSimTest {
     assertThat(Math.toDegrees(sim.position()))
         .as("not pushed on at 4 V: braking, it sags under its weight")
         .isLessThan(60.01);
+  }
+
+  /**
+   * The fixtures' turret, which turns freely, on a TalonFX that reads a CANcoder turning with it.
+   */
+  private static final Joint.Revolute TURRET_ON_CANCODER =
+      TURRET.motorsOn(TALON_FX.can(23)).absoluteEncoder(CANCODER.can(35).offset(Rotations.of(0)));
+
+  /**
+   * The turret a turn and a quarter round from where it rests, its motor controller counting it
+   * there since it started: restarted, it's seeded from its CANcoder, as a real one is, inside the
+   * window the CANcoder's turn tells apart, a half turn either side of where the turret rests. It
+   * reads 90°, not 450°. Until 2026-10-08 it was seeded with the turns the CANcoder can't tell.
+   */
+  @Test
+  void aRestartedControllerIsSeededInsideItsEncodersTurn() {
+    JointSimulation simulation = new JointSimulation(ROBOT.with(TURRET_ON_CANCODER));
+    JointIO io = simulation.io(TURRET);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    simulation.place(TURRET, Math.toRadians(450));
+    io.updateInputs(inputs);
+    double counted = inputs.position;
+
+    simulation.restart(TURRET);
+    io.updateInputs(inputs);
+
+    assertThat(Math.toDegrees(counted)).isCloseTo(450, within(1e-9));
+    assertThat(inputs.restarted).isTrue();
+    assertThat(Math.toDegrees(inputs.position)).isCloseTo(90, within(1e-9));
   }
 
   /**

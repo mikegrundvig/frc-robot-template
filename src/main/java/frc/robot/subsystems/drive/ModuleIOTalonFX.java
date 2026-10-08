@@ -217,12 +217,15 @@ final class ModuleIOTalonFX implements ModuleIO {
   /**
    * The most current, either way, among a loop's readings and the latest: the steering's peak,
    * which lasts a few milliseconds as a turn starts and stops, so a reading once a loop would
-   * almost always miss it. Takes the readings.
+   * almost always miss it. A reading that didn't come, no number, is passed over. Takes the
+   * readings.
    */
   static double mostAmps(Queue<Double> readings, double latest) {
     double most = Math.abs(latest);
     for (Double amps = readings.poll(); amps != null; amps = readings.poll()) {
-      most = Math.max(most, Math.abs(amps));
+      if (!amps.isNaN()) {
+        most = Math.max(most, Math.abs(amps));
+      }
     }
     return most;
   }

@@ -54,6 +54,9 @@ final class GyroIOPigeon2 implements GyroIO {
   private final Queue<Long> odometryTimes;
   private final Queue<Double> odometryYaws;
 
+  /** The last high-rate yaw that came, in radians. */
+  private double lastYaw;
+
   /** Disconnected once silent for half a second, not at one glitch. */
   private final Debouncer connected = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
@@ -119,8 +122,13 @@ final class GyroIOPigeon2 implements GyroIO {
       if (time == null || reading == null) {
         break; // cannot happen while the lock is held
       }
+      // A yaw that didn't come reads no number: the last that did stands, as the Pigeon's last
+      // frame would, and its connection says when it's lost.
+      if (!reading.isNaN()) {
+        lastYaw = yawScale * reading * radiansPerYawUnit;
+      }
       times[k] = time;
-      yaws[k] = yawScale * reading * radiansPerYawUnit;
+      yaws[k] = lastYaw;
     }
     inputs.odometryTimestampsNanos = times;
     inputs.odometryYawsRad = yaws;

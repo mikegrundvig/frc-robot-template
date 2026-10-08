@@ -165,6 +165,53 @@ class KinematicsModelTest {
     }
   }
 
+  /**
+   * A module that didn't report (its motor controllers off the bus) reads no number, and the motion
+   * fits the other three exactly, however the robot moved.
+   */
+  @Test
+  void aModuleThatDidntReportIsLeftOutAndTheRestFixTheMotion() {
+    for (double[] motion : new double[][] {{0.1, 0, 0}, {0.05, 0.08, 0}, {0.05, 0.02, 0.03}}) {
+      OdometrySample after = afterRigidMotion(motion[0], motion[1], motion[2]);
+      OdometrySample before = startingFrom(after);
+      double[] distances = new double[4];
+      double[] angles = new double[4];
+      for (int i = 0; i < 4; i++) {
+        distances[i] = after.distanceMeters(i);
+        angles[i] = after.angleRadians(i);
+      }
+      distances[2] = Double.NaN;
+      OdometrySample silent = new OdometrySample(1, distances, angles);
+
+      BodyMotion found = swerve.motion(before, silent);
+
+      assertThat(found.dxMeters()).isCloseTo(motion[0], within(1e-12));
+      assertThat(found.dyMeters()).isCloseTo(motion[1], within(1e-12));
+      assertThat(found.dthetaRadians()).isCloseTo(motion[2], within(1e-12));
+      assertThat(found.residualMeters()).isCloseTo(0.0, within(1e-12));
+    }
+  }
+
+  /**
+   * With fewer than two modules reporting, nothing fixes the motion: none, as doubtful as it is.
+   */
+  @Test
+  void oneModuleAloneFixesNoMotion() {
+    OdometrySample after = afterRigidMotion(0.1, 0, 0);
+    double nan = Double.NaN;
+    OdometrySample oneLeft =
+        new OdometrySample(
+            1,
+            new double[] {after.distanceMeters(0), nan, nan, nan},
+            new double[] {after.angleRadians(0), nan, nan, nan});
+
+    BodyMotion found = swerve.motion(startingFrom(after), oneLeft);
+
+    assertThat(found.dxMeters()).isZero();
+    assertThat(found.dthetaRadians()).isZero();
+    assertThat(found.residualMeters()).isCloseTo(0.1, within(1e-12));
+  }
+
   @Test
   void swerveNeedsModulesThatCanFixAMotion() {
     assertThatThrownBy(() -> new SwerveKinematicsModel(new Translation2d(0.3, 0)))

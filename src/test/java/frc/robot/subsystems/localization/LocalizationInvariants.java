@@ -40,8 +40,11 @@ import org.wpilib.math.util.MathUtil;
  *       measured against its own uncertainty, no farther than the measurement is from it; and what
  *       turning its heading beyond its IMU turns the path it replays from the earliest image's
  *       capture by. A recovery, a jump the estimator declares, counts and logs, is one exception; a
- *       loop with an image taken before one it accepted already is the other: on its way back to
- *       now the estimator applies that one again, as it now fits, which no χ² it reports bounds.
+ *       loop with an image taken before one it applied already is the other. The estimator gates
+ *       that image against the estimate before the later one, and applies the later one again after
+ *       it, gated again, so the estimate ends where the two in order would have put it; but what
+ *       that moves it from last loop's estimate, which already held the later image, is the earlier
+ *       image weighed against that estimate, whose χ² it never works out.
  * </ul>
  *
  * <p>Each judges what the robot reports, not where the simulator really has it: off the field, or
@@ -209,8 +212,8 @@ public final class LocalizationInvariants {
         }
       }
     }
-    // An image taken before one applied already re-weighs it: the estimator applies it again on
-    // its way back to now, as it now fits, and what that moves isn't reported.
+    // An image taken before one applied already is weighed against the estimate before that one,
+    // and moves last loop's estimate by more than its χ² says.
     boolean reweighs = earliest < newestApplied;
     newestApplied = newest;
     before = pose;
@@ -301,7 +304,7 @@ public final class LocalizationInvariants {
   /**
    * The farthest any wheel traveled from the newest reading of the loop before to this loop's
    * newest: the most the wheels can move the robot, whose travel is their average. Nothing for a
-   * loop without readings.
+   * loop without readings, and nothing from a wheel that didn't report in either.
    */
   private double travel(List<OdometrySample> samples) {
     if (samples.isEmpty()) {
@@ -313,7 +316,7 @@ public final class LocalizationInvariants {
     double[] then = wheels;
     for (int i = 0; i < now.length; i++) {
       now[i] = newest.distanceMeters(i);
-      if (then != null && i < then.length) {
+      if (then != null && i < then.length && Double.isFinite(now[i]) && Double.isFinite(then[i])) {
         farthest = Math.max(farthest, Math.abs(now[i] - then[i]));
       }
     }

@@ -42,7 +42,8 @@ public record LocalizationEstimate(
   /**
    * The numbers behind the mode.
    *
-   * @param visionAgeSeconds since the last accepted camera measurement; infinite if none yet
+   * @param visionAgeSeconds since the newest image the estimate rests on was taken: the newest
+   *     accepted, or that agreed on a recovery; infinite if none yet
    * @param accepted camera measurements accepted since the robot started
    * @param rejected camera measurements rejected since the robot started
    * @param lastInnovationMeters how far the last compared measurement was from the estimate

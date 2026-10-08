@@ -45,6 +45,8 @@ public final class WatchedJoint implements JointIO {
   private double velocity;
   private double supplyAmps;
   private boolean connected;
+  private boolean followersConnected;
+  private boolean restarted;
 
   /**
    * @param joint the joint's own IO, the simulator's
@@ -86,6 +88,16 @@ public final class WatchedJoint implements JointIO {
     return connected;
   }
 
+  /** Whether each of its followers answered, as last read: true for a joint with none. */
+  boolean followersConnected() {
+    return followersConnected;
+  }
+
+  /** Whether its leading motor controller said it had restarted, as last read. */
+  boolean restarted() {
+    return restarted;
+  }
+
   @Override
   public void updateInputs(JointIOInputs inputs) {
     joint.updateInputs(inputs);
@@ -94,6 +106,11 @@ public final class WatchedJoint implements JointIO {
     velocity = inputs.velocity;
     supplyAmps = inputs.supplyCurrentAmps;
     connected = inputs.connected;
+    followersConnected = true;
+    for (boolean follower : inputs.followersConnected) {
+      followersConnected &= follower;
+    }
+    restarted = inputs.restarted;
   }
 
   @Override

@@ -476,12 +476,18 @@ public final class LocalizationService {
 
   /**
    * The robot when an image was taken, as the vision pipeline solves it: its heading then, if the
-   * estimate reaches back that far, its tilt then, and how it moves this loop. Read-only: asking
-   * changes nothing, however often or early in the loop it's asked.
+   * estimate reaches back that far and the heading isn't a driver's reset no camera has backed, its
+   * tilt then, and how it moves this loop. Read-only: asking changes nothing, however often or
+   * early in the loop it's asked.
    */
   public CaptureContext capture(long timestampNanos) {
     Motion now = motion;
-    Rotation2d heading = estimator.poseAt(timestampNanos).map(Pose2d::getRotation).orElse(null);
+    // A heading in doubt solves no image, however sure the driver's reset says it is: solved with
+    // it, an image lands off by its error, and only one solved without it can back it.
+    Rotation2d heading =
+        estimator.headingInDoubt()
+            ? null
+            : estimator.poseAt(timestampNanos).map(Pose2d::getRotation).orElse(null);
     AttitudeHistory.Attitude tilted = attitudes.at(timestampNanos);
     return new CaptureContext(
         heading,

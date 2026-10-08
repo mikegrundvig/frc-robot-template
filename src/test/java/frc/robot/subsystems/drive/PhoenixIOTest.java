@@ -20,9 +20,12 @@ import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -223,6 +226,72 @@ class PhoenixIOTest {
     assertThat(read.SupplyCurrentLimitEnable).as("the supply limit is on").isTrue();
   }
 
+  /**
+   * A module's drive motor that stops answering: its next reading doesn't come, past two periods in
+   * transit, and reads no number, so odometry leaves the wheel out of that reading, while the
+   * module still reads connected, its silence not yet half a second long. Read again, it's a number
+   * again. Until 2026-10-08 the reading was the last the motor sent, its wheel standing still, for
+   * the half second before its module read disconnected.
+   */
+  @Test
+  void aReadingThatDidntComeIsNoNumberBeforeItsModuleReadsDisconnected()
+      throws InterruptedException {
+    CountDownLatch read = new CountDownLatch(1);
+    Deque<PhoenixOdometryThread.Batch> batches =
+        new ArrayDeque<>(
+            List.of(odometryBatch(1, true), odometryBatch(2, false), odometryBatch(3, true)));
+    PhoenixOdometryThread scripted =
+        new PhoenixOdometryThread(
+            signals -> {
+              PhoenixOdometryThread.Batch next = batches.poll();
+              if (next == null) {
+                read.countDown();
+                new CountDownLatch(1).await(); // until the test stops the thread
+                throw new InterruptedException();
+              }
+              return next;
+            },
+            message -> {});
+    ModuleIOTalonFX io =
+        new ModuleIOTalonFX(wiring(21, 22, 23), BUS, GEOMETRY.module(0), COUPLING, scripted);
+    ModuleIOInputsAutoLogged inputs = new ModuleIOInputsAutoLogged();
+    scripted.start();
+    try {
+      assertThat(read.await(2, TimeUnit.SECONDS)).as("read every batch").isTrue();
+      scripted.lock().lock();
+      try {
+        io.updateInputs(inputs);
+      } finally {
+        scripted.lock().unlock();
+      }
+    } finally {
+      scripted.interrupt();
+      scripted.join(2000);
+    }
+
+    assertThat(inputs.driveConnected).as("not silent half a second yet").isTrue();
+    assertThat(inputs.odometryDrivePositionsRad).hasSize(3);
+    assertThat(inputs.odometryDrivePositionsRad[0]).isFinite();
+    assertThat(inputs.odometryDrivePositionsRad[1]).isNaN();
+    assertThat(inputs.odometryDrivePositionsRad[2]).isFinite();
+    assertThat(inputs.odometrySteerAnglesRad).containsExactly(0, 0, 0);
+    assertThat(inputs.steerStatorCurrentAmps).as("its readings' peak").isGreaterThanOrEqualTo(1);
+  }
+
+  /**
+   * One read of a module's odometry signals, in the order it registers them (its drive's position,
+   * its steering's, its steering's current), the drive at so many rotations: fresh, or its device
+   * silent, its reading 20 ms in transit.
+   */
+  private static PhoenixOdometryThread.Batch odometryBatch(double driveRotations, boolean came) {
+    return new PhoenixOdometryThread.Batch(
+        (long) (driveRotations * 1e9),
+        List.of(
+            new PhoenixOdometryThread.Reading(driveRotations, true, came ? 0.002 : 0.02),
+            new PhoenixOdometryThread.Reading(0, true, 0.002),
+            new PhoenixOdometryThread.Reading(1, true, 0.002)));
+  }
+
   /** A main loop that fell behind gets the newest readings, not stale ones. */
   @Test
   void aFullQueueMakesRoomByDroppingTheOldestReading() {
@@ -259,6 +328,9 @@ class PhoenixIOTest {
     assertThat(ModuleIOTalonFX.mostAmps(readings, 5)).isEqualTo(40);
     assertThat(readings).as("taken").isEmpty();
     assertThat(ModuleIOTalonFX.mostAmps(readings, -2)).as("no readings: the latest").isEqualTo(2);
+    assertThat(ModuleIOTalonFX.mostAmps(new ArrayDeque<>(List.of(3.0, Double.NaN)), 2))
+        .as("one that didn't come passed over")
+        .isEqualTo(3);
   }
 
   @Test

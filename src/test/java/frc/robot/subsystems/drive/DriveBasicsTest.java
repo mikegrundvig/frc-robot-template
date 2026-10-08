@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.localization.BodyMotion;
+import com.michaelgrundvig.frc.localization.OdometrySample;
+import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.sim.DriveSimHarness;
@@ -175,6 +178,56 @@ class DriveBasicsTest {
 
       assertFalse(afterOneLoop, "a loop without readings can happen");
       assertTrue(drive.isOdometryStoppedAlertActive());
+    }
+  }
+
+  /**
+   * A module whose motor controllers are off the bus reads what it last sent: its wheel standing
+   * still, at the speed it had then. The robot drives on the other three, and so do its odometry
+   * and its measured speed: driving straight ahead at 1 m/s, the readings leave that wheel out, the
+   * fit from the rest finds the robot's 2 cm a loop, and the measured speed is 1 m/s.
+   */
+  @Test
+  void aDisconnectedModuleIsLeftOutOfOdometryAndTheMeasuredSpeed() {
+    double radius = Robots.SIM.definition().drivetrain().module(0).wheelRadius().in(Meters);
+    long[] clock = {1_000_000};
+    double[] rolled = {0};
+    ModuleIO[] modules = new ModuleIO[4];
+    for (int i = 0; i < 4; i++) {
+      boolean silent = i == 2;
+      modules[i] =
+          new ModuleIO() {
+            @Override
+            public void updateInputs(ModuleIOInputs inputs) {
+              double wheel = silent ? 0 : rolled[0] / radius;
+              inputs.driveConnected = !silent;
+              inputs.steerConnected = !silent;
+              inputs.drivePositionRad = wheel;
+              inputs.driveVelocityRadPerSec = (silent ? 3.0 : 1.0) / radius;
+              inputs.odometryTimestampsNanos = new long[] {clock[0]};
+              inputs.odometryDrivePositionsRad = new double[] {wheel};
+              inputs.odometrySteerAnglesRad = new double[] {0};
+            }
+          };
+    }
+    try (Drive drive = drive("OnThree", hardware(new GyroIO() {}, modules))) {
+      drive.periodic(true);
+      OdometrySample before = drive.readings().wheels().get(0);
+      clock[0] += 20_000_000;
+      rolled[0] += 0.02;
+      drive.periodic(true);
+      OdometrySample after = drive.readings().wheels().get(0);
+      BodyMotion moved =
+          new SwerveKinematicsModel(Robots.SIM.definition().moduleTranslations())
+              .motion(before, after);
+
+      assertFalse(after.reported(2), "the silent module's reading");
+      assertTrue(after.reported(0));
+      assertEquals(0.02, moved.dxMeters(), 1e-9, "forward");
+      assertEquals(0.0, moved.dyMeters(), 1e-9, "sideways");
+      assertEquals(0.0, moved.dthetaRadians(), 1e-9, "turned");
+      assertEquals(1.0, drive.getRobotRelativeVelocities().vx, 1e-9, "measured speed");
+      assertEquals(0.0, drive.getRobotRelativeVelocities().omega, 1e-9, "measured turning");
     }
   }
 

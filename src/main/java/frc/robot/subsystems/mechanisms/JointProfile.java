@@ -40,8 +40,8 @@ final class JointProfile {
   /**
    * One loop on toward a position, at a share of the cruise, from its point the loop before, or
    * from where the joint is, if it restarts or its point isn't a number: the position as a goal
-   * from there ({@link Travel#goalNear}). A point that isn't a number, from a reading that wasn't
-   * one, would stay one from then on.
+   * from where the joint is ({@link Travel#goalNear}), the turn its interlocks judge it at. A point
+   * that isn't a number, from a reading that wasn't one, would stay one from then on.
    *
    * @param position where it's headed, in the joint's units
    * @param fraction the share of the cruise, above 0 and at most 1
@@ -59,7 +59,7 @@ final class JointProfile {
       setpoint.velocity = velocity;
       restart = false;
     }
-    goal.position = travel.goalNear(position, setpoint.position);
+    goal.position = travel.goalNear(position, at);
     goal.velocity = 0;
     double before = setpoint.velocity;
     if (setpoint.position != goal.position || setpoint.velocity != 0) {

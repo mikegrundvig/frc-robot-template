@@ -74,19 +74,19 @@ import org.wpilib.units.Measure;
  * through a match or two of random input from one seed, every loop checked against what must always
  * hold (of its joints, {@link JointInvariants}; of its drive moves, {@link DriveInvariants}; of
  * where it thinks it is, {@link LocalizationInvariants}), and no exception escaping the robot's
- * loop. Its drive team presses, holds, taps and releases every button the robot's bindings record,
- * both gamepads' sticks wander, commands a team's code could schedule (each joint's moves, its
- * outputs, its configurations, a law of its own, now and then a target that isn't a number; the
- * drivetrain's moves to a pose, a heading, along a path, or at a speed until something holds) start
- * and are canceled, and the robot is disabled and enabled as a match does, and now and then as a
- * brownout or the drive team does, at any moment, mid-homing or mid-move, and its mode switched
- * between autonomous and teleop. With faults on, at random times something fails and later
- * recovers: a sensor tripped, blinded, silenced or its wire cut; a joint's motor controller
- * silenced or restarted, its encoder frozen, slipped or unplugged, the joint jammed, one of its
- * motors' PDH breakers tripped (its controller off the CAN bus without power, a leader's taking the
- * joint with it), or one of its followers off the CAN bus alone; and anything the simulator's
- * controls can fail (the drivetrain's modules and IMUs, the cameras, every camera at once, the
- * robot shoved).
+ * loop. Its report counts the loops each joint and drive move check had something to judge. Its
+ * drive team presses, holds, taps and releases every button the robot's bindings record, both
+ * gamepads' sticks wander, commands a team's code could schedule (each joint's moves, its outputs,
+ * its configurations, a law of its own, now and then a target that isn't a number; the drivetrain's
+ * moves to a pose, a heading, along a path, or at a speed until something holds) start and are
+ * canceled, and the robot is disabled and enabled as a match does, and now and then as a brownout
+ * or the drive team does, at any moment, mid-homing or mid-move, and its mode switched between
+ * autonomous and teleop. With faults on, at random times something fails and later recovers: a
+ * sensor tripped, blinded, silenced or its wire cut; a joint's motor controller silenced or
+ * restarted, its encoder frozen, slipped or unplugged, the joint jammed, one of its motors' PDH
+ * breakers tripped (its controller off the CAN bus without power, a leader's taking the joint with
+ * it), or one of its followers off the CAN bus alone; and anything the simulator's controls can
+ * fail (the drivetrain's modules and IMUs, the cameras, every camera at once, the robot shoved).
  *
  * <p>Everything random comes from one {@link Random}, seeded, and the simulator's clock moves only
  * as it's stepped, so a seed runs the same every time: a failure names its seed and its loop, and
@@ -123,8 +123,11 @@ public final class Monkey {
    * @param faults how many faults it applied
    * @param fingerprint where every joint and the robot really were, loop by loop, as one number:
    *     the same for the same seed, every time
+   * @param judged how many loops each of its joints' and drive moves' checks had something to
+   *     judge, by its name: one that never fires may never have had the chance
    */
-  public record Report(int loops, int actions, int faults, long fingerprint) {}
+  public record Report(
+      int loops, int actions, int faults, long fingerprint, Map<String, Integer> judged) {}
 
   /** A match: disabled before it, autonomous, disabled between, teleop. In seconds. */
   private static final double[] MATCH = {1, 15, 2, 135};
@@ -152,6 +155,9 @@ public final class Monkey {
   private final double seconds;
   private final boolean faults;
   private final Random random;
+
+  /** The test class that built it, which a failure names to run it again. */
+  private final String test;
 
   private final Map<Joint, WatchedJoint> watched = new LinkedHashMap<>();
   private final Deque<String> recent = new ArrayDeque<>();
@@ -200,6 +206,18 @@ public final class Monkey {
     this.seconds = seconds;
     this.faults = faults;
     random = new Random(seed);
+    // The class that called this constructor, or the one it's nested in: Gradle's --tests names a
+    // top-level class.
+    test =
+        StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE)
+            .getCallerClass()
+            .getNestHost()
+            .getName();
+  }
+
+  /** How to run it again, alone: the test that built it, at its seed. */
+  public String rerun() {
+    return "./gradlew test --tests " + test + " -PmonkeySeed=" + seed;
   }
 
   /**
@@ -261,7 +279,10 @@ public final class Monkey {
       }
       remember(joints);
     }
-    return new Report(total, actions, applied, fingerprint);
+    Map<String, Integer> judged = new LinkedHashMap<>(invariants.judged());
+    judged.putAll(drive.judged());
+    System.out.printf(Locale.ROOT, "Monkey on %s, seed %d, judged: %s%n", robot, seed, judged);
+    return new Report(total, actions, applied, fingerprint, judged);
   }
 
   /** Whether every camera is unplugged, as the simulator's controls have it. */
@@ -686,8 +707,8 @@ public final class Monkey {
             what)
         + "Its last doings:\n  "
         + String.join("\n  ", recent)
-        + "\nRun it again: ./gradlew test --tests frc.robot.MonkeySimTest -PmonkeySeed="
-        + seed;
+        + "\nRun it again: "
+        + rerun();
   }
 
   // ---- The drive team's inputs ----

@@ -408,6 +408,38 @@ class LocalizationServiceTest {
   }
 
   /**
+   * A driver's heading reset solves no image until a camera backs it, however sure it says it is,
+   * here 2°: the front camera's view of the hub just after it is solved from a tag alone, its own
+   * heading agreeing with the reset backs it, and the next view is solved with the heading again.
+   * Until 2026-10-08 a reset as sure as the 5° a heading must be within to solve with was solved
+   * with: so a reset by eye, 5°, was or wasn't on a hair of variance, and one solved with was never
+   * backed.
+   */
+  @Test
+  void aHeadingResetNoCameraHasBackedSolvesNoImage() {
+    LocalizationService localization = placed();
+    long now = standStill(localization, 10) + LOOP_NANOS;
+    loop(
+        localization, now, () -> localization.resetHeading(ROBOT.getRotation(), Math.toRadians(2)));
+    long taken = now + LOOP_NANOS;
+    loop(localization, taken, () -> {});
+
+    VisionResult[] results = new VisionResult[2];
+    loop(localization, taken + LOOP_NANOS, () -> results[0] = localization.camera(hubFace(taken)));
+    loop(
+        localization,
+        taken + 2 * LOOP_NANOS,
+        () -> results[1] = localization.camera(hubFace(taken + LOOP_NANOS)));
+
+    assertThat(Objects.requireNonNull(results[0].measurement()).solver())
+        .as("solved without the reset's heading")
+        .isEqualTo(VisionMeasurement.Solver.SINGLE_TAG);
+    assertThat(Objects.requireNonNull(results[1].measurement()).solver())
+        .as("backed, solved with it")
+        .isEqualTo(VisionMeasurement.Solver.HEADING_CONSTRAINED);
+  }
+
+  /**
    * Asking how the robot stood, or solving an image held back, before the drive team places the
    * robot that loop changes nothing: the loop's images are solved as the robot stands once placed,
    * here with a heading too unsure to solve with, and the loop is recorded once.

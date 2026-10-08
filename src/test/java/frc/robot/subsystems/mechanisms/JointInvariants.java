@@ -57,7 +57,10 @@ import org.wpilib.command3.SchedulerEvent;
  */
 public final class JointInvariants {
 
-  /** One check: its name, and what it found wrong this loop, or null for nothing. */
+  /**
+   * One check: its name, and what it found wrong this loop, or null for nothing; a loop it had
+   * something to judge, it says so ({@link #judging}).
+   */
   private interface Check {
     String name();
 
@@ -73,6 +76,11 @@ public final class JointInvariants {
 
   /** The joints a fault reached since the last loop's checks. */
   private final Set<Joint> touched = new LinkedHashSet<>();
+
+  /** How many loops each check had something to judge, by its name; and those this loop. */
+  private final Map<String, Integer> judged = new LinkedHashMap<>();
+
+  private final Set<String> judgedNow = new LinkedHashSet<>();
 
   /**
    * The checks on a robot's joints, watching its scheduler from now on.
@@ -107,7 +115,16 @@ public final class JointInvariants {
     checks.add(moves);
     checks.add(new JamsStall());
     checks.add(new DeadChannelsFlagged());
+    for (Check check : checks) {
+      judged.put(check.name(), 0);
+    }
   }
+
+  /**
+   * How long a joint is let be after its motor controllers all answer again, or its leading one
+   * restarts: what catching it takes, a joint that fell meanwhile still falling as they come back.
+   */
+  static final long SETTLE_NANOS = 250_000_000L;
 
   /** A fault reached a joint before this loop: its checks start afresh from where it is. */
   public void touched(Joint joint) {
@@ -129,9 +146,24 @@ public final class JointInvariants {
         found = check.name() + ": " + why;
       }
     }
+    judgedNow.forEach(name -> judged.merge(name, 1, Integer::sum));
+    judgedNow.clear();
     touched.clear();
     watched.values().forEach(WatchedJoint::cleared);
     return found;
+  }
+
+  /**
+   * How many loops each check had something to judge, by its name, in the order they're checked: a
+   * check that never fires may never have had the chance. Every check is counted, from 0.
+   */
+  public Map<String, Integer> judged() {
+    return new LinkedHashMap<>(judged);
+  }
+
+  /** A check had something to judge this loop: counted once a loop, however many it judged. */
+  private void judging(Check check) {
+    judgedNow.add(check.name());
   }
 
   private WatchedJoint io(Joint joint) {
@@ -167,6 +199,7 @@ public final class JointInvariants {
     public @Nullable String broken(long now, boolean enabled) {
       for (JointMechanism joint : joints.all()) {
         for (WatchedJoint.Told told : io(joint.joint()).told()) {
+          judging(this);
           if (!told.numbers()) {
             return joint.getName() + "'s IO was told " + told;
           }
@@ -180,11 +213,17 @@ public final class JointInvariants {
    * A joint held at positions that doesn't know where it is (unhomed, homing or faulted) is
    * stopped, pushed by its homing while it homes, or held where its motor says: a position with no
    * speed and no added volts, where its motor read it as it stopped knowing, give or take how far
-   * it took to stop and its band. Never run to a position, at a speed, or at volts on a guess.
+   * it took to stop and its band. Never run to a position, at a speed, or at volts on a guess. A
+   * later fault on the joint starts it afresh from where the joint then is, still closing on its
+   * hold, perhaps, or stuck short of it: the hold it allowed stays allowed, its mechanism's own,
+   * until the robot is enabled again, when it holds wherever it is.
    */
   private final class KnownBeforeDriven implements Check {
     /** Where each joint's motor read it, and how fast, as it last stopped knowing where it is. */
     private final Map<Joint, double[]> lost = new LinkedHashMap<>();
+
+    /** Where each joint was held as it allowed, since it stopped knowing or was last enabled. */
+    private final Map<Joint, Double> held = new LinkedHashMap<>();
 
     private boolean wasEnabled;
 
@@ -205,32 +244,43 @@ public final class JointInvariants {
         JointMechanism.State state = mechanism.state();
         if (state == JointMechanism.State.READY) {
           lost.remove(joint);
+          held.remove(joint);
           continue;
         }
-        if (!lost.containsKey(joint) || (enabled && !wasEnabled) || touched.contains(joint)) {
+        boolean afresh = !lost.containsKey(joint) || (enabled && !wasEnabled);
+        if (afresh || touched.contains(joint)) {
           // Disabled meanwhile, it holds wherever it is as it's enabled.
           lost.put(joint, new double[] {io.onMotor(), io.velocity()});
         }
-        double[] from = lost.get(joint);
+        if (afresh) {
+          held.remove(joint);
+        }
+        double[] from = Objects.requireNonNull(lost.get(joint));
+        Double holds = held.get(joint);
         Travel travel = travel(joint);
         double reach =
             Math.abs(travel.stoppingPoint(from[0], from[1]) - travel.clamp(from[0])) + band(joint);
         for (WatchedJoint.Told told : io.told()) {
+          judging(this);
           String why =
               switch (told.kind()) {
                 case "stop", "reset" -> null;
                 case "home" ->
                     state == JointMechanism.State.HOMING ? null : "pushed by homing while " + state;
-                case "position" ->
-                    told.values()[1] == 0
-                            && told.values()[2] == 0
-                            && Math.abs(told.values()[0] - from[0]) <= reach
-                        ? null
-                        : String.format(
-                            Locale.ROOT,
-                            "run to a position while %s, its motor at %s as it stopped knowing",
-                            mechanism.stateShown(),
-                            joint.shown(from[0]));
+                case "position" -> {
+                  double point = told.values()[0];
+                  boolean still = told.values()[1] == 0 && told.values()[2] == 0;
+                  if (still
+                      && (Math.abs(point - from[0]) <= reach || Objects.equals(holds, point))) {
+                    held.put(joint, point);
+                    yield null;
+                  }
+                  yield String.format(
+                      Locale.ROOT,
+                      "run to a position while %s, its motor at %s as it stopped knowing",
+                      mechanism.stateShown(),
+                      joint.shown(from[0]));
+                }
                 default -> "run at a " + told.kind() + " while " + mechanism.stateShown();
               };
           if (why != null && found == null) {
@@ -276,6 +326,9 @@ public final class JointInvariants {
         double toward = kind.end() == Sensor.Switch.Limit.End.LOWER ? -1 : 1;
         double band = band(kind.joint());
         for (WatchedJoint.Told told : io(kind.joint()).told()) {
+          if (!told.kind().equals("stop") && !told.kind().equals("reset")) {
+            judging(this); // driven, its switch tripped
+          }
           boolean on =
               switch (told.kind()) {
                 case "velocity", "voltage", "duty cycle", "home" -> told.values()[0] * toward > 0;
@@ -304,9 +357,14 @@ public final class JointInvariants {
    * A joint doesn't go into a region it's kept out of while the region is closed, as the robot
    * judges it (the joint the condition reads unknown counts as closed), past its band. As the
    * region closes, or the joint comes to know where it is inside it, it may still go as far as
-   * braking from how fast it was going takes it; once it's been outside, no further than its band.
-   * Judged only while the robot is enabled and the joint knows where it is: disabled, nothing holds
-   * a joint up.
+   * braking from how fast it was going takes it; once it's been outside, no further than braking
+   * from how fast it goes there takes it, and once it's slowed, its band. One braking would take
+   * through the region may carry on out the far side, as its interlock lets it, and is kept out
+   * from there. Judged only while the robot is enabled, the joint knows where it is, and its motor
+   * controllers all answer and its leading one hasn't restarted, for a settle since ({@link
+   * #SETTLE_NANOS}): disabled, or with its leading controller off the bus, nothing holds a joint
+   * up; with a follower off it, its motors hold less than its control counts on, so a weighed joint
+   * sags under its weight, further than its band where its gains are soft.
    */
   private final class KeptOut implements Check {
     private final Interlock.KeepsOut keeps;
@@ -320,6 +378,12 @@ public final class JointInvariants {
 
     /** Whether it was judged last loop, the region closed. */
     private boolean judging;
+
+    /**
+     * Until when it's let be, in nanoseconds: one of its motor controllers silent, or its leading
+     * one restarting, and a settle after ({@link #SETTLE_NANOS}).
+     */
+    private long letBeUntil = Long.MIN_VALUE;
 
     /** Which edge it's kept to, and how far past it it may go, while it's judged. */
     private boolean below;
@@ -364,15 +428,32 @@ public final class JointInvariants {
       if (knows && !keeps.keepsOut(at)) {
         side = keeps.keptBelow(at, 0) ? -1 : 1;
       }
-      boolean judged = enabled && knows && closed();
+      WatchedJoint io = io(keeps.joint());
+      if (!io.connected() || !io.followersConnected() || io.restarted()) {
+        letBeUntil = now + SETTLE_NANOS;
+      }
+      boolean judged = enabled && knows && now >= letBeUntil && closed();
+      if (judged) {
+        judging(this);
+      }
       String found = null;
       if (judged && (!judging || touched.contains(keeps.joint()))) {
         below = keeps.keptBelow(at, side);
         double stops = past(travel.stoppingPoint(at, joint.velocity()));
         allowed = Math.max(0, Math.max(past(at), stops)) + band;
       } else if (judged) {
+        if (!keeps.keepsOut(at) && keeps.keptBelow(at, 0) != below) {
+          // Out the far side: too fast to stop inside as the region closed, it carried on through,
+          // and is kept out from there.
+          below = !below;
+          allowed = Math.max(0, past(travel.stoppingPoint(at, joint.velocity()))) + band;
+        }
         if (past(at) <= 0) {
-          allowed = Math.min(allowed, band);
+          // Outside, it may still go as far as braking from how fast it goes takes it, and as it
+          // slows, that's its band: a joint the region closed on a little short of its edge, too
+          // fast to stop there, is still braking outside it the loop after.
+          double stops = Math.max(0, past(travel.stoppingPoint(at, joint.velocity())));
+          allowed = Math.min(allowed, stops + band);
         } else if (past(at) > allowed) {
           found =
               String.format(
@@ -433,6 +514,9 @@ public final class JointInvariants {
     public @Nullable String broken(long now, boolean enabled) {
       String found = endedWithout;
       endedWithout = null;
+      if (found != null || !running.isEmpty()) {
+        judging(this);
+      }
       Set<Joint> waitedOn = new LinkedHashSet<>();
       for (Move move : running) {
         long deadline = move.deadlineNanos();
@@ -519,7 +603,11 @@ public final class JointInvariants {
         Joint joint = mechanism.joint();
         WatchedJoint io = io(joint);
         boolean run = ran.getOrDefault(joint, false) && enabled && io.connected();
-        int count = run && jammed.test(joint) ? loops.getOrDefault(joint, 0) + 1 : 0;
+        boolean jammedAndRun = run && jammed.test(joint);
+        if (jammedAndRun) {
+          judging(this);
+        }
+        int count = jammedAndRun ? loops.getOrDefault(joint, 0) + 1 : 0;
         loops.put(joint, count);
         ran.put(joint, asksToMove(joint, io.told()));
         double seconds = count * RobotLoop.PERIOD_SECONDS;
@@ -605,6 +693,9 @@ public final class JointInvariants {
             since.remove(device);
           } else {
             since.put(device, from);
+          }
+          if (from >= 0 || named) {
+            judging(this); // drawing nothing while its joint works, or flagged
           }
           String why = null;
           if (from >= 0 && now - from >= allowed && !named) {

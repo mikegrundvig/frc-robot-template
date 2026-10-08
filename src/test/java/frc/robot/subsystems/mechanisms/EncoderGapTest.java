@@ -5,6 +5,7 @@ import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TAL
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
@@ -61,7 +62,7 @@ class EncoderGapTest {
    */
   @Test
   void theyreApartOnlyPastTheirMarginForAQuarterSecond() {
-    EncoderGap gap = new EncoderGap(PIVOT, Math.toRadians(5));
+    EncoderGap gap = new EncoderGap(PIVOT, Math.toRadians(5), Double.POSITIVE_INFINITY);
     double off = Math.toRadians(6);
 
     String first = gap.apart(0, off, 0, 0);
@@ -79,5 +80,30 @@ class EncoderGapTest {
     assertThat(again).as("starting over").isNull();
     assertThat(gap.agree(Math.toRadians(4.9), 0)).isTrue();
     assertThat(gap.agree(off, 0)).isFalse();
+  }
+
+  /**
+   * A turret that turns freely, its encoder on its axle, travels past the turn its encoder tells
+   * apart: its motor's count at 350° and its encoder's -10° agree, and an encoder slipped 20°
+   * across its wrap, reading -170° with the count at 170°, is 20° apart. The pivot, whose range its
+   * encoder tells apart, takes them as they read.
+   */
+  @Test
+  void theyreApartTheNearestWayRoundAJointThatTravelsPastItsEncodersTurn() {
+    Joint.Revolute turret =
+        TURRET.absoluteEncoder(MechanismWiring.PortEncoder.dutyCycle(1).offset(Rotations.of(0)));
+    Joint.Revolute pivot =
+        PIVOT.absoluteEncoder(MechanismWiring.PortEncoder.dutyCycle(1).offset(Rotations.of(0)));
+    double turn = EncoderGap.turn(ROBOT.with(turret).math(), turret);
+    EncoderGap gap = new EncoderGap(turret, Math.toRadians(5), turn);
+
+    gap.apart(0, Math.toRadians(-170), Math.toRadians(170), 0);
+    String slipped = gap.apart(13 * LOOP, Math.toRadians(-170), Math.toRadians(170), 0);
+
+    assertThat(Math.toDegrees(turn)).isCloseTo(360, within(1e-9));
+    assertThat(gap.agree(Math.toRadians(-10), Math.toRadians(350))).isTrue();
+    assertThat(gap.agree(Math.toRadians(-10), Math.toRadians(710))).isTrue();
+    assertThat(slipped).isEqualTo("20° apart, more than 5°");
+    assertThat(EncoderGap.turn(ROBOT.with(pivot).math(), pivot)).isInfinite();
   }
 }

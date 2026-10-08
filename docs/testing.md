@@ -204,8 +204,8 @@ camera unplugged it's soon not ready to score, nor tracking tags; and the estima
 no farther than its wheels' travel and what the images it accepted can move it by their gate.
 
 It runs three seeds a robot, about 4 s each for the guide's robot (7 s for the first, as the JVM
-warms) and 1.2 s for 2611's. A failure names its seed, its loop and the monkey's last doings, and
-the seed runs the same every time:
+warms) and 1.2 s for 2611's. A failure names its seed, its loop, the monkey's last doings and the
+test that ran it, and the seed runs the same every time:
 `./gradlew test --tests frc.robot.MonkeySimTest -PmonkeySeed=17` runs it again, alone, and
 `-PmonkeySeeds=50` runs seeds 1 to 50, for a longer hunt.
 

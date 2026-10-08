@@ -12,6 +12,11 @@ import org.wpilib.math.util.MathUtil;
  * one that's wrong (a collision, a spin, a bad heading reset), and the estimate should go to them.
  * It keeps the recent rejected measurements' disagreements and says what they agree on; the
  * estimator does the moving.
+ *
+ * <p>Positions solved with the estimate's own heading agree with each other whether the position or
+ * the heading is wrong: a heading off by an angle turns every one of them about its tags alike. So
+ * while the heading is in doubt they don't vote on the position ({@link Rejected#positionCounts});
+ * the cameras' own headings settle it first.
  */
 final class Recovery {
   private final int needed;
@@ -25,13 +30,17 @@ final class Recovery {
    *
    * @param innovationHeading NaN when the measurement had no heading
    * @param positionAgreed whether its position alone passed the gate: only its heading disagreed
+   * @param positionCounts whether its position can say the estimate's is wrong: not one solved with
+   *     a heading in doubt, which lands off by that heading's error however right the position is,
+   *     and the same way in every image that shares it
    */
   record Rejected(
       long time,
       double innovationX,
       double innovationY,
       double innovationHeading,
-      boolean positionAgreed) {}
+      boolean positionAgreed,
+      boolean positionCounts) {}
 
   Recovery(EstimatorConfig config) {
     needed = config.recoveryMeasurements();
@@ -97,14 +106,23 @@ final class Recovery {
   }
 
   /**
-   * The move the rejected measurements agree the estimate's position needs, if enough whose
-   * positions disagreed agree with each other on one.
+   * A move of the estimate's position the cameras agree on.
+   *
+   * @param by how far
+   * @param newestTaken when the newest image that agreed on it was taken: the estimate rests on
+   *     images that old, however much later the move is made
    */
-  @Nullable Translation2d positionCorrection() {
+  record Move(Translation2d by, long newestTaken) {}
+
+  /**
+   * The move the rejected measurements agree the estimate's position needs, if enough whose
+   * positions disagreed, and count, agree with each other on one.
+   */
+  @Nullable Move positionCorrection() {
     // Only the measurements whose positions disagreed say the position is wrong.
     List<Rejected> offPosition = new ArrayList<>();
     for (Rejected rejected : recent) {
-      if (!rejected.positionAgreed()) {
+      if (!rejected.positionAgreed() && rejected.positionCounts()) {
         offPosition.add(rejected);
       }
     }
@@ -113,9 +131,11 @@ final class Recovery {
     }
     double meanX = 0;
     double meanY = 0;
+    long newest = Long.MIN_VALUE;
     for (Rejected rejected : offPosition) {
       meanX += rejected.innovationX();
       meanY += rejected.innovationY();
+      newest = Math.max(newest, rejected.time());
     }
     meanX /= offPosition.size();
     meanY /= offPosition.size();
@@ -125,6 +145,6 @@ final class Recovery {
         return null;
       }
     }
-    return new Translation2d(meanX, meanY);
+    return new Move(new Translation2d(meanX, meanY), newest);
   }
 }

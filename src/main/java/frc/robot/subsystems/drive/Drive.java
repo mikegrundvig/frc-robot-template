@@ -24,7 +24,9 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.locks.Lock;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
@@ -120,6 +122,9 @@ public class Drive implements Mechanism, AutoCloseable {
 
   /** What the sensors read this loop, for localization. */
   private DrivetrainReadings readings;
+
+  /** The kinematics of each set of connected modules short of all four, made as each comes. */
+  private final Map<Integer, SwerveDriveKinematics> reportingKinematics = new HashMap<>();
 
   private final Alert[] moduleDisconnectedAlerts = new Alert[4];
   private final Alert[] moduleUnconfiguredAlerts = new Alert[4];
@@ -250,7 +255,9 @@ public class Drive implements Mechanism, AutoCloseable {
           new Alert(
               name,
               "module" + module + "Disconnected",
-              module + " swerve module disconnected: driving on three",
+              module
+                  + " swerve module disconnected: driving on the other three, odometry from them."
+                  + " Check its motor controllers' CAN wiring and power",
               Alert.Level.HIGH);
       moduleUnconfiguredAlerts[i] =
           new Alert(
@@ -358,9 +365,11 @@ public class Drive implements Mechanism, AutoCloseable {
   }
 
   /**
-   * Every high-rate reading of the wheels since the last loop, oldest first. A reading that isn't
-   * one (a value that isn't a number, a time before the clock started) is left out: the next good
-   * one covers the motion.
+   * Every high-rate reading of the wheels since the last loop, oldest first. A module that's
+   * disconnected reads only what it last sent, as if its wheel stood still: it reads no number
+   * instead, as does one whose reading isn't a number, and odometry fits the motion from the rest
+   * (driving on three). A reading no wheel reports in, or taken before the clock started, is left
+   * out: the next good one covers the motion.
    */
   private List<OdometrySample> wheelReadings() {
     int count = Integer.MAX_VALUE;
@@ -371,14 +380,15 @@ public class Drive implements Mechanism, AutoCloseable {
     for (int k = 0; k < count; k++) {
       double[] distances = new double[4];
       double[] angles = new double[4];
-      boolean numbers = true;
+      boolean any = false;
       for (int i = 0; i < 4; i++) {
-        distances[i] = modules[i].odometryDistanceMeters(k);
-        angles[i] = modules[i].odometryAngleRadians(k);
-        numbers &= Double.isFinite(distances[i]) && Double.isFinite(angles[i]);
+        boolean connected = modules[i].isConnected();
+        distances[i] = connected ? modules[i].odometryDistanceMeters(k) : Double.NaN;
+        angles[i] = connected ? modules[i].odometryAngleRadians(k) : Double.NaN;
+        any |= Double.isFinite(distances[i]) && Double.isFinite(angles[i]);
       }
       long stamp = modules[0].odometryTimestampNanos(k);
-      if (numbers && stamp >= 0) {
+      if (any && stamp >= 0) {
         wheels.add(new OdometrySample(stamp, distances, angles));
       }
     }
@@ -508,9 +518,41 @@ public class Drive implements Mechanism, AutoCloseable {
     return pose.get();
   }
 
-  /** Measured robot-relative velocities. */
+  /**
+   * Measured robot-relative velocities, from the modules that are connected: a disconnected one
+   * reads the speed it last sent, however the robot moves now. With fewer than two connected,
+   * nothing better than all four.
+   */
   public ChassisVelocities getRobotRelativeVelocities() {
-    return kinematics.toChassisVelocities(moduleVelocities());
+    SwerveModuleVelocity[] measured = moduleVelocities();
+    int connected = 0;
+    for (int i = 0; i < 4; i++) {
+      connected |= modules[i].isConnected() ? 1 << i : 0;
+    }
+    if (connected == 0b1111 || Integer.bitCount(connected) < 2) {
+      return kinematics.toChassisVelocities(measured);
+    }
+    SwerveModuleVelocity[] reporting = new SwerveModuleVelocity[Integer.bitCount(connected)];
+    int k = 0;
+    for (int i = 0; i < 4; i++) {
+      if ((connected & (1 << i)) != 0) {
+        reporting[k++] = measured[i];
+      }
+    }
+    return reportingKinematics
+        .computeIfAbsent(connected, this::kinematicsOf)
+        .toChassisVelocities(reporting);
+  }
+
+  /** WPILib's kinematics for the modules a mask's bits name. */
+  private SwerveDriveKinematics kinematicsOf(int mask) {
+    List<Translation2d> at = new ArrayList<>();
+    for (int i = 0; i < 4; i++) {
+      if ((mask & (1 << i)) != 0) {
+        at.add(moduleTranslations[i]);
+      }
+    }
+    return new SwerveDriveKinematics(at.toArray(Translation2d[]::new));
   }
 
   /** The modules' positions, as WPILib's odometry takes them. */

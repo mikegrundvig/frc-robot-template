@@ -12,6 +12,10 @@ import org.wpilib.math.kinematics.SwerveModulePosition;
  * distance at its fixed angle. The drivetrain's kinematics turns two samples into a {@link
  * BodyMotion}.
  *
+ * <p>A wheel that didn't report (its motor controllers off the bus, say) reads a value that isn't a
+ * number, its distance or its angle: the kinematics leaves it out and fits the motion from the
+ * rest.
+ *
  * <p>Immutable: the arrays are copied in, and read one wheel at a time.
  */
 public final class OdometrySample {
@@ -21,8 +25,10 @@ public final class OdometrySample {
 
   /**
    * @param timestampNanos when the wheels were read
-   * @param distancesMeters how far each wheel has rolled since the robot started, in meters
-   * @param anglesRadians which way each wheel points, counterclockwise from the robot's forward
+   * @param distancesMeters how far each wheel has rolled since the robot started, in meters; not a
+   *     number for a wheel that didn't report
+   * @param anglesRadians which way each wheel points, counterclockwise from the robot's forward;
+   *     not a number for a wheel that didn't report
    */
   public OdometrySample(long timestampNanos, double[] distancesMeters, double[] anglesRadians) {
     if (timestampNanos < 0) {
@@ -35,11 +41,6 @@ public final class OdometrySample {
               + " distances, "
               + anglesRadians.length
               + " angles");
-    }
-    for (int i = 0; i < distancesMeters.length; i++) {
-      if (!Double.isFinite(distancesMeters[i]) || !Double.isFinite(anglesRadians[i])) {
-        throw new IllegalArgumentException("wheel " + i + " reads a value that isn't a number");
-      }
     }
     this.timestampNanos = timestampNanos;
     this.distancesMeters = distancesMeters.clone();
@@ -71,6 +72,11 @@ public final class OdometrySample {
 
   public double angleRadians(int wheel) {
     return anglesRadians[wheel];
+  }
+
+  /** Whether a wheel reported: both its distance and its angle are numbers. */
+  public boolean reported(int wheel) {
+    return Double.isFinite(distancesMeters[wheel]) && Double.isFinite(anglesRadians[wheel]);
   }
 
   /** The wheels as swerve modules, for WPILib's kinematics. */

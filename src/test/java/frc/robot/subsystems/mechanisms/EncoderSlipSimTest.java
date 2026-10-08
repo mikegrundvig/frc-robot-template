@@ -8,6 +8,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.control;
 import static frc.robot.subsystems.mechanisms.JointFixtures.gearing;
 import static frc.robot.subsystems.mechanisms.JointFixtures.profile;
@@ -200,6 +201,58 @@ class EncoderSlipSimTest {
       assertThat(took).as(pivot.driven().absoluteEncoder().toString()).isNotNaN();
       assertThat(sim.joints.of(PIVOT).fault())
           .endsWith("Check both, then restart the robot code to tell its motor where it is again");
+    }
+  }
+
+  /**
+   * A turret that turns freely, its encoder on its axle read by the robot or on its SPARK's data
+   * port, sent on past 180°, to 190°, where its encoder wraps to -170° while its motor's count goes
+   * on: the two agree there. Back at 170°, its encoder slips 20° on its shaft, across its wrap:
+   * they're 20° apart, not 340°, and it's faulted for that, held where it is.
+   */
+  @Test
+  void aJointThatTurnsFreelyIsCheckedTheNearestWayRound() {
+    Joint.Revolute onPort =
+        TURRET
+            .absoluteEncoder(MechanismWiring.PortEncoder.dutyCycle(1).offset(Rotations.of(0)))
+            .retuned(old -> control(20, 0.5, profile(3, 10)));
+    Joint.Revolute onDataPort =
+        unmotored(TURRET)
+            .motor(Motor.NEO, gearing(50), SPARK_MAX.can(22))
+            .absoluteEncoder(DATA_PORT.offset(Rotations.of(0)))
+            .retuned(old -> control(20, 0.5, profile(3, 10)));
+    for (Joint.Revolute turret : List.of(onPort, onDataPort)) {
+      JointsSimHarness sim = new JointsSimHarness(ROBOT.with(turret));
+      JointMechanism mechanism = sim.joints.of(TURRET);
+      double past = Double.NaN;
+      JointMechanism.State there = null;
+      for (double heading : new double[] {170, -170, 170}) {
+        Move move = mechanism.goTo(Degrees.of(heading));
+        sim.scheduler.schedule(move);
+        sim.runUntil(() -> move.outcome().isPresent(), 3);
+        sim.run(0.5);
+        if (heading < 0) {
+          past = degrees(sim.simulation.position(TURRET));
+          there = mechanism.state();
+        }
+      }
+      double at = degrees(sim.simulation.position(TURRET));
+
+      sim.simulation.slip(TURRET, Math.toRadians(20));
+      double took = sim.runUntil(() -> mechanism.state() == JointMechanism.State.FAULTED, 1);
+      String why = mechanism.fault();
+      sim.run(0.5);
+
+      String wired = turret == onPort ? "read by the robot" : "on its data port";
+      assertThat(past).as(wired).isCloseTo(190, within(1.0));
+      assertThat(there).as(wired).isEqualTo(JointMechanism.State.READY);
+      assertThat(at).as(wired).isCloseTo(170, within(1.0));
+      assertThat(took).as(wired).isNotNaN();
+      assertThat(why)
+          .as(wired)
+          .startsWith(
+              "turret's absolute encoder and its motor's count are 20° apart, more than 5°");
+      assertThat(degrees(sim.simulation.position(TURRET))).as(wired).isCloseTo(at, within(1.0));
     }
   }
 

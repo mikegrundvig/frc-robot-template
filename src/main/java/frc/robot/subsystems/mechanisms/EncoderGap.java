@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.timing.RobotLoop;
+import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -50,16 +51,37 @@ final class EncoderGap {
 
   private final Joint joint;
   private final double margin;
+  private final double turn;
 
   /** Since when they've been apart, in nanoseconds: -1 while they agree. */
   private long since = -1;
 
   /**
    * @param margin how far apart they may be, still, in the joint's units ({@link #margin})
+   * @param turn the encoder's turn at the joint, where the joint travels past it ({@link #turn}):
+   *     they're apart by the nearest way round it; infinite where it doesn't
    */
-  EncoderGap(Joint joint, double margin) {
+  EncoderGap(Joint joint, double margin, double turn) {
     this.joint = joint;
     this.margin = margin;
+    this.turn = turn;
+  }
+
+  /**
+   * The encoder's turn at a joint that travels past it, in the joint's units: one that turns
+   * freely, or whose range is wider than the window its encoder tells apart ({@link
+   * RobotMath#absoluteWindow}). Its encoder reads within its turn while its motor's count goes on,
+   * so the two are a whole turn apart where they agree. Infinite for a joint whose range the
+   * encoder tells apart, where a reading a turn off is one that slipped.
+   */
+  static double turn(RobotMath math, Joint joint) {
+    Sensor.Encoder encoder = math.absoluteEncoder(joint);
+    if (encoder == null) {
+      return Double.POSITIVE_INFINITY;
+    }
+    double window = math.absoluteWindow(List.of(encoder)).width();
+    boolean past = joint.range().map(range -> range.width() > window).orElse(true);
+    return past ? window : Double.POSITIVE_INFINITY;
   }
 
   /**
@@ -112,7 +134,7 @@ final class EncoderGap {
    * @param velocity how fast it moves: a loop's travel at it is allowed beside the margin
    */
   @Nullable String apart(long now, double encoder, double motor, double velocity) {
-    double gap = Math.abs(encoder - motor);
+    double gap = gap(encoder, motor);
     if (!(gap > margin + Math.abs(velocity) * RobotLoop.PERIOD_SECONDS)) {
       since = -1;
       return null;
@@ -127,6 +149,12 @@ final class EncoderGap {
 
   /** Whether they agree now, inside the margin: an encoder distrusted for its gap is trusted. */
   boolean agree(double encoder, double motor) {
-    return Math.abs(encoder - motor) <= margin;
+    return gap(encoder, motor) <= margin;
+  }
+
+  /** How far apart they are: the nearest way round the encoder's turn, where it wraps. */
+  private double gap(double encoder, double motor) {
+    double apart = encoder - motor;
+    return Math.abs(Double.isInfinite(turn) ? apart : apart - turn * Math.rint(apart / turn));
   }
 }

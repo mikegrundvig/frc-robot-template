@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.localization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.within;
 
 import java.util.ArrayList;
@@ -248,6 +249,42 @@ class PoseEstimatorTest {
     assertThat(inOrder.estimate().health().accepted()).isEqualTo(2);
   }
 
+  /**
+   * Two images that rule each other out, placed to 30 cm: the earlier puts the robot 60 cm ahead,
+   * the later 40 cm behind. Weighed in order, the earlier passes the gate and the later, a meter
+   * from it, doesn't. Arriving the other way round, the later passes first; when the earlier comes,
+   * the replay weighs the later again against what the earlier says, and it no longer passes, so
+   * it's taken back, and says so. Either way the estimate is where the earlier image put it.
+   */
+  @Test
+  void anAppliedImageThatALateEarlierOneRulesOutIsTakenBack() {
+    PoseReset rough = new PoseReset(T0, START, PoseCovariance.fromStdDevs(0.3, 0.3, 0.02), "x");
+    Robot inOrder = new Robot(TEXTBOOK, rough);
+    Robot reversed = new Robot(TEXTBOOK, rough);
+    for (Robot robot : List.of(inOrder, reversed)) {
+      robot.estimator.reset(rough);
+      robot.drive(20, 0, 0, 0);
+    }
+    long earlier = T0 + 5 * STEP + 1_000_000;
+    long later = T0 + 10 * STEP + 1_000_000;
+    Pose2d ahead = new Pose2d(1.6, 1, Rotation2d.ZERO);
+    Pose2d behind = new Pose2d(0.6, 1, Rotation2d.ZERO);
+
+    boolean aheadFirst = inOrder.see(ahead, earlier, position(0.05)).get(0).accepted();
+    boolean behindSecond = inOrder.see(behind, later, position(0.05)).get(0).accepted();
+    boolean behindFirst = reversed.see(behind, later, position(0.05)).get(0).accepted();
+    List<VisionDecision> lateArrival = reversed.see(ahead, earlier, position(0.05));
+
+    assertThat(List.of(aheadFirst, behindSecond, behindFirst)).containsExactly(true, false, true);
+    assertThat(lateArrival)
+        .extracting(decision -> decision.measurement().pose(), VisionDecision::verdict)
+        .containsExactly(tuple(ahead, Verdict.ACCEPTED), tuple(behind, Verdict.GATED));
+    assertThat(inOrder.pose().getX()).isGreaterThan(1.5);
+    assertSame(reversed.pose(), inOrder.pose(), 1e-9);
+    assertThat(reversed.estimate().covariance().xx())
+        .isCloseTo(inOrder.estimate().covariance().xx(), within(1e-12));
+  }
+
   @Test
   void aMeasurementFarOutsideTheUncertaintyIsGatedOut() {
     Robot robot = new Robot().drive(10, 0, 0, 0);
@@ -318,6 +355,39 @@ class PoseEstimatorTest {
     assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.TRACKING);
     assertThat(robot.estimate().health().recoveries()).isEqualTo(1);
     assertThat(robot.estimate().covariance().xStdDev()).isCloseTo(0.25, within(1e-9));
+  }
+
+  /**
+   * Three images agree the robot was knocked a meter sideways, but a fourth just before them, two
+   * meters off, holds the recovery back until it's older than the recovery window. Then the camera
+   * is unplugged, and the three recover the estimate a second after the first was taken. The images
+   * are as old as when they were taken, not when they were acted on: a second after the last of
+   * them, the estimate is dead reckoning, not tracking tags.
+   */
+  @Test
+  void aRecoveryCountsItsImagesAsOldAsWhenTheyWereTaken() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    int loop = 5; // steps a robot loop, 20 ms
+    robot.drive(loop, 0, 0, 0).see(new Pose2d(1, 3, Rotation2d.ZERO), robot.time, position(0.05));
+    for (int i = 0; i < 3; i++) {
+      robot.drive(loop, 0, 0, 0).see(new Pose2d(1, 2, Rotation2d.ZERO), robot.time, position(0.05));
+    }
+    long lastTaken = robot.time;
+    assertThat(robot.estimate().health().recoveries()).isZero();
+
+    while (robot.estimate().health().recoveries() == 0) {
+      robot.drive(loop, 0, 0, 0).estimator.update();
+    }
+    double recoveredAfter = (robot.time - lastTaken) / 1e9;
+    while (robot.time - lastTaken <= 1e9 * TEXTBOOK.visionTimeoutSeconds()) {
+      robot.drive(loop, 0, 0, 0).estimator.update();
+    }
+
+    assertThat(recoveredAfter).as("seconds after the last image").isBetween(0.9, 1.0);
+    assertThat(robot.pose().getTranslation().getDistance(new Translation2d(1, 2))).isLessThan(1e-9);
+    assertThat(robot.estimate().health().visionAgeSeconds())
+        .isCloseTo((robot.time - lastTaken) / 1e9, within(1e-9));
+    assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
   }
 
   @Test
@@ -861,6 +931,62 @@ class PoseEstimatorTest {
 
     assertThat(robot.pose().getRotation().getDegrees()).isCloseTo(0, within(1e-6));
     assertThat(robot.estimate().health().recoveries()).isZero();
+  }
+
+  /**
+   * A driver's heading reset facing the wrong way: the robot faces +x, the driver says -y. Solved
+   * with that heading, its tags 3 m ahead at (4, 1) put the robot at (4, 4), turned about them, and
+   * every such position agrees with the next, since they share the heading. They can't say the
+   * position is wrong while it's the heading in doubt, so the estimate stays put until the cameras'
+   * own headings turn it back; then their positions count again.
+   */
+  @Test
+  void positionsSolvedWithADriversUnbackedHeadingDontMoveTheEstimate() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    robot.estimator.resetHeading(Rotation2d.fromDegrees(-90), Math.toRadians(5));
+    Pose2d turnedAboutTheTags = new Pose2d(4, 4, Rotation2d.fromDegrees(-90));
+
+    List<Boolean> leaning = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
+      robot.drive(8, 0, 0, 0);
+      leaning.add(robot.seeLeaning(turnedAboutTheTags, new Translation2d(0, -3), 0.05).accepted());
+    }
+    Pose2d afterLeaning = robot.pose();
+    for (int i = 0; i < 3; i++) {
+      robot.drive(8, 0, 0, 0).seeWithHeading(START);
+    }
+    Pose2d turnedBack = robot.pose();
+    VisionDecision solvedFacingRight =
+        robot.drive(8, 0, 0, 0).seeLeaning(START, new Translation2d(3, 0), 0.05);
+
+    assertThat(leaning).containsExactly(false, false, false);
+    assertThat(afterLeaning.getTranslation().getDistance(START.getTranslation()))
+        .as("where it stands")
+        .isLessThan(1e-9);
+    assertThat(turnedBack.getRotation().getDegrees()).isCloseTo(0, within(1e-6));
+    assertThat(robot.estimate().health().recoveries()).isEqualTo(1);
+    assertThat(solvedFacingRight.accepted()).isTrue();
+    assertSame(robot.pose(), START, 0.01);
+  }
+
+  /**
+   * Once a camera's own heading agrees with a driver's reset, positions solved with it say where
+   * the robot is again: knocked a meter sideways, they agree it moved, and it recovers to them.
+   */
+  @Test
+  void aResetACamerasHeadingBacksLetsItsPositionsRecoverAKnock() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    robot.estimator.resetHeading(Rotation2d.fromDegrees(2), Math.toRadians(5));
+    assertThat(robot.drive(8, 0, 0, 0).seeWithHeading(START).accepted()).isTrue();
+    Pose2d knocked = new Pose2d(1, 2, Rotation2d.ZERO);
+
+    for (int i = 0; i < 3; i++) {
+      robot.drive(8, 0, 0, 0).seeLeaning(knocked, new Translation2d(3, -1), 0.05);
+    }
+
+    assertThat(robot.estimate().health().recoveries()).isEqualTo(1);
+    assertThat(robot.pose().getTranslation().getDistance(knocked.getTranslation()))
+        .isLessThan(0.05);
   }
 
   @Test

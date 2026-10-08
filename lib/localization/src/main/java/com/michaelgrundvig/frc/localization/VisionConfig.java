@@ -29,7 +29,8 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
  * @param speedStdDevFactor uncertainty grows by this fraction per meter per second of robot speed
  * @param yawRateStdDevFactor and by this fraction per radian per second of turning
  * @param maxHeadingStdDevToConstrain the gyro's heading is used to solve only while the estimate is
- *     this sure of it, in radians; until then (a robot not yet placed), full solves find it
+ *     this sure of it, in radians; until then (a robot not yet placed), full solves find it. A
+ *     driver's heading reset no camera has backed is never used, however sure it says it is
  * @param minTagsForHeading a result may correct heading only from a multi-tag solution with at
  *     least this many tags
  * @param maxYawRateForHeading and only while the robot turns slower than this

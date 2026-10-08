@@ -91,7 +91,8 @@ final class Interlocks {
   /**
    * What the interlocks leave of what the joint is asked this loop, each in turn: held, stopped or
    * kept out, saying which hold it ({@link Demand#heldBy}), its profile restarted from where it is
-   * as a {@code runsOnlyWhen} lets go. A demand they leave alone is handed on as it is.
+   * as a {@code runsOnlyWhen} or a region it's inside holds it, and as a {@code runsOnlyWhen} lets
+   * go. A demand they leave alone is handed on as it is.
    *
    * @param demand what the joint is asked, or its idle
    * @param at where the joint is
@@ -106,6 +107,7 @@ final class Interlocks {
     double fraction = demand.fraction();
     String heldBy = demand.heldBy();
     boolean frozen = false;
+    boolean holdStarts = false;
     for (Restriction restriction : restrictions) {
       Interlock interlock = restriction.interlock;
       JointView other = restriction.other;
@@ -141,6 +143,7 @@ final class Interlocks {
             if (positional) {
               if (heldAt.isEmpty()) {
                 heldAt = OptionalDouble.of(travel.stoppingPoint(at, velocity));
+                holdStarts = true;
               }
               asked = Request.POSITION;
               target = heldAt.getAsDouble();
@@ -154,7 +157,9 @@ final class Interlocks {
         }
         case Interlock.KeepsOut keeps -> {
           if (!known || condition) {
+            boolean heldInside = restriction.inside.isPresent();
             double kept = keptOut(keeps, restriction, asked, target, at, velocity, accelerating);
+            holdStarts |= !heldInside && restriction.inside.isPresent();
             // Only a region that moves its target holds it, at its cruise; a target it leaves
             // alone keeps its command's share of the cruise.
             if (!Double.isNaN(kept) && (asked != Request.POSITION || kept != target)) {
@@ -175,14 +180,17 @@ final class Interlocks {
     if (letGo) {
       heldAt = OptionalDouble.empty();
     }
+    // As a hold starts, its profile starts from where the joint is, braking it to where it stops:
+    // from where it had the joint, ahead of one that lagged it, it would carry the joint on past.
+    boolean restart = letGo || holdStarts;
     if (asked == demand.kind()
         && target == demand.value()
         && fraction == demand.fraction()
         && heldBy.equals(demand.heldBy())
-        && !letGo) {
+        && !restart) {
       return demand;
     }
-    return new Demand(asked, target, fraction, demand.restart() || letGo, heldBy);
+    return new Demand(asked, target, fraction, demand.restart() || restart, heldBy);
   }
 
   /**
@@ -214,10 +222,12 @@ final class Interlocks {
     double from = keeps.region().lower();
     double to = keeps.region().upper();
     // Out of the region, it's held on its side; inside, it may only leave, by the side it's kept
-    // to.
+    // to. A position is judged where its profile takes it: the short way round from where the
+    // joint is, for one that turns freely, so -170° from 90° is 190°.
     boolean inside = keeps.keepsOut(at);
     boolean below = keeps.keptBelow(at, restriction.side);
-    boolean leaving = asked == Request.POSITION && (below ? target <= from : target >= to);
+    double goal = asked == Request.POSITION ? travel.goalNear(target, at) : target;
+    boolean leaving = asked == Request.POSITION && (below ? goal <= from : goal >= to);
     if (!inside || leaving || asked == Request.NEUTRAL) {
       restriction.inside = OptionalDouble.empty();
     }
@@ -226,7 +236,8 @@ final class Interlocks {
     }
     if (asked == Request.POSITION) {
       if (!inside) {
-        return below ? Math.min(target, from) : Math.max(target, to);
+        boolean past = below ? goal > from : goal < to;
+        return past ? (below ? from : to) : target;
       }
       return leaving ? target : heldInside(restriction, at, velocity);
     }

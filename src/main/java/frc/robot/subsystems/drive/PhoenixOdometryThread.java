@@ -18,8 +18,9 @@ import org.wpilib.system.RobotController;
  * Reads the drivetrain's odometry signals as fast as the devices publish them (250 Hz), on its own
  * thread, so odometry sees every turn of the wheels whatever the main loop is doing. It waits until
  * every signal has a new value, then records them together, stamped with when they were measured:
- * now, less the signals' average time in transit. The main loop drains the readings every loop
- * through the IO layer, so they're logged, and a replay sees exactly what the robot saw.
+ * now, less the signals' average time in transit; a signal that didn't come reads no number. The
+ * main loop drains the readings every loop through the IO layer, so they're logged, and a replay
+ * sees exactly what the robot saw.
  *
  * <p>On Systemcore, waiting works on every CAN bus and Phoenix shares the robot's clock (Phoenix
  * 26.70). Register every signal before starting the thread.
@@ -42,7 +43,15 @@ final class PhoenixOdometryThread extends Thread {
    * @param ok whether it read without an error
    * @param transitSeconds how long it took to arrive; NaN when its time isn't valid
    */
-  record Reading(double value, boolean ok, double transitSeconds) {}
+  record Reading(double value, boolean ok, double transitSeconds) {
+    /**
+     * Whether it came: read without an error, and not past two periods in transit, as one whose
+     * device has stopped answering is. A time that isn't valid says nothing either way.
+     */
+    boolean came() {
+      return ok && !(transitSeconds > STALE);
+    }
+  }
 
   /**
    * One read of every signal, in the order they were registered.
@@ -213,9 +222,13 @@ final class PhoenixOdometryThread extends Thread {
         }
       }
       long measured = batch.nanos() - (timed == 0 ? 0 : Timestamps.fromSeconds(latency / timed));
-      // Each registered signal's queue takes its reading, in the order they were registered.
+      // Each registered signal's queue takes its reading, in the order they were registered: one
+      // that didn't come reads no number, rather than the last its device sent. A wheel's is left
+      // out of odometry from that reading on, not once its module has been silent long enough to
+      // read disconnected.
       for (int i = 0; i < values.size(); i++) {
-        keepNewest(values.get(i), readings.get(i).value());
+        Reading reading = readings.get(i);
+        keepNewest(values.get(i), reading.came() ? reading.value() : Double.NaN);
       }
       for (Queue<Long> queue : timestamps) {
         keepNewest(queue, measured);

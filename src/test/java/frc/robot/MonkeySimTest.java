@@ -46,7 +46,10 @@ class MonkeySimTest {
     return ROBOTS.stream().flatMap(robot -> seeds().mapToObj(seed -> Arguments.of(robot, seed)));
   }
 
-  /** A match of the monkey at the controls, things failing as it plays: nothing breaks. */
+  /**
+   * A match of the monkey at the controls, things failing as it plays: nothing breaks, and each
+   * check is counted, the obvious ones having judged something on the guide's robot.
+   */
   @ParameterizedTest(name = "{0}, seed {1}")
   @MethodSource("runs")
   @Timeout(600)
@@ -64,6 +67,21 @@ class MonkeySimTest {
         report.faults(),
         (System.nanoTime() - started) / 1e9);
     assertThat(report.faults()).isPositive();
+    assertThat(report.judged())
+        .containsKeys(
+            "numbers only",
+            "known before driven",
+            "limit switches stop it",
+            "moves end",
+            "jams stall",
+            "dead channels flagged",
+            "drive moves end");
+    if (robot == ExampleMonkey.ROBOT) {
+      assertThat(report.judged())
+          .hasEntrySatisfying("numbers only", loops -> assertThat(loops).isPositive())
+          .hasEntrySatisfying("moves end", loops -> assertThat(loops).isPositive())
+          .hasEntrySatisfying("drive moves end", loops -> assertThat(loops).isPositive());
+    }
   }
 
   /** A seed runs the same every time: the same doings, and every joint where it was. */

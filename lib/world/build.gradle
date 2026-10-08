@@ -1,8 +1,9 @@
-// The world model: what the field and the robot are. Three packages, which ArchitectureTest keeps
-// apart: the validation kit every configuration record is built with (config), the field with its
-// tags, places, and terrain (field), and the robot's definition (robot). It reads WPILib's math,
-// units, and field layouts and nothing more, so everything can read it, the robot itself, the
-// simulator, localization, and the views, without reaching anything else of theirs.
+// The world model: what the field and the robot are. Its packages, which ArchitectureTest keeps
+// apart: the validation kit every configuration record is built with (config), what the field and
+// the robot are both made of (physical), the field with its tags, places, and terrain (field), the
+// robot's definition (robot), and the writers for other tools (bridges). It reads WPILib's math,
+// units, field layouts and JSON library and nothing more, so everything can read it, the robot
+// itself, the simulator, localization, and the views, without reaching anything else of theirs.
 
 plugins {
     id "java-library"
@@ -77,5 +78,4 @@ tasks.named("test") {
     useJUnitPlatform()
 }
 
-ext.nullSafePackages = "com.michaelgrundvig.frc.world"
 apply from: rootProject.file("gradle/quality.gradle")

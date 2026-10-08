@@ -25,14 +25,14 @@ import org.wpilib.units.measure.MomentOfInertia;
  * robot's origin is the center of the frame, on the floor.
  *
  * <p>Its mass is the robot as weighed, bumpers and battery on, with every mechanism at its joint's
- * reference position (stowed): its links are part of it. What needs the chassis alone, the
- * simulator, takes them off ({@code RobotMath.chassis}). Until it's weighed, it's the most the
- * season allows ({@link Weight#unweighed}), and the robot's missing-data report says so. Its
- * inertia is CAD's whole tensor, or its yaw alone, as PathPlanner, Choreo or a rotation test gives
- * it, or neither; what isn't given is a solid box's of its mass, bumpers and height ({@link
- * #massProperties}): never zero, or the drivetrain couldn't turn it. Its center of mass, which only
- * the simulator reads, is the frame's center, a third of its height up, until it's given ({@link
- * #cgOrDefault}), and the missing-data report notes it in the simulator.
+ * rest position (stowed): its links are part of it. What needs the chassis alone, the simulator,
+ * takes them off ({@code RobotMath.chassis}). Until it's weighed, it's the most the season allows
+ * ({@link Weight#unweighed}), and the robot's missing-data report says so. Its inertia is CAD's
+ * whole tensor, or its yaw alone, as PathPlanner, Choreo or a rotation test gives it, or neither;
+ * what isn't given is a solid box's of its mass, bumpers and height ({@link #massProperties}):
+ * never zero, or the drivetrain couldn't turn it. Its center of mass, which only the simulator
+ * reads, is the frame's center, a third of its height up, until it's given ({@link #cgOrDefault}),
+ * and the missing-data report notes it in the simulator.
  *
  * @param frameLength front to back, across the outside of the frame
  * @param frameWidth side to side, across the outside of the frame

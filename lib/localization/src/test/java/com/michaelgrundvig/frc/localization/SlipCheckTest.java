@@ -34,7 +34,7 @@ class SlipCheckTest {
    * robot turns.
    */
   private static final class Robot {
-    final SlipCheck check = new SlipCheck(SETTINGS, REACH, GRIP);
+    final SlipCheck check;
     final Translation2d imu;
     final boolean checked;
     double heading = 0.3;
@@ -61,6 +61,12 @@ class SlipCheckTest {
     }
 
     Robot(Translation2d imu, boolean checked) {
+      this(imu, checked, GRIP);
+    }
+
+    /** On tread said to grip this hard, in m/s². */
+    Robot(Translation2d imu, boolean checked, double grip) {
+      check = new SlipCheck(SETTINGS, REACH, grip);
       this.imu = imu;
       this.checked = checked;
     }
@@ -579,6 +585,35 @@ class SlipCheckTest {
     assertThat(robot.check.collisionShare()).isZero();
   }
 
+  /**
+   * Treads said to grip past the collision's jolt, 1.7 g against its 15 m/s²: the floor could
+   * explain any jolt up to 16.7 m/s², so one the wheels don't explain is no collision up to it, and
+   * a whole one past it, with no share between; by its size alone too, since driving could feel as
+   * much. At the accelerometer's range it's still a whole one.
+   */
+  @Test
+  void aGripPastTheJoltLeavesNoCollisionTheFloorCouldExplain() {
+    double grip = 1.7 * ImuReadings.STANDARD_GRAVITY;
+    Robot nudged = new Robot(Translation2d.ZERO, true, grip).loops(10, 0, 0, 0, 0);
+    Robot hit = new Robot(Translation2d.ZERO, true, grip).loops(10, 0, 0, 0, 0);
+    Robot stopping = new Robot(Translation2d.ZERO, false, grip);
+    stopping.fieldVx = 2;
+    stopping.loops(10, 0, 0, 0, 0);
+    Robot slammed = new Robot(Translation2d.ZERO, false, grip);
+    slammed.fieldVx = 2;
+    slammed.loops(10, 0, 0, 0, 0);
+
+    nudged.slide(-0.32, 0).loop(0.32, 0, 0, 0); // 16 m/s², the wheels not seeing it
+    hit.slide(-0.36, 0).loop(0.36, 0, 0, 0); // 18 m/s²
+    stopping.loop(-0.32, 0, 0, 0); // 16 m/s² by its size alone
+    slammed.loop(-0.8, 0, 0, 0); // 40 m/s², past the range
+
+    assertThat(nudged.check.collisionShare()).isZero();
+    assertThat(hit.check.collisionShare()).isOne();
+    assertThat(stopping.check.collisionShare()).isZero();
+    assertThat(slammed.check.collisionShare()).isOne();
+  }
+
   /** Without a checked accelerometer, a jolt's size alone decides. */
   @Test
   void anUncheckedAccelerometersJoltIsJudgedByItsSize() {
@@ -623,7 +658,7 @@ class SlipCheckTest {
                     .build())
         .hasMessage("Settings.speedToleranceMetersPerSecond: -1 must be zero or more");
     assertThatThrownBy(() -> new SlipCheck(SETTINGS, 0, GRIP)).hasMessageContaining("reach");
-    assertThatThrownBy(() -> new SlipCheck(SETTINGS, REACH, 20)).hasMessageContaining("grip");
+    assertThatThrownBy(() -> new SlipCheck(SETTINGS, REACH, 0)).hasMessageContaining("grip");
     assertThatThrownBy(
             () ->
                 new SlipCheck.Sample(

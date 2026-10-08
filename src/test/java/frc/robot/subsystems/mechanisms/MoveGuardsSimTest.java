@@ -7,6 +7,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_INTAKING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Percent;
 
 import frc.robot.RobotSim;
 import frc.robot.behavior.Gate;
@@ -83,7 +84,7 @@ class MoveGuardsSimTest {
   @Test
   void guardsCarryThroughTheMovesOtherOptions() {
     clear[0] = true;
-    Move out = pivot.goTo(PIVOT_OUT).onlyWhile(intakeClear).at(0.5);
+    Move out = pivot.goTo(PIVOT_OUT).onlyWhile(intakeClear).atSpeed(Percent.of(50));
     sim.scheduler.schedule(out);
     sim.run(0.2);
 

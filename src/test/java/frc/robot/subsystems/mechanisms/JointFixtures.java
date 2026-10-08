@@ -24,6 +24,7 @@ import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.Transmission;
 import frc.robot.Robots;
 import java.util.List;
@@ -101,7 +102,7 @@ public final class JointFixtures {
           .outputs(List.of(ROLLER_INTAKING, ROLLER_OUTTAKING, ROLLER_EJECTING))
           .build()
           .motor(Motor.KRAKEN_X60, gearing(3))
-          .control(control(0.02, 0, Optional.empty()));
+          .control(MechanismControl.velocity(0.02));
 
   /** An elevator, 0 to 1.2 m, carrying 5 kg: down, clear at 0.4 m, and at the top. */
   public static final Joint.Prismatic ELEVATOR =
@@ -163,9 +164,46 @@ public final class JointFixtures {
     return joint.driven(DrivenBuilder.builder(joint.driven()).motors(Optional.empty()).build());
   }
 
+  /**
+   * A limit switch in the robot's list of sensors, by a label of its own ("pivot down"), tripping
+   * at a position: a test's, whose recordings name it so. A team's goes in its joint's block,
+   * {@code .limitSwitch(End.LOWER, Degrees.of(0), ...)}, named for its joint and its end.
+   */
+  public static Sensor.Switch limit(
+      String label, Joint joint, Sensor.Switch.Limit.End end, double position) {
+    return limit(label, joint, end, Optional.of(position));
+  }
+
+  /** A limit switch in the robot's list of sensors, whose position isn't known. */
+  public static Sensor.Switch limit(String label, Joint joint, Sensor.Switch.Limit.End end) {
+    return limit(label, joint, end, Optional.empty());
+  }
+
+  private static Sensor.Switch limit(
+      String label, Joint joint, Sensor.Switch.Limit.End end, Optional<Double> position) {
+    return Sensor.Switch.builder()
+        .label(label)
+        .part(joint.parent())
+        .kind(new Sensor.Switch.Limit(joint, position, end))
+        .build();
+  }
+
+  /**
+   * An absolute encoder in the robot's list of sensors, on a joint's axle, of a resolution: a
+   * test's, for a joint without one in its block, a swerve module's steering.
+   */
+  public static Sensor.Encoder absoluteEncoder(String label, Joint joint, int countsPerTurn) {
+    return Sensor.Encoder.builder()
+        .label(label)
+        .terms(List.of(Transmission.Term.builder().joint(joint).ratio(1).build()))
+        .absolute(true)
+        .countsPerTurn(countsPerTurn)
+        .build();
+  }
+
   /** A control whose joint is where its definition rests it at power on. */
   public static MechanismControl assumed(MechanismControl control) {
-    return homed(control, MechanismControl.Homing.assumeAtReference());
+    return homed(control, MechanismControl.Homing.assumeAtRest());
   }
 
   /** A control with a homing recipe. */
@@ -173,7 +211,10 @@ public final class JointFixtures {
     return MechanismControlBuilder.builder(control).homing(homing).build();
   }
 
-  /** Feedback gains, the feedforward seeded from the definition, a profile, 40 A, braking. */
+  /**
+   * A position loop's feedback gains, the feedforward seeded from the definition, a profile, 40 A,
+   * braking.
+   */
   public static MechanismControl control(
       double kP, double kD, Optional<MechanismControl.Profile> profile) {
     return control(kP, kD, Optional.empty(), profile, 40);
@@ -186,6 +227,7 @@ public final class JointFixtures {
       Optional<MechanismControl.Profile> profile,
       double statorAmps) {
     return MechanismControl.builder()
+        .loop(MechanismControl.Loop.POSITION)
         .gains(MechanismControl.Gains.builder().kP(kP).kI(0).kD(kD).kS(0).build())
         .currentLimits(
             MechanismControl.CurrentLimits.builder()

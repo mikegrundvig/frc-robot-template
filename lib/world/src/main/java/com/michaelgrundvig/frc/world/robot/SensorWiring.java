@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.between;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
@@ -45,8 +46,8 @@ public final class SensorWiring {
       case Candi candi -> "CANdi " + candi.id() + "'s S" + candi.input();
       case CanRange range -> "CANrange " + range.id();
       case ControllerLimit limit ->
-          limit.joint()
-              + "'s controller's "
+          possessive(limit.joint())
+              + " controller's "
               + (limit.direction() == Direction.FORWARD ? "forward" : "reverse")
               + " limit";
     };

@@ -35,7 +35,8 @@ class JointPlantTest {
 
   private static final Joint.Revolute ARM =
       Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.1, 0, 0.5), Joint.PITCH_UP)
-          .range(Range.degrees(-60, 90), Degrees.of(0))
+          .range(Range.degrees(-60, 90))
+          .rest(Degrees.of(0))
           .carries(
               Link.weighed(
                   "arm link",
@@ -47,13 +48,15 @@ class JointPlantTest {
 
   private static final Joint.Revolute BARE_ARM =
       Joint.pivot("bare arm", Part.CHASSIS, new Translation3d(-0.1, 0, 0.5), Joint.PITCH_UP)
-          .range(Range.degrees(-60, 90), Degrees.of(0))
+          .range(Range.degrees(-60, 90))
+          .rest(Degrees.of(0))
           .motor(Motor.KRAKEN_X60, Gearing.of(50))
           .control(MechanismControl.position(30).withKg(0.4, Degrees.of(-30)));
 
   private static final Joint.Prismatic LIFT =
       Joint.elevator("lift", Part.CHASSIS, new Translation3d(0, 0.2, 0.1))
-          .range(Range.meters(0, 1), Meters.of(0))
+          .range(Range.meters(0, 1))
+          .rest(Meters.of(0))
           .motors(Motor.KRAKEN_X60, Gearing.of(10), Inches.of(1), 2)
           .control(MechanismControl.position(60).withKg(0.5));
 
@@ -84,7 +87,7 @@ class JointPlantTest {
 
     assertThat(lift.joint()).isEqualTo(LIFT);
     assertThat(lift.motors()).isEqualTo(2);
-    assertThat(lift.position()).isEqualTo(LIFT.reference());
+    assertThat(lift.position()).isEqualTo(LIFT.restPosition());
     assertThat(lift.velocity()).isZero();
     assertThat(lift.supplyAmps()).isZero();
   }

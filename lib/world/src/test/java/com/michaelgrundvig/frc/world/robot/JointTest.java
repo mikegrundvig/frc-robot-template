@@ -107,7 +107,15 @@ class JointTest {
         .withMessageStartingWith("Prismatic[lift].origin");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Range.meters(1, 1))
-        .withMessage("Range.upper: 1 must be above the lower stop (1)");
+        .withMessage("a range's stops are apart, and 1 m to 1 m is one place: give them both");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Range.degrees(135, 0))
+        .withMessage(
+            "a range goes from its lower stop to its upper, and 135° to 0° is the other way round:"
+                + " give the lower first, Range.degrees(0, 135)");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Range.meters(Double.NaN, 1))
+        .withMessage("a range's stops are numbers, not NaN m to 1 m");
     assertThat(Range.degrees(-10, 110).width()).isCloseTo(Math.toRadians(120), within(1e-12));
     assertThat(Part.CHASSIS.label()).isEqualTo("chassis");
   }
@@ -260,7 +268,7 @@ class JointTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> definition(List.of(), List.of(), List.of(drive), List.of(pivot)))
         .withMessageContaining("drive arm's joint, arm, isn't one of the robot's joints: list it")
-        .withMessageContaining("sensor arm-abs's joint, arm, isn't one of the robot's joints");
+        .withMessageContaining("sensor arm-abs' joint, arm, isn't one of the robot's joints");
     Joint.Revolute wrist =
         revolute(
             "wrist",

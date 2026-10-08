@@ -10,8 +10,7 @@ import java.lang.annotation.Target;
 /**
  * Marks one of localization's outputs (what an update says), built by name through a builder
  * generated at compile time: {@code
- * TagVerdict.builder().tag(26).verdict(Verdict.ACCEPTED)...build()}. The architecture tests make
- * the builder the only way to build one.
+ * TagVerdict.builder().tag(26).verdict(Verdict.ACCEPTED)...build()}.
  *
  * <p>Unlike a configuration record's builder, this one lets a value be left out, so a value added
  * later breaks no caller: a collection left out is empty, an {@code Optional} empty, a number the

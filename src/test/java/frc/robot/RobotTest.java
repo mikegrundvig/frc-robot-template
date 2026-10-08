@@ -94,6 +94,17 @@ class RobotTest {
     assertEquals(Optional.empty(), MatchState.getAlliance(), "no station");
   }
 
+  /**
+   * The loop carries on past what the commands throw on a robot, and in a replay, which follows the
+   * robot's path; the simulator stops at once, so a bug fails its test.
+   */
+  @Test
+  void aRobotAndItsReplayCarryOnPastAThrowAndTheSimulatorStops() {
+    assertTrue(Robot.carriesOn(Constants.Mode.REAL), "on a robot");
+    assertTrue(Robot.carriesOn(Constants.Mode.REPLAY), "replaying one");
+    assertFalse(Robot.carriesOn(Constants.Mode.SIM), "in the simulator");
+  }
+
   /** Disabled with no station, as a robot starts: not the tests' own default, blue 2. */
   private static void asARealRobotStarts() {
     DriverStationSim.setAllianceStationId(AllianceStationID.UNKNOWN);
@@ -130,11 +141,7 @@ class RobotTest {
   void aScenarioStartsOnceTheRobotIsEnabled() {
     try (SimulatedWorld world =
         new SimulatedWorld(
-            RobotSim.FIELD,
-            Robots.SIM.definition().drivetrain(),
-            Robots.SIM.definition().body(),
-            List.of(),
-            SensorErrors.NONE)) {
+            RobotSim.FIELD, RobotSim.WITHOUT_CAMERAS.definition(), SensorErrors.NONE)) {
       Components components = new Components(said -> {});
       world.addTo(components);
       List<Setting> collision = Scenarios.named("collision").eventsIn(world);
@@ -172,11 +179,7 @@ class RobotTest {
   void aScenarioStartsWithItsSensorFaults() {
     try (SimulatedWorld world =
         new SimulatedWorld(
-            RobotSim.FIELD,
-            Robots.SIM.definition().drivetrain(),
-            Robots.SIM.definition().body(),
-            List.of(),
-            SensorErrors.TYPICAL)) {
+            RobotSim.FIELD, RobotSim.WITHOUT_CAMERAS.definition(), SensorErrors.TYPICAL)) {
       Components components = new Components(said -> {});
       world.addTo(components);
 

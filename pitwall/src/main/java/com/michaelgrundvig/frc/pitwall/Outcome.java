@@ -36,8 +36,6 @@ public record Outcome(Result result, String detail, List<Reason> reasons) {
     LIMIT,
     /** A record of its configuration refused it, when rebuilt with the change. */
     RECORD,
-    /** A robot rule across configurations ({@link ConfigRules}) refused it. */
-    RULE,
     /** The tunable's own setter threw. */
     TUNABLE
   }
@@ -47,14 +45,13 @@ public record Outcome(Result result, String detail, List<Reason> reasons) {
    * show it beside each of them.
    *
    * @param layer which check refused it
-   * @param by who refused it: the record whose check it was ({@code SwerveConfig.Gains}), or the
-   *     rule's name; empty for a value's own limits and type
+   * @param by who refused it: the record whose check it was ({@code DrivetrainControl.Gains});
+   *     empty for a value's own limits and type
    * @param paths the tunables it concerns, each to show it beside: the one a value's own check (its
    *     type, its limits) or a record's check names; for a record's check that names none (a check
-   *     of the record as a whole), every value of the change in that record; for a rule, every
-   *     value it reads; for a tunable's own setter, the tunables it was setting
-   * @param config the configuration it concerns; empty for a rule, which reads several, and for a
-   *     tunable of no configuration
+   *     of the record as a whole), every value of the change in that record; for a tunable's own
+   *     setter, the tunables it was setting
+   * @param config the configuration it concerns; empty for a tunable of no configuration
    * @param group for a record's check that names no value, where that record is in its
    *     configuration ({@code travel}; empty for the root); empty otherwise
    * @param text why, as the check said it
@@ -72,7 +69,7 @@ public record Outcome(Result result, String detail, List<Reason> reasons) {
       paths = List.copyOf(paths);
     }
 
-    /** A reason that concerns one tunable, of no configuration's record or rule. */
+    /** A reason that concerns one tunable, of no configuration's record. */
     static Reason of(Layer layer, String path, String config, String text, String line) {
       return new Reason(layer, "", List.of(path), config, "", text, line);
     }

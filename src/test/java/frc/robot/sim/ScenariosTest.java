@@ -11,6 +11,7 @@ import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
+import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.game.Rebuilt;
@@ -67,9 +68,7 @@ class ScenariosTest {
     SimulatedWorld built =
         new SimulatedWorld(
             RobotSim.FIELD,
-            Robots.SIM.definition().drivetrain(),
-            Robots.SIM.definition().body(),
-            cameras,
+            RobotDefinitionBuilder.builder(Robots.SIM.definition()).cameras(cameras).build(),
             errors);
     worlds.add(built);
     components = new Components(said -> {});
@@ -359,8 +358,8 @@ class ScenariosTest {
 
   /** How far the robot goes with every drive motor at 3 V for a second. */
   private static double distanceDriven(SimulatedWorld world) {
-    for (ModuleIO module : world.drivetrainHardware().modules()) {
-      module.setDriveVoltage(3.0);
+    for (int i = 0; i < 4; i++) {
+      world.drivetrain().moduleSim(i).setDriveVoltage(3.0);
     }
     for (int i = 0; i < RobotLoop.loops(1.0); i++) {
       step(world);

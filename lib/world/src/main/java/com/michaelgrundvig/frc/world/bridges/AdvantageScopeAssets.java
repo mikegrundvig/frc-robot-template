@@ -8,7 +8,11 @@ import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import io.avaje.jsonb.JsonType;
+import io.avaje.jsonb.Jsonb;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -170,6 +174,9 @@ public final class AdvantageScopeAssets {
       robot in `Robots.java` instead. See docs/simulator.md, "See it in AdvantageScope".
       """;
 
+  /** Any JSON value: maps in their own order, lists, text, numbers, true or false. */
+  private static final JsonType<Object> JSON = Jsonb.instance().type(Object.class);
+
   private static final String USAGE =
       "AdvantageScopeAssets --catalog=<a RobotCatalog's class> --out=<folder> [--robot=<name>]...";
 
@@ -319,7 +326,25 @@ public final class AdvantageScopeAssets {
       components.add(cones);
     }
     config.put("components", components);
-    return Json.pretty(config).getBytes(StandardCharsets.UTF_8);
+    return (JSON.toJsonPretty(rounded(config)) + "\n").getBytes(StandardCharsets.UTF_8);
+  }
+
+  /**
+   * Every number to six places (a micrometer, a millionth of a degree), so a config.json changes
+   * only where the robot did, never in a last digit.
+   */
+  private static Object rounded(Object value) {
+    return switch (value) {
+      case Double number ->
+          BigDecimal.valueOf(number).setScale(6, RoundingMode.HALF_EVEN).doubleValue();
+      case Map<?, ?> map -> {
+        Map<Object, Object> copy = new LinkedHashMap<>();
+        map.forEach((key, item) -> copy.put(key, rounded(item)));
+        yield copy;
+      }
+      case List<?> list -> list.stream().map(AdvantageScopeAssets::rounded).toList();
+      default -> value;
+    };
   }
 
   /**

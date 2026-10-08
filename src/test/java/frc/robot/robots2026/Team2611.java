@@ -48,10 +48,10 @@ import java.util.List;
 
 /**
  * 2611's 2026 competition robot, as its code on main configures it: {@code
- * ~/src/2611-Vectors/2026-Beta-Bot} at 6a5da76. Paths are under {@code src/main/java/frc/robot/}
- * unless they say otherwise. That code carries the AdvantageKit license ({@code
- * AdvantageKit-License.md}) and WPILib's ({@code WPILib-License.md}): its numbers are copied here
- * with citations, never its code.
+ * 2611-Vectors/2026-Beta-Bot} at 6a5da76. Paths are under {@code src/main/java/frc/robot/} unless
+ * they say otherwise. That code carries the AdvantageKit license ({@code AdvantageKit-License.md})
+ * and WPILib's ({@code WPILib-License.md}): its numbers are copied here with citations, never its
+ * code.
  *
  * <p>"Guess:" marks a number the code doesn't hold, with its basis; guesses validate nothing. No
  * link's mass is guessed: the code gives none, so each is none, and the missing-data report lists
@@ -97,8 +97,8 @@ final class Team2611 {
    * Tuner's simulation inertias, 0.01 kg m² each (TunerConstants.java:92-93). The tread's grip
    * isn't measured, so it's left out and the robot says so, planning on the default, 1.2: their
    * 2.255 (Constants.java:189) is PathPlanner's tuning value, not the tread's, which grips 1.0 to
-   * 1.3 on carpet. A robot's configuration would refuse it, since at a grip that high the slip
-   * check can't tell a slide from a collision ({@code LocalizationService.problems}).
+   * 1.3 on carpet. Given, the robot would start and say it doubts it, since at a grip that high the
+   * slip check can't tell a slide from a collision ({@code LocalizationService.doubts}).
    */
   static final DrivetrainGeometry.ModuleType MODULES =
       DrivetrainGeometry.ModuleType.builder()
@@ -296,12 +296,13 @@ final class Team2611 {
    */
   static final Joint.Revolute PIVOT =
       Joint.pivot("pivot", Part.CHASSIS, point(0.25, 0, 0.32), Joint.PITCH_DOWN)
-          .range(Range.degrees(0, 135), PIVOT_IN)
+          .range(Range.degrees(0, 135))
+          .rest(PIVOT_IN)
           .carries(Link.box("intake arm", point(0, 0, 0.2), point(0.05, 0.55, 0.36)))
           .positions(PIVOT_IN, PIVOT_OUT)
           .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).clockwise())
           .absoluteEncoder(
-              1024, MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(-296)).inverted())
+              MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(-296)).inverted())
           .control(
               MechanismControl.position(30)
                   .withKd(1)
@@ -415,7 +416,8 @@ final class Team2611 {
    */
   static final Joint.Revolute HOOD =
       Joint.pivot("hood", Part.CHASSIS, point(-0.2, 0, 18.33 * IN + 0.1), Joint.PITCH_UP)
-          .range(Range.degrees(0, 40), Degrees.of(0))
+          .range(Range.degrees(0, 40))
+          .rest(Degrees.of(0))
           .servo("hood left", WCP_0408, point(0.054, 0.1, -0.233), point(0.054, 0.1, 0))
           .servo("hood right", WCP_0408, point(0.054, -0.1, -0.233), point(0.054, -0.1, 0));
 

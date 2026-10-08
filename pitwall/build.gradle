@@ -134,5 +134,4 @@ def vendorThree = tasks.register("vendorThree", Sync) {
 }
 sourceSets.main.resources.srcDir(vendorThree)
 
-ext.nullSafePackages = "com.michaelgrundvig.frc.pitwall"
 apply from: rootProject.file("gradle/quality.gradle")

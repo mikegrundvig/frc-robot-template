@@ -8,7 +8,7 @@ import org.wpilib.math.geometry.Pose2d;
 /**
  * A field pose a path passes through, facing its heading: {@code Keyframe.at(new Pose2d(4, 2,
  * Rotation2d.fromDegrees(90)))}. Named, {@code .named("pickup")}, it's a place code can wait for:
- * {@link DriveMove#at} is a gate that opens as the robot passes it.
+ * {@link DriveMove#passed} is a gate that opens as the robot passes it.
  *
  * @param pose where the path passes, and the heading the robot turns to as it comes from the one
  *     before

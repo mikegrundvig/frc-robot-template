@@ -16,62 +16,20 @@ import org.wpilib.command3.Scheduler;
 import org.wpilib.system.RobotController;
 
 /**
- * A joint whose motor controllers stop answering: its moves are refused, at the start or mid-way,
- * with the reason. The simulator's joints always answer, so each here can be silenced.
+ * A joint whose motor controllers stop answering, as the simulator's do when a test silences them:
+ * its moves are refused, at the start or mid-way, with the reason; and one whose controllers didn't
+ * take their settings, which the simulator's always do, so each here can say so.
  */
 @ExtendWith(RobotSim.class)
 class JointFaultsSimTest {
-  /** A simulated joint that can be silenced: it reads as a motor controller that isn't there. */
-  private static final class Silenceable implements JointIO {
-    private final JointIO joint;
-    boolean silent;
-    String unconfigured = "";
-
-    Silenceable(JointIO joint) {
-      this.joint = joint;
-    }
-
-    @Override
-    public void updateInputs(JointIOInputs inputs) {
-      joint.updateInputs(inputs);
-      inputs.connected = !silent;
-      inputs.unconfigured = unconfigured;
-    }
-
-    @Override
-    public void setPosition(double position, double velocity, double feedforwardVolts) {
-      joint.setPosition(position, velocity, feedforwardVolts);
-    }
-
-    @Override
-    public void setVelocity(double velocity) {
-      joint.setVelocity(velocity);
-    }
-
-    @Override
-    public void setVoltage(double volts) {
-      joint.setVoltage(volts);
-    }
-
-    @Override
-    public void setDutyCycle(double share) {
-      joint.setDutyCycle(share);
-    }
-
-    @Override
-    public void stop() {
-      joint.stop();
-    }
-  }
-
   private final Scheduler scheduler = Scheduler.createIndependentScheduler();
-  private final JointSimulation simulation = new JointSimulation(ROBOT.math());
+  private final JointSimulation simulation = new JointSimulation(ROBOT);
   private Silenceable pivotIo = new Silenceable(new JointIO() {});
   private final Joints joints =
       new Joints(
           ROBOT,
           joint -> {
-            Silenceable io = new Silenceable(simulation.add(joint));
+            Silenceable io = new Silenceable(simulation.io(joint));
             if (joint.equals(PIVOT)) {
               pivotIo = io;
             }
@@ -97,7 +55,7 @@ class JointFaultsSimTest {
 
   @Test
   void aJointThatIsntAnsweringRefusesItsMoves() {
-    pivotIo.silent = true;
+    simulation.silence(PIVOT, true);
     loop();
     Move out = pivot.goTo(PIVOT_OUT);
 
@@ -107,6 +65,13 @@ class JointFaultsSimTest {
     assertThat(out.outcome()).contains(Outcome.REFUSED);
     assertThat(out.reason())
         .isEqualTo("pivot → out: REFUSED: pivot isn't answering: its motor controllers are silent");
+
+    simulation.silence(PIVOT, false);
+    Move again = pivot.goTo(PIVOT_OUT);
+    scheduler.schedule(again);
+    loopUntil(() -> again.outcome().isPresent());
+
+    assertThat(again.arrived()).as("answering again").isTrue();
   }
 
   /**
@@ -138,7 +103,7 @@ class JointFaultsSimTest {
       loop();
     }
 
-    pivotIo.silent = true;
+    simulation.silence(PIVOT, true);
     loopUntil(() -> out.outcome().isPresent());
 
     assertThat(out.outcome()).contains(Outcome.REFUSED);

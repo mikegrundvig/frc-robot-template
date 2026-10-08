@@ -20,14 +20,14 @@ import org.jspecify.annotations.Nullable;
  * (a hit, {@link #event}). A lasting fault says whether it's on now, read from the simulated world
  * itself, so it's right however it was turned on or off.
  *
- * <pre>{@code
- * Fault.lasting("Unplugged")
- *     .does("No readings at all: the robot's code sees the gyro disconnected")
- *     .isOn(gyro::isUnplugged)
- *     .apply(values -> gyro.unplug(true))
- *     .undo("Plugs it back in", () -> gyro.unplug(false))
- *     .build();
- * }</pre>
+ * {@snippet :
+ * Fault.lasting("Out")
+ *     .does("Dark.")
+ *     .isOn(() -> lampOut)
+ *     .apply(values -> lampOut = true)
+ *     .undo("Lit.", () -> lampOut = false)
+ *     .build()
+ * }
  *
  * <p>Its code runs on the robot loop's thread ({@link Components}), so it may change the simulated
  * world freely.

@@ -145,6 +145,14 @@ public final class Rules {
     return shown(value.magnitude()) + " " + value.unit().symbol();
   }
 
+  /**
+   * A name's possessive, as a message says it: "pivot's", and "rollers'" for a name that ends in s,
+   * never "rollers's".
+   */
+  public static String possessive(String name) {
+    return name.endsWith("s") ? name + "'" : name + "'s";
+  }
+
   /** A number to four significant digits, without an exponent: "0.08", "1235000". */
   public static String shown(double value) {
     if (!Double.isFinite(value)) {

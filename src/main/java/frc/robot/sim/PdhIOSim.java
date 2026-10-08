@@ -1,6 +1,7 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Pdh;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
@@ -8,7 +9,6 @@ import frc.robot.subsystems.mechanisms.PdhIO;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.DoubleSupplier;
-import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -23,9 +23,6 @@ import org.jspecify.annotations.Nullable;
  * its motor.
  */
 public final class PdhIOSim implements PdhIO {
-  /** The simulator's battery, which its motors draw from. */
-  private static final double BATTERY_VOLTS = 12.0;
-
   /** One channel, and what it reads. */
   private record Channel(int number, DoubleSupplier amps) {}
 
@@ -34,14 +31,11 @@ public final class PdhIOSim implements PdhIO {
 
   /**
    * @param definition what the robot is: which channel feeds which device
-   * @param joints the robot's simulated joints, as they are when it's read: none until the robot
-   *     asks for its first, and none for a robot without
+   * @param joints the robot's simulated joints
    * @param drivetrain the simulated drivetrain, or none, where a test runs only the joints
    */
   public PdhIOSim(
-      RobotDefinition definition,
-      Supplier<@Nullable JointSimulation> joints,
-      @Nullable DriveSimulation drivetrain) {
+      RobotDefinition definition, JointSimulation joints, @Nullable DriveSimulation drivetrain) {
     for (Joint joint : definition.joints()) {
       joint.devices().stream()
           .flatMap(device -> device.feed().stream())
@@ -61,9 +55,8 @@ public final class PdhIOSim implements PdhIO {
   }
 
   /** What one of a joint's motors draws, or nothing for a joint the simulator doesn't run. */
-  private static double amps(Supplier<@Nullable JointSimulation> joints, Joint joint) {
-    JointSimulation simulation = joints.get();
-    return simulation != null && simulation.simulates(joint) ? simulation.supplyAmps(joint) : 0;
+  private static double amps(JointSimulation joints, Joint joint) {
+    return joints.simulates(joint) ? joints.supplyAmps(joint) : 0;
   }
 
   /**
@@ -89,6 +82,6 @@ public final class PdhIOSim implements PdhIO {
     inputs.connected = true;
     inputs.channelCurrentAmps = amps;
     inputs.totalCurrentAmps = total;
-    inputs.volts = BATTERY_VOLTS;
+    inputs.volts = Motor.NOMINAL_VOLTS; // the simulator's battery, which its motors draw from
   }
 }

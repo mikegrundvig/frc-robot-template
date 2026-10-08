@@ -355,7 +355,9 @@ class AdvantageScopeAssetsTest {
     String config = new String(file("Robot_test/config.json"), StandardCharsets.UTF_8);
 
     assertThat(config).startsWith("{\n  \"name\": \"test (schematic)\",\n");
-    assertThat(config).contains("\"position\": [0.25, 0.2, 0.5],");
+    assertThat(config)
+        .contains("\"position\": [\n        0.25,\n        0.2,\n        0.5\n      ],");
+    assertThat(config).as("to six places").contains("\"fov\": 76.722442\n");
     assertThat(config).endsWith("}\n");
     assertThat(new String(file("Robot_test/GENERATED.md"), StandardCharsets.UTF_8))
         .contains("Robots.java");

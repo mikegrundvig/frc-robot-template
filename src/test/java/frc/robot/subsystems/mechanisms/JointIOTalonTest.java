@@ -7,6 +7,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_MOTOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.gearing;
 import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,12 +17,21 @@ import static org.wpilib.units.Units.Rotations;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.SignalLogger;
 import com.ctre.phoenix6.configs.Slot0Configs;
+import com.ctre.phoenix6.controls.ControlRequest;
+import com.ctre.phoenix6.controls.DutyCycleOut;
+import com.ctre.phoenix6.controls.NeutralOut;
+import com.ctre.phoenix6.controls.PositionVoltage;
+import com.ctre.phoenix6.controls.VelocityVoltage;
+import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.CANcoder;
+import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.hardware.TalonFXS;
+import com.ctre.phoenix6.signals.MagnetHealthValue;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
@@ -31,6 +41,7 @@ import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import frc.robot.RobotSim;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.lib.wiring.ControllerPins;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -76,6 +87,64 @@ class JointIOTalonTest {
       Thread.sleep(10);
     }
     return false;
+  }
+
+  /**
+   * What the robot asks of a TalonFX, as it was last told: a profile's point as a PositionVoltage,
+   * in turns of the pivot (its gearing is in its own settings), with the profile's speed and the
+   * volts the robot adds; a speed as a VelocityVoltage; volts as a VoltageOut and a share of the
+   * battery as a DutyCycleOut, each within its soft limits; neutral; and homing's push as a
+   * VoltageOut that ignores its soft limits, which until it's homed are in the wrong place. A
+   * Kraken X60 without FOC runs none with it.
+   */
+  @Test
+  void itsRequestsAreWhatItsJointAsks() {
+    JointIOTalon io = io(pivot(59));
+    ParentDevice talon = io.leader();
+
+    io.setPosition(Math.toRadians(45), 1.0, 0.6);
+    PositionVoltage position = (PositionVoltage) talon.getAppliedControl();
+    io.setVelocity(3.0);
+    VelocityVoltage velocity = (VelocityVoltage) talon.getAppliedControl();
+    io.setVoltage(4);
+    VoltageOut volts = (VoltageOut) talon.getAppliedControl();
+    io.setDutyCycle(-0.5);
+    DutyCycleOut share = (DutyCycleOut) talon.getAppliedControl();
+    io.stop();
+    ControlRequest neutral = talon.getAppliedControl();
+    io.home(-2);
+    VoltageOut homing = (VoltageOut) talon.getAppliedControl();
+
+    assertThat(position.Position).as("an eighth of a turn").isCloseTo(0.125, within(1e-12));
+    assertThat(position.Velocity).isCloseTo(1 / (2 * Math.PI), within(1e-12));
+    assertThat(position.FeedForward).isEqualTo(0.6);
+    assertThat(position.EnableFOC).isFalse();
+    assertThat(position.IgnoreSoftwareLimits).isFalse();
+    assertThat(velocity.Velocity).isCloseTo(3 / (2 * Math.PI), within(1e-12));
+    assertThat(volts.Output).isEqualTo(4);
+    assertThat(volts.IgnoreSoftwareLimits).isFalse();
+    assertThat(share.Output).isEqualTo(-0.5);
+    assertThat(share.IgnoreSoftwareLimits).isFalse();
+    assertThat(neutral).isInstanceOf(NeutralOut.class);
+    assertThat(homing).as("not the VoltageOut volts go as").isNotSameAs(volts);
+    assertThat(homing.Output).isEqualTo(-2);
+    assertThat(homing.IgnoreSoftwareLimits).isTrue();
+  }
+
+  /** Told where the pivot is, as homing tells it, it reads there from then on, at 100°. */
+  @Test
+  void toldWhereItIsItReadsThere() throws InterruptedException {
+    JointIOTalon io = io(pivot(50));
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    eventually(() -> io.updateInputs(inputs), () -> inputs.connected);
+
+    io.resetPosition(Math.toRadians(100));
+    boolean there =
+        eventually(
+            () -> io.updateInputs(inputs),
+            () -> Math.abs(inputs.position - Math.toRadians(100)) < 0.01);
+
+    assertThat(there).as("100°, read %s°", Math.toDegrees(inputs.position)).isTrue();
   }
 
   /**
@@ -126,13 +195,13 @@ class JointIOTalonTest {
     boolean resting =
         eventually(
             () -> io.updateInputs(inputs),
-            () -> inputs.connected && Math.abs(inputs.position - PIVOT.reference()) < 0.01);
+            () -> inputs.connected && Math.abs(inputs.position - PIVOT.restPosition()) < 0.01);
     // Its raw rotor started at 0, where the startup told it the pivot rests.
     new TalonFX(51, new CANBus(BUS)).getSimState().setRawRotorPosition(25);
     boolean turned =
         eventually(
             () -> io.updateInputs(inputs),
-            () -> Math.abs(inputs.position - (PIVOT.reference() + 2 * Math.PI)) < 0.01);
+            () -> Math.abs(inputs.position - (PIVOT.restPosition() + 2 * Math.PI)) < 0.01);
 
     assertThat(resting).as("it starts at its reference, 1.5°").isTrue();
     assertThat(turned).as("25 rotor turns are one of the pivot").isTrue();
@@ -152,7 +221,7 @@ class JointIOTalonTest {
     boolean moved =
         eventually(
             () -> io.updateInputs(inputs),
-            () -> Math.abs(inputs.position - (ELEVATOR.reference() + travel)) < 1e-4);
+            () -> Math.abs(inputs.position - (ELEVATOR.restPosition() + travel)) < 1e-4);
 
     assertThat(moved).isTrue();
     assertThat(inputs.position).isCloseTo(travel, within(1e-4));
@@ -214,7 +283,7 @@ class JointIOTalonTest {
   @Test
   void aPivotReadByItsRotorIsToldWhereItIsByItsCancoder() throws InterruptedException {
     Joint.Revolute pivot =
-        pivot(56).absoluteEncoder(4096, CANCODER.can(CANIVORE, 57).offset(Rotations.of(0)));
+        pivot(56).absoluteEncoder(CANCODER.can(CANIVORE, 57).offset(Rotations.of(0)));
     new CANcoder(57, new CANBus(BUS)).getSimState().setRawPosition(60.0 / 360);
 
     JointIOTalon io = io(pivot);
@@ -233,6 +302,45 @@ class JointIOTalonTest {
   }
 
   /**
+   * A practice robot's elevator, its TalonFXs reading their rotors and its CANcoder, geared nine to
+   * one down from its 1 in drum, read by the robot once: its CANcoder offset for its own magnet,
+   * 0.06 rather than the competition robot's 0.31. Powered on at 0.6 m, not where it rests, it's
+   * told so through its own offset, in meters, and holds it.
+   */
+  @Test
+  void aPracticeElevatorIsToldWhereItIsByItsCancoderThroughItsOwnOffset()
+      throws InterruptedException {
+    MechanismControl unhomed =
+        MechanismControlBuilder.builder(ControllerSettings.control(ELEVATOR))
+            .homing(Optional.empty())
+            .build();
+    Joint.Prismatic competition =
+        ELEVATOR
+            .motorsOn(TALON_FX.can(CANIVORE, 60), TALON_FX.can(CANIVORE, 61))
+            .absoluteEncoder(
+                Driven.AbsoluteEncoder.of()
+                    .ratio(1.0 / 9)
+                    .on(CANCODER.can(CANIVORE, 62).offset(Rotations.of(0.31))))
+            .retuned(old -> unhomed);
+    Joint.Prismatic practice = competition.encoderOffset(Rotations.of(0.06));
+    double perMeter = 1.0 / 9 / (2 * Math.PI * 0.0254);
+    // Its magnet's raw reading at 0.6 m: where it reads, less its own offset.
+    new CANcoder(62, new CANBus(BUS)).getSimState().setRawPosition(0.6 * perMeter - 0.06);
+
+    JointIOTalon io = io(practice);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    boolean told =
+        eventually(() -> io.updateInputs(inputs), () -> Math.abs(inputs.position - 0.6) < 1e-3);
+    boolean held =
+        eventually(
+            () -> io.updateInputs(inputs),
+            () -> inputs.connected && Math.abs(inputs.position - 0.6) < 1e-3);
+
+    assertThat(told).as("its CANcoder's 0.6 m, through the practice robot's offset").isTrue();
+    assertThat(held).as("its rotor reads it from then on").isTrue();
+  }
+
+  /**
    * A NEO pivot on a TalonFXS, through 25:1: it takes the same settings a TalonFX would, and reads
    * its rotor, the NEO's hall sensor, through its gearing from where it rests.
    */
@@ -247,15 +355,82 @@ class JointIOTalonTest {
     boolean resting =
         eventually(
             () -> io.updateInputs(inputs),
-            () -> inputs.connected && Math.abs(inputs.position - PIVOT.reference()) < 0.01);
+            () -> inputs.connected && Math.abs(inputs.position - PIVOT.restPosition()) < 0.01);
     new TalonFXS(58, new CANBus(BUS)).getSimState().setRawRotorPosition(25);
     boolean turned =
         eventually(
             () -> io.updateInputs(inputs),
-            () -> Math.abs(inputs.position - (PIVOT.reference() + 2 * Math.PI)) < 0.01);
+            () -> Math.abs(inputs.position - (PIVOT.restPosition() + 2 * Math.PI)) < 0.01);
 
     assertThat(resting).isTrue();
     assertThat(turned).as("25 rotor turns are one of the pivot").isTrue();
     assertThat(inputs.unconfigured).as("the TalonFXS took its configuration").isEmpty();
+  }
+
+  /**
+   * A device that started as the robot did hasn't restarted: the frame each sends as it starts, the
+   * leader's, its follower's and its CANcoder's, came before the robot read them, and isn't one.
+   * (CTRE's simulation can't restart a device, so a restart itself is a bench check.)
+   */
+  @Test
+  void devicesThatStartedWithTheRobotHaventRestarted() throws InterruptedException {
+    Joint.Revolute pivot =
+        unmotored(PIVOT)
+            .motors(
+                Motor.KRAKEN_X60,
+                gearing(25),
+                TALON_FX.can(CANIVORE, 44),
+                TALON_FX.can(CANIVORE, 45))
+            .absoluteEncoder(CANCODER.can(CANIVORE, 46).offset(Rotations.of(0)));
+    JointIOTalon io = io(pivot);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    boolean restarted = false;
+    for (int i = 0; i < 20; i++) {
+      io.updateInputs(inputs);
+      restarted |= inputs.restarted || inputs.encoderRestarted;
+      for (boolean follower : inputs.followersRestarted) {
+        restarted |= follower;
+      }
+      Thread.sleep(10);
+    }
+
+    assertThat(inputs.followersRestarted).hasSize(1);
+    assertThat(restarted).isFalse();
+    assertThat(inputs.followersConnected).as("its follower answering").containsExactly(true);
+    assertThat(inputs.faults)
+        .as("leader, follower, CANcoder: none faulted")
+        .containsExactly(0, 0, 0);
+  }
+
+  /**
+   * A CANcoder that says its magnet is too close or too far isn't seeded from: the pivot reads
+   * where it rests, and says its magnet is bad. Once the CANcoder says the magnet is good, the
+   * pivot is seeded from it, at its 60°.
+   */
+  @Test
+  void aCancoderWithABadMagnetIsntSeededFrom() throws InterruptedException {
+    Joint.Revolute pivot =
+        pivot(47).absoluteEncoder(CANCODER.can(CANIVORE, 48).offset(Rotations.of(0)));
+    CANcoder cancoder = new CANcoder(48, new CANBus(BUS));
+    cancoder.getSimState().setRawPosition(60.0 / 360);
+    cancoder.getSimState().setMagnetHealth(MagnetHealthValue.Magnet_Red);
+
+    JointIOTalon io = io(pivot);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    boolean bad = eventually(() -> io.updateInputs(inputs), () -> inputs.magnetBad);
+    double unseeded = inputs.position;
+    cancoder.getSimState().setMagnetHealth(MagnetHealthValue.Magnet_Green);
+    boolean seeded =
+        eventually(
+            () -> io.updateInputs(inputs),
+            () -> Math.abs(inputs.position - Math.toRadians(60)) < 0.01);
+
+    assertThat(bad).isTrue();
+    assertThat(Math.toDegrees(unseeded)).as("where it rests").isCloseTo(1.5, within(0.1));
+    assertThat(seeded).isTrue();
+    assertThat(inputs.magnetBad).isFalse();
+    assertThat(Math.toDegrees(inputs.absolutePosition))
+        .as("read beside")
+        .isCloseTo(60, within(0.1));
   }
 }

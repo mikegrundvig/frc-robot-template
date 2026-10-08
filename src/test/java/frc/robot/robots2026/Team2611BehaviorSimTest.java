@@ -3,18 +3,12 @@ package frc.robot.robots2026;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
-import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 
-import com.michaelgrundvig.frc.world.robot.Drive;
-import com.michaelgrundvig.frc.world.robot.RobotMath;
 import frc.robot.RobotSim;
 import frc.robot.sim.JointsSimHarness;
 import frc.robot.subsystems.mechanisms.JointMechanism;
-import frc.robot.subsystems.mechanisms.Move;
 import java.util.List;
-import java.util.Map;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Trigger;
@@ -146,39 +140,5 @@ class Team2611BehaviorSimTest {
         .hasMessage(
             "hood has no mechanism: it's moved by hood left and hood right, and the template drives"
                 + " only motors turning a shaft so far");
-  }
-
-  /**
-   * What the hood does once the template drives a joint by its servos, a go or no-go the owner
-   * decides. Asked for 20°, both servos are told the share the linkage puts there, and carry it
-   * there at their own speed. Nothing reads back where it is, so it arrives by time: no sooner than
-   * its servos, at 32 mm/s, bring it within its 2° band, and not long after they'd reach 20°. Below
-   * its range, below 2611's floor of 0.65, it's refused.
-   */
-  @Test
-  @Disabled("the template doesn't drive servos yet: built on a trigger, a design that needs it")
-  void theHoodGoesToAnAngleOnItsServosOnceTheyreDriven() {
-    JointMechanism hood = sim.joints.of(Team2611.HOOD);
-    Move raise = hood.goTo(Degrees.of(20));
-
-    sim.scheduler.schedule(raise);
-    double arrived = sim.runUntil(raise::arrived, 2);
-    Move below = hood.goTo(Degrees.of(-5));
-    sim.run(below, 0.1);
-
-    assertThat(arrived).isBetween(servoSeconds(18), servoSeconds(20) + 0.1);
-    assertThat(Math.toDegrees(sim.simulation.position(Team2611.HOOD))).isCloseTo(20, within(1.0));
-    assertThat(Math.toDegrees(hood.position())).as("where it's assumed").isCloseTo(20, within(1.0));
-    assertThat(below.reason())
-        .isEqualTo("hood → -5°: REFUSED: -5° is outside hood's limits, 0° to 40°");
-  }
-
-  /** How long the hood's servos take, at their free speed, to bring it from 0° to an angle. */
-  private static double servoSeconds(double degrees) {
-    RobotMath math = Team2611.ROBOT.math();
-    Drive left = Team2611.HOOD.ownDrives().get(0);
-    double from = math.coordinate(left, Map.of(Team2611.HOOD, 0.0));
-    double to = math.coordinate(left, Map.of(Team2611.HOOD, Math.toRadians(degrees)));
-    return (to - from) / Team2611.WCP_0408.speed();
   }
 }

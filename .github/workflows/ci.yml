@@ -39,6 +39,15 @@ jobs:
           persist-credentials: false
       # Caches Gradle, dependencies, and the JDK 25 toolchain Gradle downloads on first use.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          # The open-source cache, on GitHub's own actions/cache, rather than the default: a
+          # proprietary component under its own terms of use.
+          cache-provider: basic
+          # The dependency graph, submitted from the hand-started run, so GitHub alerts on the
+          # libraries' own dependencies too. Off: it needs the job's `contents: write`, which can't
+          # be limited to that run, and Dependabot's pull requests' runs would get it too. To turn
+          # it on, set that permission on the job and uncomment:
+          # dependency-graph: ${{ github.event_name == 'workflow_dispatch' && 'generate-and-submit' || 'disabled' }}
       - name: Formatting, static analysis, tests, coverage
         run: ./gradlew ci
       - name: Upload reports

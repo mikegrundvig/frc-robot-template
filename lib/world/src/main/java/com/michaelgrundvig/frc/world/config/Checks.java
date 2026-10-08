@@ -12,17 +12,7 @@ import org.jspecify.annotations.Nullable;
  * record lists each value with its {@link Rule}, then any checks across its values, in its compact
  * constructor, as a port encoder's wiring does:
  *
- * {@snippet :
- * public PortEncoder {
- *   Checks.on(PortEncoder.class)
- *       .field("port", port, between(0, 5))
- *       .field("turnsPerRange", turnsPerRange, positive())
- *       .check("offset", () -> Math.abs(offset.in(Rotations)) <= turnsPerRange ? null
- *           : offset.in(Rotations) + " turns is more than its range, " + turnsPerRange
- *               + " turns, either way")
- *       .orThrow();
- * }
- * }
+ * {@snippet class=com.michaelgrundvig.frc.world.robot.MechanismWiring region=checks}
  *
  * <p>Every value is checked, and {@link #orThrow()} throws one {@link ConfigException} naming every
  * value that broke a rule: a configuration with three bad values reports three. A value may be

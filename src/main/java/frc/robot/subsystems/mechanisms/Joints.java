@@ -1,7 +1,8 @@
 package frc.robot.subsystems.mechanisms;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
 import com.michaelgrundvig.frc.world.config.Finding;
-import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Condition;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Drive;
@@ -10,22 +11,25 @@ import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismRotations;
+import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
-import com.michaelgrundvig.frc.world.robot.Transmission;
 import frc.robot.behavior.Gate;
+import frc.robot.behavior.Refusals;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.util.Alert;
 
 /**
  * Every driven joint of the robot, each a v3 {@link Mechanism} the template builds from the robot's
@@ -33,26 +37,33 @@ import org.wpilib.command3.Scheduler;
  * composition root builds it once; behavior code looks its joints up by the joints themselves,
  * never by a label:
  *
- * {@snippet :
- * JointMechanism pivot = joints.of(PIVOT);
- * joints.goTo(STOWED)    // requires exactly the joints the configuration names
- * joints.run(FEEDING)    // holds it, outputs included, until canceled
- * joints.isAt(STOWED)    // a gate: every joint at its place
- * }
+ * {@snippet class=frc.robot.examples.ExampleCommands region=look-up}
+ *
+ * <p>A configuration's joints move together, and hold it, outputs included, with {@code
+ * joints.run(FEEDING)}:
+ *
+ * {@snippet class=frc.robot.examples.ExampleCommands region=configurations}
+ *
+ * <p>A condition the model says, where a joint is, how fast it runs or what a sensor reads, is a
+ * gate too: {@code joints.gate("coral in claw", CLAW_BEAM.tripped())} ({@link #gate(String,
+ * Condition)}).
  *
  * <p>It enforces the definition's interlocks beneath every command, each on the joint it restricts
  * ({@link JointMechanism}); one about a joint the template doesn't drive can't be, and is refused.
  *
  * <p>Each loop it reads every joint before the command scheduler runs ({@link #read}), and applies
  * what the commands asked after it ({@link #write}), so a goal set this loop is applied this loop.
+ * What it reads that's wrong, it says in alerts of its own: the sensors lost, the limit switches
+ * doubted, the motor controllers drawing nothing on their channels, and a PDH that doesn't answer.
  */
-public final class Joints {
+public final class Joints implements AutoCloseable {
   /**
    * What the joints read and drive, made for the mode the program runs in: on a robot, the devices
-   * each block's wiring names; in the simulator, its own; in a replay, none, since the log has
-   * every reading. The joints ask for each driven joint's first, then the absolute encoders the
-   * robot reads itself, then the sensors, then the PDH, each once as they're built: the simulator's
-   * absolute encoders and limit switches move with its joints.
+   * each block's wiring names; in the simulator, its own, built from the robot's definition; in a
+   * replay, none, since the log has every reading. The joints ask for each once as they're built:
+   * the sensors, then each driven joint's motor controllers and the absolute encoder the robot
+   * reads itself, then the PDH. A switch on a joint's motor controller's limit input isn't asked
+   * for: the joint reads it from its controller.
    *
    * <p>A test that needs only its joints' hardware gives it as a lambda, {@code joint -> io}, the
    * rest none. The robot's hardware ({@code frc.robot.hardware.Hardware}) gives every one.
@@ -70,7 +81,11 @@ public final class Joints {
       return new AbsoluteEncoderIO() {};
     }
 
-    /** A switch or a rangefinder: on a port or a CAN device, the simulator's, or none. */
+    /**
+     * A switch or a rangefinder: on a port or a CAN device, the simulator's, or none. Never a
+     * switch on a joint's motor controller's limit input, which the joint reads from its
+     * controller.
+     */
     default SensorIO sensor(Sensor.Placed sensor) {
       return new SensorIO() {};
     }
@@ -83,12 +98,52 @@ public final class Joints {
 
   private final JointMechanism[] joints;
   private final Map<Joint, JointMechanism> byJoint = new HashMap<>();
+
+  /** Stand-ins for joints with no mechanism, asked for once the robot runs ({@link #of}). */
+  private final Map<Joint, JointMechanism> standIns = new HashMap<>();
+
   private final RobotDefinition definition;
   private final Sensors sensors;
   private final Power power;
 
   /** The command scheduler its mechanisms and gates are registered with. */
   private final Scheduler scheduler;
+
+  /**
+   * The sensors with no wiring in the definition, by label: on a robot an alert of their own says
+   * so, so they aren't said again as lost.
+   */
+  private final List<String> unwired = new ArrayList<>();
+
+  private final ListAlert lost =
+      new ListAlert(
+          "Sensors",
+          "lost",
+          Alert.Level.HIGH,
+          labels ->
+              String.join(", ", labels)
+                  + (labels.size() == 1 ? " is" : " are")
+                  + " lost: nothing waiting on "
+                  + (labels.size() == 1 ? "it" : "them")
+                  + " holds. Check the wiring and the CAN bus.");
+
+  private final ListAlert doubted =
+      new ListAlert("Sensors", "doubted", Alert.Level.HIGH, doubts -> String.join("; ", doubts));
+
+  private final ListAlert dead =
+      new ListAlert("Power", "dead", Alert.Level.HIGH, dead -> String.join("; ", dead));
+
+  /** The PDH the robot declares, by its CAN ID, while it doesn't answer. */
+  private final ListAlert pdhSilent =
+      new ListAlert(
+          "Power",
+          "silent",
+          Alert.Level.MEDIUM,
+          ids ->
+              "The PDH isn't answering at CAN ID "
+                  + ids.get(0)
+                  + ", so no channel's current is read. Check its CAN wiring, and its ID in REV's"
+                  + " Hardware Client.");
 
   /**
    * Every driven joint's mechanism, with the robot's switches and rangefinders ({@link #sensors})
@@ -120,34 +175,45 @@ public final class Joints {
     this.definition = definition;
     this.scheduler = scheduler;
     RobotMath math = definition.math();
+    sensors = new Sensors(definition, hardware::sensor, scheduler);
     List<JointMechanism> built = new ArrayList<>();
     for (Joint joint : driven(definition)) {
       JointMechanism mechanism =
-          new JointMechanism(math, joint, tunings.apply(joint), hardware.joint(joint), scheduler);
-      if (readsAbsolute(joint) != null) {
-        mechanism.seedFrom(hardware.absoluteEncoder(joint));
-      }
+          new JointMechanism(
+              math,
+              joint,
+              tunings.apply(joint),
+              hardware.joint(joint),
+              readsAbsolute(joint) != null ? hardware.absoluteEncoder(joint) : null,
+              sensors,
+              scheduler);
       built.add(mechanism);
       byJoint.put(joint, mechanism);
     }
     joints = built.toArray(JointMechanism[]::new);
-    sensors = new Sensors(definition, hardware::sensor, this::pinned, scheduler);
     power = new Power(definition, hardware.pdh());
-    for (JointMechanism joint : joints) {
-      List<Sensor.Switch> limits = new ArrayList<>();
-      for (Sensor sensor : definition.math().sensors()) {
-        if (sensor instanceof Sensor.Switch onSwitch
-            && onSwitch.kind() instanceof Sensor.Switch.Limit limit
-            && limit.joint().equals(joint.joint())) {
-          limits.add(onSwitch);
-        }
+    for (Sensor sensor : definition.math().sensors()) {
+      if (unwired(sensor)) {
+        unwired.add(sensor.label());
       }
-      joint.stopAt(limits, sensors);
     }
+    // An interlock reads the joint it names through what that joint shows, so each joint's are
+    // handed it once every joint is built: two joints may restrict each other.
     for (Interlock interlock : definition.everyInterlock()) {
       enforced(interlock.joint())
-          .restrict(interlock, interlock.other().map(this::enforced).orElse(null));
+          .restrict(
+              interlock,
+              interlock.other().map(this::enforced).map(JointMechanism::view).orElse(null));
     }
+  }
+
+  /** Whether a sensor's definition gives it no wiring: it runs in the simulator alone. */
+  private static boolean unwired(Sensor sensor) {
+    return switch (sensor) {
+      case Sensor.Switch onSwitch -> onSwitch.wiring().isEmpty();
+      case Sensor.Rangefinder rangefinder -> rangefinder.wiring().isEmpty();
+      case Sensor.Encoder encoder -> false;
+    };
   }
 
   /** Each joint's control as its block commits it, never tuned: for a robot nobody tunes. */
@@ -209,6 +275,19 @@ public final class Joints {
    * @throws IllegalArgumentException for a joint that isn't the robot's
    */
   public static @Nullable String whyNotDriven(RobotMath math, Joint joint) {
+    if (!math.motorsAlone(joint)) {
+      return whyNotMotorsAlone(math, joint);
+    }
+    try {
+      MechanismRotations.of(joint, math.drivesOf(joint).get(0));
+    } catch (IllegalArgumentException e) {
+      return String.valueOf(e.getMessage());
+    }
+    return null;
+  }
+
+  /** What turns a joint that isn't turned by motors alone ({@link RobotMath#motorsAlone}). */
+  private static String whyNotMotorsAlone(RobotMath math, Joint joint) {
     Joint leader = math.leaderOf(joint);
     if (leader != null) {
       return "it follows " + leader.label() + ", whose moves carry it";
@@ -217,7 +296,7 @@ public final class Joints {
     if (drives.isEmpty()) {
       List<String> movers = new ArrayList<>();
       for (Drive drive : math.drives()) {
-        if (math.leverage(drive, joint, math.references()) != 0) {
+        if (math.leverage(drive, joint, math.rests()) != 0) {
           movers.add(drive.label());
         }
       }
@@ -232,17 +311,7 @@ public final class Joints {
           + String.join(" and ", drives.stream().map(Drive::label).toList())
           + " together, which the template doesn't drive yet";
     }
-    Drive drive = drives.get(0);
-    if (!(drive.actuator() instanceof Actuator.Motors)
-        || drive.transmission() instanceof Transmission.Between) {
-      return drive.label() + " isn't motors turning a shaft";
-    }
-    try {
-      MechanismRotations.of(joint, drive);
-    } catch (IllegalArgumentException e) {
-      return String.valueOf(e.getMessage());
-    }
-    return null;
+    return drives.get(0).label() + " isn't motors turning a shaft";
   }
 
   /**
@@ -297,22 +366,32 @@ public final class Joints {
   }
 
   /**
-   * A joint's mechanism.
+   * A joint's mechanism. A joint that has none, one the template doesn't drive or one that isn't
+   * the robot's, is refused as a move to a place not a joint's own is ({@link Refusals}): asked for
+   * as the robot starts, it throws, saying why; once it runs, its mechanism is a stand-in, never
+   * driven, whose every move ends {@link frc.robot.behavior.Outcome#REFUSED} and every gate holds
+   * false, saying why.
    *
    * @throws IllegalArgumentException for a joint that isn't the robot's, or one the template
-   *     doesn't drive, saying why
+   *     doesn't drive, saying why, as the robot starts
    */
   public JointMechanism of(Joint joint) {
     JointMechanism mechanism = byJoint.get(joint);
     if (mechanism != null) {
       return mechanism;
     }
-    if (!definition.joints().contains(joint)) {
-      throw new IllegalArgumentException(
-          joint.label() + " isn't one of " + definition.name() + "'s joints");
-    }
-    throw new IllegalArgumentException(
-        joint.label() + " has no mechanism: " + whyNotDriven(definition.math(), joint));
+    String why = noMechanism(joint);
+    Refusals.asBuilt(scheduler, why);
+    return standIns.computeIfAbsent(
+        joint,
+        standIn -> JointMechanism.standIn(definition.math(), standIn, sensors, scheduler, why));
+  }
+
+  /** Why a joint has no mechanism: the template doesn't drive it, or it isn't the robot's. */
+  private String noMechanism(Joint joint) {
+    return definition.joints().contains(joint)
+        ? joint.label() + " has no mechanism: " + whyNotDriven(definition.math(), joint)
+        : joint.label() + " isn't one of " + possessive(definition.name()) + " joints";
   }
 
   /**
@@ -338,7 +417,11 @@ public final class Joints {
    */
   public Move goTo(Configuration configuration) {
     return Move.configuration(
-        configuration, mechanisms(configuration), true, undriven(definition, configuration));
+        configuration,
+        mechanisms(configuration),
+        true,
+        undriven(definition, configuration),
+        scheduler);
   }
 
   /**
@@ -348,7 +431,11 @@ public final class Joints {
    */
   public Move run(Configuration configuration) {
     return Move.configuration(
-        configuration, mechanisms(configuration), false, undriven(definition, configuration));
+        configuration,
+        mechanisms(configuration),
+        false,
+        undriven(definition, configuration),
+        scheduler);
   }
 
   /**
@@ -367,6 +454,88 @@ public final class Joints {
               : Gate.of(scheduler, target.joint().label() + " driven", () -> false));
     }
     return Gate.all("at " + configuration.name(), terms.toArray(Gate[]::new));
+  }
+
+  /**
+   * A gate on a condition the robot's model says, named as the condition reads: {@code
+   * joints.gate(PIVOT.atLeast(Degrees.of(110)))} is "pivot at least 110°" ({@link #gate(String,
+   * Condition)}).
+   *
+   * @throws IllegalArgumentException as {@link #gate(String, Condition)} does, as the robot starts
+   */
+  public Gate gate(Condition condition) {
+    return gate(condition.toString(), condition);
+  }
+
+  /**
+   * A gate on a condition the robot's model says, named for what it means to the robot, logged as
+   * {@code Gates/<name>}: where a joint is, {@code joints.gate("intake out of the frame",
+   * PIVOT.atLeast(Degrees.of(110)))}, {@code ELEVATOR.between(...)}; how fast one runs, {@code
+   * SHOOTER.upToSpeed(RPM.of(3000))}; or what a sensor reads, {@code joints.gate("coral in claw",
+   * CLAW_BEAM.tripped())}. Combine and debounce it as any gate ({@link Gate#all}, {@link
+   * Gate#debounce}). A place it names is where this robot puts it, so a practice robot's gate on
+   * {@code PIVOT.atLeast(PIVOT_OUT)} opens from its own out; a joint at one of its places, {@code
+   * PIVOT.at(PIVOT_OUT)}, is there within its band, as {@link JointMechanism#isAt(Position)} is.
+   *
+   * <p>A condition on what isn't known holds false, saying why: a joint that doesn't know where it
+   * is (unhomed, faulted, silent), one whose motor controllers don't answer, a sensor that's lost
+   * ("claw beam lost"). One on a joint with no mechanism, or a sensor the robot hasn't, is refused
+   * as {@link #of} refuses the joint ({@link Refusals#gate}): thrown as the robot starts, and once
+   * it runs, a gate that holds false saying why.
+   *
+   * @throws IllegalArgumentException for a joint with no mechanism or a sensor the robot hasn't, as
+   *     the robot starts
+   */
+  public Gate gate(String name, Condition condition) {
+    return switch (definition.own(condition)) {
+      case Condition.OnSensor onSensor -> sensors.gate(name, onSensor);
+      case Condition.At at -> {
+        JointMechanism mechanism = byJoint.get(at.joint());
+        if (mechanism == null) {
+          yield Refusals.gate(scheduler, name, noMechanism(at.joint()));
+        }
+        yield at.isOutput()
+            ? mechanism.isAt(name, mechanism.joint().output(at.name()))
+            : mechanism.isAt(name, mechanism.joint().position(at.name()));
+      }
+      case Condition.OnJoint where ->
+          reading(
+              name,
+              where.joint(),
+              (view, why) -> {
+                if (!view.knowsWhere()) {
+                  why.add(where.joint().label() + " doesn't know where it is");
+                  return false;
+                }
+                return where.holdsAt(view.position());
+              });
+      case Condition.UpToSpeed speed ->
+          reading(
+              name,
+              speed.joint(),
+              (view, why) -> {
+                if (!view.answers()) {
+                  why.add(speed.joint().label() + " isn't answering");
+                  return false;
+                }
+                return speed.holdsAt(view.velocity());
+              });
+    };
+  }
+
+  /**
+   * A gate on what a joint's mechanism reads, where it is or how fast it runs; refused, saying why,
+   * for a joint with no mechanism.
+   *
+   * @param holds whether it holds, given what the joint shows, adding why not
+   */
+  private Gate reading(String name, Joint joint, BiPredicate<JointView, List<String>> holds) {
+    JointMechanism mechanism = byJoint.get(joint);
+    if (mechanism == null) {
+      return Refusals.gate(scheduler, name, noMechanism(joint));
+    }
+    JointView view = mechanism.view();
+    return new Gate(scheduler, name, why -> holds.test(view, why));
   }
 
   /**
@@ -412,30 +581,6 @@ public final class Joints {
   }
 
   /**
-   * A switch on a joint's limit input, bound to that joint: read from its controller with the rest
-   * of the joint, a loop's reading behind none. Any other sensor's hardware, as it is.
-   *
-   * @throws IllegalArgumentException for a joint the template doesn't drive
-   */
-  private SensorIO pinned(SensorIO io) {
-    if (!(io instanceof SensorIO.OnPin pin)) {
-      return io;
-    }
-    for (JointMechanism joint : joints) {
-      if (joint.joint().label().equals(pin.joint())) {
-        return new SensorIO() {
-          @Override
-          public void updateInputs(SensorIOInputs inputs) {
-            joint.readPin(pin.direction(), inputs);
-          }
-        };
-      }
-    }
-    throw new IllegalArgumentException(
-        "a switch is on " + pin.joint() + "'s limit input, and the template doesn't drive it");
-  }
-
-  /**
    * What the robot's limit switches are doubted for this loop: each one reading tripped nowhere
    * near where it trips, or clear well past it, with its joint homed. Empty while they agree.
    */
@@ -472,7 +617,7 @@ public final class Joints {
 
   /**
    * Reads every joint, then every sensor, then the PDH: once a loop, before the command scheduler
-   * runs.
+   * runs. Then says what's wrong in its alerts.
    */
   public void read(long nowNanos, boolean enabled) {
     for (JointMechanism joint : joints) {
@@ -484,6 +629,26 @@ public final class Joints {
       joint.sensed();
       joint.powered(power);
     }
+    List<String> lostNow = new ArrayList<>(sensors.lost());
+    lostNow.removeAll(unwired);
+    lost.set(lostNow);
+    doubted.set(switchDoubts());
+    dead.set(deadChannels());
+    pdhSilent.set(
+        definition
+            .pdh()
+            .filter(pdh -> !power.reads())
+            .map(pdh -> List.of(String.valueOf(pdh.id())))
+            .orElse(List.of()));
+  }
+
+  /** Releases its alerts, so a test can build another robot. */
+  @Override
+  public void close() {
+    lost.close();
+    doubted.close();
+    dead.close();
+    pdhSilent.close();
   }
 
   /** Applies what the commands asked of each joint, or its idle: once a loop, after them. */

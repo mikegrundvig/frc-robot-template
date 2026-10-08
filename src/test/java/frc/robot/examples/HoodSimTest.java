@@ -116,8 +116,7 @@ class HoodSimTest {
     JointsSimHarness switched =
         new JointsSimHarness(
             RobotDefinitionBuilder.builder(ROBOT).joints(List.of(withSwitch)).build());
-    Gate down =
-        switched.joints.sensors().gate("hood down", withSwitch.switchAt(End.LOWER).tripped());
+    Gate down = switched.joints.gate("hood down", withSwitch.switchAt(End.LOWER).tripped());
 
     switched.loop();
     boolean before = down.getAsBoolean();

@@ -246,9 +246,11 @@ class RobotMathTest {
           .isThrownBy(() -> math.gravityTorque(stage2, Map.of()))
           .withMessageContaining("ask about carriage");
       // Stowed is the carriage alone: the stages are its to place, so any method takes it.
-      assertThat(math.references()).containsExactly(Map.entry(carriage, 0.0));
-      assertThat(math.positions(math.references())).containsKeys(stage1, stage2);
-      assertThat(math.extension(math.references())).isZero();
+      assertThat(math.rests()).containsExactly(Map.entry(carriage, 0.0));
+      assertThat(math.positions(math.rests())).containsKeys(stage1, stage2);
+      assertThat(math.extension(math.rests())).isZero();
+      assertThat(math.motorsAlone(carriage)).isTrue();
+      assertThat(math.motorsAlone(stage1)).as("its leader's moves carry it").isFalse();
     }
 
     /** Each stage's weight counts by how far it moves for the carriage's travel. */
@@ -598,6 +600,8 @@ class RobotMathTest {
     Drive a = differential("a", pitch, roll, 20, 20);
     Drive b = differential("b", pitch, roll, 20, -20);
     RobotMath math = definition(List.of(pitch, roll), List.of(), List.of(a, b), List.of()).math();
+    assertThat(math.motorsAlone(pitch)).as("two drives turn it together").isFalse();
+    assertThat(math.motorsAlone(roll)).isFalse();
     DCMotor x44 = KRAKEN_X44;
     double perVolt = x44.stallTorque / x44.nominalVoltage;
     Map<Joint, Double> at = Map.of(pitch, 0.5, roll, 0.2);
@@ -690,6 +694,9 @@ class RobotMathTest {
     // its own two motors'.
     assertThat(math.drivesOf(shoulder)).extracting(Drive::label).containsExactly("shoulder");
     assertThat(math.drivesOf(wrist)).containsExactly(chain);
+    assertThat(math.motorsAlone(wrist))
+        .as("its motor turns the shoulder too, and it's the wrist's")
+        .isTrue();
     assertThat(math.idealGains(shoulder).kV()).isCloseTo(80 * 12 / KRAKEN.freeSpeed, within(1e-9));
     assertThat(math.freeSpeed(shoulder)).isCloseTo(KRAKEN.freeSpeed / 80, within(1e-9));
     assertThat(math.gravityTorque(shoulder, Map.of(shoulder, 0.0, wrist, 0.0)))

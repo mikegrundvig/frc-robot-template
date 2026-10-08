@@ -135,8 +135,7 @@ class TurretTurnsSimTest {
     JointsSimHarness limited =
         new JointsSimHarness(
             ROBOT.with(
-                TURRET.retuned(
-                    control -> control.withSoftLimits(Math.toRadians(-190), Math.toRadians(160)))));
+                TURRET.retuned(control -> control.withSoftLimits(Range.degrees(-190, 160)))));
     JointMechanism soft = limited.joints.of(TURRET);
     Move wrapped = soft.goTo(Degrees.of(200));
     Move outside = soft.goTo(Degrees.of(165));

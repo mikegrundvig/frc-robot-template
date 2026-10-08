@@ -29,8 +29,8 @@ import org.wpilib.units.measure.Mass;
  * checked: no guard reads the limits while the robot runs.
  *
  * @param framePerimeter the most the frame may measure around
- * @param startingHeight the tallest the robot may be in its starting configuration: every joint at
- *     its reference
+ * @param startingHeight the tallest the robot may be in its starting configuration: every joint
+ *     where it rests
  * @param extension the farthest any part may reach beyond the frame perimeter, seen from above
  * @param bumperZoneBottom the lowest the bumpers may sit, above the floor
  * @param bumperZoneTop the highest they may reach
@@ -90,14 +90,14 @@ public record SeasonLimits(
 
   /**
    * Everything about a robot's definition the rules don't allow, each in words; empty when it fits.
-   * The robot is checked as it starts a match, every joint at its reference, and in each of its
-   * configurations, the joints it doesn't name at their references, against the extension limit.
-   * Only the links with shapes reach anywhere; collisions between links aren't checked yet.
+   * The robot is checked as it starts a match, every joint where it rests, and in each of its
+   * configurations, the joints it doesn't name where they rest, against the extension limit. Only
+   * the links with shapes reach anywhere; collisions between links aren't checked yet.
    */
   public List<String> problems(RobotDefinition definition) {
     Body body = definition.body();
     RobotMath math = definition.math();
-    Map<Joint, Double> stowed = math.references();
+    Map<Joint, Double> stowed = math.rests();
     List<String> problems = new ArrayList<>();
     if (body.framePerimeter().in(Meters) > framePerimeter.in(Meters) + SLACK) {
       problems.add(
@@ -151,19 +151,20 @@ public record SeasonLimits(
     }
     Mass weighed = body.mass().minus(battery);
     if (weighed.in(Kilograms) > weight.in(Kilograms) + SLACK) {
+      // In the rule's own unit, as the rule book says it: 135 lb, not a mix of it and kilograms.
       problems.add(
           "it weighs "
-              + shown(weighed)
+              + shown(weight.unit().of(weighed.in(weight.unit())))
               + " without its battery, more than the "
               + shown(weight)
-              + " allowed");
+              + " allowed: lighten it, or weigh it again");
     }
     return problems;
   }
 
   /**
-   * Where a configuration puts the joints it names at positions; the rest stay at their references,
-   * and its outputs move nothing anywhere.
+   * Where a configuration puts the joints it names at positions; the rest stay where they rest, and
+   * its outputs move nothing anywhere.
    */
   private static Map<Joint, Double> positions(Configuration configuration) {
     Map<Joint, Double> positions = new LinkedHashMap<>();

@@ -110,7 +110,7 @@ class SparkRequestsRecordedTest {
     boolean slides = joint instanceof Joint.Prismatic;
 
     io.updateInputs(inputs);
-    io.setPosition(joint.reference(), 0, 0);
+    io.setPosition(joint.restPosition(), 0, 0);
     asked(name, "hold where it rests", io);
     io.setPosition(slides ? 0.4 : Math.toRadians(45), slides ? 0.3 : 1.0, 0.6);
     asked(name, "to a point, rising", io);
@@ -139,7 +139,7 @@ class SparkRequestsRecordedTest {
     Joint.Revolute pivot =
         unmotored(PIVOT)
             .motor(Motor.NEO, gearing(25), SPARK_MAX.can(61))
-            .absoluteEncoder(8192, DATA_PORT.offset(Rotations.of(0.1)).inverted().closesLoop())
+            .absoluteEncoder(DATA_PORT.offset(Rotations.of(0.1)).inverted().closesLoop())
             .retuned(
                 control ->
                     MechanismControlBuilder.builder(control.withKs(0.2).withKg(0.5))

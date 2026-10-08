@@ -48,7 +48,8 @@ class PowerSimTest {
   /** An arm on two Krakens, fed from channels 4 and 5, stowed by hand against its lower stop. */
   static final Joint.Revolute ARM =
       Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
-          .range(Range.degrees(0, 90), ARM_DOWN)
+          .range(Range.degrees(0, 90))
+          .rest(ARM_DOWN)
           .positions(ARM_DOWN)
           .outputs(PUSH)
           .motors(
@@ -59,7 +60,7 @@ class PowerSimTest {
           .control(
               MechanismControl.position(30)
                   .withKg(0)
-                  .withHoming(MechanismControl.Homing.assumeAtReference()));
+                  .withHoming(MechanismControl.Homing.assumeAtRest()));
 
   /** The template's robot with the arm, and its PDH. */
   static final RobotDefinition ROBOT =

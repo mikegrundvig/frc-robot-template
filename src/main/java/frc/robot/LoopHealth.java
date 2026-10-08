@@ -3,19 +3,27 @@ package frc.robot;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import java.io.File;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
+import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.util.Alert;
 
 /**
- * Whether the robot loop keeps up, and its log with it. {@link Robot} starts and finishes each loop
- * here; the container marks its sections on {@link #monitor()}.
+ * Whether the robot loop keeps up, and its log with it, and on a robot (or in a replay of one)
+ * whether its commands run. {@link Robot} starts and finishes each loop here; the container marks
+ * its sections on {@link #monitor()}.
  *
- * <p>It raises three alerts:
+ * <p>It raises four alerts:
  *
  * <ul>
  *   <li>loops that overran, in the robot's own code, or started late, from time lost between loops
@@ -23,7 +31,9 @@ import org.wpilib.util.Alert;
  *   <li>a log that fell behind and dropped data: that log has gaps, so the alert stays raised for
  *       the rest of the session;
  *   <li>a log drive that's missing, can't be written, or is nearly full, checked every second away
- *       from the robot loop, so a drive that hangs never stalls it.
+ *       from the robot loop, so a drive that hangs never stalls it;
+ *   <li>on a robot, and in a replay of one, commands that threw ({@link #threw}), each place once:
+ *       the code has a bug, so the alert stays raised for the rest of the session.
  * </ul>
  */
 final class LoopHealth implements AutoCloseable {
@@ -32,6 +42,20 @@ final class LoopHealth implements AutoCloseable {
 
   /** A log drive with less room than this is nearly full: about half an hour of logging. */
   static final long MIN_FREE_BYTES = 500L * 1024 * 1024;
+
+  /**
+   * How many loops in a row the commands may throw on a robot (or in a replay of one, which follows
+   * it) before the program ends: half a second. A command that throws once costs a loop. Code that
+   * throws every loop (a binding's condition, a default command, a sideload that threw and so is
+   * over) runs nothing while the robot drives on its last outputs, so the program ends, and
+   * restarts, rather than run wedged.
+   */
+  static final int FAILING_LOOPS = 25;
+
+  private static final String ERRORS_KEY = "Errors/Commands";
+
+  /** Where commands threw from: an exception's kind and its stack. */
+  private record Site(Class<?> kind, List<StackTraceElement> stack) {}
 
   private final LoopMonitor monitor =
       new LoopMonitor(RobotLoop.PERIOD_SECONDS, RobotLoop.loops(RECENT_SECONDS));
@@ -44,6 +68,18 @@ final class LoopHealth implements AutoCloseable {
           "Logging fell behind and dropped data this session: this log has gaps",
           Alert.Level.HIGH);
   private final Alert logDrive = new Alert("Loop", "logDrive", "", Alert.Level.HIGH);
+  private final Alert threw = new Alert("Loop", "threw", "", Alert.Level.HIGH);
+
+  /** Each place commands threw from, reported once. */
+  private final Set<Site> reported = new HashSet<>();
+
+  /** What the alert lists: each place commands threw from, once, in the order they did. */
+  private final List<String> threwFrom = new ArrayList<>();
+
+  /** Loops in a row whose commands threw. */
+  private int failingLoops;
+
+  private boolean failedThisLoop;
   private @Nullable ScheduledExecutorService driveWatch;
   private volatile @Nullable String logDriveProblem;
   private LoopMonitor.Report last = LoopMonitor.Report.NONE;
@@ -101,6 +137,52 @@ final class LoopHealth implements AutoCloseable {
       logDrive.setText(driveProblem);
     }
     logDrive.set(driveProblem != null);
+    if (!failedThisLoop) {
+      failingLoops = 0;
+    }
+    failedThisLoop = false;
+  }
+
+  /**
+   * The commands threw this loop, on a robot or in a replay of one ({@link Robot#loop}): a command,
+   * a binding's condition, anything the scheduler runs. The scheduler has already ended a command
+   * that threw, and the command that started it, and the robot carries on without them. It's logged
+   * every time ({@code Errors/Commands}, with the stack), and each place it threw from is reported
+   * once: a Driver Station error with the stack, and the alert.
+   *
+   * @throws RuntimeException the same exception, on the {@value #FAILING_LOOPS}th loop in a row
+   *     whose commands threw: the program ends, and restarts, rather than run with nothing running
+   */
+  void threw(RuntimeException e) {
+    failedThisLoop = true;
+    failingLoops++;
+    StackTraceElement[] frames = e.getStackTrace();
+    StringWriter stack = new StringWriter();
+    e.printStackTrace(new PrintWriter(stack));
+    Logger.recordOutput(ERRORS_KEY, stack.toString());
+    if (reported.add(new Site(e.getClass(), List.of(frames)))) {
+      DriverStationErrors.reportError(
+          "Commands threw " + what(e) + ". The robot carries on without them", frames);
+      threwFrom.add(what(e) + (frames.length > 0 ? ", at " + frames[0] : ""));
+      threw.setText(
+          "Commands threw, and the robot carried on without them: "
+              + String.join("; ", threwFrom)
+              + ". Fix the code: the stack is in the Driver Station's log");
+      threw.set(true);
+    }
+    if (failingLoops >= FAILING_LOOPS) {
+      DriverStationErrors.reportError(
+          "Commands threw in " + FAILING_LOOPS + " loops in a row: the program ends, and restarts",
+          frames);
+      throw e;
+    }
+  }
+
+  /** "IllegalStateException: no reading yet", or its kind alone when it says nothing. */
+  private static String what(RuntimeException e) {
+    String message = e.getMessage();
+    String kind = e.getClass().getSimpleName();
+    return message == null || message.isBlank() ? kind : kind + ": " + message;
   }
 
   private String overrunText() {
@@ -181,6 +263,14 @@ final class LoopHealth implements AutoCloseable {
     return loggingBehind.get();
   }
 
+  boolean isThrewAlertActive() {
+    return threw.get();
+  }
+
+  String threwAlertText() {
+    return threw.getText();
+  }
+
   private static String format(String pattern, Object... values) {
     return String.format(Locale.ROOT, pattern, values);
   }
@@ -194,5 +284,6 @@ final class LoopHealth implements AutoCloseable {
     overrunning.close();
     loggingBehind.close();
     logDrive.close();
+    threw.close();
   }
 }

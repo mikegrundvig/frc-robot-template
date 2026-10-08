@@ -17,7 +17,8 @@ import org.jspecify.annotations.Nullable;
  * controllers, and which way each turns; and the one feedforward law ({@link #feedforward}) that
  * every loop driving the joint evaluates: a TalonFX's slot, set from these gains, a SPARK's
  * feedforward, which the robot works out each loop, a loop the robot closes itself, and the
- * simulator's motor controllers.
+ * simulator's motor controllers. A joint whose block wires no controllers is planned on the one its
+ * motor runs on ({@link MechanismWiring.Controller#standIn}), which the simulator runs it as.
  *
  * <p>Vendor-neutral and pure: a motor controller's settings are worked out from it in that vendor's
  * units and terms, and what only one vendor can't take (a ratio past Phoenix's, a kI on a SPARK) is
@@ -137,7 +138,7 @@ public final class ControllerPlan {
     this.joint = joint;
     this.drive = drive;
     this.control = control;
-    this.controllers = List.copyOf(controllers);
+    this.controllers = controllers.isEmpty() ? standIns(driving) : List.copyOf(controllers);
     motors = driving.count();
     rotations = MechanismRotations.of(joint, drive);
     RobotMath.Gains seed = math.idealGains(joint);
@@ -173,8 +174,8 @@ public final class ControllerPlan {
 
   /**
    * The plan for a joint driven by another control than its block's: as the pit tunes it. Its drive
-   * is the definition's ({@link RobotMath#drivesOf}), its controllers its block's, none if its
-   * motors aren't wired.
+   * is the definition's ({@link RobotMath#drivesOf}), its controllers its block's, or its motor's
+   * stand-in where they aren't wired ({@link #controllers}).
    *
    * @throws IllegalArgumentException for what no motor controller could do
    */
@@ -188,11 +189,11 @@ public final class ControllerPlan {
   }
 
   /**
-   * The plan for a joint from its parts given apart: what a vendor's helper is given, by its tests
-   * and for a joint whose motors aren't wired.
+   * The plan for a joint from its parts given apart: what a vendor's helper is given, by its tests.
    *
    * @param drive the motors that move it
-   * @param controllers each motor's controller, the leader first, as many as its motors; or none
+   * @param controllers each motor's controller, the leader first, as many as its motors; or none,
+   *     for its motor's stand-in ({@link #controllers})
    * @throws IllegalArgumentException for what no motor controller could do
    */
   public static ControllerPlan of(
@@ -219,9 +220,24 @@ public final class ControllerPlan {
     return control;
   }
 
-  /** Each motor's controller, the leader first; none if its motors aren't wired. */
+  /**
+   * Each motor's controller, the leader first: its block's, or, where its block wires none, the
+   * controller its motor runs on ({@link MechanismWiring.Controller#standIn}), on Systemcore's CAN
+   * at IDs from 0, each turning counterclockwise for positive. A stand-in's ID only tells its
+   * motors apart: nothing refused or doubted of the joint reads its ID, its bus or its direction.
+   */
   public List<MechanismWiring.Device> controllers() {
     return controllers;
+  }
+
+  /** The stand-in controller for each of a joint's motors, its block wiring none. */
+  private static List<MechanismWiring.Device> standIns(Actuator.Motors motors) {
+    MechanismWiring.Controller controller = MechanismWiring.Controller.standIn(motors.motor());
+    List<MechanismWiring.Device> standIns = new ArrayList<>();
+    for (int id = 0; id < motors.count(); id++) {
+      standIns.add(controller.can(id));
+    }
+    return List.copyOf(standIns);
   }
 
   /**
@@ -369,8 +385,8 @@ public final class ControllerPlan {
     Range range = joint.range().orElseThrow();
     double atStow =
         Math.min(
-            reading(encoder, joint.reference()) - (wrapPoint - 1),
-            wrapPoint - reading(encoder, joint.reference()));
+            reading(encoder, joint.restPosition()) - (wrapPoint - 1),
+            wrapPoint - reading(encoder, joint.restPosition()));
     return String.format(
         Locale.ROOT,
         "%s wraps at %s of its turn, %s %s's range (%s to %s), and %s from where it stows (%s): a"
@@ -382,7 +398,7 @@ public final class ControllerPlan {
         joint.shown(range.lower()),
         joint.shown(range.upper()),
         joint.shown(alongJoint(encoder, atStow)),
-        joint.shown(joint.reference()));
+        joint.shown(joint.restPosition()));
   }
 
   /** The encoder's turns for each of its joint's turns (or meters): a magnitude. */
@@ -477,7 +493,7 @@ public final class ControllerPlan {
 
   /**
    * The first joint above this one whose turning tilts gravity at it: a revolute joint about an
-   * axis that isn't vertical, with the joints at their references. Null when none does.
+   * axis that isn't vertical, with the joints where they rest. Null when none does.
    */
   private @Nullable Joint tilting(RobotMath math) {
     Part up = joint.parent();

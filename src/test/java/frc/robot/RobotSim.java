@@ -7,6 +7,7 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.behavior.Bindings;
 import frc.robot.behavior.RecordingGamepad;
@@ -14,11 +15,11 @@ import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
+import frc.robot.sim.JointsSimHarness;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.Joints;
-import frc.robot.subsystems.mechanisms.Sensors;
 import java.util.List;
 import java.util.Objects;
 import org.jspecify.annotations.Nullable;
@@ -97,6 +98,7 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   @Override
   public void afterEach(ExtensionContext context) {
     closeRobot();
+    JointsSimHarness.closeAll();
     TelemetryRegistry.reset();
     TunableRegistry.reset();
     DriverStationSim.resetData();
@@ -216,25 +218,25 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
   public interface ControlsMaker<T> {
     T make(
         Scheduler scheduler,
+        RobotDefinition robot,
         Joints joints,
         Drive drive,
-        Sensors sensors,
         RecordingGamepad driver,
         RecordingGamepad operator);
   }
 
   /**
    * A team's controls on the robot, made as the robot makes its own {@code Controls}, with its
-   * joints, drivetrain, sensors and both gamepads: {@code sim.controls(Team2611Controls::new)}. Its
-   * bindings join the robot's record ({@link #bindings}).
+   * definition, joints, drivetrain and both gamepads: {@code sim.controls(Team2611Controls::new)}.
+   * Its bindings join the robot's record ({@link #bindings}).
    */
   public <T> T controls(ControlsMaker<T> controls) {
     RobotContainer robot = robot();
     return controls.make(
         scheduler(),
+        robot.definition(),
         robot.joints(),
         robot.drive(),
-        robot.joints().sensors(),
         robot.driver(),
         robot.operator());
   }
@@ -253,13 +255,25 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
    * One robot loop, as WPILib's runs it: the clock moves a loop's time, WPILib reads the Driver
    * Station's newest data (which is how the simulator's controls on the Pitwall page reach the
    * robot, a loop after they're asked), then the robot runs {@link Robot#loop}, then WPILib's
-   * tunables update.
+   * tunables update. What the robot's commands throw, it throws, so a bug fails its test.
    */
   public void loop() {
+    loop(false);
+  }
+
+  /**
+   * One robot loop as on a robot: what the robot's commands throw is reported, and the robot
+   * carries on without them ({@link Robot#loop}).
+   */
+  void loopOnRobot() {
+    loop(true);
+  }
+
+  private void loop(boolean carriesOn) {
     RobotContainer robot = robot();
     stepClock();
     DriverStationBackend.refreshData();
-    Robot.loop(pitwall(), robot, scheduler(), Objects.requireNonNull(loopHealth));
+    Robot.loop(pitwall(), robot, scheduler(), Objects.requireNonNull(loopHealth), carriesOn);
     TunableRegistry.update();
   }
 

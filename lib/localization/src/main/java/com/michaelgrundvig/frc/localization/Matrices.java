@@ -44,16 +44,4 @@ final class Matrices {
     }
     return sum;
   }
-
-  /** A B into {@code out}, for 3x3 A and B; {@code out} must be neither. */
-  static void multiply3(double[] a, double[] b, double[] out) {
-    for (int row = 0; row < 3; row++) {
-      for (int column = 0; column < 3; column++) {
-        out[row * 3 + column] =
-            a[row * 3] * b[column]
-                + a[row * 3 + 1] * b[3 + column]
-                + a[row * 3 + 2] * b[6 + column];
-      }
-    }
-  }
 }

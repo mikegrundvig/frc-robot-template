@@ -12,7 +12,6 @@ import com.michaelgrundvig.frc.world.robot.DrivetrainControlBuilder;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControlGainsBuilder;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControlLimitsBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
-import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.JointFixtures;
 import frc.robot.subsystems.mechanisms.JointMechanism;
 import java.util.List;
@@ -94,7 +93,7 @@ class CommitCallsTest {
   @Test
   void theDrivetrainsTunedValuesCommitByTheirBuilderSteps() {
     commits(
-        Drive.tuning(Robots.SIM.drivetrain()),
+        RobotContainer.tunings(Robots.SIM).drivetrain(),
         List.of(
             new Row<>("gains.driveKs", 0.15, ".driveKs(0.15)", gains(b -> b.driveKs(0.15))),
             new Row<>("gains.driveKv", 2.2, ".driveKv(2.2)", gains(b -> b.driveKv(2.2))),

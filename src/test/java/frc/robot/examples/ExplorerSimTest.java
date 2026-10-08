@@ -63,8 +63,7 @@ class ExplorerSimTest {
   void build() {
     sim.build(ROBOT, SensorErrors.NONE);
     sensors = Objects.requireNonNull(sim.world().sensors());
-    explore =
-        new Explorer(sim.drive(), sim.joints().sensors(), FRONT_BUMPER, new Random(1)).explore();
+    explore = new Explorer(sim.drive(), sim.joints(), FRONT_BUMPER, new Random(1)).explore();
     RobotSim.setEnabled(true);
     sim.scheduler().schedule(explore);
   }

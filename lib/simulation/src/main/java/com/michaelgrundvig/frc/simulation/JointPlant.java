@@ -4,6 +4,7 @@ import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import java.util.Map;
@@ -34,9 +35,6 @@ import org.wpilib.math.system.DCMotor;
  * known until measured.
  */
 public final class JointPlant {
-  /** The battery's voltage: it holds steady, as the drivetrain's does. */
-  static final double BATTERY_VOLTS = 12.0;
-
   private final Joint joint;
   private final RobotMath math;
   private final CurrentLimitedMotor motor;
@@ -78,7 +76,7 @@ public final class JointPlant {
             : Optional.empty();
     lower = joint.range().map(Range::lower).orElse(Double.NEGATIVE_INFINITY);
     upper = joint.range().map(Range::upper).orElse(Double.POSITIVE_INFINITY);
-    motor.place(joint.reference(), 0);
+    motor.place(joint.restPosition(), 0);
   }
 
   /**
@@ -187,6 +185,6 @@ public final class JointPlant {
    * what its PDH channel does. Each motor draws alike, as they share the joint's load.
    */
   public double supplyAmps() {
-    return Math.abs(motor.currentAmps() * motor.appliedVolts()) / BATTERY_VOLTS / count;
+    return Math.abs(motor.currentAmps() * motor.appliedVolts()) / Motor.NOMINAL_VOLTS / count;
   }
 }

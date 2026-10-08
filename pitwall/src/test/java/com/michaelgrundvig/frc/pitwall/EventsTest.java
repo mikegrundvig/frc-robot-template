@@ -231,7 +231,7 @@ class EventsTest {
 
     Map<String, Object> snapshot = page.snapshot().json();
 
-    assertThat(snapshot).containsEntry("stream", "1");
+    assertThat(snapshot.get("stream")).as("its own id, random").asString().hasSize(36);
     Map<String, Object> document = asMap(snapshot.get("document"));
     assertThat(document)
         .containsKeys(
@@ -306,30 +306,30 @@ class EventsTest {
   @Test
   void closingAStreamRemovesIt() throws Exception {
     Listener page = new Listener(start(Duration.ofMillis(20)));
-    page.snapshot();
+    String stream = (String) Objects.requireNonNull(page.snapshot().json().get("stream"));
     assertThat(broadcaster.size()).isEqualTo(1);
 
     page.close();
 
     loopUntil(() -> broadcaster.size() == 0);
-    assertThat(closed).containsExactly("1");
+    assertThat(closed).containsExactly(stream);
   }
 
   /** With eight pages following, a ninth takes the place of the one that wrote least lately. */
   @Test
   void aNinthPageTakesTheStalestPlace() throws Exception {
     PitwallServer running = start(PitwallServer.IDLE);
-    List<Listener> pages = new ArrayList<>();
+    List<Object> streams = new ArrayList<>();
     for (int i = 0; i < Broadcaster.MAX_STREAMS; i++) {
       Listener page = new Listener(running);
-      page.snapshot();
-      pages.add(page);
+      streams.add(page.snapshot().json().get("stream"));
     }
 
     Listener ninth = new Listener(running);
 
-    assertThat(ninth.snapshot().json()).containsEntry("stream", "9");
+    assertThat(ninth.snapshot().json().get("stream")).isNotIn(streams);
     loopUntil(() -> closed.size() == 1);
+    assertThat(streams).contains(closed.getFirst());
     assertThat(broadcaster.size()).isEqualTo(Broadcaster.MAX_STREAMS);
   }
 
@@ -337,16 +337,17 @@ class EventsTest {
   @Test
   void aPageThatReconnectsReplacesItsStream() throws Exception {
     PitwallServer running = start(PitwallServer.IDLE);
-    new Listener(running).snapshot();
+    String had =
+        (String) Objects.requireNonNull(new Listener(running).snapshot().json().get("stream"));
 
     var again =
         answered(
             client.sendAsync(
-                HttpRequest.newBuilder(uri(running, "/api/events?replaces=1")).GET().build(),
+                HttpRequest.newBuilder(uri(running, "/api/events?replaces=" + had)).GET().build(),
                 HttpResponse.BodyHandlers.ofLines()));
     open.add(again.body()::close);
 
-    loopUntil(() -> closed.contains("1"));
+    loopUntil(() -> closed.contains(had));
     assertThat(broadcaster.size()).isEqualTo(1);
   }
 

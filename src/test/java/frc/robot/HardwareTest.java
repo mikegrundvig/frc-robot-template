@@ -5,6 +5,7 @@ import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TAL
 import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANDI;
 import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANRANGE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Rotations;
@@ -33,7 +34,6 @@ import frc.robot.subsystems.mechanisms.AbsoluteEncoderIOPort;
 import frc.robot.subsystems.mechanisms.JointIOSpark;
 import frc.robot.subsystems.mechanisms.JointIOTalon;
 import frc.robot.subsystems.mechanisms.PdhIORev;
-import frc.robot.subsystems.mechanisms.SensorIO;
 import frc.robot.subsystems.mechanisms.SensorIOCanRange;
 import frc.robot.subsystems.mechanisms.SensorIOCandi;
 import frc.robot.subsystems.mechanisms.SensorIOPort;
@@ -59,7 +59,8 @@ class HardwareTest {
   /** A pivot on a TalonFX, its encoder and lower limit switch on Systemcore ports. */
   private static final Joint.Revolute PIVOT =
       Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
-          .range(Range.degrees(0, 135), Degrees.of(0))
+          .range(Range.degrees(0, 135))
+          .rest(Degrees.of(0))
           .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(11))
           .absoluteEncoder(MechanismWiring.PortEncoder.dutyCycle(2).offset(Rotations.of(0.3)))
           .limitSwitch(End.LOWER, Degrees.of(0), SensorWiring.port(1).normallyClosed())
@@ -68,13 +69,14 @@ class HardwareTest {
   /** An arm on a SPARK, its lower limit switch on the SPARK's own input. */
   private static final Joint.Revolute ARM =
       Joint.pivot("arm", Part.CHASSIS, new Translation3d(-0.2, 0, 0.4), Joint.PITCH_UP)
-          .range(Range.degrees(0, 90), Degrees.of(0))
+          .range(Range.degrees(0, 90))
+          .rest(Degrees.of(0))
           .motor(Motor.NEO, Gearing.of(50), SPARK_MAX.can(12))
           .limitSwitch(End.LOWER, Degrees.of(0), SensorWiring.Direction.REVERSE.normallyClosed())
           .control(
               MechanismControl.position(30)
                   .withKg(0)
-                  .withHoming(MechanismControl.Homing.assumeAtReference()));
+                  .withHoming(MechanismControl.Homing.assumeAtRest()));
 
   /** A roller whose motor has no controller named: it runs in the simulator alone. */
   private static final Joint.Revolute ROLLER =
@@ -120,8 +122,8 @@ class HardwareTest {
 
   /**
    * On a robot, each part on the device its wiring names: the encoder and the limit switch on
-   * Systemcore ports (each cast to its kind, to close it), a switch on a SPARK's input read with
-   * its joint.
+   * Systemcore ports (each cast to its kind, to close it). A switch on a SPARK's input has no
+   * device of its own: its joint reads it from the SPARK, and nothing asks for one.
    */
   @Test
   void aRobotsHardwareIsTheDevicesItsWiringNames() {
@@ -134,8 +136,11 @@ class HardwareTest {
       assertThat(hardware).isInstanceOf(RobotHardware.class);
       assertThat(hardware.joint(PIVOT)).isInstanceOf(JointIOTalon.class);
       assertThat(hardware.joint(ARM)).isInstanceOf(JointIOSpark.class);
-      assertThat(hardware.sensor(Objects.requireNonNull(sensors.get("arm lower limit"))))
-          .isEqualTo(SensorIO.onPin("arm", SensorWiring.Direction.REVERSE));
+      assertThatIllegalArgumentException()
+          .isThrownBy(() -> hardware.sensor(Objects.requireNonNull(sensors.get("arm lower limit"))))
+          .withMessage(
+              "arm lower limit is on arm's controller's limit input: arm reads it from its"
+                  + " controller");
       assertThat(hardware.sensor(BEAM)).isInstanceOf(SensorIOCandi.class);
       assertThat(hardware.sensor(HOPPER)).isInstanceOf(SensorIOCanRange.class);
       assertThat(hardware.pdh()).isInstanceOf(PdhIORev.class);
@@ -159,7 +164,6 @@ class HardwareTest {
       assertThat(hardware.joint(ROLLER).getClass().isAnonymousClass()).isTrue();
       assertThat(hardware.sensor(BUMPER).getClass().isAnonymousClass()).isTrue();
 
-      assertThat(hardware.unwiredSensors()).containsExactly("bumper");
       assertThat(activeAlerts())
           .contains(
               "This robot's configuration has no drivetrain wiring (CAN IDs and encoder offsets),"
@@ -171,33 +175,29 @@ class HardwareTest {
     assertThat(activeAlerts()).as("closed with it").noneMatch(text -> text.contains("No wiring"));
   }
 
-  /** In the simulator, each part is the simulated world's, wired or not. */
+  /**
+   * In the simulator, each part is the simulated world's, wired or not, built from the definition
+   * with the world: the joints, their encoders and the sensors whatever order they're asked for in.
+   */
   @Test
   void theSimulatorsHardwareIsTheWorlds() {
-    try (SimulatedWorld world =
-            new SimulatedWorld(
-                RobotSim.FIELD,
-                ROBOT.drivetrain(),
-                ROBOT.body(),
-                ROBOT.cameras(),
-                ROBOT.imus(),
-                SensorErrors.NONE);
+    try (SimulatedWorld world = new SimulatedWorld(RobotSim.FIELD, ROBOT, SensorErrors.NONE);
         Hardware hardware = RobotContainer.hardware(Constants.Mode.SIM, ROBOT, world)) {
       assertThat(hardware).isInstanceOf(SimulatedHardware.class);
       assertThat(hardware.drive().modules())
           .containsExactlyElementsOf(world.drivetrainHardware().modules());
-      hardware.joint(PIVOT);
-      hardware.joint(ROLLER);
-      hardware.absoluteEncoder(PIVOT);
-      hardware.sensor(BUMPER);
-
-      assertThat(Objects.requireNonNull(world.joints()).position(ROLLER))
-          .as("the roller, unwired, simulated")
-          .isZero();
-      assertThat(world.sensors()).isNotNull();
+      assertThat(hardware.sensor(BUMPER)).isSameAs(world.sensors().io(BUMPER));
+      assertThat(hardware.absoluteEncoder(PIVOT)).isSameAs(world.joints().absoluteEncoder(PIVOT));
+      assertThat(hardware.joint(ROLLER)).isSameAs(world.joints().io(ROLLER));
+      assertThat(world.joints().position(ROLLER)).as("the roller, unwired, simulated").isZero();
+      assertThatIllegalArgumentException()
+          .isThrownBy(
+              () -> hardware.sensor(Objects.requireNonNull(sensors().get("arm lower limit"))))
+          .withMessage(
+              "arm lower limit is on arm's controller's limit input: arm reads it from its"
+                  + " controller");
       assertThat(hardware.pdh()).isSameAs(world.pdh());
       assertThat(hardware.cameras()).containsExactly(world.cameras());
-      assertThat(hardware.unwiredSensors()).isEmpty();
     }
   }
 

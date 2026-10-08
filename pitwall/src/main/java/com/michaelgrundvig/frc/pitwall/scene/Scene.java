@@ -9,13 +9,14 @@ import org.jspecify.annotations.Nullable;
  * shapes in them, grouped into {@link Layer}s the page can switch on and off. Pitwall knows nothing
  * of fields or robots: a scene is whatever its layers say.
  *
- * <pre>{@code
- * pitwall.scenes().add(Scene.named("world", "World")
- *     .layer(field)
- *     .layer(robot)
- *     .layer(rays, Visibility.OFF)
- *     .focus("robot"));
- * }</pre>
+ * {@snippet :
+ * scenes.add(
+ *     Scene.named("world", "World")
+ *         .layer(field)
+ *         .layer(robotLayer)
+ *         .layer(rays, Scene.Visibility.OFF)
+ *         .focus("robot"));
+ * }
  *
  * <p>The page offers a view of it once one is added, and only then: Pitwall without scenes shows no
  * such view. Its description goes to the page once, when it opens, and again only when a layer is

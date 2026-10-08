@@ -22,7 +22,6 @@ import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.SimulationTest;
 import frc.robot.lib.timing.RobotLoop;
-import frc.robot.subsystems.drive.ModuleIO;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -279,7 +278,8 @@ class DriveSimulationTest {
     DrivetrainControl drivetrain = Robots.SIM.drivetrain();
     DriveSimulation simulation =
         new DriveSimulation(body, Robots.SIM.definition().drivetrain(), SensorErrors.NONE);
-    for (ModuleIO module : simulation.modules()) {
+    for (int i = 0; i < 4; i++) {
+      ModuleIOSim module = simulation.moduleSim(i);
       module.configure(drivetrain.gains(), drivetrain.limits());
       module.setDriveVoltage(12);
     }

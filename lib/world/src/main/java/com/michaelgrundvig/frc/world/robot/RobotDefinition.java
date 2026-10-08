@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.world.robot;
 
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
@@ -203,8 +204,8 @@ public record RobotDefinition(
           throw new IllegalArgumentException(
               sensor.label()
                   + " is "
-                  + joint.label()
-                  + "'s own: re-wire it with its joint, "
+                  + possessive(joint.label())
+                  + " own: re-wire it with its joint, "
                   + (sensor instanceof Sensor.Switch onSwitch
                           && onSwitch.kind() instanceof Sensor.Switch.Limit limit
                       ? "limitSwitchOn(End." + limit.end().name() + ", ...)"
@@ -264,8 +265,8 @@ public record RobotDefinition(
   public RobotDefinition with(DrivetrainGeometry changed) {
     if (!changed.equals(drivetrain)) {
       throw new IllegalArgumentException(
-          name
-              + "'s drivetrain isn't this one: their modules, or where they sit, differ. Give its"
+          possessive(name)
+              + " drivetrain isn't this one: their modules, or where they sit, differ. Give its"
               + " own, re-wired, .wired(...), or re-tuned, .control(...)");
     }
     return RobotDefinitionBuilder.builder(this).drivetrain(changed).build();
@@ -438,18 +439,18 @@ public record RobotDefinition(
             missing(
                 joint.label(),
                 link.label() + (spins ? " has no mass, only its inertia" : " has no mass"),
-                (sags ? joint.label() + "'s gravity comes from its kG, and " : "")
+                (sags ? possessive(joint.label()) + " gravity comes from its kG, and " : "")
                     + link.label()
                     + (spins ? " adds only its own turning to " : " adds nothing to ")
-                    + joint.label()
-                    + "'s inertia",
+                    + possessive(joint.label())
+                    + " inertia",
                 Finding.Scope.SIMULATOR));
       } else if (link.mass().inertia().isZero()) {
         missing.add(
             missing(
                 joint.label(),
                 link.label() + " has mass but no inertia",
-                "its own turning adds nothing to " + joint.label() + "'s inertia",
+                "its own turning adds nothing to " + possessive(joint.label()) + " inertia",
                 Finding.Scope.SIMULATOR));
       }
       if (link.shapes().isEmpty()) {
@@ -501,7 +502,10 @@ public record RobotDefinition(
         missing.add(
             missing(
                 sensor.label(),
-                sensor.label() + "'s position on " + limit.joint().label() + " isn't known",
+                possessive(sensor.label())
+                    + " position on "
+                    + limit.joint().label()
+                    + " isn't known",
                 "it can stop " + limit.joint().label() + " but not home it",
                 Finding.Scope.ROBOT));
       }
@@ -588,10 +592,10 @@ public record RobotDefinition(
     }
     return missing(
         joint.label(),
-        joint.label()
+        possessive(joint.label())
             + (unfed.size() == 1
-                ? "'s motor controller " + unfed.get(0) + " has"
-                : "'s motor controllers " + String.join(", ", unfed) + " have")
+                ? " motor controller " + unfed.get(0) + " has"
+                : " motor controllers " + String.join(", ", unfed) + " have")
             + " no PDH channel",
         "which channel feeds each, and through what breaker, isn't checked: give each its own where"
             + " it's wired, .pdh(channel, breaker)",
@@ -634,7 +638,7 @@ public record RobotDefinition(
     if (math.gravityHeld(joint) > 1e-12) {
       return missing(
           joint.label(),
-          joint.label() + "'s kG is seeded from its mass, not tuned",
+          possessive(joint.label()) + " kG is seeded from its mass, not tuned",
           "it holds only as well as its links' mass and where it sits are right: tune its kG and"
               + " write it, withKg(...)",
           Finding.Scope.ROBOT);
@@ -702,6 +706,31 @@ public record RobotDefinition(
   }
 
   /**
+   * This robot's own joint, the one equal to a joint: the competition robot's {@code HOOD}, on its
+   * practice robot, with the practice robot's stops and places. A subsystem of the team's own reads
+   * its joint from it rather than restating it.
+   *
+   * @throws IllegalArgumentException for a joint the robot hasn't
+   */
+  public Joint own(Joint joint) {
+    int at = joints.indexOf(joint);
+    if (at < 0) {
+      throw new IllegalArgumentException(
+          name + " has no joint " + joint.label() + ": add it to the definition's joints");
+    }
+    return joints.get(at);
+  }
+
+  /**
+   * A condition about this robot's own joint, each place it names where this robot puts it: the
+   * competition robot's {@code PIVOT.atLeast(PIVOT_OUT)}, on its practice robot, from the practice
+   * robot's out. One about a sensor, as it is; one about a joint the robot hasn't, as it is.
+   */
+  public Condition own(Condition condition) {
+    return onOwn(joints, condition);
+  }
+
+  /**
    * Every interlock: each joint's own, from its block, then the robot's list. What the robot
    * enforces, and what the definition checks.
    */
@@ -748,28 +777,24 @@ public record RobotDefinition(
 
   /**
    * A condition about the robot's own joint, the one equal to its joint, a place it names where
-   * that joint puts it: {@code ELEVATOR.before(ELEVATOR_SCORE)} on a practice robot whose elevator
-   * scores lower is before its own. One about a sensor, as it is.
+   * that joint puts it: {@code ELEVATOR.atMost(ELEVATOR_SCORE)} on a practice robot whose elevator
+   * scores lower is at most its own. One about a sensor, as it is.
    */
   private static Condition onOwn(List<Joint> joints, Condition condition) {
     return switch (condition) {
       case Condition.At at -> onOwn(joints, at);
-      case Condition.AtLeast atLeast ->
-          ConditionAtLeastBuilder.builder(atLeast).joint(own(joints, atLeast.joint())).build();
-      case Condition.AtMost atMost ->
-          ConditionAtMostBuilder.builder(atMost).joint(own(joints, atMost.joint())).build();
-      case Condition.Past past -> {
-        Joint joint = own(joints, past.joint());
-        yield ConditionPastBuilder.builder(past)
+      case Condition.AtLeast atLeast -> {
+        Joint joint = own(joints, atLeast.joint());
+        yield ConditionAtLeastBuilder.builder(atLeast)
             .joint(joint)
-            .position(placed(joint, past.place(), past.position()))
+            .position(placed(joint, atLeast.place(), atLeast.position()))
             .build();
       }
-      case Condition.Before before -> {
-        Joint joint = own(joints, before.joint());
-        yield ConditionBeforeBuilder.builder(before)
+      case Condition.AtMost atMost -> {
+        Joint joint = own(joints, atMost.joint());
+        yield ConditionAtMostBuilder.builder(atMost)
             .joint(joint)
-            .position(placed(joint, before.place(), before.position()))
+            .position(placed(joint, atMost.place(), atMost.position()))
             .build();
       }
       case Condition.Between between -> {
@@ -818,8 +843,8 @@ public record RobotDefinition(
                 "\""
                     + interlock
                     + "\" is written twice: once is enough, in "
-                    + interlock.joint().label()
-                    + "'s block or the robot's interlocks"));
+                    + possessive(interlock.joint().label())
+                    + " block or the robot's interlocks"));
       }
     }
     return List.of();

@@ -46,6 +46,22 @@ def buildConstants = tasks.register("generateBuildConstants") {
                 : "UNKNOWN"
         def buildDate = quick ? "not stamped (-Pquick)" : now.format(fmt)
         def buildTime = quick ? 0L : now.toInstant().toEpochMilli()
+        // Each text as the inside of a Java string literal. A branch may be named anything git
+        // allows, a quote included, and its name must end no literal; a backslash is escaped too,
+        // so no text makes a Unicode escape either, and a control character is written in octal.
+        def text = { String value ->
+            value.collect { String c ->
+                c == "\\" || c == "\"" ? "\\" + c
+                        : (c < " " || c == "\u007f") ? String.format("\\%03o", (int) c.charAt(0))
+                        : c
+            }.join("")
+        }
+        def sha = text(git(["rev-parse", "HEAD"]) ?: "UNKNOWN")
+        def branch = text(git([
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD"
+        ]) ?: "UNKNOWN")
         def file = generatedDir.get().file("frc/robot/BuildConstants.java").asFile
         file.parentFile.mkdirs()
         file.text = """\
@@ -61,11 +77,11 @@ package frc.robot;
  * that nothing they generate from it has changed.
  */
 public final class BuildConstants {
-  public static final String MAVEN_NAME = stamp("${name}");
-  public static final String GIT_SHA = stamp("${git(["rev-parse", "HEAD"]) ?: "UNKNOWN"}");
-  public static final String GIT_DATE = stamp("${gitDateText}");
-  public static final String GIT_BRANCH = stamp("${git(["rev-parse", "--abbrev-ref", "HEAD"]) ?: "UNKNOWN"}");
-  public static final String BUILD_DATE = stamp("${buildDate}");
+  public static final String MAVEN_NAME = stamp("${text(name)}");
+  public static final String GIT_SHA = stamp("${sha}");
+  public static final String GIT_DATE = stamp("${text(gitDateText)}");
+  public static final String GIT_BRANCH = stamp("${branch}");
+  public static final String BUILD_DATE = stamp("${text(buildDate)}");
   public static final long BUILD_UNIX_TIME = stamp(${buildTime}L);
   public static final int DIRTY = stamp(${dirty});
 

@@ -1,5 +1,10 @@
 package com.michaelgrundvig.frc.world.field;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
+import io.avaje.json.JsonException;
+import io.avaje.jsonb.JsonType;
+import io.avaje.jsonb.Jsonb;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -43,6 +48,18 @@ public final class VenueFile {
   private static final Set<String> SIGMA_KEYS =
       Set.of("alongWallMeters", "heightMeters", "outOfWallMeters", "yawDegrees", "tiltDegrees");
 
+  /** Any JSON value: maps in the file's order, lists, text, numbers, true or false. */
+  private static final JsonType<Object> JSON = Jsonb.instance().type(Object.class);
+
+  /**
+   * Deeper nesting than this is refused before it's read: a field layout is five levels deep, and
+   * the reader recurses for each, so an upload nested thousands deep would overflow its stack.
+   */
+  static final int MAX_DEPTH = 64;
+
+  /** Text as a JSON string. */
+  private static final JsonType<String> TEXT = Jsonb.instance().type(String.class);
+
   private final List<String> problems = new ArrayList<>();
 
   private VenueFile() {}
@@ -54,7 +71,7 @@ public final class VenueFile {
    */
   public static Venue read(String text) {
     VenueFile reader = new VenueFile();
-    Object parsed = JsonText.parse(text);
+    Object parsed = parse(text);
     if (!(parsed instanceof Map<?, ?> top)) {
       throw new IllegalArgumentException("venue file: not a JSON object");
     }
@@ -78,7 +95,7 @@ public final class VenueFile {
    * @throws IllegalArgumentException if it isn't a WPILib layout, or doesn't make a venue file
    */
   public static Venue wrap(String layout, String name, Venue.Kind kind, String base) {
-    Object parsed = JsonText.parse(layout);
+    Object parsed = parse(layout);
     if (!(parsed instanceof Map<?, ?> top)
         || !(top.containsKey("field-tags") || top.containsKey("tags"))) {
       throw new IllegalArgumentException(
@@ -91,11 +108,11 @@ public final class VenueFile {
         "{\n  \"format\": "
             + Venue.FORMAT
             + ",\n  \"name\": "
-            + quoted(name)
+            + TEXT.toJson(name)
             + ",\n  \"kind\": "
-            + quoted(kind.name().toLowerCase(Locale.ROOT))
+            + TEXT.toJson(kind.name().toLowerCase(Locale.ROOT))
             + ",\n  \"base\": "
-            + quoted(base)
+            + TEXT.toJson(base)
             + ",\n  \"method\": \"unknown\",\n  \"layout\": "
             + layout.strip()
             + "\n}\n";
@@ -118,7 +135,7 @@ public final class VenueFile {
    */
   public static boolean bare(String text) {
     try {
-      return JsonText.parse(text) instanceof Map<?, ?> top
+      return parse(text) instanceof Map<?, ?> top
           && !top.containsKey("format")
           && (top.containsKey("field-tags") || top.containsKey("tags"));
     } catch (IllegalArgumentException e) {
@@ -126,26 +143,22 @@ public final class VenueFile {
     }
   }
 
-  /** Text as a JSON string. */
-  private static String quoted(String text) {
-    StringBuilder out = new StringBuilder("\"");
-    for (char c : text.toCharArray()) {
-      switch (c) {
-        case '"' -> out.append("\\\"");
-        case '\\' -> out.append("\\\\");
-        case '\n' -> out.append("\\n");
-        case '\r' -> out.append("\\r");
-        case '\t' -> out.append("\\t");
-        default -> {
-          if (c < 0x20) {
-            out.append(String.format(Locale.ROOT, "\\u%04x", (int) c));
-          } else {
-            out.append(c);
-          }
-        }
-      }
+  /**
+   * The value JSON text holds.
+   *
+   * @throws IllegalArgumentException if it isn't JSON, saying where, or nests deeper than {@link
+   *     #MAX_DEPTH}
+   */
+  private static @Nullable Object parse(String text) {
+    if (depth(text) > MAX_DEPTH) {
+      throw new IllegalArgumentException(
+          "not JSON a venue file can be: nested deeper than " + MAX_DEPTH + " levels");
     }
-    return out.append('"').toString();
+    try {
+      return JSON.fromJson(text);
+    } catch (JsonException e) {
+      throw new IllegalArgumentException("not JSON: " + e.getMessage(), e);
+    }
   }
 
   private @Nullable Venue venue(Map<?, ?> top, String text) {
@@ -249,20 +262,22 @@ public final class VenueFile {
       return null;
     }
     String which = "tag " + (int) id;
-    Map<?, ?> translation = map(pose.get("translation"), which + "'s translation");
-    Map<?, ?> rotation = map(pose.get("rotation"), which + "'s rotation");
+    Map<?, ?> translation = map(pose.get("translation"), possessive(which) + " translation");
+    Map<?, ?> rotation = map(pose.get("rotation"), possessive(which) + " rotation");
     Map<?, ?> quaternion =
-        rotation == null ? null : map(rotation.get("quaternion"), which + "'s quaternion");
+        rotation == null
+            ? null
+            : map(rotation.get("quaternion"), possessive(which) + " quaternion");
     if (translation == null || quaternion == null) {
       return null;
     }
-    double x = number(translation, "x", which + "'s x", Double.NaN);
-    double y = number(translation, "y", which + "'s y", Double.NaN);
-    double z = number(translation, "z", which + "'s z", Double.NaN);
-    double w = number(quaternion, "W", which + "'s quaternion W", Double.NaN);
-    double qx = number(quaternion, "X", which + "'s quaternion X", Double.NaN);
-    double qy = number(quaternion, "Y", which + "'s quaternion Y", Double.NaN);
-    double qz = number(quaternion, "Z", which + "'s quaternion Z", Double.NaN);
+    double x = number(translation, "x", possessive(which) + " x", Double.NaN);
+    double y = number(translation, "y", possessive(which) + " y", Double.NaN);
+    double z = number(translation, "z", possessive(which) + " z", Double.NaN);
+    double w = number(quaternion, "W", possessive(which) + " quaternion W", Double.NaN);
+    double qx = number(quaternion, "X", possessive(which) + " quaternion X", Double.NaN);
+    double qy = number(quaternion, "Y", possessive(which) + " quaternion Y", Double.NaN);
+    double qz = number(quaternion, "Z", possessive(which) + " quaternion Z", Double.NaN);
     if (Double.isNaN(x + y + z + w + qx + qy + qz)) {
       return null;
     }
@@ -272,7 +287,7 @@ public final class VenueFile {
     }
     double norm = Math.sqrt(w * w + qx * qx + qy * qy + qz * qz);
     if (Math.abs(norm - 1) > 1e-3) {
-      problems.add(which + "'s quaternion isn't a rotation (length " + norm + ")");
+      problems.add(possessive(which) + " quaternion isn't a rotation (length " + norm + ")");
       return null;
     }
     return new FieldTag(
@@ -281,7 +296,7 @@ public final class VenueFile {
   }
 
   private Iterable<? extends Map.Entry<?, ?>> entries(Map<?, ?> top, String key) {
-    if (top.get(key) == null) {
+    if (!top.containsKey(key)) {
       return List.of();
     }
     Map<?, ?> map = map(top.get(key), key);
@@ -311,28 +326,52 @@ public final class VenueFile {
 
   private double number(Map<?, ?> map, String key, String what, double ifMissing) {
     Object value = map.get(key);
-    if (value == null && !Double.isNaN(ifMissing)) {
+    if (!map.containsKey(key) && !Double.isNaN(ifMissing)) {
       return ifMissing;
     }
-    if (value instanceof Double number) {
-      return number;
+    if (value instanceof Number number && Double.isFinite(number.doubleValue())) {
+      return number.doubleValue();
     }
     problems.add(
-        (key.equals(what) ? key : what + "'s " + key)
-            + (value == null ? " is missing" : " isn't a number"));
+        (key.equals(what) ? key : possessive(what) + " " + key)
+            + (map.containsKey(key) ? " isn't a number" : " is missing"));
     return Double.NaN;
   }
 
   private @Nullable String text(
       Map<?, ?> map, String key, String what, @Nullable String ifMissing) {
     Object value = map.get(key);
-    if (value == null && ifMissing != null) {
+    if (!map.containsKey(key) && ifMissing != null) {
       return ifMissing;
     }
     if (value instanceof String text) {
       return text;
     }
-    problems.add(what + (value == null ? " is missing" : " isn't text"));
+    problems.add(what + (map.containsKey(key) ? " isn't text" : " is missing"));
     return null;
+  }
+
+  /** How deep the text's lists and objects nest, outside its strings. */
+  private static int depth(String text) {
+    int depth = 0;
+    int deepest = 0;
+    boolean inString = false;
+    for (int i = 0; i < text.length(); i++) {
+      char c = text.charAt(i);
+      if (inString) {
+        if (c == '\\') {
+          i++;
+        } else if (c == '"') {
+          inString = false;
+        }
+      } else if (c == '"') {
+        inString = true;
+      } else if (c == '[' || c == '{') {
+        deepest = Math.max(deepest, ++depth);
+      } else if (c == ']' || c == '}') {
+        depth--;
+      }
+    }
+    return deepest;
   }
 }

@@ -15,11 +15,11 @@ import static org.wpilib.units.Units.Rotations;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
 import com.michaelgrundvig.frc.world.robot.Configuration;
+import com.michaelgrundvig.frc.world.robot.Driven.AbsoluteEncoder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
-import com.michaelgrundvig.frc.world.robot.MechanismControl.Homing;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.Part;
@@ -44,12 +44,14 @@ import org.wpilib.math.geometry.Translation3d;
 final class ExampleRobot {
   private ExampleRobot() {}
 
+  // @start region=intake
   static final Position PIVOT_IN = Position.degrees("in", 1.5);
   static final Position PIVOT_OUT = Position.degrees("out", 130);
 
   static final Joint.Revolute PIVOT =
       Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
-          .range(Range.degrees(0, 135), PIVOT_IN) // its hard stops, and where it rests
+          .range(Range.degrees(0, 135))
+          .rest(PIVOT_IN) // its hard stops, and where it rests
           .carries(
               Link.box(
                   "intake arm", new Translation3d(0, 0, 0.2), new Translation3d(0.05, 0.55, 0.36)))
@@ -67,9 +69,16 @@ final class ExampleRobot {
       Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35)) // it rides on the pivot's end
           .outputs(INTAKING, OUTTAKING)
           .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31).pdh(5, Amps.of(40)))
+          // @start region=runs-only-when
           // The roller runs only once the pivot is out of the frame.
           .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))
+          // @end region=runs-only-when
           .control(MechanismControl.velocity(0.02));
+
+  static final Configuration INTAKE =
+      Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
+
+  // @end region=intake
 
   /** The claw's beam break, on the pivot's arm, and a rangefinder looking into the hopper. */
   static final Sensor.Switch CLAW_BEAM =
@@ -84,7 +93,8 @@ final class ExampleRobot {
   /** A hood zeroed level, raised as its angle grows: its kG holds it, along one cosine. */
   static final Joint.Revolute HOOD =
       Joint.pivot("hood", Part.CHASSIS, new Translation3d(-0.2, 0, 0.55), Joint.PITCH_UP)
-          .range(Range.degrees(0, 40), HOOD_DOWN)
+          .range(Range.degrees(0, 40))
+          .rest(HOOD_DOWN)
           .positions(HOOD_DOWN)
           .motor(Motor.KRAKEN_X44, Gearing.of(50), TALON_FX.can(40).pdh(6, Amps.of(30)))
           .absoluteEncoder(CANCODER.can(41).offset(Rotations.of(-0.3)))
@@ -93,10 +103,14 @@ final class ExampleRobot {
   static final Position ELEVATOR_DOWN = Position.of("down", Inches.of(0));
   static final Position ELEVATOR_CLEAR = Position.of("clear", Inches.of(32));
 
-  /** An elevator, homed against its lower hard stop: nothing tells it where it is at startup. */
+  /**
+   * An elevator whose CANcoder is geared to its drum, so it knows where it is at startup: its 1.2 m
+   * of travel turn its 0.75 in drum ten times, and the CANcoder less than once.
+   */
   static final Joint.Prismatic ELEVATOR =
       Joint.elevator("elevator", Part.CHASSIS, new Translation3d(0, 0, 0.1))
-          .range(Range.meters(0, 1.2), ELEVATOR_DOWN)
+          .range(Range.meters(0, 1.2))
+          .rest(ELEVATOR_DOWN)
           .positions(ELEVATOR_DOWN, ELEVATOR_CLEAR)
           .motors(
               Motor.KRAKEN_X60,
@@ -104,24 +118,29 @@ final class ExampleRobot {
               Inches.of(0.75),
               TALON_FX.can(20).pdh(0, Amps.of(40)),
               TALON_FX.can(21).clockwise().pdh(1, Amps.of(40)))
-          .control(
-              MechanismControl.position(30)
-                  .withKg(0.35)
-                  .withHoming(Homing.toHardStop(Homing.Stop.LOWER)));
+          // Its CANcoder turns once for twelve turns of the drum: less than once over its travel.
+          .absoluteEncoder(
+              AbsoluteEncoder.of().ratio(1.0 / 12).on(CANCODER.can(24).offset(Rotations.of(0.31))))
+          .control(MechanismControl.position(30).withKg(0.35));
 
   static final Position ARM_STOWED = Position.degrees("stowed", -45);
   static final Position ARM_SCORING = Position.degrees("scoring", 120);
 
-  /** An arm on the elevator, zeroed straight up and tipping forward as its angle grows. */
+  /**
+   * An arm on the elevator, standing straight up at its zero and swinging back as its angle grows.
+   */
   static final Joint.Revolute ARM =
       Joint.pivot("arm", ELEVATOR, new Translation3d(0.1, 0, 0.3), Joint.PITCH_UP)
-          .range(Range.degrees(-60, 150), ARM_STOWED)
+          .range(Range.degrees(-60, 150))
+          .rest(ARM_STOWED)
           .positions(ARM_STOWED, ARM_SCORING)
           .motor(Motor.KRAKEN_X60, Gearing.of(60), TALON_FX.can(22).pdh(2, Amps.of(40)))
           .absoluteEncoder(CANCODER.can(23).offset(Rotations.of(0.12)))
+          // @start region=keeps-out
           // The arm keeps out of the bumper's band while the elevator is too low to clear it.
           .keepsOut(Range.degrees(-10, 30))
           .when(ELEVATOR.atMost(Inches.of(32)))
+          // @end
           .control(MechanismControl.position(30).withKg(0.35, Degrees.of(-90)));
 
   static final Output FEEDER_FEEDING = Output.rpm("feeding", 1000);
@@ -149,6 +168,7 @@ final class ExampleRobot {
               TALON_FX.can(53).clockwise().pdh(10, Amps.of(40)))
           .control(MechanismControl.velocity(0.02).coasting());
 
+  // @start region=configurations
   static final Configuration FEEDING =
       Configuration.of("feeding", FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING));
 
@@ -156,8 +176,7 @@ final class ExampleRobot {
       Configuration.of(
           "stowed", PIVOT.at(PIVOT_IN), ELEVATOR.at(ELEVATOR_DOWN), ARM.at(ARM_STOWED));
 
-  static final Configuration INTAKE =
-      Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
+  // @end
 
   /** The template's robot's back-left camera, as Robots.java mounts it, 21 in up. */
   static final CameraConfig BACK_LEFT = Robots.SIM.definition().cameras().get(2);
@@ -182,6 +201,7 @@ final class ExampleRobot {
    * of what it changes, so a regear of the competition robot's pivot reaches it, and the same code
    * sends its pivot to its own out.
    */
+  // @start region=practice
   static final RobotConfig PRACTICE =
       COMPETITION
           .named("practice")
@@ -199,4 +219,5 @@ final class ExampleRobot {
   static List<RobotConfig> all() {
     return List.of(COMPETITION, PRACTICE);
   }
+  // @end
 }

@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.Percent;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Seconds;
 
@@ -96,7 +97,7 @@ class JointMovesSimTest {
     double full = runToEnd(pivot.goTo(PIVOT_OUT), 3);
     sim.scheduler.schedule(pivot.goTo(PIVOT_IN));
     sim.run(2);
-    Move half = pivot.goTo(PIVOT_OUT).at(0.5);
+    Move half = pivot.goTo(PIVOT_OUT).atSpeed(Percent.of(50));
 
     double slower = runToEnd(half, 3);
 
@@ -493,25 +494,10 @@ class JointMovesSimTest {
   }
 
   @Test
-  void whatCantBeAskedIsRefusedWhenWritten() {
-    assertThatThrownBy(() -> pivot.goTo(Meters.of(1)))
-        .hasMessage("pivot turns: send it to an angle");
-    assertThatThrownBy(() -> elevator.goTo(Degrees.of(1)))
-        .hasMessage("elevator slides: send it to a distance");
-    assertThatThrownBy(() -> pivot.goTo(PIVOT_OUT).at(1.5))
-        .hasMessage("pivot → out: a share of the cruise is above 0 and at most 1, not 1.5");
-    assertThatThrownBy(() -> roller.run(ROLLER_INTAKING).at(0.5))
-        .hasMessage("roller: intaking isn't a move to a place: it has no profile");
-    assertThatThrownBy(() -> roller.run(ROLLER_INTAKING).within(Seconds.of(1)))
-        .hasMessage(
-            "roller: intaking never ends on its own, so it has no deadline: use withTimeout");
-  }
-
-  @Test
   void aJointThatIsntTheRobotsOrIsntDrivenHasNoMechanism() {
     assertThatThrownBy(
             () -> sim.joints.of(JointRevoluteBuilder.builder(PIVOT).label("stranger").build()))
-        .hasMessage("stranger isn't one of joints's joints");
+        .hasMessage("stranger isn't one of joints' joints");
     assertThat(sim.joints.all()).containsExactly(pivot, roller, elevator, turret);
   }
 

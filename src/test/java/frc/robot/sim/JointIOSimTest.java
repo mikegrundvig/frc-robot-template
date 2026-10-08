@@ -49,24 +49,26 @@ class JointIOSimTest {
   /** An arm with no mass, its kG tuned: 0.4 V, its weight pulling hardest at its zero. */
   private static final Joint.Revolute BARE_ARM =
       Joint.pivot("bare arm", Part.CHASSIS, new Translation3d(0.1, 0, 0.4), Joint.PITCH_UP)
-          .range(Range.degrees(-120, 90), Degrees.of(0))
+          .range(Range.degrees(-120, 90))
+          .rest(Degrees.of(0))
           .motor(Motor.KRAKEN_X60, Gearing.of(50))
           .control(
               MechanismControl.position(30)
                   .withKd(1)
                   .withKg(0.4)
-                  .withHoming(MechanismControl.Homing.assumeAtReference()));
+                  .withHoming(MechanismControl.Homing.assumeAtRest()));
 
   /** An elevator with no mass, its kG tuned: 0.5 V all along it. */
   private static final Joint.Prismatic BARE_LIFT =
       Joint.elevator("bare lift", Part.CHASSIS, new Translation3d(-0.2, 0, 0.1))
-          .range(Range.meters(0, 1), Meters.of(0))
+          .range(Range.meters(0, 1))
+          .rest(Meters.of(0))
           .motor(Motor.KRAKEN_X60, Gearing.of(10), Inches.of(1))
           .control(
               MechanismControl.position(60)
                   .withKd(2)
                   .withKg(0.5)
-                  .withHoming(MechanismControl.Homing.assumeAtReference()));
+                  .withHoming(MechanismControl.Homing.assumeAtRest()));
 
   private static final RobotDefinition MASSLESS =
       RobotDefinitionBuilder.builder(Robots.SIM.definition())
@@ -95,8 +97,9 @@ class JointIOSimTest {
    * it and its motor controller running a control of its own, and says where it ends.
    */
   private static double held(Joint joint, MechanismControl control, double target) {
-    JointSimulation simulation = new JointSimulation(MASSLESS.with(joint).math());
-    JointIO io = simulation.add(joint.retuned(old -> control));
+    JointSimulation simulation = new JointSimulation(MASSLESS.with(joint));
+    JointIO io = simulation.io(joint);
+    io.retune(control);
     simulation.place(joint, target);
     io.setPosition(target, 0, 0);
     for (int i = 0; i < 100; i++) {
@@ -112,6 +115,7 @@ class JointIOSimTest {
   private static MechanismControl pivotControl(Optional<Double> kG) {
     MechanismControl seeded = control(30, 1, profile(8, 30));
     return MechanismControl.builder()
+        .loop(MechanismControl.Loop.POSITION)
         .gains(MechanismControl.Gains.builder().kP(30).kI(0).kD(1).kS(0).kG(kG).build())
         .currentLimits(seeded.currentLimits())
         .neutralMode(seeded.neutralMode())
@@ -131,7 +135,7 @@ class JointIOSimTest {
     sim.updateInputs(inputs);
 
     assertThat(inputs.connected).isTrue();
-    assertThat(inputs.position).isEqualTo(PIVOT.reference());
+    assertThat(inputs.position).isEqualTo(PIVOT.restPosition());
     assertThat(inputs.velocity).isZero();
     assertThat(inputs.unconfigured).isEmpty();
   }
@@ -281,8 +285,8 @@ class JointIOSimTest {
 
     double holding = held(BARE_ARM, tuned, target);
     double sagging = held(BARE_ARM, tuned.withKg(0), target);
-    JointSimulation simulation = new JointSimulation(MASSLESS.math());
-    simulation.add(BARE_ARM).stop();
+    JointSimulation simulation = new JointSimulation(MASSLESS);
+    simulation.io(BARE_ARM).stop();
     simulation.place(BARE_ARM, target);
     for (int i = 0; i < 25; i++) {
       simulation.step(STEP);
@@ -365,7 +369,7 @@ class JointIOSimTest {
             control ->
                 control
                     .withKg(0.4, Degrees.of(-120))
-                    .withHoming(MechanismControl.Homing.assumeAtReference()));
+                    .withHoming(MechanismControl.Homing.assumeAtRest()));
     RobotDefinition robot =
         RobotDefinitionBuilder.builder(MASSLESS).joints(List.of(turned)).build();
 
@@ -374,5 +378,57 @@ class JointIOSimTest {
         .withMessageStartingWith(
             "bare arm's gravity angle, -120°, is more than a quarter turn from its zero, past"
                 + " Phoenix's gravity offset of ±0.25 rotations");
+  }
+
+  /**
+   * Restarted, its motor controller says so the next time it's read, and only then; it counts from
+   * 0, its motor's own count being all it reads; and it's neutral until it's asked again.
+   */
+  @Test
+  void aRestartedControllerSaysSoOnceCountsFromZeroAndGoesNeutral() {
+    JointIOSim sim = joint(PIVOT, control(30, 1, profile(8, 30)));
+    sim.place(Math.toRadians(60));
+    sim.setVoltage(4);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+
+    sim.restart();
+    sim.updateInputs(inputs);
+    boolean said = inputs.restarted;
+    double read = inputs.position;
+    run(sim, 0.2);
+    sim.updateInputs(inputs);
+
+    assertThat(said).isTrue();
+    assertThat(read).isZero();
+    assertThat(inputs.restarted).as("once").isFalse();
+    assertThat(Math.toDegrees(sim.position()))
+        .as("not pushed on at 4 V: braking, it sags under its weight")
+        .isLessThan(60.01);
+  }
+
+  /**
+   * Silent, off the bus, its motor controller answers nothing, its last readings standing, and
+   * hears nothing, so it goes neutral; brought back, it answers again.
+   */
+  @Test
+  void aSilentControllerAnswersNothingAndHearsNothing() {
+    JointIOSim sim = joint(PIVOT, control(30, 1, profile(8, 30)));
+    sim.place(Math.toRadians(60));
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    sim.updateInputs(inputs);
+
+    sim.silence(true);
+    sim.setVoltage(4);
+    run(sim, 0.2);
+    sim.updateInputs(inputs);
+    boolean answered = inputs.connected;
+    double read = inputs.position;
+    sim.silence(false);
+    sim.updateInputs(inputs);
+
+    assertThat(answered).isFalse();
+    assertThat(Math.toDegrees(read)).as("its last reading").isCloseTo(60, within(1e-9));
+    assertThat(Math.toDegrees(sim.position())).as("not pushed at 4 V").isLessThan(60.01);
+    assertThat(inputs.connected).as("back").isTrue();
   }
 }

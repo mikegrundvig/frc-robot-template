@@ -19,9 +19,8 @@
  * com.michaelgrundvig.frc.world.robot.Configuration}: several joints, each at a named place), and
  * joint-to-joint interlocks ({@link com.michaelgrundvig.frc.world.robot.Interlock}, on {@link
  * com.michaelgrundvig.frc.world.robot.Condition}s: a joint at a named place, at least or at most a
- * position, between two, or past or before one from where it rests). These are facts about the
- * robot, where its intake is out and that its roller mustn't run stowed, which every reader reads
- * alike.
+ * position, or between two). These are facts about the robot, where its intake is out and that its
+ * roller mustn't run stowed, which every reader reads alike.
  *
  * <p>It's a description, read by everything that needs to know the robot: the mechanisms' code,
  * localization (where the wheels and sensors sit), the simulator (all of it), Pitwall, and the

@@ -45,7 +45,7 @@ import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The helper's Phoenix settings for 2611's 2026 robot ({@link Team2611}) against what its code
- * configures. Citations are to {@code ~/src/2611-Vectors/2026-Beta-Bot} at 6a5da76, under {@code
+ * configures. Citations are to {@code 2611-Vectors/2026-Beta-Bot} at 6a5da76, under {@code
  * src/main/java/frc/robot/}.
  *
  * <p>Every ratio here is the definition's gearing, a {@code double}, never typed again: 2611's 2025
@@ -232,7 +232,7 @@ class Team2611PhoenixTest {
   void theSwerveModulesAreTunersOwn() {
     DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     Sensor.Encoder cancoder =
-        Sensor.Encoder.absolute("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
+        JointFixtures.absoluteEncoder("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     RobotMath corner = corner(BODY, frontLeft, cancoder);
     double driveGearing = Team2611.MODULES.driveGearing().ratio();
     double steerGearing = Team2611.MODULES.steerGearing().ratio();

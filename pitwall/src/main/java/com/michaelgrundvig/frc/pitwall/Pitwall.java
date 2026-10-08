@@ -23,10 +23,11 @@ import org.wpilib.util.Alert;
 /**
  * Pitwall in a robot program, in two lines:
  *
- * <pre>{@code
+ * {@snippet :
  * pitwall = Pitwall.start(robot.name()); // after Logger.start(), before the mechanisms
- * pitwall.periodic(); // first thing in robotPeriodic()
- * }</pre>
+ * ...
+ * pitwall.periodic(); // first thing in the robot's loop
+ * }
  *
  * <p>That serves the page (http://robot.local:5820, or localhost in the simulator), shows the
  * standard status (which robot and code, the mode, the battery), tunes, runs actions, and runs
@@ -56,7 +57,6 @@ public final class Pitwall implements AutoCloseable {
   private final Actions actions;
   private final Experiments experiments;
   private final Devices devices;
-  private final Notices notices = new Notices();
   private final Scenes scenes;
   private final TunableTee tee;
   private final Page page;
@@ -140,16 +140,7 @@ public final class Pitwall implements AutoCloseable {
     scenes = new Scenes(RobotController::getTime, System.out::println);
     page =
         new Page(
-            status,
-            actions,
-            tuning,
-            tee,
-            experiments,
-            Pitwall::mode,
-            simulated,
-            devices,
-            notices,
-            scenes);
+            status, actions, tuning, tee, experiments, Pitwall::mode, simulated, devices, scenes);
     // A page whose stream closes can't keep an experiment it started going, or drive a joystick.
     // The page's state is compared at most 20 times a second, on the robot's clock.
     broadcaster =
@@ -267,20 +258,10 @@ public final class Pitwall implements AutoCloseable {
 
   /**
    * The devices the page's Pit view shows a card for, each ending in what can be done about it. Add
-   * them here: {@code devices().add(Devices.Device.named("vision-front", "Coprocessor",
-   * coprocessor::card))}.
+   * them here: {@code devices().add(Devices.Device.named("venue", "Field", pit::card))}.
    */
   public Devices devices() {
     return devices;
-  }
-
-  /**
-   * What the robot has to tell whoever is at the page, right now: shown in the state bar on every
-   * view, and atop Pit. Add a source here: {@code notices().add("Coprocessors",
-   * coprocessors::notice)}.
-   */
-  public Notices notices() {
-    return notices;
   }
 
   /**
@@ -342,7 +323,6 @@ public final class Pitwall implements AutoCloseable {
     experiments.periodic(gate);
     status.periodic(broadcaster.watched());
     devices.periodic(broadcaster.watched());
-    notices.periodic(broadcaster.watched());
     if (wasEnabled && !enabled) {
       report("", tuning.report());
     }

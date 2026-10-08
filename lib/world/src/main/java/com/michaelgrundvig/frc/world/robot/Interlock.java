@@ -1,18 +1,22 @@
 package com.michaelgrundvig.frc.world.robot;
 
-import com.michaelgrundvig.frc.world.config.Checks;
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
  * An interlock: what one joint may do, by where another is or what a sensor reads. Each is one of
- * two shapes, written from the joint it restricts:
+ * two shapes, written from the joint it restricts, in its block, or in the robot's definition for
+ * one its block can't name yet ({@code Interlock.that(ELEVATOR).keepsOut(...).when(...)}). A roller
+ * that runs only with the pivot out, in the roller's block:
  *
- * {@snippet :
- * Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))   // only with the pivot out
- * Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.atMost(Inches.of(32)))
- * }
+ * {@snippet class=frc.robot.examples.ExampleRobot region=runs-only-when}
+ *
+ * <p>An arm kept out of the bumper's band while the elevator is too low, in the arm's:
+ *
+ * {@snippet class=frc.robot.examples.ExampleRobot region=keeps-out}
  *
  * <p>Interlocks are facts about the robot, in its definition, enforced beneath every command: no
  * command, binding, auto or button skips one. They speak only of the robot's own joints and
@@ -57,9 +61,7 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
   @ConfigRecord
   record RunsOnlyWhen(Joint joint, Condition condition) implements Interlock {
     public RunsOnlyWhen {
-      Checks.on(RunsOnlyWhen.class, joint.label())
-          .check("condition", () -> notAnother(joint, condition))
-          .orThrow();
+      Places.refuse(notAnother(joint, condition));
     }
 
     /** Starts describing the interlock, one named value at a time. */
@@ -86,10 +88,7 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
   @ConfigRecord
   record KeepsOut(Joint joint, Range region, Condition condition) implements Interlock {
     public KeepsOut {
-      Checks.on(KeepsOut.class, joint.label())
-          .check("condition", () -> notAnother(joint, condition))
-          .check("region", () -> notPartOf(joint, region))
-          .orThrow();
+      Places.refuse(notAnother(joint, condition), notPartOf(joint, region));
     }
 
     /** Starts describing the interlock, one named value at a time. */
@@ -187,7 +186,8 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
 
   /**
    * Why a condition can't restrict a joint, or null when it can: one on a joint must be about
-   * another joint, where it is or how fast it runs, not one of its named outputs. Any sensor's can.
+   * another joint, where it is or how fast it runs, not one of its named outputs, nor exactly at
+   * one of its positions, which the joint, measured, never is. Any sensor's can.
    */
   private static @Nullable String notAnother(Joint joint, Condition given) {
     if (given instanceof Condition.UpToSpeed upToSpeed) {
@@ -203,14 +203,45 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
           + " can't be held by where it is itself: limit it by its range, or an interlock on another"
           + " joint";
     }
-    if (condition instanceof Condition.At at && at.isOutput()) {
-      return "an interlock speaks of where a joint is, or how fast it runs, and "
+    if (condition instanceof Condition.At at) {
+      String other = at.joint().label();
+      if (at.isOutput()) {
+        return "an interlock speaks of where a joint is, or how fast it runs, and "
+            + at.name()
+            + " is "
+            + possessive(other)
+            + " output: say the speed it must reach, "
+            + other
+            + ".upToSpeed(...)";
+      }
+      // The robot judges it against where the joint is measured, which is never exactly a place.
+      boolean revolute = at.joint() instanceof Joint.Revolute;
+      String of = revolute ? "Degrees.of(...)" : "Inches.of(...)";
+      return at
+          + " holds only with "
+          + other
+          + " exactly at "
           + at.name()
-          + " is "
-          + at.joint().label()
-          + "'s output: say the speed it must reach, "
-          + at.joint().label()
-          + ".atLeast(...)";
+          + ", "
+          + Places.shownAt(revolute, at.joint().position(at.name()).value())
+          + ", which a measured position never is, so the interlock would never hold: say the"
+          + " edge where the parts clear, "
+          + other
+          + ".atLeast("
+          + of
+          + ") or "
+          + other
+          + ".atMost("
+          + of
+          + "), or a band around "
+          + at.name()
+          + ", "
+          + other
+          + ".between("
+          + of
+          + ", "
+          + of
+          + ")";
     }
     return null;
   }
@@ -235,13 +266,13 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
     String rangeShown =
         Places.shownAt(revolute, range.lower()) + " to " + Places.shownAt(revolute, range.upper());
     if (region.upper() <= range.lower() || region.lower() >= range.upper()) {
-      return regionShown + " is outside " + joint.label() + "'s range, " + rangeShown;
+      return regionShown + " is outside " + possessive(joint.label()) + " range, " + rangeShown;
     }
     if (region.lower() <= range.lower() && region.upper() >= range.upper()) {
       return regionShown
           + " is all of "
-          + joint.label()
-          + "'s range, "
+          + possessive(joint.label())
+          + " range, "
           + rangeShown
           + ": it would have nowhere to be";
     }

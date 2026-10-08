@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.localization;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
@@ -13,6 +14,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -169,7 +171,7 @@ public final class LocalizationService {
    *     can put the robot
    * @param robot what the robot is: its wheels, its IMUs, and its cameras' mounts
    * @param kinematics how the drivetrain's wheels move the robot: {@link SwerveKinematicsModel} for
-   *     the robot's swerve modules, {@link DifferentialKinematicsModel} for a tank drive
+   *     the robot's swerve modules
    * @param config how the estimator weighs its sources
    * @param loopSeconds how long one robot loop is
    */
@@ -198,7 +200,6 @@ public final class LocalizationService {
    * @param terrain the ground the robot drives on: a tilt it explains keeps the wheels trusted
    * @param robot what the robot is: its wheels, its IMUs, and its cameras' mounts
    * @param loopSeconds how long one robot loop is
-   * @throws IllegalArgumentException for a robot it can't take ({@link #problems})
    */
   public LocalizationService(
       PoseEstimator estimator,
@@ -209,10 +210,6 @@ public final class LocalizationService {
       double loopSeconds) {
     if (!(loopSeconds > 0) || Double.isInfinite(loopSeconds)) {
       throw new IllegalArgumentException("a loop takes some time: " + loopSeconds);
-    }
-    String refused = problems(robot);
-    if (refused != null) {
-      throw new IllegalArgumentException(refused);
     }
     this.estimator = estimator;
     this.kinematics = kinematics;
@@ -237,7 +234,7 @@ public final class LocalizationService {
     }
     attitudes = new AttitudeHistory(loops(ATTITUDE_SECONDS, loopSeconds));
     math = robot.math();
-    jointPositions = new JointHistory(math.references(), loops(ATTITUDE_SECONDS, loopSeconds));
+    jointPositions = new JointHistory(math.rests(), loops(ATTITUDE_SECONDS, loopSeconds));
     recentYawRates = new double[loops(RECENT_TURNING_SECONDS, loopSeconds)];
     estimate = estimator.estimate();
     motion =
@@ -245,23 +242,29 @@ public final class LocalizationService {
   }
 
   /**
-   * Why localization can't take a robot, or null when it can: treads said to grip harder than the
-   * slip check can tell from a collision. A robot's configuration asks this as it's built, before
-   * anything of the robot is made.
+   * What localization doubts of a robot, said as it starts: treads said to grip at or past the jolt
+   * the slip check calls a whole collision, where it can't tell a slide from a collision.
    */
-  public static @Nullable String problems(RobotDefinition robot) {
-    List<String> problems = new ArrayList<>();
+  public static List<Finding> doubts(RobotDefinition robot) {
     double grip = robot.drivetrain().wheelCoefficientOfFriction();
     double most = SlipCheck.Settings.DEFAULTS.joltMetersPerSecSq() / ImuReadings.STANDARD_GRAVITY;
-    if (!(grip < most)) {
-      problems.add(
-          String.format(
-              "the treads' grip, %.3g, is more than tread has: the slip check tells a slide from a"
-                  + " collision only under %.3g. Give the tread's own, about 1.0 worn and 1.3"
-                  + " new; a path planner's friction is a tuning value, not the tread's",
-              grip, most));
+    if (grip < most) {
+      return List.of();
     }
-    return problems.isEmpty() ? null : String.join("; ", problems);
+    return List.of(
+        Finding.doubt(
+            robot.name(),
+            String.format(
+                Locale.ROOT,
+                "the treads' grip, %.3g, is past %.3g, above which the slip check can't tell a"
+                    + " slide from a collision: a jolt up to %.3g g may be the floor's, so it's"
+                    + " none, and a hit under it is seen only as a slide. Give the tread's own,"
+                    + " about 1.0 worn and 1.3 new, from a pull test (docs/characterization.md,"
+                    + " tread friction); a path planner's friction is a tuning value, not the"
+                    + " tread's",
+                grip,
+                most,
+                grip)));
   }
 
   /**

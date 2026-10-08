@@ -1,18 +1,16 @@
 package frc.robot.subsystems.mechanisms;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
 import com.michaelgrundvig.frc.world.config.Finding;
-import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
-import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
-import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.lib.rev.RevMechanism;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -29,8 +27,8 @@ import java.util.Optional;
  * same settings ({@link JointIOTalon}, {@link JointIOSpark}).
  *
  * <p>A joint whose motors aren't wired runs in the simulator alone, on the controller its motor
- * runs on ({@link #standIn}): it's checked on that, so a NEO Vortex isn't refused for what only a
- * TalonFX can't take.
+ * runs on, its plan's stand-in ({@link MechanismWiring.Controller#standIn}): it's checked on that,
+ * as the simulator runs it, so a NEO Vortex isn't refused for what only a TalonFX can't take.
  */
 public final class ControllerSettings {
   private ControllerSettings() {}
@@ -66,7 +64,7 @@ public final class ControllerSettings {
    */
   private static List<String> notes(RobotMath math, Joint joint) {
     MechanismControl control = control(joint);
-    return switch (controllers(math, joint).get(0).controller()) {
+    return switch (plan(math, joint, control).controllers().get(0).controller()) {
       case TALON_FX, TALON_FXS -> talon(math, joint, control).notes();
       case SPARK_MAX, SPARK_FLEX -> spark(math, joint, control).notes();
     };
@@ -74,13 +72,13 @@ public final class ControllerSettings {
 
   /**
    * How the program drives a joint, for a control, its block's or as the pit tunes it: with the
-   * controllers its block names, or its motor's where it names none ({@link #controllers}).
+   * controllers its block names, or its motor's where it names none ({@link
+   * ControllerPlan#controllers}).
    *
    * @throws IllegalArgumentException for what no motor controller could do
    */
   static ControllerPlan plan(RobotMath math, Joint joint, MechanismControl control) {
-    Drive drive = math.drivesOf(joint).get(0);
-    return ControllerPlan.of(math, joint, drive, controllers(math, joint), control);
+    return ControllerPlan.of(math, joint, control);
   }
 
   /**
@@ -91,16 +89,15 @@ public final class ControllerSettings {
    *     doesn't read yet, and what the plan or the Phoenix helper refuses
    */
   static PhoenixMechanism.Settings talon(RobotMath math, Joint joint, MechanismControl control) {
-    List<MechanismWiring.Device> controllers = controllers(math, joint);
+    ControllerPlan plan = plan(math, joint, control);
     Optional<Driven.AbsoluteEncoder> encoder = joint.driven().absoluteEncoder();
     if (encoder.flatMap(Driven.AbsoluteEncoder::dataPort).isPresent()
-        && controllers.get(0).controller() == MechanismWiring.Controller.TALON_FXS) {
+        && plan.controllers().get(0).controller() == MechanismWiring.Controller.TALON_FXS) {
       throw new IllegalArgumentException(
-          joint.label()
-              + "'s wiring names an encoder on a TalonFXS's data port, which the template doesn't"
+          possessive(joint.label())
+              + " wiring names an encoder on a TalonFXS's data port, which the template doesn't"
               + " read yet: wire it as a CANcoder");
     }
-    ControllerPlan plan = plan(math, joint, control);
     Optional<MechanismWiring.Cancoder> cancoder = encoder.flatMap(Driven.AbsoluteEncoder::cancoder);
     if (cancoder.isEmpty()) {
       return PhoenixMechanism.configure(plan);
@@ -147,45 +144,5 @@ public final class ControllerSettings {
         .driven()
         .control()
         .orElseThrow(() -> new IllegalArgumentException(joint.label() + " has no control"));
-  }
-
-  /**
-   * A joint's motor controllers, the leader first: its block's, or, for motors not wired, the
-   * controller each motor runs on ({@link #standIn}), on Systemcore's CAN, each turning
-   * counterclockwise for positive, as the simulator runs them. Their IDs only tell them apart:
-   * nothing the helpers refuse or doubt reads an ID, a bus or a direction.
-   */
-  static List<MechanismWiring.Device> controllers(RobotMath math, Joint joint) {
-    List<MechanismWiring.Device> wired =
-        joint.driven().motors().map(Driven.Motors::controllers).orElse(List.of());
-    if (!wired.isEmpty()) {
-      return wired;
-    }
-    Drive drive = math.drivesOf(joint).get(0);
-    Actuator.Motors motors = (Actuator.Motors) drive.actuator();
-    MechanismWiring.Controller controller = standIn(motors.motor());
-    List<MechanismWiring.Device> standIns = new ArrayList<>();
-    for (int id = 0; id < motors.count(); id++) {
-      standIns.add(controller.can(id));
-    }
-    return standIns;
-  }
-
-  /**
-   * The controller a motor runs on where its block wires none: a NEO's or a NEO 550's a SPARK MAX,
-   * a NEO Vortex's a SPARK Flex, a Minion's a TalonFXS, and a Kraken's, a Falcon's or a motor
-   * described from its datasheet a TalonFX.
-   */
-  static MechanismWiring.Controller standIn(Motor motor) {
-    if (motor.equals(Motor.NEO_VORTEX)) {
-      return MechanismWiring.Controller.SPARK_FLEX;
-    }
-    if (MechanismWiring.Controller.SPARK_MAX.drives(motor)) {
-      return MechanismWiring.Controller.SPARK_MAX;
-    }
-    if (MechanismWiring.Controller.TALON_FXS.drives(motor)) {
-      return MechanismWiring.Controller.TALON_FXS;
-    }
-    return MechanismWiring.Controller.TALON_FX;
   }
 }

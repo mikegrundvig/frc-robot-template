@@ -17,17 +17,11 @@ import org.jspecify.annotations.Nullable;
  * it names only the joints it sets, and leaves the rest where they are, so the joints it names are
  * what a command moving to it requires.
  *
- * {@snippet :
- * static final Configuration FEEDING =
- *     Configuration.of("feeding", FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING));
- * static final Configuration STOWED =
- *     Configuration.of(
- *         "stowed", PIVOT.at(PIVOT_IN), ELEVATOR.at(ELEVATOR_DOWN), ARM.at(ARM_STOWED));
- * }
+ * {@snippet class=frc.robot.examples.ExampleRobot region=configurations}
  *
  * <p>The robot's definition checks each against the rest of it: every joint one of the robot's,
  * none that follows another (its leader is set instead), every interlock obeyed with the joints it
- * doesn't name at their references, and, where the links have shapes, the season's extension limit
+ * doesn't name where they rest, and, where the links have shapes, the season's extension limit
  * ({@code SeasonLimits}).
  *
  * @param name what code, logs and Pitwall call it: unique among the robot's configurations

@@ -12,6 +12,7 @@ import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Milliseconds;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.field.Bump;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.field.Symmetry;
@@ -23,6 +24,7 @@ import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CameraConfigBuilder;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.DrivetrainGeometryModuleTypeBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Imus;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -138,12 +140,7 @@ class LocalizationServiceTest {
 
   /** Localization with the robot placed in front of the hub, to 5 cm and half a degree. */
   private static LocalizationService placed() {
-    return placed(new SwerveKinematicsModel(DEFINITION.moduleTranslations()));
-  }
-
-  /** The same, with another drivetrain's wheels. */
-  private static LocalizationService placed(DriveKinematicsModel kinematics) {
-    return placed(kinematics, DEFINITION);
+    return placed(DEFINITION);
   }
 
   /** The same, for another robot of the test's drivetrain. */
@@ -377,35 +374,6 @@ class LocalizationServiceTest {
             List.of(),
             List.of());
     assertThatThrownBy(() -> localization.venue(other)).hasMessageContaining("Other has others");
-  }
-
-  /**
-   * Any drivetrain localizes the same way, through its own kinematics: a tank drive's two sides,
-   * here, rolling a meter forward.
-   */
-  @Test
-  void aTankDriveLocalizesThroughItsOwnKinematics() {
-    LocalizationService localization = placed(new DifferentialKinematicsModel(0.6));
-    long now = T0;
-    for (int k = 0; k <= 10; k++) {
-      now = T0 + k * LOOP_NANOS;
-      double rolled = k * 0.1;
-      LoopContext loop = new LoopContext(now, true);
-      localization.drivetrain(
-          DrivetrainReadings.builder()
-              .wheels(
-                  List.of(new OdometrySample(now, new double[] {rolled, rolled}, new double[2])))
-              .gyro(still(now, 0, 0).gyro())
-              .backupImu(ImuReadings.NONE)
-              .velocities(new ChassisVelocities(5, 0, 0))
-              .build(),
-          loop);
-      localization.update();
-    }
-
-    assertThat(localization.pose().getTranslation().getDistance(ROBOT.getTranslation()))
-        .isCloseTo(1.0, within(1e-9));
-    assertThat(localization.pose().getRotation()).isEqualTo(ROBOT.getRotation());
   }
 
   /**
@@ -875,6 +843,46 @@ class LocalizationServiceTest {
     assertThat(Fingerprint.of(nearly)).isNotEqualTo(Fingerprint.of(pose));
     assertThatThrownBy(() -> Fingerprint.of(new Object()))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  /**
+   * Treads said to grip past the jolt the slip check calls a collision, as a path planner's
+   * friction often is, are a doubt about the robot, naming what it costs; localization still takes
+   * it.
+   */
+  @Test
+  void aGripPastWhatTheSlipCheckTellsIsADoubt() {
+    RobotDefinition grippy =
+        RobotDefinitionBuilder.builder(DEFINITION)
+            .drivetrain(
+                DrivetrainGeometry.inset(
+                    DrivetrainGeometryModuleTypeBuilder.builder(DEFINITION.drivetrain().module(0))
+                        .wheelCoefficientOfFriction(2.255)
+                        .build(),
+                    BODY,
+                    Inches.of(2.625)))
+            .build();
+
+    assertThat(LocalizationService.doubts(DEFINITION)).isEmpty();
+    assertThat(LocalizationService.doubts(grippy))
+        .singleElement()
+        .satisfies(
+            doubt -> {
+              assertThat(doubt.level()).isEqualTo(Finding.Level.DOUBT);
+              assertThat(doubt.subject()).isEqualTo("test");
+              assertThat(doubt.message())
+                  .startsWith(
+                      "the treads' grip, 2.26, is past 1.53, above which the slip check can't tell"
+                          + " a slide from a collision");
+            });
+    assertThat(
+            new LocalizationService(
+                FIELD,
+                grippy,
+                new SwerveKinematicsModel(grippy.moduleTranslations()),
+                EstimatorConfig.DEFAULTS,
+                0.02))
+        .isNotNull();
   }
 
   /** A bump across the robot's way, its crest a meter ahead. */

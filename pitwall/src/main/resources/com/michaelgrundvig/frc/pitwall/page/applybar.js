@@ -22,7 +22,6 @@ const LAYERS = {
   value: "The values",
   limit: "Tuning limits",
   record: "The records' own checks",
-  rule: "Robot rules",
   tunable: "A tunable's own setter",
 };
 
@@ -146,9 +145,8 @@ function where(error) {
 function checked(errors) {
   const layers = new Set(errors.map((error) => error.layer));
   if (layers.has("value") || layers.has("limit")) {
-    return "Checked: tuning limits ✗ · records not run · robot rules not run.";
+    return "Checked: tuning limits ✗ · records not run.";
   }
-  if (layers.has("record")) return "Checked: tuning limits ✓ · records ✗ · robot rules not run.";
-  if (layers.has("rule")) return "Checked: tuning limits ✓ · records ✓ · robot rules ✗.";
-  return "Checked: tuning limits ✓ · records ✓ · robot rules ✓; applying it failed.";
+  if (layers.has("record")) return "Checked: tuning limits ✓ · records ✗.";
+  return "Checked: tuning limits ✓ · records ✓; applying it failed.";
 }

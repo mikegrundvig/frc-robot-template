@@ -1,7 +1,6 @@
 package frc.robot.sim;
 
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
-import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 
 /**
  * A motor controller's own closed loop, as the simulator runs it, every millisecond: what it puts
@@ -14,13 +13,12 @@ import com.michaelgrundvig.frc.world.robot.MechanismWiring;
  * motors as it is.
  */
 sealed interface ControllerEmulator permits TalonFxEmulator, SparkEmulator {
-  /** The emulator for the controllers a joint's plan names: a TalonFX for none. */
+  /**
+   * The emulator for the controllers a joint's plan names: its block's, or its motor's stand-in
+   * where its block wires none, a NEO's a SPARK MAX ({@link ControllerPlan#controllers}).
+   */
   static ControllerEmulator of(ControllerPlan plan) {
-    MechanismWiring.Controller leader =
-        plan.controllers().isEmpty()
-            ? MechanismWiring.Controller.TALON_FX
-            : plan.controllers().get(0).controller();
-    return switch (leader) {
+    return switch (plan.controllers().get(0).controller()) {
       case TALON_FX, TALON_FXS -> new TalonFxEmulator(plan);
       case SPARK_MAX, SPARK_FLEX -> new SparkEmulator(plan);
     };

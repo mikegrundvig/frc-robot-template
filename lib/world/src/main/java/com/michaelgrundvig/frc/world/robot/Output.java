@@ -9,6 +9,7 @@ import static org.wpilib.units.Units.Volts;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
+import java.util.Optional;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.LinearVelocity;
 import org.wpilib.units.measure.Voltage;
@@ -27,14 +28,20 @@ import org.wpilib.units.measure.Voltage;
  * <p>Negative runs it backward. Every joint has one more, built in, which it doesn't name: {@link
  * #STOPPED}, its motors at neutral, braking or coasting as its control says. The definition holds
  * each to what the joint's motors can do: a velocity within their free speed through the gearing
- * ({@code RobotMath.freeSpeed}), a voltage within their nominal voltage.
+ * ({@code RobotMath.freeSpeed}), a voltage within their nominal voltage. A velocity knows whether
+ * it's a speed of turning or of sliding, as a position knows it's an angle or a length, so a speed
+ * in rpm given a joint that slides, or in meters per second given one that turns, is refused where
+ * the joint is built.
  *
  * @param name what code, logs and Pitwall call it: unique among its joint's positions and outputs
  * @param kind a velocity, a voltage or a duty cycle
  * @param value how much: in the joint's units per second, in volts, or as a share from -1 to 1
+ * @param motion for a velocity, what it's a speed of: an angle turned, for a joint that turns
+ *     ({@link #rpm}), or a length slid, for one that slides ({@code Output.of(name,
+ *     InchesPerSecond.of(...))}); none for a voltage or a duty cycle
  */
 @ConfigRecord
-public record Output(String name, Kind kind, double value) {
+public record Output(String name, Kind kind, double value, Optional<Position.Kind> motion) {
   /** What an output holds its joint's motors to. */
   public enum Kind {
     /** A speed, in the joint's units per second, which a velocity loop holds. */
@@ -54,6 +61,7 @@ public record Output(String name, Kind kind, double value) {
 
   public Output {
     double share = value;
+    Optional<Position.Kind> of = motion;
     Checks.on(Output.class, name)
         .field("name", name, notBlank())
         .field("value", value, finite())
@@ -63,6 +71,17 @@ public record Output(String name, Kind kind, double value) {
                 kind == Kind.DUTY_CYCLE && !(Math.abs(share) <= 1)
                     ? shown(share) + " must be a share of the battery's voltage, from -1 to 1"
                     : null)
+        .check(
+            "motion",
+            () ->
+                kind == Kind.VELOCITY && of.isEmpty()
+                    ? "a speed is of turning or of sliding: give it with its unit, Output.rpm(name,"
+                        + " rpm) for a joint that turns, Output.of(name, InchesPerSecond.of(...))"
+                        + " for one that slides"
+                    : kind != Kind.VELOCITY && of.isPresent()
+                        ? "only a speed is of turning or of sliding, and this is a "
+                            + (kind == Kind.VOLTAGE ? "voltage" : "duty cycle")
+                        : null)
         .orThrow();
   }
 
@@ -73,17 +92,21 @@ public record Output(String name, Kind kind, double value) {
 
   /** A revolute joint's speed, in its turns a minute, as teams' code gives them. */
   public static Output rpm(String name, double rpm) {
-    return builder().name(name).kind(Kind.VELOCITY).value(rpm * 2 * Math.PI / 60).build();
+    return speed(name, rpm * 2 * Math.PI / 60, Position.Kind.ANGLE);
   }
 
   /** A revolute joint's speed. */
   public static Output of(String name, AngularVelocity speed) {
-    return builder().name(name).kind(Kind.VELOCITY).value(speed.in(RadiansPerSecond)).build();
+    return speed(name, speed.in(RadiansPerSecond), Position.Kind.ANGLE);
   }
 
-  /** A prismatic joint's speed. */
+  /** A prismatic joint's speed: {@code Output.of("creeping", InchesPerSecond.of(4))}. */
   public static Output of(String name, LinearVelocity speed) {
-    return builder().name(name).kind(Kind.VELOCITY).value(speed.in(MetersPerSecond)).build();
+    return speed(name, speed.in(MetersPerSecond), Position.Kind.LENGTH);
+  }
+
+  private static Output speed(String name, double value, Position.Kind motion) {
+    return builder().name(name).kind(Kind.VELOCITY).value(value).motion(motion).build();
   }
 
   /** A voltage across the joint's motors. */

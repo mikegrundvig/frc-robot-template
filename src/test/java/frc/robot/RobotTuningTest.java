@@ -3,11 +3,11 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.wpilib.units.Units.MetersPerSecond;
 
-import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Outcome;
+import com.michaelgrundvig.frc.pitwall.ParameterDocs;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
-import frc.robot.subsystems.drive.Drive;
+import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import frc.robot.subsystems.vision.Vision;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -50,7 +50,7 @@ class RobotTuningTest {
 
   @Test
   void aGainIsTunedByItsPathWithinItsLimits() {
-    var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+    var drivetrain = RobotContainer.tunings(Robots.SIM).drivetrain();
 
     assertThat(drivetrain.set(Map.of("gains.steerKp", 18.5))).isTrue();
     assertThat(drivetrain.get().gains().steerKp()).isEqualTo(18.5);
@@ -78,6 +78,18 @@ class RobotTuningTest {
             .isNotBlank();
       }
     }
+  }
+
+  /**
+   * The build copies each configuration record's Javadoc into the program as it compiles, for the
+   * page to show beside its values: what the record is, and what each value means.
+   */
+  @Test
+  void aRecordsJavadocIsInTheProgram() {
+    ParameterDocs gains = ParameterDocs.of(DrivetrainControl.Gains.class);
+
+    assertThat(gains.summary()).startsWith("Drive: velocity control on the motor controller");
+    assertThat(gains.params().get("steerKp")).isEqualTo("volts per radian of error");
   }
 
   /** Within its limits isn't enough: the records' own checks have the last word, and say which. */
@@ -120,18 +132,25 @@ class RobotTuningTest {
 
   /**
    * The drivetrain's top speed is tuned live, but never past what its motors and gearing can reach,
-   * which the robot's definition says and the pit can't change: the robot's rules hold it there,
-   * and the page shows why beside the value.
+   * which the robot's definition says and the pit can't change: its tuning limits end at the free
+   * speed, and the page shows why beside the value. Every robot's committed top speed is within
+   * them ({@link #everyRobotsCommittedValuesCanBeDialedIn}).
    */
   @Test
   void theTopSpeedIsHeldToTheDrivetrainsFreeSpeed() {
-    var drivetrain = Drive.tuning(Robots.SIM.drivetrain());
-    RobotRules.register(
-        new ConfigRules(), Robots.SIM.definition(), drivetrain, Vision.tuning(Robots.SIM.vision()));
+    var drivetrain = RobotContainer.tunings(Robots.SIM).drivetrain();
 
+    assertThat(drivetrain.knobs())
+        .filteredOn(knob -> knob.path().equals("limits.maxLinearSpeed"))
+        .singleElement()
+        .satisfies(
+            knob ->
+                assertThat(knob.limits().max())
+                    .isEqualTo(
+                        Robots.SIM.definition().drivetrain().freeSpeed().in(MetersPerSecond)));
     assertThat(drivetrain.set(Map.of("limits.maxLinearSpeed", 4.5))).isTrue();
     assertThat(drivetrain.whyNot(Map.of("limits.maxLinearSpeed", 6.0)))
-        .contains("6 m/s is faster than the drivetrain's free speed of 4.729 m/s");
+        .isEqualTo("drivetrain: limits.maxLinearSpeed: 6 m/s is above its limit of 4.72868 m/s");
     assertThat(drivetrain.set(Map.of("limits.maxLinearSpeed", 6.0))).isFalse();
     assertThat(drivetrain.get().limits().maxLinearSpeed().in(MetersPerSecond)).isEqualTo(4.5);
   }

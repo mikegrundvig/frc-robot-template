@@ -114,6 +114,7 @@ final class PhoenixParts {
       Optional<MechanismControl.SoftLimits> softLimits,
       Optional<MechanismControl.Profile> profile) {
     return MechanismControl.builder()
+        .loop(MechanismControl.Loop.POSITION)
         .gains(gains)
         .currentLimits(
             MechanismControl.CurrentLimits.builder()

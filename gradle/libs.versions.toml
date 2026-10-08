@@ -4,6 +4,13 @@
 [versions]
 gradlerio = "2027.0.0-alpha-7"
 spotless = "8.6.0"
+# The formatters Spotless runs (gradle/quality.gradle), pinned rather than left to Spotless's
+# defaults, so a newer Spotless can't reformat the code on its own: a formatter's new version is a
+# change of its own, with the reformatting it brings. Dependabot doesn't see them: bump them by hand.
+# greclipse is the Eclipse release whose Groovy formatter formats the build files.
+google-java-format = "1.28.0"
+greclipse = "4.35"
+gson = "2.13.2"
 errorprone-plugin = "5.1.1"
 errorprone = "2.50.0"
 nullaway = "0.14.2"

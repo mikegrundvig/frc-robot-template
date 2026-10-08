@@ -249,8 +249,8 @@ export function whyLocked() {
 
 /**
  * Applies the staged edits, all or none: every one, or with {@code only}, just those values (a
- * rig's gains, for its run). The robot checks them whole (each value's limits, its configuration's
- * records, the robot's rules) and either applies all of them or none, saying why. The session's
+ * rig's gains, for its run). The robot checks them whole (each value's limits, then its
+ * configuration's records) and either applies all of them or none, saying why. The session's
  * history records what it applied.
  *
  * @param options {only}: the paths to apply, or every staged edit; {source}: where the history

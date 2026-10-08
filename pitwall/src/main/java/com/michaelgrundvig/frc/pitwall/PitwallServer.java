@@ -86,7 +86,7 @@ import org.wpilib.hardware.hal.RobotMode;
  *       ({@link LiveConfig.Documentation}), {@code {name: {"record", "doc": {"summary", "text"},
  *       "groups": [{"path", "record", "doc", "meaning"}]}}}: its root record, then each record its
  *       values are in, with what the record holding it says it is. A {@code record} is a display
- *       name, such as {@code SwerveConfig.Gains}.
+ *       name, such as {@code DrivetrainControl.Gains}.
  *   <li>{@code GET /api/tunables}: the configurations' tunable values, by the WPILib tunable each
  *       is published as, {@code {path: {"config", "field", "unit", "limits", "min", "max",
  *       "committed", "record", "group", "meaning"}}}: its tuning limits as text and their ends as
@@ -115,23 +115,18 @@ import org.wpilib.hardware.hal.RobotMode;
  *   <li>{@code GET /api/devices/<name>/downloads/<id>}: a file from a device, fetched now, as an
  *       attachment; 502 when the device doesn't give it, 503 (with {@code Retry-After}) when it's
  *       busy.
- *   <li>{@code GET /api/devices/<name>/log?priority=&unit=&cursor=&before=&from=}: a page of a
- *       device's log, {@code {"entries": [{"time", "priority", "unit", "message"}], "newer",
- *       "older"}}: priority from 0 to 7 (7, everything, when left out), only one unit's entries
- *       when one is named, and the latest page, or the one after a cursor ({@code cursor}), before
- *       one ({@code before}), or from the start ({@code from=start}), one of them at most; {@code
- *       newer} and {@code older} are the cursors for the pages either side. 502 when the device
- *       doesn't answer, 503 (with {@code Retry-After}) when it's busy. {@code /log.txt} with the
- *       same filters is the log as text, to save: from the start of the device's run, up to a
- *       bound.
+ *   <li>{@code POST /api/devices/<name>/uploads/<id>}: a file for a device, the body as it is (64
+ *       KB at most), and {@code POST /api/devices/<name>/choices/<id>}: {@code {"value": option}},
+ *       a choice made on its card; each {@code {"message"}}, what the robot did with it, or 422
+ *       with why it refused.
  * </ul>
  *
  * <p>The device routes ask the device on the server's thread, never the robot loop's; the page
  * never talks to a device itself. Each names the page's event stream ({@code Pitwall-Stream}), as
  * only the page can (400 without), so another site's page can't make the robot ask a device
- * anything; at most two are under way at once (503 beyond); and a download or a log's text waits
- * until the field system disconnects (409). A file is streamed through as it arrives, up to 64 MB,
- * and a log's text is cut off after 30 s.
+ * anything; at most two downloads are under way at once (503 beyond); and a download, or a change
+ * to a device, waits until the field system disconnects (409). A file is streamed through as it
+ * arrives, up to 64 MB.
  *
  * <p>In the simulator only, the simulator's controls ({@link Simulator}); on a robot every one of
  * these is 404, so nothing can write the Driver Station's state there. They are exempt from the
@@ -422,9 +417,8 @@ public final class PitwallServer implements AutoCloseable {
   private static final String SIMULATOR = "/api/simulator";
 
   /**
-   * A device's routes: a download by its id, its log as a page or as text (GET), and a file sent to
-   * it or a choice made on its card (POST). Names as {@link Devices#NAME} allows them, so no
-   * request can name anything else.
+   * A device's routes: a download by its id (GET), and a file sent to it or a choice made on its
+   * card (POST). Names as {@link Devices#NAME} allows them, so no request can name anything else.
    */
   private static final Pattern DEVICE_ROUTE =
       Pattern.compile(
@@ -436,7 +430,7 @@ public final class PitwallServer implements AutoCloseable {
               + Devices.NAME.pattern()
               + ")|choices/("
               + Devices.NAME.pattern()
-              + ")|log|log\\.txt)");
+              + "))");
 
   /** A scene's names, as {@link com.michaelgrundvig.frc.pitwall.scene.Scene} allows them. */
   private static final String SCENE_NAMES = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
@@ -451,28 +445,17 @@ public final class PitwallServer implements AutoCloseable {
   /** The most views a page may say it shows at once. */
   private static final int MAX_VIEWS = 8;
 
-  /** The most pages of a device's log one text download gathers, and the most text. */
-  static final int MAX_LOG_PAGES = 100;
-
-  static final int MAX_LOG_TEXT_BYTES = 8 * 1024 * 1024;
-
   /**
-   * What asking devices may cost: how many requests at once (more are 503, never queued), the
-   * largest file passed on, and how long a log's text may take to gather.
+   * What asking devices may cost: how many downloads at once (more are 503, never queued), and the
+   * largest file passed on.
    *
-   * @param concurrent requests to devices at once, across every page
+   * @param concurrent downloads from devices at once, across every page
    * @param maxFileBytes the largest file passed on from a device
-   * @param logDeadline how long gathering a log's text may take, after which it's cut off
    */
-  record DeviceLimits(int concurrent, long maxFileBytes, Duration logDeadline) {
-    /** Two at once, 64 MB, 30 s. */
-    static final DeviceLimits DEFAULT =
-        new DeviceLimits(2, 64L * 1024 * 1024, Duration.ofSeconds(30));
+  record DeviceLimits(int concurrent, long maxFileBytes) {
+    /** Two at once, 64 MB. */
+    static final DeviceLimits DEFAULT = new DeviceLimits(2, 64L * 1024 * 1024);
   }
-
-  /** Syslog's priorities, by number, as a log's text names them. */
-  private static final List<String> PRIORITIES =
-      List.of("emerg", "alert", "crit", "err", "warning", "notice", "info", "debug");
 
   /** The page, and the resources of the API. */
   private static final class Api {
@@ -538,6 +521,9 @@ public final class PitwallServer implements AutoCloseable {
     /** Requests to devices under way: a page can't make the robot ask more at once. */
     private final Semaphore deviceRequests;
 
+    /** This computer's name on the local network, once looked up: see {@link #machineName}. */
+    private volatile @Nullable String machineName;
+
     private final JsonType<Object> json = Jsonb.builder().build().type(Object.class);
 
     Api(
@@ -568,7 +554,7 @@ public final class PitwallServer implements AutoCloseable {
         String path = exchange.getRequestURI().getPath();
         String method = exchange.getRequestMethod();
         try {
-          checkAddressed(exchange, method);
+          checkAddressed(exchange, path, method);
           if (path.startsWith(SIMULATOR) && state.simulator() == null) {
             throw new Problem(
                 404, "Not found", "There is no simulator here: a robot has no simulator controls");
@@ -654,13 +640,16 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     /**
-     * Refuses a request addressed to anything but the robot itself, and a change sent from another
-     * site's page. A web page open on a laptop connected to the robot could otherwise point a name
-     * it controls at the robot's address (DNS rebinding) and use the page as its own; the address
-     * the request names gives it away. The robot is reached by address, as localhost, or by its
-     * local name (robot.local).
+     * Refuses a request addressed to anything but the robot itself, a change sent from another
+     * site's page, and any use of the API by another site's page. A web page open on a laptop
+     * connected to the robot could otherwise point a name it controls at the robot's address (DNS
+     * rebinding) and use the page as its own; the address the request names gives it away. The
+     * robot is reached by address, as localhost, as robot.local, or by this computer's own name on
+     * the local network ({@code fedora.local}): any other name, even another {@code .local} one, is
+     * 403. A browser says which site a request comes from ({@code Sec-Fetch-Site}), so another
+     * site's page can't even read the API, or close a page's event stream by naming it.
      */
-    private static void checkAddressed(HttpExchange exchange, String method) {
+    private void checkAddressed(HttpExchange exchange, String path, String method) {
       String host = exchange.getRequestHeaders().getFirst("Host");
       if (host == null || !isRobotsOwn(withoutPort(host))) {
         throw new Problem(
@@ -669,6 +658,13 @@ public final class PitwallServer implements AutoCloseable {
       String origin = exchange.getRequestHeaders().getFirst("Origin");
       if (!method.equals("GET") && origin != null && !origin.equals("http://" + host)) {
         throw new Problem(403, "Another site", "Changes come only from Pitwall's own page");
+      }
+      String site = exchange.getRequestHeaders().getFirst("Sec-Fetch-Site");
+      if (path.startsWith("/api/")
+          && site != null
+          && !site.equals("same-origin")
+          && !site.equals("none")) {
+        throw new Problem(403, "Another site", "Pitwall's API answers only Pitwall's own page");
       }
     }
 
@@ -681,12 +677,42 @@ public final class PitwallServer implements AutoCloseable {
       return colon < 0 ? host : host.substring(0, colon);
     }
 
-    private static boolean isRobotsOwn(String name) {
+    private boolean isRobotsOwn(String name) {
       String host = name.toLowerCase(Locale.ROOT);
       return host.equals("localhost")
-          || host.endsWith(".local")
-          || host.startsWith("[") // an IPv6 address
-          || host.matches("\\d{1,3}(\\.\\d{1,3}){3}"); // an IPv4 address
+          || host.equals("robot.local")
+          || isAddress(host)
+          || host.equals(machineName());
+    }
+
+    /** Whether a host is an IP address, v4 or v6 in brackets, rather than a name. */
+    private static boolean isAddress(String host) {
+      try {
+        InetAddress.ofLiteral(host); // parses it, and never asks DNS
+        return true;
+      } catch (IllegalArgumentException name) {
+        return false;
+      }
+    }
+
+    /**
+     * This computer's own name on the local network, such as {@code fedora.local}: looked up the
+     * first time a request names something else, on a server thread, never the robot loop's. Empty
+     * when the computer has no name to look up.
+     */
+    private String machineName() {
+      String name = machineName;
+      if (name == null) {
+        try {
+          String host = InetAddress.getLocalHost().getHostName().toLowerCase(Locale.ROOT);
+          int dot = host.indexOf('.');
+          name = (dot < 0 ? host : host.substring(0, dot)) + ".local";
+        } catch (IOException noName) {
+          name = "";
+        }
+        machineName = name;
+      }
+      return name;
     }
 
     private void postAction(HttpExchange exchange) throws IOException {
@@ -992,10 +1018,10 @@ public final class PitwallServer implements AutoCloseable {
     }
 
     /**
-     * A device's download or log, asked of the device now, on this thread: it may wait on the
-     * network, never the robot loop. Only the page asks: a request names its event stream, which
-     * another site's page can't send. At most {@link DeviceLimits#concurrent} at once, and no
-     * downloads while the field system is connected.
+     * A device's download, asked of the device now, on this thread: it may wait on the network,
+     * never the robot loop. Only the page asks: a request names its event stream, which another
+     * site's page can't send. At most {@link DeviceLimits#concurrent} at once, and none while the
+     * field system is connected.
      */
     private void device(HttpExchange exchange, Matcher route) throws IOException {
       String stream = exchange.getRequestHeaders().getFirst(STREAM);
@@ -1019,22 +1045,13 @@ public final class PitwallServer implements AutoCloseable {
         deviceChange(exchange, name, device, uploadId, choiceId);
         return;
       }
-      String what = route.group(2);
-      String id = route.group(3);
-      Devices.Download download = null;
-      Devices.Log log = null;
-      Devices.LogQuery query = null;
-      if (id != null) {
-        download =
-            device
-                .download(id)
-                .orElseThrow(
-                    () -> new Problem(404, "No download", name + " has no download named " + id));
-      } else {
-        log = device.log().orElseThrow(() -> new Problem(404, "No log", name + " has no log"));
-        query = logQuery(exchange);
-      }
-      if ((download != null || what.equals("log.txt")) && tuning.isFieldConnected()) {
+      String id = Objects.requireNonNull(route.group(3));
+      Devices.Download download =
+          device
+              .download(id)
+              .orElseThrow(
+                  () -> new Problem(404, "No download", name + " has no download named " + id));
+      if (tuning.isFieldConnected()) {
         throw new Problem(
             409,
             "On the field",
@@ -1050,20 +1067,7 @@ public final class PitwallServer implements AutoCloseable {
                 + " things: try again when one is done");
       }
       try {
-        if (download != null) {
-          sendDeviceFile(exchange, name, download);
-        } else if (what.equals("log")) {
-          Devices.Log reading = Objects.requireNonNull(log);
-          Devices.LogQuery asked = Objects.requireNonNull(query);
-          Devices.LogPage page = fromDevice(name, () -> reading.read(asked));
-          Map<String, Object> shown = new LinkedHashMap<>();
-          shown.put("entries", page.entries().stream().map(Api::entry).toList());
-          shown.put("newer", page.newer());
-          shown.put("older", page.older());
-          sendJson(exchange, 200, shown);
-        } else {
-          sendLogText(exchange, name, Objects.requireNonNull(log), Objects.requireNonNull(query));
-        }
+        sendDeviceFile(exchange, name, download);
       } finally {
         deviceRequests.release();
       }
@@ -1178,67 +1182,6 @@ public final class PitwallServer implements AutoCloseable {
           name + "'s " + file + " is more than Pitwall passes on: " + most + " bytes");
     }
 
-    /**
-     * A device's log as text, to save: every page from the start of its current run (a computer's
-     * boot), until the log ends, or a bound (pages, size, or time) cuts it off, which its last line
-     * says.
-     */
-    private void sendLogText(
-        HttpExchange exchange, String name, Devices.Log log, Devices.LogQuery filters)
-        throws IOException {
-      StringBuilder text = new StringBuilder();
-      Devices.LogQuery next =
-          new Devices.LogQuery(Devices.From.START, "", filters.priority(), filters.unit());
-      long deadline = System.nanoTime() + deviceLimits.logDeadline().toNanos();
-      String cut = "";
-      for (int pages = 0; ; pages++) {
-        if (pages >= MAX_LOG_PAGES || text.length() >= MAX_LOG_TEXT_BYTES) {
-          cut = "it's this long at most";
-          break;
-        }
-        if (System.nanoTime() >= deadline) {
-          long millis = deviceLimits.logDeadline().toMillis();
-          cut =
-              "gathering it took "
-                  + (millis % 1000 == 0
-                      ? String.valueOf(millis / 1000)
-                      : String.valueOf(millis / 1e3))
-                  + " s";
-          break;
-        }
-        Devices.LogQuery asked = next;
-        Devices.LogPage page = fromDevice(name, () -> log.read(asked));
-        for (Devices.LogEntry entry : page.entries()) {
-          text.append(entry.time())
-              .append(' ')
-              .append(PRIORITIES.get(Math.clamp(entry.priority(), 0, 7)))
-              .append(' ')
-              .append(entry.unit())
-              .append(": ")
-              .append(entry.message())
-              .append('\n');
-        }
-        if (page.entries().isEmpty()
-            || page.newer().isEmpty()
-            || page.newer().equals(asked.cursor())) {
-          break;
-        }
-        next =
-            new Devices.LogQuery(
-                Devices.From.AFTER, page.newer(), filters.priority(), filters.unit());
-      }
-      if (!cut.isEmpty()) {
-        text.append("-- cut off here: ")
-            .append(cut)
-            .append(". Read on in the page's log viewer.\n");
-      }
-      sendFile(
-          exchange,
-          name + "-log.txt",
-          "text/plain; charset=utf-8",
-          text.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
     /** Something a device gives, or 502 saying why it didn't (503 when it's busy). */
     private static <T> T fromDevice(String name, DeviceCall<T> call) {
       try {
@@ -1259,51 +1202,6 @@ public final class PitwallServer implements AutoCloseable {
     @FunctionalInterface
     private interface DeviceCall<T> {
       T call() throws IOException;
-    }
-
-    /** What the page asks of a log: {@code ?priority=&unit=&cursor=}, each optional. */
-    private static Devices.LogQuery logQuery(HttpExchange exchange) {
-      Map<String, String> asked = query(exchange.getRequestURI().getRawQuery());
-      for (String key : asked.keySet()) {
-        if (!Set.of("priority", "unit", "cursor", "before", "from").contains(key)) {
-          throw new Problem(
-              400,
-              "Not a filter",
-              "A log is asked by priority and unit, and one of cursor, before, and from=start");
-        }
-      }
-      String after = asked.getOrDefault("cursor", "");
-      String before = asked.getOrDefault("before", "");
-      String from = asked.getOrDefault("from", "");
-      if (!from.isEmpty() && !from.equals("start")) {
-        throw new Problem(400, "Not a place", "A log is read from=start, or not from anywhere");
-      }
-      int places =
-          (after.isEmpty() ? 0 : 1) + (before.isEmpty() ? 0 : 1) + (from.isEmpty() ? 0 : 1);
-      if (places > 1) {
-        throw new Problem(
-            400, "Two places", "A page of a log is after a cursor, before one, or from the start");
-      }
-      Devices.From where =
-          !after.isEmpty()
-              ? Devices.From.AFTER
-              : !before.isEmpty()
-                  ? Devices.From.BEFORE
-                  : !from.isEmpty() ? Devices.From.START : Devices.From.LATEST;
-      int priority = 7;
-      String given = asked.get("priority");
-      if (given != null && !given.isEmpty()) {
-        if (!given.matches("[0-7]")) {
-          throw new Problem(400, "Not a priority", "A priority is a number from 0 to 7");
-        }
-        priority = Integer.parseInt(given);
-      }
-      try {
-        return new Devices.LogQuery(
-            where, after + before, priority, asked.getOrDefault("unit", ""));
-      } catch (IllegalArgumentException e) {
-        throw new Problem(400, "Not a log's filter", String.valueOf(e.getMessage()));
-      }
     }
 
     /** A query string's parameters, decoded; the last of a name given twice. */
@@ -1328,15 +1226,6 @@ public final class PitwallServer implements AutoCloseable {
         }
       }
       return parameters;
-    }
-
-    private static Map<String, Object> entry(Devices.LogEntry entry) {
-      Map<String, Object> shown = new LinkedHashMap<>();
-      shown.put("time", entry.time());
-      shown.put("priority", entry.priority());
-      shown.put("unit", entry.unit());
-      shown.put("message", entry.message());
-      return shown;
     }
 
     /** A file, to save rather than show: never shown in the page, whatever it holds. */
@@ -1926,10 +1815,10 @@ public final class PitwallServer implements AutoCloseable {
 
     /**
      * A reason a change was refused, as the page reads it: which check ({@code layer}: value,
-     * limit, record, rule, or tunable), who refused it ({@code by}: a record or a rule), the
-     * tunables it concerns ({@code paths}, and {@code path} when it's one), its configuration and,
-     * for a record's check that names no value, where the record is ({@code group}), why ({@code
-     * text}), and its line of {@code detail} ({@code line}).
+     * limit, record, or tunable), who refused it ({@code by}: a record), the tunables it concerns
+     * ({@code paths}, and {@code path} when it's one), its configuration and, for a record's check
+     * that names no value, where the record is ({@code group}), why ({@code text}), and its line of
+     * {@code detail} ({@code line}).
      */
     private static Map<String, Object> error(Outcome.Reason reason) {
       Map<String, Object> shown = new LinkedHashMap<>();

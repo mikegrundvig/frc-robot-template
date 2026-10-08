@@ -1,6 +1,5 @@
 package com.michaelgrundvig.frc.world.robot;
 
-import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
 
@@ -33,7 +32,7 @@ import org.wpilib.units.measure.Distance;
  *
  * @param motors its motors, through its gearing; empty if none turn it
  * @param servos its servos, each pushing between its parent and its link
- * @param absoluteEncoder an absolute encoder on its axle, if it has one
+ * @param absoluteEncoder an absolute encoder on its axle, or a sliding joint's drum, if it has one
  * @param limitSwitches the switches it presses at the ends of its travel
  * @param control how the program drives it: what its program needs of a joint with motors, which
  *     refuses one without ({@code RobotDefinition.findings}); the definition checks it fits the
@@ -160,23 +159,22 @@ public record Driven(
 
   /**
    * An absolute encoder on the joint, turning with it: it knows where the joint is from the moment
-   * the robot starts. On its axle at 1:1, or geared ({@link #ratio}). Read by a CANcoder, through
-   * the joint's TalonFX; on its SPARK's data port; or on one of Systemcore's ports, by the robot;
-   * or by none of them, in the simulator alone.
+   * the robot starts. On its axle at 1:1, or geared ({@link #ratio}); on a joint that slides, on
+   * its drum's shaft, or geared to it. Read by a CANcoder, through the joint's TalonFX; on its
+   * SPARK's data port; or on one of Systemcore's ports, by the robot; or by none of them, in the
+   * simulator alone.
    *
-   * @param countsPerTurn its resolution, from its datasheet, if it's given: only a pair geared
-   *     nearly alike, decoded by their difference, reads it, and needs it ({@code
-   *     RobotMath.absoluteSpan})
    * @param ratio its turns for each of the joint's, positive: 1 on the axle, 92/18 on an 18-tooth
-   *     gear against a 92-tooth ring, which way it turns being its wiring's; it must stay within
-   *     one of its turns, or the joint's position can't be told from it alone
+   *     gear against a 92-tooth ring, which way it turns being its wiring's. On a joint that
+   *     slides, its turns for each of its drum's, the drum its motors' pitch radius names: 1 on the
+   *     drum's shaft, 1/12 geared twelve to one down from it. Its travel must stay within one of
+   *     its turns, or the joint's position can't be told from it alone
    * @param cancoder its CANcoder, if it's read through one
    * @param dataPort its SPARK's data port, if it's read there
    * @param port the Systemcore port it's on, if the robot reads it there
    */
   @ConfigRecord
   public record AbsoluteEncoder(
-      Optional<Integer> countsPerTurn,
       double ratio,
       Optional<MechanismWiring.Cancoder> cancoder,
       Optional<MechanismWiring.DataPortEncoder> dataPort,
@@ -187,7 +185,6 @@ public record Driven(
               + (dataPort.isPresent() ? 1 : 0)
               + (port.isPresent() ? 1 : 0);
       Checks.on(AbsoluteEncoder.class)
-          .field("countsPerTurn", countsPerTurn, given(positive()))
           .field(
               "ratio",
               ratio,
@@ -196,8 +193,8 @@ public record Driven(
                       ? null
                       : r
                           + " must be a ratio, finite and positive: which way it turns is its"
-                          + " wiring's, a CANcoder's clockwise, a data port's reversed, a port's"
-                          + " inverted")
+                          + " wiring's, after its offset: a CANcoder's .clockwise(), a data"
+                          + " port's or a Systemcore port's .inverted()")
           .check(
               "port",
               () ->
@@ -209,20 +206,11 @@ public record Driven(
     }
 
     /**
-     * An absolute encoder on the joint's axle and unwired, its resolution not given: {@code
+     * An absolute encoder on the joint's axle and unwired: {@code
      * AbsoluteEncoder.of().ratio(0.536).on(cancoder)}.
      */
     public static AbsoluteEncoder of() {
       return DrivenAbsoluteEncoderBuilder.builder().ratio(1).build();
-    }
-
-    /**
-     * An absolute encoder of a resolution, on the joint's axle and unwired: {@code
-     * AbsoluteEncoder.of(4096).ratio(92.0 / 18).on(cancoder)}, one of a pair decoded by their
-     * difference, which reads it.
-     */
-    public static AbsoluteEncoder of(int countsPerTurn) {
-      return DrivenAbsoluteEncoderBuilder.builder().ratio(1).countsPerTurn(countsPerTurn).build();
     }
 
     /** The same encoder, geared: its turns for each of the joint's. */

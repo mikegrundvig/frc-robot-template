@@ -14,9 +14,10 @@
  * records, and writes files. Nothing here starts the robot program, reads a sensor, or reads
  * another tool's files.
  *
- * <p>The world model's rules hold here too (its {@code ArchitectureTest}): plain Java, WPILib's
- * math and units, and the rest of the model, with no robot code, hardware, clock, or static state.
- * The writers read the model; the field and the robot's definition never see them.
+ * <p>The world model's rules hold here too: no clock, unseeded draw, thread, or static state (the
+ * robot program's {@code ArchitectureTest}), and no robot code or hardware, which Gradle keeps out.
+ * The writers read the model; the field and the robot's definition never see them (the model's
+ * {@code ArchitectureTest}).
  */
 @NullMarked
 package com.michaelgrundvig.frc.world.bridges;

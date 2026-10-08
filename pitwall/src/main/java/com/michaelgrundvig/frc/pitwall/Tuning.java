@@ -67,7 +67,7 @@ public final class Tuning {
    * @param committed its committed value
    * @param current its value now
    * @param record the display name of the record that declares it, such as {@code
-   *     SwerveConfig.Gains}
+   *     DrivetrainControl.Gains}
    * @param group the path of that record in the configuration, such as {@code gains}; empty at the
    *     root
    * @param meaning what it means, its {@code @param} there; empty when there's none

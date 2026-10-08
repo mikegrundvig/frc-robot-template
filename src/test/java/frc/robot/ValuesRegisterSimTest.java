@@ -4,21 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.TunableTee;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.ValuesRegister.Switch;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.Set;
+import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 /**
  * The drive team's switches against the values register (docs/values.md): every WPILib tunable the
- * running robot publishes, apart from its configuration, has a row with its limits and how it
- * starts. Switches are made by the mechanisms as the robot is built, so this builds the robot.
+ * running robot publishes, apart from its configuration, has a row saying where it came from and
+ * why. Switches are made by the mechanisms as the robot is built, so this builds the robot.
  */
 @SimulationTest
 class ValuesRegisterSimTest {
@@ -33,14 +32,12 @@ class ValuesRegisterSimTest {
     sim.loop(); // the tunables update, as on a robot
     List<String> cameras =
         Robots.SIM.definition().cameras().stream().map(CameraConfig::name).toList();
-    Map<String, Switch> switches = new TreeMap<>();
+    Set<String> switches = new TreeSet<>();
     for (TunableTee.Listed listed : sim.pitwall().tunables().view()) {
-      String path = generic(listed.path(), cameras);
-      switches.putIfAbsent(
-          path, new Switch(path, listed.value(), listed.limits().min(), listed.limits().max()));
+      switches.add(generic(listed.path(), cameras));
     }
 
-    assertThat(switches).containsKeys("Vision/autoStartHoldSeconds", "Vision/<camera>/enabled");
+    assertThat(switches).contains("Vision/autoStartHoldSeconds", "Vision/<camera>/enabled");
     assertThat(ValuesRegister.parse(Files.readString(REGISTER)).switchProblems(switches)).isEmpty();
   }
 

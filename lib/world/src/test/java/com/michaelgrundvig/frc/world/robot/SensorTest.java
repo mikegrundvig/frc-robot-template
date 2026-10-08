@@ -23,7 +23,8 @@ import org.wpilib.math.geometry.Translation3d;
 class SensorTest {
   private static final Joint.Revolute PIVOT =
       Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.2, 0, 0.3), Joint.PITCH_UP)
-          .range(Range.degrees(0, 120), Degrees.of(0))
+          .range(Range.degrees(0, 120))
+          .rest(Degrees.of(0))
           .carries(Link.unseen("arm"));
 
   private static final Joint.Revolute ROLLER =

@@ -14,6 +14,7 @@ import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.RadiansPerSecondPerSecond;
 import static org.wpilib.units.Units.Seconds;
+import static org.wpilib.units.Units.Value;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
@@ -35,6 +36,7 @@ import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.AngularAcceleration;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
+import org.wpilib.units.measure.Dimensionless;
 import org.wpilib.units.measure.Distance;
 import org.wpilib.units.measure.LinearAcceleration;
 import org.wpilib.units.measure.LinearVelocity;
@@ -49,13 +51,17 @@ import org.wpilib.units.measure.Time;
  *
  * <p>Every value is held in the joint's own units, as the definition's are: radians for a revolute
  * joint, meters for a prismatic one, and seconds. A motor controller's units differ (Phoenix's
- * rotations of its rotor or its sensor); the program converts. Each value is given with its unit
- * where that reads better, and converted: a kP per turn of the joint as Phoenix's slot holds it
- * ({@code position(Volts.per(Rotation).of(188))}), a profile in degrees per second, soft limits as
- * a {@link Range}. A value given with its unit remembers whether it's an angle or a length, and the
- * joint refuses one of the other kind. A plain number is in the joint's units: {@code position(30)}
- * is 30 volts per radian on an arm, per meter on an elevator.
+ * rotations of its rotor or its sensor); the program converts. Each value is given with its unit,
+ * and converted: a profile in degrees per second, soft limits as a {@link Range}, bands in degrees
+ * or inches, a roller's as a share of its speed. A value given with its unit remembers whether it's
+ * an angle or a length, and the joint refuses one of the other kind. The gains may be plain
+ * numbers, in the joint's units, as SysId and Pitwall give them: {@code position(30)} is 30 volts
+ * per radian on an arm, per meter on an elevator; one per turn as Phoenix's slot holds it is given
+ * with its unit, {@code position(Volts.per(Rotation).of(188))}.
  *
+ * @param loop what its loop holds, which its factory says: positions ({@link #position(double)}),
+ *     an arm or an elevator, or speeds ({@link #velocity(double)}), a roller or a flywheel. The
+ *     definition refuses the other loop than its joint's, since its kP means something else there
  * @param gains the slot's feedback gains, and its feedforward gains where tuned
  * @param softLimits where the motor controller stops driving the joint, inside its hard stops;
  *     empty for none
@@ -69,9 +75,12 @@ import org.wpilib.units.measure.Time;
  *     encoder, which the definition must have on it
  * @param deadChannel when one of its motor controllers reads as drawing nothing on its PDH channel
  *     while the joint works: a tripped breaker, unplugged power, or a channel its block names wrong
+ * @param encoderGap how far its absolute encoder and its motor's count may disagree before one of
+ *     them is taken to have slipped; empty for the template's, worked out from the encoder
  */
 @ConfigRecord
 public record MechanismControl(
+    Loop loop,
     Gains gains,
     Optional<SoftLimits> softLimits,
     Optional<Profile> profile,
@@ -79,9 +88,10 @@ public record MechanismControl(
     NeutralMode neutralMode,
     Optional<Bands> bands,
     Optional<Homing> homing,
-    DeadChannel deadChannel) {
+    DeadChannel deadChannel,
+    Optional<EncoderGap> encoderGap) {
   /** Starts describing how a mechanism is driven, one named value at a time. */
-  public static MechanismControlBuilder.GainsStage builder() {
+  public static MechanismControlBuilder.LoopStage builder() {
     return MechanismControlBuilder.builder();
   }
 
@@ -96,7 +106,7 @@ public record MechanismControl(
    *     2π times this; give that one with its unit
    */
   public static MechanismControl position(double kP) {
-    return defaults(kP, Optional.empty());
+    return defaults(Loop.POSITION, kP, Optional.empty());
   }
 
   /**
@@ -109,7 +119,8 @@ public record MechanismControl(
    * @throws IllegalArgumentException for a kP per anything but an angle or a length
    */
   public static MechanismControl position(Measure<? extends PerUnit<VoltageUnit, ?>> kP) {
-    return defaults(kP.baseUnitMagnitude(), Optional.of(per("kP", kP, POSITION)));
+    return defaults(
+        Loop.POSITION, kP.baseUnitMagnitude(), Optional.of(per("kP", kP, POSITION, null)));
   }
 
   /**
@@ -122,7 +133,7 @@ public record MechanismControl(
    *     Phoenix's slot holds it, is 2π times this; give that one with its unit
    */
   public static MechanismControl velocity(double kP) {
-    return defaults(kP, Optional.empty());
+    return defaults(Loop.VELOCITY, kP, Optional.empty());
   }
 
   /**
@@ -133,7 +144,7 @@ public record MechanismControl(
    * @throws IllegalArgumentException for a kP per anything but a speed
    */
   public static MechanismControl velocity(Measure<? extends PerUnit<VoltageUnit, ?>> kP) {
-    return defaults(kP.baseUnitMagnitude(), Optional.of(per("kP", kP, SPEED)));
+    return defaults(Loop.VELOCITY, kP.baseUnitMagnitude(), Optional.of(per("kP", kP, SPEED, null)));
   }
 
   /** The same, coasting when told nothing: a flywheel spinning down rather than stopping hard. */
@@ -142,18 +153,9 @@ public record MechanismControl(
   }
 
   /**
-   * The same, its moves profiled: at most this fast, and this quick to get there, in the joint's
-   * units, radians (or meters) per second and per second squared. Give them with their units where
-   * they read better: {@code withProfile(DegreesPerSecond.of(450),
-   * DegreesPerSecondPerSecond.of(1700))}.
-   */
-  public MechanismControl withProfile(double cruiseVelocity, double acceleration) {
-    return profiled(cruiseVelocity, acceleration, Optional.empty());
-  }
-
-  /**
-   * The same, a joint that turns profiled: {@code withProfile(DegreesPerSecond.of(450),
-   * DegreesPerSecondPerSecond.of(1700))}, or in turns per second as Phoenix's are.
+   * The same, a joint that turns profiled, its moves at most this fast and this quick to get there:
+   * {@code withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700))}, or in turns
+   * per second as Phoenix's are.
    */
   public MechanismControl withProfile(AngularVelocity cruise, AngularAcceleration acceleration) {
     return profiled(
@@ -171,6 +173,28 @@ public record MechanismControl(
         cruise.in(MetersPerSecond),
         acceleration.in(MetersPerSecondPerSecond),
         Optional.of(Position.Kind.LENGTH));
+  }
+
+  /**
+   * The same, with another proportional gain, in its loop's units: volts per radian (or meter) of
+   * error for a joint held at positions, per radian (or meter) per second for one run at speeds. A
+   * practice robot's own, {@code retuned(control -> control.withKp(25))}.
+   */
+  public MechanismControl withKp(double kP) {
+    return with(gainsWith().kP(kP).build());
+  }
+
+  /**
+   * The same, its proportional gain given with its unit: per angle or length for a joint held at
+   * positions, {@code withKp(Volts.per(Rotation).of(150))}, as Phoenix's slot holds it; per speed
+   * for one run at speeds, {@code withKp(Volts.per(RotationsPerSecond).of(0.12))}.
+   *
+   * @throws IllegalArgumentException for a kP per anything else than its loop's, or per the other
+   *     kind than its other gains
+   */
+  public MechanismControl withKp(Measure<? extends PerUnit<VoltageUnit, ?>> kP) {
+    int takes = loop == Loop.POSITION ? POSITION : SPEED;
+    return with(gainsWith().kP(kP.baseUnitMagnitude()).kind(kind("kP", kP, takes, loop)).build());
   }
 
   /** The same, with an integral gain: volts per radian (or meter) of error, per second it lasts. */
@@ -191,12 +215,12 @@ public record MechanismControl(
    * {@code withKd(Volts.per(RotationsPerSecond).of(2))}, as Phoenix's slot holds it; per
    * acceleration for one run at speeds, {@code Volts.per(RotationsPerSecondPerSecond)}.
    *
-   * @throws IllegalArgumentException for a kD per anything but a speed or an acceleration, or per
-   *     the other kind than its other gains
+   * @throws IllegalArgumentException for a kD per anything else than its loop's, or per the other
+   *     kind than its other gains
    */
   public MechanismControl withKd(Measure<? extends PerUnit<VoltageUnit, ?>> kD) {
-    return with(
-        gainsWith().kD(kD.baseUnitMagnitude()).kind(kind("kD", kD, SPEED, ACCELERATION)).build());
+    int takes = loop == Loop.POSITION ? SPEED : ACCELERATION;
+    return with(gainsWith().kD(kD.baseUnitMagnitude()).kind(kind("kD", kD, takes, loop)).build());
   }
 
   /** The same, with SysId's kS: the volts that overcome static friction. */
@@ -221,7 +245,7 @@ public record MechanismControl(
    *     its other gains
    */
   public MechanismControl withKv(Measure<? extends PerUnit<VoltageUnit, ?>> kV) {
-    return with(gainsWith().kV(kV.baseUnitMagnitude()).kind(kind("kV", kV, SPEED)).build());
+    return with(gainsWith().kV(kV.baseUnitMagnitude()).kind(kind("kV", kV, SPEED, null)).build());
   }
 
   /**
@@ -241,7 +265,8 @@ public record MechanismControl(
    *     kind than its other gains
    */
   public MechanismControl withKa(Measure<? extends PerUnit<VoltageUnit, ?>> kA) {
-    return with(gainsWith().kA(kA.baseUnitMagnitude()).kind(kind("kA", kA, ACCELERATION)).build());
+    return with(
+        gainsWith().kA(kA.baseUnitMagnitude()).kind(kind("kA", kA, ACCELERATION, null)).build());
   }
 
   /**
@@ -270,14 +295,6 @@ public record MechanismControl(
     return limited(limits.lower(), limits.upper(), Optional.of(limits.kind()));
   }
 
-  /**
-   * The same, the motor controller stopping it inside its hard stops, in the joint's units: radians
-   * or meters. Degrees read better as a range: {@code withSoftLimits(Range.degrees(5, 130))}.
-   */
-  public MechanismControl withSoftLimits(double lower, double upper) {
-    return limited(lower, upper, Optional.empty());
-  }
-
   /** The same, its motors' torque capped at this current. */
   public MechanismControl withStatorLimit(Current stator) {
     return MechanismControlBuilder.builder(this)
@@ -299,17 +316,17 @@ public record MechanismControl(
   }
 
   /**
-   * The same, there once inside {@code enter} of a target, and still while inside {@code stay}: in
-   * the joint's units, radians or meters, for a joint held at positions; shares of the speed it's
-   * asked for, {@code withBands(0.03, 0.06)}, for one run at speeds.
+   * The same, a joint run at speeds, a roller or a flywheel, there once inside {@code enter} of the
+   * speed it's asked for, and still while inside {@code stay}, each a share of that speed: {@code
+   * withBands(Percent.of(3), Percent.of(6))}.
    */
-  public MechanismControl withBands(double enter, double stay) {
-    return banded(enter, stay, Optional.empty());
+  public MechanismControl withBands(Dimensionless enter, Dimensionless stay) {
+    return banded(enter.in(Value), stay.in(Value), Optional.empty());
   }
 
   /**
-   * The same, a joint that turns there within these angles: {@code withBands(Degrees.of(1),
-   * Degrees.of(2))}.
+   * The same, a joint that turns held at positions, there once inside {@code enter} of a target,
+   * and still while inside {@code stay}: {@code withBands(Degrees.of(1), Degrees.of(2))}.
    */
   public MechanismControl withBands(Angle enter, Angle stay) {
     return banded(enter.in(Radians), stay.in(Radians), Optional.of(Position.Kind.ANGLE));
@@ -337,6 +354,27 @@ public record MechanismControl(
   public MechanismControl withDeadChannel(Current drawing, Current dead, Time time) {
     return MechanismControlBuilder.builder(this)
         .deadChannel(DeadChannel.builder().drawing(drawing).dead(dead).time(time).build())
+        .build();
+  }
+
+  /**
+   * The same, its absolute encoder and its motor's count trusted to disagree by up to this, still,
+   * before one of them is taken to have slipped: {@code withEncoderGap(Degrees.of(8))}, an arm
+   * whose chain gives a lot. Without it, the template's: 5°, or 2 cm on a joint that slides, or
+   * eight of the encoder's counts at the joint where that's more.
+   */
+  public MechanismControl withEncoderGap(Angle gap) {
+    return gapped(gap.in(Radians), Position.Kind.ANGLE);
+  }
+
+  /** The same, a joint that slides: {@code withEncoderGap(Inches.of(1))}. */
+  public MechanismControl withEncoderGap(Distance gap) {
+    return gapped(gap.in(Meters), Position.Kind.LENGTH);
+  }
+
+  private MechanismControl gapped(double margin, Position.Kind kind) {
+    return MechanismControlBuilder.builder(this)
+        .encoderGap(EncoderGap.builder().margin(margin).kind(kind).build())
         .build();
   }
 
@@ -379,11 +417,20 @@ public record MechanismControl(
               : "its bands are angles, and the joint slides: give them in lengths,"
                   + " Inches.of(...)");
     }
+    if (encoderGap.filter(gap -> gap.kind() != joint).isPresent()) {
+      wrong.add(
+          turns
+              ? "its encoder gap is a length, and the joint turns: give it in an angle,"
+                  + " withEncoderGap(Degrees.of(...))"
+              : "its encoder gap is an angle, and the joint slides: give it in a length,"
+                  + " withEncoderGap(Inches.of(...))");
+    }
     return wrong.isEmpty() ? null : String.join("; ", wrong);
   }
 
-  private static MechanismControl defaults(double kP, Optional<Position.Kind> per) {
+  private static MechanismControl defaults(Loop loop, double kP, Optional<Position.Kind> per) {
     return builder()
+        .loop(loop)
         .gains(MechanismControlGainsBuilder.builder(Gains.seeded()).kP(kP).kind(per).build())
         .currentLimits(CurrentLimits.DEFAULTS)
         .neutralMode(NeutralMode.BRAKE)
@@ -462,27 +509,29 @@ public record MechanismControl(
   /**
    * What a gain given with its unit is per, an angle or a length: refused unless it's per what the
    * gain takes, a position, a speed or an acceleration ({@code takes}).
+   *
+   * @param loop the loop that decides what it takes, said in the refusal; null when the gain takes
+   *     the same in either
    */
   private static Position.Kind per(
-      String gain, Measure<? extends PerUnit<VoltageUnit, ?>> value, int... takes) {
+      String gain,
+      Measure<? extends PerUnit<VoltageUnit, ?>> value,
+      int takes,
+      @Nullable Loop loop) {
     Unit unit = value.unit().denominator();
     Per per = per(unit);
-    for (int allowed : takes) {
-      if (per != null && per.perSecond() == allowed) {
-        return per.kind();
-      }
-    }
-    List<String> ways = new ArrayList<>();
-    for (int allowed : takes) {
-      ways.add(TAKES.get(allowed));
+    if (per != null && per.perSecond() == takes) {
+      return per.kind();
     }
     throw new IllegalArgumentException(
         "Gains."
             + gain
             + ": volts per "
             + unit.name()
-            + " can't be one: give it per "
-            + String.join(", or per ", ways));
+            + " can't be one"
+            + (loop == null ? "" : " in a control for " + loop.held())
+            + ": give it per "
+            + TAKES.get(takes));
   }
 
   /**
@@ -490,8 +539,11 @@ public record MechanismControl(
    * the gains already are.
    */
   private Optional<Position.Kind> kind(
-      String gain, Measure<? extends PerUnit<VoltageUnit, ?>> value, int... takes) {
-    Position.Kind kind = per(gain, value, takes);
+      String gain,
+      Measure<? extends PerUnit<VoltageUnit, ?>> value,
+      int takes,
+      @Nullable Loop loop) {
+    Position.Kind kind = per(gain, value, takes, loop);
     if (gains.kind().isPresent() && gains.kind().get() != kind) {
       boolean angle = kind == Position.Kind.ANGLE;
       throw new IllegalArgumentException(
@@ -504,6 +556,23 @@ public record MechanismControl(
               + ": a control drives one joint, which turns or slides");
     }
     return Optional.of(kind);
+  }
+
+  /**
+   * What a joint's loop holds: where it is, or how fast it runs. Its control's factory says it,
+   * {@code position(kP)} or {@code velocity(kP)}, and its joint must agree: one held at positions
+   * (with a range or named positions) runs a position loop, and a roller a velocity loop.
+   */
+  public enum Loop {
+    /** Positions: an arm, an elevator, a turret. Its kP is volts per radian (or meter) of error. */
+    POSITION,
+    /** Speeds: a roller, a flywheel. Its kP is volts per radian (or meter) per second of error. */
+    VELOCITY;
+
+    /** What it holds, as a message says it: "positions" or "speeds". */
+    String held() {
+      return this == POSITION ? "positions" : "speeds";
+    }
   }
 
   /** What the motors do when told nothing. */
@@ -580,7 +649,7 @@ public record MechanismControl(
    * @param lower the lowest position it drives the joint to
    * @param upper the highest
    * @param kind angles or lengths, as they were given with their units ({@code Range.degrees}),
-   *     which the joint must be; empty when given as plain numbers, in the joint's units
+   *     which the joint must be; empty only when built by name, in the joint's units
    */
   @ConfigRecord
   public record SoftLimits(double lower, double upper, Optional<Position.Kind> kind) {
@@ -611,7 +680,7 @@ public record MechanismControl(
    * @param cruiseVelocity the fastest the profile moves it, per second
    * @param acceleration how fast the profile speeds it up and slows it down, per second squared
    * @param kind angles or lengths, as they were given with their units ({@code DegreesPerSecond}),
-   *     which the joint must be; empty when given as plain numbers, in the joint's units
+   *     which the joint must be; empty only when built by name, in the joint's units
    */
   @ConfigRecord
   public record Profile(double cruiseVelocity, double acceleration, Optional<Position.Kind> kind) {
@@ -678,27 +747,63 @@ public record MechanismControl(
    * @param enter the most it may be off to come to be there
    * @param stay the most it may be off to stay there: at least {@code enter}
    * @param kind angles or lengths, as they were given with their units ({@code Degrees.of}), which
-   *     the joint must be, held at positions; empty when given as plain numbers, in the joint's
-   *     units or as shares of a speed
+   *     the joint must be, held at positions; empty for shares of a speed ({@code Percent.of})
    */
   @ConfigRecord
   public record Bands(double enter, double stay, Optional<Position.Kind> kind) {
     public Bands {
-      Checks.on(Bands.class)
-          .field("enter", enter, positive())
-          .field("stay", stay, finite())
-          .check(
-              "stay",
-              () ->
-                  stay >= enter
-                      ? null
-                      : shown(stay) + " must be at least the band to arrive (" + shown(enter) + ")")
-          .orThrow();
+      if (!(enter > 0) || !Double.isFinite(enter)) {
+        throw new IllegalArgumentException(
+            "a band to arrive within is more than none, not " + shownBand(enter, kind));
+      }
+      if (!(stay >= enter) || !Double.isFinite(stay)) {
+        throw new IllegalArgumentException(
+            "a band to stay within, "
+                + shownBand(stay, kind)
+                + ", is at least the band to arrive within, "
+                + shownBand(enter, kind)
+                + ": give "
+                + shownBand(enter, kind)
+                + " or more, so it leaves only past where it arrived");
+      }
+    }
+
+    /** A band as the team gave it: degrees, meters, or a share of a speed. */
+    private static String shownBand(double band, Optional<Position.Kind> kind) {
+      return kind.isEmpty()
+          ? shown(band * 100) + "%"
+          : Places.shownAt(kind.get() == Position.Kind.ANGLE, band);
     }
 
     /** Starts describing bands, one named value at a time. */
     public static MechanismControlBandsBuilder.EnterStage builder() {
       return MechanismControlBandsBuilder.builder();
+    }
+  }
+
+  /**
+   * How far a joint's absolute encoder and its motor's count may disagree, still, before one of
+   * them is taken to have slipped: a magnet loose on its shaft, a belt that skipped. Past it for a
+   * quarter second, more a loop's travel at the joint's speed (the two aren't read at the same
+   * instant), where the joint is isn't known, and it's faulted until they agree again. In the
+   * joint's units, radians or meters, as given with its unit.
+   *
+   * @param margin the most they may disagree, still
+   * @param kind an angle or a length, as it was given with its unit, which the joint must be
+   */
+  @ConfigRecord
+  public record EncoderGap(double margin, Position.Kind kind) {
+    public EncoderGap {
+      if (!(margin > 0) || !Double.isFinite(margin)) {
+        throw new IllegalArgumentException(
+            "an encoder gap is more than none, not "
+                + Places.shownAt(kind == Position.Kind.ANGLE, margin));
+      }
+    }
+
+    /** Starts describing an encoder gap, one named value at a time. */
+    public static MechanismControlEncoderGapBuilder.MarginStage builder() {
+      return MechanismControlEncoderGapBuilder.builder();
     }
   }
 
@@ -750,13 +855,12 @@ public record MechanismControl(
    * How a joint read by its motor alone finds where it is: the motor counts turns from wherever it
    * was at power on, so until then the joint's position is a guess. A joint with an absolute
    * encoder needs none; any other joint held at positions names one, so trusting the start is a
-   * choice written down ({@link #assumeAtReference}), never a silent one.
+   * choice written down ({@link #assumeAtRest}), never a silent one.
    */
-  public sealed interface Homing
-      permits Homing.AssumeAtReference, Homing.ToHardStop, Homing.ToSwitch {
+  public sealed interface Homing permits Homing.AssumeAtRest, Homing.ToHardStop, Homing.ToSwitch {
     /** The joint is where its definition rests it whenever the robot powers on: stowed by hand. */
-    static Homing assumeAtReference() {
-      return new AssumeAtReference();
+    static Homing assumeAtRest() {
+      return new AssumeAtRest();
     }
 
     /**
@@ -764,16 +868,16 @@ public record MechanismControl(
      * there is the stop's: 2 V, for as long as its model says crossing its range takes at that
      * push, twice over and half a second more ({@link #secondsAllowed}).
      */
-    static Homing toHardStop(Stop stop) {
-      return ToHardStop.builder().stop(stop).volts(2).build();
+    static Homing toHardStop(Sensor.Switch.Limit.End end) {
+      return ToHardStop.builder().end(end).volts(2).build();
     }
 
     /**
      * The same, for at most this long: for a joint slower than its model says, such as one pushed
      * up against its weight.
      */
-    static Homing toHardStop(Stop stop, Time timeout) {
-      return ToHardStop.builder().stop(stop).volts(2).timeout(timeout).build();
+    static Homing toHardStop(Sensor.Switch.Limit.End end, Time timeout) {
+      return ToHardStop.builder().end(end).volts(2).timeout(timeout).build();
     }
 
     /**
@@ -782,12 +886,12 @@ public record MechanismControl(
      * model says crossing its range takes at that push, twice over and half a second more ({@link
      * #secondsAllowed}).
      */
-    static Homing toSwitch(Stop end) {
+    static Homing toSwitch(Sensor.Switch.Limit.End end) {
       return ToSwitch.builder().end(end).volts(2).build();
     }
 
     /** The same, for at most this long: for a joint slower than its model says. */
-    static Homing toSwitch(Stop end, Time timeout) {
+    static Homing toSwitch(Sensor.Switch.Limit.End end, Time timeout) {
       return ToSwitch.builder().end(end).volts(2).timeout(timeout).build();
     }
 
@@ -829,8 +933,8 @@ public record MechanismControl(
 
     /** How far apart a slide's named places and where it rests lie: its travel, without stops. */
     private static double spread(Joint joint) {
-      double lowest = joint.reference();
-      double highest = joint.reference();
+      double lowest = joint.restPosition();
+      double highest = joint.restPosition();
       for (Position place : joint.positions()) {
         lowest = Math.min(lowest, place.value());
         highest = Math.max(highest, place.value());
@@ -838,32 +942,25 @@ public record MechanismControl(
       return highest - lowest;
     }
 
-    /** Which of a joint's hard stops, or which end of its travel. */
-    enum Stop {
-      /** The bottom of its range. */
-      LOWER,
-      /** The top of its range. */
-      UPPER
-    }
-
-    /** The joint is at its reference at power on ({@link #assumeAtReference}). */
-    record AssumeAtReference() implements Homing {}
+    /** The joint is where it rests at power on ({@link #assumeAtRest}). */
+    record AssumeAtRest() implements Homing {}
 
     /**
      * Pushed into a hard stop on the first enable, the joint is there once it has stopped moving
      * for a quarter of a second; if it hasn't by the timeout, it's faulted, and its moves refused.
      *
-     * @param stop which hard stop
+     * @param end which end's hard stop
      * @param volts how hard it's pushed: enough to move it, against gravity if the stop is above
      * @param timeout how long it may take; empty to work it out from the joint ({@link
      *     Homing#secondsAllowed})
      */
     @ConfigRecord
-    record ToHardStop(Stop stop, double volts, Optional<Time> timeout) implements Homing {
+    record ToHardStop(Sensor.Switch.Limit.End end, double volts, Optional<Time> timeout)
+        implements Homing {
       public ToHardStop {
         Checks.on(ToHardStop.class)
             .field("volts", volts, positive())
-            .field("volts", volts, atMost(12.0))
+            .field("volts", volts, atMost(Motor.NOMINAL_VOLTS))
             .field("timeout", timeout, given(positive()))
             .orThrow();
       }
@@ -874,7 +971,7 @@ public record MechanismControl(
       }
 
       /** Starts describing the homing, one named value at a time. */
-      public static MechanismControlHomingToHardStopBuilder.StopStage builder() {
+      public static MechanismControlHomingToHardStopBuilder.EndStage builder() {
         return MechanismControlHomingToHardStopBuilder.builder();
       }
     }
@@ -890,11 +987,12 @@ public record MechanismControl(
      *     Homing#secondsAllowed})
      */
     @ConfigRecord
-    record ToSwitch(Stop end, double volts, Optional<Time> timeout) implements Homing {
+    record ToSwitch(Sensor.Switch.Limit.End end, double volts, Optional<Time> timeout)
+        implements Homing {
       public ToSwitch {
         Checks.on(ToSwitch.class)
             .field("volts", volts, positive())
-            .field("volts", volts, atMost(12.0))
+            .field("volts", volts, atMost(Motor.NOMINAL_VOLTS))
             .field("timeout", timeout, given(positive()))
             .orThrow();
       }

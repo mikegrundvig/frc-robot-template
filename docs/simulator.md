@@ -279,7 +279,10 @@ and a scenario for it, when the simulator can make it.
 - One wheel slipping on its own under acceleration: the robot keeps to its tread's grip as a whole,
   and every wheel carries the same share, so they slip all alike or not at all (maple-sim,
   [stand-ins](stand-ins.md)).
-- A CAN device dropping off the bus, or browning out: the simulated modules have no bus.
+- A CAN device dropping off the bus, or browning out: the simulated modules have no bus. A joint's
+  motor controllers can be silenced or restarted, and its absolute encoder frozen or slipped on its
+  shaft, but only by a test (`JointSimulation.silence`, `restart`, `freeze`, `slip`), not yet from
+  the page.
 - The battery sagging: the simulated world models no battery.
 - A camera's axes swapped in the configuration, the wrong field variant, or one camera with the
   wrong tag layout.
@@ -421,13 +424,16 @@ The simulated world is in two places, apart so that nothing the robot runs can r
   how the simulated robot's sensors and wheels err (`SensorErrors`), the catalog of what can fail
   (`FaultCatalog`), and where each random stream starts (`Seeds`). It reads
   the world model and WPILib's math alone: no hardware layer, robot program, localization, or
-  Pitwall, and no clock, unseeded randomness, threads, or static state (its `ArchitectureTest`), so
-  worlds run side by side and a run repeats to the bit.
+  Pitwall, and no clock, unseeded randomness, threads, or static state (the robot program's
+  `ArchitectureTest`), so worlds run side by side and a run repeats to the bit.
 - **The robot program's adapters** (`frc.robot.sim`) hold what does: the modules' motor controllers
   and encoders (`ModuleIOSim`, a TalonFX's loops and limits and the CANcoder's timing, with the
   steering in closed form), each joint's motor controller (`JointIOSim`, a TalonFX's slot or a
   SPARK's loop as its block wires it, `TalonFxEmulator` and `SparkEmulator`, each running the
-  joint's `ControllerPlan` where that controller does, on its plant), the IMUs' IO (`GyroIOSim`),
+  joint's `ControllerPlan` where that controller does, on its plant, and stopping on its limit
+  switches each millisecond, from the limits the robot's IO is given), the switches and
+  rangefinders (`SensorSimulation`), each built from the robot's definition with the world, the
+  IMUs' IO (`GyroIOSim`),
   the cameras (`CameraIOSim`, over
   PhotonVision's simulation in `VisionSim`), the coprocessors, the faults' bindings to Pitwall
   (`Faults`), the scenarios, and `DriveSimulation`, which steps them together and takes the

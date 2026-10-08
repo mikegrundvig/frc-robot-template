@@ -18,22 +18,23 @@ import org.wpilib.units.Unit;
 /**
  * Everything tuning needs to know about one mechanism, built by name:
  *
- * <pre>{@code
+ * {@snippet :
  * Rig.builder()
- *     .name("Steering")
- *     .gains(drivetrainTuning, "gains.steerKp", "gains.steerKd") // values of its LiveConfig
- *     .setpoint(Radians, drive::holdSteerAngle) // how an experiment commands it
- *     .limits(Degrees.of(-180), Degrees.of(180)) // where an experiment may send it
- *     .measurement("Front left", Degrees, drive::frontLeftAngles) // what's scored
- *     .signal("Front left voltage", Volts, drive::frontLeftVolts) // recorded beside it
- *     .requires(drive)
+ *     .name("Arm")
+ *     .gains(config, "gains.kP", "gains.kD") // values of its LiveConfig
+ *     .setpoint(Radians, radians -> setpoint = radians) // how an experiment commands it
+ *     .limits(Degrees.of(-100), Degrees.of(100)) // where an experiment may send it
+ *     .measurement("Angle", Degrees, this::readings) // what's scored
+ *     .signal("Voltage", Volts, () -> config.get().gains().kP() * (setpoint - angle)) // beside it
  *     .build();
- * }</pre>
+ * }
+ *
+ * <p>A rig on a mechanism the scheduler runs says so ({@code .requires(drive)}), so a run holds it
+ * as a command would; the template's drivetrain is one ({@code Drive.steeringRig}).
  *
  * <p>Its gains are values of a {@link LiveConfig}, so they stay where they always were: the page
- * tunes them there, through the same checks as any other change (their tuning limits, the
- * configuration's own checks, and the robot's rules across mechanisms). A rig only reads them, to
- * record which gains a run ran with.
+ * tunes them there, through the same checks as any other change (their tuning limits, then the
+ * configuration's own checks). A rig only reads them, to record which gains a run ran with.
  *
  * <p>Its signals are read each loop an experiment runs. A signal hands over every sample taken
  * since the last loop, each with its own time, so a device's 250 Hz readings keep their rate: see

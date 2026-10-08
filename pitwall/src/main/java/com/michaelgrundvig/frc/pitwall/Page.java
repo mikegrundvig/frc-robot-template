@@ -38,7 +38,6 @@ public final class Page {
   private final Supplier<String> mode;
   private final @Nullable Simulator simulator;
   private final Devices devices;
-  private final Notices notices;
   private final Scenes scenes;
 
   /** Tells this run of the robot program from the last: the page keeps runs across restarts. */
@@ -102,7 +101,6 @@ public final class Page {
         () -> "",
         null,
         new Devices(System::nanoTime),
-        new Notices(),
         new Scenes(System::nanoTime, System.out::println));
   }
 
@@ -128,7 +126,6 @@ public final class Page {
         mode,
         null,
         new Devices(System::nanoTime),
-        new Notices(),
         new Scenes(System::nanoTime, System.out::println));
   }
 
@@ -138,7 +135,6 @@ public final class Page {
    * @param simulator the simulator's controls, in the simulator; null on a robot, where the page
    *     has none
    * @param devices the devices the robot reports on, for the Pit view's cards
-   * @param notices what the robot has to tell whoever is at the page, above everything else
    * @param scenes the scenes the page draws
    */
   Page(
@@ -150,7 +146,6 @@ public final class Page {
       Supplier<String> mode,
       @Nullable Simulator simulator,
       Devices devices,
-      Notices notices,
       Scenes scenes) {
     this.status = status;
     this.actions = actions;
@@ -160,7 +155,6 @@ public final class Page {
     this.mode = mode;
     this.simulator = simulator;
     this.devices = devices;
-    this.notices = notices;
     this.scenes = scenes;
   }
 
@@ -187,11 +181,6 @@ public final class Page {
   /** The devices the robot reports on: the Pit view's cards. */
   public Devices devices() {
     return devices;
-  }
-
-  /** What the robot has to tell whoever is at the page: shown in the state bar and atop Pit. */
-  public Notices notices() {
-    return notices;
   }
 
   /** The scenes the page draws: its World view. */
@@ -222,8 +211,6 @@ public final class Page {
    *   <li>{@code rigs}, {@code experiments}: what can be run;
    *   <li>{@code run}: the run in progress, or the latest to end;
    *   <li>{@code devices}: each device's card, as of its last read: see {@link Devices#view};
-   *   <li>{@code notices}: what the robot has to tell whoever is at the page: see {@link
-   *       Notices#view};
    *   <li>{@code scenes}: each scene's description, by id; what moves in one goes only to the pages
    *       that show it: see {@link Scenes};
    *   <li>in the simulator only, {@code simulator} (the Driver Station, the clock, and the
@@ -285,7 +272,6 @@ public final class Page {
                     pathsFound),
                 () -> run(run)));
     sections.put("devices", devices.view());
-    sections.put("notices", notices.view());
     sections.put("scenes", scenes.descriptions());
     if (simulator != null) {
       sections.putAll(simulator.view());
@@ -321,7 +307,8 @@ public final class Page {
    * Each configuration's documentation, by name: what its root record's Javadoc says, then each
    * record its values are in, with what the record holding it says it is: {@code {"record", "doc":
    * {"summary", "text"}, "groups": [{"path", "record", "doc", "meaning"}]}}. Each {@code record} is
-   * a display name ({@code SwerveConfig.Gains}). It was read when the configuration was published.
+   * a display name ({@code DrivetrainControl.Gains}). It was read when the configuration was
+   * published.
    */
   static Map<String, Object> configs(List<LiveConfig<?>> configs) {
     Map<String, Object> described = new LinkedHashMap<>();

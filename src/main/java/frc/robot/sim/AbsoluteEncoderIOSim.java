@@ -9,7 +9,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * A joint's absolute encoder in the simulator: it reads where the joint really is, as its port
  * would, its offset and direction undone, so the joint's mechanism seeds from it as from a real
- * one. Unplugged on a test's word ({@link JointSimulation#unplug}).
+ * one. Unplugged, frozen or slipped on a test's word ({@link JointSimulation#unplug}, {@link
+ * JointSimulation#freeze}, {@link JointSimulation#slip}).
  */
 final class AbsoluteEncoderIOSim implements AbsoluteEncoderIO {
   private final JointIOSim joint;
@@ -20,6 +21,15 @@ final class AbsoluteEncoderIOSim implements AbsoluteEncoderIO {
   private final MechanismWiring.@Nullable PortEncoder port;
 
   boolean connected = true;
+
+  /** Whether its reading is stuck where it was, as a frozen encoder's is. */
+  boolean frozen;
+
+  /** How far off it reads the joint, in the joint's units: its magnet turned on its shaft. */
+  double slip;
+
+  /** Its reading as last read: what it reads while frozen. */
+  private double share = Double.NaN;
 
   AbsoluteEncoderIOSim(
       JointIOSim joint, Sensor.Encoder model, MechanismWiring.@Nullable PortEncoder port) {
@@ -32,8 +42,11 @@ final class AbsoluteEncoderIOSim implements AbsoluteEncoderIO {
   @Override
   public void updateInputs(AbsoluteEncoderIOInputs inputs) {
     inputs.connected = connected;
-    double reading = joint.position() * perUnit;
-    MechanismWiring.PortEncoder wired = port;
-    inputs.share = wired != null ? wired.raw(reading) : reading - Math.floor(reading);
+    if (!frozen || Double.isNaN(share)) {
+      double reading = (joint.position() + slip) * perUnit;
+      MechanismWiring.PortEncoder wired = port;
+      share = wired != null ? wired.raw(reading) : reading - Math.floor(reading);
+    }
+    inputs.share = share;
   }
 }

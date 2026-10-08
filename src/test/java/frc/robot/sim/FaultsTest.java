@@ -63,12 +63,7 @@ class FaultsTest {
   /** A world with sensors that err like this, its parts declared, the robot standing. */
   private SimulatedWorld world(SensorErrors errors) {
     SimulatedWorld built =
-        new SimulatedWorld(
-            RobotSim.FIELD,
-            Robots.SIM.definition().drivetrain(),
-            Robots.SIM.definition().body(),
-            List.of(),
-            errors);
+        new SimulatedWorld(RobotSim.FIELD, RobotSim.WITHOUT_CAMERAS.definition(), errors);
     worlds.add(built);
     components = new Components(said::add);
     built.addTo(components);
@@ -567,8 +562,8 @@ class FaultsTest {
 
   /** Drives every wheel at a voltage for a time; how far the robot went from where it stood. */
   private static double drive(SimulatedWorld world, double volts, double seconds) {
-    for (ModuleIO module : world.drivetrainHardware().modules()) {
-      module.setDriveVoltage(volts);
+    for (int i = 0; i < 4; i++) {
+      world.drivetrain().moduleSim(i).setDriveVoltage(volts);
     }
     for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       step(world);

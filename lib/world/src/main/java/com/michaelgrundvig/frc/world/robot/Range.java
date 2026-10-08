@@ -1,11 +1,9 @@
 package com.michaelgrundvig.frc.world.robot;
 
-import static com.michaelgrundvig.frc.world.config.Rules.finite;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Radians;
 
-import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.Distance;
@@ -23,16 +21,33 @@ import org.wpilib.units.measure.Distance;
 @ConfigRecord
 public record Range(Position.Kind kind, double lower, double upper) {
   public Range {
-    Checks.on(Range.class)
-        .field("lower", lower, finite())
-        .field("upper", upper, finite())
-        .check(
-            "upper",
-            () ->
-                upper > lower
-                    ? null
-                    : shown(upper) + " must be above the lower stop (" + shown(lower) + ")")
-        .orThrow();
+    boolean angles = kind == Position.Kind.ANGLE;
+    String stops = stop(angles, lower) + " to " + stop(angles, upper);
+    if (!Double.isFinite(lower) || !Double.isFinite(upper)) {
+      throw new IllegalArgumentException("a range's stops are numbers, not " + stops);
+    }
+    if (upper == lower) {
+      throw new IllegalArgumentException(
+          "a range's stops are apart, and " + stops + " is one place: give them both");
+    }
+    if (upper < lower) {
+      throw new IllegalArgumentException(
+          "a range goes from its lower stop to its upper, and "
+              + stops
+              + " is the other way round: give the lower first, "
+              + (angles
+                  ? "Range.degrees("
+                      + shown(Math.toDegrees(upper))
+                      + ", "
+                      + shown(Math.toDegrees(lower))
+                  : "Range.meters(" + shown(upper) + ", " + shown(lower))
+              + ")");
+    }
+  }
+
+  /** A stop as a message shows it: in degrees or meters, or as it is when it isn't a number. */
+  private static String stop(boolean angles, double value) {
+    return Double.isFinite(value) ? Places.shownAt(angles, value) : value + (angles ? "°" : " m");
   }
 
   /** Starts describing a range, one named value at a time. */

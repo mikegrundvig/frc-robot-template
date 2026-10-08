@@ -14,6 +14,10 @@ import static org.wpilib.units.Units.InchesPerSecond;
 import static org.wpilib.units.Units.InchesPerSecondPerSecond;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.Percent;
+import static org.wpilib.units.Units.Radians;
+import static org.wpilib.units.Units.RadiansPerSecond;
+import static org.wpilib.units.Units.RadiansPerSecondPerSecond;
 import static org.wpilib.units.Units.Rotation;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.RotationsPerSecondPerSecond;
@@ -123,12 +127,12 @@ class MechanismControlTest {
             .withKs(0.2)
             .withKv(2.1)
             .withKa(0.05)
-            .withProfile(8, 30)
-            .withSoftLimits(0, 2)
+            .withProfile(RadiansPerSecond.of(8), RadiansPerSecondPerSecond.of(30))
+            .withSoftLimits(Range.of(Radians.of(0), Radians.of(2)))
             .withStatorLimit(Amps.of(60))
             .withSupplyLimit(Amps.of(50))
-            .withBands(0.02, 0.05)
-            .withHoming(MechanismControl.Homing.assumeAtReference());
+            .withBands(Radians.of(0.02), Radians.of(0.05))
+            .withHoming(MechanismControl.Homing.assumeAtRest());
 
     assertThat(arm.gains().kP()).isEqualTo(30);
     assertThat(arm.gains().kI()).isEqualTo(0.1);
@@ -145,7 +149,18 @@ class MechanismControlTest {
     assertThat(arm.currentLimits().supplyLower()).isEqualTo(Amps.of(40));
     assertThat(arm.bands().orElseThrow().enter()).isEqualTo(0.02);
     assertThat(arm.bands().orElseThrow().stay()).isEqualTo(0.05);
-    assertThat(arm.homing()).contains(MechanismControl.Homing.assumeAtReference());
+    assertThat(MechanismControl.velocity(0.02).withBands(Percent.of(3), Percent.of(6)).bands())
+        .as("a roller's, shares of its speed")
+        .contains(MechanismControl.Bands.builder().enter(0.03).stay(0.06).build());
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> arm.withBands(Degrees.of(4), Degrees.of(2)))
+        .withMessage(
+            "a band to stay within, 2°, is at least the band to arrive within, 4°: give 4° or more,"
+                + " so it leaves only past where it arrived");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> arm.withBands(Percent.of(0), Percent.of(6)))
+        .withMessage("a band to arrive within is more than none, not 0%");
+    assertThat(arm.homing()).contains(MechanismControl.Homing.assumeAtRest());
   }
 
   /**
@@ -231,6 +246,52 @@ class MechanismControlTest {
                 .kind())
         .as("a joint run at speeds takes a kD per acceleration")
         .contains(Position.Kind.ANGLE);
+  }
+
+  /**
+   * A control remembers the loop its factory was written for, and a gain that's per its loop's
+   * error, kP and kD, given with its unit, is per what that loop takes: kP per a position or a
+   * speed, kD per a speed or an acceleration.
+   */
+  @Test
+  void aControlRemembersItsLoop() {
+    double turn = 2 * Math.PI;
+    assertThat(MechanismControl.position(30).loop()).isEqualTo(MechanismControl.Loop.POSITION);
+    assertThat(MechanismControl.position(Volts.per(Rotation).of(188)).loop())
+        .isEqualTo(MechanismControl.Loop.POSITION);
+    assertThat(MechanismControl.velocity(0.02).loop()).isEqualTo(MechanismControl.Loop.VELOCITY);
+    assertThat(MechanismControl.velocity(Volts.per(RotationsPerSecond).of(0.12)).loop())
+        .isEqualTo(MechanismControl.Loop.VELOCITY);
+    assertThat(MechanismControl.position(30).withKp(25).gains().kP()).isEqualTo(25);
+    assertThat(MechanismControl.position(30).withKp(Volts.per(Rotation).of(turn * 25)).gains())
+        .extracting(MechanismControl.Gains::kP, MechanismControl.Gains::kind)
+        .containsExactly(25.0, Optional.of(Position.Kind.ANGLE));
+    assertThat(
+            MechanismControl.velocity(0.02)
+                .withKp(Volts.per(RotationsPerSecond).of(turn * 0.03))
+                .gains()
+                .kP())
+        .isCloseTo(0.03, within(1e-12));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> MechanismControl.velocity(0.02).withKp(Volts.per(Rotation).of(1)))
+        .withMessage(
+            "Gains.kP: volts per Rotation can't be one in a control for speeds: give it per a"
+                + " speed, Volts.per(RotationsPerSecond) or Volts.per(MetersPerSecond)");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                MechanismControl.position(30).withKd(Volts.per(RotationsPerSecondPerSecond).of(1)))
+        .withMessageStartingWith("Gains.kD: volts per ")
+        .withMessageEndingWith(
+            " can't be one in a control for positions: give it per a speed,"
+                + " Volts.per(RotationsPerSecond) or Volts.per(MetersPerSecond)");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> MechanismControl.velocity(0.02).withKd(Volts.per(RotationsPerSecond).of(1)))
+        .withMessage(
+            "Gains.kD: volts per Rotation per Second can't be one in a control for speeds: give it"
+                + " per an acceleration, Volts.per(RotationsPerSecondPerSecond) or"
+                + " Volts.per(MetersPerSecondPerSecond)");
   }
 
   /**
@@ -369,10 +430,10 @@ class MechanismControlTest {
     double elevatorTravel = MechanismControl.Homing.travelSeconds(math, elevator, 2);
     var derived =
         (MechanismControl.Homing.ToHardStop)
-            MechanismControl.Homing.toHardStop(MechanismControl.Homing.Stop.LOWER);
+            MechanismControl.Homing.toHardStop(Sensor.Switch.Limit.End.LOWER);
     var given =
         (MechanismControl.Homing.ToSwitch)
-            MechanismControl.Homing.toSwitch(MechanismControl.Homing.Stop.UPPER, Seconds.of(5));
+            MechanismControl.Homing.toSwitch(Sensor.Switch.Limit.End.UPPER, Seconds.of(5));
 
     assertThat(elevatorTravel).isCloseTo(1.2 / lifting, within(1e-9));
     assertThat(derived.timeout()).isEmpty();
@@ -385,7 +446,7 @@ class MechanismControlTest {
     assertThatThrownBy(
             () ->
                 MechanismControl.Homing.ToSwitch.builder()
-                    .end(MechanismControl.Homing.Stop.LOWER)
+                    .end(Sensor.Switch.Limit.End.LOWER)
                     .volts(2)
                     .timeout(Seconds.of(0))
                     .build())
@@ -415,5 +476,32 @@ class MechanismControlTest {
                 + " drawing as much as its leader isn't dead");
     assertThatThrownBy(() -> control.withDeadChannel(Amps.of(2), Amps.of(0.5), Seconds.of(0)))
         .hasMessage("DeadChannel.time: 0 s must be positive");
+  }
+
+  /**
+   * How far a joint's absolute encoder and its motor's count may disagree is given with its unit
+   * and held in the joint's, remembering its kind: the joint refuses one of the other kind, saying
+   * how to write it, and none is more than none.
+   */
+  @Test
+  void anEncoderGapIsGivenWithItsUnit() {
+    MechanismControl arm = MechanismControl.position(30).withEncoderGap(Degrees.of(8));
+    MechanismControl elevator = MechanismControl.position(60).withEncoderGap(Inches.of(1));
+
+    assertThat(arm.encoderGap().orElseThrow().margin()).isCloseTo(Math.toRadians(8), within(1e-12));
+    assertThat(arm.encoderGap().orElseThrow().kind()).isEqualTo(Position.Kind.ANGLE);
+    assertThat(elevator.encoderGap().orElseThrow().margin()).isCloseTo(0.0254, within(1e-12));
+    assertThat(MechanismControl.position(30).encoderGap()).as("the template's").isEmpty();
+    assertThat(elevator.ofTheOtherKind(Position.Kind.ANGLE))
+        .isEqualTo(
+            "its encoder gap is a length, and the joint turns: give it in an angle,"
+                + " withEncoderGap(Degrees.of(...))");
+    assertThat(arm.ofTheOtherKind(Position.Kind.LENGTH))
+        .isEqualTo(
+            "its encoder gap is an angle, and the joint slides: give it in a length,"
+                + " withEncoderGap(Inches.of(...))");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> arm.withEncoderGap(Degrees.of(0)))
+        .withMessage("an encoder gap is more than none, not 0°");
   }
 }

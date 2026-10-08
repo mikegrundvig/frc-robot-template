@@ -18,6 +18,7 @@ import com.michaelgrundvig.frc.simulation.WheelDrive;
 import com.michaelgrundvig.frc.simulation.WheelTruth;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.ModuleIO;
 import frc.robot.subsystems.drive.PhoenixDrivetrain;
@@ -48,14 +49,6 @@ import org.wpilib.math.util.MathUtil;
  * high its gains can go before it overshoots, as on a robot.
  */
 final class ModuleIOSim implements ModuleIO {
-  private static final double MAX_VOLTS = 12.0;
-
-  /**
-   * The battery's voltage, which no motor gets more than: 12 V, steady, as WPILib's simulated
-   * battery gives it ({@code DCMotorSim} held its motor to it the same way).
-   */
-  private static final double BATTERY_VOLTS = 12.0;
-
   /**
    * A TalonFX runs its closed loop every millisecond (CTRE's Phoenix 6 documentation: 1 kHz), in
    * nanoseconds. The module keeps its own time in whole nanoseconds, so the loop's rate, and the
@@ -237,13 +230,15 @@ final class ModuleIOSim implements ModuleIO {
       double error = driveSetpointRadPerSec - speed;
       driveVolts = driveFeedforwardVolts + driveKp * error * wheelRadiusMeters;
     }
-    driveVolts = Math.clamp(driveVolts, -MAX_VOLTS, MAX_VOLTS);
+    driveVolts = Math.clamp(driveVolts, -Motor.NOMINAL_VOLTS, Motor.NOMINAL_VOLTS);
     drive.drive(
         driveVolts,
         // A velocity loop's gain, while the battery doesn't cap what it asks for.
-        driveClosedLoop && Math.abs(driveVolts) < MAX_VOLTS ? -driveKp * wheelRadiusMeters : 0,
+        driveClosedLoop && Math.abs(driveVolts) < Motor.NOMINAL_VOLTS
+            ? -driveKp * wheelRadiusMeters
+            : 0,
         driveStatorLimitAmps,
-        BATTERY_VOLTS);
+        Motor.NOMINAL_VOLTS);
     subStepUnread = true;
     spinRadians += spinRadPerSec * seconds;
     steer(Math.round(seconds * 1e9));
@@ -286,8 +281,8 @@ final class ModuleIOSim implements ModuleIO {
                 ? Math.clamp(
                     steerKp * MathUtil.angleModulus(steerSetpointRad - heardSteerRadians)
                         - steerKd * heardSteerRadPerSec,
-                    -MAX_VOLTS,
-                    MAX_VOLTS)
+                    -Motor.NOMINAL_VOLTS,
+                    Motor.NOMINAL_VOLTS)
                 : 0.0;
         untilSteerLoopNanos = STEER_LOOP_NANOS;
       }
@@ -368,12 +363,12 @@ final class ModuleIOSim implements ModuleIO {
 
   /** The current the drive motor draws from the battery, in amps: what its PDH channel reads. */
   double driveSupplyAmps() {
-    return Math.abs(wheel.driveVolts() * wheel.driveCurrentAmps()) / MAX_VOLTS;
+    return Math.abs(wheel.driveVolts() * wheel.driveCurrentAmps()) / Motor.NOMINAL_VOLTS;
   }
 
   /** The current the steering motor draws from the battery now, in amps. */
   double steerSupplyAmps() {
-    return Math.abs(steerSim.appliedVolts() * steerSim.currentAmps()) / BATTERY_VOLTS;
+    return Math.abs(steerSim.appliedVolts() * steerSim.currentAmps()) / Motor.NOMINAL_VOLTS;
   }
 
   /** What the drive encoder reads: every turn of the wheel, slips too, unless it's stale. */
@@ -417,7 +412,7 @@ final class ModuleIOSim implements ModuleIO {
     driveFeedforwardVolts = feedforwardVolts;
   }
 
-  @Override
+  /** Drives the wheel open loop at a voltage, for a test of the simulated drivetrain. */
   public void setDriveVoltage(double volts) {
     driveClosedLoop = false;
     driveVolts = volts;

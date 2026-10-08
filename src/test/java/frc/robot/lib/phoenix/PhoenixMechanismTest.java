@@ -30,6 +30,7 @@ import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Coupling;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Link;
@@ -858,6 +859,69 @@ class PhoenixMechanismTest {
         .isInfinite();
   }
 
+  /**
+   * An elevator's CANcoder, geared twelve to one down from its 2 cm drum, as its block writes it:
+   * its turns are counted in the drum's rotations, a twelfth of one each, so the TalonFX reads the
+   * carriage through it fused, in the drum's rotations, and its rotor turns 120 times for each of
+   * the CANcoder's. Read once instead, the TalonFX reads its rotor through the gearing. Its wrap is
+   * as far from the travel as a turn allows: 1.2 m is 0.796 of the CANcoder's turns, centered.
+   */
+  @Test
+  void anElevatorsCancoderGearedToItsDrumIsInTheDrumsRotations() {
+    Joint.Prismatic elevator =
+        ELEVATOR
+            .motors(
+                Motor.KRAKEN_X60,
+                gearing(10),
+                Meters.of(0.02),
+                MechanismWiring.Controller.TALON_FX.can(30),
+                MechanismWiring.Controller.TALON_FX.can(31))
+            .absoluteEncoder(
+                Driven.AbsoluteEncoder.of()
+                    .ratio(1.0 / 12)
+                    .on(CANCODER.can(32).offset(Rotations.of(0.31)).fused()));
+    Sensor.Encoder encoder = (Sensor.Encoder) elevator.ownSensors().getFirst();
+    RobotMath robot =
+        RobotMath.of(BODY, List.of(elevator), List.of(), elevator.ownDrives(), List.of(encoder));
+    MechanismWiring.Cancoder fused =
+        elevator.driven().absoluteEncoder().orElseThrow().cancoder().orElseThrow();
+    double travel = 1.2 / (TURN * 0.02) / 12; // the CANcoder's turns over the travel
+
+    PhoenixMechanism.Settings settings =
+        PhoenixMechanism.configure(
+            robot, ControllerPlan.of(robot, elevator, control()), encoder, fused);
+    PhoenixMechanism.Settings once =
+        PhoenixMechanism.configure(
+            robot,
+            ControllerPlan.of(robot, elevator, control()),
+            encoder,
+            CANCODER.can(32).offset(Rotations.of(0.31)));
+    TalonFXConfiguration leader = settings.leader();
+    CANcoderConfiguration cancoder = settings.cancoder().orElseThrow();
+
+    assertThat(leader.Feedback.FeedbackSensorSource)
+        .isEqualTo(FeedbackSensorSourceValue.FusedCANcoder);
+    assertThat(leader.Feedback.FeedbackRemoteSensorID).isEqualTo(32);
+    assertThat(leader.Feedback.SensorToMechanismRatio).isCloseTo(1.0 / 12, within(1e-12));
+    assertThat(leader.Feedback.RotorToSensorRatio).isCloseTo(120, within(1e-9));
+    assertThat(settings.followers().get(0).configuration().Feedback.SensorToMechanismRatio)
+        .as("a follower reads its own rotor, through the gearing")
+        .isCloseTo(10, within(1e-12));
+    assertThat(once.leader().Feedback.FeedbackSensorSource)
+        .isEqualTo(FeedbackSensorSourceValue.RotorSensor);
+    assertThat(once.leader().Feedback.SensorToMechanismRatio).isCloseTo(10, within(1e-12));
+    assertThat(cancoder.MagnetSensor.MagnetOffset).isCloseTo(0.31, within(1e-12));
+    assertThat(cancoder.MagnetSensor.AbsoluteSensorDiscontinuityPoint)
+        .isCloseTo(travel / 2 + 0.5, within(1e-12));
+    assertThat(settings.notes()).isEmpty();
+    assertThat(ControllerPlan.wrapProblem(encoder, travel + 0.01))
+        .as("a team's own wrap, said in meters")
+        .isEqualTo(
+            "elevator absolute encoder wraps at 0.8058 of its turn, 0.0151 m from elevator's range"
+                + " (0 m to 1.2 m), and 0.2929 m from where it stows (0 m): a reading a hair past"
+                + " the wrap reads a turn away");
+  }
+
   @Test
   void aCancoderMustBeAbsolute() {
     Sensor.Encoder relative =
@@ -1054,7 +1118,7 @@ class PhoenixMechanismTest {
 
   private static MechanismWiring.Cancoder cancoder(MechanismWiring.Feedback feedback) {
     Angle offset = Rotations.of(-0.125);
-    MechanismWiring.Cancoder cancoder = CANCODER.can(9).clockwise().offset(offset);
+    MechanismWiring.Cancoder cancoder = CANCODER.can(9).offset(offset).clockwise();
     return switch (feedback) {
       case ROTOR -> cancoder;
       case REMOTE -> cancoder.remote();
@@ -1127,6 +1191,7 @@ class PhoenixMechanismTest {
       Optional<MechanismControl.Profile> profile,
       MechanismControl.NeutralMode neutral) {
     return MechanismControl.builder()
+        .loop(MechanismControl.Loop.POSITION)
         .gains(gains)
         .currentLimits(
             MechanismControl.CurrentLimits.builder()

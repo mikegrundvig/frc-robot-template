@@ -1,5 +1,6 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -20,6 +21,8 @@ import org.wpilib.driverstation.DriverStationErrors;
  * <ul>
  *   <li>Its definition's own ({@code RobotDefinition.findings}): a named speed at its motors' free
  *       speed, a kG nobody tuned, a link not weighed.
+ *   <li>Localization's ({@link LocalizationService#doubts}): treads said to grip so hard its slip
+ *       check can't tell a slide from a collision.
  *   <li>Each driven joint's motor controller settings ({@link ControllerSettings#findings}): a
  *       tuned gain far from what its weight needs, a gravity offset at Phoenix's limit, an encoder
  *       wrapping near its range.
@@ -45,6 +48,7 @@ final class Doubts {
   /** Every doubt and note its definition gives, the definition's own first. */
   static List<Finding> of(RobotDefinition definition) {
     List<Finding> found = new ArrayList<>(definition.findings());
+    found.addAll(LocalizationService.doubts(definition));
     for (Joint joint : Joints.driven(definition)) {
       found.addAll(ControllerSettings.findings(definition.math(), joint));
     }

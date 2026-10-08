@@ -10,19 +10,14 @@ import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.pitwall.Actions;
-import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.experiment.Experiment;
 import com.michaelgrundvig.frc.pitwall.experiment.Profile;
 import com.michaelgrundvig.frc.pitwall.experiment.Profiles;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
-import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.FieldModel;
-import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.field.Placement;
-import com.michaelgrundvig.frc.world.field.Zone;
-import com.michaelgrundvig.frc.world.field.ZoneTrigger;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -58,24 +53,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
-import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
-import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
-import org.wpilib.smartdashboard.Field2d;
 import org.wpilib.system.RobotController;
-import org.wpilib.telemetry.Telemetry;
 import org.wpilib.tunable.TunableRegistry;
-import org.wpilib.util.Alert;
 
 /**
  * The composition root: builds every mechanism on the hardware for the mode the program runs in
@@ -89,21 +77,11 @@ public final class RobotContainer implements AutoCloseable {
   private static final int DRIVER_PORT = 0;
   private static final int OPERATOR_PORT = 1;
 
-  /** How far from a start position, and how far turned from it, still counts as on it. */
-  static final double START_TOLERANCE_METERS = 0.10;
-
-  static final double START_TOLERANCE_DEGREES = 5;
-
   /** How well a drive team places the robot on its start: within about 5 cm and 2 degrees. */
   static final PoseCovariance PLACED = PoseCovariance.fromStdDevs(0.05, 0.05, Math.toRadians(2));
 
   /** How straight a driver lines the robot up by eye for a heading reset: about 5 degrees. */
   static final double HEADING_BY_EYE_RADIANS = Math.toRadians(5);
-
-  /** Zone triggers look this far ahead along the robot's path, and turn off this far outside. */
-  static final double ZONE_LOOKAHEAD_SECONDS = 0.4;
-
-  static final double ZONE_EXIT_MARGIN_METERS = 0.1;
 
   private final Scheduler scheduler;
 
@@ -137,22 +115,18 @@ public final class RobotContainer implements AutoCloseable {
       joints.put(joint.label(), JointMechanism.tuning(joint, ControllerSettings.control(joint)));
     }
     return new Tunings(
-        Drive.tuning(robot.drivetrain()), Vision.tuning(robot.vision()), Map.copyOf(joints));
+        Drive.tuning(robot.drivetrain(), robot.definition().drivetrain().freeSpeed()),
+        Vision.tuning(robot.vision()),
+        Map.copyOf(joints));
   }
 
-  /** The drivetrain's and vision's configurations as the pit tunes them. */
-  private final LiveConfig<DrivetrainControl> drivetrainTuning;
+  /** What the pit can tune, as published: every one is removed again as the robot closes. */
+  private final Tunings tunings;
 
-  private final LiveConfig<VisionConfig> visionTuning;
-
-  /** The field the robot believes it plays on: the official layout, or the venue selected. */
-  private FieldModel field;
+  /** The field as this match sets it: the alliance, the start, the placement, the zones. */
+  private final MatchField matchField;
 
   private final Venues venues;
-  private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
-
-  /** The simulator's field view: the robot, its start, and the field's places. Null in a robot. */
-  private final @Nullable Field2d fieldView;
 
   /** The simulator's world, which knows where the robot really is. Null unless simulating. */
   private final @Nullable SimulatedWorld world;
@@ -173,27 +147,6 @@ public final class RobotContainer implements AutoCloseable {
   /** Whether a camera rides on a joint, so localization needs the joints' positions. */
   private final boolean camerasOnJoints;
 
-  /** Sensors that stopped answering, named: their conditions hold neither way. */
-  private final Alert sensorsLost;
-
-  /** Limit switches that disagree with where their joints are: each said, with what to check. */
-  private final Alert sensorsDoubted;
-
-  /** The PDH the robot declares, not answering: no channel's current is read. */
-  private final Alert pdhSilent;
-
-  /** Motor controllers drawing nothing on their PDH channels while their joints work: each said. */
-  private final Alert deadChannels;
-
-  /** The motor controllers drawing nothing as of the last loop, as the alert says them. */
-  private List<String> dead = List.of();
-
-  /** What the limit switches were doubted for as of the last loop, as the alert says. */
-  private List<String> doubted = List.of();
-
-  /** The sensors lost as of the last loop, as the alert names them. */
-  private List<String> lost = List.of();
-
   private final Vision vision;
   private final Calibration calibration;
 
@@ -206,32 +159,12 @@ public final class RobotContainer implements AutoCloseable {
   /** What the robot reads and drives: its devices, the simulator's, or none in a replay. */
   private final Hardware hardware;
 
-  private final Alert allianceUnknown =
-      new Alert(
-          "Field",
-          "allianceUnknown",
-          "Alliance unknown: driving assumes the blue drivers' side of the field",
-          Alert.Level.MEDIUM);
-  private final Alert offField =
-      new Alert("Field", "offField", "Odometry puts the robot off the field", Alert.Level.MEDIUM);
-
   /** Every loop's time, section by section: the robot marks its sections, this marks its own. */
   private final LoopHealth loopHealth;
 
   private final LoopMonitor loop;
 
-  /** This loop's alliance and station (1, 2, 3), from the Driver Station or the field system. */
-  private Optional<Alliance> alliance = Optional.empty();
-
-  private OptionalInt location = OptionalInt.empty();
-
-  /** The start chosen for the match, and where it is for the alliance, as of this loop. */
-  private Optional<Place> start = Optional.empty();
-
-  private Optional<Pose2d> startPose = Optional.empty();
-  private boolean enabledSinceBoot;
   private boolean wasAutonomous;
-  private Placement placement = new Placement(Placement.Status.ALLIANCE_UNKNOWN, null, 0, 0);
 
   /**
    * Built by {@link Robot#assemble}, for the robot and for tests alike.
@@ -257,30 +190,21 @@ public final class RobotContainer implements AutoCloseable {
     // What the pit can tune, published where dashboards and the Pitwall page find it; the
     // mechanisms read it every loop.
     Tunings tunings = tunings(robot);
-    drivetrainTuning = tunings.drivetrain();
-    TunableRegistry.publish("Drive/config", drivetrainTuning);
-    visionTuning = tunings.vision();
-    TunableRegistry.publish("Vision/config", visionTuning);
+    this.tunings = tunings;
+    TunableRegistry.publish("Drive/config", tunings.drivetrain());
+    TunableRegistry.publish("Vision/config", tunings.vision());
     tunings
         .joints()
         .forEach((label, tuning) -> TunableRegistry.publish("Joints/" + label + "/config", tuning));
-    // The rules across mechanisms: checked on every change the pit makes, and here, as committed,
-    // so a configuration that breaks one stops the program with every rule it breaks.
-    ConfigRules rules = new ConfigRules();
     RobotDefinition definition = robot.definition();
-    RobotRules.register(rules, definition, drivetrainTuning, visionTuning);
-    rules.checkCommitted();
-    Supplier<DrivetrainControl> drivetrain = drivetrainTuning::get;
+    Supplier<DrivetrainControl> drivetrain = tunings.drivetrain()::get;
     this.scheduler = scheduler;
     this.loopHealth = loopHealth;
     loop = loopHealth.monitor();
     List<CameraConfig> cameras = definition.cameras();
     robotDefinition = definition;
-    this.field = field;
+    matchField = new MatchField(field, mode == Constants.Mode.SIM);
     this.venues = venues;
-    for (Zone zone : field.zones()) {
-      zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
-    }
     bindings = new Bindings(scheduler);
     driver = bindings.gamepad("driver", DRIVER_PORT);
     operator = bindings.gamepad("operator", OPERATOR_PORT);
@@ -288,15 +212,7 @@ public final class RobotContainer implements AutoCloseable {
     // What the robot reads and drives: the simulator's, the robot's own devices, or none (a replay
     // reads the log).
     world =
-        mode == Constants.Mode.SIM
-            ? new SimulatedWorld(
-                field,
-                definition.drivetrain(),
-                definition.body(),
-                cameras,
-                definition.imus(),
-                simulatedErrors)
-            : null;
+        mode == Constants.Mode.SIM ? new SimulatedWorld(field, definition, simulatedErrors) : null;
     hardware = hardware(mode, definition, world);
 
     // Until the robot is placed it could be anywhere: localization starts it in the middle of the
@@ -313,7 +229,6 @@ public final class RobotContainer implements AutoCloseable {
                 RobotLoop.PERIOD_SECONDS));
     drive =
         new Drive("Drive", hardware.drive(), definition, drivetrain, scheduler, localization::pose);
-    fieldView = mode == Constants.Mode.SIM ? new Field2d() : null;
     if (world != null) {
       world.place(middle);
     }
@@ -327,24 +242,6 @@ public final class RobotContainer implements AutoCloseable {
             hardware,
             joint -> Objects.requireNonNull(tunings.joints().get(joint.label()))::get,
             scheduler);
-    sensorsLost = new Alert("Sensors", "lost", "", Alert.Level.HIGH);
-    sensorsDoubted = new Alert("Sensors", "doubted", "", Alert.Level.HIGH);
-    pdhSilent =
-        new Alert(
-            "Power",
-            "silent",
-            definition
-                .pdh()
-                .map(
-                    pdh ->
-                        "The PDH isn't answering at CAN ID "
-                            + pdh.id()
-                            + ", so no channel's current is read. Check its CAN wiring, and its ID"
-                            + " in REV's Hardware Client.")
-                .orElse(""),
-            Alert.Level.MEDIUM);
-    deadChannels = new Alert("Power", "dead", "", Alert.Level.HIGH);
-
     // Cameras: PhotonVision on the robot, its simulation in the simulator, the log in a replay.
     vision =
         new Vision(
@@ -352,8 +249,8 @@ public final class RobotContainer implements AutoCloseable {
             hardware.cameras().toArray(CameraIO[]::new),
             localization.service(),
             field,
-            visionTuning::get,
-            () -> alliance);
+            tunings.vision()::get,
+            matchField::alliance);
     calibration =
         new Calibration(
             drive,
@@ -377,7 +274,7 @@ public final class RobotContainer implements AutoCloseable {
 
     // What the robot does, and the drive team's buttons for the rest: the team's own class. Its
     // constructor builds the commands and binds them, so nothing else needs to hold it.
-    new Controls(scheduler, joints, drive, joints.sensors(), driver, operator);
+    new Controls(scheduler, definition, joints, drive, driver, operator);
 
     // What it doubts or doesn't know, said once its bindings are made: its definition's, and two
     // commands bound to one button the same way.
@@ -391,8 +288,7 @@ public final class RobotContainer implements AutoCloseable {
    * back to them.
    */
   void faceDownfield() {
-    localization.resetHeading(
-        FieldModel.driverForward(alliance.orElse(Alliance.BLUE)), HEADING_BY_EYE_RADIANS);
+    localization.resetHeading(matchField.driverForward(), HEADING_BY_EYE_RADIANS);
   }
 
   /**
@@ -402,7 +298,7 @@ public final class RobotContainer implements AutoCloseable {
    */
   private Translation2d leftStick() {
     return new Translation2d(-driver.getLeftY(), -driver.getLeftX())
-        .rotateBy(FieldModel.driverForward(alliance.orElse(Alliance.BLUE)));
+        .rotateBy(matchField.driverForward());
   }
 
   /**
@@ -414,17 +310,9 @@ public final class RobotContainer implements AutoCloseable {
     // The venue first: a selection the pit made takes effect at the start of a loop, while
     // disabled.
     venues.update(!enabled, RobotState.isFMSAttached()).ifPresent(this::venue);
-    alliance = MatchState.getAlliance().map(RobotContainer::alliance);
-    location = MatchState.getLocation();
-    Optional<Place> chosen = chosenStart();
-    Optional<Pose2d> chosenPose = alliance.flatMap(ours -> chosen.map(s -> s.on(field, ours)));
-    // The robot stands where the drive team put it: on the chosen start. It is put there whenever
-    // the choice changes before the match or while disabled (so changing the alliance station in
-    // the simulator moves it), never while it drives. With cameras, the tags will say instead.
-    Optional<Pose2d> placed =
-        !chosenPose.equals(startPose) && (!enabled || !enabledSinceBoot)
-            ? chosenPose
-            : Optional.empty();
+    // Where the drive team put the robot, if they did this loop: on the chosen start. With cameras,
+    // the tags will say instead.
+    Optional<Pose2d> placed = matchField.read(enabled);
     SimulatedWorld sim = world;
     if (sim != null) {
       // In the simulator the drive team really moves it. Then the world moves on and the robot
@@ -438,9 +326,6 @@ public final class RobotContainer implements AutoCloseable {
       vision.autonomousStarted(RobotController.getTime());
     }
     wasAutonomous = autonomous;
-    start = chosen;
-    startPose = chosenPose;
-    enabledSinceBoot |= enabled;
 
     drive.periodic(enabled);
     loop.mark("Drive", System.nanoTime());
@@ -450,35 +335,10 @@ public final class RobotContainer implements AutoCloseable {
       // Where each camera on a joint is, for the images it takes.
       localization.service().joints(read, joints.positions());
     }
-    List<String> nowLost = new ArrayList<>(joints.sensors().lost());
-    nowLost.removeAll(hardware.unwiredSensors());
-    if (!nowLost.equals(lost)) {
-      lost = nowLost;
-      sensorsLost.setText(
-          String.join(", ", lost)
-              + (lost.size() == 1 ? " is" : " are")
-              + " lost: nothing waiting on "
-              + (lost.size() == 1 ? "it" : "them")
-              + " holds. Check the wiring and the CAN bus.");
-      sensorsLost.set(!lost.isEmpty());
-    }
-    pdhSilent.set(robotDefinition.pdh().isPresent() && !joints.power().reads());
-    List<String> nowDead = joints.deadChannels();
-    if (!nowDead.equals(dead)) {
-      dead = nowDead;
-      deadChannels.setText(String.join("; ", dead));
-      deadChannels.set(!dead.isEmpty());
-    }
-    List<String> nowDoubted = joints.switchDoubts();
-    if (!nowDoubted.equals(doubted)) {
-      doubted = nowDoubted;
-      sensorsDoubted.setText(String.join("; ", doubted));
-      sensorsDoubted.set(!doubted.isEmpty());
-    }
     loop.mark("Joints", System.nanoTime());
     localization.periodic(drive.readings(), enabled);
     // Told where it is after odometry, so a turn made in placing it isn't counted twice.
-    String placedOn = "placed on " + chosen.map(Place::name).orElse("its start");
+    String placedOn = matchField.placedOn();
     placed.ifPresent(pose -> localization.place(pose, PLACED, placedOn));
     vision.periodic(RobotController.getTime());
     loop.mark("Vision", System.nanoTime());
@@ -486,18 +346,11 @@ public final class RobotContainer implements AutoCloseable {
     vision.record(frames);
     loop.mark("Localization", System.nanoTime());
     Pose2d pose = localization.pose();
-    placement =
-        Placement.check(
-            field,
-            alliance,
-            pose,
-            start.orElse(null),
-            START_TOLERANCE_METERS,
-            START_TOLERANCE_DEGREES);
-    allianceUnknown.set(alliance.isEmpty());
-    offField.set(!field.contains(pose.getTranslation()));
-    updateZones(pose);
-    show(pose);
+    if (sim != null) {
+      sim.log(pose);
+    }
+    matchField.update(
+        pose, drive.getRobotRelativeVelocities(), sim != null ? sim.truePose() : null);
     loop.mark("Field", System.nanoTime());
     Dashboard.publish(status());
     loop.mark("Dashboard", System.nanoTime());
@@ -520,7 +373,7 @@ public final class RobotContainer implements AutoCloseable {
   static Hardware hardware(
       Constants.Mode mode, RobotDefinition definition, @Nullable SimulatedWorld world) {
     return switch (mode) {
-      case SIM -> new SimulatedHardware(Objects.requireNonNull(world), definition);
+      case SIM -> new SimulatedHardware(Objects.requireNonNull(world));
       case REAL -> new RobotHardware(definition);
       case REPLAY -> Hardware.replay(definition);
     };
@@ -532,95 +385,18 @@ public final class RobotContainer implements AutoCloseable {
   }
 
   /**
-   * The start chosen for the match. Until autos choose theirs, the Driver Station's location picks
-   * it: stations 1, 2, and 3 choose the field's first, second, and third start.
-   */
-  private Optional<Place> chosenStart() {
-    List<Place> starts = field.starts();
-    if (location.isEmpty() || location.getAsInt() < 1 || location.getAsInt() > starts.size()) {
-      return Optional.empty();
-    }
-    return Optional.of(starts.get(location.getAsInt() - 1));
-  }
-
-  private void updateZones(Pose2d pose) {
-    ChassisVelocities robotRelative = drive.getRobotRelativeVelocities();
-    Translation2d velocity =
-        new Translation2d(robotRelative.vx, robotRelative.vy).rotateBy(pose.getRotation());
-    for (ZoneTrigger trigger : zones.values()) {
-      boolean active =
-          alliance.isPresent()
-              && trigger.update(field, alliance.get(), pose.getTranslation(), velocity);
-      Logger.recordOutput("Field/Zones/" + trigger.zone().name(), active);
-    }
-  }
-
-  /** Logs the robot's place on the field, and shows it in the simulator's field view. */
-  private void show(Pose2d pose) {
-    Logger.recordOutput("Field/Alliance", allianceStation());
-    Logger.recordOutput("Field/Start", startPose.stream().toArray(Pose2d[]::new));
-    Logger.recordOutput("Field/Placement", placement.describe());
-    for (Place place : field.places()) {
-      Logger.recordOutput(
-          "Field/Places/" + place.name(),
-          alliance.stream().map(ours -> place.on(field, ours)).toArray(Pose2d[]::new));
-    }
-    SimulatedWorld sim = world;
-    if (sim != null) {
-      sim.log(pose);
-    }
-    if (fieldView != null) {
-      fieldView.setRobotPose(pose);
-      if (sim != null) {
-        fieldView.getObject("Truth").setPose(sim.truePose());
-      }
-      fieldView.getObject("Start").setPoses(startPose.stream().toList());
-      for (Place place : field.places()) {
-        fieldView
-            .getObject(place.name())
-            .setPoses(alliance.stream().map(ours -> place.on(field, ours)).toList());
-      }
-      Telemetry.log("Field", fieldView);
-    }
-  }
-
-  /**
    * Plays on a venue from now on: localization solves images against its tags, the cameras' mount
    * checks judge against them, and places derived from tags move with them.
    */
   private void venue(FieldModel venue) {
-    field = venue;
+    matchField.venue(venue);
     localization.service().venue(venue);
     vision.venue(venue);
   }
 
-  /**
-   * The Driver Station's alliance, as the field model names it: the model has its own, so that
-   * nothing reading it needs WPILib's Driver Station.
-   */
-  static Alliance alliance(org.wpilib.driverstation.Alliance driverStation) {
-    return switch (driverStation) {
-      case BLUE -> Alliance.BLUE;
-      case RED -> Alliance.RED;
-    };
-  }
-
-  /** The alliance and station, such as "Red 2", or "Unknown". */
-  String allianceStation() {
-    if (alliance.isEmpty()) {
-      return "Unknown";
-    }
-    String name = alliance.get() == Alliance.RED ? "Red" : "Blue";
-    return location.isPresent() ? name + " " + location.getAsInt() : name;
-  }
-
-  /**
-   * Whether a zone's trigger is on: the robot is in the zone, or will be within {@link
-   * #ZONE_LOOKAHEAD_SECONDS}. Bind mechanisms to it, such as stowing before a low bar.
-   */
-  boolean inZone(Zone zone) {
-    ZoneTrigger trigger = zones.get(zone);
-    return alliance.isPresent() && trigger != null && trigger.isActive();
+  /** The field as this match sets it: the alliance, the start, the placement, the zones. */
+  MatchField matchField() {
+    return matchField;
   }
 
   /** The robot's state, as the drive team's dashboard shows it, as of this loop. */
@@ -628,9 +404,9 @@ public final class RobotContainer implements AutoCloseable {
     return RobotStatus.builder()
         .readyToScore(localization.readyToScore())
         .scoring(localization.scoring())
-        .station(allianceStation())
-        .onStart(placement.status() == Placement.Status.READY)
-        .placement(placement.describe())
+        .station(matchField.allianceStation())
+        .onStart(matchField.placement().status() == Placement.Status.READY)
+        .placement(matchField.placement().describe())
         .localization(localization.describe())
         .cameras(vision.summary())
         .loop(loopStatus())
@@ -668,11 +444,6 @@ public final class RobotContainer implements AutoCloseable {
   /** The localization estimate, as of the last loop. */
   LocalizationEstimate estimate() {
     return localization.estimate();
-  }
-
-  /** The pre-match placement check, as of the last loop. */
-  Placement placement() {
-    return placement;
   }
 
   /** The calibration procedures, for the Pitwall page. */
@@ -718,14 +489,16 @@ public final class RobotContainer implements AutoCloseable {
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
         .experiments()
-        .add(new Experiment(STEER_STEP, drive.steeringRig(drivetrainTuning), STEER_STEP_PROFILE));
+        .add(
+            new Experiment(
+                STEER_STEP, drive.steeringRig(tunings.drivetrain()), STEER_STEP_PROFILE));
     // The World view: the field, the robot where localization believes it is, its cameras' sight
     // lines with their verdicts, and in the simulator, the truth.
     pitwall
         .scenes()
         .add(
             WorldView.scene(
-                () -> field,
+                matchField::field,
                 robotDefinition,
                 worldReadings(),
                 sim != null ? () -> sim.drivetrain().truePose3d() : null,
@@ -735,9 +508,9 @@ public final class RobotContainer implements AutoCloseable {
     pitwall
         .status()
         .add("Loop", this::loopStatus, STATUS_INTERVAL)
-        .add("Alliance", this::allianceStation)
+        .add("Alliance", matchField::allianceStation)
         .add("Venue", venues::active)
-        .add("Placement", () -> placement.describe(), STATUS_INTERVAL)
+        .add("Placement", () -> matchField.placement().describe(), STATUS_INTERVAL)
         .add("Localization", this::localizationStatus, STATUS_INTERVAL)
         .add("Scoring", this::scoring)
         .add("Calibration", calibration::lastResult)
@@ -746,6 +519,11 @@ public final class RobotContainer implements AutoCloseable {
 
   Drive drive() {
     return drive;
+  }
+
+  /** What the robot is, as configured: the definition its {@link Controls} is given. */
+  RobotDefinition definition() {
+    return robotDefinition;
   }
 
   /** Every driven joint's mechanism, for behavior code to look up by its joint. */
@@ -800,7 +578,7 @@ public final class RobotContainer implements AutoCloseable {
 
   /** The drivetrain's configuration as the pit tunes it. */
   LiveConfig<DrivetrainControl> drivetrainTuning() {
-    return drivetrainTuning;
+    return tunings.drivetrain();
   }
 
   /** The simulator's world, or null outside the simulator. */
@@ -817,16 +595,11 @@ public final class RobotContainer implements AutoCloseable {
   /** Releases what holds global resources (alerts), so a test can build another robot. */
   @Override
   public void close() {
-    TunableRegistry.remove(drivetrainTuning);
-    TunableRegistry.remove(visionTuning);
+    tunings.all().forEach(TunableRegistry::remove);
     drive.close();
     localization.close();
-    sensorsLost.close();
-    sensorsDoubted.close();
-    pdhSilent.close();
-    deadChannels.close();
-    allianceUnknown.close();
-    offField.close();
+    joints.close();
+    matchField.close();
     venues.close();
     loopHealth.close();
     vision.close();
@@ -834,8 +607,5 @@ public final class RobotContainer implements AutoCloseable {
       world.close();
     }
     hardware.close();
-    if (fieldView != null) {
-      fieldView.close();
-    }
   }
 }

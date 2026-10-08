@@ -103,7 +103,7 @@ what broke.
 | A mechanism | A subsystem on simulated hardware, stepped loop by loop. The class carries `@ExtendWith(RobotSim.class)`. | `subsystems/drive/DriveBasicsTest`, with `sim/DriveSimHarness` |
 | The whole robot | The robot program as `Robot` builds and runs it, Pitwall and all, driven from a simulated Driver Station and gamepad. | `RobotContainerSimTest` |
 | The program itself | The robot program started as a program, in its own process: a session recorded, then replayed. | `ReplayEndToEndTest` |
-| The structure | The architecture rules (what may depend on what), checked against the compiled code: one per project, each for what Gradle's boundaries between projects can't see. | `ArchitectureTest` |
+| The structure | The architecture rules (what may depend on what), checked against the compiled code, each for a bug Gradle's boundaries between projects can't see: the robot program's, which hold its components and the libraries to the same answer every run too; the world model's packages; Pitwall's. | `ArchitectureTest` |
 
 Name a test class after what it tests: `ZoneTest`. A test class that runs the simulator for
 seconds of robot time is a `...SimTest` and carries `@SimulationTest`; one that starts the program
@@ -198,6 +198,10 @@ What it offers:
     CANcoders and SPARKs are told (wired as their robots have them, and otherwise), and a session
     in the simulator, every second loop. `SparkRequestsRecordedTest` records what a joint on a
     SPARK asks of it each loop: its setpoint, its slot, and the feedforward the robot sends with it.
+    `JointStagesRecordedSimTest` records what holds a joint beneath its commands and how it finds
+    where it is, in scenes of the runtime tests' joints: its interlocks, its limit switches, its
+    homing, and an absolute encoder the robot reads, with what each joint's IO is told, what holds
+    it and its state, every second loop.
 
   When a change is meant to move one, run its test with the environment variable `GOLDEN_UPDATE=1`
   to record it again, and commit the recording with the change, saying why it moved.
@@ -793,12 +797,6 @@ checked by the tests `deploy` runs first:
   (`RobotConfigTest` and each record's own test).
 - **Its tuning:** every value a mechanism lets the pit tune starts within its limits
   (`RobotTuningTest`).
-- **Its rules across mechanisms** (`RobotRules`): the committed configuration keeps every one
-  (`RobotRulesTest`).
 - **Its register:** every configuration value, and every value a mechanism tunes, has a row in
   [docs/values.md](values.md) saying what kind it is and where its number came from, and no row
   names one that's gone (`ValuesRegisterTest`).
-
-A new rule gets a test of its own: a change that breaks it is refused, one that keeps it isn't,
-and changing both sides together works. Pitwall's `ConfigRulesTest` works one through, two arms
-that can collide.

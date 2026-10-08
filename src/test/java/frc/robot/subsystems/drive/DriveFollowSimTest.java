@@ -10,6 +10,8 @@ import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimHarness;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -81,7 +83,7 @@ class DriveFollowSimTest {
   @Test
   void aNamedKeyframeOpensAGateAsItsPassed() {
     DriveMove path = drive.follow(at(1.5, 0.5, 0).named("pickup"), at(3, 0, 0));
-    Gate pickup = path.at("pickup");
+    Gate pickup = path.passed("pickup");
     RobotSim.setEnabled(true);
     harness.scheduler.schedule(path);
     double openedAt = Double.NaN;
@@ -111,7 +113,7 @@ class DriveFollowSimTest {
                 co -> {
                   DriveMove leg = drive.follow(at(1.5, 0.5, 0).named("pickup"), at(3, 0, 0));
                   co.fork(leg);
-                  co.waitUntil(leg.at("pickup"));
+                  co.waitUntil(leg.passed("pickup"));
                   acted[0] = truth().getTranslation().getDistance(new Translation2d(1.5, 0.5));
                   co.await(leg);
                 })
@@ -166,14 +168,62 @@ class DriveFollowSimTest {
                 + " starts");
   }
 
-  /** Keyframes are checked as the move is made: none, two of one name, or a name it hasn't. */
+  /**
+   * Keyframes are checked as the move is made: none, two of one name, or a name it hasn't. Made as
+   * the robot starts, as its autos are, it throws, so the robot doesn't start.
+   */
   @Test
-  void badKeyframesAreRejectedAsTheMoveIsMade() {
-    assertThatThrownBy(() -> drive.follow()).hasMessage("a path needs a keyframe");
+  void badKeyframesMadeAsTheRobotStartsThrow() {
+    assertThatThrownBy(() -> drive.follow())
+        .hasMessage("a path needs a keyframe: give one, Keyframe.at(pose)");
     assertThatThrownBy(() -> drive.follow(at(1, 0, 0).named("a"), at(2, 0, 0).named("a")))
-        .hasMessage("two keyframes are named a");
-    assertThatThrownBy(() -> drive.follow(at(1, 0, 0)).at("pickup"))
-        .hasMessage("drive → (1.00, 0.00) 0.0° has no keyframe pickup");
+        .hasMessage("two keyframes are named a: name each once");
+    assertThatThrownBy(() -> drive.follow(at(1, 0, 0)).passed("pickup"))
+        .hasMessage(
+            "drive → (1.00, 0.00) 0.0° has no keyframe pickup: name one,"
+                + " Keyframe.at(...).named(\"pickup\")");
     assertThatThrownBy(() -> at(1, 0, 0).named(" ")).hasMessage("a keyframe's name can't be blank");
+  }
+
+  /**
+   * Made once the robot runs, inside a command, the same are refused, saying the same: the moves
+   * end REFUSED as they start, the gate on a name it hasn't holds false, and the command runs on.
+   */
+  @Test
+  void badKeyframesMadeWhileTheRobotRunsAreRefused() {
+    List<DriveMove> moves = new ArrayList<>();
+    List<Gate> gates = new ArrayList<>();
+    boolean[] ended = {false};
+    Command wrong =
+        Command.requiring(drive)
+            .executing(
+                co -> {
+                  moves.add(drive.follow());
+                  moves.add(drive.follow(at(1, 0, 0).named("a"), at(2, 0, 0).named("a")));
+                  gates.add(drive.follow(at(1, 0, 0)).passed("pickup"));
+                  for (DriveMove move : moves) {
+                    co.await(move);
+                  }
+                  ended[0] = true;
+                })
+            .named("Bad keyframes");
+    RobotSim.setEnabled(true);
+    harness.scheduler.schedule(wrong);
+    for (int i = 0; i < 5; i++) {
+      harness.loop();
+    }
+
+    assertThat(moves.get(0).outcome()).contains(Outcome.REFUSED);
+    assertThat(moves.get(0).reason())
+        .isEqualTo("drive → a path: REFUSED: a path needs a keyframe: give one, Keyframe.at(pose)");
+    assertThat(moves.get(1).reason())
+        .isEqualTo("drive → a → a 0.0°: REFUSED: two keyframes are named a: name each once");
+    assertThat(gates.get(0).getAsBoolean()).isFalse();
+    assertThat(gates.get(0).why())
+        .isEqualTo(
+            "passed pickup is false: drive → (1.00, 0.00) 0.0° has no keyframe pickup: name one,"
+                + " Keyframe.at(...).named(\"pickup\")");
+    assertThat(ended[0]).as("the command ran on to its end").isTrue();
+    assertThat(truth().getTranslation().getNorm()).isLessThan(0.01);
   }
 }

@@ -194,12 +194,11 @@ function placeRange(range, value, now, edited) {
   range.high.textContent = shown(value.max) + (value.unit ? " " + value.unit : "");
 }
 
-/** Who refused a change, as the row says it: "its tuning limits", "SwerveConfig.Gains's check". */
+/** Who refused a change, as the row says it: "its tuning limits", "VisionConfig's own check". */
 function refuser(reason) {
   switch (reason.layer) {
     case "limit": return "its tuning limits";
     case "record": return (reason.by || "its record") + "'s own check";
-    case "rule": return "the robot rule “" + reason.by + "”";
     case "tunable": return "its tunable";
     default: return "the robot";
   }

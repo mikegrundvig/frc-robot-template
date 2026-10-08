@@ -30,15 +30,17 @@ final class PickUp {
     return Command.requiring(drive, pivot)
         .executing(
             co -> {
+              // @start region=path
               DriveMove leg =
                   drive.follow(
                       Keyframe.at(new Pose2d(3, 1, Rotation2d.ZERO)),
                       Keyframe.at(new Pose2d(5, 2, Rotation2d.CCW_90DEG)).named("pickup"),
                       Keyframe.at(new Pose2d(7, 2, Rotation2d.PI)));
               co.fork(leg); // drive the path...
-              co.waitUntil(leg.at("pickup")); // ...and as it passes pickup,
+              co.waitUntil(leg.passed("pickup")); // ...and as it passes pickup,
               co.await(pivot.goTo(PIVOT_OUT)); // swing the intake out
               co.await(leg); // then wait for the path's end
+              // @end
             })
         .named("Pick up");
   }

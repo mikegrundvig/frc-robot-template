@@ -11,9 +11,9 @@ import org.wpilib.units.measure.Time;
 /**
  * The standard test motions, each written by name:
  *
- * <pre>{@code
+ * {@snippet :
  * Profiles.stepAndBack().from(Degrees.of(0)).to(Degrees.of(90)).hold(Seconds.of(0.8))
- * }</pre>
+ * }
  *
  * <p>Every profile starts with a lead-in at its first setpoint ({@link #LEAD_IN} unless changed
  * with {@link Step#leadIn}), so the mechanism is settled there before the first jump. Only the

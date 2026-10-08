@@ -83,7 +83,6 @@ class SimulatorApiTest {
           () -> "",
           simulator,
           new Devices(System::nanoTime),
-          new Notices(),
           new Scenes(System::nanoTime, System.out::println));
   private final Broadcaster broadcaster =
       new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, simulator::lost);

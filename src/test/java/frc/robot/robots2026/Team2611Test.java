@@ -49,7 +49,7 @@ import org.wpilib.math.geometry.Translation2d;
 
 /**
  * 2611's 2026 robot ({@link Team2611}) against what its code configures. Citations are to {@code
- * ~/src/2611-Vectors/2026-Beta-Bot} at 6a5da76, under {@code src/main/java/frc/robot/}.
+ * 2611-Vectors/2026-Beta-Bot} at 6a5da76, under {@code src/main/java/frc/robot/}.
  */
 class Team2611Test {
   private final RobotMath math = ROBOT.math();
@@ -84,7 +84,7 @@ class Team2611Test {
   void theSwerveModulesAreTunersOwn() {
     DrivetrainGeometry.ModuleJoints frontLeft = DRIVETRAIN.joints().get(0);
     Sensor.Encoder cancoder =
-        Sensor.Encoder.absolute("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
+        JointFixtures.absoluteEncoder("front-left cancoder", frontLeft.steer(), CANCODER_COUNTS);
     Sensor.Encoder rotor = frontLeft.drive().rotor();
     RobotMath corner =
         RobotMath.of(
@@ -252,7 +252,8 @@ class Team2611Test {
                     JointFixtures.motors(autoFeed, Motor.KRAKEN_X60, 1, Gearing.of(4))))
         .withMessage(
             "RobotDefinition[2611 2026].joints: full send's feeding, 5000 rpm, is 3.333 times its"
-                + " free speed, 1500 rpm: its motors can't turn it that fast");
+                + " free speed, 1500 rpm: its motors can't turn it that fast; give it a speed under"
+                + " that");
   }
 
   /**

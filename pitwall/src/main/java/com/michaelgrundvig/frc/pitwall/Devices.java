@@ -3,8 +3,6 @@ package com.michaelgrundvig.frc.pitwall;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -12,31 +10,29 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
-import org.jspecify.annotations.Nullable;
 
 /**
  * The robot's devices as the page's Pit view shows them: a card for each, saying whether it's there
- * and how it is, ending in what can be done about it: a link to the device's own page, a file to
- * download from it, or its log to read. A device is whatever the robot program knows how to ask: a
- * vision coprocessor, say. Pitwall knows nothing of any device; the robot describes each.
+ * and how it is, ending in what can be done about it: a file to download from it or send to it, or
+ * a choice to make. A device is whatever the robot program knows how to ask, or keep: the venue the
+ * robot plays on, say. Pitwall knows nothing of any device; the robot describes each, as the
+ * template's venue card does:
  *
- * <pre>{@code
- * pitwall.devices().add(
- *     Devices.Device.named("vision-front", "Coprocessor", coprocessor::card)
- *         .link("Open PhotonVision", "http://10.0.0.11:5800")
- *         .download("settings", "Download settings backup", coprocessor::settingsBackup)
- *         .log(coprocessor::journal));
- * }</pre>
+ * {@snippet :
+ * return Devices.Device.named("venue", "Field", pit::card)
+ *     .upload("survey", "Upload venue", pit::upload)
+ *     .choose("venue", pit::choose)
+ *     .download("file", "Download venue file", pit::download);
+ * }
  *
  * <p>A card is read in the robot loop, like a status item: only while a page watches, and at most
- * once an interval, so keep it cheap (what the loop already read). Downloads and log pages are
- * fetched on the page's own request, on Pitwall's server threads and never in the robot loop, so
- * they may wait on the network; the page never talks to a device itself. None of them changes the
- * robot, so nothing is logged for replay.
+ * once an interval, so keep it cheap (what the loop already read). Downloads, uploads and choices
+ * are made on the page's own request, on Pitwall's server threads and never in the robot loop, so
+ * they may wait on the network or the disk; the page never talks to a device itself. None of them
+ * changes the robot loop's state, so nothing is logged for replay.
  */
 public final class Devices {
   /**
@@ -47,9 +43,6 @@ public final class Devices {
 
   /** The most often a card is read: once a second, as the status lines that follow sensors. */
   public static final Duration INTERVAL = Duration.ofSeconds(1);
-
-  /** The schemes a card may link to: a page's, never a script's. */
-  private static final Set<String> LINKED_SCHEMES = Set.of("http", "https");
 
   /** How a line, or a whole card, stands: the page marks each its own way, never by color alone. */
   public enum Level {
@@ -229,114 +222,6 @@ public final class Devices {
     File fetch() throws IOException;
   }
 
-  /** Where in a log a page is. */
-  public enum From {
-    /** The latest entries. */
-    LATEST,
-    /** The entries just after a cursor: newer. */
-    AFTER,
-    /** The entries just before a cursor: older. */
-    BEFORE,
-    /** The first entries the device keeps of its current run (a computer's boot, say). */
-    START
-  }
-
-  /**
-   * What the page asks of a device's log: one page of entries.
-   *
-   * @param from where the page is
-   * @param cursor the cursor it's after or before; empty for the latest or the start
-   * @param priority the least important entry wanted, as syslog numbers them: 0, emergencies only,
-   *     to 7, everything down to debugging
-   * @param unit only this unit's entries, such as {@code photonvision.service}; empty for all
-   */
-  public record LogQuery(From from, String cursor, int priority, String unit) {
-    /** A unit's name, as systemd writes them. */
-    public static final Pattern UNIT = Pattern.compile("[A-Za-z0-9@._:-]{0,100}");
-
-    /** A cursor: opaque, but printable and short. */
-    public static final Pattern CURSOR = Pattern.compile("[\\x21-\\x7e]{0,512}");
-
-    public LogQuery {
-      if (priority < 0 || priority > 7) {
-        throw new IllegalArgumentException("a priority is from 0 to 7: " + priority);
-      }
-      if (!UNIT.matcher(unit).matches()) {
-        throw new IllegalArgumentException("not a unit's name: " + unit);
-      }
-      if (!CURSOR.matcher(cursor).matches()) {
-        throw new IllegalArgumentException("not a cursor");
-      }
-      boolean takesCursor = from == From.AFTER || from == From.BEFORE;
-      if (takesCursor == cursor.isEmpty()) {
-        throw new IllegalArgumentException(
-            takesCursor
-                ? "a page " + from + " a cursor needs one"
-                : "a page " + from + " takes none");
-      }
-    }
-
-    /** The latest entries. */
-    public static LogQuery latest(int priority, String unit) {
-      return new LogQuery(From.LATEST, "", priority, unit);
-    }
-  }
-
-  /**
-   * One entry of a device's log.
-   *
-   * @param time when it was written, as the device's robot program can place it: on the robot's
-   *     clock where it can
-   * @param priority 0 (emergency) to 7 (debug), as syslog numbers them
-   * @param unit what wrote it, such as {@code kernel} or {@code photonvision.service}
-   * @param message what it says
-   */
-  public record LogEntry(String time, int priority, String unit, String message) {}
-
-  /**
-   * One page of a device's log, oldest first.
-   *
-   * @param entries the entries
-   * @param newer the cursor to ask for the entries after these with ({@link From#AFTER}): a live
-   *     log grows, so there's one whenever there are entries; empty when there are none
-   * @param older the cursor to ask for the entries before these with ({@link From#BEFORE}); empty
-   *     when none older remain
-   */
-  public record LogPage(List<LogEntry> entries, String newer, String older) {
-    public LogPage {
-      entries = List.copyOf(entries);
-    }
-  }
-
-  /** Reads a device's log, a page at a time, on Pitwall's server threads. */
-  @FunctionalInterface
-  public interface Log {
-    /**
-     * @throws IOException saying why there's no page: the device didn't answer, say
-     */
-    LogPage read(LogQuery query) throws IOException;
-  }
-
-  /**
-   * A link on a card.
-   *
-   * @param label what the button says
-   * @param url where it goes: http or https only
-   */
-  public record Link(String label, String url) {
-    public Link {
-      String scheme;
-      try {
-        scheme = new URI(url).getScheme();
-      } catch (URISyntaxException e) {
-        throw new IllegalArgumentException("not a link: " + url, e);
-      }
-      if (scheme == null || !LINKED_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) {
-        throw new IllegalArgumentException("a card links only to http or https: " + url);
-      }
-    }
-  }
-
   /**
    * A download on a card.
    *
@@ -361,11 +246,9 @@ public final class Devices {
     private final String name;
     private final String kind;
     private final Supplier<Card> card;
-    private final List<Link> links = new ArrayList<>();
     private final List<Download> downloads = new ArrayList<>();
     private final List<Upload> uploads = new ArrayList<>();
     private final Map<String, Choose> choosers = new LinkedHashMap<>();
-    private @Nullable Log log;
     private boolean added;
 
     private Device(String name, String kind, Supplier<Card> card) {
@@ -387,13 +270,6 @@ public final class Devices {
      */
     public static Device named(String name, String kind, Supplier<Card> card) {
       return new Device(name, kind, card);
-    }
-
-    /** Adds a link, such as to the device's own page. */
-    public Device link(String label, String url) {
-      unchanged();
-      links.add(new Link(label, url));
-      return this;
     }
 
     /** Adds a file to download from it. */
@@ -434,13 +310,6 @@ public final class Devices {
       return this;
     }
 
-    /** Gives it a log the page can read, a page at a time, and download. */
-    public Device log(Log log) {
-      unchanged();
-      this.log = log;
-      return this;
-    }
-
     /** Refuses a change once it's on the page, where the server's threads read it. */
     private void unchanged() {
       if (added) {
@@ -457,21 +326,9 @@ public final class Devices {
       return kind;
     }
 
-    public List<Link> links() {
-      return List.copyOf(links);
-    }
-
-    public List<Download> downloads() {
-      return List.copyOf(downloads);
-    }
-
     /** Its download with this id, if it has one. */
     public Optional<Download> download(String id) {
       return downloads.stream().filter(d -> d.id().equals(id)).findFirst();
-    }
-
-    public List<Upload> uploads() {
-      return List.copyOf(uploads);
     }
 
     /** Its upload with this id, if it has one. */
@@ -482,11 +339,6 @@ public final class Devices {
     /** What answers its card's choice with this id, if anything does. */
     public Optional<Choose> chooser(String id) {
       return Optional.ofNullable(choosers.get(id));
-    }
-
-    /** Its log, if it has one. */
-    public Optional<Log> log() {
-      return Optional.ofNullable(log);
     }
   }
 
@@ -561,9 +413,9 @@ public final class Devices {
 
   /**
    * The devices as of the last read, for the event stream: {@code {name: {"kind", "state", "level",
-   * "lines": [{"label", "value", "level"}], "links": [{"label", "url"}], "downloads": [{"id",
-   * "label"}], "uploads": [{"id", "label"}], "choices": [{"id", "label", "options": [{"value",
-   * "label"}], "current"}], "log"}}}, levels in lowercase.
+   * "lines": [{"label", "value", "level"}], "downloads": [{"id", "label"}], "uploads": [{"id",
+   * "label"}], "choices": [{"id", "label", "options": [{"value", "label"}], "current"}]}}}, levels
+   * in lowercase.
    */
   Map<String, Object> view() {
     return section;
@@ -596,14 +448,6 @@ public final class Devices {
       lines.add(each);
     }
     shown.put("lines", lines);
-    List<Object> links = new ArrayList<>();
-    for (Link link : device.links) {
-      Map<String, Object> each = new LinkedHashMap<>();
-      each.put("label", link.label());
-      each.put("url", link.url());
-      links.add(each);
-    }
-    shown.put("links", links);
     List<Object> downloads = new ArrayList<>();
     for (Download download : device.downloads) {
       Map<String, Object> each = new LinkedHashMap<>();
@@ -640,7 +484,6 @@ public final class Devices {
       choices.add(each);
     }
     shown.put("choices", choices);
-    shown.put("log", device.log != null);
     return shown;
   }
 

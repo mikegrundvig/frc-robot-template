@@ -44,6 +44,8 @@ elevator,follower 21,MotorOutput,NeutralMode,Brake
 elevator,follower 21,CurrentLimits,StatorCurrentLimit,40.0,A
 elevator,follower 21,CurrentLimits,SupplyCurrentLimit,60.0,A
 elevator,follower 21,Feedback,SensorToMechanismRatio,5.0,scalar
+elevator,cancoder,MagnetSensor,MagnetOffset,0.31,rotations
+elevator,cancoder,MagnetSensor,AbsoluteSensorDiscontinuityPoint,0.9177295094275468,rotations
 arm,leader,MotorOutput,NeutralMode,Brake
 arm,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 arm,leader,CurrentLimits,SupplyCurrentLimit,60.0,A
@@ -132,6 +134,8 @@ elevator,follower 21,MotorOutput,NeutralMode,Brake
 elevator,follower 21,CurrentLimits,StatorCurrentLimit,40.0,A
 elevator,follower 21,CurrentLimits,SupplyCurrentLimit,60.0,A
 elevator,follower 21,Feedback,SensorToMechanismRatio,5.0,scalar
+elevator,cancoder,MagnetSensor,MagnetOffset,0.31,rotations
+elevator,cancoder,MagnetSensor,AbsoluteSensorDiscontinuityPoint,0.9177295094275468,rotations
 arm,leader,MotorOutput,NeutralMode,Brake
 arm,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 arm,leader,CurrentLimits,SupplyCurrentLimit,60.0,A
@@ -208,7 +212,10 @@ hood,cancoder,MagnetSensor,AbsoluteSensorDiscontinuityPoint,0.5555555555555556,r
 elevator,leader,MotorOutput,NeutralMode,Brake
 elevator,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 elevator,leader,CurrentLimits,SupplyCurrentLimit,60.0,A
-elevator,leader,Feedback,SensorToMechanismRatio,5.0,scalar
+elevator,leader,Feedback,SensorToMechanismRatio,0.08333333333333333,scalar
+elevator,leader,Feedback,RotorToSensorRatio,60.00000000000001,scalar
+elevator,leader,Feedback,FeedbackSensorSource,FusedCANcoder
+elevator,leader,Feedback,FeedbackRemoteSensorID,24
 elevator,leader,Slot0,kP,3.590840403053133
 elevator,leader,Slot0,kV,0.5999999999999999
 elevator,leader,Slot0,kA,6.912390041749051E-4
@@ -220,6 +227,8 @@ elevator,follower 21,MotorOutput,NeutralMode,Brake
 elevator,follower 21,CurrentLimits,StatorCurrentLimit,40.0,A
 elevator,follower 21,CurrentLimits,SupplyCurrentLimit,60.0,A
 elevator,follower 21,Feedback,SensorToMechanismRatio,5.0,scalar
+elevator,cancoder,MagnetSensor,MagnetOffset,0.31,rotations
+elevator,cancoder,MagnetSensor,AbsoluteSensorDiscontinuityPoint,0.9177295094275468,rotations
 arm,leader,MotorOutput,NeutralMode,Brake
 arm,leader,CurrentLimits,StatorCurrentLimit,40.0,A
 arm,leader,CurrentLimits,SupplyCurrentLimit,60.0,A
@@ -312,17 +321,22 @@ hood,leader,Slot0,GravityType,Arm_Cosine
 hood,cancoder,MagnetSensor,MagnetOffset,-0.3,rotations
 hood,cancoder,MagnetSensor,AbsoluteSensorDiscontinuityPoint,0.5555555555555556,rotations
 elevator,leader,parameter,6,1
-elevator,leader,parameter,9,1
-elevator,leader,parameter,13,3D75227C
-elevator,leader,parameter,21,3A82BD0F
+elevator,leader,parameter,9,4
+elevator,leader,parameter,13,4065D054
+elevator,leader,parameter,21,3D75227C
 elevator,leader,parameter,45,0
 elevator,leader,parameter,59,28
 elevator,leader,parameter,60,0
 elevator,leader,parameter,61,4E20
 elevator,leader,parameter,74,2
 elevator,leader,parameter,75,41400000
+elevator,leader,parameter,127,0
+elevator,leader,parameter,141,0
+elevator,leader,parameter,149,0
+elevator,leader,parameter,154,3F1B9429
 elevator,leader,parameter,158,14
 elevator,leader,parameter,160,14
+elevator,leader,parameter,163,14
 elevator,follower 21,parameter,6,1
 elevator,follower 21,parameter,59,28
 elevator,follower 21,parameter,60,0
@@ -332,13 +346,13 @@ elevator,follower 21,parameter,75,41400000
 elevator,follower 21,parameter,194,14
 elevator,follower 21,parameter,195,1
 elevator,robot,,rotorRatio,5.0000000
-elevator,robot,,loopRatio,5.0000000
-elevator,robot,,loopZero,0.0000000
-elevator,robot,,positionKp,0.0598473
-elevator,robot,,velocityKp,0.0009975
-elevator,robot,,windowEdge,0.0000000
-elevator,robot,,closedLoop,false
-elevator,robot,,absolute,none
+elevator,robot,,loopRatio,0.0833333
+elevator,robot,,loopZero,0.0822705
+elevator,robot,,positionKp,3.5908404
+elevator,robot,,velocityKp,0.0598473
+elevator,robot,,windowEdge,-0.0822705
+elevator,robot,,closedLoop,true
+elevator,robot,,absolute,elevator absolute encoder
 elevator,robot,,softLimits,none
 arm,leader,parameter,6,1
 arm,leader,parameter,9,1

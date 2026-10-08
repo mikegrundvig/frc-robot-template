@@ -393,12 +393,12 @@ class RobotDefinitionTest {
   /** A pivot of the robot's, as its block has it, geared as CAD has it. */
   private static Joint.Revolute pivot(Gearing gearing) {
     return Joint.pivot("pivot", Part.CHASSIS, AXLE, Joint.PITCH_DOWN)
-        .range(Range.degrees(0, 135), Degrees.of(1.5))
+        .range(Range.degrees(0, 135))
+        .rest(Degrees.of(1.5))
         .motor(Motor.KRAKEN_X60, gearing, TALON_FX.can(32))
         .control(
             MechanismControl.position(30)
-                .withHoming(
-                    MechanismControl.Homing.toHardStop(MechanismControl.Homing.Stop.LOWER)));
+                .withHoming(MechanismControl.Homing.toHardStop(Sensor.Switch.Limit.End.LOWER)));
   }
 
   /** The test robot with these joints. */

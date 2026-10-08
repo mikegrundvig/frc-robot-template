@@ -33,15 +33,18 @@ import org.wpilib.units.Units;
  * with its tuning {@link Limits}; read the configuration, tuned values applied, with {@link
  * #get()}:
  *
- * <pre>{@code
- * LiveConfig<SwerveConfig> drivetrain =
- *     LiveConfig.of("drivetrain", robot.drivetrain())
- *         .number("gains.steerKp", Limits.between(0, 100))
- *         .number("limits.driveStatorCurrent", Limits.between(10, 120)); // amps, as written
- * TunableRegistry.publish("Drive/config", drivetrain);
- * ...
- * drivetrain.get().gains().steerKp() // in the robot loop
- * }</pre>
+ * {@snippet :
+ * return LiveConfig.of("drivetrain", committed)
+ *     ...
+ *     .number("gains.steerKp", Limits.between(0, 100))
+ *     ...
+ *     .measure("limits.driveStatorCurrent", Amps.of(10), Amps.of(120)) // a measure, in its unit
+ *     ...
+ * }
+ *
+ * <p>The template's drivetrain does that ({@code Drive.tuning}), publishes it ({@code
+ * TunableRegistry.publish("Drive/config", drivetrain)}), and reads it in the robot loop ({@code
+ * drivetrain.get().gains().steerKp()}).
  *
  * <p>A value is checked twice before it applies: against its tuning limits (what's safe to dial in
  * live), then by rebuilding the configuration through the records' own constructors (what's valid,
@@ -53,10 +56,11 @@ import org.wpilib.units.Units;
  * <p>A record refuses a value by throwing from its constructor, with a message the page can tie to
  * the value: one line for each value it rejects, {@code "where: what"}, where names the value from
  * the record that checked it, by its simple name and its path there ({@code Gains.steerKd}, or
- * {@code SwerveConfig.limits.maxLinearSpeed} for a check across records). A record with a name of
- * its own puts it in brackets ({@code CameraConfig[front].tiltUp}). The page shows each line beside
- * its value; a line that names no tunable value (a check of the record as a whole) shows beside the
- * change's values in that record. Any message refuses the change; this form only places it.
+ * {@code DrivetrainControl.limits.maxLinearSpeed} for a check across records). A record with a name
+ * of its own puts it in brackets ({@code CameraConfig[front].tiltUp}). The page shows each line
+ * beside its value; a line that names no tunable value (a check of the record as a whole) shows
+ * beside the change's values in that record. Any message refuses the change; this form only places
+ * it.
  *
  * <p>Nothing is saved on the robot. {@link #changes()} lists what differs from the committed
  * configuration, each with the builder call that commits it: by default the record's own builder
@@ -95,7 +99,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    * What the records' Javadoc says about this configuration, for the page and for dashboards: read
    * once, when the configuration is published, so the robot loop never reads it.
    *
-   * @param record the root record's display name, such as {@code SwerveConfig} ({@link
+   * @param record the root record's display name, such as {@code DrivetrainControl} ({@link
    *     ParameterDocs#nameOf})
    * @param doc the root record's own Javadoc
    * @param groups the records the tunable values are in, below the root, in the order the knobs
@@ -108,7 +112,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
      * A record the tunable values are in, below the root.
      *
      * @param path where it is, such as {@code gains}
-     * @param record its display name, such as {@code SwerveConfig.Gains}
+     * @param record its display name, such as {@code DrivetrainControl.Gains}
      * @param doc its own Javadoc
      * @param meaning what it is to the record that holds it: that record's {@code @param} for it,
      *     such as {@code "control gains"}; empty when there's none
@@ -119,7 +123,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
      * A tunable value.
      *
      * @param record the display name of the record that declares it, such as {@code
-     *     SwerveConfig.Gains}
+     *     DrivetrainControl.Gains}
      * @param group the path of that record, the group it's in, such as {@code gains}; empty at the
      *     root
      * @param meaning what it means, its {@code @param} there, such as {@code "volts per radian of
@@ -167,8 +171,8 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    *     record's ({@code RECORD})
    * @param fields the values it concerns, by path: the one it names; for a record's check that
    *     names none, the change's values in that record
-   * @param record for a record's check, the record that refused it ({@code SwerveConfig.Gains});
-   *     empty otherwise
+   * @param record for a record's check, the record that refused it ({@code
+   *     DrivetrainControl.Gains}); empty otherwise
    * @param group for a record's check that names no value, where that record is in this
    *     configuration ({@code travel}, empty for the root); empty otherwise
    * @param text why, as the check said it
@@ -205,7 +209,6 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   private final Map<String, Slot> slots = new LinkedHashMap<>();
   private final Map<TunableBase, String> children =
       Collections.synchronizedMap(new IdentityHashMap<>());
-  private final List<ConfigRules> rules = new ArrayList<>();
   private volatile T current;
 
   /** What the records' Javadoc says, once it's been read; again after a value is chosen. */
@@ -351,7 +354,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
             slot.component(),
             unit,
             slot.commit());
-    String outside = limits.whyNot(number(limited, committed));
+    String outside = limits.whyNot(number(limited, committed), limited.knob().unit());
     if (outside != null) {
       slots.remove(path);
       throw new IllegalArgumentException(
@@ -384,7 +387,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
 
   /**
    * The record that declares a tunable value, as the configuration holds it: {@code
-   * SwerveConfig.Gains} for {@code gains.steerKp}.
+   * DrivetrainControl.Gains} for {@code gains.steerKp}.
    *
    * @throws IllegalArgumentException if no tunable value has this path
    */
@@ -460,21 +463,15 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   }
 
   /**
-   * Why a change can't be made, checking without making it: every reason {@link #candidate} gives,
-   * then every {@link ConfigRules} rule the change touches breaks, with the other configurations as
-   * they are now.
+   * Why a change can't be made, checking without making it: every reason {@link #candidate} gives.
    *
    * @param values new values by path, each in its knob's unit
    * @return null when it can be made
    */
   public @Nullable String whyNot(Map<String, Double> values) {
     List<Problem> problems = new ArrayList<>();
-    T candidate = check(values, problems);
-    List<String> lines = new ArrayList<>(lines(problems));
-    if (candidate != null) {
-      lines.addAll(brokenRules(values, candidate));
-    }
-    return lines.isEmpty() ? null : String.join("\n", lines);
+    check(values, problems);
+    return problems.isEmpty() ? null : String.join("\n", lines(problems));
   }
 
   /**
@@ -484,7 +481,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
    */
   public boolean set(Map<String, Double> values) {
     T candidate = check(values, new ArrayList<>());
-    if (candidate == null || !brokenRules(values, candidate).isEmpty()) {
+    if (candidate == null) {
       return false;
     }
     current = candidate;
@@ -582,18 +579,6 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
     }
   }
 
-  /** Registers rules that read this configuration, which its checks then run. */
-  void ruledBy(ConfigRules registry) {
-    if (rules.stream().noneMatch(known -> known == registry)) {
-      rules.add(registry);
-    }
-  }
-
-  /** The rules that read this configuration. */
-  List<ConfigRules> rules() {
-    return List.copyOf(rules);
-  }
-
   /** Which tunable value a published tunable is, or null if it isn't one of these. */
   @Nullable String pathOf(TunableBase tunable) {
     return children.get(tunable);
@@ -665,7 +650,7 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
         String why = path + " takes a number, got " + value;
         problems.add(value(Outcome.Layer.VALUE, path, why, name + ": " + why));
       } else {
-        String outside = slot.knob().limits().whyNot(value);
+        String outside = slot.knob().limits().whyNot(value, slot.knob().unit());
         if (outside != null) {
           problems.add(
               value(Outcome.Layer.LIMIT, path, outside, name + ": " + path + ": " + outside));
@@ -701,9 +686,9 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   /**
    * A record's refusal, one line of it, tied to the value it names. A record names a value from
    * itself, {@code where: what}: {@code Gains.steerKd}, {@code CameraConfig[front].tiltUp}, or a
-   * value further in, {@code SwerveConfig.limits.maxLinearSpeed}. A line naming no tunable value (a
-   * whole-record check, or a value that isn't tunable) concerns the change's values in that record,
-   * and the record itself.
+   * value further in, {@code DrivetrainControl.limits.maxLinearSpeed}. A line naming no tunable
+   * value (a whole-record check, or a value that isn't tunable) concerns the change's values in
+   * that record, and the record itself.
    */
   private Problem refusedBy(Rejected rejected, String line, Set<String> changed) {
     String record = ParameterDocs.nameOf(rejected.record);
@@ -747,15 +732,6 @@ public final class LiveConfig<T extends Record> implements ComplexTunable {
   /** The reasons as lines, as {@link #candidate(Map)} and {@link #whyNot} give them. */
   private static List<String> lines(List<Problem> problems) {
     return problems.stream().map(Problem::line).toList();
-  }
-
-  /** Why a candidate breaks the rules the change touches, one line for each rule broken. */
-  private List<String> brokenRules(Map<String, Double> values, T candidate) {
-    List<String> broken = new ArrayList<>();
-    for (ConfigRules registry : rules) {
-      broken.addAll(registry.whyNot(Map.of(this, values.keySet()), Map.of(this, candidate)));
-    }
-    return broken;
   }
 
   /** The configuration rebuilt with new values, each in its knob's unit; throws if rejected. */

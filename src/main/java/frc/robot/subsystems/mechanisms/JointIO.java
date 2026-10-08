@@ -18,6 +18,15 @@ public interface JointIO {
     /** Whether the motor controllers answered lately: false after half a second of silence. */
     public boolean connected = false;
 
+    /**
+     * Whether its position and speed are this loop's: false the loop a status frame of the leading
+     * motor controller's doesn't come, when they're the last it read. The interlocks reading the
+     * joint hold at once on a reading that isn't fresh, where {@link #connected} waits half a
+     * second of them to call the controller silent. A SPARK says so; a TalonFX, whose last reading
+     * Phoenix keeps, and the simulator, read fresh.
+     */
+    public boolean fresh = true;
+
     /** Where the joint is, in radians for a revolute joint or meters for a prismatic one. */
     public double position = 0.0;
 
@@ -26,10 +35,24 @@ public interface JointIO {
 
     /**
      * Where the absolute encoder its leading motor controller reads says the joint is, each loop,
-     * in its units: a SPARK's data port's. NaN without one, or before its first good reading; an
-     * encoder only the robot reads has inputs of its own ({@link AbsoluteEncoderIO}).
+     * in its units: a SPARK's data port's, or a CANcoder's that a TalonFX reads its rotor beside.
+     * NaN without one, or this loop without a good reading; an encoder only the robot reads has
+     * inputs of its own ({@link AbsoluteEncoderIO}).
      */
     public double absolutePosition = Double.NaN;
+
+    /**
+     * Where its motor's own count says the joint is, where {@link #position} is an absolute
+     * encoder's word instead (a SPARK's loop closed on its data port): NaN otherwise, its position
+     * being its motor's count.
+     */
+    public double motorPosition = Double.NaN;
+
+    /**
+     * Whether the CANcoder its leading motor controller reads says its magnet is too close or too
+     * far (red): what it reads then isn't trusted, and the joint isn't seeded from it.
+     */
+    public boolean magnetBad = false;
 
     /** The voltage across the leading motor. */
     public double appliedVolts = 0.0;
@@ -54,7 +77,42 @@ public interface JointIO {
      * empty: they run on their defaults, without the configured ratios, gains or current limits.
      */
     public String unconfigured = "";
+
+    /**
+     * Whether its leading motor controller restarted since the last loop: a breaker that reset, a
+     * power connector that came loose. A restarted controller counts its motor from 0, or from the
+     * absolute encoder it reads, so its joint finds where it is again ({@link JointMechanism}). A
+     * TalonFX says so in the frame it sends as it starts; a SPARK, in its sticky warnings.
+     */
+    public boolean restarted = false;
+
+    /** Whether each following motor controller restarted since the last loop, in block order. */
+    public boolean[] followersRestarted = new boolean[0];
+
+    /** Whether the CANcoder its leading motor controller reads restarted since the last loop. */
+    public boolean encoderRestarted = false;
+
+    /**
+     * Whether each following motor controller answered lately, in block order: false after half a
+     * second of silence. Read a few times a second ({@link JointIO#HEALTH_LOOPS}).
+     */
+    public boolean[] followersConnected = new boolean[0];
+
+    /**
+     * Each device's active faults, as its vendor numbers them: the leader, each follower in block
+     * order, then its CANcoder. A TalonFX's or a CANcoder's fault field; a SPARK's fault bits, its
+     * warnings' sixteen bits above them. 0 for none. Read a few times a second ({@link
+     * JointIO#HEALTH_LOOPS}), the last reading standing between.
+     */
+    public int[] faults = new int[0];
   }
+
+  /**
+   * Its devices' health, their followers' answering and their faults, is read once in this many
+   * loops, ten times a second: what a log needs to show a follower off the bus, and a few frames a
+   * second's worth of reading.
+   */
+  int HEALTH_LOOPS = 5;
 
   default void updateInputs(JointIOInputs inputs) {}
 

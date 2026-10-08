@@ -3,18 +3,19 @@ package frc.robot.sim;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 
 /**
- * A SPARK's loop, as the REV helper configures it from the joint's plan: its kP on the device,
- * every millisecond, on where it reads the joint; the rest, the plan's feedforward and kD, worked
- * out by the robot as it asks, from where it last read the joint, and sent with the request in
- * volts, held until it asks again ({@code JointIOSpark}). So its damping and its gravity are a
- * loop's old, as on a robot. Its loop runs on its motor's count, as a TalonFX's does: one closed on
- * the encoder on its data port reads the same here, since the simulated joint's count only slips
- * when a test powers it on elsewhere.
+ * A SPARK's loop, as the REV helper configures it from the joint's plan: its kP and, holding a
+ * position, its kI on the device, every millisecond, on where it reads the joint; the rest, the
+ * plan's feedforward and kD, worked out by the robot as it asks, from where it last read the joint,
+ * and sent with the request in volts, held until it asks again ({@code JointIOSpark}). So its
+ * damping and its gravity are a loop's old, as on a robot. Its loop runs on where it reads the
+ * joint: its motor's count, as a TalonFX's does, or the encoder on its data port its loop closes on
+ * ({@code JointIOSim}).
  */
 final class SparkEmulator implements ControllerEmulator {
   private ControllerPlan plan;
   private double setPosition;
   private double setVelocity;
+  private double integral;
 
   /** What the robot sent with its request: the plan's feedforward and kD, in volts. */
   private double feedforwardVolts;
@@ -31,6 +32,9 @@ final class SparkEmulator implements ControllerEmulator {
       double read,
       double readVelocity,
       boolean fresh) {
+    if (fresh) {
+      integral = 0;
+    }
     setPosition = position;
     this.feedforwardVolts =
         feedforwardVolts
@@ -46,7 +50,9 @@ final class SparkEmulator implements ControllerEmulator {
 
   @Override
   public double holding(double position, double velocity, double seconds) {
-    return plan.kP() * (setPosition - position) + feedforwardVolts;
+    double error = setPosition - position;
+    integral += error * seconds;
+    return plan.kP() * error + plan.kI() * integral + feedforwardVolts;
   }
 
   @Override

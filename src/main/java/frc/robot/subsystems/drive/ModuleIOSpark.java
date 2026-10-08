@@ -6,6 +6,7 @@ import static org.wpilib.units.Units.Rotations;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import com.revrobotics.PersistMode;
 import com.revrobotics.REVLibError;
@@ -51,9 +52,6 @@ final class ModuleIOSpark implements ModuleIO {
 
   /** At startup, configuring a SPARK is tried this many times. */
   private static final int TRIES = 5;
-
-  /** The voltage a SPARK's loop output is a share of: its voltage compensation. */
-  private static final double NOMINAL_VOLTS = 12;
 
   private static final int SIGNAL_MS = 20;
 
@@ -112,7 +110,7 @@ final class ModuleIOSpark implements ModuleIO {
     driveConfig
         .inverted(wiring.driveInverted())
         .idleMode(SparkBaseConfig.IdleMode.kBrake)
-        .voltageCompensation(NOMINAL_VOLTS);
+        .voltageCompensation(Motor.NOMINAL_VOLTS);
     driveConfig.closedLoop.feedbackSensor(FeedbackSensor.kPrimaryEncoder);
     driveConfig
         .signals
@@ -125,7 +123,7 @@ final class ModuleIOSpark implements ModuleIO {
     steerConfig
         .inverted(wiring.steerInverted())
         .idleMode(SparkBaseConfig.IdleMode.kBrake)
-        .voltageCompensation(NOMINAL_VOLTS);
+        .voltageCompensation(Motor.NOMINAL_VOLTS);
     if (steerController == MechanismWiring.Controller.SPARK_MAX) {
       steerConfig.absoluteEncoder.setSparkMaxDataPortConfig();
     }
@@ -246,10 +244,10 @@ final class ModuleIOSpark implements ModuleIO {
     steerKd = gains.steerKd();
     SparkBaseConfig driveConfig = blank(driveController);
     driveConfig.smartCurrentLimit((int) Math.round(limits.driveStatorCurrent().in(Amps)));
-    driveConfig.closedLoop.p(driveKp / NOMINAL_VOLTS, ClosedLoopSlot.kSlot0);
+    driveConfig.closedLoop.p(driveKp / Motor.NOMINAL_VOLTS, ClosedLoopSlot.kSlot0);
     SparkBaseConfig steerConfig = blank(steerController);
     steerConfig.smartCurrentLimit((int) Math.round(limits.steerStatorCurrent().in(Amps)));
-    steerConfig.closedLoop.p(steerKp / NOMINAL_VOLTS, ClosedLoopSlot.kSlot0);
+    steerConfig.closedLoop.p(steerKp / Motor.NOMINAL_VOLTS, ClosedLoopSlot.kSlot0);
     if (!configured) {
       if (!applied(
           () ->
@@ -282,11 +280,6 @@ final class ModuleIOSpark implements ModuleIO {
         ClosedLoopSlot.kSlot0,
         feedforwardVolts,
         SparkClosedLoopController.ArbFFUnits.kVoltage);
-  }
-
-  @Override
-  public void setDriveVoltage(double volts) {
-    drive.setVoltage(volts);
   }
 
   @Override

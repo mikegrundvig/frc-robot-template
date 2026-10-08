@@ -8,6 +8,7 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.Rotations;
 
+import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.DrivenBuilder;
@@ -31,6 +32,7 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
+import com.michaelgrundvig.frc.world.robot.SwerveWiringModuleWiringBuilder;
 import frc.robot.subsystems.mechanisms.JointFixtures;
 import frc.robot.subsystems.mechanisms.Joints;
 import java.util.List;
@@ -71,7 +73,7 @@ class RobotConfigTest {
                     .build())
         .withMessage(
             "RobotDefinition[sim].drivetrain.control.limits.maxLinearSpeed: 5 m/s is faster than"
-                + " the drivetrain's free speed of 4.729 m/s");
+                + " the drivetrain's free speed of 4.729 m/s: give maxLinearSpeed at most that");
   }
 
   /**
@@ -199,13 +201,13 @@ class RobotConfigTest {
             .interlocks(
                 List.of(
                     Interlock.that(JointFixtures.ROLLER)
-                        .runsOnlyWhen(JointFixtures.PIVOT.past(JointFixtures.PIVOT_RUN))))
+                        .runsOnlyWhen(JointFixtures.PIVOT.atLeast(JointFixtures.PIVOT_RUN))))
             .build();
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> RobotConfigBuilder.builder(Robots.SIM).definition(guarded).build())
         .withMessage(
-            "RobotConfig[sim].definition.interlocks: \"roller runs only when pivot past run\""
+            "RobotConfig[sim].definition.interlocks: \"roller runs only when pivot at least run\""
                 + " can't be enforced: roller has no mechanism, as nothing drives it");
   }
 
@@ -214,21 +216,23 @@ class RobotConfigTest {
    * the robot's own words, wherever the program runs: an arm's gravity angle a third of a turn from
    * its zero, past Phoenix's gravity offset, on a TalonFXS it's wired to, and on Krakens wired to
    * nothing, which the simulator runs on TalonFXs. On NEOs wired to nothing it runs on a SPARK, as
-   * it does wired to one, the robot working out its gravity each loop, any offset; and a SPARK
-   * refuses what a TalonFX takes, a kI, wired or not.
+   * it does wired to one, the robot working out its gravity each loop, any offset, and a kI with
+   * it.
    */
   @Test
   void aControlItsMotorControllerWouldRefuseIsRefusedWithTheConfiguration() {
     MechanismControl held =
-        MechanismControl.position(30).withHoming(MechanismControl.Homing.assumeAtReference());
+        MechanismControl.position(30).withHoming(MechanismControl.Homing.assumeAtRest());
     Joint.Revolute arm =
         Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
-            .range(Range.degrees(0, 90), Degrees.of(0))
+            .range(Range.degrees(0, 90))
+            .rest(Degrees.of(0))
             .motor(Motor.NEO, JointFixtures.gearing(50))
             .control(held.withKg(0.4, Degrees.of(120)));
     Joint.Revolute onKrakens =
         Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
-            .range(Range.degrees(0, 90), Degrees.of(0))
+            .range(Range.degrees(0, 90))
+            .rest(Degrees.of(0))
             .motor(Motor.KRAKEN_X60, JointFixtures.gearing(50))
             .control(held.withKg(0.4, Degrees.of(120)));
     String robots =
@@ -240,9 +244,6 @@ class RobotConfigTest {
         MechanismControlBuilder.builder(held)
             .gains(MechanismControlGainsBuilder.builder(held.gains()).kI(1).build())
             .build();
-    String noKi =
-        "RobotConfig[sim].joints: arm's control has a kI, which isn't carried to a SPARK yet:"
-            + " its integral's units aren't confirmed. Leave kI at 0";
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> withJoint(onKrakens))
@@ -259,12 +260,10 @@ class RobotConfigTest {
     assertThat(withJoint(onKrakens.retuned(control -> integral.withKg(0.4, Degrees.of(60)))))
         .as("a TalonFX takes a kI")
         .isNotNull();
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> withJoint(arm.retuned(control -> integral)))
-        .withMessage(noKi);
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> withJoint(arm.motorsOn(SPARK_MAX.can(21)).retuned(control -> integral)))
-        .withMessage(noKi);
+    assertThat(withJoint(arm.retuned(control -> integral)).definition().joints()).hasSize(1);
+    assertThat(withJoint(arm.motorsOn(SPARK_MAX.can(21)).retuned(control -> integral)))
+        .as("a SPARK takes a kI")
+        .isNotNull();
   }
 
   /** The simulator's robot with one joint, its configuration built. */
@@ -279,11 +278,12 @@ class RobotConfigTest {
   }
 
   /**
-   * Treads said to grip harder than the slip check can tell from a collision are refused as the
-   * configuration is built: a path planner's friction, a tuning value, often is.
+   * Treads said to grip harder than the slip check can tell from a collision, as a path planner's
+   * friction often is (2611's PathPlanner gives 2.255), are the robot's doubt, not a refusal: the
+   * robot starts, and says what the grip costs and what to give.
    */
   @Test
-  void aPathPlannersFrictionIsRefusedAsTheTreadsGrip() {
+  void aPathPlannersFrictionAsTheTreadsGripIsADoubt() {
     List<DrivetrainGeometry.Corner> corners =
         Robots.SIM.definition().drivetrain().corners().stream()
             .map(
@@ -291,7 +291,7 @@ class RobotConfigTest {
                     DrivetrainGeometryCornerBuilder.builder(corner)
                         .module(
                             DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
-                                .wheelCoefficientOfFriction(1.6)
+                                .wheelCoefficientOfFriction(2.255)
                                 .build())
                         .build())
             .toList();
@@ -303,18 +303,23 @@ class RobotConfigTest {
                     .build())
             .build();
 
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> RobotConfigBuilder.builder(Robots.SIM).definition(grippy).build())
-        .withMessage(
-            "RobotConfig[sim].definition: the treads' grip, 1.60, is more than tread has: the slip"
-                + " check tells a slide from a collision only under 1.53. Give the tread's own,"
-                + " about 1.0 worn and 1.3 new; a path planner's friction is a tuning value, not"
-                + " the tread's");
+    RobotConfig robot = RobotConfigBuilder.builder(Robots.SIM).definition(grippy).build();
+
+    assertThat(Doubts.lines(Doubts.of(robot.definition()), Finding.Scope.ROBOT))
+        .contains(
+            "the treads' grip, 2.26, is past 1.53, above which the slip check can't tell a slide"
+                + " from a collision: a jolt up to 2.26 g may be the floor's, so it's none, and a"
+                + " hit under it is seen only as a slide. Give the tread's own, about 1.0 worn and"
+                + " 1.3 new, from a pull test (docs/characterization.md, tread friction); a path"
+                + " planner's friction is a tuning value, not the tread's");
+    assertThat(Doubts.lines(Doubts.of(Robots.SIM.definition()), Finding.Scope.ROBOT))
+        .noneMatch(doubt -> doubt.contains("slip check can't tell"));
   }
 
   /**
-   * A drivetrain wired for a robot whose controllers can't drive its motors is refused as the
-   * configuration is built: its modules wouldn't move. In the simulator alone, any motor runs.
+   * A drivetrain wired for a robot whose controllers can't drive its motors is refused by its
+   * definition as it's wired, saying what does: its modules wouldn't move. In the simulator alone,
+   * any motor runs.
    */
   @Test
   void aWiredSwerveOfMotorsNoTalonFxDrivesIsRefused() {
@@ -350,10 +355,70 @@ class RobotConfigTest {
 
     assertThat(unwired.definition()).isEqualTo(rev);
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> unwired.with(rev.drivetrain().wired(wiring)))
+        .isThrownBy(() -> rev.drivetrain().wired(wiring))
         .withMessage(
-            "RobotConfig[sim].definition.drivetrain.wiring: the drivetrain's wiring: its drive's NEO isn't"
-                + " driven by a TalonFX");
+            "DrivetrainGeometry.wiring: its drive's NEO is on a TalonFX, which doesn't drive one: a"
+                + " TalonFXS or a SPARK MAX or a SPARK Flex does");
+  }
+
+  /**
+   * A drivetrain whose drive and steering are on different makers' controllers, each driving its
+   * motors, is the definition's to have, and the template's modules can't drive it yet: refused as
+   * the configuration is built, saying what they drive.
+   */
+  @Test
+  void aSwerveOnTwoMakersControllersIsRefusedByTheProgram() {
+    List<DrivetrainGeometry.Corner> neoSteering =
+        Robots.SIM.definition().drivetrain().corners().stream()
+            .map(
+                corner ->
+                    DrivetrainGeometryCornerBuilder.builder(corner)
+                        .module(
+                            DrivetrainGeometryModuleTypeBuilder.builder(corner.module())
+                                .steerMotor(Motor.NEO_550)
+                                .build())
+                        .build())
+            .toList();
+    DrivetrainGeometry drivetrain =
+        DrivetrainGeometryBuilder.builder(Robots.SIM.definition().drivetrain())
+            .corners(neoSteering)
+            .build();
+    RobotConfig unwired =
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .drivetrain(drivetrain)
+                    .build())
+            .build();
+    DrivetrainGeometry mixed =
+        drivetrain.wired(
+            SwerveWiring.builder()
+                .canBus(CanBus.port(CanBus.Systemcore.CAN_S0))
+                .driveController(MechanismWiring.Controller.TALON_FX)
+                .steerController(SPARK_MAX)
+                .gyroId(1)
+                .gyroYawScale(1.0)
+                .modules(
+                    List.of(
+                        sparkSteered(1, 2),
+                        sparkSteered(3, 4),
+                        sparkSteered(5, 6),
+                        sparkSteered(7, 8)))
+                .build());
+
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> unwired.with(mixed))
+        .withMessage(
+            "RobotConfig[sim].definition.drivetrain.wiring: the drivetrain drives on a TalonFX and"
+                + " steers on a SPARK MAX, and the template's modules are TalonFXs or SPARKs, doing"
+                + " both, so far: put both on TalonFXs, or both on SPARKs");
+  }
+
+  /** A module steered by a SPARK, which reads its angle on its data port: no CANcoder. */
+  private static SwerveWiring.ModuleWiring sparkSteered(int drive, int steer) {
+    return SwerveWiringModuleWiringBuilder.builder(module(drive, steer, 1))
+        .encoderId(Optional.empty())
+        .build();
   }
 
   private static SwerveWiring.ModuleWiring module(int drive, int steer, int encoder) {

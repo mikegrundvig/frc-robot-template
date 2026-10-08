@@ -1,5 +1,7 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
 import com.michaelgrundvig.frc.world.config.Finding;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,14 +61,13 @@ final class Inputs {
                 label,
                 label
                     + " is "
-                    + own.joint().label()
-                    + "'s limit switch, on "
-                    + limit.joint()
-                    + "'s controller, which would stop "
+                    + possessive(own.joint().label())
+                    + " limit switch, on "
+                    + possessive(limit.joint())
+                    + " controller, which would stop "
                     + limit.joint()
                     + ": wire it to "
-                    + own.joint().label()
-                    + "'s"));
+                    + possessive(own.joint().label())));
       }
       Joint on = byLabel.get(limit.joint());
       Optional<Driven.Motors> motors =
@@ -79,10 +80,14 @@ final class Inputs {
                 label,
                 label
                     + " is on "
+                    + possessive(limit.joint())
+                    + " controller's limit input, and "
                     + limit.joint()
-                    + "'s controller's limit input, and "
-                    + limit.joint()
-                    + " isn't wired"));
+                    + " isn't wired: wire "
+                    + possessive(limit.joint())
+                    + " motors to their controllers, or put "
+                    + label
+                    + " on a Systemcore port or a CANdi"));
       } else if (motors.get().controllers().get(0).controller()
               == MechanismWiring.Controller.TALON_FX
           && !motors.get().motor().equals(Motor.FALCON_500)
@@ -92,8 +97,8 @@ final class Inputs {
                 label,
                 label
                     + " is on "
-                    + limit.joint()
-                    + "'s TalonFX's limit input, and a Kraken's TalonFX has none: put it on a"
+                    + possessive(limit.joint())
+                    + " TalonFX's limit input, and a Kraken's TalonFX has none: put it on a"
                     + " CANdi"));
       }
     }
@@ -110,7 +115,13 @@ final class Inputs {
     if (other != null) {
       problems.add(
           Finding.refused(
-              label, other + " and " + label + " are on one input: " + SensorWiring.shown(input)));
+              label,
+              other
+                  + " and "
+                  + label
+                  + " are on one input, "
+                  + SensorWiring.shown(input)
+                  + ": move one to an input of its own"));
     }
   }
 }

@@ -177,24 +177,6 @@ class KinematicsModelTest {
   }
 
   @Test
-  void aTankDriveGoesForwardOnItsAverageAndTurnsOnItsDifference() {
-    DifferentialKinematicsModel tank = new DifferentialKinematicsModel(0.6);
-    OdometrySample start = new OdometrySample(0, new double[] {0, 0}, new double[] {0, 0});
-
-    BodyMotion straight =
-        tank.motion(start, new OdometrySample(1, new double[] {1, 1}, new double[] {0, 0}));
-    BodyMotion spin =
-        tank.motion(start, new OdometrySample(1, new double[] {-0.3, 0.3}, new double[] {0, 0}));
-
-    assertThat(straight).isEqualTo(new BodyMotion(1, 0, 0, 0));
-    assertThat(spin.dxMeters()).isZero();
-    assertThat(spin.dthetaRadians()).isCloseTo(1.0, within(1e-12));
-    assertThatThrownBy(() -> new DifferentialKinematicsModel(0)).hasMessageContaining("track");
-    OdometrySample four = new OdometrySample(0, new double[4], new double[4]);
-    assertThatThrownBy(() -> tank.motion(four, four)).hasMessageContaining("2 wheels");
-  }
-
-  @Test
   void aSingularMatrixHasNoInverse() {
     double[] out = new double[9];
 

@@ -65,7 +65,7 @@ class SimulatorControlsSimTest {
     assertThat(RobotState.getRobotMode()).isEqualTo(RobotMode.UTILITY);
     assertThat(RobotState.isDSAttached()).isTrue();
     assertThat(MatchState.getLocation()).hasValue(1);
-    assertThat(sim.robot().allianceStation()).isEqualTo("Red 1");
+    assertThat(sim.robot().matchField().allianceStation()).isEqualTo("Red 1");
   }
 
   /**

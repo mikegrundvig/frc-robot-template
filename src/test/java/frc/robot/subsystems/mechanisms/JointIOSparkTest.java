@@ -12,31 +12,44 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismControlGainsBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.SensorWiring;
+import com.revrobotics.PersistMode;
+import com.revrobotics.REVLibError;
+import com.revrobotics.ResetMode;
 import com.revrobotics.sim.SparkAbsoluteEncoderSim;
+import com.revrobotics.sim.SparkSimFaultManager;
 import com.revrobotics.spark.ClosedLoopSlot;
 import com.revrobotics.spark.FeedbackSensor;
+import com.revrobotics.spark.SparkBase;
+import com.revrobotics.spark.SparkFlex;
+import com.revrobotics.spark.SparkLowLevel;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.SparkSim;
 import com.revrobotics.spark.config.LimitSwitchConfig;
 import com.revrobotics.spark.config.LimitSwitchConfigAccessor;
+import com.revrobotics.util.Signal;
 import frc.robot.RobotSim;
 import frc.robot.lib.rev.RevMechanism;
 import frc.robot.lib.wiring.ControllerPins;
+import java.util.Locale;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.math.system.DCMotor;
+import org.wpilib.simulation.SimDeviceSim;
 
 /**
  * The REV joint against REV's own simulated SPARK: what it tells the SPARK, in the SPARK's units,
@@ -72,16 +85,58 @@ class JointIOSparkTest {
     io.updateInputs(inputs);
     double resting = inputs.position;
     // The simulation's own position starts at 0, not where the startup set the encoder.
-    sim.setPosition(PIVOT.reference() / (2 * Math.PI) * 25 + 25);
+    sim.setPosition(PIVOT.restPosition() / (2 * Math.PI) * 25 + 25);
     sim.iterate(0, 12, 0.02);
     io.updateInputs(inputs);
 
     assertThat(resting)
         .as("it starts at its reference, 1.5°")
-        .isCloseTo(PIVOT.reference(), within(1e-9));
+        .isCloseTo(PIVOT.restPosition(), within(1e-9));
     // A SPARK reports its position as a float.
-    assertThat(inputs.position).isCloseTo(PIVOT.reference() + 2 * Math.PI, within(1e-6));
+    assertThat(inputs.position).isCloseTo(PIVOT.restPosition() + 2 * Math.PI, within(1e-6));
     assertThat(inputs.unconfigured).as("every SPARK took its settings").isEmpty();
+  }
+
+  /**
+   * A frame of its encoder that doesn't come, REV's signal invalid, reads REV's default, 0: the
+   * pivot's last position and speed stand instead, not 0, and its reading isn't fresh that loop, so
+   * the interlocks reading it hold at once. Its SPARK reads as silent only after half a second of
+   * them; a frame that comes is fresh again at once.
+   */
+  @Test
+  void aFrameThatDoesntComeLeavesTheLastReadingNotFresh() {
+    JointIOSpark io = io(pivot(48));
+    SparkSim sim = new SparkSim(io.leader(), DCMotor.getNEO(1));
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    // Turning at 250 rpm, a turn and some on from where it rested.
+    sim.setPosition(PIVOT.restPosition() / (2 * Math.PI) * 25 + 25);
+    sim.iterate(250, 12, 0.02);
+    io.updateInputs(inputs);
+    double position = inputs.position;
+    double velocity = inputs.velocity;
+    Signal<Double> lost = Signal.ofError(0.0, REVLibError.kTimeout, 0);
+
+    io.updateInputs(inputs, lost, lost);
+    boolean fresh = inputs.fresh;
+    boolean connected = inputs.connected;
+    double kept = inputs.position;
+    double keptSpeed = inputs.velocity;
+    for (int i = 0; i < 26; i++) {
+      RobotSim.stepClock();
+      io.updateInputs(inputs, lost, lost);
+    }
+    boolean silent = !inputs.connected;
+    io.updateInputs(inputs);
+
+    assertThat(position).isGreaterThan(PIVOT.restPosition() + 2 * Math.PI);
+    assertThat(velocity).isPositive();
+    assertThat(fresh).isFalse();
+    assertThat(connected).as("not silent yet").isTrue();
+    assertThat(kept).as("not 0").isEqualTo(position);
+    assertThat(keptSpeed).isEqualTo(velocity);
+    assertThat(silent).as("after half a second").isTrue();
+    assertThat(inputs.fresh).isTrue();
+    assertThat(inputs.position).isCloseTo(position, within(1e-6));
   }
 
   /**
@@ -152,17 +207,17 @@ class JointIOSparkTest {
                 ControllerSettings.control(pivot)));
 
     // REV's simulation steps its own position into the encoder: start it where the pivot rests.
-    sim.setPosition(PIVOT.reference() / (2 * Math.PI) * 25);
+    sim.setPosition(PIVOT.restPosition() / (2 * Math.PI) * 25);
     io.setPosition(Math.toRadians(45), 0, 0.6);
     sim.iterate(0, 12, 0.02);
     double far = sim.getSetpoint();
-    double near = PIVOT.reference() + Math.toRadians(0.5);
+    double near = PIVOT.restPosition() + Math.toRadians(0.5);
     io.setPosition(near, 0, 0.6);
     for (int i = 0; i < 25; i++) {
       sim.iterate(0, 12, 0.02);
     }
 
-    double rest = PIVOT.reference() / (2 * Math.PI) * 25;
+    double rest = PIVOT.restPosition() / (2 * Math.PI) * 25;
     double target = near / (2 * Math.PI) * 25;
     double feedforward = 0.6 + settings.plan().feedforward(near, 0, 0);
     // A SPARK holds its setpoint as a float.
@@ -219,6 +274,36 @@ class JointIOSparkTest {
     assertThat(inputs.unconfigured).isEmpty();
   }
 
+  /**
+   * Volts and a share of the battery go to the SPARK as they are, as REV's simulated SPARK holds
+   * them; neutral is a share of none, which brakes or coasts as its settings say.
+   */
+  @Test
+  void voltsAShareAndNeutralGoAsTheyAre() {
+    JointIOSpark io = io(pivot(49));
+    SparkBase spark = io.leader();
+    SimDeviceSim device =
+        new SimDeviceSim(
+            String.format(
+                Locale.ROOT, "SPARK MAX [%d,%d]", spark.getCanPort().value, spark.getDeviceId()));
+
+    io.setVoltage(4);
+    int voltsMode = device.getInt("Control Mode").get();
+    double volts = device.getDouble("Setpoint").get();
+    io.setDutyCycle(-0.5);
+    int shareMode = device.getInt("Control Mode").get();
+    double share = device.getDouble("Setpoint").get();
+    io.stop();
+
+    assertThat(voltsMode).isEqualTo(SparkLowLevel.ControlType.kVoltage.value);
+    assertThat(volts).isEqualTo(4);
+    assertThat(shareMode).isEqualTo(SparkLowLevel.ControlType.kDutyCycle.value);
+    assertThat(share).isEqualTo(-0.5);
+    assertThat(device.getInt("Control Mode").get())
+        .isEqualTo(SparkLowLevel.ControlType.kDutyCycle.value);
+    assertThat(device.getDouble("Setpoint").get()).isZero();
+  }
+
   /** A speed goes to the SPARK's speed slot in rotor RPM: the roller's 1 rad/s through 3:1. */
   @Test
   void aSpeedGoesInRotorRpm() {
@@ -239,7 +324,12 @@ class JointIOSparkTest {
    */
   @Test
   void homingSwitchesItsSoftLimitsOffAndBackOn() {
-    JointIOSpark io = io(pivot(37).retuned(control -> control.withSoftLimits(0.01, 2.3)));
+    JointIOSpark io =
+        io(
+            pivot(37)
+                .retuned(
+                    control ->
+                        control.withSoftLimits(Range.of(Radians.of(0.01), Radians.of(2.3)))));
     SparkMax spark = (SparkMax) io.leader();
     boolean before = spark.configAccessor.softLimit.getForwardSoftLimitEnabled();
 
@@ -264,7 +354,7 @@ class JointIOSparkTest {
    */
   @Test
   void aPivotWithAnEncoderOnItsDataPortIsToldWhereItIs() {
-    JointIOSpark io = io(pivot(38).absoluteEncoder(8192, REVERSED));
+    JointIOSpark io = io(pivot(38).absoluteEncoder(REVERSED));
     SparkMax spark = (SparkMax) io.leader();
     // At 60°, a sixth of a turn past the pivot's zero and so 0.3125 + 1/6 of one past the edge.
     new SparkAbsoluteEncoderSim(spark).setPosition(0.3125 + 60.0 / 360);
@@ -305,8 +395,7 @@ class JointIOSparkTest {
         MechanismControlBuilder.builder(ControllerSettings.control(PIVOT))
             .homing(Optional.empty())
             .build();
-    JointIOSpark io =
-        io(pivot(39).absoluteEncoder(8192, REVERSED.closesLoop()).retuned(old -> unhomed));
+    JointIOSpark io = io(pivot(39).absoluteEncoder(REVERSED.closesLoop()).retuned(old -> unhomed));
     SparkMax spark = (SparkMax) io.leader();
     SparkSim sim = new SparkSim(spark, DCMotor.getNEO(1));
     sim.enable();
@@ -340,7 +429,142 @@ class JointIOSparkTest {
     assertThat(sim.getSetpoint()).isCloseTo(60, within(1e-4));
   }
 
+  /**
+   * An elevator on two Vortexes, its through-bore on the leader's data port geared nine to one down
+   * from its 1 in drum, its loop closed on it: 1.2 m is 0.835 of the encoder's turns, so the SPARK
+   * reads zero 0.082 of a turn below the elevator's zero, the edge of the window centered on its
+   * travel. It's read in meters from the encoder, wherever its motor's count is, and moved in the
+   * encoder's turns: 0.3 m is 0.209 of a turn past its zero. Its kP is 60 V a meter, per turn of
+   * the encoder as a share of 12 V.
+   */
+  @Test
+  void anElevatorClosedOnItsDataPortEncoderIsReadInMetersThroughItsDrum() {
+    MechanismControl unhomed =
+        MechanismControlBuilder.builder(ControllerSettings.control(ELEVATOR))
+            .homing(Optional.empty())
+            .build();
+    JointIOSpark io =
+        io(
+            unmotored(ELEVATOR)
+                .motors(
+                    Motor.NEO_VORTEX,
+                    gearing(10),
+                    Inches.of(1),
+                    SPARK_FLEX.can(43),
+                    SPARK_FLEX.can(44))
+                .absoluteEncoder(
+                    Driven.AbsoluteEncoder.of()
+                        .ratio(1.0 / 9)
+                        .on(DATA_PORT.offset(Rotations.of(0.1)).closesLoop()))
+                .retuned(old -> unhomed));
+    SparkFlex spark = (SparkFlex) io.leader();
+    SparkSim sim = new SparkSim(spark, DCMotor.getNeoVortex(1));
+    sim.enable();
+    SparkAbsoluteEncoderSim encoder = new SparkAbsoluteEncoderSim(spark);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    double perMeter = 1.0 / 9 / (2 * Math.PI * 0.0254);
+    double edge = 1.2 * perMeter / 2 - 0.5;
+
+    encoder.setPosition(0.6 * perMeter - edge);
+    io.updateInputs(inputs);
+    io.updateInputs(inputs);
+    double seeded = inputs.position;
+    encoder.setPosition(0.7 * perMeter - edge);
+    io.updateInputs(inputs);
+    double moved = inputs.position;
+    io.setPosition(0.3, 0, 0);
+    sim.iterate(0, 12, 0.02);
+
+    assertThat(spark.configAccessor.closedLoop.getFeedbackSensor())
+        .isEqualTo(FeedbackSensor.kAbsoluteEncoder);
+    // The raw reading at the edge, offset 0.1.
+    assertThat(spark.configAccessor.absoluteEncoder.getZeroOffset())
+        .isCloseTo(edge - 0.1 + 1, within(1e-6));
+    double kP = 60 / perMeter / 12;
+    assertThat(spark.configAccessor.closedLoop.getP(ClosedLoopSlot.kSlot0))
+        .isCloseTo(kP, within(1e-6 * kP));
+    assertThat(seeded).isCloseTo(0.6, within(1e-5));
+    assertThat(moved).as("from its encoder").isCloseTo(0.7, within(1e-5));
+    assertThat(sim.getSetpoint()).isCloseTo(0.3 * perMeter - edge, within(1e-6));
+  }
+
   /** The pivot's through-bore on its SPARK's data port, reversed and offset 0.1, seeded once. */
   private static final MechanismWiring.DataPortEncoder REVERSED =
       DATA_PORT.offset(Rotations.of(0.1)).inverted();
+
+  /**
+   * A SPARK that restarts says so in its sticky warnings: believed once the warning has read clear
+   * since the robot cleared it as it started, said once, and its tuning told it again, which a
+   * restart loses. REV's simulation keeps what it was told through a restart, so the test puts the
+   * SPARK back on its saved tuning, as a restart would.
+   */
+  @Test
+  void aRestartedSparkSaysSoAndIsToldItsTuningAgain() {
+    Joint.Revolute pivot = pivot(40);
+    JointIOSpark io = io(pivot);
+    SparkMax spark = (SparkMax) io.leader();
+    MechanismControl control = ControllerSettings.control(pivot);
+    MechanismControl tuned =
+        MechanismControlBuilder.builder(control)
+            .gains(MechanismControlGainsBuilder.builder(control.gains()).kP(60).build())
+            .build();
+    io.retune(tuned);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    io.updateInputs(inputs);
+    boolean before = inputs.restarted;
+
+    spark.configure(
+        ControllerSettings.spark(ROBOT.with(pivot).math(), pivot, control)
+            .tuning(SPARK_MAX, control),
+        ResetMode.kNoResetSafeParameters,
+        PersistMode.kNoPersistParameters);
+    double fellBack = spark.configAccessor.closedLoop.getP(ClosedLoopSlot.kSlot0);
+    new SparkSimFaultManager(spark)
+        .setStickyWarnings(
+            new SparkBase.Warnings(false, false, false, false, false, false, true, false));
+    io.updateInputs(inputs);
+    boolean restarted = inputs.restarted;
+    io.updateInputs(inputs);
+
+    double expected = 60 * 2 * Math.PI / (12 * 25);
+    assertThat(before).isFalse();
+    assertThat(fellBack).isNotCloseTo(expected, within(1e-6 * expected));
+    assertThat(restarted).isTrue();
+    assertThat(inputs.restarted).as("once").isFalse();
+    assertThat(spark.configAccessor.closedLoop.getP(ClosedLoopSlot.kSlot0))
+        .as("its tuning, again")
+        .isCloseTo(expected, within(1e-6 * expected));
+  }
+
+  /**
+   * Its SPARKs' health, a few times a second: each one's faults, its warnings above them, and its
+   * follower answering. A gate-driver fault and a brownout warning on the leader read as their
+   * bits.
+   */
+  @Test
+  void itsSparksHealthIsReadAFewTimesASecond() {
+    JointIOSpark io =
+        io(unmotored(PIVOT).motors(Motor.NEO, gearing(25), SPARK_MAX.can(52), SPARK_MAX.can(53)));
+    SparkMax spark = (SparkMax) io.leader();
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    io.updateInputs(inputs);
+    int[] before = inputs.faults.clone();
+
+    SparkSimFaultManager faults = new SparkSimFaultManager(spark);
+    faults.setFaults(new SparkBase.Faults(false, false, false, false, false, true, false, false));
+    faults.setWarnings(
+        new SparkBase.Warnings(true, false, false, false, false, false, false, false));
+    for (int i = 0; i < JointIO.HEALTH_LOOPS; i++) {
+      io.updateInputs(inputs);
+    }
+    SparkBase.Faults gateDriver =
+        new SparkBase.Faults(false, false, false, false, false, true, false, false);
+    SparkBase.Warnings brownout =
+        new SparkBase.Warnings(true, false, false, false, false, false, false, false);
+
+    assertThat(before).containsExactly(0, 0);
+    assertThat(inputs.faults[0]).isEqualTo(brownout.rawBits << 16 | gateDriver.rawBits);
+    assertThat(inputs.faults[1]).isZero();
+    assertThat(inputs.followersConnected).containsExactly(true);
+  }
 }

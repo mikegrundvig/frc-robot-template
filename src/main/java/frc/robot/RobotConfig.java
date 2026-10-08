@@ -1,7 +1,6 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
-import com.michaelgrundvig.frc.localization.LocalizationService;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
@@ -12,6 +11,7 @@ import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.Sensor;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
+import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.Joints;
 import java.util.Optional;
 
@@ -39,12 +39,8 @@ public record RobotConfig(
         .findings("definition", definition::findings)
         .check(
             "definition.drivetrain.wiring",
-            () ->
-                drivetrainWiring
-                    .map(wiring -> DrivetrainControl.whyNotDriven(definition.drivetrain(), wiring))
-                    .orElse(null))
+            () -> drivetrainWiring.map(Drive::whyNotDriven).orElse(null))
         .findings("joints", () -> Joints.problems(definition))
-        .check("definition", () -> LocalizationService.problems(definition))
         .findings("definition.interlocks", () -> Joints.unenforceable(definition))
         .orThrow();
   }

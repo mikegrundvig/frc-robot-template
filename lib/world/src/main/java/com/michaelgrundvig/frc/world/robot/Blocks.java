@@ -1,6 +1,6 @@
 package com.michaelgrundvig.frc.world.robot;
 
-import static com.michaelgrundvig.frc.world.config.Rules.shown;
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 
 import com.michaelgrundvig.frc.world.config.Finding;
 import java.util.ArrayList;
@@ -12,10 +12,10 @@ import org.jspecify.annotations.Nullable;
 /**
  * The definition's checks of each joint's block against itself and the robot it's on: where it
  * rests and its places against its stops, its control against its range, its places and its
- * sensors, and its absolute encoder against its motors' controllers. Judged on the whole
- * definition, never on a block half written, so the order of its calls doesn't matter, and a sensor
- * of the robot's on the joint counts as its own does. What the program can't drive yet is the
- * program's to say, not the definition's.
+ * sensors, and its absolute encoder against its motors' controllers, and a sliding joint's against
+ * its drum and its stops. Judged on the whole definition, never on a block half written, so the
+ * order of its calls doesn't matter, and a sensor of the robot's on the joint counts as its own
+ * does. What the program can't drive yet is the program's to say, not the definition's.
  */
 final class Blocks {
   private Blocks() {}
@@ -27,6 +27,7 @@ final class Blocks {
       pastItsStops(joint).forEach(problem -> add(problems, joint, problem));
       Optional<MechanismControl> control = joint.driven().control();
       if (control.isPresent()) {
+        add(problems, joint, otherLoop(joint, control.get()));
         add(problems, joint, outsideStops(joint, control.get()));
         for (Position position : outsideSoftLimits(joint, control.get())) {
           add(
@@ -42,13 +43,14 @@ final class Blocks {
                   joint.shown(control.get().softLimits().orElseThrow().upper())));
         }
         add(problems, joint, nothingToHome(joint, control.get()));
-        if (motorsAlone(math, joint)) {
+        if (math.motorsAlone(joint)) {
           add(problems, joint, cantHome(math, joint, control.get()));
           add(problems, joint, noSwitch(math, joint, control.get()));
         }
       }
       add(problems, joint, unwiredMotors(joint));
       add(problems, joint, offTheMotorsBus(joint));
+      add(problems, joint, slidesUnread(joint));
       add(problems, joint, cantCloseLoop(joint));
       add(problems, joint, noDataPort(joint));
       add(problems, joint, offSparks(joint));
@@ -64,7 +66,7 @@ final class Blocks {
     List<Finding> uncontrolled = new ArrayList<>();
     for (Joint joint : math.joints()) {
       if (joint.driven().control().isEmpty()
-          && (joint.driven().motors().isPresent() || motorsAlone(math, joint))) {
+          && (joint.driven().motors().isPresent() || math.motorsAlone(joint))) {
         uncontrolled.add(
             Finding.refused(
                 joint.label(),
@@ -76,24 +78,43 @@ final class Blocks {
     return uncontrolled;
   }
 
-  /**
-   * Whether a joint is turned by motors alone: one drive of motors, turning a shaft, and no other,
-   * and it follows no joint. What homing and a loop on its encoder are worked out for.
-   */
-  static boolean motorsAlone(RobotMath math, Joint joint) {
-    if (math.leaderOf(joint) != null) {
-      return false;
-    }
-    List<Drive> drives = math.drivesOf(joint);
-    return drives.size() == 1
-        && drives.get(0).actuator() instanceof Actuator.Motors
-        && !(drives.get(0).transmission() instanceof Transmission.Between);
-  }
-
   private static void add(List<Finding> problems, Joint joint, @Nullable String problem) {
     if (problem != null) {
       problems.add(Finding.refused(joint.label(), problem));
     }
+  }
+
+  /**
+   * Why a joint's control is written for the other loop than the joint runs, or null when it isn't:
+   * one held at positions (with a range or named positions) runs a position loop, and one that only
+   * runs at outputs, a roller, a velocity loop. Its kP is volts per its loop's error, so one
+   * written for the other would run, silently wrong by orders of magnitude.
+   */
+  private static @Nullable String otherLoop(Joint joint, MechanismControl control) {
+    boolean positions = joint.holdsPositions();
+    if ((control.loop() == MechanismControl.Loop.POSITION) == positions) {
+      return null;
+    }
+    boolean revolute = joint instanceof Joint.Revolute;
+    String per =
+        positions
+            ? (revolute
+                ? "radian of error, or per turn, Volts.per(Rotation).of(...)"
+                : "meter of error, or per inch, Volts.per(Inch).of(...)")
+            : (revolute
+                ? "radian per second of error, or per turn per second,"
+                    + " Volts.per(RotationsPerSecond).of(...)"
+                : "meter per second of error, or per inch per second,"
+                    + " Volts.per(InchesPerSecond).of(...)");
+    return joint.label()
+        + (positions
+            ? " is held at positions (it has a range or named positions), and its control is"
+                + " MechanismControl.velocity(...), for a roller run at speeds: write"
+                + " MechanismControl.position(kP), its kP in volts per "
+            : " only runs at outputs (it has no range and no named positions), and its control is"
+                + " MechanismControl.position(...), for a joint held at positions: write"
+                + " MechanismControl.velocity(kP), its kP in volts per ")
+        + per;
   }
 
   /**
@@ -110,32 +131,14 @@ final class Blocks {
     if (soft.lower() >= range.lower() && soft.upper() <= range.upper()) {
       return null;
     }
-    String why =
-        String.format(
-            Locale.ROOT,
-            "%s's soft limits, %s to %s, must be inside its hard stops, %s to %s",
-            joint.label(),
-            joint.shown(soft.lower()),
-            joint.shown(soft.upper()),
-            joint.shown(range.lower()),
-            joint.shown(range.upper()));
-    boolean inDegrees =
-        joint instanceof Joint.Revolute
-            && soft.kind().isEmpty()
-            && soft.upper() - soft.lower() > 3 * range.width()
-            && range.contains(Math.toRadians(soft.lower()))
-            && range.contains(Math.toRadians(soft.upper()));
-    return inDegrees
-        ? why
-            + String.format(
-                Locale.ROOT,
-                ". Given in degrees? withSoftLimits(%s, %s) is in radians: write"
-                    + " withSoftLimits(Range.degrees(%s, %s))",
-                shown(soft.lower()),
-                shown(soft.upper()),
-                shown(soft.lower()),
-                shown(soft.upper()))
-        : why;
+    return String.format(
+        Locale.ROOT,
+        "%s's soft limits, %s to %s, must be inside its hard stops, %s to %s",
+        joint.label(),
+        joint.shown(soft.lower()),
+        joint.shown(soft.upper()),
+        joint.shown(range.lower()),
+        joint.shown(range.upper()));
   }
 
   /**
@@ -150,20 +153,27 @@ final class Blocks {
     Range range = joint.range().get();
     String stops = joint.shown(range.lower()) + " to " + joint.shown(range.upper());
     List<String> past = new ArrayList<>();
-    if (!range.contains(joint.reference())) {
+    if (!range.contains(joint.restPosition())) {
       past.add(
-          joint.label()
-              + " rests at "
-              + joint.shown(joint.reference())
-              + ", outside its hard stops, "
-              + stops
-              + ": it can't start there");
+          joint.rest().isPresent()
+              ? joint.label()
+                  + " rests at "
+                  + joint.shown(joint.restPosition())
+                  + ", outside its hard stops, "
+                  + stops
+                  + ": it can't start there"
+              : joint.label()
+                  + " has no rest, so it starts at its zero, "
+                  + joint.shown(0)
+                  + ", outside its hard stops, "
+                  + stops
+                  + ": it can't start there; give where it rests, .rest(...)");
     }
     for (Position position : joint.positions()) {
       if (!range.contains(position.value())) {
         past.add(
-            joint.label()
-                + "'s "
+            possessive(joint.label())
+                + " "
                 + position.name()
                 + ", "
                 + joint.shown(position.value())
@@ -221,18 +231,35 @@ final class Blocks {
     if (math.absoluteEncoder(joint) == null) {
       return joint.label()
           + " has no absolute encoder, so where it is at power on is a guess: give its control a"
-          + " homing recipe, Homing.toHardStop, Homing.toSwitch or Homing.assumeAtReference()";
+          + " homing recipe, Homing.toHardStop, Homing.toSwitch or Homing.assumeAtRest()";
     }
-    boolean motorsWired =
-        joint.driven().motors().map(motors -> !motors.controllers().isEmpty()).orElse(false);
+    List<MechanismWiring.Device> controllers =
+        joint.driven().motors().map(Driven.Motors::controllers).orElse(List.of());
     boolean encoderWired =
         joint.driven().absoluteEncoder().map(Driven.AbsoluteEncoder::wired).orElse(false);
-    if (motorsWired && !encoderWired) {
+    if (!controllers.isEmpty() && !encoderWired) {
       return joint.label()
           + " homes by its absolute encoder, and its wiring names no CANcoder, data port or"
-          + " Systemcore port to read it on";
+          + " Systemcore port to read it on: wire it in its block, "
+          + readable(controllers.get(0).controller())
+          + ", or give its control a homing recipe";
     }
     return null;
+  }
+
+  /**
+   * The absolute encoder a joint's leading controller reads, as its block wires it: a SPARK's on
+   * its data port, which reads no CANcoder; a TalonFX's or a TalonFXS's, a CANcoder on its bus.
+   */
+  private static String readable(MechanismWiring.Controller controller) {
+    String dataPort = "'s data port, .absoluteEncoder(DATA_PORT.offset(...))";
+    String cancoder = "'s bus, .absoluteEncoder(CANCODER.can(...).offset(...))";
+    return switch (controller) {
+      case SPARK_MAX -> "on its SPARK MAX" + dataPort;
+      case SPARK_FLEX -> "on its SPARK Flex" + dataPort;
+      case TALON_FX -> "as a CANcoder on its TalonFX" + cancoder;
+      case TALON_FXS -> "as a CANcoder on its TalonFXS" + cancoder;
+    };
   }
 
   /**
@@ -243,21 +270,51 @@ final class Blocks {
     if (!(control.homing().orElse(null) instanceof MechanismControl.Homing.ToSwitch to)) {
       return null;
     }
-    boolean lower = to.end() == MechanismControl.Homing.Stop.LOWER;
-    Sensor.Switch onSwitch =
-        math.limitSwitch(
-            joint, lower ? Sensor.Switch.Limit.End.LOWER : Sensor.Switch.Limit.End.UPPER);
+    boolean lower = to.end() == Sensor.Switch.Limit.End.LOWER;
+    Sensor.Switch onSwitch = math.limitSwitch(joint, to.end());
+    String end = lower ? "LOWER" : "UPPER";
+    String at = joint instanceof Joint.Revolute ? "Degrees.of(...)" : "Inches.of(...)";
     if (onSwitch == null) {
       return joint.label()
           + " homes to its "
           + (lower ? "lower" : "upper")
-          + " limit switch, and its definition has none: add it (Sensor.Switch.limit)";
+          + " limit switch, and its block has none: give it one where it trips, .limitSwitch(End."
+          + end
+          + ", "
+          + at
+          + ", ...)";
     }
     if (((Sensor.Switch.Limit) onSwitch.kind()).position().isEmpty()) {
       return joint.label()
           + " homes to "
           + onSwitch.label()
-          + ", whose position isn't known: measure where it trips, or home another way";
+          + ", whose position isn't known: measure where it trips and give it, .limitSwitch(End."
+          + end
+          + ", "
+          + at
+          + ", ...), or home another way";
+    }
+    return null;
+  }
+
+  /**
+   * Why a sliding joint's absolute encoder can't say where it is, or null when it can, or it has
+   * none: the encoder turns with its drum, whose pitch radius its block's motors give, and one of
+   * its turns must cover the joint's travel, which its hard stops bound.
+   */
+  private static @Nullable String slidesUnread(Joint joint) {
+    if (!(joint instanceof Joint.Prismatic) || joint.driven().absoluteEncoder().isEmpty()) {
+      return null;
+    }
+    if (joint.driven().motors().flatMap(Driven.Motors::pitchRadius).isEmpty()) {
+      return possessive(joint.label())
+          + " absolute encoder turns with its drum, and its block has no motors to say the drum's"
+          + " pitch radius: give them, .motors(motor, gearing, pitchRadius, ...)";
+    }
+    if (joint.range().isEmpty()) {
+      return joint.label()
+          + " has an absolute encoder and no hard stops, so nothing says one of the encoder's turns"
+          + " covers its travel: give its range, range(Range.meters(...))";
     }
     return null;
   }
@@ -266,7 +323,8 @@ final class Blocks {
    * Why a joint's loop can't close on its absolute encoder, as its block says it does, or null when
    * it can, or doesn't: the joint must be held at positions, know where it is from that encoder
    * rather than a homing recipe, and have a range, which the definition checks one of the encoder's
-   * turns holds, rather than turn freely, where the reading wraps within its travel.
+   * turns holds, rather than turn freely, where the reading wraps within its travel. A sliding
+   * joint without one is refused already ({@link #slidesUnread}).
    */
   private static @Nullable String cantCloseLoop(Joint joint) {
     if (!joint.driven().absoluteEncoder().map(Driven.AbsoluteEncoder::closedLoop).orElse(false)) {
@@ -274,14 +332,15 @@ final class Blocks {
     }
     if (!joint.holdsPositions()) {
       return joint.label()
-          + " only runs at outputs, so its loop has no position to close on its absolute encoder";
+          + " only runs at outputs, so its loop has no position to close on its absolute encoder:"
+          + " drop .closesLoop() from its encoder's wiring";
     }
     if (joint.driven().control().flatMap(MechanismControl::homing).isPresent()) {
-      return joint.label()
-          + "'s loop closes on its absolute encoder, which tells it where it is: drop its"
+      return possessive(joint.label())
+          + " loop closes on its absolute encoder, which tells it where it is: drop its"
           + " control's homing recipe";
     }
-    if (joint.range().isEmpty()) {
+    if (joint.range().isEmpty() && joint instanceof Joint.Revolute) {
       return joint.label()
           + " turns freely, and its absolute encoder's reading wraps each turn: its loop can't"
           + " close on it yet, so let the encoder tell its motor where it is instead";
@@ -301,8 +360,8 @@ final class Blocks {
     return onDataPort
             && !controllers.isEmpty()
             && controllers.get(0).controller() == MechanismWiring.Controller.TALON_FX
-        ? joint.label()
-            + "'s wiring names an encoder on its controller's data port, and a TalonFX has none:"
+        ? possessive(joint.label())
+            + " wiring names an encoder on its controller's data port, and a TalonFX has none:"
             + " wire it as a CANcoder"
         : null;
   }
@@ -320,11 +379,12 @@ final class Blocks {
       return null;
     }
     if (!(controllers.get(0).bus() instanceof CanBus.Port)) {
-      return joint.label() + "'s SPARKs are on a CANivore: a SPARK is on Systemcore's own CAN";
+      return possessive(joint.label())
+          + " SPARKs are on a CANivore: a SPARK is on Systemcore's own CAN";
     }
     if (joint.driven().absoluteEncoder().flatMap(Driven.AbsoluteEncoder::cancoder).isPresent()) {
-      return joint.label()
-          + "'s wiring names a CANcoder, which a SPARK doesn't read: plug the encoder into the"
+      return possessive(joint.label())
+          + " wiring names a CANcoder, which a SPARK doesn't read: plug the encoder into the"
           + " SPARK's data port, or give its control a homing recipe";
     }
     return null;
@@ -344,8 +404,8 @@ final class Blocks {
     boolean motorsWired =
         joint.driven().motors().map(motors -> !motors.controllers().isEmpty()).orElse(false);
     return throughController && !motorsWired
-        ? joint.label()
-            + "'s absolute encoder is wired, and its motors aren't: it's read through their"
+        ? possessive(joint.label())
+            + " absolute encoder is wired, and its motors aren't: it's read through their"
             + " controller, so wire them too; a joint your own code drives reads one on a"
             + " Systemcore port instead, MechanismWiring.PortEncoder"
         : null;
@@ -366,8 +426,8 @@ final class Blocks {
     CanBus bus = controllers.get(0).bus();
     return cancoder.get().bus().equals(bus)
         ? null
-        : joint.label()
-            + "'s CANcoder is on "
+        : possessive(joint.label())
+            + " CANcoder is on "
             + cancoder.get().bus().shown()
             + ", and its motors on "
             + bus.shown()

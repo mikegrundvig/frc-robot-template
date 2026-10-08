@@ -58,9 +58,8 @@ class DevicesTest {
   void theViewHoldsWhatTheCardSaysAndWhatCanBeDone() {
     devices.add(
         Device.named("vision-front", "Coprocessor", this::card)
-            .link("Open PhotonVision", "http://10.0.0.11:5800")
             .download("settings", "Download settings backup", NO_FILE)
-            .log(query -> new Devices.LogPage(List.of(), "", "")));
+            .upload("survey", "Upload venue", body -> "Saved"));
 
     devices.periodic(true);
 
@@ -70,14 +69,13 @@ class DevicesTest {
     assertThat(shown)
         .containsEntry("kind", "Coprocessor")
         .containsEntry("state", "Present")
-        .containsEntry("level", "ok")
-        .containsEntry("log", true);
+        .containsEntry("level", "ok");
     assertThat(shown.get("lines"))
         .isEqualTo(List.of(Map.of("label", "Version", "value", "v1 (1)", "level", "ok")));
-    assertThat(shown.get("links"))
-        .isEqualTo(List.of(Map.of("label", "Open PhotonVision", "url", "http://10.0.0.11:5800")));
     assertThat(shown.get("downloads"))
         .isEqualTo(List.of(Map.of("id", "settings", "label", "Download settings backup")));
+    assertThat(shown.get("uploads"))
+        .isEqualTo(List.of(Map.of("id", "survey", "label", "Upload venue")));
   }
 
   @Test
@@ -137,20 +135,7 @@ class DevicesTest {
   }
 
   @Test
-  void aCardLinksOnlyToAPage() {
-    Device device = Device.named("vision-front", "Coprocessor", this::card);
-
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> device.link("Run", "javascript:alert(1)"))
-        .withMessageContaining("http or https");
-    assertThatIllegalArgumentException().isThrownBy(() -> device.link("Odd", "not a link"));
-    assertThatIllegalArgumentException().isThrownBy(() -> device.link("Odd", "http://a b"));
-    device.link("Open", "https://example.org/");
-    assertThat(device.links()).hasSize(1);
-  }
-
-  @Test
-  void filesAndLogQueriesAreChecked() {
+  void filesAreChecked() {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Devices.File.of("../passwd", "text/plain", new byte[0]));
     assertThatIllegalArgumentException()
@@ -162,22 +147,6 @@ class DevicesTest {
             () ->
                 new Devices.File(
                     "a.txt", "text/plain", -2, new java.io.ByteArrayInputStream(new byte[0])));
-    assertThatIllegalArgumentException().isThrownBy(() -> Devices.LogQuery.latest(8, ""));
-    assertThatIllegalArgumentException().isThrownBy(() -> Devices.LogQuery.latest(-1, ""));
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> Devices.LogQuery.latest(3, "photon vision"));
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.LogQuery(Devices.From.AFTER, "a b", 3, ""));
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.LogQuery(Devices.From.BEFORE, "", 3, ""))
-        .withMessageContaining("needs one");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> new Devices.LogQuery(Devices.From.START, "s=1", 3, ""))
-        .withMessageContaining("takes none");
-    assertThat(
-            new Devices.LogQuery(Devices.From.AFTER, "s=1;i=2", 3, "photonvision.service")
-                .priority())
-        .isEqualTo(3);
   }
 
   /** Once on the page, the server's threads read a device: it can't change after. */
@@ -186,12 +155,12 @@ class DevicesTest {
     Device device = Device.named("vision-front", "Coprocessor", this::card);
     devices.add(device);
 
-    assertThatThrownBy(() -> device.link("Open", "http://10.0.0.11:5800"))
+    assertThatThrownBy(() -> device.download("settings", "Settings", NO_FILE))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("describe a device whole");
-    assertThatThrownBy(() -> device.download("settings", "Settings", NO_FILE))
+    assertThatThrownBy(() -> device.upload("survey", "Upload", body -> "Saved"))
         .isInstanceOf(IllegalStateException.class);
-    assertThatThrownBy(() -> device.log(query -> new Devices.LogPage(List.of(), "", "")))
+    assertThatThrownBy(() -> device.choose("venue", value -> "Chose"))
         .isInstanceOf(IllegalStateException.class);
   }
 }

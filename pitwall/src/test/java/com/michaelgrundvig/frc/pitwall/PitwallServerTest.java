@@ -5,6 +5,7 @@ import static com.michaelgrundvig.frc.pitwall.experiment.ByHand.STEP;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.experiment.ByHand;
+import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.push.Broadcaster;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -18,11 +19,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
@@ -77,13 +80,22 @@ class PitwallServerTest {
   private final Page page = new Page(status, actions, tuning, tunables, byHand.experiments());
   private final Broadcaster broadcaster =
       new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, stream -> {});
-  private final PitwallServer server = new PitwallServer(page, broadcaster, 0);
+
+  /**
+   * Waits for the loop as long as {@link Await} would: an answer comes as soon as the loop applies
+   * a change, so only a stuck loop is ever waited on that long, and never a busy machine's 202.
+   */
+  private final PitwallServer server =
+      new PitwallServer(page, broadcaster, 0, Await.DEADLINE, PitwallServer.IDLE);
 
   private @Nullable String whyLocked() {
     return tuning.whyLocked();
   }
 
   private final ScheduledExecutorService loop = Executors.newSingleThreadScheduledExecutor();
+
+  /** How many times the loop has run. */
+  private final AtomicInteger loops = new AtomicInteger();
 
   @BeforeAll
   void start() throws Exception {
@@ -106,10 +118,12 @@ class PitwallServerTest {
           broadcaster.periodic(page::sections, byHand.experiments().run());
           byHand.step();
           tunables.update();
+          loops.incrementAndGet();
         },
         0,
         5,
         TimeUnit.MILLISECONDS);
+    Await.until("the loop's first run", () -> loops.get() > 0);
   }
 
   @AfterAll
@@ -123,6 +137,11 @@ class PitwallServerTest {
   void backToCommitted() throws Exception {
     fieldConnected.set(false);
     gate = new Actions.Gate(true, true, false);
+    // Off the field and free to run, as the loop reports it, before anything is put back: a change
+    // the loop applied with the field still connected would be refused.
+    Await.until("the field system disconnected", () -> !tuning.isFieldConnected());
+    Await.until("actions free to run", () -> actions.whyLocked() == null);
+    Await.until("experiments free to run", () -> byHand.experiments().whyLocked() == null);
     send("POST", "/api/actions", "application/json", "{\"cancel\": \"Home arm\"}");
     send("POST", "/api/experiments", "application/json", "{\"cancel\": \"" + STEP + "\"}");
     send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
@@ -233,10 +252,10 @@ class PitwallServerTest {
         .isEqualTo(404);
   }
 
+  /** A read waits for the next loop, which reads every item then: none is older than the ask. */
   @Test
-  void showsTheStatusAsOfTheLastLoop() throws Exception {
+  void showsTheStatusAsOfTheNextLoop() throws Exception {
     homed.set(true);
-    Thread.sleep(50); // a few loops
 
     assertThat(get("/api/status").body())
         .isEqualTo(
@@ -267,6 +286,7 @@ class PitwallServerTest {
   @Test
   void anActionOutsideUtilityModeIsLockedAndSaysWhy() throws Exception {
     gate = new Actions.Gate(true, false, false);
+    Await.until("actions locked", () -> actions.whyLocked() != null);
 
     var locked = send("POST", "/api/actions", "application/json", "{\"start\": \"Home arm\"}");
 
@@ -311,6 +331,7 @@ class PitwallServerTest {
     var notAValue =
         send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": \"fast\"}");
     fieldConnected.set(true);
+    Await.until("the field system connected", tuning::isFieldConnected);
     var locked = send("PATCH", "/api/wpilib-tunables", MERGE_PATCH, "{\"Shooter/kP\": 0.6}");
 
     assertThat(unknown.statusCode()).isEqualTo(422);
@@ -452,6 +473,7 @@ class PitwallServerTest {
   @Test
   void theFieldLocksTuning() throws Exception {
     fieldConnected.set(true);
+    Await.until("the field system connected", tuning::isFieldConnected);
 
     var change = send("PATCH", "/api/values", MERGE_PATCH, "{\"/Machine/drive/gains/kP\": 18.5}");
     var on = send("PATCH", "/api/tuning", MERGE_PATCH, "{\"enabled\": true}");
@@ -592,14 +614,40 @@ class PitwallServerTest {
 
   /**
    * A web page on a laptop connected to the robot could point a name it controls at the robot's
-   * address (DNS rebinding) and use the page as its own: the name it sends gives it away.
+   * address (DNS rebinding) and use the page as its own: the name it sends gives it away. Only the
+   * robot's own names pass, never another {@code .local} one, which anyone on the network can
+   * announce.
    */
   @Test
   void answersOnlyAtTheRobotsOwnAddress() throws Exception {
+    String machine = InetAddress.getLocalHost().getHostName().split("\\.")[0] + ".local";
+
     assertThat(statusLine("localhost:" + server.port())).endsWith(" 200 OK");
     assertThat(statusLine("robot.local:5820")).endsWith(" 200 OK");
     assertThat(statusLine("10.26.11.2:5820")).endsWith(" 200 OK");
+    assertThat(statusLine("[::1]:5820")).endsWith(" 200 OK");
+    assertThat(statusLine(machine + ":5820")).as("this computer's own name").endsWith(" 200 OK");
+    assertThat(statusLine("evil.local:5820")).contains(" 403 ");
+    assertThat(statusLine("localhost.example.com")).contains(" 403 ");
     assertThat(statusLine("rebinding.example.com:5820")).contains(" 403 ");
+    assertThat(statusLine("[evil]:5820")).as("not an address").contains(" 403 ");
+    assertThat(statusLine(null)).as("no Host").contains(" 403 ");
+  }
+
+  /**
+   * A browser says which site a request comes from: another site's page can't read the API, or
+   * close a page's stream by naming it, even with a request a browser sends without asking.
+   */
+  @Test
+  void theApiAnswersOnlyThePagesOwnSite() throws Exception {
+    assertThat(fetchedFrom("same-origin", "/api/tuning").statusCode()).isEqualTo(200);
+    assertThat(fetchedFrom("none", "/api/tuning").statusCode()).as("typed in").isEqualTo(200);
+    assertThat(fetchedFrom("cross-site", "/api/tuning").statusCode()).isEqualTo(403);
+    assertThat(fetchedFrom("same-site", "/api/tuning").statusCode()).isEqualTo(403);
+    assertThat(fetchedFrom("cross-site", "/api/events?replaces=x").statusCode()).isEqualTo(403);
+    assertThat(fetchedFrom("cross-site", "/").statusCode())
+        .as("the page itself, which runs nothing until it's open")
+        .isEqualTo(200);
   }
 
   @Test
@@ -681,7 +729,8 @@ class PitwallServerTest {
   @Test
   void anExperimentStartsFromThePageAndItsRunIsServedWithItsTrace() throws Exception {
     var started = sendAs("9", "{\"start\": \"" + STEP + "\"}");
-    Thread.sleep(50); // a few loops
+    Run run = Objects.requireNonNull(byHand.experiments().run());
+    Await.until("a setpoint traced", () -> run.trace().series("Setpoint").count() > 0);
 
     assertThat(started.statusCode()).isEqualTo(200);
     assertThat(started.body())
@@ -766,8 +815,10 @@ class PitwallServerTest {
     assertThat(page.sections()).doesNotContainKeys("simulator", "components", "scenarios");
   }
 
-  /** The status line of a GET naming this host, sent by hand: Java's client won't set Host. */
-  private String statusLine(String host) throws Exception {
+  /**
+   * The status line of a GET naming this host, or none, sent by hand: Java's client won't set Host.
+   */
+  private String statusLine(@Nullable String host) throws Exception {
     try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), server.port());
         var reader =
             new BufferedReader(
@@ -775,10 +826,22 @@ class PitwallServerTest {
       socket
           .getOutputStream()
           .write(
-              ("GET /api/tuning HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n")
+              ("GET /api/tuning HTTP/1.1\r\n"
+                      + (host == null ? "" : "Host: " + host + "\r\n")
+                      + "Connection: close\r\n\r\n")
                   .getBytes(StandardCharsets.US_ASCII));
       return reader.readLine();
     }
+  }
+
+  /**
+   * A GET as a browser sends it from a page of this site, or another. Never an event stream that
+   * opens: it would never end.
+   */
+  private HttpResponse<String> fetchedFrom(String site, String path) throws Exception {
+    return client.send(
+        HttpRequest.newBuilder(uri(path)).header("Sec-Fetch-Site", site).GET().build(),
+        HttpResponse.BodyHandlers.ofString());
   }
 
   /** Posts to the experiments as the page does, naming its stream. */

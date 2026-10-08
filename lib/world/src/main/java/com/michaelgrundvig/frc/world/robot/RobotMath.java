@@ -1,13 +1,18 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.KilogramSquareMeters;
 import static org.wpilib.units.Units.Kilograms;
 import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.world.config.Finding;
+import com.michaelgrundvig.frc.world.config.Rules;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Shape;
 import com.michaelgrundvig.frc.world.physical.Vector3;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -29,9 +34,9 @@ import org.wpilib.math.system.DCMotor;
  * does at each joint). Each is a pure function of the definition and the joints' positions, as
  * {@code DrivetrainGeometry.Modules.idealDriveKv()} is for the drive.
  *
- * <p>Positions are by joint, in its own units, radians or meters; a joint not given sits at its
- * reference, and a coupled joint follows its leader whatever it's given. Gravity is along the
- * robot's -z: the robot level.
+ * <p>Positions are by joint, in its own units, radians or meters; a joint not given sits where it
+ * rests, and a coupled joint follows its leader whatever it's given. Gravity is along the robot's
+ * -z: the robot level.
  *
  * <p>The ideal gains are never the gains: they seed a mechanism's feedforward and Phoenix's slots
  * until SysId measures the real ones, and they're what SysId's results are compared with.
@@ -63,7 +68,7 @@ public final class RobotMath {
    *
    * @param kV volts per unit per second: WPILib's and Phoenix's kV, the motors' nominal voltage
    *     over their free speed through the gearing
-   * @param kA volts per unit per second squared, with every link it moves at its reference and the
+   * @param kA volts per unit per second squared, with every link it moves where it rests and the
    *     motors' rotors through their gearing
    * @param kG volts to hold it against gravity, from its links' mass, so 0 for links without it:
    *     for a revolute joint, at its worst, which {@code ArmFeedforward} scales by the cosine of
@@ -187,6 +192,23 @@ public final class RobotMath {
     return leader[i] < 0 ? null : joints.get(leader[i]);
   }
 
+  /**
+   * Whether a joint is turned by motors alone: one drive of motors, turning a shaft, and no other,
+   * and it follows no joint. What its homing, a loop on its encoder, and the program's mechanism
+   * for it are worked out for.
+   *
+   * @throws IllegalArgumentException for a joint that isn't the robot's
+   */
+  public boolean motorsAlone(Joint joint) {
+    if (leaderOf(joint) != null) {
+      return false;
+    }
+    List<Drive> drives = drivesOf(joint);
+    return drives.size() == 1
+        && drives.get(0).actuator() instanceof Actuator.Motors
+        && !(drives.get(0).transmission() instanceof Transmission.Between);
+  }
+
   /** The drives. */
   public List<Drive> drives() {
     return drives;
@@ -229,24 +251,24 @@ public final class RobotMath {
   }
 
   /**
-   * Every joint that moves on its own at its reference: stowed, as the robot is weighed. The joints
+   * Every joint that moves on its own where it rests: stowed, as the robot is weighed. The joints
    * that follow others aren't in it, since their positions are their leaders' to give, so every
    * method that takes positions takes it as it is; {@link #positions} with nothing given has them
    * all, followers too.
    */
-  public Map<Joint, Double> references() {
-    Map<Joint, Double> references = new LinkedHashMap<>();
+  public Map<Joint, Double> rests() {
+    Map<Joint, Double> rests = new LinkedHashMap<>();
     for (int i = 0; i < joints.size(); i++) {
       if (leader[i] < 0) {
-        references.put(joints.get(i), joints.get(i).reference());
+        rests.put(joints.get(i), joints.get(i).restPosition());
       }
     }
-    return references;
+    return rests;
   }
 
   /**
-   * Every joint's position: the ones given, the rest at their references, and each coupled joint
-   * where its leader puts it.
+   * Every joint's position: the ones given, the rest where they rest, and each coupled joint where
+   * its leader puts it.
    *
    * @throws IllegalArgumentException for a joint that isn't the robot's, or one that follows
    *     another, whose position is its leader's to give
@@ -293,8 +315,8 @@ public final class RobotMath {
   }
 
   /**
-   * What the robot's mass is without its links: the body as weighed, less every link at its joint's
-   * reference. The simulator's chassis.
+   * What the robot's mass is without its links: the body as weighed, less every link where its
+   * joint rests. The simulator's chassis.
    *
    * @throws IllegalArgumentException if nothing's left, or what's left turns more easily than any
    *     body could
@@ -325,9 +347,9 @@ public final class RobotMath {
   /**
    * How far a revolute joint's zero is from horizontal: the angle to add to its position to give
    * the angle {@code ArmFeedforward} takes, and Phoenix's {@code GravityArmPositionOffset}, with
-   * the joint's parent level and every other joint at its reference. Zero for a joint gravity
-   * doesn't turn, such as a turret, and for one whose links have no mass: its weight is then taken
-   * to pull hardest at its zero, unless its control says where ({@code
+   * the joint's parent level and every other joint where it rests. Zero for a joint gravity doesn't
+   * turn, such as a turret, and for one whose links have no mass: its weight is then taken to pull
+   * hardest at its zero, unless its control says where ({@code
    * MechanismControl.Gains.gravityAngle}).
    *
    * @throws IllegalArgumentException for a prismatic joint, which doesn't turn against gravity
@@ -348,8 +370,8 @@ public final class RobotMath {
 
   /**
    * How well one cosine, the ideal kG and the gravity offset, fits gravity at a revolute joint
-   * across its range (a turn about its reference, for one that turns freely), its parent level and
-   * every other joint at its reference.
+   * across its range (a turn about where it rests, for one that turns freely), its parent level and
+   * every other joint where it rests.
    *
    * @throws IllegalArgumentException for a prismatic joint, or one that follows another
    */
@@ -357,8 +379,8 @@ public final class RobotMath {
     double offset = gravityOffset(joint);
     int j = independent(joint);
     double peak = Math.hypot(levelGravity(j, 0), levelGravity(j, Math.PI / 2));
-    double from = joint.range().map(Range::lower).orElse(joint.reference() - Math.PI);
-    double to = joint.range().map(Range::upper).orElse(joint.reference() + Math.PI);
+    double from = joint.range().map(Range::lower).orElse(joint.restPosition() - Math.PI);
+    double to = joint.range().map(Range::upper).orElse(joint.restPosition() + Math.PI);
     double widest = 0;
     double worstAt = from;
     for (int i = 0; i <= FIT_STEPS; i++) {
@@ -375,9 +397,9 @@ public final class RobotMath {
 
   /**
    * Whether gravity can move a joint, whatever it carries: a revolute joint about an axis that
-   * isn't vertical, or a prismatic one along an axis that isn't level, with the joints at their
-   * references. Not a turret or a spindexer, which turn about the vertical, nor a slide that runs
-   * level. It needs no mass: it's what a tuned kG may hold against.
+   * isn't vertical, or a prismatic one along an axis that isn't level, with the joints where they
+   * rest. Not a turret or a spindexer, which turn about the vertical, nor a slide that runs level.
+   * It needs no mass: it's what a tuned kG may hold against.
    */
   public boolean gravityActsOn(Joint joint) {
     Vector3 axis = joint.axis().unit();
@@ -446,7 +468,7 @@ public final class RobotMath {
     int j = independent(joint);
     return joint instanceof Joint.Revolute
         ? Math.hypot(levelGravity(j, 0), levelGravity(j, Math.PI / 2))
-        : levelGravity(j, joint.reference());
+        : levelGravity(j, joint.restPosition());
   }
 
   /**
@@ -577,7 +599,7 @@ public final class RobotMath {
    * Phoenix's {@code AbsoluteSensorDiscontinuityPoint} for an absolute encoder, in turns: where its
    * reading wraps, put as far from the joint's range as it can be, with the range centered in the
    * encoder's turn. The encoder's offset, measured per install, makes it read 0 with the joint at
-   * 0. A joint that turns freely is centered on its reference.
+   * 0. A joint that turns freely is centered on where it rests.
    *
    * @throws IllegalArgumentException if it isn't absolute, or the joint's range is more of its turn
    *     than one turn can hold
@@ -595,7 +617,7 @@ public final class RobotMath {
       low = Math.min(a, b);
       high = Math.max(a, b);
     } else {
-      low = encoderTurns(encoder, joint.reference());
+      low = encoderTurns(encoder, joint.restPosition());
       high = low;
     }
     double point = wrapAt(low, high);
@@ -685,7 +707,7 @@ public final class RobotMath {
    * discontinuity point puts it ({@link #discontinuityPoint}): its turn centered on the joint's
    * range, as far as Phoenix's point, from 0 to 1, can go. For a pair, centered on the range,
    * wherever that is: where their difference wraps is the decoder's own to choose. A joint that
-   * turns freely is centered on its reference.
+   * turns freely is centered on where it rests.
    *
    * @throws IllegalArgumentException as {@link #absoluteSpan} does
    */
@@ -703,7 +725,7 @@ public final class RobotMath {
         low = Math.min(a, b);
         high = Math.max(a, b);
       } else {
-        low = encoderTurns(encoder, joint.reference());
+        low = encoderTurns(encoder, joint.restPosition());
         high = low;
       }
       double point = wrapAt(low, high);
@@ -713,7 +735,10 @@ public final class RobotMath {
       return Range.in(joint, Math.min(from, to), Math.max(from, to));
     }
     double middle =
-        joint.range().map(range -> (range.lower() + range.upper()) / 2).orElse(joint.reference());
+        joint
+            .range()
+            .map(range -> (range.lower() + range.upper()) / 2)
+            .orElse(joint.restPosition());
     double span = decoding.span();
     return Range.in(joint, middle - span / 2, middle + span / 2);
   }
@@ -813,7 +838,8 @@ public final class RobotMath {
 
   /**
    * The highest any link reaches at a set of positions, above the floor; zero without links. The
-   * starting height limit is checked against it at the references, and against the body's height.
+   * starting height limit is checked against it with the joints where they rest, and against the
+   * body's height.
    */
   public double top(Map<Joint, Double> positions) {
     double top = 0;
@@ -941,6 +967,13 @@ public final class RobotMath {
       problems.add(String.valueOf(e.getMessage()));
       return;
     }
+    if (absolute.size() == 1 && joint.ownSensors().contains(absolute.get(0))) {
+      String own = ownEncoderProblem(joint, absolute.get(0));
+      if (own != null) {
+        problems.add(own);
+      }
+      return;
+    }
     if (!(span > range.width())) {
       problems.add(
           String.format(
@@ -979,6 +1012,104 @@ public final class RobotMath {
               joint.shown(
                   Math.min(range.lower() - window.lower(), window.upper() - range.upper()))));
     }
+  }
+
+  /**
+   * What's wrong with the absolute encoder in a joint's block, the joint's only one, as {@link
+   * #encoderProblems} judges any, said in its block's terms with what to do, or null when nothing
+   * is: its travel must be inside one of its turns, a fortieth of a turn clear of its wrap at each
+   * end, and within a turn of where it reads 0, the joint's zero, where Phoenix can put its wrap.
+   * The ratio that fits is its block's ratio, scaled until it does: its turns for each of the
+   * joint's, or of a sliding joint's drum.
+   */
+  private static @Nullable String ownEncoderProblem(Joint joint, Sensor.Encoder encoder) {
+    Range range = joint.range().orElseThrow();
+    // In turns of its signal, which is the encoder's own turn but for a potentiometer's range.
+    double a = encoderTurns(encoder, range.lower());
+    double b = encoderTurns(encoder, range.upper());
+    double low = Math.min(a, b);
+    double high = Math.max(a, b);
+    double turns = high - low;
+    double point = wrapAt(low, high);
+    if (low >= point - 1 + WRAP_MARGIN && high <= point - WRAP_MARGIN) {
+      return null;
+    }
+    Driven.AbsoluteEncoder block = joint.driven().absoluteEncoder().orElseThrow();
+    double perSignal = block.turnsPerSignal();
+    double farthest = Math.max(Math.abs(low), Math.abs(high));
+    // Geared slower, its readings shrink toward 0 by as much: by this, its turn holds the travel
+    // with the margin at each end, and it reads within a turn of 0, less the margin, all along it.
+    double scale = Math.min((1 - 2 * WRAP_MARGIN) / turns, (1 - WRAP_MARGIN) / farthest);
+    String travel =
+        String.format(
+            Locale.ROOT,
+            "its travel, %s to %s",
+            joint.shown(range.lower()),
+            joint.shown(range.upper()));
+    String why;
+    String or;
+    if (turns >= 1 - 2 * WRAP_MARGIN) {
+      // Where the joint's zero is far from its travel, reading within a turn of 0 from it bounds
+      // the gearing more than the travel does: said, or the bound can't be worked out from this.
+      boolean zeroBounds = (1 - WRAP_MARGIN) / farthest < (1 - 2 * WRAP_MARGIN) / turns;
+      why =
+          String.format(
+              Locale.ROOT,
+              "%s's absolute encoder turns %s times over %s: %s must cover the travel, with a"
+                  + " fortieth of it to spare at each end,%s to tell where %s is",
+              joint.label(),
+              Rules.shown(turns * perSignal),
+              travel,
+              perSignal == 1
+                  ? "one of its turns"
+                  : "its signal's range, " + Rules.shown(perSignal) + " of its turns,",
+              zeroBounds
+                  ? String.format(
+                      Locale.ROOT,
+                      " and it must read within %s turns of 0 all along it, counting from 0 at %s's"
+                          + " zero,",
+                      Rules.shown((1 - WRAP_MARGIN) * perSignal),
+                      joint.label())
+                  : "",
+              joint.label());
+      or =
+          (zeroBounds
+                  ? "move " + possessive(joint.label()) + " zero, its origin, to a hard stop, or "
+                  : "")
+              + "leave it out and give "
+              + possessive(joint.label())
+              + " control a homing recipe";
+    } else {
+      why =
+          String.format(
+              Locale.ROOT,
+              "%s's absolute encoder reads %s to %s turns over %s, counting from 0 at %s's zero,"
+                  + " and must read within %s turns of 0 all along it, where its wrap can be put",
+              joint.label(),
+              Rules.shown(low * perSignal),
+              Rules.shown(high * perSignal),
+              travel,
+              joint.label(),
+              Rules.shown((1 - WRAP_MARGIN) * perSignal));
+      or = "move " + possessive(joint.label()) + " zero, its origin, to a hard stop";
+    }
+    return String.format(
+        Locale.ROOT,
+        "%s. Gear it to at most %s of its turns for each %s, or %s",
+        why,
+        floored(block.ratio() * scale),
+        joint instanceof Joint.Revolute
+            ? "of " + possessive(joint.label()) + " turns"
+            : "turn of " + possessive(joint.label()) + " drum",
+        or);
+  }
+
+  /** A positive number rounded down to three significant figures: a bound it's safe to meet. */
+  private static String floored(double value) {
+    return new BigDecimal(value)
+        .round(new MathContext(3, RoundingMode.FLOOR))
+        .stripTrailingZeros()
+        .toPlainString();
   }
 
   /** A camera on a joint sits on its link, and inside the robot when stowed. */
@@ -1021,7 +1152,7 @@ public final class RobotMath {
     unique("sensors", sensors.stream().map(Sensor::label).toList(), problems);
     Set<Joint> known = new HashSet<>(joints);
     for (Joint joint : joints) {
-      known(joint.parent(), "joint " + joint.label() + "'s parent", known, problems);
+      known(joint.parent(), "joint " + possessive(joint.label()) + " parent", known, problems);
     }
     for (Coupling each : couplings) {
       known(each.leader(), "a coupling's leader", known, problems);
@@ -1029,7 +1160,7 @@ public final class RobotMath {
     }
     for (Drive drive : drives) {
       for (Joint joint : drive.transmission().joints()) {
-        known(joint, "drive " + drive.label() + "'s joint", known, problems);
+        known(joint, "drive " + possessive(drive.label()) + " joint", known, problems);
       }
     }
     for (Sensor sensor : sensors) {
@@ -1043,14 +1174,15 @@ public final class RobotMath {
             case Sensor.Rangefinder rangefinder -> List.of(rangefinder.part());
           };
       for (Part part : parts) {
-        known(part, "sensor " + sensor.label() + "'s joint", known, problems);
+        known(part, "sensor " + possessive(sensor.label()) + " joint", known, problems);
       }
     }
     for (CameraConfig camera : cameras) {
       camera
           .joint()
           .ifPresent(
-              joint -> known(joint, "camera " + camera.name() + "'s joint", known, problems));
+              joint ->
+                  known(joint, "camera " + possessive(camera.name()) + " joint", known, problems));
     }
     if (!problems.isEmpty()) {
       return problems;
@@ -1077,14 +1209,14 @@ public final class RobotMath {
       }
     }
     for (Coupling each : couplings) {
-      double expected = each.followerAt(each.leader().reference());
-      if (Math.abs(expected - each.follower().reference()) > 1e-6) {
+      double expected = each.followerAt(each.leader().restPosition());
+      if (Math.abs(expected - each.follower().restPosition()) > 1e-6) {
         problems.add(
             String.format(
                 Locale.ROOT,
                 "%s's rest (%.4g) isn't where its coupling puts it with %s at its own (%.4g)",
                 each.follower().label(),
-                each.follower().reference(),
+                each.follower().restPosition(),
                 each.leader().label(),
                 expected));
       }
@@ -1131,18 +1263,18 @@ public final class RobotMath {
     return j;
   }
 
-  /** Every joint's position, by index: given, at its reference, or following its leader. */
+  /** Every joint's position, by index: given, where it rests, or following its leader. */
   private double[] resolve(Map<Joint, Double> given) {
     int n = joints.size();
     double[] q = new double[n];
     for (int i = 0; i < n; i++) {
-      q[i] = joints.get(i).reference();
+      q[i] = joints.get(i).restPosition();
     }
     for (Map.Entry<Joint, Double> entry : given.entrySet()) {
       int i = independent(entry.getKey());
       if (!Double.isFinite(entry.getValue())) {
         throw new IllegalArgumentException(
-            entry.getKey().label() + "'s position must be a number: " + entry.getValue());
+            possessive(entry.getKey().label()) + " position must be a number: " + entry.getValue());
       }
       q[i] = entry.getValue();
     }
@@ -1280,7 +1412,7 @@ public final class RobotMath {
   }
 
   /**
-   * Gravity's at a joint with its parent level: the other joints at their references, up along its
+   * Gravity's at a joint with its parent level: the other joints where they rest, up along its
    * parent's z.
    */
   private double levelGravity(int j, double position) {

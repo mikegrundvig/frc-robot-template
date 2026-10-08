@@ -94,8 +94,8 @@ final class TruthRig {
 
   /** Every drive motor asked for this voltage, open loop. */
   void driveVolts(double volts) {
-    for (ModuleIO module : modules) {
-      module.setDriveVoltage(volts);
+    for (int i = 0; i < modules.length; i++) {
+      simulation.moduleSim(i).setDriveVoltage(volts);
     }
   }
 

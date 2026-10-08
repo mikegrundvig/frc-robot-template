@@ -1,5 +1,6 @@
 package frc.robot.subsystems.vision;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.localization.FrameVerdict;
@@ -155,7 +156,7 @@ final class Camera implements AutoCloseable {
         new Alert(
             "Vision",
             name + "OutOfStep",
-            "Camera " + name + "'s images arrive out of step",
+            "Camera " + possessive(name) + " images arrive out of step",
             Alert.Level.HIGH);
     TunableRegistry.publish(key + "/enabled", enabled);
   }
@@ -259,8 +260,8 @@ final class Camera implements AutoCloseable {
       // Said once as the alert goes up, not changed with every image while it's up.
       outOfStep.setText(
           "Camera "
-              + name()
-              + "'s images are out of step, and left out: one "
+              + possessive(name())
+              + " images are out of step, and left out: one "
               + why
               + ". Are its clock and the robot's in step (time sync)? If it's just slower,"
               + " measure its latency");

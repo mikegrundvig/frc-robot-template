@@ -1,5 +1,7 @@
 package frc.robot.hardware;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -129,8 +131,10 @@ public final class RobotHardware implements Hardware {
   }
 
   /**
-   * A sensor's device, from the wiring it carries: nothing for one with none. A switch on a motor
-   * controller's limit input is read by its joint's controller, with the joint.
+   * A sensor's device, from the wiring it carries: nothing for one with none.
+   *
+   * @throws IllegalArgumentException for a switch on a joint's motor controller's limit input,
+   *     which its joint reads from its controller, and nothing asks for
    */
   @Override
   public SensorIO sensor(Sensor.Placed sensor) {
@@ -160,7 +164,13 @@ public final class RobotHardware implements Hardware {
                         case SensorWiring.Candi candi ->
                             new SensorIOCandi(candi, wiring.polarity());
                         case SensorWiring.ControllerLimit limit ->
-                            SensorIO.onPin(limit.joint(), limit.direction());
+                            throw new IllegalArgumentException(
+                                sensor.label()
+                                    + " is on "
+                                    + possessive(limit.joint())
+                                    + " controller's limit input: "
+                                    + limit.joint()
+                                    + " reads it from its controller");
                       })
               .orElse(null);
       case Sensor.Rangefinder rangefinder ->
@@ -185,11 +195,6 @@ public final class RobotHardware implements Hardware {
       cameras.add(new CameraIOPhotonVision(camera.name()));
     }
     return List.copyOf(cameras);
-  }
-
-  @Override
-  public List<String> unwiredSensors() {
-    return List.copyOf(unwiredSensors);
   }
 
   @Override

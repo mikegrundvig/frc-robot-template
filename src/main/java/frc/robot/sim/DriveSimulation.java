@@ -173,11 +173,6 @@ public final class DriveSimulation {
     backupGyro.setConnected(!disconnected);
   }
 
-  /** Freezes the backup IMU: it keeps reporting, the same yaw every time. */
-  public void freezeBackupGyro(boolean frozen) {
-    backupGyro.setFrozen(frozen);
-  }
-
   /**
    * Wears one wheel's tread from now on: its true radius over the configured one, 0.97 for tread
    * worn 3%. The robot moves that much less than its encoder counts.
@@ -364,10 +359,6 @@ public final class DriveSimulation {
 
   double yawRateRadiansPerSecond() {
     return physics.chassis().yawRateRadiansPerSecond();
-  }
-
-  double elapsedSeconds() {
-    return physics.chassis().seconds();
   }
 
   double pitchRadians() {

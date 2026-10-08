@@ -3,6 +3,7 @@ package com.michaelgrundvig.frc.world.robot;
 import static com.michaelgrundvig.frc.world.config.Rules.between;
 import static com.michaelgrundvig.frc.world.config.Rules.nonNegative;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Amps;
 
@@ -140,8 +141,8 @@ public record Pdh(CanBus bus, int id) {
         problems.add(
             Finding.refused(
                 device.name(),
-                device.name()
-                    + "'s channel, "
+                possessive(device.name())
+                    + " channel, "
                     + channel
                     + ", isn't one of the PDH's: they're 0 to "
                     + (CHANNELS - 1)));
@@ -152,8 +153,8 @@ public record Pdh(CanBus bus, int id) {
         problems.add(
             Finding.refused(
                 device.name(),
-                device.name()
-                    + "'s "
+                possessive(device.name())
+                    + " "
                     + shown(feed.breaker())
                     + " breaker is over channel "
                     + channel

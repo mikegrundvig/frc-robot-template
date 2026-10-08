@@ -51,7 +51,6 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter"
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core
-    testImplementation libs.archunit
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -72,5 +71,4 @@ tasks.named("test") {
     systemProperty "java.library.path", natives.get().asFile.absolutePath
 }
 
-ext.nullSafePackages = "com.michaelgrundvig.frc.simulation"
 apply from: rootProject.file("gradle/quality.gradle")

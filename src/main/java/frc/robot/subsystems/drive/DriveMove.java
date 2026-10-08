@@ -7,6 +7,7 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
+import frc.robot.behavior.Refusals;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,12 +53,15 @@ import org.wpilib.units.measure.Time;
  *       where it got to; or {@link Outcome#REFUSED} if no path goes through its keyframes.
  * </ul>
  *
- * <p>{@link #within} sets another deadline, and {@link #at} waits for a named keyframe. Canceled,
- * it's {@link Outcome#CANCELED}. It stops the drivetrain as it ends; the drive's default command
- * takes over from the next loop.
+ * <p>{@link #within} sets another deadline, and {@link #passed} waits for a named keyframe.
+ * Canceled, it's {@link Outcome#CANCELED}. It stops the drivetrain as it ends; the drive's default
+ * command takes over from the next loop.
  */
 public final class DriveMove implements Command {
-  /** How near its pose a move must come to arrive, how still, and for how long. */
+  /**
+   * How near its pose a move must come to arrive, and how still, for the dwell every move arrives
+   * by ({@link Outcome#DWELL_NANOS}).
+   */
   static final double PLACED_METERS = 0.02;
 
   static final double TURNED_RADIANS = Math.toRadians(2);
@@ -65,16 +69,6 @@ public final class DriveMove implements Command {
   static final double STILL_METERS_PER_SECOND = 0.05;
 
   static final double STILL_RADIANS_PER_SECOND = 0.2;
-
-  static final long ARRIVED_NANOS = 40_000_000L;
-
-  /** {@code runUntil}'s default deadline, in seconds. */
-  static final double RUN_UNTIL_SECONDS = 3;
-
-  /** A move's default deadline: this many times its profile's time, and this much more. */
-  static final double DEADLINE_FACTOR = 2;
-
-  static final double DEADLINE_SLACK_SECONDS = 0.5;
 
   /**
    * How much of the gap between the profile's speed and turning rate and the robot's measured ones
@@ -152,7 +146,15 @@ public final class DriveMove implements Command {
   static DriveMove runUntil(Drive drive, ChassisVelocities velocity, BooleanSupplier until) {
     String name = "drive until" + (until instanceof Gate gate ? " " + gate.name() : "");
     return new DriveMove(
-        drive, Kind.RUN_UNTIL, name, velocity, until, null, false, List.of(), RUN_UNTIL_SECONDS);
+        drive,
+        Kind.RUN_UNTIL,
+        name,
+        velocity,
+        until,
+        null,
+        false,
+        List.of(),
+        Outcome.RUN_UNTIL_SECONDS);
   }
 
   static DriveMove turnTo(Drive drive, Rotation2d heading) {
@@ -184,34 +186,43 @@ public final class DriveMove implements Command {
   }
 
   /**
-   * @throws IllegalArgumentException with no keyframes, or two of one name
+   * A path through keyframes. One with none, or two of one name, can't be, and is refused as a
+   * joint's move to a place not its own is ({@link Refusals}): thrown as the robot starts, and once
+   * it runs, it ends {@link Outcome#REFUSED} as it starts, saying why.
+   *
+   * @throws IllegalArgumentException with no keyframes, or two of one name, as the robot starts
    */
   static DriveMove follow(Drive drive, List<Keyframe> keyframes) {
-    if (keyframes.isEmpty()) {
-      throw new IllegalArgumentException("a path needs a keyframe");
-    }
     List<Keyframe> path = List.copyOf(keyframes);
     List<@Nullable String> names = new ArrayList<>();
     List<String> shown = new ArrayList<>();
+    String why = path.isEmpty() ? "a path needs a keyframe: give one, Keyframe.at(pose)" : null;
     for (Keyframe keyframe : path) {
-      if (keyframe.name() != null && names.contains(keyframe.name())) {
-        throw new IllegalArgumentException("two keyframes are named " + keyframe.name());
+      if (why == null && keyframe.name() != null && names.contains(keyframe.name())) {
+        why = "two keyframes are named " + keyframe.name() + ": name each once";
       }
       names.add(keyframe.name());
       shown.add(keyframe.toString());
     }
-    Pose2d end = path.get(path.size() - 1).pose();
-    shown.set(
-        shown.size() - 1,
-        shown.get(shown.size() - 1)
-            + String.format(Locale.ROOT, " %.1f°", end.getRotation().getDegrees()));
+    String refused = Refusals.asBuilt(drive.getRegisteredScheduler(), why);
+    if (!path.isEmpty()) {
+      Pose2d end = path.get(path.size() - 1).pose();
+      shown.set(
+          shown.size() - 1,
+          shown.get(shown.size() - 1)
+              + String.format(Locale.ROOT, " %.1f°", end.getRotation().getDegrees()));
+    }
     return new DriveMove(
         drive,
         Kind.FOLLOW,
-        "drive → " + String.join(" → ", shown),
+        "drive → " + (path.isEmpty() ? "a path" : String.join(" → ", shown)),
         new ChassisVelocities(),
         null,
-        (start, moving, limits) -> Trajectories.through(start, moving, path, limits),
+        refused != null
+            ? (start, moving, limits) -> {
+              throw new IllegalArgumentException(refused);
+            }
+            : (start, moving, limits) -> Trajectories.through(start, moving, path, limits),
         false,
         Collections.unmodifiableList(names),
         Double.NaN);
@@ -225,15 +236,32 @@ public final class DriveMove implements Command {
 
   /**
    * A gate that opens as this move's path passes a named keyframe, and stays open until the move
-   * next starts: {@code co.waitUntil(leg.at("pickup"))}. It's the path's time that passes it, which
-   * the robot follows within centimeters.
+   * next starts: {@code co.waitUntil(leg.passed("pickup"))}. It's the path's time that passes it,
+   * which the robot follows within centimeters. A name none of its keyframes has is refused as a
+   * joint's gate on a place not its own is ({@link Refusals#gate}): thrown as the robot starts, and
+   * once it runs, a gate that holds false saying why.
    *
-   * @throws IllegalArgumentException for a name none of its keyframes has
+   * @throws IllegalArgumentException for a name none of its keyframes has, as the robot starts
    */
-  public Gate at(String keyframe) {
+  public Gate passed(String keyframe) {
     int index = keyframes.indexOf(keyframe);
     if (index < 0) {
-      throw new IllegalArgumentException(name + " has no keyframe " + keyframe);
+      List<String> named = new ArrayList<>();
+      for (String each : keyframes) {
+        if (each != null) {
+          named.add(each);
+        }
+      }
+      return Refusals.gate(
+          drive.getRegisteredScheduler(),
+          "passed " + keyframe,
+          name
+              + " has no keyframe "
+              + keyframe
+              + ": "
+              + (named.isEmpty()
+                  ? "name one, Keyframe.at(...).named(\"" + keyframe + "\")"
+                  : "its keyframes are " + String.join(", ", named)));
     }
     return gates.computeIfAbsent(
         keyframe,
@@ -334,9 +362,7 @@ public final class DriveMove implements Command {
     double[] passing = plan.passing();
     HolonomicSample last = path.end();
     double deadline =
-        Double.isNaN(deadlineSeconds)
-            ? DEADLINE_FACTOR * path.duration + DEADLINE_SLACK_SECONDS
-            : deadlineSeconds;
+        Double.isNaN(deadlineSeconds) ? Outcome.deadline(path.duration) : deadlineSeconds;
     long arrivedSince = -1;
     while (true) {
       Pose2d pose = drive.getPose();
@@ -361,12 +387,12 @@ public final class DriveMove implements Command {
         arrivedSince = -1;
       } else if (arrivedSince < 0) {
         arrivedSince = now;
-      } else if (now - arrivedSince >= ARRIVED_NANOS) {
+      } else if (now - arrivedSince >= Outcome.DWELL_NANOS) {
         end(Outcome.ARRIVED, null);
         return;
       }
       if (t >= deadline) {
-        end(Outcome.TIMED_OUT, where(pose));
+        end(Outcome.TIMED_OUT, ", " + where(pose), null);
         return;
       }
       HolonomicSample due = path.sampleAt(t + RobotLoop.PERIOD_SECONDS);
@@ -422,18 +448,19 @@ public final class DriveMove implements Command {
   }
 
   private void end(Outcome how, @Nullable String why) {
+    end(how, "", why);
+  }
+
+  /**
+   * Ends its run: records how, with what it says of it ({@link Outcome#reason}), stops the
+   * drivetrain, and logs the reason.
+   *
+   * @param details where it got to, for a path timed out; empty otherwise
+   */
+  private void end(Outcome how, String details, @Nullable String why) {
     running = false;
     outcome = how;
-    StringBuilder text = new StringBuilder(name).append(": ").append(how);
-    if (how != Outcome.REFUSED) {
-      text.append(
-          String.format(
-              Locale.ROOT, how == Outcome.ARRIVED ? " in %.2f s" : " after %.2f s", seconds()));
-    }
-    if (why != null) {
-      text.append(how == Outcome.TIMED_OUT && kind == Kind.FOLLOW ? ", " : ": ").append(why);
-    }
-    reason = text.toString();
+    reason = how.reason(name, seconds(), details, why);
     drive.runVelocity(new ChassisVelocities());
     Logger.recordOutput("Drive/Outcome", reason);
   }

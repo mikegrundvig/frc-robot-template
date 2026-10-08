@@ -13,8 +13,9 @@
  * </ul>
  *
  * <p>The field and the robot don't know about each other, and the kit and the physical values know
- * about neither; none of it reads a clock or holds state, so the robot, the simulator's parallel
- * runs, and a replay all read the same model ({@code ArchitectureTest}).
+ * about neither (the model's {@code ArchitectureTest}); none of it reads a clock or holds state, so
+ * the robot, the simulator's parallel runs, and a replay all read the same model (the robot
+ * program's).
  */
 @NullMarked
 package com.michaelgrundvig.frc.world;

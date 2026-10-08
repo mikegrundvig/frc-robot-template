@@ -66,7 +66,7 @@ public final class SimulatedRobot implements AutoCloseable {
   /** One robot loop: the clock moves a loop's time, the robot runs its loop, tunables update. */
   public void loop() {
     SimHooks.stepTiming(RobotLoop.PERIOD_SECONDS);
-    Robot.loop(pitwall, container, scheduler, loopHealth);
+    Robot.loop(pitwall, container, scheduler, loopHealth, false); // a bug ends a study at once
     TunableRegistry.update();
   }
 

@@ -68,8 +68,9 @@ class PdhIOSimTest {
     RobotDefinition robot = fed();
     DriveSimulation drivetrain =
         new DriveSimulation(robot.body(), robot.drivetrain(), SensorErrors.NONE);
-    PdhIO pdh = new PdhIOSim(robot, () -> null, drivetrain);
-    for (var module : drivetrain.modules()) {
+    PdhIO pdh = new PdhIOSim(robot, new JointSimulation(robot), drivetrain);
+    for (int i = 0; i < 4; i++) {
+      ModuleIOSim module = drivetrain.moduleSim(i);
       module.configure(Robots.SIM.drivetrain().gains(), Robots.SIM.drivetrain().limits());
       module.setDriveVoltage(6);
       module.setSteerAngle(Rotation2d.CCW_90DEG);

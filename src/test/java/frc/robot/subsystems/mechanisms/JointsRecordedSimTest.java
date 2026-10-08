@@ -25,11 +25,13 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.gearing;
 import static frc.robot.subsystems.mechanisms.JointFixtures.unmotored;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
+import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.Rotations;
 
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import com.michaelgrundvig.frc.world.robot.Motor;
+import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.GoldenFile;
 import frc.robot.RobotSim;
@@ -97,10 +99,13 @@ class JointsRecordedSimTest {
     Joint.Revolute pivot =
         unmotored(PIVOT)
             .motors(Motor.NEO, gearing(25), SPARK_MAX.can(41).clockwise(), SPARK_MAX.can(42))
-            .absoluteEncoder(8192, closed ? port.closesLoop() : port)
+            .absoluteEncoder(closed ? port.closesLoop() : port)
             .retuned(
                 control ->
-                    MechanismControlBuilder.builder(control.withSoftLimits(0.02, 2.3).withKs(0.2))
+                    MechanismControlBuilder.builder(
+                            control
+                                .withSoftLimits(Range.of(Radians.of(0.02), Radians.of(2.3)))
+                                .withKs(0.2))
                         .homing(Optional.empty())
                         .build());
     Joint.Prismatic elevator =

@@ -1,9 +1,9 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.behavior.RecordingGamepad;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.Joints;
-import frc.robot.subsystems.mechanisms.Sensors;
 import org.wpilib.command3.Scheduler;
 
 /**
@@ -13,18 +13,7 @@ import org.wpilib.command3.Scheduler;
  * reaches; write each command as a method, and bind it in the constructor, as on any v3 gamepad.
  * docs/mechanisms.md, "Where behavior goes", has a robot's:
  *
- * {@snippet :
- * private final JointMechanism pivot, roller;
- *
- * Controls(Scheduler scheduler, Joints joints, Drive drive, Sensors sensors,
- *     RecordingGamepad driver, RecordingGamepad operator) {
- *   pivot = joints.of(PIVOT);
- *   roller = joints.of(ROLLER);
- *
- *   operator.rightTrigger().whileTrue(intake());
- *   operator.faceRight().onTrue(pivot.goTo(PIVOT_IN));
- * }
- * }
+ * {@snippet class=frc.robot.examples.Controls region=constructor}
  *
  * <p>The robot records each binding as it's made, with its button and its command's name, and says
  * at startup when two commands are bound to one button the same way. The driver's sticks drive the
@@ -37,18 +26,20 @@ public final class Controls {
    *
    * @param scheduler the command scheduler, for gates of your own ({@code Gate.within(scheduler,
    *     ...)})
-   * @param joints every driven joint's mechanism, by its joint: {@code joints.of(PIVOT)}
-   * @param drive the drivetrain, with its moves (docs/driving.md)
-   * @param sensors the robot's switches and rangefinders, as gates: {@code sensors.gate("coral in
+   * @param robot the robot this runs on, its definition: a subsystem of your own finds its joint
+   *     there, {@code robot.own(HOOD)}, a practice robot's places its own
+   * @param joints every driven joint's mechanism, by its joint, {@code joints.of(PIVOT)}, and a
+   *     gate on anything the model says, a sensor's reading included: {@code joints.gate("coral in
    *     claw", CLAW_BEAM.tripped())}
+   * @param drive the drivetrain, with its moves (docs/driving.md)
    * @param driver the driver's gamepad, port 0
    * @param operator the operator's gamepad, port 1
    */
   Controls(
       Scheduler scheduler,
+      RobotDefinition robot,
       Joints joints,
       Drive drive,
-      Sensors sensors,
       RecordingGamepad driver,
       RecordingGamepad operator) {
     // The template's robot has no mechanisms yet: build and bind yours here.

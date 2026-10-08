@@ -9,6 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Meters;
+import static org.wpilib.units.Units.Percent;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Interlock;
@@ -109,7 +110,7 @@ class SensorInterlocksSimTest {
    */
   @Test
   void aJointOvershootingIntoAClosedBandHoldsWhereItWouldStop() {
-    Move out = pivot.goTo(PIVOT_OUT).at(0.3).within(Seconds.of(5));
+    Move out = pivot.goTo(PIVOT_OUT).atSpeed(Percent.of(30)).within(Seconds.of(5));
     sim.scheduler.schedule(out);
     sim.runUntil(() -> Math.toDegrees(sim.simulation.position(PIVOT)) > 58, 3);
     sim.sensors.see(REEF, Meters.of(0.2));

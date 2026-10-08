@@ -19,6 +19,7 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.hardware.TalonFXS;
 import com.ctre.phoenix6.hardware.traits.CommonTalon;
 import com.ctre.phoenix6.signals.ForwardLimitValue;
+import com.ctre.phoenix6.signals.MagnetHealthValue;
 import com.ctre.phoenix6.signals.ReverseLimitValue;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Drive;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
@@ -58,7 +60,17 @@ import org.wpilib.units.measure.Angle;
  * controller as {@code PositionVoltage} with the profile's velocity, which its own kV, kS and
  * gravity turn into volts; speeds as {@code VelocityVoltage}. A joint read by its rotor is told
  * where it is from its CANcoder's first good reading, when its wiring reads one that way ({@code
- * Feedback.ROTOR}); with no CANcoder, it takes its reference as where it is at power on.
+ * Feedback.ROTOR}), and reads the CANcoder each loop beside its rotor, so a slip between them
+ * shows; with no CANcoder, it takes where the joint rests as where it is at power on. It isn't
+ * seeded from a CANcoder that says its magnet is too close or too far, and says so ({@link
+ * JointIOInputs#magnetBad}). The CANcoder sends both its reading and its magnet's health anyway, at
+ * its own rates: reading them adds nothing on the bus.
+ *
+ * <p>Each device's restart is read from the frame Phoenix says it sends as it starts ({@code
+ * ParentDevice.getResetOccurredChecker}), once a loop, with no traffic of its own. A leader that
+ * restarts counts its rotor from 0: one told where it is by its CANcoder is told again, at once;
+ * the joint does the rest ({@link JointMechanism}). Phoenix keeps a TalonFX's settings through a
+ * restart, a retune's included, and sends the followers their request again on its own.
  */
 public final class JointIOTalon implements JointIO {
   /** At startup, configuring a device is tried this many times, waiting this long each time. */
@@ -105,11 +117,36 @@ public final class JointIOTalon implements JointIO {
   private final @Nullable StatusSignal<Angle> seedFrom;
 
   private final Sensor.@Nullable Encoder seedModel;
+
+  /** Its CANcoder's magnet's health, whichever way it's read: none without one. */
+  private final @Nullable StatusSignal<MagnetHealthValue> magnet;
+
   private final RobotMath math;
   private boolean seeded;
 
   /** Where it was seeded this loop, in Phoenix's units: NaN otherwise. */
   private double seededAt = Double.NaN;
+
+  /**
+   * Whether each device restarted since it was last asked: the leader, each follower in order, and
+   * its CANcoder, if it has one.
+   */
+  private final BooleanSupplier leaderRestarts;
+
+  private final BooleanSupplier[] followerRestarts;
+  private final @Nullable BooleanSupplier encoderRestarts;
+
+  /**
+   * Each device's fault field, the leader, each follower in order, then its CANcoder: read once in
+   * {@link JointIO#HEALTH_LOOPS} loops. A TalonFX's sent four times a second, the least Phoenix
+   * sends, and a follower answering while it comes.
+   */
+  private final List<StatusSignal<Integer>> faultFields = new ArrayList<>();
+
+  private final Debouncer[] followersAnswer;
+
+  /** The loops it's been read in. */
+  private int loops;
 
   /**
    * Configures every device of the joint, waiting for each, at startup.
@@ -162,22 +199,49 @@ public final class JointIOTalon implements JointIO {
       followers.add(follower);
     }
     StatusSignal<Angle> cancoderReading = null;
+    StatusSignal<MagnetHealthValue> cancoderMagnet = null;
+    BooleanSupplier cancoderRestarts = null;
+    CANcoder wired = null;
     if (settings.cancoder().isPresent()) {
       CANcoderConfiguration config = settings.cancoder().get();
       int id = wiredCancoder.orElseThrow().id();
       CANcoder cancoder = new CANcoder(id, bus);
+      wired = cancoder;
       if (!applied(() -> cancoder.getConfigurator().apply(config, STARTUP_TIMEOUT_SECONDS))) {
         failed.add("CANcoder " + id);
       }
       cancoderReading = cancoder.getAbsolutePosition();
+      cancoderMagnet = cancoder.getMagnetHealth();
+      cancoderRestarts = restarts(cancoder);
     }
+    faultFields.add(leader.device().getFaultField(false));
+    for (Talon follower : followers) {
+      faultFields.add(follower.device().getFaultField(false));
+    }
+    // A TalonFX's sent four times a second: a frame a device of its own on the bus, which Phoenix
+    // would otherwise stop as it optimizes it (below). A CANcoder sends its own anyway.
+    BaseStatusSignal.setUpdateFrequencyForAll(4, faultFields.toArray(BaseStatusSignal[]::new));
+    if (wired != null) {
+      faultFields.add(wired.getFaultField(false));
+    }
+    followersAnswer = new Debouncer[followers.size()];
+    for (int i = 0; i < followersAnswer.length; i++) {
+      followersAnswer[i] = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
+    }
+    encoderRestarts = cancoderRestarts;
+    magnet = cancoderMagnet;
+    leaderRestarts = restarts(leader.parent());
+    followerRestarts =
+        followers.stream()
+            .map(follower -> restarts(follower.parent()))
+            .toArray(BooleanSupplier[]::new);
     boolean readsRotor =
         wiredCancoder.isEmpty() || wiredCancoder.get().feedback() == MechanismWiring.Feedback.ROTOR;
     if (readsRotor) {
       // Where it rests, until a CANcoder read by the robot says where it is (seed).
       leader
           .device()
-          .setPosition(rotations.toRotations(joint.reference()), STARTUP_TIMEOUT_SECONDS);
+          .setPosition(rotations.toRotations(joint.restPosition()), STARTUP_TIMEOUT_SECONDS);
     }
     this.math = math;
     seedFrom = readsRotor ? cancoderReading : null;
@@ -212,6 +276,11 @@ public final class JointIOTalon implements JointIO {
     homingRequest = new VoltageOut(0).withEnableFOC(foc).withIgnoreSoftwareLimits(true);
   }
 
+  /** The leading motor controller: for the tests, which read what it was last told. */
+  ParentDevice leader() {
+    return leader.parent();
+  }
+
   @Override
   public void retune(MechanismControl control) {
     PhoenixMechanism.Settings settings = configure.apply(control);
@@ -243,6 +312,16 @@ public final class JointIOTalon implements JointIO {
   }
 
   /**
+   * A device's restarts from now on: what it reported before, as it and the robot started, isn't
+   * one.
+   */
+  private static BooleanSupplier restarts(ParentDevice device) {
+    BooleanSupplier restarted = device.getResetOccurredChecker();
+    boolean startedWithTheRobot = restarted.getAsBoolean(); // read, and so not read again
+    return restarted;
+  }
+
+  /**
    * Tries something a device must confirm, a few times: at startup, where waiting is fine. Whether
    * it took.
    */
@@ -256,24 +335,57 @@ public final class JointIOTalon implements JointIO {
   }
 
   /**
-   * Tells the rotor where the joint is, from its CANcoder's first good reading: once, at startup.
-   * The CANcoder's own settings give its offset, direction and wrap.
+   * Tells the rotor where the joint is, from its CANcoder's first good reading: once, at startup,
+   * and again after it restarts. Only once the CANcoder has said its magnet isn't bad: it waits for
+   * that, a frame it sends four times a second.
+   *
+   * @param at where the CANcoder says the joint is, in its units: NaN without a good reading
+   * @param magnetGood whether the CANcoder has said its magnet isn't too close or too far
    */
-  private void seed() {
-    StatusSignal<Angle> reading = seedFrom;
-    Sensor.Encoder model = seedModel;
-    if (seeded || reading == null || model == null || !reading.refresh().getStatus().isOK()) {
+  private void seed(double at, boolean magnetGood) {
+    if (seeded || Double.isNaN(at) || !magnetGood) {
       return;
     }
-    double at = rotations.toRotations(math.fromAbsolute(model, reading.getValueAsDouble()));
-    leader.device().setPosition(at, 0);
-    seededAt = at;
+    double rotationsAt = rotations.toRotations(at);
+    leader.device().setPosition(rotationsAt, 0);
+    seededAt = rotationsAt;
     seeded = true;
+  }
+
+  /**
+   * Where its CANcoder says the joint is this loop, in its units, where the robot reads it beside
+   * the rotor: NaN for a joint whose TalonFX reads it instead, or without a good reading. The
+   * CANcoder's own settings give its offset, direction and wrap.
+   */
+  private double fromCancoder() {
+    StatusSignal<Angle> reading = seedFrom;
+    Sensor.Encoder model = seedModel;
+    if (reading == null || model == null || !reading.refresh().getStatus().isOK()) {
+      return Double.NaN;
+    }
+    return math.fromAbsolute(model, reading.getValueAsDouble());
+  }
+
+  /**
+   * What its CANcoder says of its magnet as of this loop: null without one, or before it has said:
+   * red, too close or too far; orange, adequate; green; or that it can't tell.
+   */
+  private @Nullable MagnetHealthValue magnet() {
+    StatusSignal<MagnetHealthValue> health = magnet;
+    return health != null && health.refresh().getStatus().isOK() ? health.getValue() : null;
   }
 
   @Override
   public void updateInputs(JointIOInputs inputs) {
-    seed();
+    boolean restarted = leaderRestarts.getAsBoolean();
+    if (restarted) {
+      // Its rotor counts from 0 again: a CANcoder it was seeded from seeds it again, now.
+      seeded = false;
+    }
+    MagnetHealthValue health = magnet();
+    boolean magnetBad = health == MagnetHealthValue.Magnet_Red;
+    double fromCancoder = fromCancoder();
+    seed(fromCancoder, health != null && !magnetBad);
     inputs.connected = connected.calculate(BaseStatusSignal.refreshAll(signals).isOK());
     // Told where it is this loop: its rotor's reading catches up on the next.
     inputs.position =
@@ -287,7 +399,44 @@ public final class JointIOTalon implements JointIO {
         tripped(pins.forward(), forwardLimit.getValue() == ForwardLimitValue.ClosedToGround);
     inputs.reverseLimit =
         tripped(pins.reverse(), reverseLimit.getValue() == ReverseLimitValue.ClosedToGround);
+    inputs.absolutePosition = fromCancoder;
+    inputs.magnetBad = magnetBad;
     inputs.unconfigured = unconfigured;
+    inputs.restarted = restarted;
+    if (inputs.followersRestarted.length != followerRestarts.length) {
+      inputs.followersRestarted = new boolean[followerRestarts.length];
+    }
+    for (int i = 0; i < followerRestarts.length; i++) {
+      inputs.followersRestarted[i] = followerRestarts[i].getAsBoolean();
+    }
+    BooleanSupplier encoder = encoderRestarts;
+    inputs.encoderRestarted = encoder != null && encoder.getAsBoolean();
+    if (loops++ % HEALTH_LOOPS == 0) {
+      health(inputs);
+    }
+  }
+
+  /**
+   * Its devices' health: each one's faults, and each follower's answering, from its fault field,
+   * the last reading standing where none came.
+   */
+  private void health(JointIOInputs inputs) {
+    if (inputs.faults.length != faultFields.size()) {
+      inputs.faults = new int[faultFields.size()];
+    }
+    if (inputs.followersConnected.length != followersAnswer.length) {
+      inputs.followersConnected = new boolean[followersAnswer.length];
+    }
+    for (int i = 0; i < faultFields.size(); i++) {
+      StatusSignal<Integer> field = faultFields.get(i);
+      boolean answered = field.refresh().getStatus().isOK();
+      if (answered) {
+        inputs.faults[i] = field.getValue();
+      }
+      if (i >= 1 && i <= followersAnswer.length) {
+        inputs.followersConnected[i - 1] = followersAnswer[i - 1].calculate(answered);
+      }
+    }
   }
 
   @Override

@@ -2,6 +2,7 @@ package com.michaelgrundvig.frc.world.field;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.within;
 
 import java.util.ArrayList;
@@ -158,13 +159,28 @@ class VenueTest {
         .hasMessageContaining("this code reads format 1");
   }
 
+  /**
+   * What avaje-jsonb refuses, as a problem with the file: a key given twice, and anything that
+   * isn't JSON. It reads past text after the value, and a comma before an object's closing brace.
+   */
   @Test
-  void jsonThatIsntStrictlyJsonIsRefusedSayingWhere() {
+  void jsonThatIsntJsonIsRefusedSayingWhere() {
     assertThatThrownBy(() -> VenueFile.read("{\"name\": \"a\", \"name\": \"b\"}"))
-        .hasMessageContaining("appears twice")
-        .hasMessageContaining("line 1");
-    assertThatThrownBy(() -> VenueFile.read("{} {}")).hasMessageContaining("more after");
-    assertThatThrownBy(() -> VenueFile.read("{\"a\": 1,}")).hasMessageContaining("expected a key");
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("not JSON: Map key 'name' has multiple values")
+        .hasMessageContaining("position: 25");
+    assertThatThrownBy(() -> VenueFile.read("{\"name\": tru}"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("not JSON");
+    assertThat(VenueFile.bare("{\"tags\": [1, 2,]}")).as("a list's trailing comma").isFalse();
+    assertThatThrownBy(() -> VenueFile.read("[".repeat(5000) + "]".repeat(5000)))
+        .as("nested past the reader's stack, refused before it's read")
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("not JSON a venue file can be: nested deeper than 64 levels");
+    Throwable inAString = catchThrowable(() -> VenueFile.read("{\"name\": \"[[[[\"}"));
+    assertThat(inAString == null ? "" : String.valueOf(inAString.getMessage()))
+        .as("brackets in a string don't count")
+        .doesNotContain("nested");
   }
 
   @Test

@@ -81,12 +81,16 @@ DriveMove leg = drive.follow(
   toward the next keyframe's heading, as fast as its turning limits allow, the nearer way round. If
   it hasn't finished turning to the last heading when it reaches the last place, it turns there.
 - **Refused:** a keyframe within 5 cm of where the robot starts, or of the keyframe before it. No
-  smooth path goes through those.
+  smooth path goes through those. A path with no keyframes, or two of one name, is refused as it's
+  made, as a joint's move to a place it hasn't is ([mechanisms](mechanisms.md#outcomes)): it
+  throws as the robot starts, and made once it runs, it ends `REFUSED` as it starts. So is
+  `leg.passed(...)` given a name none of its keyframes has: made once the robot runs, it's a gate
+  that holds false, saying why.
 
 ### Do something at a keyframe
 
-A named keyframe is something code can wait for. `leg.at("pickup")` is a
-[gate](mechanisms.md#4-gates-wait-for-things-and-know-why-not): it opens when the path passes the
+A named keyframe is something code can wait for. `leg.passed("pickup")` is a
+[gate](mechanisms.md#gates-wait-for-things-and-know-why-not): it opens when the path passes the
 keyframe, and stays open until the move starts again. `src/test/java/frc/robot/examples/PickUp.java`
 has it whole:
 
@@ -95,7 +99,7 @@ Command pickUp() {
   return Command.requiring(drive, pivot).executing(co -> {
     DriveMove leg = drive.follow(...);
     co.fork(leg);                       // drive the path...
-    co.waitUntil(leg.at("pickup"));     // ...and as it passes pickup,
+    co.waitUntil(leg.passed("pickup"));     // ...and as it passes pickup,
     co.await(pivot.goTo(PIVOT_OUT));    // swing the intake out
     co.await(leg);                      // then wait for the path's end
   }).named("Pick up");

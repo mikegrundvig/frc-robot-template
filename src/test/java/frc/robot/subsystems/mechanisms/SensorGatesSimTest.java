@@ -34,7 +34,7 @@ class SensorGatesSimTest {
 
   /** At the pivot's bottom, 2°: it rests on it, at 1.5°. */
   private static final Sensor.Switch PIVOT_DOWN =
-      Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER, Math.toRadians(2));
+      JointFixtures.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER, Math.toRadians(2));
 
   private static final Sensor.Rangefinder HOPPER =
       Sensor.Rangefinder.builder()
@@ -53,12 +53,12 @@ class SensorGatesSimTest {
   private final Sensors sensors = sim.joints.sensors();
   private final JointMechanism pivot = sim.joints.of(PIVOT);
   private final JointMechanism roller = sim.joints.of(ROLLER);
-  private final Gate coralIn = sensors.gate("coral in claw", CLAW_BEAM.tripped());
+  private final Gate coralIn = sim.joints.gate("coral in claw", CLAW_BEAM.tripped());
 
   /** A beam's gate opens the loop it trips, and its other side the loop it clears. */
   @Test
   void aBeamsGateOpensTheLoopItTrips() {
-    Gate clear = sensors.gate(CLAW_BEAM.clear());
+    Gate clear = sim.joints.gate(CLAW_BEAM.clear());
     sim.loop();
     assertThat(coralIn.getAsBoolean()).isFalse();
     assertThat(coralIn.blocking()).as("read, and clear: nothing to blame").isEmpty();
@@ -96,7 +96,7 @@ class SensorGatesSimTest {
    */
   @Test
   void aLostSensorHoldsNeitherWayAndWhatWaitedOnItSaysSo() {
-    Gate clear = sensors.gate(CLAW_BEAM.clear());
+    Gate clear = sim.joints.gate(CLAW_BEAM.clear());
     sim.sensors.silence(CLAW_BEAM, true);
     Move intake = roller.runUntil(ROLLER_INTAKING, coralIn);
     sim.scheduler.schedule(intake);
@@ -119,7 +119,7 @@ class SensorGatesSimTest {
    */
   @Test
   void aLimitSwitchTripsWhereItsJointReallyIs() {
-    Gate down = sensors.gate(PIVOT_DOWN.tripped());
+    Gate down = sim.joints.gate(PIVOT_DOWN.tripped());
     sim.loop();
     assertThat(down.getAsBoolean()).isTrue();
 
@@ -135,8 +135,8 @@ class SensorGatesSimTest {
   /** A rangefinder that sees nothing reads farther than anything; something near reads nearer. */
   @Test
   void aRangefinderReadsNearerOrFarther() {
-    Gate full = sensors.gate("hopper full", HOPPER.nearerThan(Inches.of(6)));
-    Gate empty = sensors.gate(HOPPER.fartherThan(Meters.of(0.5)));
+    Gate full = sim.joints.gate("hopper full", HOPPER.nearerThan(Inches.of(6)));
+    Gate empty = sim.joints.gate(HOPPER.fartherThan(Meters.of(0.5)));
     sim.loop();
     assertThat(full.getAsBoolean()).isFalse();
     assertThat(empty.getAsBoolean()).isTrue();
@@ -179,11 +179,22 @@ class SensorGatesSimTest {
     assertThat(waited[0]).isTrue();
   }
 
-  /** A gate on a sensor the robot doesn't have is refused as it's made. */
+  /**
+   * A gate on a sensor the robot doesn't have is refused as it's made: as the robot starts, it
+   * throws; once it runs, it holds false, saying why.
+   */
   @Test
   void aGateOnAStrangersSensorIsRefused() {
+    Sensor.Switch stray = Sensor.Switch.beam("stray", PIVOT);
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> sensors.gate(Sensor.Switch.beam("stray", PIVOT).tripped()))
+        .isThrownBy(() -> sim.joints.gate(stray.tripped()))
         .withMessage("stray isn't one of the robot's sensors");
+    sim.loop();
+
+    Gate gate = sim.joints.gate("stray in", stray.tripped());
+    sim.loop();
+
+    assertThat(gate.getAsBoolean()).isFalse();
+    assertThat(gate.why()).isEqualTo("stray in is false: stray isn't one of the robot's sensors");
   }
 }

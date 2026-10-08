@@ -42,10 +42,10 @@ catches a kind of bug that robot code otherwise accumulates quietly until it bit
 | Check | What it catches |
 |---|---|
 | **NullAway** with [JSpecify](https://jspecify.dev) annotations | A null reaching code that doesn't expect it: the classic mid-match crash. Nothing may be null unless it is declared `@Nullable`, and the compiler proves every use is checked. |
-| **Error Prone** (error level) | Code that compiles but is certainly wrong: exceptions created and never thrown, bad equality, misused APIs. |
+| **Error Prone** (error level) | Code that compiles but is certainly wrong: exceptions created and never thrown, bad equality, misused APIs, and a public static array anyone can change. |
 | **WPILib's compiler plugin** | FRC-specific mistakes, such as a Commands v3 loop that never yields and freezes the robot. |
 | **Compiler warnings as errors** (a curated set) | Unchecked casts, raw types, switch fall-through, and other near-certain bugs. |
-| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | Structural rot: components that reach into robot code, hardware, or the clock (so a replay would decide differently); vendor libraries outside the IO layer; subsystems reaching into each other; static mutable state that makes behavior depend on what ran before; and configuration written by position, where two values can swap unnoticed. |
+| **Architecture tests** ([ArchUnit](https://www.archunit.org)) | What Gradle's boundaries between projects can't see: components that reach a device or robot code; components and libraries that read the clock, an unseeded draw, another thread, or shared state (so a replay would decide differently); vendor libraries outside the IO layer; subsystems reaching into each other; the alliance read before the Driver Station says it; static mutable state that makes behavior depend on what ran before; and configuration written by position, where two values can swap unnoticed. |
 | **Tests** (JUnit 6, [AssertJ](https://assertj.github.io/doc/)) | Behavior regressions, including simulation tests that exercise physics. |
 | **Coverage floor** (JaCoCo) | Code with no tests at all. The build fails below 50% line or branch coverage overall, or below 50% of the lines in any one file, so a file with no tests fails even while the rest carries the total (`coverage-floor.properties`). Enough to catch untested code, low enough not to slow heavy development. |
 | **Formatting** (google-java-format via Spotless) | Diff noise and review friction. Your local build formats automatically; CI only checks. |
@@ -67,9 +67,6 @@ Also built in:
     `pitwall.actions().add("Home arm", arm::home)`. One that mustn't run while the robot can move,
     such as zeroing a mechanism by hand, runs only while it's disabled instead, and only until
     the field system first connects (`Actions.When.DISABLED`).
-  - **Notices**: what the robot has to tell whoever is at the page right now, such as "Safe to
-    switch off", shown in the state bar on every view and atop Pit:
-    `pitwall.notices().add("Battery", battery::notice)`.
   - **Experiments**: tuning a mechanism by test motion. A mechanism describes itself as a *rig*:
     its gains (values of its `LiveConfig`), how to command it, how far it may go, and what to
     record (`Drive.steeringRig`). An experiment runs a test motion on it from the page, such as
@@ -79,12 +76,12 @@ Also built in:
     steady-state error, and peak voltage and current. The page lays the runs side by side, the
     best of each score marked, with Restore to stage a run's gains again and the builder calls
     that commit them. A gain changes only the way any value does, through the checks below.
-  - **Devices**: a card in Pit for each device the robot program asks after (a vision
-    coprocessor, say), saying whether it's there and how it is, and ending in what can be done
-    about it: its own page, a file to download from it, or its log to read. The robot program asks
-    the device, on Pitwall's server threads, two requests at once at most and no downloads on the
-    field; the browser never reaches a device itself:
-    `pitwall.devices().add(Devices.Device.named("vision-front", "Coprocessor", card))`.
+  - **Devices**: a card in Pit for each device the robot program asks after (the venue it plays
+    on, say), saying whether it's there and how it is, and ending in what can be done about it: a
+    file to download from it or send to it, or a choice to make. The robot program asks the
+    device, on Pitwall's server threads, two downloads at once at most and nothing on the field;
+    the browser never reaches a device itself:
+    `pitwall.devices().add(Devices.Device.named("venue", "Field", card))`.
   - **The simulator's controls**, in the page's Sim view (in the simulator only; a robot has
     none), in place of WPILib's simulator GUI: the Driver Station (enable, the mode, the alliance
     station, the field system, the match time), driving from the keyboard or a gamepad, pausing
@@ -121,10 +118,10 @@ Also built in:
       `LiveConfig.of("drivetrain", committed).number("gains.steerKp", Limits.between(0, 100))`.
       Each value carries its tuning limits, the range that's safe to dial in live, as WPILib
       properties any NetworkTables tool can read. Before a change applies, it is checked against
-      its limits, then by the configuration's own checks, then by the robot's rules across
-      mechanisms that read it (`RobotRules`: two arms that could collide), so a refused value
-      never reaches the robot, and the page shows every reason beside the value it concerns (a
-      dashboard's snaps back, and the page shows why). Several values change together, all or none, even across mechanisms. Nothing is saved on the robot: the page lists each
+      its limits, then by the configuration's own checks, so a refused value never reaches the
+      robot, and the page shows every reason beside the value it concerns (a dashboard's snaps
+      back, and the page shows why). Several values change together, all or none, even across
+      mechanisms. Nothing is saved on the robot: the page lists each
       change as the builder call that commits it to `Robots.java`. When the field connects, every
       configuration returns to committed (printed first, so nothing is lost): a match runs the
       committed configuration.
@@ -141,8 +138,9 @@ Also built in:
 
   **Where a check goes:** what a value may be at all goes in its record, with `Checks` (`steerKp`
   zero or more; `bumperTop` no higher than the robot); how far it may be tuned live goes with its
-  `Limits` in the mechanism's `tuning`; a check that reads two mechanisms goes in `RobotRules`.
-  Each is checked against the committed configuration in the tests and at startup.
+  `Limits` in the mechanism's `tuning`, which may come from what the robot is (the drivetrain's
+  top speed is tuned up to its free speed). Both are checked against the committed configuration
+  in the tests and at startup.
 
   **What a value means is its `@param`:** the page shows a configuration record's Javadoc
   beside its values, each value's `@param` as what it means (`@param steerKp volts per radian of
@@ -235,9 +233,9 @@ Also built in:
 | `frc.robot.sim` | The simulated world's adapters to the robot program: the simulated hardware behind its IO (`SimulatedHardware`: the modules' motor controllers and encoders, the IMUs, the joints, sensors and PDH, the cameras), the faults bound to Pitwall's simulator controls (`Faults`), and the named scenarios (`Scenarios`), over the simulation library (`lib/simulation`). Only the simulator builds it. |
 | `frc.robot.lib` | The robot program's own components, unit-tested and free of robot code (enforced): loop timing (`timing`), the checks across the devices' wiring (`wiring`), and the Phoenix helper (`phoenix`), which turns a mechanism's definition, wiring and control into its TalonFX and CANcoder settings (ratios, gains, gravity, limits, followers), so nothing is retyped by hand. |
 | `src/test/java/` | Tests, in the same packages as what they test, from single classes to the whole robot in the simulator, plus the architecture rules (`ArchitectureTest`). See [docs/testing.md](docs/testing.md). |
-| `lib/world/` | The world model, a Gradle project of its own (`com.michaelgrundvig.frc.world`), read by everything that needs to know the field or the robot: the validation kit every configuration record is built with (`config`), what the field and the robot are both made of, mass, shapes, and materials (`physical`), the field model and its frames, tags, terrain, and zones (`field`), the robot's definition, its body, drivetrain, cameras, IMUs and joints, each with its wiring and control (`robot`), and the writers that give other tools what they say, such as AdvantageScope's robot assets (`bridges`). It reads only WPILib's math, units, and field layouts, so Gradle keeps the robot program, the simulator, and Pitwall out of its reach. |
+| `lib/world/` | The world model, a Gradle project of its own (`com.michaelgrundvig.frc.world`), read by everything that needs to know the field or the robot: the validation kit every configuration record is built with (`config`), what the field and the robot are both made of, mass, shapes, and materials (`physical`), the field model and its frames, tags, terrain, and zones (`field`), the robot's definition, its body, drivetrain, cameras, IMUs and joints, each with its wiring and control (`robot`), and the writers that give other tools what they say, such as AdvantageScope's robot assets (`bridges`). It reads only WPILib's math, units, field layouts and JSON library (avaje-jsonb), so Gradle keeps the robot program, the simulator, and Pitwall out of its reach. |
 | `lib/localization/` | Localization, a Gradle project of its own (`com.michaelgrundvig.frc.localization`): the service the robot runs each loop (`LocalizationService`: readings and images in, the estimate and a verdict on each image out), the pose estimator and everything that feeds it (its package documentation is a reading map), and the calibration math (`calibration`). It reads the world model and nothing else of the robot's, so its tests run in milliseconds without the simulator. |
-| `lib/simulation/` | The simulation, a Gradle project of its own (`com.michaelgrundvig.frc.simulation`): the physics behind one interface (`Physics`), the IMUs' models, how the simulated robot's sensors err (`SensorErrors`), the catalog of what can fail (`FaultCatalog`), and where each random stream starts (`Seeds`), with the truth suite that checks it against physics ([docs/simulator.md](docs/simulator.md#how-far-to-trust-it-the-truth-suite)). It reads the world model and WPILib's math, and nothing of the robot program, localization, or Pitwall; in the robot program only the simulator's adapters (`frc.robot.sim`) and its top level reach it, never the robot's code, which sees its IO alone (each project's `ArchitectureTest`). |
+| `lib/simulation/` | The simulation, a Gradle project of its own (`com.michaelgrundvig.frc.simulation`): the physics behind one interface (`Physics`), the IMUs' models, how the simulated robot's sensors err (`SensorErrors`), the catalog of what can fail (`FaultCatalog`), and where each random stream starts (`Seeds`), with the truth suite that checks it against physics ([docs/simulator.md](docs/simulator.md#how-far-to-trust-it-the-truth-suite)). It reads the world model and WPILib's math, and nothing of the robot program, localization, or Pitwall; in the robot program only the simulator's adapters (`frc.robot.sim`) and its top level reach it, never the robot's code, which sees its IO alone (the robot program's `ArchitectureTest`). |
 | `src/studies/java/` | Simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([docs/camera-placement.md](docs/camera-placement.md), `./gradlew cameraStudy`); whether the pose estimator's uncertainty tells the truth ([docs/testing.md](docs/testing.md#is-the-estimator-honest-the-consistency-study), `./gradlew consistencyStudy`). |
 | `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, live tuning, and the World view's scenes ([pitwall/README.md](pitwall/README.md)). Its own Gradle project and package (`com.michaelgrundvig.frc.pitwall`), free of robot code, so it can become a library teams pull in. `Robot.java` starts it. `pitwall/docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | Dashboard layouts: the drive team's, for Elastic, and AdvantageScope's, for the simulator and its logs. |
@@ -247,7 +245,7 @@ Also built in:
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `AGENTS.md` | Instructions for coding agents, which `CLAUDE.md` points Claude Code to: what's different from older FRC code, how to check work, and where the guides are. |
 | `docs/` | Guides: [mechanisms](docs/mechanisms.md), [driving](docs/driving.md), [editors and commands](docs/editors.md), [testing](docs/testing.md), [the simulator](docs/simulator.md), [calibration](docs/calibration.md), [where every value comes from](docs/values.md), [characterization](docs/characterization.md), [kickoff](docs/kickoff.md), [upgrading WPILib](docs/upgrading.md), [venues](docs/venues.md), and the [stand-ins](docs/stand-ins.md). |
-| `gradle/` | The build's supporting rules: `quality.gradle` (checks, for every project), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), `wpilib-repositories.gradle` (where the projects beside the robot program find WPILib), and the version catalog. |
+| `gradle/` | The build's supporting rules: `quality.gradle` (checks, for every project), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), `wpilib-repositories.gradle` (where the projects beside the robot program find WPILib), the version catalog, and every downloaded library's checksum (`verification-metadata.xml`, [docs/upgrading.md](docs/upgrading.md#dependency-checksums)). |
 
 ## License
 
@@ -271,3 +269,4 @@ built robot program (the jar `deploy` sends) contains them all, so share source,
 | three.js 0.181.1, three of its files in Pitwall's jar | MIT |
 | PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
 | CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |
+| REVLib | BSD 3-Clause, as the license file in its native libraries says; its Java jar carries no license file |

@@ -53,6 +53,13 @@ public record Motor(
     Current freeCurrent,
     AngularVelocity freeSpeed,
     MomentOfInertia rotorInertia) {
+  /**
+   * An FRC battery's nominal voltage, 12 V: what the presets' numbers are measured at, the most a
+   * motor is asked for, what a SPARK's loop output is a share of (its voltage compensation), and
+   * what the simulator's battery holds steady.
+   */
+  public static final double NOMINAL_VOLTS = 12;
+
   // Rotor inertias are estimates, the same for a motor with and without FOC (one rotor): no maker
   // publishes them (M21). The Kraken X60's is the one the template's drive inertia already assumed
   // (0.0006 kg m² through 6.75:1); the rest scale it by each motor's size.

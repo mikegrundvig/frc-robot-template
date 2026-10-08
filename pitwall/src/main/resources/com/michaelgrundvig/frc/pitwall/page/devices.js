@@ -1,12 +1,11 @@
-// Pit's devices: a card for each device the robot reports on (a vision coprocessor, say), saying
-// whether it's there and how it is, and ending in what can be done about it: its own page, a file
-// to download from it or send to it, a choice to make, or its log to read. The robot program asks
-// the device; this page asks only the robot (/api/devices/...), never a device itself.
+// Pit's devices: a card for each device the robot reports on (the venue it plays on, say), saying
+// whether it's there and how it is, and ending in what can be done about it: a file to download
+// from it or send to it, or a choice to make. The robot program asks the device; this page asks
+// only the robot (/api/devices/...), never a device itself.
 
 import { robot, onChange, api, h, replace, say } from "./core.js";
 
 const MARKS = { ok: ["✓", "ok"], note: ["•", "none"], warning: ["▲", "warn"], problem: ["✗", "bad"] };
-const PRIORITIES = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"];
 
 let section;
 let grid;
@@ -19,7 +18,7 @@ export function mountDevices(parent) {
   section = h("section", { class: "devices-section", hidden: true, "aria-label": "Devices" },
     h("h2", { class: "devices-title" }, "Devices"),
     h("p", { class: "meta" }, "Each device the robot program asks after, as of its last answer. "
-        + "The robot fetches downloads and logs from the device; this page never reaches it."),
+        + "The robot fetches downloads from the device; this page never reaches it."),
     grid);
   parent.append(section);
   onChange((patch, snapshot) => {
@@ -33,8 +32,8 @@ function render(snapshot) {
   section.hidden = names.length === 0;
   // Rebuilt only when the devices or what can be done from them change; updated in place after.
   const key = names.map((name) => name + ":" + JSON.stringify([devices[name].kind,
-    devices[name].links, devices[name].downloads, devices[name].uploads,
-    (devices[name].choices || []).map((choice) => choice.id), devices[name].log])).join("\n");
+    devices[name].downloads, devices[name].uploads,
+    (devices[name].choices || []).map((choice) => choice.id)])).join("\n");
   if (snapshot || key !== built) {
     built = key;
     cards.clear();
@@ -51,11 +50,6 @@ function makeCard(name, device) {
     shownChoices: "",
   };
   const actions = [];
-  for (const link of device.links || []) {
-    if (!/^https?:\/\//i.test(link.url)) continue; // a page's link, never a script
-    actions.push(h("a", { class: "button", href: link.url, target: "_blank",
-                          rel: "noopener noreferrer" }, link.label + " ↗"));
-  }
   for (const download of device.downloads || []) {
     const button = h("button", { type: "button" }, download.label);
     button.addEventListener("click", () => fetchFile(button,
@@ -71,9 +65,6 @@ function makeCard(name, device) {
       if (file) send(button, "/api/devices/" + name + "/uploads/" + upload.id, file, upload.label);
     });
     actions.push(button, input);
-  }
-  if (device.log) {
-    actions.push(h("button", { type: "button", onclick: () => openLog(name) }, "Download logs"));
   }
   parts.el = h("section", { class: "card device", "aria-label": name },
     h("h3", { class: "dhead" }, h("span", { class: "mono" }, name),
@@ -176,122 +167,4 @@ function save(blob, name) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
-
-// ---- The log viewer ----
-
-let viewer = null;
-
-/**
- * The log viewer: a dialog with the filters, a page of entries (the latest first), Older and Newer
- * to read on either side, and Download for the whole of the device's run as text.
- */
-function openLog(name) {
-  if (!viewer) viewer = makeViewer();
-  viewer.name = name;
-  viewer.title.textContent = name + "'s log";
-  viewer.dialog.showModal();
-  load("latest");
-}
-
-function makeViewer() {
-  const v = { loads: 0, newer: "", older: "", name: "" };
-  v.priority = h("select", { "aria-label": "Least important shown" },
-    PRIORITIES.map((word, number) => h("option", { value: String(number) },
-      number + " " + word + (number < 7 ? " and worse" : ": everything"))));
-  v.priority.value = "6";
-  v.unit = h("input", { type: "text", placeholder: "every unit", spellcheck: "false",
-                        autocomplete: "off", "aria-label": "Unit, such as photonvision.service" });
-  v.list = h("ol", { class: "logview", "aria-live": "polite" });
-  v.status = h("p", { class: "meta" });
-  v.olderButton = h("button", { type: "button", onclick: () => load("older") }, "Older");
-  v.newerButton = h("button", { type: "button", onclick: () => load("newer") }, "Newer");
-  v.download = h("button", { type: "button" }, "Download as text");
-  v.download.addEventListener("click", () => fetchFile(v.download,
-    "/api/devices/" + v.name + "/log.txt?" + filters(), v.name + "'s log"));
-  v.title = h("h2");
-  v.dialog = h("dialog", { class: "logdialog" },
-    h("div", { class: "dlg" }, v.title,
-      h("div", { class: "toolbar" },
-        h("label", null, "Priority ", v.priority),
-        h("label", null, "Unit ", v.unit),
-        h("button", { type: "button", onclick: () => load("latest") }, "Show")),
-      v.olderButton, v.list, v.status,
-      h("div", { class: "dlg-actions" }, v.newerButton, v.download,
-        h("button", { type: "button", class: "primary", onclick: () => v.dialog.close() },
-          "Close"))));
-  v.unit.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") load("latest");
-  });
-  v.priority.addEventListener("change", () => load("latest"));
-  document.body.append(v.dialog);
-  return v;
-}
-
-/** The filters, and where the page is: after a cursor, before one, or the latest. */
-function filters(place, cursor) {
-  const query = new URLSearchParams({ priority: viewer.priority.value });
-  const unit = viewer.unit.value.trim();
-  if (unit) query.set("unit", unit);
-  if (place === "newer" && cursor) query.set("cursor", cursor);
-  if (place === "older" && cursor) query.set("before", cursor);
-  return query.toString();
-}
-
-/**
- * Loads the latest page for the filters, or the page of older entries before what's shown, or of
- * newer ones after it. Only the latest load counts: one asked before it (another filter, another
- * device) is dropped when it answers.
- */
-async function load(place) {
-  const v = viewer;
-  const asked = ++v.loads;
-  const cursor = place === "newer" ? v.newer : place === "older" ? v.older : "";
-  if (place === "latest") {
-    v.newer = "";
-    v.older = "";
-    v.list.replaceChildren();
-  }
-  v.olderButton.disabled = v.newerButton.disabled = true;
-  v.status.textContent = "Asking " + v.name + "…";
-  const response = await api("GET", "/api/devices/" + v.name + "/log?" + filters(place, cursor))
-    .catch(() => null);
-  if (asked !== v.loads) return;
-  if (!response) {
-    v.status.textContent = "✗ The robot isn't answering.";
-    buttons();
-    return;
-  }
-  const body = await response.json().catch(() => null);
-  if (asked !== v.loads) return;
-  if (!response.ok || !body) {
-    v.status.textContent = "✗ " + (body && body.detail ? body.detail : response.statusText);
-    buttons();
-    return;
-  }
-  const rows = body.entries.map((entry) => {
-    const tone = entry.priority <= 3 ? "bad" : entry.priority === 4 ? "warn" : "";
-    return h("li", { class: tone },
-      h("span", { class: "t" }, entry.time), " ",
-      h("span", { class: "p" }, PRIORITIES[entry.priority] || String(entry.priority)), " ",
-      h("span", { class: "u" }, entry.unit + ":"), " ",
-      h("span", null, entry.message));
-  });
-  if (place === "older") {
-    v.list.prepend(...rows);
-    v.older = body.older || "";
-  } else {
-    v.list.append(...rows);
-    if (body.newer) v.newer = body.newer;
-    if (place === "latest") v.older = body.older || "";
-  }
-  buttons();
-  const shown = v.list.childElementCount;
-  v.status.textContent = shown === 0 ? "Nothing matches." : shown + " entries"
-    + (place === "newer" && rows.length === 0 ? "; nothing newer yet." : ".");
-}
-
-function buttons() {
-  viewer.olderButton.disabled = !viewer.older;
-  viewer.newerButton.disabled = !viewer.newer;
 }

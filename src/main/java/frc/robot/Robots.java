@@ -49,32 +49,7 @@ import org.wpilib.math.geometry.Translation3d;
  * joints and their places. The template's robot has none; an intake would read (the guide's robot,
  * src/test/java/frc/robot/examples/ExampleRobot.java, has it whole):
  *
- * {@snippet :
- * static final Position PIVOT_IN = Position.degrees("in", 1.5);
- * static final Position PIVOT_OUT = Position.degrees("out", 130);
- *
- * static final Joint.Revolute PIVOT =
- *     Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
- *         .range(Range.degrees(0, 135), PIVOT_IN)
- *         .positions(PIVOT_IN, PIVOT_OUT)
- *         .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).pdh(4, Amps.of(40)))
- *         .absoluteEncoder(CANCODER.can(34).offset(Rotations.of(0.82)))
- *         .control(MechanismControl.position(30)
- *             .withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700)));
- *
- * static final Output INTAKING = Output.rpm("intaking", 2000);
- * static final Output OUTTAKING = Output.volts("outtaking", -4);
- *
- * static final Joint.Revolute ROLLER =
- *     Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))
- *         .outputs(INTAKING, OUTTAKING)
- *         .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31).pdh(5, Amps.of(40)))
- *         .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))   // only once the pivot is out of the frame
- *         .control(MechanismControl.velocity(0.02));
- *
- * static final Configuration INTAKE =
- *     Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
- * }
+ * {@snippet class=frc.robot.examples.ExampleRobot region=intake}
  *
  * <p>The definition refuses what can't be: a position outside its joint's range, a speed past what
  * its motors turn it at or a voltage past what they're rated for, a configuration that breaks an
@@ -91,18 +66,7 @@ import org.wpilib.math.geometry.Translation3d;
  * pivot.goTo(PIVOT_OUT)} to each robot's own out, and a revision of the competition robot's blocks
  * reaches it. It's listed beside the competition robot:
  *
- * {@snippet :
- * static final RobotConfig PRACTICE =
- *     COMPETITION.named("practice")
- *         .with(
- *             PIVOT.motorsOn(TALON_FX.can(33).pdh(4, Amps.of(40)))
- *                 .replaced(PIVOT_OUT, Degrees.of(128)),
- *             ...)
- *         .with(CLAW_BEAM.on(CANDI.can(36).s1().normallyOpen()))
- *         .with(CameraConfigBuilder.builder(BACK_LEFT).up(Inches.of(20.5)).build());
- * ...
- * return List.of(COMPETITION, PRACTICE);
- * }
+ * {@snippet class=frc.robot.examples.ExampleRobot region=practice}
  *
  * <p>2611's 2026 robot is a whole robot described this way
  * (src/test/java/frc/robot/robots2026/Team2611.java). docs/mechanisms.md says how to describe a

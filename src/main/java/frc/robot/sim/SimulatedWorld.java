@@ -4,37 +4,27 @@ import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
-import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import com.michaelgrundvig.frc.world.robot.DrivetrainGeometry;
 import com.michaelgrundvig.frc.world.robot.Imus;
-import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import com.michaelgrundvig.frc.world.robot.RobotMath;
-import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.drive.GyroIO;
-import frc.robot.subsystems.mechanisms.AbsoluteEncoderIO;
-import frc.robot.subsystems.mechanisms.JointIO;
-import frc.robot.subsystems.mechanisms.PdhIO;
-import frc.robot.subsystems.mechanisms.SensorIO;
 import frc.robot.subsystems.vision.CameraIO;
 import frc.robot.subsystems.vision.VisionSim;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
-import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Transform3d;
 
 /**
  * The world the simulated robot drives in: the drivetrain's physics, which knows where the robot
- * really is, its joints' ({@link JointSimulation}), and PhotonVision's simulated cameras, rendering
- * what they'd see from there. The robot's code sees it only through its IO interfaces ({@link
- * SimulatedHardware}), as it would see real hardware.
+ * really is, its joints' ({@link JointSimulation}), its switches and rangefinders ({@link
+ * SensorSimulation}), its PDH, and PhotonVision's simulated cameras, rendering what they'd see from
+ * there; each built from the robot's definition as the world is. The robot's code sees it only
+ * through its IO interfaces ({@link SimulatedHardware}), as it would see real hardware.
  *
  * <p>The robot's wheels and sensors differ from its configuration as a real robot's do ({@link
  * SensorErrors}), so its estimate drifts from the truth, and localization is tested against that
@@ -57,48 +47,25 @@ public final class SimulatedWorld implements AutoCloseable {
   /** The cameras that ride on joints, which move with them. */
   private final List<CameraConfig> camerasOnJoints;
 
-  /** The robot's driven joints, once the robot asks for the first: none without mechanisms. */
-  private @Nullable JointSimulation joints;
+  /** The robot's driven joints, and the absolute encoders the robot reads itself. */
+  private final JointSimulation joints;
 
-  /** The robot's switches and rangefinders, once the robot asks for the first: none without. */
-  private @Nullable SensorSimulation sensors;
+  /** The robot's switches and rangefinders. */
+  private final SensorSimulation sensors;
 
-  /** The PDH, once the robot asks for it. */
-  private @Nullable PdhIOSim pdh;
-
-  /**
-   * @param field the field, with its tags and terrain
-   * @param drivetrain the drivetrain as defined: its modules, and where its wheels sit
-   * @param body the robot's frame, which places the wheels, and its mass, which they carry
-   * @param cameras the robot's cameras, as configured
-   * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
-   */
-  public SimulatedWorld(
-      FieldModel field,
-      DrivetrainGeometry drivetrain,
-      Body body,
-      List<CameraConfig> cameras,
-      SensorErrors errors) {
-    this(field, drivetrain, body, cameras, Imus.UNCHECKED, errors);
-  }
+  private final PdhIOSim pdh;
 
   /**
    * @param field the field, with its tags and terrain
-   * @param drivetrain the drivetrain as defined: its modules, and where its wheels sit
-   * @param body the robot's frame, which places the wheels, and its mass, which they carry
-   * @param cameras the robot's cameras, as configured
-   * @param imus where the robot's definition mounts its IMUs
+   * @param definition what the robot is: its drivetrain, frame and IMUs, its cameras, its joints,
+   *     its sensors and its PDH, each simulated from it
    * @param errors how the robot's wheels, sensors, and camera mounts differ from its configuration
    */
-  public SimulatedWorld(
-      FieldModel field,
-      DrivetrainGeometry drivetrain,
-      Body body,
-      List<CameraConfig> cameras,
-      Imus imus,
-      SensorErrors errors) {
+  public SimulatedWorld(FieldModel field, RobotDefinition definition, SensorErrors errors) {
     this.field = field;
-    this.drivetrain = new DriveSimulation(body, drivetrain, errors, imus);
+    Imus imus = definition.imus();
+    List<CameraConfig> cameras = definition.cameras();
+    this.drivetrain = new DriveSimulation(definition.body(), definition.drivetrain(), errors, imus);
     this.hasBackupImu = imus.backup().isPresent();
     this.drivetrain.setTerrain(field.terrain());
     // Each camera's noise from its own stream of the seed (Seeds).
@@ -112,6 +79,9 @@ public final class SimulatedWorld implements AutoCloseable {
       this.cameras[i] =
           new CameraIOSim(camera.name(), vision.camera(camera, mountError), vision, mountError);
     }
+    joints = new JointSimulation(definition);
+    sensors = new SensorSimulation(definition, joints);
+    pdh = new PdhIOSim(definition, joints, this.drivetrain);
   }
 
   /**
@@ -141,65 +111,21 @@ public final class SimulatedWorld implements AutoCloseable {
     return cameras.clone();
   }
 
-  /**
-   * A driven joint's simulated motor controller, for its mechanism to read and drive.
-   *
-   * @param math what the robot's definition derives: the same for every joint asked for
-   */
-  public JointIO joint(RobotMath math, Joint joint) {
-    JointSimulation simulation = joints;
-    if (simulation == null) {
-      simulation = new JointSimulation(math);
-      joints = simulation;
-    }
-    return simulation.add(joint);
-  }
-
-  /**
-   * A joint's absolute encoder, simulated, where the robot reads it itself: asked for after the
-   * joint ({@link #joint}).
-   */
-  public AbsoluteEncoderIO absoluteEncoder(Joint joint) {
-    return Objects.requireNonNull(joints, "the joints come first").absoluteEncoder(joint);
-  }
-
-  /**
-   * A switch's or a rangefinder's simulated device, for the robot to read: asked for after the
-   * joints, whose positions a limit switch reads.
-   */
-  public SensorIO sensor(Sensor.Placed sensor) {
-    SensorSimulation simulation = sensors;
-    if (simulation == null) {
-      simulation = new SensorSimulation(joints);
-      sensors = simulation;
-    }
-    return simulation.add(sensor);
-  }
-
-  /** The robot's switches and rangefinders, as a test sets them, or null for a robot without. */
-  public @Nullable SensorSimulation sensors() {
+  /** The robot's switches and rangefinders, as a test sets them. */
+  public SensorSimulation sensors() {
     return sensors;
   }
 
   /**
-   * The PDH, simulated, for the robot to read: each channel what the simulated motor it feeds
-   * draws, the joints' and the drivetrain's.
-   *
-   * @param definition what the robot is: which channel feeds which device
+   * The PDH, simulated: each channel what the simulated motor it feeds draws, the joints' and the
+   * drivetrain's.
    */
-  public PdhIO pdh(RobotDefinition definition) {
-    PdhIOSim simulated = new PdhIOSim(definition, () -> joints, drivetrain);
-    pdh = simulated;
-    return simulated;
-  }
-
-  /** The PDH, as a test sets it, or null before the robot asks for it. */
-  public @Nullable PdhIOSim pdh() {
+  public PdhIOSim pdh() {
     return pdh;
   }
 
-  /** The robot's driven joints' physics, or null for a robot without them. */
-  public @Nullable JointSimulation joints() {
+  /** The robot's driven joints' physics, and the absolute encoders the robot reads itself. */
+  public JointSimulation joints() {
     return joints;
   }
 
@@ -234,12 +160,9 @@ public final class SimulatedWorld implements AutoCloseable {
    */
   public void step(long nowNanos) {
     drivetrain.step(RobotLoop.PERIOD_SECONDS, nowNanos);
-    JointSimulation simulation = joints;
-    if (simulation != null) {
-      simulation.step(RobotLoop.PERIOD_SECONDS);
-      for (CameraConfig camera : camerasOnJoints) {
-        vision.carry(camera.name(), simulation.cameraMount(camera));
-      }
+    joints.step(RobotLoop.PERIOD_SECONDS);
+    for (CameraConfig camera : camerasOnJoints) {
+      vision.carry(camera.name(), joints.cameraMount(camera));
     }
     vision.update(drivetrain.truePose3d());
   }

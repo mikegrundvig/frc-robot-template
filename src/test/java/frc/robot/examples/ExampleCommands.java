@@ -20,7 +20,6 @@ import frc.robot.behavior.Gate;
 import frc.robot.subsystems.mechanisms.JointMechanism;
 import frc.robot.subsystems.mechanisms.Joints;
 import frc.robot.subsystems.mechanisms.Move;
-import frc.robot.subsystems.mechanisms.Sensors;
 import java.util.function.DoubleSupplier;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
@@ -58,14 +57,17 @@ final class ExampleCommands {
     this.joints = joints;
     this.headingError = headingError;
     this.distance = distance;
+    // @start region=look-up
     JointMechanism pivot = joints.of(PIVOT);
     JointMechanism roller = joints.of(ROLLER);
+    // @end
     this.pivot = pivot;
     this.roller = roller;
     shooter = joints.of(SHOOTER);
     feeder = joints.of(FEEDER);
     indexer = joints.of(INDEXER);
 
+    // @start region=gates
     Gate aimed =
         Gate.within(
             scheduler, "aimed", () -> headingErrorDegrees(), 2.0, 4.0); // in at 2°, out past 4°
@@ -73,18 +75,21 @@ final class ExampleCommands {
         Gate.all("ready to shoot", shooter.isAtGoal(), aimed)
             .debounce(
                 Milliseconds.of(80), Debouncer.DebounceType.FALLING); // rides out a flywheel's dip
+    // @end
     this.readyToShoot = readyToShoot;
 
-    Sensors sensors = joints.sensors();
-    Gate coralIn = sensors.gate("coral in claw", CLAW_BEAM.tripped());
-    Gate hopperFull = sensors.gate("hopper full", HOPPER.nearerThan(Inches.of(6)));
+    // @start region=sensor-gates
+    Gate coralIn = joints.gate("coral in claw", CLAW_BEAM.tripped());
+    Gate hopperFull = joints.gate("hopper full", HOPPER.nearerThan(Inches.of(6)));
+    // @end
     this.coralIn = coralIn;
-    intakeClear = sensors.gate("intake clear", CLAW_BEAM.clear());
+    intakeClear = joints.gate("intake clear", CLAW_BEAM.clear());
     hoppers = hopperFull;
   }
 
   /** Deploys the intake, and backs it off if it doesn't get there. */
   Command deployOrBackOff() {
+    // @start region=recovery
     return Command.requiring(pivot)
         .executing(
             co -> {
@@ -95,6 +100,7 @@ final class ExampleCommands {
               }
             })
         .named("Deploy or back off");
+    // @end
   }
 
   /** A law of its own: the roller pushed at a voltage it works out every loop. */
@@ -110,6 +116,7 @@ final class ExampleCommands {
         .named("Push");
   }
 
+  // @start region=intake-one
   /** Intakes until the claw's beam trips, the loop it trips; then counts the piece. */
   Command intakeOne() {
     Move intake =
@@ -123,6 +130,8 @@ final class ExampleCommands {
         .named("Intake one");
   }
 
+  // @end
+
   /** Counts each piece, once each time the beam trips, past a beam that flickers. */
   void countPieces() {
     coralIn.onTrue(countPiece()); // once each time it trips
@@ -134,10 +143,18 @@ final class ExampleCommands {
     return pivot.goTo(PIVOT_OUT).onlyIf(intakeClear); // checked once: REFUSED if false
   }
 
+  // @start region=configurations
   /** Every joint of a configuration to its place, requiring exactly those joints. */
   Command stow() {
     return joints.goTo(STOWED);
   }
+
+  /** Whether every joint of a configuration is at its place. */
+  Gate stowed() {
+    return joints.isAt(STOWED);
+  }
+
+  // @end
 
   /** Spins up, and feeds whenever it's ready, pausing when it's not. */
   Command shoot() {
@@ -151,11 +168,6 @@ final class ExampleCommands {
               }
             })
         .named("Shoot");
-  }
-
-  /** Whether every joint of a configuration is at its place. */
-  Gate stowed() {
-    return joints.isAt(STOWED);
   }
 
   /** Whether the hopper is full. */

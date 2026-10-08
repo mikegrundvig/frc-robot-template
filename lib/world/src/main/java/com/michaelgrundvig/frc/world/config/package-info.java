@@ -12,20 +12,18 @@
  * change applies, returned to committed when the field connects, and reported as the builder calls
  * that commit them. A plain WPILib tunable is for a switch the drive team flips.
  *
- * <p>A value is checked in three places, each where what it knows lives:
+ * <p>A value is checked in two places, each where what it knows lives:
  *
  * <ol>
  *   <li><b>Its record</b>, when built: what the value may be at all, alone or with the record's
  *       other values.
  *   <li><b>Its tuning limits</b>, declared with it in the mechanism's {@code LiveConfig}: how far
- *       the pit may take it while the robot runs.
- *   <li><b>The robot's rules across mechanisms</b> ({@code frc.robot.RobotRules}, with Pitwall's
- *       {@code ConfigRules}): what two mechanisms' values may be together, such as two arms that
- *       could collide. A rule runs when a change touches a value it reads.
+ *       the pit may take it while the robot runs. A limit may come from what the robot is: the
+ *       drivetrain's top speed is tuned up to its free speed, which its definition says.
  * </ol>
  *
- * <p>All three check the committed configuration in the tests and at startup, and every change the
- * pit makes before it applies.
+ * <p>Both check the committed configuration in the tests and at startup, and every change the pit
+ * makes before it applies.
  *
  * <p>Conventions:
  *

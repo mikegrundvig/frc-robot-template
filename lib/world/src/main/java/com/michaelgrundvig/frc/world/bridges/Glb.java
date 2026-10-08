@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.world.bridges;
 
+import io.avaje.jsonb.Jsonb;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -10,8 +11,8 @@ import java.util.Map;
 
 /**
  * Writes meshes as a binary glTF 2.0 file (a {@code .glb}), by the Khronos specification, with no
- * library: a 12-byte header, a JSON chunk describing the scene, and a binary chunk holding every
- * corner's position and normal as little-endian 32-bit floats.
+ * glTF library: a 12-byte header, a JSON chunk describing the scene (written by avaje-jsonb), and a
+ * binary chunk holding every corner's position and normal as little-endian 32-bit floats.
  *
  * <p>Each mesh is one node and one primitive of triangles (no index buffer: every corner is its
  * own, since faces are flat), with its own material, a flat color.
@@ -111,7 +112,8 @@ final class Glb {
       gltf.put("bufferViews", views);
       gltf.put("buffers", List.of(Map.of("byteLength", offset)));
     }
-    return pack(Json.compact(gltf).getBytes(StandardCharsets.UTF_8), chunks, offset);
+    String json = Jsonb.instance().type(Object.class).toJson(gltf);
+    return pack(json.getBytes(StandardCharsets.UTF_8), chunks, offset);
   }
 
   /** A robot-frame point or direction (forward, left, up) as glTF's (left, up, forward). */

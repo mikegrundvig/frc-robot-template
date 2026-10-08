@@ -1,5 +1,6 @@
 package frc.robot.lib.rev;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.Amps;
 
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
@@ -7,6 +8,7 @@ import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -31,13 +33,14 @@ import org.jspecify.annotations.Nullable;
  * a device.
  *
  * <p>A SPARK reads its motor's own encoder in rotations and RPM: REVLib 2027 has no conversion
- * factors. With its voltage compensated to {@link #NOMINAL_VOLTS}, its loop's output is a share of
- * that. Its loop runs the plan's kP, per rotor rotation of error in slot 0, for positions, and per
- * rotor RPM in slot 1, for speeds. The rest, the plan's feedforward law (kS, kV, kA and gravity)
- * and its kD, the robot works out each loop in volts ({@link ControllerPlan#feedforward}) and adds
- * as the loop's arbitrary feedforward: volts are the one unit a SPARK takes exactly, whatever the
- * units of its own feedforward and derivative. Measured in REV's simulation (2026-10-05): kP 0.01
- * on 10 rotations of error gave a share of 0.1, and 1.2 V of feedforward a share of 0.1.
+ * factors. With its voltage compensated to {@link Motor#NOMINAL_VOLTS}, its loop's output is a
+ * share of that. Its loop runs the plan's kP, per rotor rotation of error in slot 0, for positions,
+ * and per rotor RPM in slot 1, for speeds. The rest, the plan's feedforward law (kS, kV, kA and
+ * gravity) and its kD, the robot works out each loop in volts ({@link ControllerPlan#feedforward})
+ * and adds as the loop's arbitrary feedforward: volts are the one unit a SPARK takes exactly,
+ * whatever the units of its own feedforward and derivative. Measured in REV's simulation
+ * (2026-10-05): kP 0.01 on 10 rotations of error gave a share of 0.1, and 1.2 V of feedforward a
+ * share of 0.1.
  *
  * <p>A SPARK whose loop closes on the absolute encoder on its data port ({@code
  * DataPortEncoder#closesLoop}) runs it on that encoder's turns instead, with no conversion factor
@@ -50,14 +53,17 @@ import org.jspecify.annotations.Nullable;
  * unconfirmed: REV's simulation runs its loop on the motor's own encoder whatever it's told.
  *
  * <p>A SPARK limits its motor's current (its smart limit, from the control's stator limit), not the
- * battery's, so the supply limits aren't applied. Its kI isn't carried over yet: a joint whose
- * control has one is refused.
+ * battery's, so the supply limits aren't applied.
+ *
+ * <p>Its kI goes to the loop for positions, in REV's units: a share of {@link Motor#NOMINAL_VOLTS}
+ * per turn of error of the sensor the loop runs on, per millisecond, the loop's period, so the
+ * plan's kI per second over a thousand (REV's "SPARK closed-loop units", docs.revrobotics.com).
+ * REV's simulation integrates per second instead; the template's own simulator integrates as REV
+ * documents the device. Unconfirmed on a SPARK until a bench check: an integral of a known error
+ * read back after a second.
  */
 public final class RevMechanism {
   private RevMechanism() {}
-
-  /** The voltage a SPARK's loop output is a share of: its voltage compensation. */
-  public static final double NOMINAL_VOLTS = 12;
 
   /** A SPARK's position and speed signals, every loop: 20 ms. */
   private static final int SIGNAL_MS = 20;
@@ -74,9 +80,11 @@ public final class RevMechanism {
    *     the rotor's, or, closed on its absolute encoder, the encoder's
    * @param loopZero what that sensor reads with the mechanism at zero: 0 for its rotor, and for its
    *     absolute encoder, read from the window's edge, minus the edge
-   * @param positionKp the loop's kP for positions: a share of {@link #NOMINAL_VOLTS} per turn of
-   *     error of the sensor it runs on
+   * @param positionKp the loop's kP for positions: a share of {@link Motor#NOMINAL_VOLTS} per turn
+   *     of error of the sensor it runs on
    * @param velocityKp the loop's kP for speeds: a share per RPM of error of that sensor
+   * @param positionKi the loop's kI for positions: a share of {@link Motor#NOMINAL_VOLTS} per turn
+   *     of error of that sensor per millisecond
    * @param softLimits the soft limits, in that sensor's turns, lower then upper, if the control has
    *     them
    * @param absolute the definition's absolute encoder the SPARK's data port reads, if its wiring
@@ -98,6 +106,7 @@ public final class RevMechanism {
       double loopZero,
       double positionKp,
       double velocityKp,
+      double positionKi,
       Optional<double[]> softLimits,
       Optional<Sensor.Encoder> absolute,
       double windowEdge,
@@ -214,22 +223,15 @@ public final class RevMechanism {
       MechanismWiring.@Nullable DataPortEncoder port) {
     Joint joint = plan.joint();
     List<MechanismWiring.Device> controllers = plan.controllers();
-    if (controllers.isEmpty()) {
-      throw new IllegalArgumentException(
-          joint.label() + "'s motors aren't wired: a SPARK drives each");
-    }
     MechanismWiring.Device leading = controllers.get(0);
     MechanismWiring.Controller controller = leading.controller();
     if (controller != MechanismWiring.Controller.SPARK_MAX
         && controller != MechanismWiring.Controller.SPARK_FLEX) {
       throw new IllegalArgumentException(
-          joint.label() + "'s wiring is " + controller.shown() + "'s, not a SPARK's");
-    }
-    if (plan.kI() != 0) {
-      throw new IllegalArgumentException(
-          joint.label()
-              + "'s control has a kI, which isn't carried to a SPARK yet: its integral's units"
-              + " aren't confirmed. Leave kI at 0");
+          possessive(joint.label())
+              + " wiring is "
+              + possessive(controller.shown())
+              + ", not a SPARK's");
     }
     List<String> notes = new ArrayList<>(plan.notes());
     MechanismRotations rotations = plan.rotations();
@@ -255,19 +257,25 @@ public final class RevMechanism {
         .inverted(leading.turnsClockwise())
         .idleMode(plan.brakes() ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
         .smartCurrentLimit(amps)
-        .voltageCompensation(NOMINAL_VOLTS);
+        .voltageCompensation(Motor.NOMINAL_VOLTS);
     // The sensor its loop runs on, and its turns: the rotor's, or the absolute encoder's from the
     // window's edge.
     double loopRatio = closed ? encoderRatio : ratio;
     double loopZero = closed ? -windowEdge : 0;
     double kP = rotations.gainPerRotation(plan.kP());
-    double positionKp = kP / (NOMINAL_VOLTS * loopRatio);
-    double velocityKp = kP / (NOMINAL_VOLTS * loopRatio * 60);
+    double positionKp = kP / (Motor.NOMINAL_VOLTS * loopRatio);
+    double velocityKp = kP / (Motor.NOMINAL_VOLTS * loopRatio * 60);
+    // Its integral accumulates each millisecond, its loop's period: per second over a thousand.
+    double positionKi =
+        rotations.gainPerRotation(plan.kI()) / (Motor.NOMINAL_VOLTS * loopRatio * 1000);
     leader
         .closedLoop
         .feedbackSensor(closed ? FeedbackSensor.kAbsoluteEncoder : FeedbackSensor.kPrimaryEncoder)
         .p(positionKp, ClosedLoopSlot.kSlot0)
         .p(velocityKp, ClosedLoopSlot.kSlot1);
+    if (positionKi != 0) {
+      leader.closedLoop.i(positionKi, ClosedLoopSlot.kSlot0);
+    }
     if (closed) {
       // Its reading wraps outside the joint's range: the short way round could be through a stop.
       leader.closedLoop.positionWrappingEnabled(false);
@@ -310,7 +318,7 @@ public final class RevMechanism {
           .idleMode(
               plan.brakes() ? SparkBaseConfig.IdleMode.kBrake : SparkBaseConfig.IdleMode.kCoast)
           .smartCurrentLimit(amps)
-          .voltageCompensation(NOMINAL_VOLTS)
+          .voltageCompensation(Motor.NOMINAL_VOLTS)
           .follow(leading.id(), plan.opposes(motor));
       followers.add(new Follower(motor.id(), follower));
     }
@@ -324,6 +332,7 @@ public final class RevMechanism {
         loopZero,
         positionKp,
         velocityKp,
+        positionKi,
         softLimits,
         Optional.ofNullable(absolute),
         windowEdge,

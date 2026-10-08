@@ -1,11 +1,18 @@
 package frc.robot.subsystems.mechanisms;
 
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
+import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_BACK;
 import static frc.robot.subsystems.mechanisms.JointFixtures.TURRET_FRONT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.RadiansPerSecond;
 
+import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
+import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
@@ -15,6 +22,8 @@ import frc.robot.sim.JointsSimHarness;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.wpilib.command3.Command;
 
 /**
@@ -26,7 +35,7 @@ import org.wpilib.command3.Command;
 class LimitStopSimTest {
   /** At 90° of the turret's swing, on its way to the back. */
   private static final Sensor.Switch TURRET_RIGHT =
-      Sensor.Switch.limit(
+      JointFixtures.limit(
           "turret right", TURRET, Sensor.Switch.Limit.End.UPPER, Math.toRadians(90));
 
   private static final RobotDefinition ROBOT =
@@ -60,7 +69,10 @@ class LimitStopSimTest {
     assertThat(turretDegrees()).isCloseTo(0, within(2.0));
   }
 
-  /** A voltage toward the switch goes neutral once it trips; away from it, it's applied. */
+  /**
+   * A voltage toward the switch goes neutral once it trips, and braking, the turret stops within
+   * what it travels from its speed there: 1.7° past the switch, at 91.7°.
+   */
   @Test
   void anOutputTowardATrippedSwitchGoesNeutral() {
     Command push =
@@ -75,7 +87,88 @@ class LimitStopSimTest {
             .named("Push right");
     sim.run(push, 3);
 
-    assertThat(turretDegrees()).isBetween(90.0, 110.0);
+    assertThat(turretDegrees()).isBetween(90.0, 92.0);
     assertThat(turret.heldBy()).isEqualTo("turret right tripped");
+  }
+
+  /** A turret run at shares of the battery, either way, its own switch at 90° on its right. */
+  private static final Output SPINNING = Output.dutyCycle("spinning", 0.15);
+
+  private static final Output SPINNING_BACK = Output.dutyCycle("spinning back", -0.15);
+
+  private static final Joint.Revolute SPUN =
+      JointRevoluteBuilder.builder(TURRET).outputs(List.of(SPINNING, SPINNING_BACK)).build();
+
+  private static final Sensor.Switch SPUN_RIGHT =
+      JointFixtures.limit("turret right", SPUN, Sensor.Switch.Limit.End.UPPER, Math.toRadians(90));
+
+  /** Each way an output drives a joint, toward its right (up) or away from it. */
+  enum Pushed {
+    VOLTAGE,
+    VELOCITY,
+    DUTY_CYCLE;
+
+    /** The command that drives the turret this way, toward its right switch or away from it. */
+    Command toward(JointMechanism turret, boolean right) {
+      double sign = right ? 1 : -1;
+      return switch (this) {
+        case VOLTAGE ->
+            turret
+                .run(
+                    co -> {
+                      while (true) {
+                        turret.setVoltage(2 * sign);
+                        co.yield();
+                      }
+                    })
+                .named("Push at " + 2 * sign + " V");
+        case VELOCITY -> turret.follow(() -> RadiansPerSecond.of(2 * sign));
+        case DUTY_CYCLE -> turret.run(right ? SPINNING : SPINNING_BACK);
+      };
+    }
+  }
+
+  /** The turret on its tripped right switch, at 95°, still. */
+  private static JointsSimHarness onTheSwitch() {
+    JointsSimHarness spun =
+        new JointsSimHarness(
+            RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
+                .name("spun")
+                .joints(List.of(PIVOT, ROLLER, ELEVATOR, SPUN))
+                .sensors(List.of(SPUN_RIGHT))
+                .build());
+    spun.simulation.place(SPUN, Math.toRadians(95));
+    spun.run(0.1);
+    return spun;
+  }
+
+  /** Each output toward its tripped switch goes neutral, held where it is, and says so. */
+  @ParameterizedTest
+  @EnumSource(Pushed.class)
+  void anOutputTowardATrippedSwitchGoesNeutralWhicheverItIs(Pushed pushed) {
+    JointsSimHarness spun = onTheSwitch();
+    JointMechanism turret = spun.joints.of(SPUN);
+
+    spun.run(pushed.toward(turret, true), 0.5);
+
+    assertThat(Math.toDegrees(spun.simulation.position(SPUN))).isCloseTo(95, within(0.5));
+    assertThat(spun.simulation.velocity(SPUN)).isCloseTo(0, within(0.01));
+    assertThat(turret.heldBy()).isEqualTo("turret right tripped");
+  }
+
+  /**
+   * Each output away from its tripped switch is applied, and moves it off: in half a second, from
+   * 95° to 37° at 2 V, to 45° chasing 2 rad/s, and to 43° at 15% of the battery.
+   */
+  @ParameterizedTest
+  @EnumSource(Pushed.class)
+  void anOutputAwayFromATrippedSwitchMovesItOff(Pushed pushed) {
+    JointsSimHarness spun = onTheSwitch();
+    JointMechanism turret = spun.joints.of(SPUN);
+
+    spun.run(pushed.toward(turret, false), 0.5);
+
+    assertThat(Math.toDegrees(spun.simulation.position(SPUN))).isLessThan(50);
+    assertThat(turret.heldBy()).isEmpty();
   }
 }

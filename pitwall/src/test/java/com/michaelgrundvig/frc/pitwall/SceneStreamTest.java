@@ -83,7 +83,6 @@ class SceneStreamTest {
           () -> "",
           null,
           new Devices(clock::get),
-          new Notices(),
           scenes);
   private final Broadcaster broadcaster =
       new Broadcaster(Broadcaster.MAX_STREAMS, Broadcaster.MAILBOX, id -> {});
@@ -473,7 +472,9 @@ class SceneStreamTest {
 
     List<String> since(String name) {
       List<String> found = new ArrayList<>();
-      for (String[] event : events.subList(marked, events.size())) {
+      // A copy first: a view of the list the stream's thread adds to throws as it's read.
+      List<String[]> now = List.copyOf(events);
+      for (String[] event : now.subList(marked, now.size())) {
         if (event[0].equals(name)) {
           found.add(event[1]);
         }

@@ -1,5 +1,7 @@
 package frc.robot.subsystems.mechanisms;
 
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
+import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR_CLEAR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_RUN;
@@ -10,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Rotations;
 
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
@@ -21,9 +24,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * A joint whose loop closes on its absolute encoder on a Systemcore port: the robot works out its
- * motor's voltage each loop from where the encoder says it is, so a motor's count that slipped
- * doesn't send it to the wrong place, as it does a joint whose encoder only told its motor where it
- * was at startup.
+ * motor's voltage each loop from where the encoder says it is, so a motor's count that slipped, by
+ * less than the two may disagree before one is taken to have slipped ({@link EncoderGap}), doesn't
+ * send it to the wrong place, as it does a joint whose encoder only told its motor where it was at
+ * startup.
  */
 @ExtendWith(RobotSim.class)
 class EncoderLoopSimTest {
@@ -33,13 +37,13 @@ class EncoderLoopSimTest {
 
   /** Its encoder tells its motor where it is, once. */
   private static final Joint.Revolute SEEDED =
-      PIVOT.absoluteEncoder(1024, PORT_1).retuned(old -> control(30, 1, profile(8, 30)));
+      PIVOT.absoluteEncoder(PORT_1).retuned(old -> control(30, 1, profile(8, 30)));
 
   /** Its loop closes on its encoder. */
   private static final Joint.Revolute CLOSED = SEEDED.encoderOn(PORT_1.closesLoop());
 
-  private static JointsSimHarness sim(Joint.Revolute pivot) {
-    RobotDefinition robot = ROBOT.with(pivot);
+  private static JointsSimHarness sim(Joint joint) {
+    RobotDefinition robot = ROBOT.with(joint);
     return new JointsSimHarness(robot);
   }
 
@@ -51,9 +55,9 @@ class EncoderLoopSimTest {
   }
 
   /**
-   * Its motor's count slips 20° behind the joint: told once where it was, the pivot is sent to its
-   * run position by its motor's count, and arrives there by that count 20° past it; closed on its
-   * encoder, it arrives at the run position itself, and knows it.
+   * Its motor's count slips 4° behind the joint, inside the 5° they may disagree: told once where
+   * it was, the pivot is sent to its run position by its motor's count, and arrives there by that
+   * count 4° past it; closed on its encoder, it arrives at the run position itself, and knows it.
    */
   @Test
   void aSlippedMotorSendsASeededPivotToTheWrongPlaceAndNotOneClosedOnItsEncoder() {
@@ -61,8 +65,8 @@ class EncoderLoopSimTest {
     JointsSimHarness closed = sim(CLOSED);
     for (JointsSimHarness each : new JointsSimHarness[] {seeded, closed}) {
       each.run(0.1);
-      // The joint's at 21.5°, still, and its motor's count reads where it rests, 1.5°.
-      each.simulation.powerOnAt(PIVOT, Math.toRadians(21.5));
+      // The joint's at 5.5°, still, and its motor's count reads where it rests, 1.5°.
+      each.simulation.powerOnAt(PIVOT, Math.toRadians(5.5));
       each.run(0.1);
     }
 
@@ -71,12 +75,55 @@ class EncoderLoopSimTest {
     closed.run(0.5);
 
     assertThat(wrong.arrived()).as("by its motor's count").isTrue();
-    assertThat(Math.toDegrees(seeded.simulation.position(PIVOT))).isCloseTo(130, within(2.0));
+    assertThat(Math.toDegrees(seeded.simulation.position(PIVOT))).isCloseTo(114, within(1.0));
     assertThat(right.arrived()).isTrue();
     assertThat(Math.toDegrees(closed.simulation.position(PIVOT))).isCloseTo(110, within(2.0));
     assertThat(closed.joints.of(PIVOT).position())
         .as("where it says it is, from its encoder")
         .isCloseTo(closed.simulation.position(PIVOT), within(Math.toRadians(0.5)));
+  }
+
+  /** An elevator's through-bore on port 2, geared nine to one down from its 1 in drum. */
+  private static final Joint.Prismatic ELEVATOR_SEEDED =
+      ELEVATOR
+          .absoluteEncoder(
+              Driven.AbsoluteEncoder.of()
+                  .ratio(1.0 / 9)
+                  .on(MechanismWiring.PortEncoder.dutyCycle(2).offset(Rotations.of(0.3))))
+          .retuned(old -> control(60, 2, profile(1.2, 5)));
+
+  /**
+   * An elevator's motor count slips 1.5 cm behind the carriage, inside the 2 cm they may disagree:
+   * told once where it was, the elevator is sent to clear, 0.4 m, by its motor's count, and stops
+   * 1.5 cm past it; closed on its encoder, geared to its drum, it stops at clear itself, holding
+   * its carriage's weight there, and knows it.
+   */
+  @Test
+  void aSlippedMotorSendsASeededElevatorPastItsPlaceAndNotOneClosedOnItsEncoder() {
+    JointsSimHarness seeded = sim(ELEVATOR_SEEDED);
+    JointsSimHarness closed =
+        sim(
+            ELEVATOR_SEEDED.encoderOn(
+                MechanismWiring.PortEncoder.dutyCycle(2).offset(Rotations.of(0.3)).closesLoop()));
+    for (JointsSimHarness each : new JointsSimHarness[] {seeded, closed}) {
+      each.run(0.1);
+      // The carriage is at 1.5 cm, still, and its motor's count reads where it rests, 0 m.
+      each.simulation.powerOnAt(ELEVATOR, 0.015);
+      each.run(0.1);
+    }
+
+    Move wrong = run(seeded, seeded.joints.of(ELEVATOR).goTo(ELEVATOR_CLEAR));
+    Move right = run(closed, closed.joints.of(ELEVATOR).goTo(ELEVATOR_CLEAR));
+    closed.run(1);
+
+    assertThat(wrong.arrived()).as("by its motor's count").isTrue();
+    assertThat(seeded.simulation.position(ELEVATOR)).isCloseTo(0.415, within(0.005));
+    assertThat(right.arrived()).isTrue();
+    assertThat(closed.simulation.position(ELEVATOR)).isCloseTo(0.4, within(0.01));
+    assertThat(closed.simulation.velocity(ELEVATOR)).isCloseTo(0, within(0.01));
+    assertThat(closed.joints.of(ELEVATOR).position())
+        .as("where it says it is, from its encoder")
+        .isCloseTo(closed.simulation.position(ELEVATOR), within(0.005));
   }
 
   /**

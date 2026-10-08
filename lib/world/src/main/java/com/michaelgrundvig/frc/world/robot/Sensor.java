@@ -4,6 +4,7 @@ import static com.michaelgrundvig.frc.world.config.Rules.between;
 import static com.michaelgrundvig.frc.world.config.Rules.given;
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 import static com.michaelgrundvig.frc.world.config.Rules.positive;
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.Degrees;
 
 import com.michaelgrundvig.frc.world.config.Checks;
@@ -88,12 +89,12 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
     }
 
     /**
-     * An absolute encoder on a revolute joint's axle, turning with it: {@code
-     * Sensor.Encoder.absolute("pivot absolute", PIVOT, 1024)}, a through-bore's.
+     * An absolute encoder on a revolute joint's axle, turning with it, of a resolution: what the
+     * model's own tests write. A team's goes in its joint's block, {@code .absoluteEncoder(...)}.
      *
      * @param countsPerTurn its resolution, from its datasheet: a CANcoder's 4096
      */
-    public static Encoder absolute(String label, Joint.Revolute joint, int countsPerTurn) {
+    static Encoder absolute(String label, Joint.Revolute joint, int countsPerTurn) {
       return builder()
           .label(label)
           .terms(List.of(Transmission.Term.builder().joint(joint).ratio(1).build()))
@@ -168,12 +169,13 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
 
     /**
      * A limit switch, or a hall sensor, at one end of a joint's travel: tripped with the joint at
-     * or past its position. Mounted on the joint's parent, where it's pressed.
+     * or past its position. Mounted on the joint's parent, where it's pressed. What a joint's block
+     * makes of its own ({@code .limitSwitch(End.LOWER, Degrees.of(0), ...)}), named for it.
      *
      * @param end which end of the joint's travel it marks
      * @param position where it trips, in the joint's units, if known: inside the joint's range
      */
-    public static Switch limit(String label, Joint joint, Limit.End end, double position) {
+    static Switch limit(String label, Joint joint, Limit.End end, double position) {
       return builder()
           .label(label)
           .part(joint.parent())
@@ -185,7 +187,7 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
      * A limit switch whose position isn't known: it can stop the joint, as a hard limit, but not
      * home it, since nothing says where the joint is when it trips.
      */
-    public static Switch limit(String label, Joint joint, Limit.End end) {
+    static Switch limit(String label, Joint joint, Limit.End end) {
       return builder()
           .label(label)
           .part(joint.parent())
@@ -268,7 +270,10 @@ public sealed interface Sensor permits Sensor.Encoder, Sensor.Placed {
                             || joint.range().isEmpty()
                             || joint.range().get().contains(position.get())
                         ? null
-                        : position.get() + " must be inside " + joint.label() + "'s range")
+                        : position.get()
+                            + " must be inside "
+                            + possessive(joint.label())
+                            + " range")
             .orThrow();
       }
 

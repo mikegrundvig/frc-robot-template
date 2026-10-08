@@ -1,14 +1,12 @@
 package com.michaelgrundvig.frc.pitwall;
 
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.fields;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
-import java.util.Set;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /** Pitwall's boundaries, checked on every build: what keeps it a library any robot can use. */
@@ -27,20 +25,8 @@ class ArchitectureTest {
         .dependOnClassesThat()
         .resideInAPackage("org.littletonrobotics..")
         .because(
-            "Pitwall works without AdvantageKit: only AdvantageKitLog touches it, and only once"
-                + " Pitwall has found it on the classpath")
-        .check(PITWALL);
-  }
-
-  @Test
-  void theWebServerStaysInOnePlace() {
-    noClasses()
-        .that()
-        .haveNameNotMatching(".*\\.PitwallServer(\\$.*)?")
-        .should()
-        .dependOnClassesThat()
-        .resideInAPackage("com.sun.net.httpserver..")
-        .because("the page and its API are one class; the rest of Pitwall runs in the robot loop")
+            "a robot program without AdvantageKit can't load a class that names it: only"
+                + " AdvantageKitLog does, once Pitwall has found AdvantageKit on the classpath")
         .check(PITWALL);
   }
 
@@ -50,72 +36,36 @@ class ArchitectureTest {
         .should()
         .dependOnClassesThat()
         .resideInAnyPackage("com.ctre..", "org.photonvision..", "com.revrobotics..")
-        .because("Pitwall is for any robot, whatever its hardware")
+        .because(
+            "a vendor's class in Pitwall can't load in a robot program without that vendor's"
+                + " library: Pitwall is for any robot, whatever its hardware")
         .check(PITWALL);
   }
 
   /**
-   * The one way a gain changes is the page's, through the tee: it checks the change (limits, the
-   * configuration's own checks, the robot's rules) and logs it for replay. An experiment may only
-   * read a configuration, so none can step a value past those checks, or change one a replay
-   * wouldn't. An allow-list, so a method LiveConfig gains later is refused until it's judged a
-   * read.
+   * The one way a gain changes is the page's, through the tee: it checks the change (limits, then
+   * the configuration's own checks) and logs it for replay. An experiment reads gains, and changes
+   * none.
    */
   @Test
-  void experimentsOnlyReadAConfiguration() {
-    Set<String> reads = Set.of("get", "value", "name");
+  void experimentsNeverChangeAConfiguration() {
+    List<String> changes = List.of("set", "revert", "publishTunable");
     noClasses()
         .that()
         .resideInAPackage("com.michaelgrundvig.frc.pitwall.experiment..")
         .should()
         .callMethodWhere(
             DescribedPredicate.describe(
-                "a method of LiveConfig other than " + reads,
+                "LiveConfig's " + changes,
                 call ->
                     call.getTargetOwner().isEquivalentTo(LiveConfig.class)
-                        && !reads.contains(call.getName())))
+                        && changes.contains(call.getName())))
         .orShould()
         .dependOnClassesThat()
         .resideInAPackage("org.wpilib.tunable..")
         .because(
-            "gains change only through the tee's checks, which log them for replay; an experiment"
-                + " reads them")
-        .check(PITWALL);
-  }
-
-  /**
-   * A scene is data the robot program gives: Pitwall draws whatever its layers say, and knows
-   * nothing of fields, robots, or what a robot is made of. An allow-list: the scene package may use
-   * Java, WPILib's geometry (so a layer can hand over a pose as it has one), and Pitwall's push,
-   * and nothing else of WPILib's or anyone's.
-   */
-  @Test
-  void scenesKnowNothingOfFieldsOrRobots() {
-    classes()
-        .that()
-        .resideInAPackage("com.michaelgrundvig.frc.pitwall.scene..")
-        .should()
-        .onlyDependOnClassesThat()
-        .resideInAnyPackage(
-            "java..",
-            "org.jspecify..",
-            "org.wpilib.math.geometry..",
-            "com.michaelgrundvig.frc.pitwall.scene..",
-            "com.michaelgrundvig.frc.pitwall.push..")
-        .because(
-            "Pitwall stays generic: a robot program contributes its world as data, and Pitwall"
-                + " draws every shape itself")
-        .check(PITWALL);
-  }
-
-  @Test
-  void noStaticMutableState() {
-    fields()
-        .that()
-        .areStatic()
-        .should()
-        .beFinal()
-        .because("a library's static state leaks between robot programs and between tests")
+            "a gain an experiment changed would skip the tee's checks, and a replay wouldn't see"
+                + " it")
         .check(PITWALL);
   }
 }

@@ -1,5 +1,7 @@
 package frc.robot.subsystems.vision;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
+
 import com.michaelgrundvig.frc.localization.CaptureContext;
 import com.michaelgrundvig.frc.localization.FrameVerdict;
 import com.michaelgrundvig.frc.localization.LocalizationEstimate;
@@ -249,7 +251,7 @@ public final class Vision implements AutoCloseable {
                         hold(
                             null,
                             place.name() + ": the alliance isn't known, so every tag is trusted")),
-        task.name() + " (trusting " + place.name() + "'s tags)");
+        task.name() + " (trusting " + possessive(place.name()) + " tags)");
   }
 
   /**

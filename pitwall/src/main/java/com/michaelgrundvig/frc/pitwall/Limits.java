@@ -16,9 +16,9 @@ import org.wpilib.tunable.TunableConfig;
  * "max"}), so anything that reads NetworkTables topic properties sees them. Pitwall enforces them
  * on every numeric tunable, from the page and from dashboards alike, before a value is applied:
  *
- * <pre>{@code
- * TunableDouble hold = TunableDouble.createConfig(0.0, Limits.between(0, 30).config());
- * }</pre>
+ * {@snippet :
+ * TunableDouble.createConfig(0.0, Limits.between(0, MAX_HOLD_SECONDS).config());
+ * }
  */
 public final class Limits {
   /** No limits: anything that's a number. */
@@ -70,11 +70,23 @@ public final class Limits {
    * @return null when it's within them
    */
   public @Nullable String whyNot(double value) {
+    return whyNot(value, "");
+  }
+
+  /**
+   * Why a value of a measure is outside these limits, each number with its unit: "130 A is above
+   * its limit of 120 A".
+   *
+   * @param unit the measure's unit symbol, as the value is given in: empty for a plain number
+   * @return null when it's within them
+   */
+  public @Nullable String whyNot(double value, String unit) {
+    String in = unit.isEmpty() ? "" : " " + unit;
     if (value < min) {
-      return shown(value) + " is below its limit of " + shown(min);
+      return shown(value) + in + " is below its limit of " + shown(min) + in;
     }
     if (value > max) {
-      return shown(value) + " is above its limit of " + shown(max);
+      return shown(value) + in + " is above its limit of " + shown(max) + in;
     }
     return null;
   }

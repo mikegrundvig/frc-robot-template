@@ -19,7 +19,9 @@ import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
+import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.SwerveWiring;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +29,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
@@ -42,6 +45,7 @@ import org.wpilib.math.kinematics.SwerveDriveKinematics;
 import org.wpilib.math.kinematics.SwerveModulePosition;
 import org.wpilib.math.kinematics.SwerveModuleVelocity;
 import org.wpilib.math.util.MathUtil;
+import org.wpilib.units.measure.LinearVelocity;
 import org.wpilib.util.Alert;
 
 /**
@@ -128,11 +132,43 @@ public class Drive implements Mechanism, AutoCloseable {
   private double heldSteerRadians;
 
   /**
+   * Why the template can't drive a drivetrain wired this way, or null when it can: its modules are
+   * TalonFXs driving and steering, or SPARKs doing both ({@link PhoenixDrivetrain}), so far. What
+   * the wiring itself can't do, a controller that doesn't drive its motor, its definition refuses.
+   */
+  public static @Nullable String whyNotDriven(SwerveWiring wiring) {
+    MechanismWiring.Controller drive = wiring.driveController();
+    MechanismWiring.Controller steer = wiring.steerController();
+    boolean talons =
+        drive == MechanismWiring.Controller.TALON_FX
+            && steer == MechanismWiring.Controller.TALON_FX;
+    boolean sparks = spark(drive) && spark(steer);
+    return talons || sparks
+        ? null
+        : "the drivetrain drives on "
+            + drive.shown()
+            + " and steers on "
+            + steer.shown()
+            + ", and the template's modules are TalonFXs or SPARKs, doing both, so far: put both on"
+            + " TalonFXs, or both on SPARKs";
+  }
+
+  private static boolean spark(MechanismWiring.Controller controller) {
+    return controller == MechanismWiring.Controller.SPARK_MAX
+        || controller == MechanismWiring.Controller.SPARK_FLEX;
+  }
+
+  /**
    * The drivetrain's configuration as the pit tunes it: its gains and limits, each within the range
    * that's safe to dial in on a running robot (a range narrower than what's valid). Publish it, and
    * give the drivetrain its {@link LiveConfig#get}.
+   *
+   * @param committed its gains and limits, as its block in {@code Robots.java} commits them
+   * @param freeSpeed the fastest its motors and gearing can turn its wheels, which its top speed is
+   *     never tuned past: velocity control needs room under it to correct with
    */
-  public static LiveConfig<DrivetrainControl> tuning(DrivetrainControl committed) {
+  public static LiveConfig<DrivetrainControl> tuning(
+      DrivetrainControl committed, LinearVelocity freeSpeed) {
     return LiveConfig.of("drivetrain", committed)
         .number("gains.driveKs", Limits.between(0, 1)) // volts
         .number("gains.driveKv", Limits.between(0, 5)) // volts per meter per second
@@ -148,7 +184,7 @@ public class Drive implements Mechanism, AutoCloseable {
         .measure("limits.driveSupplyLowerCurrent", Amps.of(10), Amps.of(40))
         .measure("limits.driveSupplyLowerTime", Seconds.of(0.1), Seconds.of(1))
         .measure("limits.steerStatorCurrent", Amps.of(5), Amps.of(80))
-        .measure("limits.maxLinearSpeed", MetersPerSecond.of(0.5), MetersPerSecond.of(6))
+        .measure("limits.maxLinearSpeed", MetersPerSecond.of(0.5), freeSpeed)
         .measure("limits.maxAngularSpeed", RotationsPerSecond.of(0.1), RotationsPerSecond.of(3));
   }
 
@@ -410,17 +446,13 @@ public class Drive implements Mechanism, AutoCloseable {
   /**
    * Drives a smooth path from where it is through keyframes, stopping at the last, under the
    * robot's own accelerations, turning to each keyframe's heading after it passes the one before:
-   * ARRIVED at the last within 2 cm and 2°, nearly still, for 40 ms. {@link DriveMove#at} opens as
-   * it passes a named one.
+   * ARRIVED at the last within 2 cm and 2°, nearly still, for 40 ms. {@link DriveMove#passed} opens
+   * as it passes a named one.
    *
-   * {@snippet :
-   * DriveMove leg = drive.follow(
-   *     Keyframe.at(new Pose2d(3, 1, Rotation2d.ZERO)),
-   *     Keyframe.at(new Pose2d(5, 2, Rotation2d.CCW_90DEG)).named("pickup"),
-   *     Keyframe.at(new Pose2d(7, 2, Rotation2d.PI)));
-   * }
+   * {@snippet class=frc.robot.examples.PickUp region=path}
    *
-   * @throws IllegalArgumentException with no keyframes, or two of one name
+   * @throws IllegalArgumentException with no keyframes, or two of one name, as the robot starts;
+   *     once it runs, such a path ends REFUSED as it starts, saying why
    */
   public DriveMove follow(Keyframe... keyframes) {
     return DriveMove.follow(this, List.of(keyframes));

@@ -7,7 +7,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
@@ -47,9 +46,7 @@ import org.wpilib.tunable.util.PathUtil;
  *
  * <p>A {@link LiveConfig}'s values are checked whole: before a change to one applies, the
  * configuration says whether it would take it (its limits, then its records' own checks), and a
- * page's changes to several of its values apply together, as one rebuild. Then the {@link
- * ConfigRules} the change touches run, against every configuration as the change would leave them,
- * so values of different mechanisms valid only together can change together. Nothing applies unless
+ * page's changes to several of its values apply together, as one rebuild. Nothing applies unless
  * everything passes, and a refusal gives every reason. {@link Tuning} puts them back as committed
  * when the field connects.
  *
@@ -429,9 +426,9 @@ public final class TunableTee implements TunableBackend {
   /**
    * The page's changes, all or none. Everything is checked before anything applies: each value (a
    * tunable the page can change, its type, and its limits), then each configuration it changes,
-   * rebuilt with all of its new values, then the robot's rules the change touches. A refusal gives
-   * every reason, one per line, each tied to the values it concerns. Then each is applied, and if a
-   * tunable's own setter throws, the ones already applied are put back.
+   * rebuilt with all of its new values. A refusal gives every reason, one per line, each tied to
+   * the values it concerns. Then each is applied, and if a tunable's own setter throws, the ones
+   * already applied are put back.
    */
   private Outcome applyFromPage(Map<String, Object> values) {
     String why = whyLocked.get();
@@ -485,7 +482,6 @@ public final class TunableTee implements TunableBackend {
     if (!problems.isEmpty()) {
       return Outcome.refused(problems);
     }
-    Map<LiveConfig<?>, Record> candidates = new IdentityHashMap<>();
     for (Map.Entry<LiveConfig<?>, Map<String, Double>> group : configured.entrySet()) {
       LiveConfig<?> config = group.getKey();
       List<LiveConfig.Problem> refused = new ArrayList<>();
@@ -504,7 +500,6 @@ public final class TunableTee implements TunableBackend {
         }
         continue;
       }
-      candidates.put(config, candidate);
       Record old = config.get();
       Map<String, Double> oldValues = new LinkedHashMap<>();
       group.getValue().keySet().forEach(field -> oldValues.put(field, config.value(field)));
@@ -525,9 +520,6 @@ public final class TunableTee implements TunableBackend {
                 oldValues.forEach(
                     (field, v) -> appliedToConfig(paths.get(field), Double.toString(v)));
               }));
-    }
-    if (problems.isEmpty()) {
-      problems.addAll(brokenRules(configured, candidates));
     }
     if (!problems.isEmpty()) {
       return Outcome.refused(problems);
@@ -560,44 +552,6 @@ public final class TunableTee implements TunableBackend {
       }
     }
     return Outcome.applied();
-  }
-
-  /**
-   * Why a change breaks the rules across configurations it touches: each registry of rules that
-   * reads a configuration the change sets, asked once, with every candidate. Each reason names
-   * every value its rule reads.
-   */
-  private List<Outcome.Reason> brokenRules(
-      Map<LiveConfig<?>, Map<String, Double>> configured, Map<LiveConfig<?>, Record> candidates) {
-    List<ConfigRules> registries = new ArrayList<>();
-    for (LiveConfig<?> config : configured.keySet()) {
-      for (ConfigRules registry : config.rules()) {
-        if (registries.stream().noneMatch(known -> known == registry)) {
-          registries.add(registry);
-        }
-      }
-    }
-    Map<LiveConfig<?>, Set<String>> changes = new IdentityHashMap<>();
-    configured.forEach((config, values) -> changes.put(config, values.keySet()));
-    List<Outcome.Reason> broken = new ArrayList<>();
-    for (ConfigRules registry : registries) {
-      for (ConfigRules.Broken rule : registry.broken(changes, candidates)) {
-        List<String> paths = new ArrayList<>();
-        rule.reads()
-            .forEach(
-                (config, fields) ->
-                    paths.addAll(
-                        pathsOf(
-                            config,
-                            fields.isEmpty()
-                                ? config.knobs().stream().map(LiveConfig.Knob::path).toList()
-                                : fields.stream().sorted().toList())));
-        broken.add(
-            new Outcome.Reason(
-                Outcome.Layer.RULE, rule.rule(), paths, "", "", rule.text(), rule.line()));
-      }
-    }
-    return broken;
   }
 
   /** Where a configuration's values are published, those that are, in the order given. */
@@ -676,9 +630,7 @@ public final class TunableTee implements TunableBackend {
 
   /**
    * Applies one update's logged changes during a replay, as the robot applied them: a
-   * configuration's values together, the rest one by one. The records still check a configuration's
-   * values, but the rules across configurations aren't run again: they judged the change when it
-   * was made, and the log says what was applied.
+   * configuration's values together, through its records' checks, the rest one by one.
    */
   private void applyLogged(String[] paths, String[] texts) {
     Map<LiveConfig<?>, Map<String, Double>> configured = new IdentityHashMap<>();

@@ -18,7 +18,6 @@ import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
-import frc.robot.subsystems.drive.Drive;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
@@ -58,7 +57,7 @@ class PitwallRobotTest {
   void setUp() {
     pitwall = Pitwall.start(Robots.SIM.name(), 0);
     // The drivetrain's tuning, published as the robot program publishes it.
-    drivetrain = Drive.tuning(Robots.SIM.drivetrain());
+    drivetrain = RobotContainer.tunings(Robots.SIM).drivetrain();
     TunableRegistry.publish("Drive/config", drivetrain);
   }
 

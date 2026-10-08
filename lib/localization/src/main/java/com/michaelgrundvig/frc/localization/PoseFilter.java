@@ -392,9 +392,9 @@ final class PoseFilter {
    * @param camera which camera, from 0 to {@link #MAX_CAMERAS} - 1, whose turn and shifts it shares
    *     with the camera's other images; -1 for one without a place, whose turn and shifts are taken
    *     as new in each image
-   * @param tags each of its tags' place, from 0 to {@link #tags()} - 1, in the order of its {@link
-   *     VisionMeasurement#tagIds}: the placement it shares with every image of the tag; -1 for one
-   *     without a place, whose placement is taken as new in each image
+   * @param tags each of its tags' place, as the filter was made to keep them apart, in the order of
+   *     its {@link VisionMeasurement#tagIds}: the placement it shares with every image of the tag;
+   *     -1 for one without a place, whose placement is taken as new in each image
    * @return null if its uncertainty and the estimate's together are degenerate
    */
   @Nullable Innovation innovation(
@@ -667,11 +667,6 @@ final class PoseFilter {
   /** How many errors it considers: the IMUs' scales, each camera's four, and each tag's two. */
   int considered() {
     return considered;
-  }
-
-  /** How many tags' placement it keeps apart. */
-  int tags() {
-    return tags;
   }
 
   /**

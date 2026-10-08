@@ -135,8 +135,8 @@ tasks.named("test") {
             .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file("layouts/advantagescope.json").withPropertyName("advantageScopeLayout")
             .withPathSensitivity(PathSensitivity.RELATIVE)
-    // The documentation's examples of code (DocExamplesTest): the guides, and the Javadoc of the
-    // sources, whose comments the compiled classes don't carry.
+    // The guides' examples of code (DocExamplesTest): the guides, and the sources they're found in,
+    // read as text.
     inputs.files(fileTree("docs") { include "**/*.md" }, "README.md", "AGENTS.md")
     .withPropertyName("guides").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(fileTree("src") { include "*/java/**/*.java" }, fileTree("lib") { include "*/src/*/java/**/*.java" })
@@ -163,20 +163,40 @@ tasks.named("jacocoTestReport") {
     executionData.from(fileTree(layout.buildDirectory.dir("jacoco")) { include "end-to-end.exec" })
 }
 
-// A copy of the source travels with every deploy, so the code on a robot can always be recovered:
-// the robot program's, and the libraries' and Pitwall's that it's built with.
+// A copy of the source travels with every deploy, so the code on a robot can always be recovered
+// and built again, checks and deploy and all: the robot program's code, and the libraries' and
+// Pitwall's it's built with; the build itself (its files and plugins, the version catalog and
+// checksums, the Gradle wrapper); what its checks read (the guides with the values register, the
+// dashboard layouts, the coverage floor); the simulator GUI's defaults; and the team number deploy
+// reads. Not AdvantageScope's assets, which the build writes again from Robots.java.
 tasks.named("jar") {
-    from("src") { into "backup/src" }
-    from("vendordeps") { into "backup/vendordeps" }
-    from("lib") {
-        exclude "**/build/**"
-        into "backup/lib"
+    [
+        "src",
+        "vendordeps",
+        "lib",
+        "pitwall",
+        "build-logic",
+        "gradle",
+        "docs",
+        "layouts",
+        "sim",
+        ".wpilib"
+    ].each { dir ->
+        from(dir) {
+            exclude "**/build/**", "**/.gradle/**"
+            into "backup/${dir}"
+        }
     }
-    from("pitwall") {
-        exclude "**/build/**"
-        into "backup/pitwall"
-    }
-    from("settings.gradle") { into "backup" }
+    from([
+        "settings.gradle",
+        "build.gradle",
+        "gradle.properties",
+        "gradlew",
+        "gradlew.bat",
+        "coverage-floor.properties",
+        "README.md",
+        "AGENTS.md"
+    ]) { into "backup" }
 }
 
 tasks.withType(JavaCompile).configureEach {

@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -65,7 +66,6 @@ public final class Broadcaster implements AutoCloseable {
   private final List<Stream> streams = new CopyOnWriteArrayList<>();
 
   private final List<Stream> waiting = new CopyOnWriteArrayList<>();
-  private int opened;
   private boolean closed;
 
   /** The run whose samples are being sent, and how many of each signal's have been. */
@@ -136,8 +136,9 @@ public final class Broadcaster implements AutoCloseable {
           .min(Comparator.comparingLong(Stream::wroteNanos))
           .ifPresent(stalest -> stalest.close("another page needed its place"));
     }
-    opened++;
-    Stream stream = new Stream(Integer.toString(opened), mailbox, this::closed);
+    // Random, so no other page can guess it: a stream's id is what lets a request speak for its
+    // page (keep a run going, drive a joystick, close the stream it replaces).
+    Stream stream = new Stream(UUID.randomUUID().toString(), mailbox, this::closed);
     stream.show(views);
     waiting.add(stream);
     return Optional.of(stream);

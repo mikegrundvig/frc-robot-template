@@ -24,7 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 class SwitchDoubtsSimTest {
   /** The pivot's bottom switch, tripping at 30°: the pivot rests below it, at 1.5°. */
   private static final Sensor.Switch PIVOT_DOWN =
-      Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER, Math.toRadians(30));
+      JointFixtures.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER, Math.toRadians(30));
 
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(JointFixtures.ROBOT).sensors(List.of(PIVOT_DOWN)).build();

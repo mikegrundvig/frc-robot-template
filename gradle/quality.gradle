@@ -11,11 +11,10 @@
 def quick = project.hasProperty("quick")
 def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
 
-// NullAway checks the project's own packages: the robot program's, unless a project (such as a
-// library) sets ext.nullSafePackages before applying this file. The libraries in lib/ also mark
-// every package @NullMarked (in its package-info), so a project that reads one trusts its @Nullable
-// as its own: a library's null can't reach the robot program unchecked.
-def nullSafePackages = project.findProperty("nullSafePackages") ?: "frc.robot"
+// NullAway checks the robot program's packages and the template's own libraries' (the world model,
+// localization, the simulation, Pitwall) in every project, so a project that reads another trusts
+// its @Nullable as its own: a library's null can't reach the robot program unchecked.
+def nullSafePackages = "frc.robot,com.michaelgrundvig.frc"
 gradle.taskGraph.whenReady { graph ->
     if (quick && graph.allTasks.any { it.name == "ci" }) {
         throw new GradleException("-Pquick skips quality gates; run ci without it")
@@ -37,17 +36,38 @@ tasks.withType(JavaCompile).configureEach {
     // Error Prone (Google's bug finder) at error level only: its warnings are style advice, worth
     // reading in review, never worth failing a build over. NullAway (Uber's null checker) proves at
     // compile time that nothing can be null unless it is annotated @Nullable (org.jspecify).
+    // MutablePublicArray: a public static final array's elements can still be changed by anyone, so
+    // what ran before changes what runs next; share a List.of instead.
     options.errorprone {
         enabled = !quick
         disableAllWarnings = true
         disableWarningsInGeneratedCode = true
         excludedPaths = ".*/build/.*"
         errorproneArgs.addAll([
+            "-Xep:MutablePublicArray:ERROR",
             "-Xep:NullAway:ERROR",
             "-XepOpt:NullAway:AnnotatedPackages=" + nullSafePackages,
             "-XepOpt:NullAway:TreatGeneratedAsUnannotated=true",
         ])
     }
+}
+
+// Javadoc's examples are compiled code: {@snippet class=... region=...} shows a region of a source
+// marked // @start region=... and // @end, found on these paths, and javadoc fails, naming it, on a
+// class or region that isn't there. The guide's examples (the robot program's
+// src/test/java/frc/robot/examples) serve every project's Javadoc. ci builds it, so a renamed
+// example fails the build. Its comments are checked as the compiler checks them: references only.
+tasks.named("javadoc", Javadoc) {
+    def snippets = [
+        file("src/main/java"),
+        file("src/test/java"),
+        rootProject.file("src/test/java")
+    ]
+    .unique().findAll { it.directory }
+    inputs.files(snippets).withPropertyName("snippets").withPathSensitivity(PathSensitivity.RELATIVE)
+    options.addStringOption("-snippet-path", snippets.join(File.pathSeparator))
+    options.addBooleanOption("Xdoclint:reference", true)
+    options.quiet()
 }
 
 // Tests produce a coverage report (JaCoCo), except in quick mode, which runs them without JaCoCo's
@@ -128,7 +148,7 @@ if (testsNamed && project == rootProject) {
 }
 
 jacoco {
-    toolVersion = "0.8.15"
+    toolVersion = libs.versions.jacoco.get()
 }
 tasks.named("jacocoTestReport") {
     dependsOn "test"
@@ -258,21 +278,22 @@ spotless {
     java {
         target "src/**/*.java", "build-logic/src/**/*.java"
         toggleOffOn()
-        googleJavaFormat()
-        removeUnusedImports()
+        // It removes unused imports itself: Spotless's removeUnusedImports() step would run its own
+        // version of google-java-format, not the catalog's.
+        googleJavaFormat(libs.versions.google.java.format.get())
         trimTrailingWhitespace()
         endWithNewline()
     }
     groovyGradle {
         target "*.gradle", "gradle/*.gradle", "build-logic/*.gradle"
-        greclipse()
+        greclipse(libs.versions.greclipse.get())
         leadingTabsToSpaces(4)
         trimTrailingWhitespace()
         endWithNewline()
     }
     json {
         target "vendordeps/*.json", "sim/*.json"
-        gson().indentWithSpaces(2)
+        gson().version(libs.versions.gson.get()).indentWithSpaces(2)
     }
 }
 
@@ -280,7 +301,7 @@ spotless {
 tasks.register("ci") {
     group = "verification"
     description = "Run every check CI runs: formatting, the gated build and tests, coverage."
-    dependsOn "spotlessCheck", "build"
+    dependsOn "spotlessCheck", "build", "javadoc"
     // From the top of the build, every project's checks, and the build's own plugins' (build-logic/)
     // while the build uses one of them: removing a plugin's line drops its tests too.
     dependsOn project.subprojects.collect { it.path + ":ci" }

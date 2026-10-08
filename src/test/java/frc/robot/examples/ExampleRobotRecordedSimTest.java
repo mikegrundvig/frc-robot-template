@@ -21,10 +21,13 @@ import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Rotations;
 
+import com.michaelgrundvig.frc.world.robot.DrivenBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Joint;
+import com.michaelgrundvig.frc.world.robot.MechanismControl.Homing;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.GoldenFile;
 import frc.robot.RobotConfig;
 import frc.robot.RobotSim;
@@ -35,31 +38,35 @@ import frc.robot.subsystems.mechanisms.Joints;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The guide's robot, recorded ({@code JointRecordings}): what its motor controllers are told, the
- * competition robot's and the practice robot's, its arm's CANcoder fused, and its pivot, arm,
- * elevator and shooter on SPARKs; and a session in the simulator, its elevator homing on a hard
- * stop. Both must come out as recorded: a change meant to change neither is shown to change
- * nothing. When a change is meant to move them, record them again with {@code GOLDEN_UPDATE=1} and
- * say why they moved (docs/testing.md).
+ * competition robot's and the practice robot's, its arm's and its elevator's CANcoders fused, and
+ * its pivot, arm, elevator and shooter on SPARKs; and a session in the simulator, its elevator
+ * without its encoder, homing on a hard stop. Both must come out as recorded: a change meant to
+ * change neither is shown to change nothing. When a change is meant to move them, record them again
+ * with {@code GOLDEN_UPDATE=1} and say why they moved (docs/testing.md).
  */
 @SimulationTest
 @ExtendWith(RobotSim.class)
 class ExampleRobotRecordedSimTest {
-  /** Its arm's loop closed on its CANcoder, fused. */
+  /** Its arm's and its elevator's loops closed on their CANcoders, fused. */
   private static RobotDefinition fused() {
     return ExampleRobot.COMPETITION
         .definition()
-        .with(ARM.encoderOn(CANCODER.can(23).offset(Rotations.of(0.12)).fused()));
+        .with(
+            ARM.encoderOn(CANCODER.can(23).offset(Rotations.of(0.12)).fused()),
+            ELEVATOR.encoderOn(CANCODER.can(24).offset(Rotations.of(0.31)).fused()));
   }
 
   /**
    * Its pivot on a NEO with its encoder on the SPARK's data port, its loop closed on it; its arm on
    * a NEO, read once from the data port, its weight pulling hardest a quarter turn back, which the
-   * robot works out each loop; its elevator and shooter on two Vortexes each.
+   * robot works out each loop; its elevator on two Vortexes, its loop closed on its encoder on the
+   * data port, geared to its drum; and its shooter on two Vortexes.
    */
   private static RobotDefinition sparks() {
     Joint.Revolute pivot =
@@ -77,7 +84,8 @@ class ExampleRobotRecordedSimTest {
                 Gearing.of(5),
                 Inches.of(0.75),
                 SPARK_FLEX.can(20),
-                SPARK_FLEX.can(21).clockwise());
+                SPARK_FLEX.can(21).clockwise())
+            .encoderOn(DATA_PORT.offset(Rotations.of(0.31)).closesLoop());
     Joint.Revolute shooter =
         unmotored(SHOOTER)
             .motors(
@@ -100,13 +108,20 @@ class ExampleRobotRecordedSimTest {
   }
 
   /**
-   * The elevator homes on its lower stop as the robot enables; the robot stows, intakes (its roller
-   * held until the pivot is out), raises its elevator clear and its arm to score, spins its shooter
-   * and feeds, then stows again and disables: 8 s.
+   * The elevator, its encoder taken out, homes on its lower stop as the robot enables, so a homing
+   * is recorded; the robot stows, intakes (its roller held until the pivot is out), raises its
+   * elevator clear and its arm to score, spins its shooter and feeds, then stows again and
+   * disables: 8 s.
    */
   @Test
   void itsSessionIsAsRecorded() throws IOException {
-    RobotDefinition robot = ExampleRobot.COMPETITION.definition();
+    Joint.Prismatic homing =
+        ELEVATOR
+            .driven(
+                DrivenBuilder.builder(ELEVATOR.driven()).absoluteEncoder(Optional.empty()).build())
+            .retuned(
+                control -> control.withHoming(Homing.toHardStop(Sensor.Switch.Limit.End.LOWER)));
+    RobotDefinition robot = ExampleRobot.COMPETITION.definition().with(homing);
     List<Joint> joints = Joints.driven(robot);
     JointsSimHarness sim = new JointsSimHarness(robot);
     JointRecordings.Session session = new JointRecordings.Session(sim, joints);

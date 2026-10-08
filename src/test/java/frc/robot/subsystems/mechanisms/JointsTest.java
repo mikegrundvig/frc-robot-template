@@ -1,6 +1,5 @@
 package frc.robot.subsystems.mechanisms;
 
-import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_FLEX;
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_MAX;
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FXS;
@@ -166,8 +165,6 @@ class JointsTest {
             .motors(Motor.KRAKEN_X60, JointFixtures.gearing(25), 2)
             .retuned(c -> lowering);
 
-    assertThat(ControllerSettings.standIn(Motor.NEO_VORTEX)).isEqualTo(SPARK_FLEX);
-    assertThat(ControllerSettings.standIn(Motor.MINION)).isEqualTo(TALON_FXS);
     assertThat(ControllerSettings.findings(ROBOT.with(onNeos).math(), onNeos))
         .noneMatch(finding -> finding.level() == Finding.Level.REFUSED);
     assertThat(ControllerSettings.findings(ROBOT.with(onKrakens).math(), onKrakens))

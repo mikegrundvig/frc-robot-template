@@ -12,9 +12,7 @@ import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
@@ -38,48 +36,9 @@ public record DrivetrainControl(Limits limits, Gains gains) {
   }
 
   /**
-   * Why a drivetrain's wiring can't drive its modules, or null when it can: a controller that
-   * doesn't drive the definition's motor (a NEO on a TalonFX, say), or SPARKs on a CANivore, where
-   * a SPARK can't be.
-   */
-  public static @Nullable String whyNotDriven(DrivetrainGeometry drivetrain, SwerveWiring wiring) {
-    Set<String> problems = new LinkedHashSet<>();
-    for (DrivetrainGeometry.Corner corner : drivetrain.corners()) {
-      DrivetrainGeometry.ModuleType module = corner.module();
-      if (!wiring.driveController().drives(module.driveMotor())) {
-        problems.add(
-            "its drive's "
-                + module.driveMotor().name()
-                + " isn't driven by "
-                + wiring.driveController().shown());
-      }
-      if (!wiring.steerController().drives(module.steerMotor())) {
-        problems.add(
-            "its steering's "
-                + module.steerMotor().name()
-                + " isn't driven by "
-                + wiring.steerController().shown());
-      }
-    }
-    boolean sparks =
-        wiring.driveController() != MechanismWiring.Controller.TALON_FX
-            || wiring.steerController() != MechanismWiring.Controller.TALON_FX;
-    if (sparks && !(wiring.canBus() instanceof CanBus.Port)) {
-      problems.add("its SPARKs are on a CANivore, and a SPARK is on Systemcore's own CAN");
-    }
-    if ((wiring.driveController() == MechanismWiring.Controller.TALON_FX)
-        != (wiring.steerController() == MechanismWiring.Controller.TALON_FX)) {
-      problems.add(
-          "its drive and steering are on different makers' controllers, which the template's"
-              + " modules aren't yet");
-    }
-    return problems.isEmpty() ? null : "the drivetrain's wiring: " + String.join("; ", problems);
-  }
-
-  /**
    * Why the top speed asked for is past what this drivetrain can reach, or null when it isn't:
    * velocity control needs room under the free speed to correct with. The robot's definition checks
-   * it as committed, and the robot's rules ({@code RobotRules}) as the pit tunes it.
+   * it as committed, and the drivetrain's tuning limits end at it as the pit tunes it.
    */
   public @Nullable String whyTooFastFor(DrivetrainGeometry drivetrain) {
     LinearVelocity freeSpeed = drivetrain.freeSpeed();
@@ -87,7 +46,8 @@ public record DrivetrainControl(Limits limits, Gains gains) {
         ? null
         : shown(limits.maxLinearSpeed())
             + " is faster than the drivetrain's free speed of "
-            + shown(freeSpeed);
+            + shown(freeSpeed)
+            + ": give maxLinearSpeed at most that";
   }
 
   /**

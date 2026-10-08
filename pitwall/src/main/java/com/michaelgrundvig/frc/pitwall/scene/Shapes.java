@@ -6,9 +6,9 @@ package com.michaelgrundvig.frc.pitwall.scene;
  * SceneState#shapes()}), which replace the last of them whole. Each method adds the shape and
  * returns it to set up:
  *
- * <pre>{@code
- * scene.box("frame", "robot").size(0.7, 0.7, 0.3).at(0, 0, 0.15).style(Style.ACCENT);
- * }</pre>
+ * {@snippet :
+ * scene.box("chassis", "robot").size(0.7, 0.6, 0.2).at(0, 0, 0.1).style(Style.ACCENT);
+ * }
  *
  * <p>Each shape names its id, unique in its scene, and the frame it's in, which must be one the
  * scene has. See {@link Shape} for each kind.

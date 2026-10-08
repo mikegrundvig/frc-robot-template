@@ -126,7 +126,7 @@ class LiveConfigTest {
         .isThrownBy(() -> live.candidate(values))
         .withMessage(
             "machine: drive.gains.kP: -1 is below its limit of 0\n"
-                + "machine: drive.limits.current: 500 is above its limit of 80\n"
+                + "machine: drive.limits.current: 500 A is above its limit of 80 A\n"
                 + "machine: travel.middle isn't tunable");
   }
 

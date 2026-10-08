@@ -16,10 +16,11 @@ import org.jspecify.annotations.Nullable;
  * ({@code pitwall/docs-processor}) writes it into the robot program as it compiles, one resource
  * per record, so the page needs no source on the robot:
  *
- * <pre>{@code
- * ParameterDocs.of(SwerveConfig.Gains.class).summary() // "Drive: velocity control on the ..."
- * ParameterDocs.of(SwerveConfig.Gains.class).params().get("steerKp") // "volts per radian of error"
- * }</pre>
+ * {@snippet :
+ * ParameterDocs gains = ParameterDocs.of(DrivetrainControl.Gains.class);
+ * gains.summary() // its Javadoc's first sentence
+ * gains.params().get("steerKp") // "volts per radian of error"
+ * }
  *
  * <p>A tunable value's meaning comes through {@link LiveConfig#meaning}, which knows the record
  * that declares the value.
@@ -41,7 +42,7 @@ public record ParameterDocs(String summary, String text, Map<String, String> par
 
   /**
    * Where the processor writes each record's documentation: then its binary name and ".json"
-   * ({@code SwerveConfig$Gains.json}).
+   * ({@code DrivetrainControl$Gains.json}).
    */
   static final String FOLDER = "META-INF/pitwall/docs/";
 
@@ -67,7 +68,7 @@ public record ParameterDocs(String summary, String text, Map<String, String> par
 
   /**
    * A record's display name: as code in its package writes it, nested records with their outer ones
-   * ({@code SwerveConfig.Gains}), and a record declared in a method with its class ({@code
+   * ({@code DrivetrainControl.Gains}), and a record declared in a method with its class ({@code
    * Robot.Setup}). The page names records so, to say whose Javadoc to write.
    */
   public static String nameOf(Class<?> record) {

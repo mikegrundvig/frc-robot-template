@@ -1,6 +1,7 @@
 package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
@@ -66,6 +67,44 @@ class LoopHealthTest {
     loop(20, 5, false);
 
     assertThat(health.isLoggingBehindAlertActive()).isTrue();
+  }
+
+  /** A loop whose commands threw, on a robot. */
+  private void failingLoop(long startMs, RuntimeException thrown) {
+    health.start(startMs * MS);
+    health.threw(thrown);
+    health.monitor().mark("Commands", (startMs + 1) * MS);
+    health.finish((startMs + 1) * MS, false);
+  }
+
+  /**
+   * Each place commands threw from is reported once, and the alert stays raised. A loop that runs
+   * starts the count again; in {@value LoopHealth#FAILING_LOOPS} failing loops in a row, the last
+   * rethrows what it was told, so the program ends.
+   */
+  @Test
+  void commandsThatThrowAreReportedOnceEachAndTooManyLoopsInARowEndTheProgram() {
+    RuntimeException broken = new IllegalStateException("broken");
+    RuntimeException other = new IllegalArgumentException();
+    failingLoop(0, broken);
+    failingLoop(20, broken);
+    failingLoop(40, other);
+    loop(60, 1, false);
+    loop(80, 1, false);
+    boolean raised = health.isThrewAlertActive();
+    for (int i = 1; i < LoopHealth.FAILING_LOOPS; i++) {
+      failingLoop(80 + 20L * i, broken);
+    }
+
+    assertThatThrownBy(() -> failingLoop(1000, broken)).isSameAs(broken);
+    assertThat(raised).as("raised for the session").isTrue();
+    assertThat(health.threwAlertText())
+        .startsWith(
+            "Commands threw, and the robot carried on without them: IllegalStateException: broken,"
+                + " at frc.robot.LoopHealthTest.")
+        .containsOnlyOnce("IllegalStateException")
+        .contains("; IllegalArgumentException, at frc.robot.LoopHealthTest.")
+        .endsWith(". Fix the code: the stack is in the Driver Station's log");
   }
 
   @Test

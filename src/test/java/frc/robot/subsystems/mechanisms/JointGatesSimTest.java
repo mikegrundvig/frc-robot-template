@@ -12,6 +12,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.ROLLER_OUTTAKING;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.RPM;
 
 import frc.robot.RobotSim;
 import frc.robot.behavior.Gate;
@@ -48,20 +49,44 @@ class JointGatesSimTest {
     assertThat(seen).containsExactly(false, true, true, false, true);
   }
 
+  /**
+   * A gate on where the model says a joint is reads what it measures: between two of its places,
+   * from one on, or at one within its band, as {@code isAt} is. Named as the condition reads, or as
+   * the code names it.
+   */
   @Test
-  void isPastAndIsBetweenReadWhereTheJointIs() {
-    Gate past = pivot.isPast(PIVOT_RUN);
-    Gate between = pivot.isBetween(PIVOT_RUN, PIVOT_OUT);
+  void aGateOnWhereAJointIsReadsWhereItIs() {
+    Gate between = sim.joints.gate(PIVOT.between(PIVOT_RUN, PIVOT_OUT));
+    Gate out = sim.joints.gate("intake out", PIVOT.atLeast(PIVOT_RUN));
+    Gate atOut = sim.joints.gate(PIVOT.at(PIVOT_OUT));
     sim.loop();
-    boolean[] stowed = {past.getAsBoolean(), between.getAsBoolean()};
+    boolean[] stowed = {between.getAsBoolean(), out.getAsBoolean(), atOut.getAsBoolean()};
 
-    boolean[] at120 = {at(past, 120), between.getAsBoolean()};
-    boolean[] at60 = {at(past, 60), between.getAsBoolean()};
+    boolean[] at120 = {at(between, 120), out.getAsBoolean(), atOut.getAsBoolean()};
+    boolean[] at129 = {at(between, 129), out.getAsBoolean(), atOut.getAsBoolean()};
+    boolean[] at60 = {at(between, 60), out.getAsBoolean(), atOut.getAsBoolean()};
 
-    assertThat(stowed).containsExactly(false, false);
-    assertThat(at120).containsExactly(true, true);
-    assertThat(at60).containsExactly(false, false);
+    assertThat(stowed).containsExactly(false, false, false);
+    assertThat(at120).containsExactly(true, true, false);
+    assertThat(at129).as("within 2° of out").containsExactly(true, true, true);
+    assertThat(at60).containsExactly(false, false, false);
     assertThat(between.name()).isEqualTo("pivot between run and out");
+    assertThat(out.name()).isEqualTo("intake out");
+    assertThat(atOut.name()).isEqualTo("pivot at out");
+  }
+
+  /** A gate on how fast a joint runs reads its speed: a roller up to 1000 rpm once it's run. */
+  @Test
+  void aGateOnHowFastAJointRunsReadsItsSpeed() {
+    Gate spun = sim.joints.gate(ROLLER.upToSpeed(RPM.of(1000)));
+    sim.loop();
+    boolean still = spun.getAsBoolean();
+
+    sim.run(roller.run(ROLLER_INTAKING), 1);
+
+    assertThat(still).isFalse();
+    assertThat(spun.getAsBoolean()).isTrue();
+    assertThat(spun.name()).isEqualTo("roller at least 1000 rpm");
   }
 
   @Test

@@ -15,22 +15,23 @@ whatever answers there, and drives it.
 ## Scenes: the World view
 
 A **scene** is the world drawn in 3D on the page, from what the robot program says is there: a
-field, the robot on it, what its cameras see. Pitwall knows nothing of fields or robots
-(`ArchitectureTest` holds the `scene` package to Java, WPILib's geometry, and Pitwall's own push):
-a scene is named frames and shapes in them, grouped into layers the page can switch on and off,
-and the page draws every shape itself. With no scene added, the page has no World view.
+field, the robot on it, what its cameras see. Pitwall knows nothing of fields or robots: a scene
+is named frames and shapes in them, grouped into layers the page can switch on and off,
+and the page draws every shape itself. With no scene added, the page has no World view. A robot
+program adds its scenes to `pitwall.scenes()`, as Pitwall's own `ScenesTest` does:
 
 ```java
-pitwall.scenes().add(Scene.named("world", "World")
-    .layer(field)                         // describes once: walls, tags
-    .layer(robot)                         // describes, then updates while a page shows the scene
-    .layer(sightLines, Visibility.OFF)    // off until switched on, on the page
-    .focus("robot"));                     // the frame the page's Follow keeps in view
+scenes.add(
+    Scene.named("world", "World")
+        .layer(field) // describes once: walls, tags
+        .layer(robotLayer) // describes, then updates while a page shows the scene
+        .layer(rays, Scene.Visibility.OFF) // off until switched on, on the page
+        .focus("robot")); // the frame the page's Follow keeps in view
 ```
 
 ### A layer
 
-```java
+```java fragment
 interface Layer {
   String id(); String title();
   void describe(SceneBuilder scene);          // what stays: frames, values, shapes
@@ -58,11 +59,16 @@ interface Layer {
 any frame another layer of its scene adds. Lengths are meters and angles radians, turned as WPILib
 turns (roll about x, then pitch about y, then yaw about z):
 
-```java
-scene.frame("robot", "field")                                    // moved by update
-    .frame("camera.front", "robot", camera.robotToCamera())      // fixed, at a transform
-    .deadband("robot", 0.01, Math.toRadians(0.5))                // see "Quiet when still"
-    .value("speed.front", 0.01);                                 // a size that follows a number
+```java fragment
+scene
+    .frame("robot", "field") // moved by update
+    .frame(
+        "camera",
+        "robot",
+        new Transform3d(0.3, 0, 0.5, new Rotation3d(0, Math.toRadians(-10), 0))) // fixed, here
+    .value("speed", 0.05); // a size that follows a number
+...
+scene.frame("estimate", "field").deadband("estimate", 0.01, Math.toRadians(0.5)); // "Quiet when still"
 ```
 
 **Shapes**, each with an id unique in its scene, in a frame, set up by name:

@@ -13,8 +13,8 @@ import org.wpilib.units.measure.Distance;
 /**
  * A place a joint goes, by name: an intake's "in", "run" and "out", an elevator's "clear". It's the
  * joint's own ({@code Joint.positions}), in the joint's units, radians for a revolute joint and
- * meters for a prismatic one, as its range and reference are, and inside its range. It knows which
- * it is, an angle or a length, so a length given a joint that turns, or an angle given one that
+ * meters for a prismatic one, as its range and rest are, and inside its range. It knows which it
+ * is, an angle or a length, so a length given a joint that turns, or an angle given one that
  * slides, is refused where the joint is built. Robot code moves to it by name, interlocks and
  * configurations name it, and logs and Pitwall show it.
  *

@@ -31,6 +31,24 @@ class MechanismWiringTest {
   }
 
   /**
+   * A motor its block wires to nothing runs on the controller it plugs into: a NEO's a SPARK MAX, a
+   * NEO Vortex's a SPARK Flex, a Minion's a TalonFXS, any other's a TalonFX.
+   */
+  @Test
+  void anUnwiredMotorStandsInOnItsOwnController() {
+    assertThat(MechanismWiring.Controller.standIn(Motor.NEO))
+        .isEqualTo(MechanismWiring.Controller.SPARK_MAX);
+    assertThat(MechanismWiring.Controller.standIn(Motor.NEO_550))
+        .isEqualTo(MechanismWiring.Controller.SPARK_MAX);
+    assertThat(MechanismWiring.Controller.standIn(Motor.NEO_VORTEX))
+        .isEqualTo(MechanismWiring.Controller.SPARK_FLEX);
+    assertThat(MechanismWiring.Controller.standIn(Motor.MINION))
+        .isEqualTo(MechanismWiring.Controller.TALON_FXS);
+    assertThat(MechanismWiring.Controller.standIn(Motor.KRAKEN_X60))
+        .isEqualTo(MechanismWiring.Controller.TALON_FX);
+  }
+
+  /**
    * A joint's motors are at least one, and no two of its controllers share an ID: the definition
    * says so as it lists every device on the bus once.
    */
@@ -119,11 +137,11 @@ class MechanismWiringTest {
                 .bus(canivore)
                 .id(33)
                 .offset(Rotations.of(0.82))
-                .clockwise(false)
+                .turnsClockwise(false)
                 .feedback(MechanismWiring.Feedback.ROTOR)
                 .build());
     assertThat(CANCODER.can(33).offset(Rotations.of(0)).bus()).isEqualTo(CanBus.SYSTEMCORE);
-    assertThat(CANCODER.can(canivore, 33).clockwise().offset(Rotations.of(0.82)).clockwise())
+    assertThat(CANCODER.can(canivore, 33).offset(Rotations.of(0.82)).clockwise().turnsClockwise())
         .isTrue();
     assertThat(seeded.remote().feedback()).isEqualTo(MechanismWiring.Feedback.REMOTE);
     assertThat(seeded.fused().feedback()).isEqualTo(MechanismWiring.Feedback.FUSED);

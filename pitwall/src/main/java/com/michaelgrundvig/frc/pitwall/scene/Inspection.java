@@ -7,12 +7,13 @@ import java.util.List;
  * What a shape on the page says when it's clicked: a title, its details as labeled lines, and the
  * actions that can be taken about it, which end the panel as buttons:
  *
- * <pre>{@code
- * Inspection.of("front-left → tag 7")
- *     .detail("Verdict", "rejected: gate 45.2 > 13.8")
- *     .detail("Distance", "4.1 m")
- *     .action("Calibrate the front-left camera's mount (20 s, drive slowly past tags)")
- * }</pre>
+ * {@snippet :
+ * Inspection said =
+ *     Inspection.of(line.camera + " → tag " + line.tag)
+ *         .detail("Verdict", verdict.accepted() ? "accepted" : "rejected: " + verdict.reason())
+ *         ...
+ * return calibrate.isPresent() ? said.action(calibrate.get()) : said;
+ * }
  *
  * <p>An action is one of the page's actions, by name ({@code pitwall.actions()}): it runs as it
  * would from Pit, with the same gate, and a name that isn't one isn't shown. A panel that ends in

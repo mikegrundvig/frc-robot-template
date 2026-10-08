@@ -3,12 +3,12 @@ package com.michaelgrundvig.frc.pitwall.experiment;
 /**
  * A test motion to run on a rig, the same way every time, so runs compare:
  *
- * <pre>{@code
+ * {@snippet :
  * new Experiment(
- *     "Step to 90° and back",
- *     steering,
- *     Profiles.stepAndBack().from(Degrees.of(0)).to(Degrees.of(90)).hold(Seconds.of(0.8)))
- * }</pre>
+ *     "Small step",
+ *     rig,
+ *     Profiles.step().from(Degrees.of(0)).to(Degrees.of(10)).hold(Seconds.of(0.5)))
+ * }
  *
  * <p>Teams write their own, in code, and add them with {@link Experiments#add(Experiment)}, which
  * checks that the rig can run it.

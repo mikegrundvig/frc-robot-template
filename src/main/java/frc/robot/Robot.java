@@ -301,21 +301,50 @@ public class Robot extends LoggedRobot {
 
   @Override
   public void robotPeriodic() {
-    loop(pitwall, container, Scheduler.getDefault(), loopHealth);
+    loop(pitwall, container, Scheduler.getDefault(), loopHealth, carriesOn(Constants.currentMode));
+  }
+
+  /**
+   * Whether the loop carries on past what the commands throw: on a robot, and in a replay of one,
+   * which follows the robot's path, so a match is replayed past a throw. In the simulator, and the
+   * tests that run it, a throw ends the program at once, so a bug fails there.
+   */
+  static boolean carriesOn(Constants.Mode mode) {
+    return mode != Constants.Mode.SIM;
   }
 
   /**
    * Every loop, in every mode: the Pitwall page's requests, the mechanisms' sensors, the command
    * scheduler, then what the commands asked of the joints, each timed. Tests run the robot with
    * this too ({@code RobotSim}).
+   *
+   * <p>What the commands throw (a command, a binding's condition, anything the scheduler runs) ends
+   * the program at once in the simulator or a test, so a bug fails there. On a robot, and in a
+   * replay of one, the loop carries on: v3's scheduler has already ended a command that threw, and
+   * the command that started it; the joints do what the other commands asked; and it's reported
+   * ({@link LoopHealth#threw}), until the commands throw in {@value LoopHealth#FAILING_LOOPS} loops
+   * in a row.
+   *
+   * @param carriesOn whether the loop carries on past a throw, as on a robot ({@link #carriesOn})
    */
   static void loop(
-      Pitwall pitwall, RobotContainer container, Scheduler scheduler, LoopHealth loopHealth) {
+      Pitwall pitwall,
+      RobotContainer container,
+      Scheduler scheduler,
+      LoopHealth loopHealth,
+      boolean carriesOn) {
     loopHealth.start(System.nanoTime());
     pitwall.periodic();
     loopHealth.monitor().mark("Pitwall", System.nanoTime());
     container.periodic();
-    scheduler.run();
+    try {
+      scheduler.run();
+    } catch (RuntimeException e) {
+      if (!carriesOn) {
+        throw e;
+      }
+      loopHealth.threw(e);
+    }
     loopHealth.monitor().mark("Commands", System.nanoTime());
     container.afterCommands();
     loopHealth.monitor().mark("Outputs", System.nanoTime());

@@ -18,12 +18,16 @@ import org.wpilib.math.geometry.Transform3d;
  * <p><b>Values</b> are numbers a shape's size follows (an arrow's length, an ellipse's radii), set
  * in {@code update} and sent only once they move by their resolution.
  *
- * <pre>{@code
- * scene.frame("robot", "field")
- *     .frame("camera.front", "robot", camera.robotToCamera())
- *     .value("speed.front-left", 0.05);
- * scene.box("frame", "robot").size(0.7, 0.7, 0.3).at(0, 0, 0.15).style(Style.ACCENT);
- * }</pre>
+ * {@snippet :
+ * scene
+ *     .frame("robot", "field")
+ *     .frame(
+ *         "camera",
+ *         "robot",
+ *         new Transform3d(0.3, 0, 0.5, new Rotation3d(0, Math.toRadians(-10), 0)))
+ *     .value("speed", 0.05);
+ * scene.box("chassis", "robot").size(0.7, 0.6, 0.2).at(0, 0, 0.1).style(Style.ACCENT);
+ * }
  */
 public final class SceneBuilder extends ShapeList {
   /** Every scene's root frame: the world it's drawn in, such as the field. */

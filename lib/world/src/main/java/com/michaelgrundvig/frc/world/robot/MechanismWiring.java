@@ -32,12 +32,12 @@ public final class MechanismWiring {
    * A CANcoder at its bus and ID, named in a joint's block as a motor's controller is, with the
    * offset it's measured to need: {@code CANCODER.can(CANIVORE, 34).offset(Rotations.of(0.82))}. It
    * counts counterclockwise, seen facing its LED, as the joint moves forward, until {@code
-   * .clockwise()} before its offset says otherwise. It's read once at startup, to tell its joint's
-   * TalonFX where the joint is ({@link Feedback#ROTOR}), until {@code .remote()}, {@code .fused()}
-   * or {@code .sync()} after its offset has the TalonFX's loop run on it.
+   * .clockwise()} after its offset says otherwise, as a data port's or a Systemcore port's {@code
+   * .inverted()} does. It's read once at startup, to tell its joint's TalonFX where the joint is
+   * ({@link Feedback#ROTOR}), until {@code .remote()}, {@code .fused()} or {@code .sync()} after
+   * its offset has the TalonFX's loop run on it.
    */
-  public static final CanDeviceKind<CancoderAt> CANCODER =
-      new CanDeviceKind<>((bus, id) -> new CancoderAt(bus, id, false));
+  public static final CanDeviceKind<CancoderAt> CANCODER = new CanDeviceKind<>(CancoderAt::new);
 
   /**
    * An absolute encoder on the leading SPARK's data port, as REV's Through Bore Encoder plugs in,
@@ -83,6 +83,25 @@ public final class MechanismWiring {
     /** Whether it drives a motor of the definition's catalog. */
     public boolean drives(Motor motor) {
       return drives.contains(motor);
+    }
+
+    /**
+     * The controller a motor runs on where its block wires none, which the simulator runs it as and
+     * its settings are checked on: a NEO's or a NEO 550's a SPARK MAX, a NEO Vortex's a SPARK Flex,
+     * a Minion's a TalonFXS, and a Kraken's, a Falcon's or a motor described from its datasheet a
+     * TalonFX.
+     */
+    public static Controller standIn(Motor motor) {
+      if (motor.equals(Motor.NEO_VORTEX)) {
+        return SPARK_FLEX;
+      }
+      if (SPARK_MAX.drives(motor)) {
+        return SPARK_MAX;
+      }
+      if (TALON_FXS.drives(motor)) {
+        return TALON_FXS;
+      }
+      return TALON_FX;
     }
 
     /** As a sentence names it: "a SPARK MAX". */
@@ -156,25 +175,19 @@ public final class MechanismWiring {
    *
    * @param bus the bus it's on
    * @param id its CAN ID
-   * @param turnsClockwise whether it turns clockwise, seen facing its LED, as the joint moves
-   *     forward
    */
-  public record CancoderAt(CanBus bus, int id, boolean turnsClockwise) {
-    /** The same CANcoder, turning clockwise, seen facing its LED, as the joint moves forward. */
-    public CancoderAt clockwise() {
-      return new CancoderAt(bus, id, true);
-    }
-
+  public record CancoderAt(CanBus bus, int id) {
     /**
-     * The CANcoder, its reading offset so it reads zero with the joint at zero, read once at
-     * startup to tell the joint's TalonFX where the joint is ({@link Feedback#ROTOR}).
+     * The CANcoder, its reading offset so it reads zero with the joint at zero, counting
+     * counterclockwise as the joint moves forward, read once at startup to tell the joint's TalonFX
+     * where the joint is ({@link Feedback#ROTOR}).
      */
     public Cancoder offset(Angle offset) {
       return MechanismWiringCancoderBuilder.builder()
           .bus(bus)
           .id(id)
           .offset(offset)
-          .clockwise(turnsClockwise)
+          .turnsClockwise(false)
           .feedback(Feedback.ROTOR)
           .build();
     }
@@ -187,12 +200,13 @@ public final class MechanismWiring {
    * @param id its CAN ID
    * @param offset added to its reading so it reads zero with the joint at zero: measured per
    *     install, and again whenever the encoder or its magnet is moved
-   * @param clockwise whether it turns clockwise, seen facing its LED, as the joint moves forward:
-   *     Phoenix's {@code Clockwise_Positive}, so its reading grows with the joint
+   * @param turnsClockwise whether it turns clockwise, seen facing its LED, as the joint moves
+   *     forward: Phoenix's {@code Clockwise_Positive}, so its reading grows with the joint
    * @param feedback what the motor controller reads its position from
    */
   @ConfigRecord
-  public record Cancoder(CanBus bus, int id, Angle offset, boolean clockwise, Feedback feedback) {
+  public record Cancoder(
+      CanBus bus, int id, Angle offset, boolean turnsClockwise, Feedback feedback) {
     public Cancoder {
       Checks.on(Cancoder.class)
           .field("id", id, between(0, 62))
@@ -203,6 +217,14 @@ public final class MechanismWiring {
     /** Starts describing a CANcoder, one named value at a time. */
     public static MechanismWiringCancoderBuilder.BusStage builder() {
       return MechanismWiringCancoderBuilder.builder();
+    }
+
+    /**
+     * The same CANcoder, turning clockwise, seen facing its LED, as the joint moves forward:
+     * Phoenix's {@code Clockwise_Positive}.
+     */
+    public Cancoder clockwise() {
+      return MechanismWiringCancoderBuilder.builder(this).turnsClockwise(true).build();
     }
 
     /**
@@ -331,6 +353,7 @@ public final class MechanismWiring {
       Angle offset,
       boolean reversed,
       boolean closedLoop) {
+    // @start region=checks
     public PortEncoder {
       Checks.on(PortEncoder.class)
           .field("port", port, between(0, 5))
@@ -346,6 +369,8 @@ public final class MechanismWiring {
                           + " turns, either way")
           .orThrow();
     }
+
+    // @end
 
     /** How a port encoder reports where it is. */
     public enum Signal {

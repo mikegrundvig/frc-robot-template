@@ -20,10 +20,12 @@ import static org.wpilib.units.Units.DegreesPerSecondPerSecond;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.MetersPerSecond;
+import static org.wpilib.units.Units.MetersPerSecondPerSecond;
 import static org.wpilib.units.Units.Percent;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.RotationsPerSecond;
+import static org.wpilib.units.Units.RotationsPerSecondPerSecond;
 import static org.wpilib.units.Units.Volts;
 
 import com.michaelgrundvig.frc.world.physical.Vector3;
@@ -114,10 +116,11 @@ class PlacesTest {
           MechanismFixtures.motors(ARM, Motor.KRAKEN_X60, 1, gearing(60, 1)));
 
   static final Interlock ROLLER_ONLY_WHEN_OUT =
-      Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
+      Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atLeast(PIVOT_RUN));
 
+  /** The arm kept out of the bumper's band while the elevator is below 0.35 m, where it clears. */
   static final Interlock ARM_CLEARS_BUMPER =
-      Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.before(ELEVATOR_CLEAR));
+      Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.atMost(Meters.of(0.35)));
 
   static final Configuration STOWED =
       Configuration.of("stowed", ELEVATOR.at(ELEVATOR_DOWN), ARM.at(ARM_STOWED));
@@ -214,6 +217,51 @@ class PlacesTest {
   }
 
   /**
+   * A speed knows whether it's of turning or of sliding, as a position knows it's an angle or a
+   * length: an rpm on an elevator would run in meters a second, and a speed along a slide on a
+   * roller in radians a second. A voltage or a duty cycle is neither.
+   */
+  @Test
+  void anOutputsSpeedIsTheJointsKind() {
+    assertThat(ROLLER_INTAKING.motion()).contains(Position.Kind.ANGLE);
+    assertThat(Output.of("creeping", MetersPerSecond.of(0.1)).motion())
+        .contains(Position.Kind.LENGTH);
+    assertThat(Output.volts("pushing", 6).motion()).isEmpty();
+    assertThat(named(ELEVATOR, List.of(), List.of(Output.of("creeping", MetersPerSecond.of(0.1)))))
+        .isNotNull();
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> named(ELEVATOR, List.of(), List.of(Output.rpm("creeping", 10))))
+        .withMessage(
+            "Prismatic[elevator].outputs: creeping, 10 rpm, is a speed of turning, and elevator"
+                + " slides: give it a speed along it, Output.of(\"creeping\","
+                + " InchesPerSecond.of(...))");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> named(ROLLER, List.of(), List.of(Output.of("feeding", MetersPerSecond.of(3)))))
+        .withMessage(
+            "Revolute[roller].outputs: feeding, 3 m/s, is a speed along a slide, and roller turns:"
+                + " give it a speed of turning, Output.rpm(\"feeding\", ...)");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> Output.builder().name("fast").kind(Output.Kind.VELOCITY).value(10).build())
+        .withMessage(
+            "Output[fast].motion: a speed is of turning or of sliding: give it with its unit,"
+                + " Output.rpm(name, rpm) for a joint that turns, Output.of(name,"
+                + " InchesPerSecond.of(...)) for one that slides");
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                Output.builder()
+                    .name("push")
+                    .kind(Output.Kind.VOLTAGE)
+                    .value(6)
+                    .motion(Position.Kind.ANGLE)
+                    .build())
+        .withMessage(
+            "Output[push].motion: only a speed is of turning or of sliding, and this is a voltage");
+  }
+
+  /**
    * A range knows whether it's angles or lengths, as a position does: a joint refuses its hard
    * stops, or a region an interlock keeps it out of, of the other kind.
    */
@@ -225,7 +273,8 @@ class PlacesTest {
         .isThrownBy(
             () ->
                 Joint.elevator("elevator", Part.CHASSIS, point(0, 0, 0))
-                    .range(Range.degrees(0, 135), Inches.of(0)))
+                    .range(Range.degrees(0, 135))
+                    .rest(Inches.of(0)))
         .withMessage(
             "Prismatic[elevator].range: its range is angles, and the joint slides: give it in"
                 + " lengths, Range.meters(...) or Range.of(Inches.of(...), Inches.of(...))");
@@ -236,13 +285,15 @@ class PlacesTest {
                     .keepsOut(Range.meters(0, 1))
                     .when(ELEVATOR.atMost(Inches.of(10))))
         .withMessage(
-            "KeepsOut[pivot].region: the region is lengths, and the joint turns: give it in"
+            "the region is lengths, and the joint turns: give it in"
                 + " angles, Range.degrees(...)");
   }
 
   /**
-   * "Past" a position is from it on, away from the reference, whichever side of the reference it's
-   * on; "before" is the rest; "between" includes both ends; "at" is the position exactly.
+   * "At least" a position is from it on, toward the range's upper end; "at most" is up to it,
+   * toward the lower; "between" includes both ends; "at" is the position exactly. None depends on
+   * where the joint rests: a joint resting below its range's middle reads them as one resting above
+   * it does.
    */
   @Test
   void conditionsAreRegionsOfAJointsTravel() {
@@ -260,14 +311,17 @@ class PlacesTest {
             List.of(low, Position.degrees("top", 0)),
             List.of());
 
-    assertThat(PIVOT.past(PIVOT_RUN).holdsAt(Math.toRadians(120))).isTrue();
-    assertThat(PIVOT.past(PIVOT_RUN).holdsAt(Math.toRadians(110))).isTrue();
-    assertThat(PIVOT.past(PIVOT_RUN).holdsAt(Math.toRadians(100))).isFalse();
-    assertThat(PIVOT.before(PIVOT_RUN).holdsAt(Math.toRadians(100))).isTrue();
-    assertThat(PIVOT.before(PIVOT_RUN).holdsAt(Math.toRadians(110))).isFalse();
-    assertThat(hanging.past(low).holdsAt(Math.toRadians(-70))).as("below its reference").isTrue();
-    assertThat(hanging.past(low).holdsAt(Math.toRadians(-50))).isFalse();
-    assertThat(hanging.before(low).holdsAt(Math.toRadians(-50))).isTrue();
+    assertThat(PIVOT.atLeast(PIVOT_RUN).holdsAt(Math.toRadians(120))).isTrue();
+    assertThat(PIVOT.atLeast(PIVOT_RUN).holdsAt(Math.toRadians(110))).isTrue();
+    assertThat(PIVOT.atLeast(PIVOT_RUN).holdsAt(Math.toRadians(100))).isFalse();
+    assertThat(PIVOT.atMost(PIVOT_RUN).holdsAt(Math.toRadians(100))).isTrue();
+    assertThat(PIVOT.atMost(PIVOT_RUN).holdsAt(Math.toRadians(110))).isTrue();
+    assertThat(PIVOT.atMost(PIVOT_RUN).holdsAt(Math.toRadians(111))).isFalse();
+    assertThat(hanging.atMost(low).holdsAt(Math.toRadians(-70)))
+        .as("below it, resting above it")
+        .isTrue();
+    assertThat(hanging.atMost(low).holdsAt(Math.toRadians(-50))).isFalse();
+    assertThat(hanging.atLeast(low).holdsAt(Math.toRadians(-50))).isTrue();
     assertThat(PIVOT.between(PIVOT_OUT, PIVOT_RUN).holdsAt(Math.toRadians(120))).isTrue();
     assertThat(PIVOT.between(PIVOT_RUN, PIVOT_OUT).holdsAt(Math.toRadians(131))).isFalse();
     assertThat(PIVOT.at(PIVOT_OUT).holdsAt(Math.toRadians(130))).isTrue();
@@ -277,8 +331,8 @@ class PlacesTest {
         .isThrownBy(() -> ROLLER.at(ROLLER_INTAKING).holdsAt(0))
         .withMessage("roller at intaking is an output, not a position");
     assertThat(ROLLER.at(Output.STOPPED).isOutput()).as("every joint's, built in").isTrue();
-    assertThat(PIVOT.past(PIVOT_RUN)).hasToString("pivot past run");
-    assertThat(ELEVATOR.before(ELEVATOR_CLEAR)).hasToString("elevator before clear");
+    assertThat(PIVOT.atLeast(PIVOT_RUN)).hasToString("pivot at least run");
+    assertThat(ELEVATOR.atMost(ELEVATOR_CLEAR)).hasToString("elevator at most clear");
     assertThat(PIVOT.between(PIVOT_RUN, PIVOT_OUT)).hasToString("pivot between run and out");
     assertThat(ARM.at(ARM_LEVEL)).hasToString("arm at level");
   }
@@ -286,22 +340,20 @@ class PlacesTest {
   @Test
   void aConditionNamesTheJointsOwnPlaces() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.past(PIVOT_IN))
-        .withMessage(
-            "Past[pivot].position: in is where pivot rests: everywhere is past it, and nowhere"
-                + " before it");
+        .isThrownBy(() -> ELEVATOR.atLeast(ELEVATOR_DOWN))
+        .withMessage("down is elevator's lowest: it's at least that everywhere");
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.before(Position.degrees("deployed", 120)))
+        .isThrownBy(() -> PIVOT.atMost(Position.degrees("deployed", 120)))
         .withMessage("pivot has no position deployed at 120°: it has in, run, out");
-    assertThat(PIVOT.past(Position.of("out", Degrees.of(130))).position())
+    assertThat(PIVOT.atLeast(Position.of("out", Degrees.of(130))).position())
         .as("its own out, written another way")
         .isCloseTo(Math.toRadians(130), within(1e-12));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.past(Position.of("out", Inches.of(5))))
+        .isThrownBy(() -> PIVOT.atLeast(Position.of("out", Inches.of(5))))
         .withMessage("pivot's out is an angle, and this out a length: another joint's");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.between(PIVOT_RUN, PIVOT_RUN))
-        .withMessage("Between[pivot].to: a joint between run and itself is at it");
+        .withMessage("a joint between run and itself is at it");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.between(PIVOT_RUN, ARM_UP))
         .withMessage("pivot has no position up at 90°: it has in, run, out");
@@ -323,7 +375,7 @@ class PlacesTest {
         "pivot's out is at 130°, and this out, at 60°, isn't one it has had: another joint's or"
             + " another robot's; give pivot's own";
 
-    assertThatIllegalArgumentException().isThrownBy(() -> PIVOT.past(armOut)).withMessage(why);
+    assertThatIllegalArgumentException().isThrownBy(() -> PIVOT.atLeast(armOut)).withMessage(why);
     assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.between(PIVOT_RUN, armOut))
         .withMessage(why);
@@ -342,7 +394,7 @@ class PlacesTest {
             "roller's intaking runs at 2000 rpm, and this intaking, at 1000 rpm, isn't one it has"
                 + " had: another joint's or another robot's; give roller's own");
     Joint.Revolute practice = PIVOT.replaced(PIVOT_OUT, Degrees.of(125));
-    assertThat(practice.past(PIVOT_OUT).position())
+    assertThat(practice.atLeast(PIVOT_OUT).position())
         .as("the competition robot's constant, on its practice robot")
         .isCloseTo(Math.toRadians(125), within(1e-12));
     assertThat(practice.at(PIVOT_OUT)).isEqualTo(PIVOT.at(PIVOT_OUT));
@@ -350,10 +402,35 @@ class PlacesTest {
         .as("re-placed again, by the competition robot's constant")
         .isEqualTo(Position.of("out", Degrees.of(120)));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> practice.past(armOut))
+        .isThrownBy(() -> practice.atLeast(armOut))
         .withMessage(
             "pivot's out is at 125°, and this out, at 60°, isn't one it has had: another joint's"
                 + " or another robot's; give pivot's own");
+  }
+
+  /**
+   * A subsystem of a team's own finds its joint by its constant: on a practice robot, the practice
+   * robot's own, with its places. A joint the robot hasn't is refused, saying so.
+   */
+  @Test
+  void aRobotsOwnJointIsFoundByItsConstant() {
+    RobotDefinition competition = robot(List.of(STOWED, AMP, INTAKING), interlocks());
+    RobotDefinition practice = competition.with(PIVOT.replaced(PIVOT_RUN, Degrees.of(120)));
+
+    assertThat(practice.own(PIVOT).position("run")).isEqualTo(Position.degrees("run", 120));
+    assertThat(competition.own(PIVOT).position("run")).isEqualTo(PIVOT_RUN);
+    Joint.Revolute wrist =
+        revolute(
+            "wrist",
+            Part.CHASSIS,
+            point(0, 0, 0.5),
+            PITCH_UP,
+            Optional.of(Range.degrees(0, 90)),
+            0,
+            link("wrist", 1, point(0.1, 0, 0), point(0.2, 0.1, 0.1)));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> practice.own(wrist))
+        .withMessageEndingWith("has no joint wrist: add it to the definition's joints");
   }
 
   /**
@@ -368,10 +445,14 @@ class PlacesTest {
 
     RobotDefinition practice = competition.with(PIVOT.replaced(PIVOT_RUN, Degrees.of(120)));
 
-    Condition.Past past = (Condition.Past) practice.interlocks().getFirst().condition();
-    assertThat(past).hasToString("pivot past run");
-    assertThat(past.position()).isCloseTo(Math.toRadians(120), within(1e-12));
-    assertThat(past.joint().position("run").value())
+    Condition.AtLeast run = (Condition.AtLeast) practice.interlocks().getFirst().condition();
+    assertThat(run).hasToString("pivot at least run");
+    assertThat(run.position()).isCloseTo(Math.toRadians(120), within(1e-12));
+    assertThat(practice.own(PIVOT.atLeast(PIVOT_RUN)))
+        .as("a condition the program names, at the practice robot's own run")
+        .isEqualTo(run);
+    assertThat(practice.own(ROLLER.at(ROLLER_INTAKING))).isEqualTo(ROLLER.at(ROLLER_INTAKING));
+    assertThat(run.joint().position("run").value())
         .as("the practice robot's own pivot")
         .isCloseTo(Math.toRadians(120), within(1e-12));
     assertThat(practice.configurations().get(2).targets().getFirst().joint().position("run"))
@@ -380,7 +461,7 @@ class PlacesTest {
     assertThatIllegalArgumentException()
         .isThrownBy(() -> competition.with(PIVOT.replaced(PIVOT_RUN, Degrees.of(132))))
         .withMessageContaining(
-            "configuration intaking runs roller, but roller runs only when pivot past run");
+            "configuration intaking runs roller, but roller runs only when pivot at least run");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> competition.with(PIVOT.replaced(PIVOT_OUT, Degrees.of(140))))
         .withMessageContaining(
@@ -424,10 +505,7 @@ class PlacesTest {
 
   /**
    * A practice robot's joint rests where it says, and every check runs on it: the interlocks as the
-   * robot starts there, and its {@code past} and {@code before}, measured from where it rests. A
-   * pivot stowed at 132°, beyond its out, is past its run below 110°, so the intake's
-   * configuration, out at 130°, breaks the roller's interlock; one stowed past its stops can't
-   * start there.
+   * robot starts there, and its stops. One stowed past its stops can't start there.
    */
   @Test
   void aPracticeRobotsRestIsChecked() {
@@ -435,12 +513,11 @@ class PlacesTest {
 
     RobotDefinition practice = competition.with(PIVOT.rest(Degrees.of(5)));
 
-    assertThat(practice.joints().getFirst().reference())
+    assertThat(practice.joints().getFirst().restPosition())
         .isCloseTo(Math.toRadians(5), within(1e-12));
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> competition.with(PIVOT.rest(Degrees.of(132))))
-        .withMessageContaining(
-            "configuration intaking runs roller, but roller runs only when pivot past run");
+    assertThat(competition.with(PIVOT.rest(Degrees.of(132))).joints().getFirst().restPosition())
+        .as("stowed beyond its out, its run still from 110° on")
+        .isCloseTo(Math.toRadians(132), within(1e-12));
     assertThatIllegalArgumentException()
         .isThrownBy(() -> competition.with(PIVOT.rest(Degrees.of(140))))
         .withMessageContaining(
@@ -497,9 +574,9 @@ class PlacesTest {
     assertThat(robot.interlocks()).containsExactly(ROLLER_ONLY_WHEN_OUT, ARM_CLEARS_BUMPER);
     assertThat(AMP.joints()).containsExactly(ELEVATOR, ARM);
     assertThat(AMP).hasToString("amp (elevator at clear, arm at level)");
-    assertThat(ROLLER_ONLY_WHEN_OUT).hasToString("roller runs only when pivot past run");
+    assertThat(ROLLER_ONLY_WHEN_OUT).hasToString("roller runs only when pivot at least run");
     assertThat(ARM_CLEARS_BUMPER)
-        .hasToString("arm keeps out of -10° to 30° while elevator before clear");
+        .hasToString("arm keeps out of -10° to 30° while elevator at most 0.35 m");
     assertThat(((Interlock.KeepsOut) ARM_CLEARS_BUMPER).keepsOut(Math.toRadians(30))).isFalse();
     assertThat(((Interlock.KeepsOut) ARM_CLEARS_BUMPER).keepsOut(Math.toRadians(29))).isTrue();
   }
@@ -517,10 +594,10 @@ class PlacesTest {
         .isThrownBy(() -> robot(List.of(rolling, low), interlocks()))
         .withMessageContaining(
             "RobotDefinition[test].configurations: configuration rolling runs roller, but roller"
-                + " runs only when pivot past run, and pivot is at 1.5°, where it rests")
+                + " runs only when pivot at least run, and pivot is at 1.5°, where it rests")
         .withMessageContaining(
             "configuration low puts arm at 0°, but arm keeps out of -10° to 30° while elevator"
-                + " before clear, and elevator is at 0 m, where it rests");
+                + " at most 0.35 m, and elevator is at 0 m, where it rests");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Configuration.of("twice", ARM.at(ARM_LEVEL), ARM.at(ARM_UP)))
         .withMessage("Configuration[twice].targets: set each joint once, not arm");
@@ -545,34 +622,43 @@ class PlacesTest {
   }
 
   /**
-   * An interlock restricts a joint by where another is: not itself, not by an output, and kept out
-   * of part of its range, never all of it or none.
+   * An interlock restricts a joint by where another is: not itself, not by an output, not exactly
+   * at one of its positions, and kept out of part of its range, never all of it or none.
    */
   @Test
   void anInterlockIsAboutAnotherJointsPlace() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> Interlock.that(PIVOT).runsOnlyWhen(PIVOT.past(PIVOT_RUN)))
+        .isThrownBy(() -> Interlock.that(PIVOT).runsOnlyWhen(PIVOT.atLeast(PIVOT_RUN)))
         .withMessageContaining("pivot can't be held by where it is itself");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> Interlock.that(PIVOT).runsOnlyWhen(ROLLER.at(ROLLER_INTAKING)))
         .withMessageContaining(
-            "an interlock speaks of where a joint is, or how fast it runs, and intaking is roller's output: say the speed it must reach, roller.atLeast(...)");
+            "an interlock speaks of where a joint is, or how fast it runs, and intaking is roller's output: say the speed it must reach, roller.upToSpeed(...)");
+    // Judged against where the joint is measured, "at" a place would never hold.
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () -> Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(PIVOT.at(PIVOT_OUT)))
+        .withMessage(
+            "pivot at out holds only with pivot exactly at out, 130°, which a measured position never is, so the interlock would never hold: say the edge where the parts clear, pivot.atLeast(Degrees.of(...)) or pivot.atMost(Degrees.of(...)), or a band around out, pivot.between(Degrees.of(...), Degrees.of(...))");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> Interlock.that(ARM).runsOnlyWhen(ELEVATOR.at(ELEVATOR_CLEAR)))
+        .withMessageContaining(
+            "elevator at clear holds only with elevator exactly at clear, 0.4 m, which a measured position never is, so the interlock would never hold: say the edge where the parts clear, elevator.atLeast(Inches.of(...)) or elevator.atMost(Inches.of(...)), or a band around clear, elevator.between(Inches.of(...), Inches.of(...))");
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
                 Interlock.that(ARM)
                     .keepsOut(Range.degrees(130, 140))
-                    .when(ELEVATOR.before(ELEVATOR_CLEAR)))
-        .withMessage("KeepsOut[arm].region: 130° to 140° is outside arm's range, -30° to 120°");
+                    .when(ELEVATOR.atMost(ELEVATOR_CLEAR)))
+        .withMessage("130° to 140° is outside arm's range, -30° to 120°");
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
                 Interlock.that(ARM)
                     .keepsOut(Range.degrees(-40, 130))
-                    .when(ELEVATOR.before(ELEVATOR_CLEAR)))
+                    .when(ELEVATOR.atMost(ELEVATOR_CLEAR)))
         .withMessage(
-            "KeepsOut[arm].region: -40° to 130° is all of arm's range, -30° to 120°: it would have"
-                + " nowhere to be");
+            "-40° to 130° is all of arm's range, -30° to 120°: it would have" + " nowhere to be");
   }
 
   /**
@@ -582,17 +668,17 @@ class PlacesTest {
    */
   @Test
   void anEdgeIsANumberOrAPlaceAndASpeedIsHowFastAnotherRuns() {
-    Condition.Past byNumber = PIVOT.past(Degrees.of(110));
-    Condition.Past byPlace = PIVOT.past(PIVOT_RUN);
-    Condition.Before low = ELEVATOR.before(Inches.of(10));
+    Condition.AtLeast byNumber = PIVOT.atLeast(Degrees.of(110));
+    Condition.AtLeast byPlace = PIVOT.atLeast(PIVOT_RUN);
+    Condition.AtMost low = ELEVATOR.atMost(Inches.of(10));
     Condition.Between band = ARM.between(Degrees.of(45), Degrees.of(0));
-    Condition.UpToSpeed spun = ROLLER.atLeast(RPM.of(1500));
+    Condition.UpToSpeed spun = ROLLER.upToSpeed(RPM.of(1500));
 
     assertThat(byNumber.holdsAt(Math.toRadians(111))).isTrue();
     assertThat(byNumber.holdsAt(Math.toRadians(109))).isFalse();
     assertThat(byPlace.holdsAt(Math.toRadians(111))).isTrue();
-    assertThat(byNumber).hasToString("pivot past 110°");
-    assertThat(byPlace).hasToString("pivot past run");
+    assertThat(byNumber).hasToString("pivot at least 110°");
+    assertThat(byPlace).hasToString("pivot at least run");
     assertThat(low.holdsAt(Inches.of(9).in(Meters))).isTrue();
     assertThat(low.holdsAt(Inches.of(11).in(Meters))).isFalse();
     assertThat(band.holdsAt(Math.toRadians(30))).isTrue();
@@ -605,19 +691,16 @@ class PlacesTest {
         .hasSize(1);
 
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.past(Degrees.of(150)))
+        .isThrownBy(() -> PIVOT.atLeast(Degrees.of(150)))
         .withMessageContaining("150° is outside pivot's range, 0° to 135°");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.before(Degrees.of(1.5)))
-        .withMessageContaining("is where pivot rests");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> ARM.between(Degrees.of(10), Degrees.of(10)))
         .withMessageContaining("is at it");
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> ROLLER.atLeast(RPM.of(-100)))
+        .isThrownBy(() -> ROLLER.upToSpeed(RPM.of(-100)))
         .withMessageContaining("must be forward");
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> Interlock.that(ROLLER).runsOnlyWhen(ROLLER.atLeast(RPM.of(100))))
+        .isThrownBy(() -> Interlock.that(ROLLER).runsOnlyWhen(ROLLER.upToSpeed(RPM.of(100))))
         .withMessageContaining("roller can't be held by how fast it runs itself");
     assertThatIllegalArgumentException()
         .isThrownBy(
@@ -625,20 +708,19 @@ class PlacesTest {
                 robot(
                     List.of(),
                     List.of(
-                        Interlock.that(PIVOT).runsOnlyWhen(ROLLER.atLeast(RPM.of(100))),
-                        Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(Degrees.of(110))))))
+                        Interlock.that(PIVOT).runsOnlyWhen(ROLLER.upToSpeed(RPM.of(100))),
+                        Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atLeast(Degrees.of(110))))))
         .withMessageContaining(
             "as the robot starts, it leaves pivot and roller holding each other by their"
                 + " interlocks, so neither can free the other: a deadlock (pivot runs only when"
-                + " roller at least 100 rpm, so pivot stays at 1.5°; roller runs only when pivot past"
-                + " 110°, so roller stays still)");
+                + " roller at least 100 rpm, so pivot stays at 1.5°; roller runs only when pivot at"
+                + " least 110°, so roller stays still)");
   }
 
   /**
-   * At least or at most a clearance doesn't hang on where the joint rests, as past and before do: a
-   * pivot resting out at 120° has 110° on its other side, so past 110° is below it, while at least
-   * 110° is above it wherever the pivot rests. An end of the range, where one would always hold, is
-   * refused, and the definition judges them as it does the rest.
+   * At least or at most a clearance doesn't hang on where the joint rests: at least 110° is above
+   * it, for a pivot resting in or one resting out at 120°. An end of the range, where one would
+   * always hold, is refused, and the definition judges them as it does the rest.
    */
   @Test
   void atLeastAndAtMostDontHangOnWhereTheJointRests() {
@@ -650,24 +732,20 @@ class PlacesTest {
     assertThat(clear.holdsAt(Math.toRadians(111))).isTrue();
     assertThat(clear.holdsAt(Math.toRadians(109))).isFalse();
     assertThat(restingOut.atLeast(Degrees.of(110)).holdsAt(Math.toRadians(111))).isTrue();
-    assertThat(restingOut.past(Degrees.of(110)).holdsAt(Math.toRadians(111)))
-        .as("past 110°, from 120°, is below it")
-        .isFalse();
+    assertThat(restingOut.atLeast(Degrees.of(110)).holdsAt(Math.toRadians(109))).isFalse();
     assertThat(low.holdsAt(Inches.of(9).in(Meters))).isTrue();
     assertThat(low.holdsAt(Inches.of(11).in(Meters))).isFalse();
     assertThat(clear).hasToString("pivot at least 110°");
     assertThat(low).hasToString("elevator at most 0.254 m");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.atLeast(Degrees.of(0)))
-        .withMessage(
-            "AtLeast[pivot].position: 0° is pivot's lowest: it's at least that everywhere");
+        .withMessage("0° is pivot's lowest: it's at least that everywhere");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.atMost(Degrees.of(135)))
-        .withMessage(
-            "AtMost[pivot].position: 135° is pivot's highest: it's at most that everywhere");
+        .withMessage("135° is pivot's highest: it's at most that everywhere");
     assertThatIllegalArgumentException()
         .isThrownBy(() -> ELEVATOR.atLeast(Meters.of(2)))
-        .withMessage("AtLeast[elevator].position: 2 m is outside elevator's range, 0 m to 1.2 m");
+        .withMessage("2 m is outside elevator's range, 0 m to 1.2 m");
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -688,9 +766,9 @@ class PlacesTest {
    */
   @Test
   void anInterlockInABlockIsTheRobotsAsOneInItsList() {
-    Joint.Revolute arm = ARM.keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(Inches.of(10)));
+    Joint.Revolute arm = ARM.keepsOut(Range.degrees(40, 80)).when(ELEVATOR.atMost(Inches.of(10)));
     Interlock written =
-        Interlock.that(ARM).keepsOut(Range.degrees(40, 80)).when(ELEVATOR.before(Inches.of(10)));
+        Interlock.that(ARM).keepsOut(Range.degrees(40, 80)).when(ELEVATOR.atMost(Inches.of(10)));
     RobotDefinition robot =
         RobotDefinitionBuilder.builder(robot(List.of(), List.of(ROLLER_ONLY_WHEN_OUT)))
             .joints(List.of(PIVOT, ROLLER, ELEVATOR, arm))
@@ -716,14 +794,15 @@ class PlacesTest {
             () ->
                 RobotDefinitionBuilder.builder(robot)
                     .interlocks(
-                        List.of(Interlock.that(ELEVATOR).runsOnlyWhen(ARM.past(Degrees.of(90)))))
+                        List.of(Interlock.that(ELEVATOR).runsOnlyWhen(ARM.atLeast(Degrees.of(90)))))
                     .build())
         .withMessageContaining(
             "as the robot starts, it leaves arm and elevator holding each other by their"
                 + " interlocks");
     assertThat(
             RobotDefinitionBuilder.builder(robot)
-                .interlocks(List.of(Interlock.that(ELEVATOR).runsOnlyWhen(ARM.past(Degrees.of(0)))))
+                .interlocks(
+                    List.of(Interlock.that(ELEVATOR).runsOnlyWhen(ARM.atLeast(Degrees.of(0)))))
                 .build()
                 .everyInterlock())
         .as("the arm, kept below 40°, can still pass 0° and let the elevator go")
@@ -736,16 +815,16 @@ class PlacesTest {
    */
   @Test
   void jointsMayNotHoldEachOtherWhereTheRobotStarts() {
-    Interlock pivotWaitsOnArm = Interlock.that(PIVOT).runsOnlyWhen(ARM.past(ARM_UP));
-    Interlock armWaitsOnPivot = Interlock.that(ARM).runsOnlyWhen(PIVOT.past(PIVOT_RUN));
+    Interlock pivotWaitsOnArm = Interlock.that(PIVOT).runsOnlyWhen(ARM.atLeast(ARM_UP));
+    Interlock armWaitsOnPivot = Interlock.that(ARM).runsOnlyWhen(PIVOT.atLeast(PIVOT_RUN));
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> robot(List.of(), List.of(pivotWaitsOnArm, armWaitsOnPivot)))
         .withMessage(
             "RobotDefinition[test].interlocks: as the robot starts, it leaves pivot and arm holding"
                 + " each other by their interlocks, so neither can free the other: a deadlock"
-                + " (pivot runs only when arm past up, so pivot stays at 1.5°; arm runs only when"
-                + " pivot past run, so arm stays at -20°)");
+                + " (pivot runs only when arm at least up, so pivot stays at 1.5°; arm runs only when"
+                + " pivot at least run, so arm stays at -20°)");
   }
 
   /**
@@ -767,15 +846,15 @@ class PlacesTest {
 
   /**
    * Kept out of each other where each is kept to: the arm kept out of the bumper's band while the
-   * elevator is low, and the elevator kept low while the arm is past 20°, which all of the arm's
-   * travel above the band is. With the arm stowed below the band, nothing holds at the start, but a
-   * configuration with the arm up and the elevator down puts each where only the other could free
-   * it: refused, naming it.
+   * elevator is low, and the elevator kept low while the arm is at least 20°, which all of the
+   * arm's travel above the band is. With the arm stowed below the band, nothing holds at the start,
+   * but a configuration with the arm up and the elevator down puts each where only the other could
+   * free it: refused, naming it.
    */
   @Test
   void aConfigurationMayNotPutJointsWhereTheyHoldEachOther() {
     Interlock elevatorLowWhileArmUp =
-        Interlock.that(ELEVATOR).keepsOut(Range.meters(0.1, 0.6)).when(ARM.past(Degrees.of(20)));
+        Interlock.that(ELEVATOR).keepsOut(Range.meters(0.1, 0.6)).when(ARM.atLeast(Degrees.of(20)));
     Configuration reaching =
         Configuration.of("reaching", ELEVATOR.at(ELEVATOR_DOWN), ARM.at(ARM_UP));
 
@@ -786,9 +865,9 @@ class PlacesTest {
         .withMessage(
             "RobotDefinition[test].configurations: configuration reaching leaves arm and elevator"
                 + " holding each other by their interlocks, so neither can free the other: a"
-                + " deadlock (arm keeps out of -10° to 30° while elevator before clear, so arm stays"
-                + " between 30° and 120°; elevator keeps out of 0.1 m to 0.6 m while arm past 20°,"
-                + " so elevator stays between 0 m and 0.1 m)");
+                + " deadlock (arm keeps out of -10° to 30° while elevator at most 0.35 m, so arm"
+                + " stays between 30° and 120°; elevator keeps out of 0.1 m to 0.6 m while arm at"
+                + " least 20°, so elevator stays between 0 m and 0.1 m)");
     assertThat(
             robot(List.of(STOWED), List.of(ARM_CLEARS_BUMPER, elevatorLowWhileArmUp)).interlocks())
         .as("the robot starts with the arm below 20°, so the elevator may rise")
@@ -854,13 +933,14 @@ class PlacesTest {
   /** A joint's conditions to run, all on one other joint, must all hold somewhere. */
   @Test
   void aJointsConditionsToRunCanAllHold() {
-    Interlock out = Interlock.that(ROLLER).runsOnlyWhen(PIVOT.past(PIVOT_OUT));
-    Interlock in = Interlock.that(ROLLER).runsOnlyWhen(PIVOT.before(PIVOT_RUN));
+    Interlock out = Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atLeast(PIVOT_OUT));
+    Interlock in = Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atMost(PIVOT_RUN));
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> robot(List.of(), List.of(out, in)))
         .withMessageContaining(
-            "roller can never run: no position of pivot has pivot past out and pivot before run");
+            "roller can never run: no position of pivot has pivot at least out and pivot at most"
+                + " run");
     assertThat(
             robot(
                     List.of(),
@@ -875,16 +955,16 @@ class PlacesTest {
   @Test
   void everyNamedPositionCanBeReached() {
     Interlock low =
-        Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.before(ELEVATOR_CLEAR));
+        Interlock.that(ARM).keepsOut(Range.degrees(-10, 30)).when(ELEVATOR.atMost(ELEVATOR_CLEAR));
     Interlock high =
-        Interlock.that(ARM).keepsOut(Range.degrees(-5, 10)).when(ELEVATOR.past(ELEVATOR_CLEAR));
+        Interlock.that(ARM).keepsOut(Range.degrees(-5, 10)).when(ELEVATOR.atLeast(ELEVATOR_CLEAR));
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> robot(List.of(), List.of(low, high)))
         .withMessage(
             "RobotDefinition[test].interlocks: arm can never reach level, 0°: no position of elevator"
-                + " opens it (arm keeps out of -10° to 30° while elevator before clear; arm keeps"
-                + " out of -5° to 10° while elevator past clear)");
+                + " opens it (arm keeps out of -10° to 30° while elevator at most clear; arm keeps"
+                + " out of -5° to 10° while elevator at least clear)");
   }
 
   /**
@@ -894,13 +974,13 @@ class PlacesTest {
   @Test
   void aJointThatStartsInsideARegionMayOnlyLeaveIt() {
     Interlock stowedInside =
-        Interlock.that(ARM).keepsOut(Range.degrees(-25, 30)).when(ELEVATOR.before(ELEVATOR_CLEAR));
+        Interlock.that(ARM).keepsOut(Range.degrees(-25, 30)).when(ELEVATOR.atMost(ELEVATOR_CLEAR));
 
     assertThat(doubts(robot(List.of(), List.of(stowedInside))))
         .filteredOn(doubt -> doubt.startsWith("as the robot starts"))
         .containsExactly(
             "as the robot starts, it puts arm at -20°, but arm keeps out of -25° to 30° while"
-                + " elevator before clear, and elevator is at 0 m, where it rests: arm may only leave"
+                + " elevator at most clear, and elevator is at 0 m, where it rests: arm may only leave"
                 + " it, by its edge at -25°, until that changes");
   }
 
@@ -929,7 +1009,7 @@ class PlacesTest {
     Interlock inWhileLow =
         Interlock.that(shuttle)
             .keepsOut(Range.meters(0.1, 0.3))
-            .when(ELEVATOR.before(ELEVATOR_CLEAR));
+            .when(ELEVATOR.atMost(Meters.of(0.35)));
     List<Joint> joints = List.of(ELEVATOR, shuttle);
 
     assertThatIllegalArgumentException()
@@ -944,7 +1024,7 @@ class PlacesTest {
                     .build())
         .withMessage(
             "RobotDefinition[test].configurations: configuration reaching puts shuttle at 0.3 m,"
-                + " but shuttle keeps out of 0.1 m to 0.3 m while elevator before clear, and"
+                + " but shuttle keeps out of 0.1 m to 0.3 m while elevator at most 0.35 m, and"
                 + " elevator is at 0 m");
     assertThat(
             RobotDefinitionBuilder.builder(definition(joints, List.of(), List.of(), List.of()))
@@ -991,7 +1071,7 @@ class PlacesTest {
                     List.of()))
         .withMessage(
             "RobotDefinition[test].joints: roller's intaking, 5000 rpm, is 2.5 times its free"
-                + " speed, 2000 rpm: its motors can't turn it that fast");
+                + " speed, 2000 rpm: its motors can't turn it that fast; give it a speed under that");
     assertThat(MechanismFixtures.doubts(robot(List.of(), List.of())))
         .containsExactly(
             "roller's intaking, 2000 rpm, is 100% of its free speed, 2000 rpm: a velocity loop has"
@@ -1006,60 +1086,13 @@ class PlacesTest {
 
   /**
    * A profile's cruise is within what the joint's motors turn it at, as its named speeds are: past
-   * it, its moves would only lag their profile. The pivot's Kraken X60 turns it at 25.13 rad/s
-   * through 25:1.
+   * it, its moves would only lag their profile. The pivot's Kraken X60 turns it at 1440°/s through
+   * 25:1; the elevator's at 9.6 m/s onto its 1 in drum through 10:1.
    */
   @Test
   void aProfileCruisesWithinItsFreeSpeed() {
     Joint.Revolute geared = PIVOT.motor(Motor.KRAKEN_X60, Gearing.of(25));
 
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                definition(
-                    List.of(geared.control(MechanismFixtures.stowed(30).withProfile(30, 60))),
-                    List.of(),
-                    List.of(),
-                    List.of()))
-        .withMessage(
-            "RobotDefinition[test].joints: pivot's profile cruises at 30 rad/s, 1.194 times its"
-                + " free speed, 25.13 rad/s: its motors can't turn it that fast, so its moves would"
-                + " lag their profile. Plain numbers are radians per second: give it with its"
-                + " unit, withProfile(DegreesPerSecond.of(...), DegreesPerSecondPerSecond.of(...))"
-                + " or withProfile(RotationsPerSecond.of(...), RotationsPerSecondPerSecond.of(...))");
-    assertThat(
-            definition(
-                    List.of(geared.control(MechanismFixtures.stowed(30).withProfile(20, 60))),
-                    List.of(),
-                    List.of(),
-                    List.of())
-                .joints())
-        .hasSize(1);
-  }
-
-  /**
-   * A profile given in plain numbers is in radians: one refused says so, and how to give it with
-   * its unit, without guessing which: 450 may be degrees per second, and 40 turns per second, both
-   * too fast as radians. One given in degrees per second is refused in them, with no more to say.
-   */
-  @Test
-  void aPlainProfileRefusedSaysWhatPlainNumbersAre() {
-    Joint.Revolute geared = PIVOT.motor(Motor.KRAKEN_X60, Gearing.of(25));
-
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () ->
-                definition(
-                    List.of(geared.control(MechanismFixtures.stowed(30).withProfile(450, 1700))),
-                    List.of(),
-                    List.of(),
-                    List.of()))
-        .withMessage(
-            "RobotDefinition[test].joints: pivot's profile cruises at 450 rad/s, 17.9 times its"
-                + " free speed, 25.13 rad/s: its motors can't turn it that fast, so its moves would"
-                + " lag their profile. Plain numbers are radians per second: give it with its"
-                + " unit, withProfile(DegreesPerSecond.of(...), DegreesPerSecondPerSecond.of(...))"
-                + " or withProfile(RotationsPerSecond.of(...), RotationsPerSecondPerSecond.of(...))");
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -1076,7 +1109,20 @@ class PlacesTest {
         .withMessage(
             "RobotDefinition[test].joints: pivot's profile cruises at 1800°/s, 1.25 times its free"
                 + " speed, 1440°/s: its motors can't turn it that fast, so its moves would lag"
-                + " their profile");
+                + " their profile; give it a cruise under its free speed");
+    assertThat(
+            definition(
+                    List.of(
+                        geared.control(
+                            MechanismFixtures.stowed(30)
+                                .withProfile(
+                                    DegreesPerSecond.of(1000),
+                                    DegreesPerSecondPerSecond.of(3600)))),
+                    List.of(),
+                    List.of(),
+                    List.of())
+                .joints())
+        .hasSize(1);
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -1084,18 +1130,38 @@ class PlacesTest {
                     List.of(
                         ELEVATOR
                             .motor(Motor.KRAKEN_X60, Gearing.of(10), Inches.of(1))
-                            .control(MechanismFixtures.stowed(60).withProfile(40, 80))),
+                            .control(
+                                MechanismFixtures.stowed(60)
+                                    .withProfile(
+                                        MetersPerSecond.of(40), MetersPerSecondPerSecond.of(80)))),
                     List.of(),
                     List.of(),
                     List.of()))
-        .withMessageEndingWith(
-            "Plain numbers are meters per second: give it with its unit,"
-                + " withProfile(InchesPerSecond.of(...), InchesPerSecondPerSecond.of(...))");
+        .withMessageContaining("elevator's profile cruises at 40 m/s");
+    assertThatIllegalArgumentException()
+        .as("a roller is said in rpm, as its outputs are")
+        .isThrownBy(
+            () ->
+                definition(
+                    List.of(
+                        PIVOT,
+                        ROLLER
+                            .motor(Motor.KRAKEN_X60, Gearing.of(1))
+                            .control(
+                                MechanismControl.velocity(0.02)
+                                    .withProfile(
+                                        RPM.of(7500), RotationsPerSecondPerSecond.of(200)))),
+                    List.of(),
+                    List.of(),
+                    List.of()))
+        .withMessageContaining(
+            "roller's profile cruises at 7500 rpm, 1.25 times its free speed, 6000 rpm:");
   }
 
   /**
    * A roller's bands are shares of the speed it's asked for, so bands given as angles, meant for a
-   * joint held at positions, are refused on one.
+   * joint held at positions, are refused on one; and a joint held at positions has its bands in
+   * angles or lengths, so shares are refused on it.
    */
   @Test
   void aRollersBandsAreSharesOfItsSpeed() {
@@ -1103,13 +1169,23 @@ class PlacesTest {
         ROLLER
             .motor(Motor.KRAKEN_X60, Gearing.of(3))
             .control(MechanismControl.velocity(0.02).withBands(Degrees.of(2), Degrees.of(4)));
+    Joint.Revolute shared =
+        PIVOT
+            .motor(Motor.KRAKEN_X60, Gearing.of(25))
+            .control(MechanismFixtures.stowed(30).withBands(Percent.of(3), Percent.of(6)));
 
     assertThatIllegalArgumentException()
         .isThrownBy(() -> definition(List.of(PIVOT, banded), List.of(), List.of(), List.of()))
         .withMessage(
             "RobotDefinition[test].joints: roller only runs at outputs, so its bands are shares of"
-                + " the speed it's asked for, not angles: withBands(0.03, 0.06) is 3% to arrive"
-                + " and 6% to stay");
+                + " the speed it's asked for, not angles: withBands(Percent.of(3), Percent.of(6)) is"
+                + " 3% to arrive and 6% to stay");
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> definition(List.of(shared), List.of(), List.of(), List.of()))
+        .withMessage(
+            "RobotDefinition[test].joints: pivot is held at positions, so its bands are angles, not"
+                + " shares of a speed: withBands(Degrees.of(2), Degrees.of(4)) is 2° to arrive and"
+                + " 4° to stay");
   }
 
   /**
@@ -1167,7 +1243,9 @@ class PlacesTest {
                     List.of(linear(ELEVATOR, named, 0.5)),
                     List.of(),
                     List.of()))
-        .withMessageContaining("stage follows elevator: its places are elevator's to name");
+        .withMessageContaining(
+            "stage follows elevator, whose moves carry it: give its places to elevator, and none to"
+                + " stage");
     RobotDefinition lifted =
         definition(List.of(ELEVATOR, stage), List.of(follows), List.of(), List.of());
     assertThatIllegalArgumentException()
@@ -1178,11 +1256,11 @@ class PlacesTest {
                         List.of(
                             Interlock.that(stage)
                                 .keepsOut(Range.meters(0.1, 0.2))
-                                .when(ELEVATOR.past(ELEVATOR_TOP))))
+                                .when(ELEVATOR.atLeast(ELEVATOR_TOP))))
                     .build())
         .withMessage(
             "RobotDefinition[test].interlocks: interlock \"stage keeps out of 0.1 m to 0.2 m while elevator"
-                + " past top\" names stage, which follows elevator: name elevator instead");
+                + " at least top\" names stage, which follows elevator: name elevator instead");
   }
 
   /** The intake and stacked arm, with these configurations and interlocks. */

@@ -1,16 +1,20 @@
 package frc.robot.behavior;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.Seconds;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.Trigger;
+import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.math.filter.Debouncer;
 import org.wpilib.units.measure.Time;
+import org.wpilib.util.Alert;
 
 /**
  * A named condition that says why it's false: a v3 {@link Trigger}, so it binds ({@code
@@ -18,17 +22,17 @@ import org.wpilib.units.measure.Time;
  * co.waitUntil(readyToShoot)}), with a name and named terms. Every joint's checks are gates already
  * ({@code shooter.isAtGoal()} is "shooter at goal"), and code makes its own:
  *
- * {@snippet :
- * Gate aimed = Gate.within(scheduler, "aimed", () -> headingErrorDegrees(), 2.0, 4.0);
- * Gate readyToShoot = Gate.all("ready to shoot", shooter.isAtGoal(), aimed)
- *     .debounce(Milliseconds.of(80), Debouncer.DebounceType.FALLING); // rides out a flywheel dip
- * }
+ * {@snippet class=frc.robot.examples.ExampleCommands region=gates}
  *
  * <p>It's worked out once a loop, before the scheduler's bindings and commands read it, and logged
  * then: {@code Gates/ready to shoot = false}, and {@code Gates/ready to shoot/Blocking = [aimed]},
  * the terms that are false. Terms go one level deep: a gate of gates, each a lambda, never an
  * expression language. A gate made inside a command lives as long as the command does, as v3's
  * triggers do.
+ *
+ * <p>A gate whose logic throws holds false while it does, its term saying so ({@code aimed threw:
+ * ...}), and the rest of the robot runs on. The first time, it reports a Driver Station error with
+ * the stack, and an alert stays raised while it throws.
  */
 public final class Gate extends Trigger {
   /** What a gate works out each loop. */
@@ -60,6 +64,15 @@ public final class Gate extends Trigger {
 
   private String[] shown = new String[0];
 
+  /** Raised while its logic throws: made the first time it does. */
+  private @Nullable Alert threw;
+
+  /** What the alert says. */
+  private String threwText = "";
+
+  /** Whether its logic threw last loop. */
+  private boolean throwing;
+
   /**
    * A gate whose logic names what keeps it false: what a mechanism's or a sensor's gate is built
    * from.
@@ -68,7 +81,6 @@ public final class Gate extends Trigger {
     this(scheduler, name, logic, new Value());
   }
 
-  @SuppressWarnings("this-escape")
   private Gate(Scheduler scheduler, String name, Logic logic, Value value) {
     super(scheduler, value);
     this.scheduler = scheduler;
@@ -89,15 +101,19 @@ public final class Gate extends Trigger {
   /**
    * A gate on how far something is off, either way: it becomes true within {@code enter} of zero,
    * and stays true until it's more than {@code stay} off, so an error that wavers at the edge
-   * doesn't flicker. {@code Gate.within(scheduler, "aimed", () -> headingError, 2.0, 4.0)}.
+   * doesn't flicker. {@code Gate.within(scheduler, "aimed", () -> headingError, 2.0, 4.0)}. Bands
+   * that can't be are refused ({@link Refusals#gate}): thrown as the robot starts, and once it
+   * runs, a gate that holds false saying why.
    *
    * @throws IllegalArgumentException for an {@code enter} that isn't positive, or a {@code stay}
-   *     below it
+   *     below it, as the robot starts
    */
   public static Gate within(
       Scheduler scheduler, String name, DoubleSupplier error, double enter, double stay) {
     if (!(enter > 0 && stay >= enter)) {
-      throw new IllegalArgumentException(
+      return Refusals.gate(
+          scheduler,
+          name,
           name
               + ": enter within a positive band, and stay within at least it, not "
               + enter
@@ -128,7 +144,7 @@ public final class Gate extends Trigger {
     Scheduler scheduler = terms[0].scheduler;
     for (Gate term : terms) {
       if (term.scheduler != scheduler) {
-        throw new IllegalArgumentException(name + "'s terms run on different schedulers");
+        throw new IllegalArgumentException(possessive(name) + " terms run on different schedulers");
       }
     }
     List<Gate> all = List.of(terms);
@@ -228,7 +244,23 @@ public final class Gate extends Trigger {
   /** Works it out for this loop, and logs it. */
   private void update() {
     blocking.clear();
-    value.holds = logic.holds(blocking);
+    boolean throwsNow = false;
+    try {
+      value.holds = logic.holds(blocking);
+    } catch (RuntimeException e) {
+      // Caught here, inside the scheduler's sideload: a sideload that throws is over, and the
+      // scheduler would then throw on every loop after it.
+      value.holds = false;
+      blocking.clear();
+      blocking.add(name + " threw: " + message(e));
+      report(e);
+      throwsNow = true;
+    }
+    Alert alert = threw;
+    if (alert != null && throwsNow != throwing) {
+      alert.set(throwsNow);
+    }
+    throwing = throwsNow;
     if (logged) {
       Logger.recordOutput(key, value.holds);
       if (shown.length != blocking.size() || !List.of(shown).equals(blocking)) {
@@ -236,5 +268,30 @@ public final class Gate extends Trigger {
       }
       Logger.recordOutput(blockingKey, shown);
     }
+  }
+
+  /**
+   * Reports its logic throwing: the first time, a Driver Station error with the stack; and the
+   * alert, saying what it threw last.
+   */
+  private void report(RuntimeException e) {
+    String text =
+        blocking.get(0)
+            + ". It holds false while it throws: fix its condition (the stack is in the"
+            + " Driver Station's log)";
+    Alert alert = threw;
+    if (alert == null) {
+      DriverStationErrors.reportError(text, e.getStackTrace());
+      threw = new Alert("Gates", name, text, Alert.Level.HIGH);
+    } else if (!text.equals(threwText)) {
+      alert.setText(text);
+    }
+    threwText = text;
+  }
+
+  /** What it says, or what it is when it says nothing. */
+  private static String message(RuntimeException e) {
+    String message = e.getMessage();
+    return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
   }
 }

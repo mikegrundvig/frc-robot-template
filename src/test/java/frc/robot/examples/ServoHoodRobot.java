@@ -33,7 +33,8 @@ final class ServoHoodRobot {
 
   static final Joint.Revolute HOOD =
       Joint.pivot("hood", Part.CHASSIS, new Translation3d(-0.2, 0, 0.55), Joint.PITCH_UP)
-          .range(Range.degrees(0, 40), HOOD_DOWN)
+          .range(Range.degrees(0, 40))
+          .rest(HOOD_DOWN)
           .positions(HOOD_DOWN, HOOD_LOB)
           // Each servo's body on the chassis, from the hood's axle, and its rod's end on the hood.
           .servo(

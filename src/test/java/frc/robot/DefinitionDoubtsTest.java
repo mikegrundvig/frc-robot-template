@@ -27,14 +27,14 @@ class DefinitionDoubtsTest {
   /** An arm whose plate nobody weighed, its kG not written. */
   private static final Joint.Revolute ARM =
       Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
-          .range(Range.degrees(0, 90), Degrees.of(0))
+          .range(Range.degrees(0, 90))
+          .rest(Degrees.of(0))
           .carries(
               Link.box(
                   "arm plate", new Translation3d(0.2, 0, 0), new Translation3d(0.4, 0.05, 0.05)))
           .motor(Motor.KRAKEN_X60, Gearing.of(50))
           .control(
-              MechanismControl.position(30)
-                  .withHoming(MechanismControl.Homing.assumeAtReference()));
+              MechanismControl.position(30).withHoming(MechanismControl.Homing.assumeAtRest()));
 
   private static final RobotDefinition ROBOT =
       RobotDefinitionBuilder.builder(Robots.SIM.definition())

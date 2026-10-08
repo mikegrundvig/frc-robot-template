@@ -29,6 +29,7 @@ import com.michaelgrundvig.frc.world.physical.Vector3;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Driven;
+import com.michaelgrundvig.frc.world.robot.DrivenBuilder;
 import com.michaelgrundvig.frc.world.robot.Gearing;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -68,10 +69,11 @@ class ExampleRobotSimTest {
 
   private static final Joint.Prismatic HOPPER =
       Joint.slide("hopper", Part.CHASSIS, new Translation3d(0.1, 0, 0.2), new Vector3(1, 0, 0))
-          .range(Range.meters(0, 0.3), HOPPER_DOWN)
+          .range(Range.meters(0, 0.3))
+          .rest(HOPPER_DOWN)
           .positions(HOPPER_DOWN, HOPPER_CLEAR)
           .motor(Motor.KRAKEN_X60, Gearing.of(10), Inches.of(0.5))
-          .control(MechanismControl.position(30).withHoming(Homing.assumeAtReference()));
+          .control(MechanismControl.position(30).withHoming(Homing.assumeAtRest()));
 
   /**
    * Both robots of the design, listed as Robots.all() lists them, are configurations of their own,
@@ -191,6 +193,32 @@ class ExampleRobotSimTest {
   }
 
   /**
+   * The guide's elevator knows where it is from the moment the robot starts, from its CANcoder
+   * geared twelve to one down from its drum: it's ready at once, with no homing. On the drum's
+   * shaft, which turns ten times over its travel, the CANcoder is refused, saying the gearing that
+   * covers the travel, or to home the elevator instead: the refusal the guide quotes.
+   */
+  @Test
+  void theElevatorsEncoderCoversItsTravelInOneTurn() {
+    JointsSimHarness sim = new JointsSimHarness(ExampleRobot.COMPETITION.definition());
+    sim.loop();
+    Joint.Prismatic onTheShaft =
+        ELEVATOR
+            .driven(
+                DrivenBuilder.builder(ELEVATOR.driven()).absoluteEncoder(Optional.empty()).build())
+            .absoluteEncoder(CANCODER.can(24).offset(Rotations.of(0.31)));
+
+    assertThat(sim.joints.of(ELEVATOR).state()).isEqualTo(JointMechanism.State.READY);
+    assertThatThrownBy(() -> ExampleRobot.COMPETITION.definition().with(onTheShaft))
+        .hasMessage(
+            "RobotDefinition[example].joints: elevator's absolute encoder turns 10.03 times over"
+                + " its travel, 0 m to 1.2 m: one of its turns must cover the travel, with a"
+                + " fortieth of it to spare at each end, to tell where elevator is. Gear it to at"
+                + " most 0.0947 of its turns for each turn of elevator's drum, or leave it out and"
+                + " give elevator's control a homing recipe");
+  }
+
+  /**
    * An interlock written in a joint's block is the robot's own, as its definition would list it.
    */
   @Test
@@ -202,6 +230,56 @@ class ExampleRobotSimTest {
             Interlock.that(ARM)
                 .keepsOut(Range.degrees(-10, 30))
                 .when(ELEVATOR.atMost(Inches.of(32))));
+  }
+
+  /**
+   * A joint held by one written after it has its rule in the robot's definition: the elevator, kept
+   * out of its lowest 0.3 m while the arm riding on it reaches down past 130°, is taken beside the
+   * arm's own rule. Kept out of 0.1 m to 0.6 m while the arm is at most 0° instead, it would hold
+   * the arm, resting below the bumper's band, as the arm holds it: a deadlock where the robot
+   * starts and where its stowed configuration puts them, refused as the guide quotes it.
+   */
+  @Test
+  void aJointHeldByOneWrittenAfterItHasItsRuleInTheDefinition() {
+    RobotDefinition robot =
+        RobotDefinitionBuilder.builder(ExampleRobot.COMPETITION.definition())
+            .interlocks(
+                List.of(
+                    // The elevator keeps out of its lowest 0.3 m while the arm reaches down past
+                    // 130°.
+                    Interlock.that(ELEVATOR)
+                        .keepsOut(Range.meters(0, 0.3))
+                        .when(ARM.atLeast(Degrees.of(130)))))
+            .build();
+
+    assertThat(robot.everyInterlock())
+        .contains(
+            Interlock.that(ARM)
+                .keepsOut(Range.degrees(-10, 30))
+                .when(ELEVATOR.atMost(Inches.of(32))),
+            Interlock.that(ELEVATOR)
+                .keepsOut(Range.meters(0, 0.3))
+                .when(ARM.atLeast(Degrees.of(130))));
+    assertThatThrownBy(
+            () ->
+                RobotDefinitionBuilder.builder(ExampleRobot.COMPETITION.definition())
+                    .interlocks(
+                        List.of(
+                            Interlock.that(ELEVATOR)
+                                .keepsOut(Range.meters(0.1, 0.6))
+                                .when(ARM.atMost(Degrees.of(0)))))
+                    .build())
+        .hasMessage(
+            "RobotDefinition[example].configurations: configuration stowed leaves arm and elevator"
+                + " holding each other by their interlocks, so neither can free the other: a"
+                + " deadlock (arm keeps out of -10° to 30° while elevator at most 0.8128 m, so arm"
+                + " stays between -60° and -10°; elevator keeps out of 0.1 m to 0.6 m while arm at"
+                + " most 0°, so elevator stays between 0 m and 0.1 m)\n"
+                + "RobotDefinition[example].interlocks: as the robot starts, it leaves arm and"
+                + " elevator holding each other by their interlocks, so neither can free the other:"
+                + " a deadlock (arm keeps out of -10° to 30° while elevator at most 0.8128 m, so arm"
+                + " stays between -60° and -10°; elevator keeps out of 0.1 m to 0.6 m while arm at"
+                + " most 0°, so elevator stays between 0 m and 0.1 m)");
   }
 
   /**
@@ -293,7 +371,7 @@ class ExampleRobotSimTest {
 
     assertThatThrownBy(() -> sim.joints.of(ELEVATOR).goTo(HOPPER_CLEAR)).hasMessage(why);
     assertThatThrownBy(() -> sim.joints.of(ELEVATOR).isAt(HOPPER_CLEAR)).hasMessage(why);
-    assertThatThrownBy(() -> ELEVATOR.before(HOPPER_CLEAR)).hasMessage(why);
+    assertThatThrownBy(() -> ELEVATOR.atMost(HOPPER_CLEAR)).hasMessage(why);
     assertThatThrownBy(() -> Configuration.of("clear", ELEVATOR.at(HOPPER_CLEAR))).hasMessage(why);
   }
 

@@ -72,9 +72,6 @@ public interface ModuleIO {
   /** Closed-loop wheel velocity on the motor controller, plus robot-computed feedforward. */
   default void setDriveVelocity(double wheelRadPerSec, double feedforwardVolts) {}
 
-  /** Open-loop drive voltage (characterization). */
-  default void setDriveVoltage(double volts) {}
-
   /** Closed-loop steer angle on the motor controller. */
   default void setSteerAngle(Rotation2d angle) {}
 

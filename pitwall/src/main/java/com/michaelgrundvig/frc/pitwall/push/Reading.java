@@ -3,9 +3,9 @@ package com.michaelgrundvig.frc.pitwall.push;
 /**
  * A number the page shows to some resolution, such as the battery to the nearest 0.1 V:
  *
- * <pre>{@code
- * Reading.of(RobotController.getBatteryVoltage()).toNearest(0.1)
- * }</pre>
+ * {@snippet :
+ * Reading.of(battery).toNearest(0.1)
+ * }
  *
  * <p>It counts as changed only once it has moved by at least its resolution from the value last
  * sent. Noise around a rounding edge (a battery sitting at 12.35 V) then sends nothing, where

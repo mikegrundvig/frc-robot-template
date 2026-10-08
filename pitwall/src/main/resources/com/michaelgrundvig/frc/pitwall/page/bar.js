@@ -4,7 +4,7 @@
 // what?", the question asked most, whose wrong answer costs most (tuning the simulator while the
 // robot sits unchanged).
 
-import { robot, onChange, onConnection, send, h, byId, say, announce, replace } from "./core.js";
+import { robot, onChange, onConnection, send, h, byId, say, announce } from "./core.js";
 
 let name;
 let badge;
@@ -18,7 +18,6 @@ let title = "Pitwall";
 let tuningPill;
 let tuningButton;
 let uncommitted;
-let noticePills;
 let band;
 let bandSince;
 let themeButton;
@@ -39,14 +38,13 @@ export function mountBar() {
   tuningButton = h("button", { type: "button", onclick: switchTuning });
   tuningPill = h("span", { class: "pill", hidden: true });
   uncommitted = h("a", { href: "#changes", class: "uncommitted", hidden: true });
-  noticePills = h("span", { class: "notice-pills" });
   themeButton = h("button", { type: "button", class: "theme", onclick: nextTheme });
   showTheme();
   byId("bar").append(
     h("span", { class: "brand" }, "Pitwall", name, badge),
     code,
     h("span", { class: "spacer" }),
-    connection, mode, noticePills, driving, tuningPill, uncommitted, themeButton);
+    connection, mode, driving, tuningPill, uncommitted, themeButton);
   bandSince = h("span");
   band = byId("band");
   onChange(render);
@@ -82,7 +80,6 @@ function render(patch, snapshot) {
     renderTuning();
     renderBand();
   }
-  if (snapshot || "notices" in patch) renderNotices();
   if (snapshot || "changes" in patch) {
     const count = Object.keys(doc.changes).length;
     uncommitted.hidden = count === 0;
@@ -90,14 +87,6 @@ function render(patch, snapshot) {
     uncommitted.title = count + (count === 1 ? " tuned value differs" : " tuned values differ")
         + " from the committed configuration: see Changes";
   }
-}
-
-/** What the robot has to tell whoever is here, on every view: each a pill leading to Pit. */
-function renderNotices() {
-  const marks = { ok: "✓", note: "•", warning: "▲", problem: "✗" };
-  replace(noticePills, Object.entries(robot.doc.notices || {}).map(([name, notice]) =>
-    h("a", { href: "#pit", class: "pill notice " + notice.level, title: name + ": see Pit" },
-      (marks[notice.level] || "•") + " " + notice.text)));
 }
 
 /**

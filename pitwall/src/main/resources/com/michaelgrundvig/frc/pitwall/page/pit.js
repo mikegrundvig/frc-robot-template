@@ -12,7 +12,6 @@ let actionList;
 let gate;
 let switchCard;
 let switchList;
-let notices;
 let builtActions = "";
 let builtSwitches = "";
 const actions = new Map(); // name -> its row's parts
@@ -32,11 +31,9 @@ function mount(view) {
         + "match."),
     tuningOffBanner("Switches"),
     switchList);
-  notices = h("div", { class: "notices", "aria-live": "polite" });
   view.append(
     h("h1", { class: "view-title" }, "Pit"),
     h("p", { class: "lede" }, "Is the robot ready, and the checks to run before a match."),
-    notices,
     h("div", { class: "pit" },
       h("section", { class: "card" }, h("h2", null, "Status"), statusList),
       h("div", null, actionCard, switchCard)));
@@ -52,28 +49,10 @@ function mount(view) {
 }
 
 function render(patch, snapshot) {
-  if (snapshot || "notices" in patch) renderNotices();
   if (snapshot || "status" in patch || "units" in patch) renderStatus();
   if (snapshot || "actions" in patch || "tuning" in patch) renderActions(snapshot);
   if (snapshot || "wpilibTunables" in patch || "tuning" in patch) renderSwitches(snapshot);
 }
-
-/**
- * What the robot has to tell whoever is here, above everything else: "Safe to switch off", say. The
- * state bar says it too, on every view.
- */
-function renderNotices() {
-  const shown = Object.entries(robot.doc.notices || {}).map(([name, notice]) => {
-    const [mark, tone] = NOTICE_MARKS[notice.level] || NOTICE_MARKS.note;
-    return h("div", { class: "banner notice " + tone, role: "status" },
-      h("span", { class: "nmark", "aria-hidden": "true" }, mark),
-      h("b", null, notice.text), h("span", { class: "meta" }, name));
-  });
-  replace(notices, shown);
-}
-
-const NOTICE_MARKS = { ok: ["✓", "ok"], note: ["•", "info"], warning: ["▲", "warn"],
-                       problem: ["✗", "bad"] };
 
 /** The status items: true and false as a mark and a word, a number with its unit. */
 function renderStatus() {

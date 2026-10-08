@@ -204,6 +204,6 @@ final class MechanismFixtures {
    * its feedback {@code kP}.
    */
   static MechanismControl stowed(double kP) {
-    return MechanismControl.position(kP).withHoming(MechanismControl.Homing.assumeAtReference());
+    return MechanismControl.position(kP).withHoming(MechanismControl.Homing.assumeAtRest());
   }
 }

@@ -6,7 +6,7 @@ import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.behavior.Gate;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveMove;
-import frc.robot.subsystems.mechanisms.Sensors;
+import frc.robot.subsystems.mechanisms.Joints;
 import java.util.Random;
 import org.wpilib.command3.Command;
 import org.wpilib.math.geometry.Rotation2d;
@@ -24,10 +24,10 @@ final class Explorer {
   private final Gate bumped;
   private final Random random;
 
-  Explorer(Drive drive, Sensors sensors, Sensor.Switch frontBumper, Random random) {
+  Explorer(Drive drive, Joints joints, Sensor.Switch frontBumper, Random random) {
     this.drive = drive;
     this.random = random;
-    bumped = sensors.gate("bumped", frontBumper.tripped());
+    bumped = joints.gate("bumped", frontBumper.tripped());
   }
 
   Command explore() {

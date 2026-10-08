@@ -1,5 +1,6 @@
 package com.michaelgrundvig.frc.world.robot;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 
 import com.michaelgrundvig.frc.world.config.Finding;
@@ -20,7 +21,7 @@ import org.jspecify.annotations.Nullable;
  * The definition's checks of its named places, across its parts: each joint's named outputs against
  * what its motors can do, and its configurations and interlocks against its joints and each other.
  * Everything here is judged statically, at named positions, with the joints a configuration doesn't
- * name at their references, as the robot is weighed and starts.
+ * name where they rest, as the robot is weighed and starts.
  */
 final class Places {
   private Places() {}
@@ -62,6 +63,25 @@ final class Places {
   }
 
   /**
+   * Refuses what a condition or an interlock says, as it's written: each reason in plain words,
+   * without a record's path a team never wrote.
+   *
+   * @param whys each reason it can't be, or null for none
+   * @throws IllegalArgumentException with every reason given, one a line
+   */
+  static void refuse(@Nullable String... whys) {
+    List<String> refused = new ArrayList<>();
+    for (String why : whys) {
+      if (why != null) {
+        refused.add(why);
+      }
+    }
+    if (!refused.isEmpty()) {
+      throw new IllegalArgumentException(String.join("\n", refused));
+    }
+  }
+
+  /**
    * What's wrong with the joints' names and speeds: a joint that follows another naming places of
    * its own, which are its leader's to name; a named speed, or its profile's cruise, faster than
    * the joint's motors turn it; a voltage past what they're rated at.
@@ -77,9 +97,10 @@ final class Places {
                   joint.label()
                       + " follows "
                       + leader.label()
-                      + ": its places are "
+                      + ", whose moves carry it: give its places to "
                       + leader.label()
-                      + "'s to name"));
+                      + ", and none to "
+                      + joint.label()));
         }
         continue;
       }
@@ -97,17 +118,8 @@ final class Places {
           .driven()
           .control()
           .flatMap(MechanismControl::bands)
-          .filter(bands -> bands.kind().isPresent() && !joint.holdsPositions())
-          .ifPresent(
-              bands ->
-                  problems.add(
-                      refused(
-                          joint,
-                          joint.label()
-                              + " only runs at outputs, so its bands are shares of the speed it's"
-                              + " asked for, not "
-                              + (bands.kind().get() == Position.Kind.ANGLE ? "angles" : "lengths")
-                              + ": withBands(0.03, 0.06) is 3% to arrive and 6% to stay")));
+          .map(bands -> bandsOfTheOtherLoop(joint, bands))
+          .ifPresent(why -> problems.add(refused(joint, why)));
       double nominal = nominalVolts(math, joint);
       for (Output output : joint.outputs()) {
         double size = Math.abs(output.value());
@@ -117,8 +129,9 @@ final class Places {
                   joint,
                   String.format(
                       Locale.ROOT,
-                      "%s's %s, %s, is %s times its free speed, %s: its motors can't turn it that fast",
-                      joint.label(),
+                      "%s %s, %s, is %s times its free speed, %s: its motors can't turn it that"
+                          + " fast; give it a speed under that",
+                      possessive(joint.label()),
                       output.name(),
                       shownSpeed(joint instanceof Joint.Revolute, output.value()),
                       shown(size / free),
@@ -140,41 +153,55 @@ final class Places {
   }
 
   /**
-   * Why a profile's cruise is past its joint's free speed, in the units it was given in: rad/s for
-   * plain numbers, degrees per second for an angle, m/s for a length. A plain number refused says
-   * what plain numbers are, and how to give one with its unit, without guessing which unit was
-   * meant: degrees and turns per second are both common, and both too large as radians.
+   * Why a profile's cruise is past its joint's free speed, in the joint's own terms: degrees a
+   * second for a joint that turns to places, as its profile is given; rpm for one that only runs, a
+   * roller or a flywheel, as its outputs are; m/s for one that slides.
    */
   private static String tooFast(Joint joint, MechanismControl.Profile profile, double free) {
     boolean revolute = joint instanceof Joint.Revolute;
-    boolean plain = profile.kind().isEmpty();
-    String why =
-        String.format(
-            Locale.ROOT,
-            "%s's profile cruises at %s, %s times its free speed, %s: its motors can't turn it that"
-                + " fast, so its moves would lag their profile",
-            joint.label(),
-            shownProfile(revolute, plain, profile.cruiseVelocity()),
-            shown(profile.cruiseVelocity() / free),
-            shownProfile(revolute, plain, free));
-    if (!plain) {
-      return why;
-    }
-    return why
-        + (revolute
-            ? ". Plain numbers are radians per second: give it with its unit,"
-                + " withProfile(DegreesPerSecond.of(...), DegreesPerSecondPerSecond.of(...)) or"
-                + " withProfile(RotationsPerSecond.of(...), RotationsPerSecondPerSecond.of(...))"
-            : ". Plain numbers are meters per second: give it with its unit,"
-                + " withProfile(InchesPerSecond.of(...), InchesPerSecondPerSecond.of(...))");
+    boolean runs = !joint.holdsPositions();
+    return String.format(
+        Locale.ROOT,
+        "%s's profile cruises at %s, %s times its free speed, %s: its motors can't turn it that"
+            + " fast, so its moves would lag their profile; give it a cruise under its free speed",
+        joint.label(),
+        runs
+            ? shownSpeed(revolute, profile.cruiseVelocity())
+            : shownProfile(revolute, profile.cruiseVelocity()),
+        shown(profile.cruiseVelocity() / free),
+        runs ? shownSpeed(revolute, free) : shownProfile(revolute, free));
   }
 
-  /** A profile's speed as it was given: rad/s as a plain number, else °/s or m/s. */
-  private static String shownProfile(boolean revolute, boolean plain, double speed) {
-    if (!revolute) {
-      return shown(speed) + " m/s";
+  /**
+   * Why a joint's bands aren't what its loop holds, or null when they are: a roller's are shares of
+   * the speed it's asked for, and a joint held at positions has them in angles or lengths.
+   */
+  private static @Nullable String bandsOfTheOtherLoop(Joint joint, MechanismControl.Bands bands) {
+    boolean revolute = joint instanceof Joint.Revolute;
+    if (bands.kind().isPresent() && !joint.holdsPositions()) {
+      return joint.label()
+          + " only runs at outputs, so its bands are shares of the speed it's asked for, not "
+          + (bands.kind().get() == Position.Kind.ANGLE ? "angles" : "lengths")
+          + ": withBands(Percent.of(3), Percent.of(6)) is 3% to arrive and 6% to stay";
     }
-    return plain ? shown(speed) + " rad/s" : shown(Math.toDegrees(speed)) + "°/s";
+    if (bands.kind().isEmpty() && joint.holdsPositions()) {
+      return joint.label()
+          + " is held at positions, so its bands are "
+          + (revolute ? "angles" : "lengths")
+          + ", not shares of a speed: "
+          + (revolute
+              ? "withBands(Degrees.of(2), Degrees.of(4))"
+              : "withBands(Inches.of(0.5), Inches.of(1))")
+          + " is "
+          + (revolute ? "2° to arrive and 4°" : "half an inch to arrive and an inch")
+          + " to stay";
+    }
+    return null;
+  }
+
+  /** A profile's speed as a profile is given: in degrees a second, or meters. */
+  private static String shownProfile(boolean revolute, double speed) {
+    return revolute ? shown(Math.toDegrees(speed)) + "°/s" : shown(speed) + " m/s";
   }
 
   /**
@@ -223,7 +250,7 @@ final class Places {
       String broken = broken(interlock, start, Set.of(), Set.of());
       if (broken != null && interlock instanceof Interlock.KeepsOut out) {
         Joint joint = out.joint();
-        double here = start.getOrDefault(joint, joint.reference());
+        double here = start.getOrDefault(joint, joint.restPosition());
         double edge = out.keptBelow(here, 0) ? out.region().lower() : out.region().upper();
         doubts.add(
             Finding.doubt(
@@ -270,7 +297,7 @@ final class Places {
   /**
    * What's wrong with the configurations: two named alike; a joint not the robot's, or one that
    * follows another; an interlock broken, or joints it names holding each other in a deadlock
-   * ({@link #deadlock}), with the joints a configuration doesn't name at their references. Each is
+   * ({@link #deadlock}), with the joints a configuration doesn't name where they rest. Each is
    * about its configuration.
    */
   static List<Finding> configurationProblems(
@@ -323,7 +350,7 @@ final class Places {
                   configuration.name(), "configuration " + configuration.name() + " " + broken));
         }
       }
-      // A ring whose joints are all at their references, and still, is judged as the robot starts.
+      // A ring whose joints are all where they rest, and still, is judged as the robot starts.
       Set<Set<Joint>> reported = new HashSet<>();
       for (List<Interlock> ring : rings) {
         if (ring.stream()
@@ -428,15 +455,15 @@ final class Places {
 
   /**
    * How an interlock is broken with the joints at positions and some running, or null when it
-   * isn't. A joint the configuration names is at its named place; the rest are at their references.
+   * isn't. A joint the configuration names is at its named place; the rest are where they rest.
    *
-   * @param named the joints whose positions were given, rather than their references
+   * @param named the joints whose positions were given, rather than where they rest
    */
   private static @Nullable String broken(
       Interlock interlock, Map<Joint, Double> at, Set<Joint> running, Set<Joint> named) {
     Condition.OnJoint condition = on(interlock);
     Joint other = condition.joint();
-    double there = at.getOrDefault(other, other.reference());
+    double there = at.getOrDefault(other, other.restPosition());
     boolean holds = condition.holdsAt(there);
     String where =
         other.label()
@@ -449,7 +476,7 @@ final class Places {
               ? "runs " + only.joint().label() + ", but " + interlock + ", and " + where
               : null;
       case Interlock.KeepsOut out -> {
-        double position = at.getOrDefault(out.joint(), out.joint().reference());
+        double position = at.getOrDefault(out.joint(), out.joint().restPosition());
         yield holds && out.keepsOut(position)
             ? "puts "
                 + out.joint().label()
@@ -555,7 +582,7 @@ final class Places {
         return null;
       }
       boolean revolute = joint instanceof Joint.Revolute;
-      double here = at.getOrDefault(joint, joint.reference());
+      double here = at.getOrDefault(joint, joint.restPosition());
       double from = here;
       double to = here;
       String stays;
@@ -607,7 +634,7 @@ final class Places {
       Condition condition, Map<Joint, Double> at, Map<Joint, Double> speeds) {
     return switch (condition) {
       case Condition.OnJoint onJoint ->
-          onJoint.holdsAt(at.getOrDefault(onJoint.joint(), onJoint.joint().reference()));
+          onJoint.holdsAt(at.getOrDefault(onJoint.joint(), onJoint.joint().restPosition()));
       case Condition.UpToSpeed upToSpeed -> {
         double speed = speeds.getOrDefault(upToSpeed.joint(), 0.0);
         yield Double.isNaN(speed) ? null : upToSpeed.holdsAt(speed);
@@ -792,8 +819,6 @@ final class Places {
       case Condition.At at -> List.of(joint.position(at.name()).value());
       case Condition.AtLeast atLeast -> List.of(atLeast.position());
       case Condition.AtMost atMost -> List.of(atMost.position());
-      case Condition.Past past -> List.of(past.position());
-      case Condition.Before before -> List.of(before.position());
       case Condition.Between between -> List.of(between.from(), between.to());
     };
   }
@@ -804,7 +829,10 @@ final class Places {
    */
   private static @Nullable String notOwn(RobotMath math, Joint joint, String what) {
     if (!math.has(joint)) {
-      return what + "'s joint, " + joint.label() + ", isn't one of the robot's joints: list it";
+      return possessive(what)
+          + " joint, "
+          + joint.label()
+          + ", isn't one of the robot's joints: list it";
     }
     Joint leader = math.leaderOf(joint);
     return leader == null

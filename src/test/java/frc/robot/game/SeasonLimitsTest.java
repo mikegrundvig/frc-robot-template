@@ -118,7 +118,8 @@ class SeasonLimitsTest {
             "it starts 0.787 m tall, more than the 0.762 m allowed",
             "it starts reaching 0.319 m beyond its frame perimeter: it must start inside it",
             "its bumpers, 2 in to 5.75 in up, aren't within the bumper zone, 2.5 in to 5.75 in",
-            "it weighs 140.5 lb. without its battery, more than the 135 lb. allowed");
+            "it weighs 140.5 lb. without its battery, more than the 135 lb. allowed: lighten it, or"
+                + " weigh it again");
   }
 
   /** A link above the body at the start is too tall, as a body that tall would be. */

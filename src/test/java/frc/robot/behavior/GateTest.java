@@ -6,12 +6,14 @@ import static org.wpilib.units.Units.Milliseconds;
 
 import frc.robot.RobotSim;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.math.filter.Debouncer;
+import org.wpilib.simulation.AlertSim;
 
 /**
  * Gates on their own: worked out once a loop, before what the scheduler runs, with their reasons.
@@ -162,6 +164,115 @@ class GateTest {
     assertThat(before).isFalse();
     assertThat(waited[0]).isTrue();
     assertThat(ran[0]).isEqualTo(1);
+  }
+
+  /**
+   * A gate whose condition throws holds false while it does, saying what it threw, and the
+   * scheduler runs on: its alert is raised while it throws, and lowered once it holds again.
+   */
+  @Test
+  void aGateWhoseConditionThrowsHoldsFalseSayingWhyAndTheSchedulerRunsOn() {
+    boolean[] broken = {false};
+    Gate gate =
+        Gate.of(
+            scheduler,
+            "intake clear",
+            () -> {
+              if (broken[0]) {
+                throw new IllegalStateException("no reading yet");
+              }
+              return true;
+            });
+    int[] loops = {0};
+    scheduler.schedule(
+        Command.noRequirements(
+                co -> {
+                  while (true) {
+                    loops[0]++;
+                    co.yield();
+                  }
+                })
+            .named("Counting"));
+
+    loop();
+    broken[0] = true;
+    loop();
+    boolean throwing = gate.getAsBoolean();
+    String why = gate.why();
+    List<String> raised = raised();
+    loop();
+    broken[0] = false;
+    loop();
+
+    assertThat(throwing).isFalse();
+    assertThat(why).isEqualTo("intake clear is false: intake clear threw: no reading yet");
+    assertThat(raised)
+        .containsExactly(
+            "intake clear threw: no reading yet. It holds false while it throws: fix its condition"
+                + " (the stack is in the Driver Station's log)");
+    assertThat(gate.getAsBoolean()).as("holding again").isTrue();
+    assertThat(gate.blocking()).isEmpty();
+    assertThat(raised()).as("lowered").isEmpty();
+    assertThat(loops[0]).as("the scheduler ran its command every loop").isEqualTo(4);
+  }
+
+  /**
+   * A gate that throws as it's made is made all the same, holding false, and blocks what's built on
+   * it; an exception that says nothing is named by its kind.
+   */
+  @Test
+  void aGateThatThrowsFromTheStartBlocksWhatsBuiltOnIt() {
+    boolean[] broken = {true};
+    Gate aimed =
+        Gate.of(
+            scheduler,
+            "aimed",
+            () -> {
+              if (broken[0]) {
+                throw new IllegalStateException();
+              }
+              return true;
+            });
+    Gate ready = Gate.all("ready to shoot", aimed);
+    Gate settled = aimed.debounce(Milliseconds.of(40), Debouncer.DebounceType.FALLING);
+
+    loop();
+    List<String> aimedWhy = aimed.blocking();
+    List<String> readyWhy = ready.blocking();
+    List<String> settledWhy = settled.blocking();
+    broken[0] = false;
+    loop();
+
+    assertThat(aimedWhy).containsExactly("aimed threw: IllegalStateException");
+    assertThat(readyWhy).containsExactly("aimed");
+    assertThat(settledWhy).containsExactly("aimed threw: IllegalStateException");
+    assertThat(ready.getAsBoolean()).isTrue();
+  }
+
+  /** The gates' alerts raised now. */
+  private static List<String> raised() {
+    return Arrays.stream(AlertSim.getActive())
+        .filter(alert -> alert.group.equals("Gates"))
+        .map(alert -> alert.text)
+        .toList();
+  }
+
+  /**
+   * Bands that can't be, made once the robot runs, are refused as a joint's gate on a place it
+   * hasn't is: a gate that holds false, saying why.
+   */
+  @Test
+  void badBandsMadeWhileTheRobotRunsHoldFalseSayingWhy() {
+    loop();
+
+    Gate aimed = Gate.within(scheduler, "aimed", () -> 0, 4, 2);
+    loop();
+
+    assertThat(aimed.getAsBoolean()).isFalse();
+    assertThat(aimed.why())
+        .isEqualTo(
+            "aimed is false: aimed: enter within a positive band, and stay within at least it, not"
+                + " 4.0 and 2.0");
   }
 
   @Test

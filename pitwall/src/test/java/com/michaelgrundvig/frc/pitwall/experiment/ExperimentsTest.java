@@ -7,7 +7,6 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.pitwall.Actions;
-import com.michaelgrundvig.frc.pitwall.ConfigRules;
 import com.michaelgrundvig.frc.pitwall.Outcome;
 import com.michaelgrundvig.frc.pitwall.TunableTee;
 import java.time.Duration;
@@ -464,26 +463,21 @@ class ExperimentsTest {
 
   /**
    * An experiment never changes a gain: the page does, through the tee, which checks it as it
-   * checks any change (its limits, the configuration's own checks, and the robot's rules). A run
-   * records the gains it ran with, so what the checks refused never runs.
+   * checks any change (its limits, then the configuration's own checks). A run records the gains it
+   * ran with, so what the checks refused never runs.
    */
   @Test
   void gainsChangeOnlyThroughTheTeesChecksAndARunRecordsThem() {
     TunableTee tee = new TunableTee(new MockTunableBackend(), () -> null, inputs -> {}, false);
     TunableRegistry.registerBackend("", tee);
     TunableRegistry.publish("Arm", lag.config);
-    new ConfigRules()
-        .when(lag.config, "gains.kP")
-        .check("gentle", arm -> arm.gains().kP() <= 20 ? null : "kP over 20 shakes the arm");
     tee.update();
 
-    var tooHigh = tee.requestChanges(Map.of("/Arm/gains/kP", 30.0));
     var beyondLimits = tee.requestChanges(Map.of("/Arm/gains/kP", 60.0));
     var fine = tee.requestChanges(Map.of("/Arm/gains/kP", 20.0));
     tee.update();
     start(experiments);
 
-    assertThat(tooHigh.getNow(null).detail()).isEqualTo("gentle: kP over 20 shakes the arm");
     assertThat(beyondLimits.getNow(null).detail())
         .isEqualTo("/Arm/gains/kP: 60 is above its limit of 50");
     assertThat(fine.getNow(null)).isEqualTo(new Outcome(Outcome.Result.APPLIED, ""));

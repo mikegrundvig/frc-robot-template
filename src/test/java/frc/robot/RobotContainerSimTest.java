@@ -1,7 +1,9 @@
 package frc.robot;
 
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
+import static com.michaelgrundvig.frc.world.robot.SensorWiring.CANDI;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,6 +35,7 @@ import frc.robot.behavior.Binding;
 import frc.robot.game.Rebuilt;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
+import frc.robot.sim.SensorSimulation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +50,8 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation3d;
 import org.wpilib.simulation.PDPSim;
 import org.wpilib.telemetry.MockTelemetryBackend;
+import org.wpilib.tunable.MockTunableBackend;
+import org.wpilib.tunable.TunableRegistry;
 import org.wpilib.util.AlertDataJNI;
 
 /**
@@ -116,8 +121,8 @@ class RobotContainerSimTest {
     assertThat(pose.getTranslation().getDistance(center.getTranslation())).isLessThan(0.03);
     assertThat(pose.getRotation().minus(center.getRotation()).getDegrees())
         .isCloseTo(0.0, within(0.5));
-    assertThat(sim.robot().allianceStation()).isEqualTo("Blue 2");
-    assertThat(sim.robot().placement().status()).isEqualTo(Placement.Status.READY);
+    assertThat(sim.robot().matchField().allianceStation()).isEqualTo("Blue 2");
+    assertThat(sim.robot().matchField().placement().status()).isEqualTo(Placement.Status.READY);
     assertThat(activeAlerts())
         .as("the simulator is the drivetrain's hardware")
         .doesNotContain(NO_DRIVETRAIN);
@@ -201,7 +206,8 @@ class RobotContainerSimTest {
     sim.loops(1);
 
     assertEquals(start("Left", Alliance.RED), sim.robot().drive().getPose());
-    assertThat(sim.robot().placement().describe()).isEqualTo("Ready on Left: 0 cm, 0° off");
+    assertThat(sim.robot().matchField().placement().describe())
+        .isEqualTo("Ready on Left: 0 cm, 0° off");
   }
 
   @Test
@@ -238,8 +244,10 @@ class RobotContainerSimTest {
 
     sim.loops(1);
 
-    assertThat(sim.robot().placement().status()).isEqualTo(Placement.Status.NOT_ON_A_START);
-    assertThat(sim.robot().placement().describe()).startsWith("Not on a start: Center is ");
+    assertThat(sim.robot().matchField().placement().status())
+        .isEqualTo(Placement.Status.NOT_ON_A_START);
+    assertThat(sim.robot().matchField().placement().describe())
+        .startsWith("Not on a start: Center is ");
   }
 
   /** In the pit or the simulator, the robot goes on the start chosen while it's disabled. */
@@ -272,8 +280,10 @@ class RobotContainerSimTest {
   void zonesFollowTheRobot() {
     sim.loops(1);
 
-    assertThat(sim.robot().inZone(Rebuilt.ALLIANCE_ZONE)).as("on a start, in its zone").isTrue();
-    assertThat(sim.robot().inZone(Rebuilt.TRENCH)).isFalse();
+    assertThat(sim.robot().matchField().inZone(Rebuilt.ALLIANCE_ZONE))
+        .as("on a start, in its zone")
+        .isTrue();
+    assertThat(sim.robot().matchField().inZone(Rebuilt.TRENCH)).isFalse();
   }
 
   /** From the left start, straight ahead passes under the left trench. */
@@ -289,7 +299,7 @@ class RobotContainerSimTest {
       boolean under =
           Rebuilt.TRENCH.contains(
               FIELD, Alliance.BLUE, sim.robot().drive().getPose().getTranslation());
-      if (sim.robot().inZone(Rebuilt.TRENCH) && !under) {
+      if (sim.robot().matchField().inZone(Rebuilt.TRENCH) && !under) {
         onBeforeArriving = true;
       }
       if (under) {
@@ -298,7 +308,9 @@ class RobotContainerSimTest {
     }
 
     assertThat(onBeforeArriving).isTrue();
-    assertThat(sim.robot().inZone(Rebuilt.TRENCH)).as("and on while under it").isTrue();
+    assertThat(sim.robot().matchField().inZone(Rebuilt.TRENCH))
+        .as("and on while under it")
+        .isTrue();
   }
 
   @Test
@@ -308,8 +320,8 @@ class RobotContainerSimTest {
     sim.loops(1);
 
     assertThat(sim.robot().drive().getPose().getX()).isCloseTo(FIELD.length() / 2, within(1e-9));
-    assertThat(sim.robot().allianceStation()).isEqualTo("Unknown");
-    assertThat(sim.robot().placement().describe()).isEqualTo("Alliance unknown");
+    assertThat(sim.robot().matchField().allianceStation()).isEqualTo("Unknown");
+    assertThat(sim.robot().matchField().placement().describe()).isEqualTo("Alliance unknown");
   }
 
   @Test
@@ -422,6 +434,39 @@ class RobotContainerSimTest {
   }
 
   /**
+   * A wired sensor that stops answering is said as lost, by the joints' own alert, until it answers
+   * again.
+   */
+  @Test
+  void aSensorThatStopsAnsweringIsSaidAsLost() {
+    Sensor.Switch bumper =
+        Sensor.Switch.contact("bumper", Part.CHASSIS).on(CANDI.can(30).s1().normallyOpen());
+    sim.build(
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .sensors(List.of(bumper))
+                    .build())
+            .build(),
+        SensorErrors.NONE);
+    SensorSimulation sensors =
+        Objects.requireNonNull(Objects.requireNonNull(sim.robot().world()).sensors());
+    sim.run(0.1);
+    assertThat(activeAlerts()).noneMatch(text -> text.contains("lost"));
+
+    sensors.silence(bumper, true);
+    sim.run(0.1);
+
+    assertThat(activeAlerts())
+        .contains("bumper is lost: nothing waiting on it holds. Check the wiring and the CAN bus.");
+
+    sensors.silence(bumper, false);
+    sim.run(0.1);
+
+    assertThat(activeAlerts()).noneMatch(text -> text.contains("lost"));
+  }
+
+  /**
    * A robot whose configuration has its wiring drives CTRE hardware: here Phoenix's simulated
    * devices, which answer like real ones.
    */
@@ -506,7 +551,8 @@ class RobotContainerSimTest {
     Output push = Output.volts("push", -3);
     Joint.Revolute arm =
         Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
-            .range(Range.degrees(0, 90), Degrees.of(0))
+            .range(Range.degrees(0, 90))
+            .rest(Degrees.of(0))
             .outputs(push)
             .motors(
                 Motor.KRAKEN_X60,
@@ -516,7 +562,7 @@ class RobotContainerSimTest {
             .control(
                 MechanismControl.position(30)
                     .withKg(0)
-                    .withHoming(MechanismControl.Homing.assumeAtReference()));
+                    .withHoming(MechanismControl.Homing.assumeAtRest()));
     sim.build(
         RobotConfigBuilder.builder(Robots.SIM)
             .definition(
@@ -537,6 +583,43 @@ class RobotContainerSimTest {
         .contains(
             "arm motor 12 draws nothing on channel 5 while arm's motors work: its breaker tripped,"
                 + " its power is unplugged, or its block names the wrong channel");
+  }
+
+  /**
+   * A robot closed leaves none of its tuning published, its joints' included: the robot built in
+   * its place offers only its own on the page.
+   */
+  @Test
+  void aRobotClosedLeavesNoneOfItsTuningPublished() {
+    Joint.Revolute arm =
+        Joint.pivot("arm", Part.CHASSIS, new Translation3d(0.2, 0, 0.4), Joint.PITCH_UP)
+            .range(Range.degrees(0, 90))
+            .rest(Degrees.of(0))
+            .motor(Motor.KRAKEN_X60, Gearing.of(50))
+            .control(
+                MechanismControl.position(30)
+                    .withKg(0)
+                    .withHoming(MechanismControl.Homing.assumeAtRest()));
+    sim.build(
+        RobotConfigBuilder.builder(Robots.SIM)
+            .definition(
+                RobotDefinitionBuilder.builder(Robots.SIM.definition())
+                    .joints(List.of(arm))
+                    .build())
+            .build(),
+        SensorErrors.NONE);
+    MockTunableBackend first = new MockTunableBackend(); // takes over what the robot published
+    TunableRegistry.registerBackend("", first);
+    assertThat(first.getTunable("Joints/arm/config/gains/kP")).isNotNull();
+
+    sim.build(SensorErrors.NONE);
+    MockTunableBackend second = new MockTunableBackend();
+    TunableRegistry.registerBackend("", second);
+
+    assertThat(second.getTunable("Drive/config/gains/steerKp")).isNotNull();
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> second.getTunable("Joints/arm/config/gains/kP"))
+        .withMessageStartingWith("No such tunable");
   }
 
   /** The alerts a dashboard shows now. */

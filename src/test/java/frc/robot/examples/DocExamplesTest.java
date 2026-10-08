@@ -15,23 +15,28 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every example of code in the documentation is code that compiles: each ```java block in the
- * guides (README.md, AGENTS.md and docs/), and each {@code {@snippet}} in the Javadoc of the robot
- * program and the libraries, appears in a compiled source as it's written there, whitespace and
- * comments aside. The guides' examples live in this package, each in the example it came from, so a
- * change that breaks one fails the build, and the documentation is fixed with the code.
+ * Every example of code in the guides is code that compiles: each ```java block in README.md,
+ * AGENTS.md, docs/ and pitwall/README.md appears in a compiled source as it's written there,
+ * whitespace and comments aside. The guides' examples live in this package, each in the example it
+ * came from, so a change that breaks one fails the build, and the guide is fixed with the code.
+ *
+ * <p>The Javadoc's examples are compiled code already: {@code {@snippet class=... region=...}}
+ * shows a region of a source, marked {@code // @start region=...} and {@code // @end}, and javadoc,
+ * which {@code ci} builds, fails on a class or a region that isn't there (gradle/quality.gradle).
+ * Pitwall's Javadoc still writes its examples inline ({@code {@snippet :}}), so those are checked
+ * here as a guide's are, until they're regions of compiled code too.
  *
  * <p>A guide's block that needs code around it to compile (a call in a joint's block, a step in a
  * command, alternatives side by side) is a fragment: its fence says {@code ```java fragment}. Each
  * of its lines is then found in one source, in order, with anything between them, and "..." stands
- * for whatever the guide leaves out; a line of braces alone isn't looked for. A Javadoc snippet is
+ * for whatever the guide leaves out; a line of braces alone isn't looked for. An inline snippet is
  * always one. A block of another kind, JSON or a shell's, isn't Java, and isn't checked: {@code
  * <pre>} in Javadoc, another fence in a guide.
  */
 class DocExamplesTest {
   private static final Path PROJECT = Path.of(System.getProperty("frc.projectDir", "."));
 
-  /** The sources an example is looked for in: the robot program's and the libraries'. */
+  /** The sources an example is looked for in: the robot program's, the libraries' and Pitwall's. */
   private static final List<String> SOURCES =
       List.of(
           "src/main/java",
@@ -41,20 +46,19 @@ class DocExamplesTest {
           "lib/localization/src/main/java",
           "lib/localization/src/test/java",
           "lib/simulation/src/main/java",
-          "lib/simulation/src/test/java");
+          "lib/simulation/src/test/java",
+          "pitwall/src/main/java",
+          "pitwall/src/test/java");
 
-  /** The sources whose Javadoc's snippets are checked: what the robot program builds from. */
-  private static final List<String> DOCUMENTED =
-      List.of(
-          "src/main/java",
-          "lib/world/src/main/java",
-          "lib/localization/src/main/java",
-          "lib/simulation/src/main/java");
+  /** The sources whose Javadoc still writes its snippets inline: Pitwall's. */
+  private static final List<String> INLINE = List.of("pitwall/src/main/java");
 
   /** A guide's fence: the line a block opens or closes on, and its info string. */
   private static final Pattern FENCE = Pattern.compile("^\\s*```(.*)$");
 
-  /** A Javadoc snippet's opening: the tag, its attributes, and the colon its body follows. */
+  /**
+   * An inline Javadoc snippet's opening: the tag, its attributes, and the colon its body follows.
+   */
   private static final Pattern SNIPPET = Pattern.compile("\\{@snippet[^:}]*:\\s*$");
 
   /** A Javadoc line's margin. */
@@ -80,13 +84,12 @@ class DocExamplesTest {
   }
 
   @Test
-  void everyJavadocSnippetIsInACompiledSource() {
-    assertThat(
-            missing(files(DOCUMENTED).stream().flatMap(file -> snippets(file).stream()).toList()))
+  void everyInlineJavadocSnippetIsInACompiledSource() {
+    assertThat(missing(files(INLINE).stream().flatMap(file -> snippets(file).stream()).toList()))
         .as(
-            "each Javadoc snippet below isn't in a compiled source. Copy it from the code it shows,"
-                + " or put it in an example (src/test/java/frc/robot/examples, or the library's"
-                + " tests), so it compiles")
+            "each Javadoc snippet below isn't in a compiled source. Show a region of the code it"
+                + " shows instead, {@snippet class=... region=...}, marking it in an example"
+                + " (src/test/java/frc/robot/examples) or the source itself")
         .isEmpty();
   }
 
@@ -94,10 +97,17 @@ class DocExamplesTest {
   void theDocumentationHasExamplesToCheck() {
     List<Example> blocks = guides().stream().flatMap(guide -> blocks(guide).stream()).toList();
     List<Example> snippets =
-        files(DOCUMENTED).stream().flatMap(file -> snippets(file).stream()).toList();
+        files(INLINE).stream().flatMap(file -> snippets(file).stream()).toList();
 
-    assertThat(blocks).as("the guides' blocks").hasSizeGreaterThan(20).anyMatch(Example::fragment);
-    assertThat(snippets).as("the Javadoc's snippets").hasSizeGreaterThan(5);
+    assertThat(blocks)
+        .as("the guides' blocks")
+        .hasSizeGreaterThan(20)
+        .anyMatch(Example::fragment)
+        .anyMatch(block -> block.file().startsWith("pitwall"));
+    assertThat(snippets)
+        .as("Pitwall's inline snippets")
+        .hasSizeGreaterThan(5)
+        .anyMatch(snippet -> snippet.file().startsWith("pitwall"));
   }
 
   /** Whitespace and comments aren't code; a string's text is. */
@@ -247,11 +257,12 @@ class DocExamplesTest {
     return code.toString();
   }
 
-  /** The guides: README.md, AGENTS.md, and everything in docs/. */
+  /** The guides: README.md, AGENTS.md, everything in docs/, and Pitwall's README. */
   private static List<Path> guides() {
     List<Path> guides = new ArrayList<>();
     guides.add(PROJECT.resolve("README.md"));
     guides.add(PROJECT.resolve("AGENTS.md"));
+    guides.add(PROJECT.resolve("pitwall/README.md"));
     try (Stream<Path> docs = Files.walk(PROJECT.resolve("docs"))) {
       docs.filter(path -> path.toString().endsWith(".md")).sorted().forEach(guides::add);
     } catch (IOException e) {

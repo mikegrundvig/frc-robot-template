@@ -41,7 +41,7 @@ final class Hood implements Mechanism {
    */
   Hood(Scheduler scheduler, RobotDefinition robot, PWM left, PWM right) {
     this.scheduler = scheduler;
-    hood = robot.joints().get(robot.joints().indexOf(HOOD)); // this robot's own hood
+    hood = robot.own(HOOD); // this robot's own hood
     math = robot.math();
     servos = hood.ownDrives(); // its servos as its block names them: left, then right
     pulses = List.of(left, right);

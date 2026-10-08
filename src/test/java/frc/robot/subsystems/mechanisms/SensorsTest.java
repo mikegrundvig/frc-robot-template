@@ -42,10 +42,10 @@ class SensorsTest {
   @Test
   void aCandisAndACanRangesIdsAreTheBussOwn() {
     Sensor.Switch down =
-        Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
+        JointFixtures.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
             .on(CANDI.can(BUS, 31).s1().normallyClosed());
     Sensor.Switch up =
-        Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
+        JointFixtures.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
             .on(CANDI.can(BUS, 31).s2().normallyClosed());
     RobotDefinition wired =
         RobotDefinitionBuilder.builder(JointFixtures.ROBOT)
@@ -84,11 +84,11 @@ class SensorsTest {
         unmotored(PIVOT).motor(Motor.FALCON_500, JointFixtures.gearing(25), TALON_FX.can(21));
     Joint.Revolute roller = JointFixtures.ROLLER.motorsOn(TALON_FX.can(22));
     Sensor.Switch up =
-        Sensor.Switch.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
+        JointFixtures.limit("pivot up", PIVOT, Sensor.Switch.Limit.End.UPPER)
             .on(CANDI.can(BUS, 31).s2().normallyClosed());
     List<Sensor> wired =
         List.of(
-            Sensor.Switch.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
+            JointFixtures.limit("pivot down", PIVOT, Sensor.Switch.Limit.End.LOWER)
                 .on(
                     SensorWiring.ControllerLimit.of(PIVOT, SensorWiring.Direction.REVERSE)
                         .normallyClosed()),

@@ -209,6 +209,25 @@ class ControllerPlanTest {
     assertThat(plan.drive()).isEqualTo(ARM_MOTORS);
   }
 
+  /**
+   * Motors its block wires to nothing are planned on the controller each runs on, which the
+   * simulator runs them as and their settings are checked on: a Kraken's a TalonFX, a NEO's a SPARK
+   * MAX, as many as its motors.
+   */
+  @Test
+  void unwiredMotorsArePlannedOnTheirOwnControllers() {
+    MechanismControl control = MechanismControl.position(30);
+    Drive onNeos = motors(ARM, Motor.NEO, 2, gearing(60, 1));
+
+    assertThat(ControllerPlan.of(MATH, ARM, ARM_MOTORS, List.of(), control).controllers())
+        .containsExactly(
+            MechanismWiring.Controller.TALON_FX.can(0), MechanismWiring.Controller.TALON_FX.can(1));
+    assertThat(ControllerPlan.of(MATH, ARM, onNeos, List.of(), control).controllers())
+        .extracting(MechanismWiring.Device::controller)
+        .containsExactly(
+            MechanismWiring.Controller.SPARK_MAX, MechanismWiring.Controller.SPARK_MAX);
+  }
+
   /** What no motor controller could do is refused, saying what. */
   @Test
   void itRefusesWhatNoMotorControllerCouldDo() {

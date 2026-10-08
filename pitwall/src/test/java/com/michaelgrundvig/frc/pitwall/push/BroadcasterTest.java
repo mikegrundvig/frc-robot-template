@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -81,7 +82,9 @@ class BroadcasterTest {
 
     assertThat(drain(stream))
         .containsExactly(
-            "event: snapshot\ndata: {\"stream\":\"1\",\"document\":{\"values\":{\"kP\":16.0}}}\n\n");
+            "event: snapshot\ndata: {\"stream\":\""
+                + stream.id()
+                + "\",\"document\":{\"values\":{\"kP\":16.0}}}\n\n");
 
     Objects.requireNonNull(state.get("values")).put("kP", 18.5);
     loop(null);
@@ -199,7 +202,9 @@ class BroadcasterTest {
     assertThat(drain(first)).hasSize(2);
     assertThat(drain(second))
         .containsExactly(
-            "event: snapshot\ndata: {\"stream\":\"2\",\"document\":{\"values\":{\"kP\":18.5}}}\n\n");
+            "event: snapshot\ndata: {\"stream\":\""
+                + second.id()
+                + "\",\"document\":{\"values\":{\"kP\":18.5}}}\n\n");
   }
 
   @Test
@@ -224,7 +229,7 @@ class BroadcasterTest {
 
     assertThat(stream.isOpen()).isFalse();
     assertThat(stream.why()).isEqualTo("it fell 4 events behind");
-    assertThat(closed).containsExactly("1");
+    assertThat(closed).containsExactly(stream.id());
     assertThat(broadcaster.size()).isZero();
     assertThat(stream.next(NOW)).as("nothing more for it").isNull();
   }
@@ -238,8 +243,8 @@ class BroadcasterTest {
     stream.close("again");
 
     assertThat(broadcaster.size()).isZero();
-    assertThat(closed).containsExactly("1");
-    assertThat(stream).hasToString("stream 1, closed: the page went away");
+    assertThat(closed).containsExactly(stream.id());
+    assertThat(stream).hasToString("stream " + stream.id() + ", closed: the page went away");
   }
 
   /**
@@ -260,7 +265,7 @@ class BroadcasterTest {
     assertThat(fresh.isOpen()).isTrue();
     assertThat(third.isOpen()).isTrue();
     assertThat(broadcaster.size()).isEqualTo(2);
-    assertThat(closed).containsExactly("1");
+    assertThat(closed).containsExactly(stale.id());
   }
 
   @Test
@@ -272,7 +277,16 @@ class BroadcasterTest {
 
     assertThat(before.why()).isEqualTo("its page reconnected");
     assertThat(other.isOpen()).isTrue();
-    assertThat(after.id()).isEqualTo("3");
+    assertThat(after.id()).isNotIn(before.id(), other.id());
+  }
+
+  /** A stream's id lets a request speak for its page, so no other page may guess it: random. */
+  @Test
+  void aStreamsIdIsRandom() {
+    Stream one = open();
+    Stream two = open();
+
+    assertThat(UUID.fromString(one.id())).isNotEqualTo(UUID.fromString(two.id()));
   }
 
   @Test
@@ -381,7 +395,7 @@ class BroadcasterTest {
             .sum();
     assertThat(sentAngles).as("every angle reading, once").isEqualTo(angles);
     String snapshot = drain(second).get(0);
-    assertThat(snapshot).startsWith("event: snapshot\ndata: {\"stream\":\"2\",");
+    assertThat(snapshot).startsWith("event: snapshot\ndata: {\"stream\":\"" + second.id() + "\",");
     assertThat(angleTimes(snapshot)).as("the trace so far").hasSize(angles);
   }
 }

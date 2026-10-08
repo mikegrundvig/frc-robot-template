@@ -47,7 +47,9 @@ import org.wpilib.math.kinematics.ChassisVelocities;
  *       range is a whole one, whatever the wheels did, and without a checked accelerometer the
  *       jolt's size alone decides. The speed comparison starts over after a whole one: the
  *       collision's doubt covers it. A share of one stays in it as well, so a slide it started is
- *       still seen.
+ *       still seen. Treads said to grip at the jolt or past it leave no share between: a jolt up to
+ *       the grip may be the floor's, so it's none, and one past it a whole one; by its size alone
+ *       too, since driving could feel as much. A hit under the grip is then seen only as a slide.
  * </ul>
  *
  * <p>The turn and the speed each say how fast the wheels may be sliding over the floor; together,
@@ -91,7 +93,8 @@ public final class SlipCheck {
    *     it, what the speed comparison holds is no slide (a bias it hasn't learned, adding up), and
    *     it counts no faster
    * @param joltMetersPerSecSq what the IMU feels and the wheels don't explain, past this, is a
-   *     whole collision; past the tread's grip and short of this, a share of one
+   *     whole collision; past the tread's grip and short of this, a share of one. Past a grip at or
+   *     above it, a whole one
    * @param accelerometerRangeMetersPerSecSq the most the accelerometer reports on each axis: a
    *     reading at it is a jolt past what it can say, whatever the wheels did
    */
@@ -233,7 +236,10 @@ public final class SlipCheck {
   private final double steadySpeed;
   private final double largestBias;
   private final double maxSlide;
-  private final double joltLimit;
+
+  /** Past this, a whole collision: the jolt's limit, or the tread's grip where that's more. */
+  private final double whole;
+
   private final double grip;
   private final double saturation;
   private final double reachMeters;
@@ -293,7 +299,8 @@ public final class SlipCheck {
    *     gyro doesn't, times this, is how far they slid
    * @param gripMetersPerSecSq the most the tread's grip can change the robot's velocity: its
    *     friction times g. Felt by the IMU and unexplained by the wheels, an acceleration up to it
-   *     may be the floor bringing the robot to its wheels' speed, and is no collision.
+   *     may be the floor bringing the robot to its wheels' speed, and is no collision. At {@link
+   *     Settings#joltMetersPerSecSq} or past it, a collision is only what's past it.
    */
   public SlipCheck(Settings settings, double wheelReachMeters, double gripMetersPerSecSq) {
     if (!(wheelReachMeters > 0) || Double.isInfinite(wheelReachMeters)) {
@@ -309,15 +316,12 @@ public final class SlipCheck {
     steadySpeed = settings.steadyMetersPerSecond();
     largestBias = settings.largestBiasMetersPerSecSq();
     maxSlide = settings.maxSlideMetersPerSecond();
-    joltLimit = settings.joltMetersPerSecSq();
-    if (!(gripMetersPerSecSq > 0) || !(gripMetersPerSecSq < joltLimit)) {
+    if (!(gripMetersPerSecSq > 0) || Double.isInfinite(gripMetersPerSecSq)) {
       throw new IllegalArgumentException(
-          "the tread's grip must be under the collision's jolt ("
-              + joltLimit
-              + " m/s²): "
-              + gripMetersPerSecSq);
+          "the tread's grip must be positive: " + gripMetersPerSecSq);
     }
     grip = gripMetersPerSecSq;
+    whole = Math.max(settings.joltMetersPerSecSq(), grip);
     // A reading within a hair of the range is at it.
     saturation = 0.99 * settings.accelerometerRangeMetersPerSecSq();
     reachMeters = wheelReachMeters;
@@ -454,9 +458,12 @@ public final class SlipCheck {
     return biasMetersPerSecSq() > largestBias;
   }
 
-  /** Whether an acceleration is a jolt by its size alone: past the limit, or at the range. */
+  /**
+   * Whether an acceleration is a jolt by its size alone: past a whole collision's, which is past
+   * what driving on the tread could feel, or at the range.
+   */
   private boolean joltBySize(double forward, double left) {
-    return Math.hypot(forward, left) > joltLimit || saturated(forward, left);
+    return Math.hypot(forward, left) > whole || saturated(forward, left);
   }
 
   /** Whether the accelerometer read at its range on either axis: past what it can say. */
@@ -585,7 +592,7 @@ public final class SlipCheck {
     boolean before = Double.isFinite(lastVelocityX);
     // Its range is the part's, so what it read, its bias and all, reaches it.
     boolean saturated = saturated(readForward, readLeft);
-    collision = Math.hypot(forward, left) > joltLimit || saturated ? 1 : 0;
+    collision = Math.hypot(forward, left) > whole || saturated ? 1 : 0;
     boolean checked = sample.accelerometerChecked();
     unexplained = 0;
     if (checked && before && Double.isFinite(feltX) && Double.isFinite(feltY)) {
@@ -602,8 +609,12 @@ public final class SlipCheck {
       }
     }
     if (checked && before && !saturated) {
-      // Past the grip, the floor can't explain it: a share of a collision, up to a whole one.
-      collision = Math.clamp((unexplained - grip) / (joltLimit - grip), 0.0, 1.0);
+      // Past the grip, the floor can't explain it: a share of a collision, up to a whole one. A
+      // grip at the jolt's limit or past it leaves no share between.
+      collision =
+          whole > grip
+              ? Math.clamp((unexplained - grip) / (whole - grip), 0.0, 1.0)
+              : unexplained > grip ? 1 : 0;
     }
     if (collision >= 1 || !Double.isFinite(feltX) || !Double.isFinite(feltY)) {
       forgetSpeeds();

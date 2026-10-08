@@ -1,12 +1,15 @@
 package frc.robot.subsystems.mechanisms;
 
 import static org.wpilib.units.Units.Seconds;
+import static org.wpilib.units.Units.Value;
 
+import com.michaelgrundvig.frc.world.config.Rules;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Output;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
+import frc.robot.behavior.Refusals;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -22,7 +25,9 @@ import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Coroutine;
 import org.wpilib.command3.Mechanism;
+import org.wpilib.command3.Scheduler;
 import org.wpilib.units.Measure;
+import org.wpilib.units.measure.Dimensionless;
 import org.wpilib.units.measure.Time;
 
 /**
@@ -38,24 +43,19 @@ import org.wpilib.units.measure.Time;
  *   <li>{@link Outcome#CANCELED}: another command took the joint, its binding released, or its
  *       {@link #onlyWhile} gate fell.
  *   <li>{@link Outcome#REFUSED}: it wouldn't start or can't go on: a target outside the joint's
- *       limits, a joint not answering or faulted, or its {@link #onlyIf} gate false.
+ *       limits, a place not the joint's own or an option that can't be, a joint not answering or
+ *       faulted, or its {@link #onlyIf} gate false.
  * </ul>
  *
  * <p>A move that ends on its own has a deadline, from the model: twice its profile's time from
  * where it starts, plus half a second, or 3 s for {@code runUntil}; {@link #within} overrides it.
  * One that never ends on its own, {@code run}, {@code follow} or {@code hold}, is for "while held"
  * and for background work. A move on a joint that's homing waits for it, and its deadline starts
- * once it has. Recovery is an {@code if}:
+ * once it has; one on a joint whose homing was canceled homes it again first, if the robot is
+ * enabled, so it waits no longer than the homing may take, and a homing that faults refuses it.
+ * Recovery is an {@code if}:
  *
- * {@snippet :
- * Command.requiring(pivot).executing(co -> {
- *   var deploy = pivot.goTo(PIVOT_OUT);
- *   co.await(deploy);
- *   if (!deploy.arrived()) {      // its outcome and reason are already logged
- *     co.await(pivot.goTo(PIVOT_IN));
- *   }
- * }).named("Deploy or back off");
- * }
+ * {@snippet class=frc.robot.examples.ExampleCommands region=recovery}
  *
  * <p>A move can be bound to a trigger and run again and again: each run starts afresh, and its
  * outcome is its latest run's. Its requirements are exactly the joints it moves.
@@ -74,14 +74,6 @@ public final class Move implements Command {
     /** Homes the joint by its recipe. */
     HOME
   }
-
-  /** A move's default deadline: this many times its profile's time, and this much more. */
-  static final double DEADLINE_FACTOR = 2;
-
-  static final double DEADLINE_SLACK_SECONDS = 0.5;
-
-  /** {@code runUntil}'s default deadline, in seconds. */
-  static final double RUN_UNTIL_SECONDS = 3;
 
   /**
    * One joint's part in a move: a position to go to, or an output to run at. A position with no
@@ -127,6 +119,9 @@ public final class Move implements Command {
       @Nullable Gate onlyWhile,
       @Nullable String refused) {}
 
+  /** The command scheduler its joints are registered with, which says whether the robot starts. */
+  private final Scheduler scheduler;
+
   private final Plan plan;
   private final Kind kind;
   private final String name;
@@ -150,7 +145,8 @@ public final class Move implements Command {
   /** Where a hold holds: the joint's goal as it starts. */
   private double held;
 
-  private Move(Plan plan, Leg[] legs) {
+  private Move(Scheduler scheduler, Plan plan, Leg[] legs) {
+    this.scheduler = scheduler;
     this.plan = plan;
     this.kind = plan.kind();
     this.name = plan.name();
@@ -162,30 +158,32 @@ public final class Move implements Command {
     requirements = Set.copyOf(required);
   }
 
-  private static Move of(Kind kind, String name, Leg... legs) {
-    return new Move(new Plan(kind, name, 1, Double.NaN, null, null, null, null, null), legs);
+  /** A move of one leg, refused as it starts if it can't be. */
+  private static Move of(Kind kind, String name, @Nullable String refused, Leg leg) {
+    return new Move(
+        leg.joint.getRegisteredScheduler(),
+        new Plan(kind, name, 1, Double.NaN, null, null, null, null, refused),
+        new Leg[] {leg});
   }
 
   // ---- Made by the joints ----
 
   /**
+   * @param named the name of the joint's position it goes to; null for a computed one
+   * @param where where it goes, as its name shows it: "out", "118°"
    * @param refused why it can't run, or null: a position the joint has no name for
    */
   static Move goTo(
-      JointMechanism joint, double position, @Nullable String named, @Nullable String refused) {
-    String where = named != null ? named : joint.joint().shown(position);
-    return new Move(
-        new Plan(
-            Kind.GO_TO,
-            joint.getName() + " → " + where,
-            1,
-            Double.NaN,
-            null,
-            null,
-            null,
-            null,
-            refused),
-        new Leg[] {new Leg(joint, null, position, named)});
+      JointMechanism joint,
+      double position,
+      @Nullable String named,
+      String where,
+      @Nullable String refused) {
+    return of(
+        Kind.GO_TO,
+        joint.getName() + " → " + where,
+        refused,
+        new Leg(joint, null, position, named));
   }
 
   /**
@@ -210,10 +208,17 @@ public final class Move implements Command {
             null,
             null,
             refused);
-    return new Move(plan, new Leg[] {new Leg(joint, output, Double.NaN, output.name())});
+    return new Move(
+        joint.getRegisteredScheduler(),
+        plan,
+        new Leg[] {new Leg(joint, output, Double.NaN, output.name())});
   }
 
-  static Move follow(JointMechanism joint, Supplier<? extends Measure<?>> target) {
+  /**
+   * @param refused why it can't run, or null
+   */
+  static Move follow(
+      JointMechanism joint, Supplier<? extends Measure<?>> target, @Nullable String refused) {
     Plan plan =
         new Plan(
             Kind.FOLLOW,
@@ -224,16 +229,25 @@ public final class Move implements Command {
             target,
             null,
             null,
-            null);
-    return new Move(plan, new Leg[] {new Leg(joint, null, Double.NaN, null)});
+            refused);
+    return new Move(
+        joint.getRegisteredScheduler(), plan, new Leg[] {new Leg(joint, null, Double.NaN, null)});
   }
 
-  static Move hold(JointMechanism joint) {
-    return of(Kind.HOLD, joint.getName() + " holds", new Leg(joint, null, Double.NaN, null));
+  /**
+   * @param refused why it can't run, or null
+   */
+  static Move hold(JointMechanism joint, @Nullable String refused) {
+    return of(
+        Kind.HOLD, joint.getName() + " holds", refused, new Leg(joint, null, Double.NaN, null));
   }
 
-  static Move home(JointMechanism joint) {
-    return of(Kind.HOME, joint.getName() + " homes", new Leg(joint, null, Double.NaN, null));
+  /**
+   * @param refused why it can't run, or null
+   */
+  static Move home(JointMechanism joint, @Nullable String refused) {
+    return of(
+        Kind.HOME, joint.getName() + " homes", refused, new Leg(joint, null, Double.NaN, null));
   }
 
   /**
@@ -245,12 +259,14 @@ public final class Move implements Command {
    * @param joints each target's joint's mechanism, in the configuration's order; null for a joint
    *     the template doesn't drive
    * @param refused why it can't run, or null
+   * @param scheduler the command scheduler the joints are registered with
    */
   static Move configuration(
       Configuration configuration,
       List<@Nullable JointMechanism> joints,
       boolean toIt,
-      @Nullable String refused) {
+      @Nullable String refused,
+      Scheduler scheduler) {
     List<Leg> legs = new ArrayList<>();
     for (int i = 0; i < joints.size(); i++) {
       var at = configuration.targets().get(i);
@@ -265,6 +281,7 @@ public final class Move implements Command {
     Kind kind = toIt ? Kind.GO_TO : Kind.RUN;
     String name = (toIt ? "→ " : "at ") + configuration.name();
     return new Move(
+        scheduler,
         new Plan(kind, name, 1, Double.NaN, null, null, null, null, refused),
         legs.toArray(Leg[]::new));
   }
@@ -272,21 +289,30 @@ public final class Move implements Command {
   // ---- Its options ----
 
   /**
-   * The same move at a share of each joint's cruise: {@code goTo(PIVOT_OUT).at(0.9)}. Its default
-   * deadline grows to match.
+   * The same move at a share of each joint's cruise speed: {@code
+   * goTo(PIVOT_OUT).atSpeed(Percent.of(50))}, at half. Its default deadline grows to match. A share
+   * past none or all of it, or a move that isn't to a place, is refused as a place not the joint's
+   * own is ({@link JointMechanism#goTo(Position)}): thrown as the robot starts, and once it runs,
+   * the move ends {@link Outcome#REFUSED} as it starts, saying why.
    *
-   * @param fraction above 0, at most 1
-   * @throws IllegalArgumentException for a fraction outside that, or a move with no profile
+   * @param share of its cruise: above 0%, at most 100%
+   * @throws IllegalArgumentException for a share outside that, or a move with no profile, as the
+   *     robot starts
    */
-  public Move at(double fraction) {
+  public Move atSpeed(Dimensionless share) {
+    double fraction = share.in(Value);
     if (!(fraction > 0 && fraction <= 1)) {
-      throw new IllegalArgumentException(
-          name + ": a share of the cruise is above 0 and at most 1, not " + fraction);
+      return refused(
+          String.format(
+              Locale.ROOT,
+              "a share of its cruise speed is above 0%% and at most 100%%, not %s%%",
+              Rules.shown(fraction * 100)));
     }
     if (kind != Kind.GO_TO) {
-      throw new IllegalArgumentException(name + " isn't a move to a place: it has no profile");
+      return refused("it isn't a move to a place, so it has no profile to run at a share of");
     }
     return new Move(
+        scheduler,
         new Plan(
             kind,
             name + String.format(Locale.ROOT, " at %.0f%%", fraction * 100),
@@ -302,17 +328,17 @@ public final class Move implements Command {
 
   /**
    * The same move with a deadline of its own, tighter or looser than the model's: {@code
-   * goTo(PIVOT_OUT).within(Seconds.of(1))}.
+   * goTo(PIVOT_OUT).within(Seconds.of(1))}. A move that never ends on its own, which v3's {@code
+   * withTimeout} cancels instead, is refused as {@link #atSpeed} refuses what can't be.
    *
-   * @throws IllegalArgumentException for a move that never ends on its own, which v3's {@code
-   *     withTimeout} cancels instead
+   * @throws IllegalArgumentException for a move that never ends on its own, as the robot starts
    */
   public Move within(Time deadline) {
     if (kind != Kind.GO_TO && plan.until() == null) {
-      throw new IllegalArgumentException(
-          name + " never ends on its own, so it has no deadline: use withTimeout");
+      return refused("it never ends on its own, so it has no deadline: use withTimeout");
     }
     return new Move(
+        scheduler,
         new Plan(
             kind,
             name,
@@ -332,6 +358,7 @@ public final class Move implements Command {
    */
   public Move onlyIf(Gate gate) {
     return new Move(
+        scheduler,
         new Plan(
             kind,
             name,
@@ -352,6 +379,7 @@ public final class Move implements Command {
    */
   public Move onlyWhile(Gate gate) {
     return new Move(
+        scheduler,
         new Plan(
             kind,
             name,
@@ -362,6 +390,33 @@ public final class Move implements Command {
             plan.onlyIf(),
             gate,
             plan.refused()),
+        copies());
+  }
+
+  /**
+   * The same move, refused for what an option can't do ({@link Refusals}): thrown, after the move's
+   * name, as the robot starts; once it runs, the move ends {@link Outcome#REFUSED} as it starts,
+   * saying why it was refused first.
+   *
+   * @throws IllegalArgumentException with the move's name and why, as the robot starts
+   */
+  private Move refused(String why) {
+    if (Refusals.starting(scheduler)) {
+      throw new IllegalArgumentException(name + ": " + why);
+    }
+    String first = plan.refused();
+    return new Move(
+        scheduler,
+        new Plan(
+            kind,
+            name,
+            plan.fraction(),
+            plan.within(),
+            plan.until(),
+            plan.target(),
+            plan.onlyIf(),
+            plan.onlyWhile(),
+            first != null ? first : why),
         copies());
   }
 
@@ -446,14 +501,17 @@ public final class Move implements Command {
     return name;
   }
 
-  /** Whether one of its joints is homing, or will on the first enable: it waits for them. */
+  /**
+   * Whether one of its joints is homing, or will: it waits for them. A joint whose homing was
+   * canceled homes again now, if the robot is enabled ({@link JointMechanism#homesFirst}), each of
+   * them at once.
+   */
   private boolean waitsForHoming() {
+    boolean waits = false;
     for (Leg leg : legs) {
-      if (leg.joint.waitsForHoming()) {
-        return true;
-      }
+      waits |= leg.joint.homesFirst();
     }
-    return false;
+    return waits;
   }
 
   /** Starts a run: false if it's refused, or done at once, which ends it. */
@@ -520,8 +578,8 @@ public final class Move implements Command {
         !Double.isNaN(plan.within())
             ? plan.within()
             : kind == Kind.GO_TO
-                ? DEADLINE_FACTOR * seconds + DEADLINE_SLACK_SECONDS
-                : plan.until() != null ? RUN_UNTIL_SECONDS : Double.POSITIVE_INFINITY;
+                ? Outcome.deadline(seconds)
+                : plan.until() != null ? Outcome.RUN_UNTIL_SECONDS : Double.POSITIVE_INFINITY;
     deadlineNanos =
         Double.isInfinite(deadline) ? Long.MAX_VALUE : startNanos + Math.round(deadline * 1e9);
     started = true;
@@ -635,7 +693,7 @@ public final class Move implements Command {
         leg.insideSince = now;
         all &= output != null && output.kind() != Output.Kind.VELOCITY;
       } else {
-        all &= now - leg.insideSince >= Math.round(JointMechanism.DWELL_SECONDS * 1e9);
+        all &= now - leg.insideSince >= Outcome.DWELL_NANOS;
       }
     }
     return all;
@@ -655,10 +713,9 @@ public final class Move implements Command {
       }
     }
     arrivals = Collections.unmodifiableMap(came);
-    StringBuilder text = new StringBuilder(name).append(": ").append(how);
+    StringBuilder text = new StringBuilder();
     switch (how) {
       case ARRIVED -> {
-        text.append(String.format(Locale.ROOT, " in %.2f s", seconds));
         if (legs.length > 1) {
           List<String> each = new ArrayList<>();
           came.forEach(
@@ -667,7 +724,6 @@ public final class Move implements Command {
         }
       }
       case TIMED_OUT, CANCELED -> {
-        text.append(String.format(Locale.ROOT, " after %.2f s", seconds));
         for (Leg leg : legs) {
           if (leg.output == null && kind != Kind.HOME) {
             text.append(", ")
@@ -686,10 +742,7 @@ public final class Move implements Command {
       }
       case REFUSED -> {}
     }
-    if (why != null) {
-      text.append(": ").append(why);
-    }
-    reason = text.toString();
+    reason = how.reason(name, seconds, text.toString(), why);
     for (Leg leg : legs) {
       if (started && leg.output == null && kind != Kind.HOME) {
         leg.joint.moveEnded(how == Outcome.ARRIVED && kind == Kind.GO_TO, leg.target);

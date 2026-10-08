@@ -141,7 +141,8 @@ class PdhTest {
   void theRobotListsEveryDeviceOnItsBusesOnce() {
     Joint.Revolute pivot =
         Joint.pivot("pivot", Part.CHASSIS, AXLE, Joint.PITCH_DOWN)
-            .range(Range.degrees(0, 135), Position.degrees("in", 1.5))
+            .range(Range.degrees(0, 135))
+            .rest(Position.degrees("in", 1.5))
             .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(CANIVORE, 20).pdh(6, Amps.of(40)))
             .absoluteEncoder(CANCODER.can(CANIVORE, 21).offset(Rotations.of(0)).remote())
             .limitSwitch(

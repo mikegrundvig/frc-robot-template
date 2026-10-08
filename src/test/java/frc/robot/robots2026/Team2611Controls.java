@@ -5,12 +5,12 @@ import static org.wpilib.units.Units.Milliseconds;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.RecordingGamepad;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.JointMechanism;
 import frc.robot.subsystems.mechanisms.Joints;
-import frc.robot.subsystems.mechanisms.Sensors;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import org.wpilib.command3.Command;
@@ -52,9 +52,9 @@ final class Team2611Controls {
    */
   Team2611Controls(
       Scheduler scheduler,
+      RobotDefinition robot,
       Joints joints,
       Drive drive,
-      Sensors sensors,
       RecordingGamepad driver,
       RecordingGamepad operator) {
     this(scheduler, joints, () -> aimError(drive.getPose()));

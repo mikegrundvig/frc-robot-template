@@ -15,8 +15,10 @@ import com.michaelgrundvig.frc.world.physical.Inertia;
 import com.michaelgrundvig.frc.world.physical.MassProperties;
 import com.michaelgrundvig.frc.world.physical.Vector3;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
@@ -44,7 +46,8 @@ import org.wpilib.units.measure.MomentOfInertia;
  *
  * @param corners the four modules: front left, front right, back left, back right
  * @param wiring where its devices are on the CAN bus, and how they turn; none runs it in the
- *     simulator alone
+ *     simulator alone. Its controllers must drive its modules' motors, and SPARKs are on
+ *     Systemcore's own CAN
  * @param control how it's driven: its limits and gains, tuned while the robot runs; a robot needs
  *     it
  */
@@ -58,9 +61,11 @@ public record DrivetrainGeometry(
   public DrivetrainGeometry {
     corners = List.copyOf(corners);
     List<Corner> all = corners;
+    Optional<SwerveWiring> wired = wiring;
     Checks.on(DrivetrainGeometry.class)
         .field("corners", corners, DrivetrainGeometry::notFourCorners)
         .check("corners", () -> all.size() == 4 ? misplaced(all) : null)
+        .check("wiring", () -> wired.map(each -> unwirable(all, each)).orElse(null))
         .orThrow();
   }
 
@@ -497,6 +502,56 @@ public record DrivetrainGeometry(
     return corners.size() == 4
         ? null
         : "needs four, front left, front right, back left and back right, not " + corners.size();
+  }
+
+  /**
+   * Why a wiring can't drive these modules, or null when it can: a controller that doesn't drive
+   * its motor (a NEO on a TalonFX, say), as a joint's block refuses, or SPARKs on a CANivore, where
+   * a SPARK can't be.
+   */
+  private static @Nullable String unwirable(List<Corner> corners, SwerveWiring wiring) {
+    Set<String> problems = new LinkedHashSet<>();
+    for (Corner corner : corners) {
+      ModuleType module = corner.module();
+      String drive = onController("drive", module.driveMotor(), wiring.driveController());
+      String steering = onController("steering", module.steerMotor(), wiring.steerController());
+      if (drive != null) {
+        problems.add(drive);
+      }
+      if (steering != null) {
+        problems.add(steering);
+      }
+    }
+    boolean sparks =
+        wiring.driveController() != MechanismWiring.Controller.TALON_FX
+            || wiring.steerController() != MechanismWiring.Controller.TALON_FX;
+    if (sparks && !(wiring.canBus() instanceof CanBus.Port)) {
+      problems.add("its SPARKs are on a CANivore: a SPARK is on Systemcore's own CAN");
+    }
+    return problems.isEmpty() ? null : String.join("; ", problems);
+  }
+
+  /** Why a module's motor can't be on a controller, saying which can; null when it can. */
+  private static @Nullable String onController(
+      String which, Motor motor, MechanismWiring.Controller controller) {
+    if (controller.drives(motor)) {
+      return null;
+    }
+    List<String> could = new ArrayList<>();
+    for (MechanismWiring.Controller each : MechanismWiring.Controller.values()) {
+      if (each.drives(motor)) {
+        could.add(each.shown());
+      }
+    }
+    return "its "
+        + which
+        + "'s "
+        + motor.name()
+        + " is on "
+        + controller.shown()
+        + ", which doesn't drive one: "
+        + String.join(" or ", could)
+        + " does";
   }
 
   /** The corners not in their own quarter of the robot, or null if each is. */

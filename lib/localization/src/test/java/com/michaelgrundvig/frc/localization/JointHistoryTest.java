@@ -31,8 +31,8 @@ class JointHistoryTest {
 
   private static JointHistory history() {
     Map<Joint, Double> references = new LinkedHashMap<>();
-    references.put(TURRET, TURRET.reference());
-    references.put(HOOD, HOOD.reference());
+    references.put(TURRET, TURRET.restPosition());
+    references.put(HOOD, HOOD.restPosition());
     return new JointHistory(references, 3);
   }
 

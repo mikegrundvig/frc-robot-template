@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
+import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Radians;
 import static org.wpilib.units.Units.Rotations;
 
 import com.ctre.phoenix6.configs.SlotConfigs;
 import com.michaelgrundvig.frc.world.robot.ControllerPlan;
 import com.michaelgrundvig.frc.world.robot.Drive;
+import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Link;
@@ -28,6 +30,8 @@ import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.subsystems.mechanisms.ControllerSettings;
 import frc.robot.subsystems.mechanisms.JointFixtures;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -143,7 +147,7 @@ class RevMechanismTest {
    */
   @Test
   void anEncoderOnTheDataPortIsReadAtStartup() {
-    Sensor.Encoder absolute = Sensor.Encoder.absolute("pivot absolute", PIVOT, 8192);
+    Sensor.Encoder absolute = JointFixtures.absoluteEncoder("pivot absolute", PIVOT, 8192);
     RobotMath math =
         RobotDefinitionBuilder.builder(ROBOT).sensors(List.of(absolute)).build().math();
     ControllerPlan plan = ControllerPlan.of(math, PIVOT, NEO, SPARKS, CONTROL);
@@ -164,7 +168,7 @@ class RevMechanismTest {
    */
   @Test
   void aSparksLoopClosesOnItsDataPortEncoderInItsTurns() {
-    Sensor.Encoder absolute = Sensor.Encoder.absolute("pivot absolute", PIVOT, 8192);
+    Sensor.Encoder absolute = JointFixtures.absoluteEncoder("pivot absolute", PIVOT, 8192);
     RobotMath math =
         RobotDefinitionBuilder.builder(ROBOT).sensors(List.of(absolute)).build().math();
     MechanismWiring.DataPortEncoder port = DATA_PORT.offset(Rotations.of(0));
@@ -186,12 +190,87 @@ class RevMechanismTest {
     assertThat(closed.plan()).isSameAs(once.plan());
   }
 
+  /**
+   * An elevator on two Vortexes through 10:1 onto a 1 in drum, its through-bore on the leader's
+   * data port geared nine to one down from the drum: closed on it, the SPARK's loop runs in the
+   * encoder's turns, a ninth of one for each of the drum's rotations, its kP 90 times what it is
+   * per rotor turn and its soft limits where the encoder reads them, from the low edge of the
+   * window its turn tells apart, centered on the travel: 1.2 m is 0.835 of its turns, so the edge
+   * is 0.082 of a turn below the elevator's zero.
+   */
   @Test
-  void itRefusesWhatASparkCantTakeYet() {
+  void anElevatorsLoopClosesOnItsDataPortEncoderGearedToItsDrum() {
+    Joint.Prismatic elevator =
+        JointFixtures.unmotored(JointFixtures.ELEVATOR)
+            .motors(
+                Motor.NEO_VORTEX,
+                JointFixtures.gearing(10),
+                Inches.of(1),
+                MechanismWiring.Controller.SPARK_FLEX.can(41),
+                MechanismWiring.Controller.SPARK_FLEX.can(42))
+            .absoluteEncoder(
+                Driven.AbsoluteEncoder.of()
+                    .ratio(1.0 / 9)
+                    .on(DATA_PORT.offset(Rotations.of(0.4)).closesLoop()))
+            .retuned(
+                control ->
+                    MechanismControlBuilder.builder(control).homing(Optional.empty()).build());
+    RobotMath math = JointFixtures.ROBOT.with(elevator).math();
+    Sensor.Encoder absolute = Objects.requireNonNull(math.absoluteEncoder(elevator));
+    MechanismControl limited =
+        MechanismControlBuilder.builder(ControllerSettings.control(elevator))
+            .softLimits(MechanismControl.SoftLimits.builder().lower(0.05).upper(1.1).build())
+            .build();
+    ControllerPlan plan = ControllerPlan.of(math, elevator, limited);
+    MechanismWiring.DataPortEncoder port =
+        elevator.driven().absoluteEncoder().orElseThrow().dataPort().orElseThrow();
+    double drum = 2 * Math.PI * 0.0254;
+    double edge = (1.2 / drum / 9) / 2 - 0.5;
+
+    RevMechanism.Settings closed = RevMechanism.configure(math, plan, absolute, port);
+    RevMechanism.Settings once =
+        RevMechanism.configure(math, plan, absolute, DATA_PORT.offset(Rotations.of(0.4)));
+
+    assertThat(closed.closedLoop()).isTrue();
+    assertThat(closed.windowEdge()).as("in the encoder's turns").isCloseTo(edge, within(1e-12));
+    assertThat(closed.loopRatio()).isCloseTo(1.0 / 9, within(1e-12));
+    assertThat(closed.loopZero()).isCloseTo(-edge, within(1e-12));
+    assertThat(once.loopRatio())
+        .as("its rotor's, through the gearing")
+        .isCloseTo(10, within(1e-12));
+    assertThat(closed.positionKp()).isCloseTo(once.positionKp() * 90, within(1e-9));
+    assertThat(closed.softLimits().orElseThrow()[0])
+        .isCloseTo(0.05 / drum / 9 - edge, within(1e-12));
+    assertThat(closed.softLimits().orElseThrow()[1])
+        .isCloseTo(1.1 / drum / 9 - edge, within(1e-12));
+    assertThat(port.raw(closed.windowEdge()))
+        .as("the SPARK's zero offset: the raw reading at the edge")
+        .isCloseTo(edge - 0.4 + 1, within(1e-12));
+  }
+
+  /**
+   * Its kI goes to the loop for positions as REV documents it: a share of 12 V per rotor turn of
+   * error per millisecond, the loop's period, so a TalonFX slot's kI per second over a thousand.
+   */
+  @Test
+  void itsIntegralIsPerMillisecondInASparksUnits() {
     MechanismControl integral =
         MechanismControlBuilder.builder(CONTROL)
             .gains(MechanismControlGainsBuilder.builder(CONTROL.gains()).kI(1).build())
             .build();
+    ControllerPlan plan = ControllerPlan.of(MATH, PIVOT, NEO, SPARKS, integral);
+    SlotConfigs slot = SlotConfigs.from(PhoenixMechanism.configure(plan).leader().Slot0);
+
+    assertThat(RevMechanism.configure(plan).positionKi())
+        .isCloseTo(slot.kI / (12 * 25 * 1000), within(1e-15));
+    assertThat(
+            RevMechanism.configure(ControllerPlan.of(MATH, PIVOT, NEO, SPARKS, CONTROL))
+                .positionKi())
+        .isZero();
+  }
+
+  @Test
+  void itRefusesWhatASparkCantTake() {
     assertThatIllegalArgumentException()
         .isThrownBy(
             () ->
@@ -199,9 +278,5 @@ class RevMechanismTest {
                     ControllerPlan.of(
                         MATH, PIVOT, NEO, wiring(MechanismWiring.Controller.TALON_FXS), CONTROL)))
         .withMessage("pivot's wiring is a TalonFXS's, not a SPARK's");
-    assertThatIllegalArgumentException()
-        .isThrownBy(
-            () -> RevMechanism.configure(ControllerPlan.of(MATH, PIVOT, NEO, SPARKS, integral)))
-        .withMessageStartingWith("pivot's control has a kI");
   }
 }

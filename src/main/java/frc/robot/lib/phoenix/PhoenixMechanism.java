@@ -1,5 +1,6 @@
 package frc.robot.lib.phoenix;
 
+import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Rotations;
@@ -220,7 +221,7 @@ public final class PhoenixMechanism {
     CANcoderConfiguration config = new CANcoderConfiguration();
     config.MagnetSensor.MagnetOffset = wiring.offset().in(Rotations);
     config.MagnetSensor.SensorDirection =
-        wiring.clockwise()
+        wiring.turnsClockwise()
             ? SensorDirectionValue.Clockwise_Positive
             : SensorDirectionValue.CounterClockwise_Positive;
     config.MagnetSensor.AbsoluteSensorDiscontinuityPoint = ControllerPlan.wrapPoint(math, encoder);
@@ -289,10 +290,6 @@ public final class PhoenixMechanism {
       MechanismWiring.@Nullable Cancoder wired) {
     Joint joint = plan.joint();
     List<MechanismWiring.Device> controllers = plan.controllers();
-    if (controllers.isEmpty()) {
-      throw new IllegalArgumentException(
-          joint.label() + "'s motors aren't wired: Phoenix needs a TalonFX for each");
-    }
     List<String> notes = new ArrayList<>(plan.notes());
     MechanismRotations rotations = plan.rotations();
     double rotorRatio = plan.rotorRatio();
@@ -300,7 +297,7 @@ public final class PhoenixMechanism {
     MechanismWiring.Device leading = controllers.get(0);
     output(leader, leading, plan);
     Optional<CANcoderConfiguration> cancoder = Optional.empty();
-    String ratioName = joint.label() + "'s SensorToMechanismRatio";
+    String ratioName = possessive(joint.label()) + " SensorToMechanismRatio";
     if (math == null || encoder == null || wired == null) {
       leader.Feedback.FeedbackSensorSource = FeedbackSensorSourceValue.RotorSensor;
       leader.Feedback.SensorToMechanismRatio =
@@ -333,7 +330,7 @@ public final class PhoenixMechanism {
           leader.Feedback.SensorToMechanismRatio =
               ratio(ratioName, rotations.ratioPerRotation(sensor));
           leader.Feedback.RotorToSensorRatio =
-              ratio(joint.label() + "'s RotorToSensorRatio", rotorRatio / sensor);
+              ratio(possessive(joint.label()) + " RotorToSensorRatio", rotorRatio / sensor);
         }
       }
     }

@@ -96,16 +96,6 @@ public final class RecordingTrigger extends Trigger {
     signal.trigger = this;
   }
 
-  /** The gamepad's name: "driver". */
-  public String gamepad() {
-    return gamepad;
-  }
-
-  /** What it reads on its gamepad: "right trigger", "right bumper and ready to shoot". */
-  public String button() {
-    return button;
-  }
-
   /** As its bindings name it: "operator right trigger". */
   @Override
   public String toString() {

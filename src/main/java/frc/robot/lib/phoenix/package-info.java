@@ -18,11 +18,16 @@
  *       limits, current limits and neutral mode, in the joint's units.
  * </ul>
  *
+ * <p>Its limit switches come from its sensors' wiring ({@link
+ * frc.robot.lib.wiring.ControllerPins}): one on the TalonFX's own pins, or on a CANdi it reads,
+ * which it stops on by itself.
+ *
  * <p>This says them in Phoenix's units, the joint's rotations ({@link
  * com.michaelgrundvig.frc.world.robot.MechanismRotations}): a revolute joint's rotations, a
  * prismatic joint's drum's rotations (the ratio is the gearing alone, the drum a {@code
  * Transmission.Drum}'s or a combined transmission's term's), and gains, cruise and acceleration
- * follow. It refuses only what Phoenix can't hold.
+ * follow. It refuses only what Phoenix can't hold, and notes what's doubtful beside the settings.
+ * The REV helper ({@code frc.robot.lib.rev}) says the same plan in REVLib's terms.
  *
  * <p>Pure functions: the helper builds configurations and never touches a device, so it's tested
  * without hardware; the IO layer applies what it builds ({@code ArchitectureTest}).

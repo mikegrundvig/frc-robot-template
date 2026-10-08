@@ -49,14 +49,6 @@ public interface Hardware extends Joints.Hardware, AutoCloseable {
   /** Each camera's, in the definition's order. */
   List<CameraIO> cameras();
 
-  /**
-   * The sensors it has nothing for, by label, which an alert of their own names: a robot's with no
-   * wiring. None in the simulator or a replay.
-   */
-  default List<String> unwiredSensors() {
-    return List.of();
-  }
-
   /** Releases the devices it opened, and its alerts. */
   @Override
   default void close() {}

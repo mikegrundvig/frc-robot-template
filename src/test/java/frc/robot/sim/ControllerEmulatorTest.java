@@ -1,6 +1,7 @@
 package frc.robot.sim;
 
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.SPARK_MAX;
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FXS;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_OUT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ROBOT;
@@ -21,6 +22,8 @@ import frc.robot.lib.wiring.ControllerPins;
 import frc.robot.subsystems.mechanisms.JointIO;
 import frc.robot.subsystems.mechanisms.JointIOSpark;
 import frc.robot.subsystems.mechanisms.Move;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,9 +31,9 @@ import org.wpilib.simulation.SimDeviceSim;
 
 /**
  * The simulator's motor controllers, each evaluating the joint's plan where its controller does: a
- * TalonFX's slot, all of it on the device every millisecond; a SPARK's kP on the device, with the
- * feedforward the robot works out as it asks, held between requests. The fixtures' pivot, with
- * friction, damping and an integral tuned.
+ * TalonFX's slot, all of it on the device every millisecond; a SPARK's kP and kI on the device,
+ * with the feedforward the robot works out as it asks, held between requests. The fixtures' pivot,
+ * with friction, damping and an integral tuned.
  */
 @ExtendWith(RobotSim.class)
 class ControllerEmulatorTest {
@@ -65,8 +68,9 @@ class ControllerEmulatorTest {
   }
 
   /**
-   * A SPARK runs its kP on the device; the rest the robot worked out as it asked, from where it had
-   * last read the joint, and the SPARK holds it whatever the joint does until it's asked again.
+   * A SPARK runs its kP and its integral on the device; the rest the robot worked out as it asked,
+   * from where it had last read the joint, and the SPARK holds it whatever the joint does until
+   * it's asked again.
    */
   @Test
   void aSparkRunsItsKpAndHoldsWhatTheRobotWorkedOut() {
@@ -78,8 +82,11 @@ class ControllerEmulatorTest {
     double there = spark.holding(1.0, 7, 0.001);
     spark.run(2.0, 0.9);
 
-    assertThat(near).isCloseTo(PLAN.kP() * 0.05 + held, within(1e-12));
-    assertThat(there).as("no damping on the device").isCloseTo(held, within(1e-12));
+    double integral = PLAN.kI() * 0.05 * 0.001;
+    assertThat(near).isCloseTo(PLAN.kP() * 0.05 + integral + held, within(1e-12));
+    assertThat(there)
+        .as("no damping on the device; the integral kept")
+        .isCloseTo(held + integral, within(1e-12));
     assertThat(spark.running(1.1, 1.5))
         .as("gravity where it was last read")
         .isCloseTo(PLAN.kP() * 0.5 + PLAN.feedforward(0.9, 2.0, 0), within(1e-12));
@@ -93,16 +100,15 @@ class ControllerEmulatorTest {
   @Test
   void theSimulatorsSparkIsAskedWhatTheRobotsIs() {
     MechanismWiring.Device wired = SPARK_MAX.can(62);
-    // A SPARK takes no kI yet.
     Joint.Revolute pivot =
         unmotored(PIVOT)
             .motor(Motor.NEO, gearing(25), wired)
             .retuned(control -> control.withKs(0.2).withKd(1.5));
     RobotDefinition robot = ROBOT.with(pivot);
     JointIOSpark onRobot = new JointIOSpark(robot.math(), pivot, ControllerPins.NONE);
-    JointIO simulated = new JointSimulation(robot.math()).add(pivot);
+    JointIO simulated = new JointSimulation(robot).io(pivot);
     JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
-    double rest = PIVOT.reference();
+    double rest = PIVOT.restPosition();
 
     onRobot.updateInputs(inputs);
     onRobot.setPosition(rest, 0.4, 0.25);
@@ -123,6 +129,40 @@ class ControllerEmulatorTest {
     assertThat(inputs.appliedVolts)
         .isCloseTo(spark.getDouble("Arbitrary Feedforward").get(), within(1e-6))
         .isPositive();
+  }
+
+  /**
+   * A joint wired to nothing is simulated on the controller its motor runs on, as its settings are
+   * checked: a NEO's a SPARK MAX. It runs its kP on the device and holds the rest as the robot
+   * worked it out, so it moves as the same joint wired to a SPARK MAX does, volt for volt, and not
+   * as one on a TalonFXS, whose slot damps on the speed it reads each millisecond.
+   */
+  @Test
+  void anUnwiredNeoJointIsEmulatedAsASpark() {
+    Joint.Revolute onNeo = unmotored(PIVOT);
+    List<Double> unwired = voltsGoingOut(onNeo.motor(Motor.NEO, gearing(25)));
+    List<Double> onSpark = voltsGoingOut(onNeo.motor(Motor.NEO, gearing(25), SPARK_MAX.can(32)));
+    List<Double> onTalon = voltsGoingOut(onNeo.motor(Motor.NEO, gearing(25), TALON_FXS.can(32)));
+
+    assertThat(unwired).isEqualTo(onSpark).isNotEqualTo(onTalon);
+  }
+
+  /**
+   * The volts the simulator puts across a damped pivot each loop, for half a second, asked toward
+   * 30° past where it rests.
+   */
+  private static List<Double> voltsGoingOut(Joint.Revolute motored) {
+    Joint.Revolute pivot = motored.retuned(control -> control.withKd(1.5));
+    JointIO simulated = new JointSimulation(ROBOT.with(pivot)).io(pivot);
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    List<Double> volts = new ArrayList<>();
+    for (int loop = 0; loop < 25; loop++) {
+      simulated.updateInputs(inputs);
+      volts.add(inputs.appliedVolts);
+      simulated.setPosition(PIVOT.restPosition() + Math.toRadians(30), 0, 0);
+      ((JointIOSim) simulated).step(0.02, 0);
+    }
+    return volts;
   }
 
   /** On a SPARK in the simulator, the pivot goes out as it does on a TalonFX. */

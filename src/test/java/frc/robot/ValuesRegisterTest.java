@@ -2,23 +2,16 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
-import com.michaelgrundvig.frc.simulation.SensorErrors;
-import com.michaelgrundvig.frc.world.robot.Body;
-import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.ValuesRegister.CodeRecord;
-import frc.robot.ValuesRegister.Committed;
 import frc.robot.ValuesRegister.Component;
-import frc.robot.ValuesRegister.Knob;
-import frc.robot.ValuesRegister.Switch;
-import frc.robot.game.Rebuilt;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -36,67 +29,15 @@ class ValuesRegisterTest {
   }
 
   /**
-   * Each mechanism's live tuning, from the container's one list of them: the values it tunes and
-   * their limits, by the tuning's name.
+   * Each mechanism's live tuning, from the container's one list of them: the paths of the values it
+   * tunes, by the tuning's name.
    */
-  private static Map<String, List<Knob>> tuning() {
-    Map<String, List<Knob>> tuning = new LinkedHashMap<>();
+  private static Map<String, List<String>> tuning() {
+    Map<String, List<String>> tuning = new LinkedHashMap<>();
     for (LiveConfig<?> live : RobotContainer.tunings(Robots.current()).all()) {
-      tuning.put(
-          live.name(),
-          live.knobs().stream()
-              .map(k -> new Knob(k.path(), k.limits().min(), k.limits().max()))
-              .toList());
+      tuning.put(live.name(), live.knobs().stream().map(LiveConfig.Knob::path).toList());
     }
     return tuning;
-  }
-
-  /**
-   * The values the template ships, which the register's starting values must show: every record's
-   * DEFAULTS, the scoring gate, the simulator's season-worn sensors, and the template's robot.
-   */
-  private static Map<String, Committed> committed() {
-    Map<String, Committed> committed =
-        new LinkedHashMap<>(ValuesRegister.defaults(Scanned.RECORDS));
-    RobotConfig robot = Robots.SIM;
-    committed.put(
-        "LocalizationGate", new Committed("LocalizationGate.SCORING", LocalizationGate.SCORING));
-    committed.put("SensorErrors", new Committed("SensorErrors.TYPICAL", SensorErrors.TYPICAL));
-    committed.put(
-        "SensorErrors.GyroErrors",
-        new Committed("SensorErrors.TYPICAL's gyro", SensorErrors.TYPICAL.gyro()));
-    committed.put(
-        "SensorErrors.AccelErrors",
-        new Committed(
-            "SensorErrors.TYPICAL's accelerometer", SensorErrors.TYPICAL.accelerometer()));
-    RobotDefinition definition = robot.definition();
-    committed.put("Body", new Committed("Robots.SIM's body", definition.body()));
-    committed.put("Body.Weight", new Committed("Robots.SIM's weight", definition.body().weight()));
-    committed.put(
-        "Body.Turning.Yaw",
-        new Committed("Robots.SIM's yaw inertia", (Body.Turning.Yaw) definition.body().inertia()));
-    committed.put("SeasonLimits", new Committed("Rebuilt.LIMITS", Rebuilt.LIMITS));
-    committed.put(
-        "DrivetrainGeometry", new Committed("Robots.SIM's drivetrain", definition.drivetrain()));
-    committed.put(
-        "DrivetrainGeometry.ModuleType",
-        new Committed("Robots.SIM's modules", definition.drivetrain().module(0)));
-    committed.put(
-        "Motor",
-        new Committed("Robots.SIM's drive motor", definition.drivetrain().module(0).driveMotor()));
-    committed.put(
-        "Gearing",
-        new Committed(
-            "Robots.SIM's drive gearing", definition.drivetrain().module(0).driveGearing()));
-    committed.put(
-        "DrivetrainControl.Limits",
-        new Committed("Robots.SIM's limits", robot.drivetrain().limits()));
-    committed.put(
-        "DrivetrainControl.Gains", new Committed("Robots.SIM's gains", robot.drivetrain().gains()));
-    committed.put(
-        "CameraConfig.Sensor",
-        new Committed("Robots.SIM's camera sensor", definition.cameras().get(0).sensor()));
-    return committed;
   }
 
   private static ValuesRegister register() throws IOException {
@@ -111,14 +52,6 @@ class ValuesRegisterTest {
   @Test
   void theLegendsListTheKindsAndSourcesTheCheckAccepts() throws IOException {
     assertThat(register().legendProblems()).isEmpty();
-  }
-
-  @Test
-  void theStartingValuesAreTheOnesTheTemplateShips() throws IOException {
-    Map<String, Committed> committed = committed();
-
-    assertThat(committed).containsKeys("VisionConfig", "EstimatorConfig");
-    assertThat(register().startingValueProblems(committed)).isEmpty();
   }
 
   @Test
@@ -173,11 +106,8 @@ class ValuesRegisterTest {
           new CodeRecord(
               "ArmReadings", "frc.robot.ArmReadings", List.of(new Component("angle", null))));
 
-  private static final Map<String, List<Knob>> ARM_TUNING =
-      Map.of("arm", List.of(new Knob("gains.kP", 0, 10), new Knob("gains.kD", 0, 1)));
-
-  /** The arm's gains as it ships them. */
-  record ArmGains(double kP, double kD) {}
+  private static final Map<String, List<String>> ARM_TUNING =
+      Map.of("arm", List.of("gains.kP", "gains.kD"));
 
   private static final String ARM_REGISTER =
       """
@@ -191,25 +121,25 @@ class ValuesRegisterTest {
 
       ### `Arm`
 
-      | Value | Kind | Template's starting value | Source | How to measure it, or why |
-      |---|---|---|---|---|
-      | `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |
+      | Value | Kind | Source | How to measure it, or why |
+      |---|---|---|---|
+      | `length` | as built | datasheet (its drawing) | From CAD. |
 
       ### `Arm.Gains`
 
-      | Value | Kind | Template's starting value | Source | How to measure it, or why |
-      |---|---|---|---|---|
-      | `kP` | chosen | 2 | simulation | Why: it holds. |
-      | `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |
+      | Value | Kind | Source | How to measure it, or why |
+      |---|---|---|---|
+      | `kP` | chosen | simulation | Why: it holds. |
+      | `kD` | chosen | top team (a 2025 robot) | Why: it damps. |
 
       ## Tuning limits
 
       ### `arm` tuning
 
-      | Knob | Limits | Source | Why |
-      |---|---|---|---|
-      | `gains.kP` | 0 to 10 | guess | Room to tune. |
-      | `gains.kD` | 0 to 1 | guess | Room to tune. |
+      | Knob | Source | Why |
+      |---|---|---|
+      | `gains.kP` | guess | Room to tune. |
+      | `gains.kD` | guess | Room to tune. |
 
       ## Records that aren't configuration
 
@@ -233,10 +163,9 @@ class ValuesRegisterTest {
         ARM_REGISTER
             .replace(
                 "### `Arm`\n\n"
-                    + "| Value | Kind | Template's starting value | Source | How to measure it, or"
-                    + " why |\n"
-                    + "|---|---|---|---|---|\n"
-                    + "| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n\n",
+                    + "| Value | Kind | Source | How to measure it, or why |\n"
+                    + "|---|---|---|---|\n"
+                    + "| `length` | as built | datasheet (its drawing) | From CAD. |\n\n",
                 "")
             .replace("### `Arm.Gains`", "### `Arm.Gainz`");
 
@@ -256,8 +185,7 @@ class ValuesRegisterTest {
   @Test
   void aSectionWithoutItsTableSaysSoAtItsHeading() {
     String register =
-        ARM_REGISTER.replace(
-            "| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n", "");
+        ARM_REGISTER.replace("| `length` | as built | datasheet (its drawing) | From CAD. |\n", "");
 
     assertThat(problems(register))
         .containsExactly(
@@ -269,12 +197,8 @@ class ValuesRegisterTest {
   void aTableUnderARecordsHeadingMustBeItsValues() {
     String register =
         ARM_REGISTER.replace(
-            "| Value | Kind | Template's starting value | Source | How to measure it, or why |\n"
-                + "|---|---|---|---|---|\n"
-                + "| `length` |",
-            "| Name | Kind | Template's starting value | Source | How to measure it, or why |\n"
-                + "|---|---|---|---|---|\n"
-                + "| `length` |");
+            "| Value | Kind | Source | How to measure it, or why |\n|---|---|---|---|\n| `length` |",
+            "| Name | Kind | Source | How to measure it, or why |\n|---|---|---|---|\n| `length` |");
 
     assertThat(problems(register))
         .containsExactly(
@@ -287,19 +211,18 @@ class ValuesRegisterTest {
   @Test
   void aValueMissingFromItsRecordsTableSaysWhichAndWhere() {
     String register =
-        ARM_REGISTER.replace(
-            "| `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |\n", "");
+        ARM_REGISTER.replace("| `kD` | chosen | top team (a 2025 robot) | Why: it damps. |\n", "");
 
     assertThat(problems(register))
         .containsExactly(
-            "Add Arm.Gains.kD to docs/values.md: a row | `kD` | kind | starting value | source |"
-                + " how | in Arm.Gains's table");
+            "Add Arm.Gains.kD to docs/values.md: a row | `kD` | kind | source | how | in"
+                + " Arm.Gains's table");
   }
 
   @Test
   void aRowForAValueThatsGoneSaysToRemoveIt() {
     String register =
-        ARM_REGISTER.replace("| `kD` |", "| `kI` | chosen | 0 | guess | Why: none. |\n| `kD` |");
+        ARM_REGISTER.replace("| `kD` |", "| `kI` | chosen | guess | Why: none. |\n| `kD` |");
 
     assertThat(problems(register))
         .containsExactly(
@@ -310,7 +233,7 @@ class ValuesRegisterTest {
   void aValueThatHoldsAConfigurationRecordHasItsSectionNotARow() {
     String register =
         ARM_REGISTER.replace(
-            "| `length` |", "| `gains` | chosen | | none | See below. |\n| `length` |");
+            "| `length` |", "| `gains` | chosen | none | See below. |\n| `length` |");
 
     assertThat(problems(register))
         .containsExactly(
@@ -322,11 +245,10 @@ class ValuesRegisterTest {
   void kindsAndSourcesComeFromTheirLists() {
     String register =
         ARM_REGISTER
-            .replace("| `kP` | chosen | 2 | simulation |", "| `kP` | tuned | 2 | simulation |")
+            .replace("| `kP` | chosen | simulation |", "| `kP` | tuned | simulation |")
             .replace(
-                "| `kD` | chosen | 0.1 | top team (a 2025 robot) |",
-                "| `kD` | chosen | 0.1 | a 2025 robot |")
-            .replace("| `gains.kP` | 0 to 10 | guess |", "| `gains.kP` | 0 to 10 | |");
+                "| `kD` | chosen | top team (a 2025 robot) |", "| `kD` | chosen | a 2025 robot |")
+            .replace("| `gains.kP` | guess |", "| `gains.kP` | |");
 
     assertThat(problems(register))
         .containsExactly(
@@ -404,55 +326,19 @@ class ValuesRegisterTest {
   void everyKnobOfEveryTuningHasARow() {
     String register =
         ARM_REGISTER
-            .replace("| `gains.kD` | 0 to 1 | guess | Room to tune. |\n", "")
-            .replace("| `gains.kP` |", "| `gains.kI` | 0 to 1 | guess | Gone. |\n| `gains.kP` |");
-    Map<String, List<Knob>> tuning =
-        Map.of(
-            "arm",
-            List.of(new Knob("gains.kP", 0, 10), new Knob("gains.kD", 0, 1)),
-            "wrist",
-            List.of(new Knob("gains.kP", 0, 5)));
+            .replace("| `gains.kD` | guess | Room to tune. |\n", "")
+            .replace("| `gains.kP` |", "| `gains.kI` | guess | Gone. |\n| `gains.kP` |");
+    Map<String, List<String>> tuning =
+        Map.of("arm", List.of("gains.kP", "gains.kD"), "wrist", List.of("gains.kP"));
 
     assertThat(ValuesRegister.parse(register).problems(ARM, tuning))
         .containsExactly(
-            "Add the arm tuning's gains.kD to docs/values.md: a row | `gains.kD` | limits |"
-                + " source | why | in its table",
+            "Add the arm tuning's gains.kD to docs/values.md: a row | `gains.kD` | source | why"
+                + " | in its table",
             "docs/values.md line 28: remove the arm tuning's gains.kI: it tunes no value by that"
                 + " path",
             "Add a section for the wrist tuning to docs/values.md: a heading ### `wrist` tuning"
                 + " and a table of its knobs with a row for each: gains.kP");
-  }
-
-  @Test
-  void aStaleStartingValueSaysWhatItShouldBe() {
-    Map<String, Committed> shipped =
-        Map.of("Arm.Gains", new Committed("ArmGains.DEFAULTS", new ArmGains(2.5, 0.1)));
-
-    assertThat(ValuesRegister.parse(ARM_REGISTER).startingValueProblems(shipped))
-        .containsExactly(
-            "docs/values.md line 19: Arm.Gains.kP's starting value is \"2\", but"
-                + " ArmGains.DEFAULTS has 2.5: update the cell");
-  }
-
-  @Test
-  void aCellShowsAValueToItsOwnPrecision() {
-    assertThat(ValuesRegister.shows("5° (0.087 rad)", Math.toRadians(5))).isTrue();
-    assertThat(ValuesRegister.shows("2.54 V/(m/s)", 2.5376)).isTrue();
-    assertThat(ValuesRegister.shows("0.985, 0.99", 0.99)).isTrue();
-    assertThat(ValuesRegister.shows("-0.3", -0.3)).isTrue();
-    assertThat(ValuesRegister.shows("2.5", 2.56)).isFalse();
-    assertThat(ValuesRegister.shows("none", 0)).isFalse();
-  }
-
-  @Test
-  void staleKnobLimitsSayWhatTheyShouldBe() {
-    Map<String, List<Knob>> tuning =
-        Map.of("arm", List.of(new Knob("gains.kP", 0, 20), new Knob("gains.kD", 0, 1)));
-
-    assertThat(ValuesRegister.parse(ARM_REGISTER).problems(ARM, tuning))
-        .containsExactly(
-            "docs/values.md line 28: the arm tuning's gains.kP has the limits \"0 to 10\", but"
-                + " it's tuned from 0 to 20: update the cell");
   }
 
   private static final String ARM_SWITCHES =
@@ -460,44 +346,33 @@ class ValuesRegisterTest {
 
       ## Switches
 
-      | Switch | Limits | Template's starting value | Source | Why |
-      |---|---|---|---|---|
-      | `Arm/holdSeconds` | 0 to 5 s | 0 s | guess | Holds the arm. |
-      | `Arm/<camera>/enabled` | on or off | on | none | Leaves a camera out. |
+      | Switch | Source | Why |
+      |---|---|---|
+      | `Arm/holdSeconds` | guess | Holds the arm. |
+      | `Arm/<camera>/enabled` | none | Leaves a camera out. |
       """;
 
-  private static final Map<String, Switch> ARM_PUBLISHED =
-      Map.of(
-          "Arm/holdSeconds",
-          new Switch("Arm/holdSeconds", 0.0, 0, 5),
-          "Arm/<camera>/enabled",
-          new Switch(
-              "Arm/<camera>/enabled", true, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY));
+  private static final Set<String> ARM_PUBLISHED =
+      Set.of("Arm/holdSeconds", "Arm/<camera>/enabled");
 
   @Test
-  void everySwitchTheRobotPublishesHasARowShowingItsLimitsAndStart() {
+  void everySwitchTheRobotPublishesHasARow() {
     assertThat(ValuesRegister.parse(ARM_REGISTER + ARM_SWITCHES).switchProblems(ARM_PUBLISHED))
         .isEmpty();
   }
 
   @Test
-  void aSwitchMissingStaleOrChangedSaysWhatToDo() {
+  void aSwitchMissingOrGoneSaysWhatToDo() {
     String register =
         (ARM_REGISTER + ARM_SWITCHES)
             .replace(
-                "| `Arm/holdSeconds` | 0 to 5 s | 0 s |", "| `Arm/holdSeconds` | 0 to 3 s | 1 s |")
-            .replace(
-                "| `Arm/<camera>/enabled` | on or off | on | none | Leaves a camera out. |",
-                "| `Arm/oldSwitch` | on or off | off | none | Gone. |");
+                "| `Arm/<camera>/enabled` | none | Leaves a camera out. |",
+                "| `Arm/oldSwitch` | none | Gone. |");
 
     assertThat(ValuesRegister.parse(register).switchProblems(ARM_PUBLISHED))
         .containsExactly(
             "Add the switch Arm/<camera>/enabled to docs/values.md: a row | `Arm/<camera>/enabled`"
-                + " | limits | starting value | source | why | in the table of switches",
-            "docs/values.md line 41: the switch Arm/holdSeconds has the limits \"0 to 3 s\", but it"
-                + " may be set from 0 to 5: update the cell",
-            "docs/values.md line 41: the switch Arm/holdSeconds starts at \"1 s\", but the robot"
-                + " starts it at 0: update the cell",
+                + " | source | why | in the table of switches",
             "docs/values.md line 42: remove the switch Arm/oldSwitch: the robot publishes no such"
                 + " switch");
   }
@@ -506,9 +381,9 @@ class ValuesRegisterTest {
   void aValueListedTwiceSaysWhere() {
     String register =
         ARM_REGISTER.replace(
-            "| `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |",
-            "| `kD` | chosen | 0.1 | top team (a 2025 robot) | Why: it damps. |\n"
-                + "| `kD` | chosen | 0.2 | guess | Why: again. |");
+            "| `kD` | chosen | top team (a 2025 robot) | Why: it damps. |",
+            "| `kD` | chosen | top team (a 2025 robot) | Why: it damps. |\n"
+                + "| `kD` | chosen | guess | Why: again. |");
 
     assertThat(problems(register))
         .containsExactly(
@@ -524,9 +399,9 @@ class ValuesRegisterTest {
             ## An example
 
             ```markdown
-            | Value | Kind | Template's starting value | Source | How |
-            |---|---|---|---|---|
-            | `example` | chosen | 1 | guess | Not a real row. |
+            | Value | Kind | Source | How |
+            |---|---|---|---|
+            | `example` | chosen | guess | Not a real row. |
             ```
 
             | Where | Number |
@@ -541,16 +416,16 @@ class ValuesRegisterTest {
   void tildeFencesAndCommentsAreLeftAloneToo() {
     String register =
         ARM_REGISTER.replace(
-            "| `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |\n",
+            "| `length` | as built | datasheet (its drawing) | From CAD. |\n",
             """
-            | `length` | as built | 0.8 m | datasheet (its drawing) | From CAD. |
+            | `length` | as built | datasheet (its drawing) | From CAD. |
 
             ~~~
-            | `fenced` | chosen | 1 | guess | Not a row. |
+            | `fenced` | chosen | guess | Not a row. |
             ~~~
 
             <!-- an old row, kept for now:
-            | `commented` | chosen | 1 | guess | Not a row either. |
+            | `commented` | chosen | guess | Not a row either. |
             -->
             """);
 
@@ -559,13 +434,13 @@ class ValuesRegisterTest {
 
   @Test
   void anEscapedPipeIsPartOfItsCell() {
-    assertThat(ValuesRegister.cells("| `kP` | chosen | 2 \\| 3 | guess | Why: a \\| b. |"))
-        .containsExactly("`kP`", "chosen", "2 | 3", "guess", "Why: a | b.");
+    assertThat(ValuesRegister.cells("| `kP` | chosen | guess | Why: a \\| b. |"))
+        .containsExactly("`kP`", "chosen", "guess", "Why: a | b.");
 
     String register =
         ARM_REGISTER.replace(
-            "| `kP` | chosen | 2 | simulation | Why: it holds. |",
-            "| `kP` | chosen | 2 \\| 3 | simulation | Why: either \\| both. |");
+            "| `kP` | chosen | simulation | Why: it holds. |",
+            "| `kP` | chosen | simulation | Why: either \\| both. |");
     assertThat(problems(register)).isEmpty();
   }
 
@@ -575,9 +450,9 @@ class ValuesRegisterTest {
         """
         ## No record named
 
-        | Value | Kind | Template's starting value | How |
-        |---|---|---|---|
-        | `length` | as built | 0.8 m | From CAD. |
+        | Value | Kind | How |
+        |---|---|---|
+        | `length` | as built | From CAD. |
         Length, not a row.
         """;
 

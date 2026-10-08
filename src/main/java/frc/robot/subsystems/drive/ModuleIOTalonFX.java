@@ -14,7 +14,6 @@ import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.NeutralOut;
 import com.ctre.phoenix6.controls.PositionVoltage;
 import com.ctre.phoenix6.controls.VelocityVoltage;
-import com.ctre.phoenix6.controls.VoltageOut;
 import com.ctre.phoenix6.hardware.CANcoder;
 import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
@@ -91,7 +90,6 @@ final class ModuleIOTalonFX implements ModuleIO {
   private final Debouncer steerConnected = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   private final VelocityVoltage velocityRequest = new VelocityVoltage(0);
-  private final VoltageOut voltageRequest = new VoltageOut(0);
   private final PositionVoltage positionRequest = new PositionVoltage(0);
   private final NeutralOut neutral = new NeutralOut();
 
@@ -347,11 +345,6 @@ final class ModuleIOTalonFX implements ModuleIO {
     double target =
         wheelRadPerSec / TWO_PI + couplingRatio * steerRotationsPerSecond / driveGearing;
     drive.setControl(velocityRequest.withVelocity(target).withFeedForward(feedforwardVolts));
-  }
-
-  @Override
-  public void setDriveVoltage(double volts) {
-    drive.setControl(voltageRequest.withOutput(volts));
   }
 
   @Override

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
+import java.util.List;
+import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
@@ -56,6 +58,9 @@ class SlipCheckTest {
     /** And along its left axis. */
     double biasLeft;
 
+    /** What becomes of each loop's reading before the check gets it: nothing, unless spoiled. */
+    UnaryOperator<SlipCheck.Sample> reads = UnaryOperator.identity();
+
     Robot() {
       this(Translation2d.ZERO, true);
     }
@@ -94,19 +99,20 @@ class SlipCheckTest {
       Translation2d wheels =
           new Translation2d(fieldVx + slideX, fieldVy + slideY).rotateBy(new Rotation2d(-heading));
       check.update(
-          new SlipCheck.Sample(
-              LOOP,
-              turn + wheelsTurnMore,
-              turn,
-              heading,
-              rate,
-              // Its height swings it no differently: the robot only turns level.
-              new Translation3d(imu.getX(), imu.getY(), 0.1),
-              checked,
-              new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
-              felt.getX() + bias,
-              felt.getY() + biasLeft,
-              0));
+          reads.apply(
+              new SlipCheck.Sample(
+                  LOOP,
+                  turn + wheelsTurnMore,
+                  turn,
+                  heading,
+                  rate,
+                  // Its height swings it no differently: the robot only turns level.
+                  new Translation3d(imu.getX(), imu.getY(), 0.1),
+                  checked,
+                  new ChassisVelocities(wheels.getX(), wheels.getY(), rate),
+                  felt.getX() + bias,
+                  felt.getY() + biasLeft,
+                  0)));
       return this;
     }
 
@@ -645,6 +651,72 @@ class SlipCheckTest {
     assertThat(robot.check.speedSlipMetersPerSecond()).isZero();
     robot.check.startOver(40, 0);
     assertThat(robot.check.collisionShare()).as("a jolt, by its size").isOne();
+  }
+
+  /**
+   * A wheel speed or a yaw that isn't a number (a module's velocity lost, an IMU's bad frame) is no
+   * slide and no collision: the comparison starts over, and the loops after it are judged as a
+   * robot's that never read it, a launch after it seen as on that robot.
+   */
+  @Test
+  void aWheelSpeedOrYawThatIsntANumberIsNoSlideAndTheCheckCarriesOn() {
+    List<UnaryOperator<SlipCheck.Sample>> spoiled =
+        List.of(
+            // One module's velocity not a number: the kinematics' every velocity isn't.
+            read ->
+                new SlipCheck.Sample(
+                    read.seconds(),
+                    read.wheelTurnRadians(),
+                    read.imuTurnRadians(),
+                    read.yawRadians(),
+                    read.yawRateRadiansPerSecond(),
+                    read.imuPosition(),
+                    read.accelerometerChecked(),
+                    new ChassisVelocities(Double.NaN, Double.NaN, Double.NaN),
+                    read.forwardAccelerationMetersPerSecSq(),
+                    read.leftAccelerationMetersPerSecSq(),
+                    read.tiltRadians()),
+            // The IMU's yaw not a number, and so its turn over the loop.
+            read ->
+                new SlipCheck.Sample(
+                    read.seconds(),
+                    read.wheelTurnRadians(),
+                    Double.NaN,
+                    Double.NaN,
+                    read.yawRateRadiansPerSecond(),
+                    read.imuPosition(),
+                    read.accelerometerChecked(),
+                    read.wheels(),
+                    read.forwardAccelerationMetersPerSecSq(),
+                    read.leftAccelerationMetersPerSecSq(),
+                    read.tiltRadians()));
+    for (UnaryOperator<SlipCheck.Sample> spoil : spoiled) {
+      // Speeding up at 2 m/s², turning a radian a second.
+      Robot robot = new Robot().loops(25, 2 * LOOP, 0, 1, 0);
+      Robot never = new Robot().loops(25, 2 * LOOP, 0, 1, 0);
+
+      robot.reads = spoil;
+      robot.loop(2 * LOOP, 0, 1, 0);
+      robot.reads = UnaryOperator.identity();
+      never.loop(2 * LOOP, 0, 1, 0);
+
+      assertThat(robot.check.slipMetersPerSecond()).isZero();
+      assertThat(robot.check.slideMetersPerSecond()).isZero();
+      assertThat(robot.check.collisionShare()).isZero();
+      robot.loops(25, 2 * LOOP, 0, 1, 0);
+      never.loops(25, 2 * LOOP, 0, 1, 0);
+      assertThat(robot.check.slipMetersPerSecond()).isZero();
+      for (int i = 1; i <= 30; i++) {
+        robot.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0.004);
+        never.slide(2.2 * LOOP * i, 0).loop(2.2 * LOOP, 0, 0, 0.004);
+      }
+      assertThat(robot.check.speedSlipMetersPerSecond()).isPositive();
+      assertThat(robot.check.speedSlipMetersPerSecond())
+          .isCloseTo(never.check.speedSlipMetersPerSecond(), within(1e-9));
+      assertThat(robot.check.turnSlipMetersPerSecond())
+          .isPositive()
+          .isCloseTo(never.check.turnSlipMetersPerSecond(), within(1e-9));
+    }
   }
 
   @Test

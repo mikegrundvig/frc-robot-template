@@ -273,9 +273,12 @@ public final class Move implements Command {
       JointMechanism joint = joints.get(i);
       if (joint != null) {
         legs.add(
-            at.isOutput()
-                ? new Leg(joint, joint.joint().output(at.name()), Double.NaN, at.name())
-                : new Leg(joint, null, joint.joint().position(at.name()).value(), at.name()));
+            refused != null
+                // Refused as it starts, it goes nowhere: a place not the joint's own may be none.
+                ? new Leg(joint, null, Double.NaN, at.name())
+                : at.isOutput()
+                    ? new Leg(joint, joint.joint().output(at.name()), Double.NaN, at.name())
+                    : new Leg(joint, null, joint.joint().position(at.name()).value(), at.name()));
       }
     }
     Kind kind = toIt ? Kind.GO_TO : Kind.RUN;

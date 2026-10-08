@@ -287,8 +287,9 @@ class ExampleRobotSimTest {
    * the feeder and the indexer each have a "feeding", at 1000 and 1500 rpm, and {@code
    * feeder.run(INDEXER_FEEDING)}, a slip between two constants, would otherwise run the feeder at
    * its own without a word. It's refused, and so is the indexer's feeding in a gate on the feeder
-   * or in a configuration, saying where the feeder's is. Its own constant runs, and on a practice
-   * robot that re-valued it, the competition robot's constant runs the practice robot's own.
+   * or in a configuration's move, saying where the feeder's is. Its own constant runs, and on a
+   * practice robot that re-valued it, the competition robot's constant runs the practice robot's
+   * own.
    */
   @Test
   void anotherJointsPlaceOfTheSameNameIsRefused() {
@@ -303,7 +304,11 @@ class ExampleRobotSimTest {
     assertThatThrownBy(() -> sim.joints.of(FEEDER).isAt(INDEXER_FEEDING))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(why);
-    assertThatThrownBy(() -> Configuration.of("feeding", FEEDER.at(INDEXER_FEEDING)))
+    assertThatThrownBy(() -> sim.joints.gate(FEEDER.at(INDEXER_FEEDING)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage(why);
+    assertThatThrownBy(
+            () -> sim.joints.run(Configuration.of("feeding", FEEDER.at(INDEXER_FEEDING))))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(why);
     assertThat(sim.joints.of(FEEDER).run(FEEDER_FEEDING)).isNotNull();
@@ -359,8 +364,8 @@ class ExampleRobotSimTest {
 
   /**
    * Another joint's place of a name this joint has, elsewhere, is refused wherever it's given, as a
-   * move to it is: the hopper's "clear" in the elevator's move, its gate, a condition on it, or a
-   * configuration, each saying where the elevator's clear is.
+   * move to it is: the hopper's "clear" in the elevator's move, its gate, a gate on a condition on
+   * it, or a configuration's move, each saying where the elevator's clear is.
    */
   @Test
   void anotherJointsPlaceIsRefusedWhereverItsGiven() {
@@ -371,8 +376,9 @@ class ExampleRobotSimTest {
 
     assertThatThrownBy(() -> sim.joints.of(ELEVATOR).goTo(HOPPER_CLEAR)).hasMessage(why);
     assertThatThrownBy(() -> sim.joints.of(ELEVATOR).isAt(HOPPER_CLEAR)).hasMessage(why);
-    assertThatThrownBy(() -> ELEVATOR.atMost(HOPPER_CLEAR)).hasMessage(why);
-    assertThatThrownBy(() -> Configuration.of("clear", ELEVATOR.at(HOPPER_CLEAR))).hasMessage(why);
+    assertThatThrownBy(() -> sim.joints.gate(ELEVATOR.atMost(HOPPER_CLEAR))).hasMessage(why);
+    assertThatThrownBy(() -> sim.joints.goTo(Configuration.of("clear", ELEVATOR.at(HOPPER_CLEAR))))
+        .hasMessage(why);
   }
 
   /** The guide's competition robot, the hopper beside its elevator. */

@@ -355,6 +355,53 @@ class PoseFilterTest {
   }
 
   /**
+   * The covariance the estimate reports is always one. A variance a hair under zero, or x and y
+   * varying together a hair past what their variances allow, as rounding can leave them, come back
+   * at the bound; one that isn't a number, or is infinite, which only a bug could leave, comes back
+   * as knowing nothing (100 m either way, a half turn), never as NaN or a throw in the robot loop.
+   */
+  @Test
+  void theCovarianceReportedIsAlwaysOne() {
+    PoseFilter filter = placed(TEXTBOOK, 0.1, 0.1);
+    double[] kept = new double[filter.uncertainty()];
+    filter.copyUncertaintyTo(kept, 0);
+    // Row by row: x, y, and the heading's offset; xx at 0, xy at 1, yy at 4, the heading's at 8.
+    double[] underZero = kept.clone();
+    underZero[0] = -1e-18;
+    underZero[1] = 1e-12;
+    underZero[3] = 1e-12;
+    underZero[8] = -1e-20;
+    double[] pastTheirVariances = kept.clone();
+    pastTheirVariances[1] = 0.0100001;
+    pastTheirVariances[3] = 0.0100001;
+
+    PoseCovariance rounded = restored(underZero);
+    assertThat(rounded.xx()).isZero();
+    assertThat(rounded.xy()).as("no more than the variances allow").isZero();
+    assertThat(rounded.heading()).isZero();
+    PoseCovariance together = restored(pastTheirVariances);
+    assertThat(together.xy()).isCloseTo(Math.sqrt(together.xx() * together.yy()), within(1e-15));
+    for (double broken : new double[] {Double.NaN, Double.POSITIVE_INFINITY}) {
+      for (int at : new int[] {0, 1, 4, 8}) {
+        double[] bug = kept.clone();
+        bug[at] = broken;
+        PoseCovariance noIdea = restored(bug);
+        assertThat(noIdea.xStdDev()).as("%s at %d", broken, at).isEqualTo(100);
+        assertThat(noIdea.yStdDev()).isEqualTo(100);
+        assertThat(noIdea.xy()).isZero();
+        assertThat(noIdea.headingStdDev()).isCloseTo(Math.PI, within(1e-12));
+      }
+    }
+  }
+
+  /** The covariance a filter given this uncertainty reports. */
+  private static PoseCovariance restored(double[] uncertainty) {
+    PoseFilter filter = new PoseFilter(TEXTBOOK, TAGS);
+    filter.restore(0, 0, 0, uncertainty, 0);
+    return filter.covariance();
+  }
+
+  /**
    * Set afresh, a position or a heading has nothing to do with what came before: the next camera
    * fix weighs only its own errors against it.
    */

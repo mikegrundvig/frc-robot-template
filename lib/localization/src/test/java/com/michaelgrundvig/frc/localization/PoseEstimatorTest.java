@@ -333,6 +333,55 @@ class PoseEstimatorTest {
   }
 
   /**
+   * Rejections count toward a recovery only while they're recent: three that agree, the first more
+   * than {@link EstimatorConfig#recoveryWindowSeconds} before the third, are two, and the estimate
+   * stays where it was. A fourth within the window of the second makes three, and it recovers.
+   */
+  @Test
+  void rejectionsOlderThanTheRecoveryWindowDontCount() {
+    Robot robot = new Robot().drive(10, 0, 0, 0);
+    Pose2d truth = new Pose2d(1, 2, Rotation2d.ZERO);
+    int window = (int) (TEXTBOOK.recoveryWindowSeconds() / (STEP / 1e9)); // in steps
+
+    robot.see(truth, robot.time, position(0.05));
+    robot.drive(window / 2 + 10, 0, 0, 0).see(truth, robot.time, position(0.05));
+    robot.drive(window / 2 + 10, 0, 0, 0).see(truth, robot.time, position(0.05));
+
+    assertThat(robot.estimate().health().recoveries()).isZero();
+    assertSame(robot.pose(), START, 1e-9);
+    assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.LOST);
+
+    robot.drive(10, 0, 0, 0).see(truth, robot.time, position(0.05));
+
+    assertThat(robot.estimate().health().recoveries()).isEqualTo(1);
+    assertThat(robot.pose().getTranslation().getDistance(truth.getTranslation())).isLessThan(1e-9);
+  }
+
+  /**
+   * A step no newer than the last (a reading taken twice, or out of order) is ignored, however far
+   * it says the robot moved: the estimate and its doubt stay as they were, and the next step
+   * carries on as if it never came.
+   */
+  @Test
+  void aStepNoNewerThanTheLastChangesNothing() {
+    Robot robot = new Robot().drive(25, 1, 0, 0.5);
+    Robot never = new Robot().drive(25, 1, 0, 0.5);
+    Pose2d pose = robot.pose();
+    PoseCovariance covariance = robot.estimate().covariance();
+
+    BodyMotion far = new BodyMotion(0.5, 0.2, 0.3, 0.1);
+    robot.estimator.addOdometry(robot.time, far, robot.gyroYaw + 0.3, YawSource.GYRO);
+    robot.estimator.addOdometry(robot.time - STEP, far, robot.gyroYaw + 0.3, YawSource.GYRO);
+
+    assertThat(robot.pose()).isEqualTo(pose);
+    assertThat(robot.estimate().covariance()).isEqualTo(covariance);
+    robot.drive(25, 1, 0, 0.5);
+    never.drive(25, 1, 0, 0.5);
+    assertThat(robot.pose()).isEqualTo(never.pose());
+    assertThat(robot.estimate().covariance()).isEqualTo(never.estimate().covariance());
+  }
+
+  /**
    * A position solved with the gyro's heading is off by the heading's error times the distance to
    * its tags, square to them: with the heading unsure by 0.02 rad and tags 3 m ahead (along x), the
    * fix may be 6 cm off along y on top of its own noise. So it pulls the estimate less along y than
@@ -879,7 +928,7 @@ class PoseEstimatorTest {
 
     assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
     robot.drive(25, 1, 0, 0);
-    assertThat(robot.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(robot.estimate().mode()).isEqualTo(LocalizationEstimate.Mode.DEAD_RECKONING);
     assertThat(robot.pose().getRotation().getRadians()).isCloseTo(0, within(1e-9));
     assertThat(robot.pose().getX()).isCloseTo(START.getX() + 0.204, within(1e-6));
     assertThat(robot.estimate().covariance().largestPositionStdDev()).isFinite();

@@ -28,6 +28,12 @@ public final class VenueStore {
   /** The robot user's venue folder on Systemcore (the robot user's home: to confirm, S6). */
   public static final Path ROBOT_FOLDER = Path.of("/home/systemcore/venues");
 
+  /**
+   * The most venues the robot keeps from uploads: an event's few, with room to spare, and few
+   * enough that listing them for the pit stays quick.
+   */
+  public static final int MOST_STORED = 32;
+
   private static final String SELECTION = "selected";
 
   private final Path stored;
@@ -96,6 +102,25 @@ public final class VenueStore {
     String hash = hash(text);
     write(hash + ".json", text);
     return hash;
+  }
+
+  /**
+   * Why the robot can't keep another venue file, or null if it can: it keeps at most {@value
+   * #MOST_STORED} uploads, and one it keeps already takes no more room.
+   */
+  public @Nullable String whyNoRoomFor(String text) throws IOException {
+    if (Files.isRegularFile(stored.resolve(hash(text) + ".json"))) {
+      return null;
+    }
+    try (Stream<Path> files = list(stored)) {
+      return files.count() < MOST_STORED
+          ? null
+          : "the robot keeps "
+              + MOST_STORED
+              + " uploaded venues already, the most it keeps: delete those you don't need from "
+              + stored
+              + ", then upload again";
+    }
   }
 
   /** Every venue file the robot has: stored, then committed. */

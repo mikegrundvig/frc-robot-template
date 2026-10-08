@@ -10,6 +10,7 @@ import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import org.wpilib.driverstation.DriverStationErrors;
 import org.wpilib.system.RobotController;
 
@@ -35,12 +36,49 @@ final class PhoenixOdometryThread extends Thread {
 
   private static final long PERIOD_MILLIS = Math.round(1000 / FREQUENCY_HZ);
 
+  /**
+   * One signal's reading.
+   *
+   * @param ok whether it read without an error
+   * @param transitSeconds how long it took to arrive; NaN when its time isn't valid
+   */
+  record Reading(double value, boolean ok, double transitSeconds) {}
+
+  /**
+   * One read of every signal, in the order they were registered.
+   *
+   * @param nanos when it was read, on the robot's clock
+   */
+  record Batch(long nanos, List<Reading> readings) {
+    static final Batch NONE = new Batch(0, List.of());
+  }
+
+  /** Reads the signals once each has a new value: Phoenix's on the robot, a test's own. */
+  @FunctionalInterface
+  interface Signals {
+    Batch read(BaseStatusSignal[] signals) throws InterruptedException;
+  }
+
   private final ReentrantLock lock = new ReentrantLock();
   private final List<Queue<Double>> values = new ArrayList<>();
   private final List<Queue<Long>> timestamps = new ArrayList<>();
+  private final Signals source;
+  private final Consumer<String> report;
   private BaseStatusSignal[] signals = new BaseStatusSignal[0];
 
   PhoenixOdometryThread() {
+    this(
+        PhoenixOdometryThread::waitForAll,
+        message -> DriverStationErrors.reportError(message, false));
+  }
+
+  /**
+   * @param source reads the registered signals
+   * @param report says what went wrong, as the Driver Station's errors do
+   */
+  PhoenixOdometryThread(Signals source, Consumer<String> report) {
+    this.source = source;
+    this.report = report;
     setName("PhoenixOdometry");
     setDaemon(true);
   }
@@ -97,7 +135,7 @@ final class PhoenixOdometryThread extends Thread {
       } catch (InterruptedException e) {
         return;
       } catch (RuntimeException e) {
-        DriverStationErrors.reportError("Odometry thread: a reading failed: " + e, false);
+        report.accept("Odometry thread: a reading failed: " + e);
         if (!pause()) {
           return;
         }
@@ -106,26 +144,43 @@ final class PhoenixOdometryThread extends Thread {
   }
 
   private void readOnce() throws InterruptedException {
-    BaseStatusSignal[] reading;
+    BaseStatusSignal[] registered;
     lock.lock();
     try {
-      reading = signals;
+      registered = signals;
     } finally {
       lock.unlock();
     }
-    if (reading.length == 0) {
+    record(source.read(registered));
+  }
+
+  /**
+   * Phoenix's signals: waits until every one has a new value, or two periods pass (a device is
+   * missing: its value stays as it was, and its IO reports it disconnected), and reads them.
+   */
+  private static Batch waitForAll(BaseStatusSignal[] signals) throws InterruptedException {
+    if (signals.length == 0) {
       Thread.sleep(PERIOD_MILLIS);
-      return;
+      return Batch.NONE;
     }
-    // Waits until every signal has a new value, or two periods pass (a device is missing: its value
-    // stays as it was, and its IO reports it disconnected). A wait that fails at once would spin:
-    // then it waits a period.
+    // A wait that fails at once would spin: then it waits a period.
     long before = System.nanoTime();
-    StatusCode status = BaseStatusSignal.waitForAll(2 / FREQUENCY_HZ, reading);
+    StatusCode status = BaseStatusSignal.waitForAll(2 / FREQUENCY_HZ, signals);
     if (!status.isOK() && System.nanoTime() - before < PERIOD_MILLIS * 1_000_000L) {
       Thread.sleep(PERIOD_MILLIS);
     }
-    record(reading);
+    // The time is read before the lock, which the main loop may be holding while it drains.
+    long now = RobotController.getTime();
+    List<Reading> readings = new ArrayList<>(signals.length);
+    for (BaseStatusSignal signal : signals) {
+      Timestamp stamp = signal.getTimestamp();
+      readings.add(
+          new Reading(
+              signal.getValueAsDouble(),
+              signal.getStatus().isOK(),
+              stamp.isValid() ? stamp.getLatency() : Double.NaN));
+    }
+    return new Batch(now, readings);
   }
 
   /** Waits a period after a failed reading: false if interrupted meanwhile. */
@@ -139,26 +194,28 @@ final class PhoenixOdometryThread extends Thread {
     }
   }
 
-  private void record(BaseStatusSignal[] reading) {
-    // The time is read before the lock, which the main loop may be holding while it drains.
-    long now = RobotController.getTime();
+  private void record(Batch batch) {
+    List<Reading> readings = batch.readings();
+    if (readings.isEmpty()) {
+      return;
+    }
     lock.lock();
     try {
       // The signals' average time in transit, over the ones that arrived fresh: a device that's
       // gone stale would otherwise skew every reading's time early.
       double latency = 0;
       int timed = 0;
-      for (BaseStatusSignal signal : reading) {
-        Timestamp stamp = signal.getTimestamp();
-        double transit = stamp.getLatency();
-        if (signal.getStatus().isOK() && stamp.isValid() && transit >= 0 && transit <= STALE) {
+      for (Reading reading : readings) {
+        double transit = reading.transitSeconds();
+        if (reading.ok() && transit >= 0 && transit <= STALE) {
           latency += transit;
           timed++;
         }
       }
-      long measured = now - (timed == 0 ? 0 : Timestamps.fromSeconds(latency / timed));
-      for (int i = 0; i < reading.length; i++) {
-        keepNewest(values.get(i), reading[i].getValueAsDouble());
+      long measured = batch.nanos() - (timed == 0 ? 0 : Timestamps.fromSeconds(latency / timed));
+      // Each registered signal's queue takes its reading, in the order they were registered.
+      for (int i = 0; i < values.size(); i++) {
+        keepNewest(values.get(i), readings.get(i).value());
       }
       for (Queue<Long> queue : timestamps) {
         keepNewest(queue, measured);

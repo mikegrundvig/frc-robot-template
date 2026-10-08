@@ -127,16 +127,72 @@ class VenueTest {
     // The test field's layout as WPIcal writes one: the earlier format, on its own.
     String bare = file("event", BASE, TestFields.tags(), false, "");
     String embedded = bare.substring(bare.indexOf("\"layout\": ") + 10, bare.length() - 1);
-    Venue venue = VenueFile.wrap(embedded, "Event \"A\"\nfield", Venue.Kind.EVENT, BASE);
+    Venue venue = VenueFile.wrap(embedded, "Event A", Venue.Kind.EVENT, BASE);
     assertThat(venue.wrapped()).isTrue();
-    assertThat(venue.name()).isEqualTo("Event \"A\"\nfield");
+    assertThat(venue.name()).isEqualTo("Event A");
     assertThat(venue.method()).isEqualTo("unknown");
     assertThat(venue.layout().getTags()).hasSize(6);
-    assertThat(VenueFile.read(venue.text()).name())
-        .as("its text reads back")
-        .isEqualTo(venue.name());
     assertThatThrownBy(() -> VenueFile.wrap("{\"a\": 1}", "x", Venue.Kind.EVENT, BASE))
         .hasMessageContaining("not a WPILib layout");
+  }
+
+  /** A name with a quote, a backslash, a tab and a newline is written as JSON and reads back. */
+  @Test
+  void aNameJsonEscapesReadsBackAsItWas() {
+    String bare = file("event", BASE, TestFields.tags(), false, "");
+    String embedded = bare.substring(bare.indexOf("\"layout\": ") + 10, bare.length() - 1);
+    String name = "Event \"A\" \\ hall\tB\nfield";
+
+    Venue venue = VenueFile.wrap(embedded, name, Venue.Kind.EVENT, BASE);
+
+    assertThat(venue.name()).isEqualTo(name);
+    assertThat(VenueFile.read(venue.text()).name()).as("its text reads back").isEqualTo(name);
+  }
+
+  /**
+   * Each way a venue file can be malformed is refused, saying what's wrong: what makes it no venue
+   * file at all on its own, and every problem its tags and reasons have at once, so one upload
+   * shows them all.
+   */
+  @Test
+  void aMalformedVenueFileIsRefusedSayingWhatsWrong() {
+    String good = file(TestFields.tags(), "");
+    List<FieldTag> fourTwice = new ArrayList<>(TestFields.tags());
+    fourTwice.add(TestFields.tag(4, 0, 2, 0));
+    String head =
+        "{\"format\": 1, \"name\": \"n\", \"kind\": \"practice\", \"base\": \"" + BASE + "\"";
+    // Tag 2, turned half a turn, has W, X and Y 0 and Z 1: with W at 2, it's √5 long.
+    String stretched = "tag 2's quaternion isn't a rotation (length " + Math.sqrt(5) + ")";
+    String[][] table = {
+      {"[1, 2]", "not a JSON object"},
+      {head + "}", "no layout"},
+      {
+        head + ", \"layout\": {\"field\": {\"length\": 16, \"width\": 8}}}",
+        "the layout has no list of tags (\"field-tags\" or \"tags\")"
+      },
+      {file(fourTwice, ""), "the layout has tag 4 twice"},
+      {good.replace("{\"ID\": 3, ", "{\"ID\": 3.5, "), "a tag's ID 3.5 isn't a whole number"},
+      {good.replaceFirst("\"W\": [^,]+", "\"W\": 2"), stretched},
+      {
+        file(TestFields.tags(), ", \"moved\": {\"four\": \"rehung\"}"),
+        "moved: \"four\" isn't a tag number"
+      },
+      {
+        file(fourTwice, ", \"moved\": {\"four\": \"rehung\"}")
+            .replace("{\"ID\": 3, ", "{\"ID\": 3.5, ")
+            .replaceFirst("\"W\": [^,]+", "\"W\": 2"),
+        stretched
+            + "; a tag's ID 3.5 isn't a whole number; the layout has tag 4 twice;"
+            + " moved: \"four\" isn't a tag number"
+      },
+    };
+
+    for (String[] row : table) {
+      assertThatThrownBy(() -> VenueFile.read(row[0]))
+          .as(row[1])
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("venue file: " + row[1]);
+    }
   }
 
   @Test

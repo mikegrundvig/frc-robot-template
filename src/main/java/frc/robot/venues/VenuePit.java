@@ -110,6 +110,10 @@ public final class VenuePit {
       throw new Devices.Refused(String.join("; ", problems));
     }
     synchronized (this) {
+      String full = store.whyNoRoomFor(venue.text());
+      if (full != null) {
+        throw new Devices.Refused(full);
+      }
       store.save(venue.text());
       refresh();
     }
@@ -122,7 +126,10 @@ public final class VenuePit {
         + ". Choose it to use it.";
   }
 
-  /** Selects a venue on the robot, or the official layout, for the robot to take while disabled. */
+  /**
+   * Selects a venue on the robot, or the official layout, for the robot to take while disabled: its
+   * file is read here, on Pitwall's thread, and handed to the loop.
+   */
   String choose(String value) throws IOException {
     synchronized (this) {
       Optional<Devices.Option> option =

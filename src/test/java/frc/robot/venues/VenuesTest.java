@@ -181,9 +181,13 @@ class VenuesTest {
     assertThatThrownBy(store::selectedText).hasMessageContaining("isn't on the robot");
   }
 
+  /**
+   * The disk is read as the robot starts, and after a selection on the thread that made it; the
+   * loop takes what was read, and never reads the disk: with the files gone, it still has them.
+   */
   @Test
-  void theDiskIsReadAtTheFirstLoopAndAfterASelectionOnly(@TempDir Path stored, @TempDir Path git)
-      throws IOException {
+  void theDiskIsReadAtTheStartAndAfterASelectionNeverInTheLoop(
+      @TempDir Path stored, @TempDir Path git) throws IOException {
     VenueStore store = new VenueStore(stored, git);
     VenueIODisk disk = new VenueIODisk(store);
     VenueIOInputsAutoLogged inputs = new VenueIOInputsAutoLogged();
@@ -194,10 +198,43 @@ class VenuesTest {
     store.select(store.save(text));
     disk.updateInputs(inputs);
     assertThat(inputs.text).as("not read again until asked").isEmpty();
+    VenueIOInputsAutoLogged started = new VenueIOInputsAutoLogged();
+    new VenueIODisk(store).updateInputs(started);
+    assertThat(started.text).as("a robot started now reads it as it starts").isEqualTo(text);
     disk.reread();
+    try (var files = Files.list(stored)) {
+      for (Path file : files.toList()) {
+        Files.delete(file);
+      }
+    }
     disk.updateInputs(inputs);
     assertThat(inputs.text).isEqualTo(text);
     assertThat(inputs.inGit).isFalse();
+  }
+
+  /**
+   * The robot keeps up to {@value VenueStore#MOST_STORED} uploads: past that, an upload is refused,
+   * saying what to do. One it keeps already takes no more room.
+   */
+  @Test
+  void thePitKeepsAtMost32Venues(@TempDir Path stored, @TempDir Path git) throws IOException {
+    VenueStore store = new VenueStore(stored, git);
+    VenueIODisk disk = new VenueIODisk(store);
+    VenuePit pit = new VenuePit(store, disk, venues(disk), Rebuilt.venues(BODY));
+    for (int i = 1; i <= VenueStore.MOST_STORED; i++) {
+      store.save(venue("event", 0.0005 * i));
+    }
+
+    assertThatThrownBy(() -> pit.upload(venue("event", 0.02).getBytes(StandardCharsets.UTF_8)))
+        .isInstanceOf(Devices.Refused.class)
+        .hasMessage(
+            "the robot keeps 32 uploaded venues already, the most it keeps: delete those you don't"
+                + " need from "
+                + stored
+                + ", then upload again");
+    assertThat(pit.upload(venue("event", 0.0005).getBytes(StandardCharsets.UTF_8)))
+        .as("kept already")
+        .contains("Saved");
   }
 
   @Test

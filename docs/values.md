@@ -831,25 +831,27 @@ those joints are what a command moving to it requires.
 `com.michaelgrundvig.frc.world.robot.Condition.At`: a joint at one of its named positions or outputs,
 written `ARM.at(ARM_SCORING)`: what a configuration is made of. An interlock refuses one: it holds
 only with the joint exactly there, which a measured position never is, so an interlock's edge is
-`atLeast`, `atMost` or `between`.
+`atLeast`, `atMost` or `between`. Its place, a [`Position`](#position) or an [`Output`](#output), is
+kept as the code names it, and the definition refuses a configuration on another joint's, saying
+whose it is.
 
 | Value | Kind | Source | How to measure it, or why |
 |---|---|---|---|
 | `joint` | chosen | none | The joint. |
-| `name` | chosen | none | One of its positions or outputs, by name, or `stopped`, which every joint has. |
 
 ### `Condition.AtLeast`
 
 `com.michaelgrundvig.frc.world.robot.Condition.AtLeast`: a joint at a position or beyond it, toward
 its range's upper end, written `PIVOT.atLeast(Degrees.of(110))`, or from one of its named positions
 on, `PIVOT.atLeast(PIVOT_OUT)`: what an interlock's edge usually is, a clearance, the same wherever
-the joint rests.
+the joint rests. A named position (its `place`, a [`Position`](#position)) is kept as the code names
+it: the definition refuses an interlock on another joint's, and the robot a gate on one, saying
+whose it is.
 
 | Value | Kind | Source | How to measure it, or why |
 |---|---|---|---|
 | `joint` | chosen | none | The joint. |
 | `position` | as built | none | Where, in the joint's units: inside its range, not its lower end, where it would always hold. For an interlock, the clearance, from CAD or measured on the robot where the parts just clear. |
-| `place` | chosen | none | The name of its position there, when the edge is one of its named positions; empty for a number. |
 
 ### `Condition.AtMost`
 
@@ -861,21 +863,18 @@ positions, `ELEVATOR.atMost(ELEVATOR_CLEAR)`: as `Condition.AtLeast`, the other 
 |---|---|---|---|
 | `joint` | chosen | none | The joint. |
 | `position` | as built | none | As `Condition.AtLeast`'s, not its upper end. |
-| `place` | chosen | none | As `Condition.AtLeast`'s. |
 
 ### `Condition.Between`
 
 `com.michaelgrundvig.frc.world.robot.Condition.Between`: a joint between two positions, both
 included, written as numbers, `PIVOT.between(Degrees.of(20), Degrees.of(60))`, or as two of its named
-positions.
+positions (its `fromPlace` and `toPlace`), kept as `Condition.AtLeast` keeps one.
 
 | Value | Kind | Source | How to measure it, or why |
 |---|---|---|---|
 | `joint` | chosen | none | The joint. |
 | `from` | as built | none | One end, in the joint's units, inside its range. |
 | `to` | as built | none | The other; either way round. |
-| `fromPlace` | chosen | none | The name of its position at `from`, when it's one; empty for a number. |
-| `toPlace` | chosen | none | The same, at `to`. |
 
 ### `Condition.UpToSpeed`
 

@@ -223,7 +223,7 @@ public sealed interface Interlock permits Interlock.RunsOnlyWhen, Interlock.Keep
           + " exactly at "
           + at.name()
           + ", "
-          + Places.shownAt(revolute, at.joint().position(at.name()).value())
+          + Places.shownAt(revolute, at.position().orElseThrow().value())
           + ", which a measured position never is, so the interlock would never hold: say the"
           + " edge where the parts clear, "
           + other

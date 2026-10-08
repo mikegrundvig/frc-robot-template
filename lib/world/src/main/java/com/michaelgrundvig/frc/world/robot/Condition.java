@@ -4,8 +4,6 @@ import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.Meters;
 
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import org.jspecify.annotations.Nullable;
@@ -17,7 +15,7 @@ import org.wpilib.units.measure.Distance;
  * condition holds ({@link Interlock}), and a configuration is joints at named positions or outputs
  * ({@link Configuration}). Each is written from the joint: {@code PIVOT.atLeast(Degrees.of(110))},
  * {@code ELEVATOR.atMost(Inches.of(32))}, {@code ELEVATOR.atMost(ELEVATOR_CLEAR)}, {@code
- * SHOOTER.upToSpeed(RPM.of(3000))} for an interlock, and {@code ARM.at(ARM_LEVEL)} for a
+ * SHOOTER.upToSpeed(RPM.of(3000))} for an interlock, and {@code ARM.at(ARM_SCORING)} for a
  * configuration.
  *
  * <p>They're static, and none depends on where the joint rests, so a condition means the same
@@ -25,6 +23,12 @@ import org.wpilib.units.measure.Distance;
  * OnJoint#holdsAt}), by the definition at named positions and by the robot at where it measures the
  * joint. So an interlock refuses "at" one of a joint's positions, which a measured position never
  * exactly is.
+ *
+ * <p>A place a condition names is kept as the code names it, and whether it's the joint's own is
+ * for what uses the condition to say ({@link RobotDefinition#whyNotOwn(Condition)}): the definition
+ * refuses an interlock or a configuration on another joint's place, and the robot a gate on one, as
+ * it refuses a move to one. So {@code PIVOT.atLeast(ELEVATOR_CLEAR)} built while the robot runs is
+ * made, and its gate holds false, saying why.
  */
 public sealed interface Condition
     permits Condition.OnJoint, Condition.OnSensor, Condition.UpToSpeed {
@@ -123,12 +127,17 @@ public sealed interface Condition
    * Between}.
    *
    * @param joint the joint
-   * @param name one of its positions or outputs, or {@code "stopped"}, which every joint has
+   * @param position one of its positions, as the code names it; empty for an output
+   * @param output one of its outputs, as the code names it, or {@link Output#STOPPED}, which every
+   *     joint has; empty for a position
    */
   @ConfigRecord
-  record At(Joint joint, String name) implements OnJoint {
+  record At(Joint joint, Optional<Position> position, Optional<Output> output) implements OnJoint {
     public At {
-      Places.refuse(unknown(joint, name, true));
+      if (position.isPresent() == output.isPresent()) {
+        throw new IllegalArgumentException(
+            joint.label() + " at a place is at one of its positions or one of its outputs");
+      }
     }
 
     /** Starts describing a joint at a named place, one named value at a time. */
@@ -136,41 +145,47 @@ public sealed interface Condition
       return ConditionAtBuilder.builder();
     }
 
+    /** Its place's name: one of the joint's positions or outputs, or {@code "stopped"}. */
+    public String name() {
+      return position.map(Position::name).orElseGet(() -> output.orElseThrow().name());
+    }
+
     /** Whether it names an output, rather than a position. */
     public boolean isOutput() {
-      return name.equals(Output.STOPPED_NAME)
-          || joint.outputs().stream().anyMatch(output -> output.name().equals(name));
+      return output.isPresent();
     }
 
     @Override
-    public boolean holdsAt(double position) {
+    public boolean holdsAt(double at) {
       if (isOutput()) {
         throw new IllegalStateException(this + " is an output, not a position");
       }
-      return position == joint.position(name).value();
+      return at == joint.position(name()).value();
     }
 
     @Override
     public String toString() {
-      return joint.label() + " at " + name;
+      return joint.label() + " at " + name();
     }
   }
 
   /**
    * A joint at a position or beyond it, toward its range's upper end: {@code
    * PIVOT.atLeast(Degrees.of(110))}, or from one of its named positions on, {@code
-   * PIVOT.atLeast(PIVOT_RUN)}. What an interlock's edge usually is, a clearance, and the same
+   * PIVOT.atLeast(PIVOT_OUT)}. What an interlock's edge usually is, a clearance, and the same
    * wherever the joint rests.
    *
    * @param joint the joint
    * @param position where, in its units: inside its range, and short of its lower end, where it
    *     would always hold
-   * @param place the name of its position there, when it's one of them, for what's shown
+   * @param place its position there, as the code names it, when it's one of them
    */
   @ConfigRecord
-  record AtLeast(Joint joint, double position, Optional<String> place) implements OnJoint {
+  record AtLeast(Joint joint, double position, Optional<Position> place) implements OnJoint {
     public AtLeast {
-      Places.refuse(notAnEdge(joint, position, place, true));
+      if (own(joint, place)) {
+        Places.refuse(notAnEdge(joint, position, place, true));
+      }
     }
 
     /** Starts describing a joint at least at a position, one named value at a time. */
@@ -198,12 +213,14 @@ public sealed interface Condition
    * @param joint the joint
    * @param position where, in its units: inside its range, and short of its upper end, where it
    *     would always hold
-   * @param place the name of its position there, when it's one of them, for what's shown
+   * @param place its position there, as the code names it, when it's one of them
    */
   @ConfigRecord
-  record AtMost(Joint joint, double position, Optional<String> place) implements OnJoint {
+  record AtMost(Joint joint, double position, Optional<Position> place) implements OnJoint {
     public AtMost {
-      Places.refuse(notAnEdge(joint, position, place, false));
+      if (own(joint, place)) {
+        Places.refuse(notAnEdge(joint, position, place, false));
+      }
     }
 
     /** Starts describing a joint at most at a position, one named value at a time. */
@@ -228,20 +245,22 @@ public sealed interface Condition
    * @param joint the joint
    * @param from one end, in its units, inside its range
    * @param to the other
-   * @param fromPlace the name of its position at {@code from}, when it's one of them
-   * @param toPlace the name of its position at {@code to}, when it's one of them
+   * @param fromPlace its position at {@code from}, as the code names it, when it's one of them
+   * @param toPlace its position at {@code to}, the same
    */
   @ConfigRecord
   record Between(
-      Joint joint, double from, double to, Optional<String> fromPlace, Optional<String> toPlace)
+      Joint joint, double from, double to, Optional<Position> fromPlace, Optional<Position> toPlace)
       implements OnJoint {
     public Between {
-      Places.refuse(
-          notWithin(joint, from, fromPlace),
-          notWithin(joint, to, toPlace),
-          Math.abs(from - to) <= Range.EDGE
-              ? "a joint between " + shown(joint, from, fromPlace) + " and itself is at it"
-              : null);
+      if (own(joint, fromPlace) && own(joint, toPlace)) {
+        Places.refuse(
+            notWithin(joint, from, fromPlace),
+            notWithin(joint, to, toPlace),
+            Math.abs(from - to) <= Range.EDGE
+                ? "a joint between " + shown(joint, from, fromPlace) + " and itself is at it"
+                : null);
+      }
     }
 
     /** Starts describing a joint between two positions, one named value at a time. */
@@ -301,27 +320,35 @@ public sealed interface Condition
   }
 
   /** A position as it's shown: its name, when it's one of the joint's, or its value. */
-  private static String shown(Joint joint, double position, Optional<String> place) {
-    return place.orElseGet(() -> Places.shownAt(joint instanceof Joint.Revolute, position));
+  private static String shown(Joint joint, double position, Optional<Position> place) {
+    return place
+        .map(Position::name)
+        .orElseGet(() -> Places.shownAt(joint instanceof Joint.Revolute, position));
+  }
+
+  /**
+   * Whether a place a condition names, if any, is the joint's own: its other checks are only for
+   * one that is. One that isn't is refused by what uses the condition, which says whose it is.
+   */
+  private static boolean own(Joint joint, Optional<Position> place) {
+    return place.isEmpty() || joint.whyNotOwn(place.get()) == null;
   }
 
   /**
    * Why a position isn't one a joint can be at, or null when it is: inside its range, and, when
-   * it's named, one of its positions, there.
+   * it's named, where the joint has that position.
    */
-  private static @Nullable String notWithin(Joint joint, double position, Optional<String> place) {
+  private static @Nullable String notWithin(
+      Joint joint, double position, Optional<Position> place) {
     if (!Double.isFinite(position)) {
       return position + " isn't a position";
     }
     if (place.isPresent()) {
-      String unknown = unknown(joint, place.get(), false);
-      if (unknown != null) {
-        return unknown;
-      }
-      if (joint.position(place.get()).value() != position) {
-        return place.get()
+      double own = joint.position(place.get().name()).value();
+      if (own != position) {
+        return place.get().name()
             + " is "
-            + shown(joint, joint.position(place.get()).value(), Optional.empty())
+            + shown(joint, own, Optional.empty())
             + ", not "
             + shown(joint, position, Optional.empty());
       }
@@ -340,31 +367,12 @@ public sealed interface Condition
     return null;
   }
 
-  /** Why a joint has no position (or output, where one may be) by a name, or null when it has. */
-  private static @Nullable String unknown(Joint joint, String name, boolean orOutput) {
-    List<String> names = new ArrayList<>();
-    joint.positions().forEach(position -> names.add(position.name()));
-    if (orOutput) {
-      joint.outputs().forEach(output -> names.add(output.name()));
-      names.add(Output.STOPPED_NAME);
-    }
-    return names.contains(name)
-        ? null
-        : joint.label()
-            + " has no "
-            + (orOutput ? "position or output" : "position")
-            + " named \""
-            + name
-            + "\": it has "
-            + (names.isEmpty() ? "none" : String.join(", ", names));
-  }
-
   /**
    * Why a position isn't an edge a joint can be either side of, or null when it is: inside its
    * range, and short of the end where being at least it (or at most) would always hold.
    */
   private static @Nullable String notAnEdge(
-      Joint joint, double position, Optional<String> place, boolean atLeast) {
+      Joint joint, double position, Optional<Position> place, boolean atLeast) {
     String within = notWithin(joint, position, place);
     if (within != null || joint.range().isEmpty()) {
       return within;

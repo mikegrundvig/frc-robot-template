@@ -731,6 +731,15 @@ public record RobotDefinition(
   }
 
   /**
+   * Why a place a condition names isn't where this robot's joint has it, or null when each is: a
+   * gate on it is refused as a move there is, and an interlock or a configuration on it is refused
+   * here, as the definition is built. The competition robot's constant is its practice robot's own.
+   */
+  public @Nullable String whyNotOwn(Condition condition) {
+    return Places.notOwn(onOwn(joints, condition));
+  }
+
+  /**
    * Every interlock: each joint's own, from its block, then the robot's list. What the robot
    * enforces, and what the definition checks.
    */
@@ -777,8 +786,8 @@ public record RobotDefinition(
 
   /**
    * A condition about the robot's own joint, the one equal to its joint, a place it names where
-   * that joint puts it: {@code ELEVATOR.atMost(ELEVATOR_SCORE)} on a practice robot whose elevator
-   * scores lower is at most its own. One about a sensor, as it is.
+   * that joint puts it: {@code ELEVATOR.atMost(ELEVATOR_CLEAR)} on a practice robot whose elevator
+   * clears lower is at most its own. One about a sensor, as it is.
    */
   private static Condition onOwn(List<Joint> joints, Condition condition) {
     return switch (condition) {
@@ -827,9 +836,15 @@ public record RobotDefinition(
     return at < 0 ? joint : joints.get(at);
   }
 
-  /** A position, or where a joint puts its place of the name, when it's named. */
-  private static double placed(Joint joint, Optional<String> place, double position) {
-    return place.map(name -> joint.position(name).value()).orElse(position);
+  /**
+   * A position, or where a joint puts its place, when it names one of the joint's own: one that
+   * isn't stays as it was, for the definition's checks to refuse.
+   */
+  private static double placed(Joint joint, Optional<Position> place, double position) {
+    return place
+        .filter(written -> joint.whyNotOwn(written) == null)
+        .map(written -> joint.own(written).value())
+        .orElse(position);
   }
 
   /** An interlock written twice, in a block and in the robot's list, or twice in one. */

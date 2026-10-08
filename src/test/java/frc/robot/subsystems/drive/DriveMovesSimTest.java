@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Seconds;
 
-import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.behavior.Gate;
@@ -48,21 +47,6 @@ class DriveMovesSimTest {
 
   private double heading() {
     return drive.getPose().getRotation().getDegrees();
-  }
-
-  /**
-   * By its model, the template's robot pushes with its motors' 30 A, not its tread's grip: each
-   * Kraken X60 gives 0.58 N m through 6.75:1 on a 2 in wheel, 77 N, against the 199 N its tread
-   * holds on its share of 149.5 lb. Over its mass, 4.6 m/s²; about its wheels, 0.40 m out, against
-   * its 6.7 kg m² yaw inertia, 18 rad/s².
-   */
-  @Test
-  void theRobotsAccelerationsComeFromItsModel() {
-    DrivetrainControl.Accelerations most =
-        DrivetrainControl.accelerations(Robots.SIM.definition(), Robots.SIM.drivetrain());
-
-    assertThat(most.linear()).isCloseTo(4.56, within(0.05));
-    assertThat(most.angular()).isCloseTo(18.4, within(0.3));
   }
 
   /**

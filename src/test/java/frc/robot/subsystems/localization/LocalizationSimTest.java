@@ -321,7 +321,9 @@ class LocalizationSimTest {
     assertThat(robot.localization.yawSource()).isEqualTo(YawSource.BACKUP);
     assertThat(robot.localization.isUsingBackupAlertActive()).isTrue();
     assertThat(robot.localization.isGyroDisconnectedAlertActive()).isFalse();
-    assertThat(robot.estimator.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(robot.estimator.estimate().mode())
+        .as("no camera has placed it, and the backup is no IMU fault")
+        .isEqualTo(LocalizationEstimate.Mode.INITIALIZING);
   }
 
   /** Switching between IMUs never shows up as a turn, though their zeros differ. */

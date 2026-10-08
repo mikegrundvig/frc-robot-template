@@ -337,60 +337,70 @@ class PlacesTest {
     assertThat(ARM.at(ARM_LEVEL)).hasToString("arm at level");
   }
 
+  /**
+   * A condition on the joint's own places is checked as it's made: an edge at its lowest, a band
+   * from a place to itself. One naming a place not the joint's own is made all the same, the place
+   * kept as the code names it, and what uses it refuses it, saying whose it is: a gate, an
+   * interlock or a configuration.
+   */
   @Test
-  void aConditionNamesTheJointsOwnPlaces() {
+  void aConditionKeepsThePlacesItNamesForWhatUsesItToJudge() {
+    RobotDefinition robot = robot(List.of(), List.of());
+
     assertThatIllegalArgumentException()
         .isThrownBy(() -> ELEVATOR.atLeast(ELEVATOR_DOWN))
         .withMessage("down is elevator's lowest: it's at least that everywhere");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.atMost(Position.degrees("deployed", 120)))
-        .withMessage("pivot has no position deployed at 120°: it has in, run, out");
     assertThat(PIVOT.atLeast(Position.of("out", Degrees.of(130))).position())
         .as("its own out, written another way")
         .isCloseTo(Math.toRadians(130), within(1e-12));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.atLeast(Position.of("out", Inches.of(5))))
-        .withMessage("pivot's out is an angle, and this out a length: another joint's");
-    assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.between(PIVOT_RUN, PIVOT_RUN))
         .withMessage("a joint between run and itself is at it");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.between(PIVOT_RUN, ARM_UP))
-        .withMessage("pivot has no position up at 90°: it has in, run, out");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> ROLLER.at(Output.rpm("feeding", 1000)))
-        .withMessage("roller has no output feeding: it has intaking, outtaking, and stopped");
+    assertThat(robot.whyNotOwn(PIVOT.between(PIVOT_RUN, PIVOT_OUT))).isNull();
+    assertThat(robot.whyNotOwn(PIVOT.atMost(Position.degrees("deployed", 120))))
+        .isEqualTo("pivot has no position deployed at 120°: it has in, run, out");
+    assertThat(robot.whyNotOwn(PIVOT.atLeast(Position.of("out", Inches.of(5)))))
+        .isEqualTo("pivot's out is an angle, and this out a length: another joint's");
+    assertThat(robot.whyNotOwn(PIVOT.between(PIVOT_RUN, ARM_UP)))
+        .isEqualTo("pivot has no position up at 90°: it has in, run, out");
+    assertThat(PIVOT.between(PIVOT_RUN, ARM_UP)).hasToString("pivot between run and up");
+    assertThat(robot.whyNotOwn(ROLLER.at(Output.rpm("feeding", 1000))))
+        .isEqualTo("roller has no output feeding: it has intaking, outtaking, and stopped");
   }
 
   /**
-   * Another joint's place of a name this one has, elsewhere, is refused wherever it's written, a
-   * condition, a configuration or a re-placing, as a move to it is: the arm's "out" at 60° isn't
-   * the pivot's, whose out is at 130°. The pivot's own is the pivot's, at 130°, and so is any out
-   * it has had.
+   * Another joint's place of a name this one has, elsewhere, is refused wherever it's used, an
+   * interlock, a configuration, a gate or a re-placing, as a move to it is: the arm's "out" at 60°
+   * isn't the pivot's, whose out is at 130°. The definition refuses an interlock or a configuration
+   * on it as it's built, saying whose it is. The pivot's own is the pivot's, at 130°, and so is any
+   * out it has had.
    */
   @Test
-  void anotherJointsPlaceOfTheSameNameIsRefusedInAConditionOrAConfiguration() {
+  void anotherJointsPlaceOfTheSameNameIsRefusedInAnInterlockOrAConfiguration() {
     Position armOut = Position.degrees("out", 60);
     String why =
         "pivot's out is at 130°, and this out, at 60°, isn't one it has had: another joint's or"
             + " another robot's; give pivot's own";
 
-    assertThatIllegalArgumentException().isThrownBy(() -> PIVOT.atLeast(armOut)).withMessage(why);
+    assertThat(robot(List.of(), List.of()).whyNotOwn(PIVOT.between(PIVOT_RUN, armOut)))
+        .isEqualTo(why);
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> PIVOT.between(PIVOT_RUN, armOut))
-        .withMessage(why);
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> Configuration.of("out", PIVOT.at(armOut), ROLLER.at(ROLLER_INTAKING)))
-        .withMessage(why);
+        .isThrownBy(
+            () ->
+                robot(
+                    List.of(Configuration.of("out", PIVOT.at(armOut), ROLLER.at(ROLLER_INTAKING))),
+                    List.of(Interlock.that(ROLLER).runsOnlyWhen(PIVOT.atLeast(armOut)))))
+        .withMessageContaining("configurations: configuration out: " + why)
+        .withMessageContaining(
+            "interlocks: interlock \"roller runs only when pivot at least out\": " + why);
     assertThatIllegalArgumentException()
         .isThrownBy(() -> PIVOT.replaced(armOut, Degrees.of(128)))
         .withMessage(why);
     assertThatIllegalArgumentException()
         .isThrownBy(() -> ROLLER.replaced(Output.rpm("intaking", 1000), RPM.of(1800)))
         .withMessageStartingWith("roller's intaking runs at 2000 rpm, and this intaking, at 1000");
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> ROLLER.at(Output.rpm("intaking", 1000)))
-        .withMessage(
+    assertThat(robot(List.of(), List.of()).whyNotOwn(ROLLER.at(Output.rpm("intaking", 1000))))
+        .isEqualTo(
             "roller's intaking runs at 2000 rpm, and this intaking, at 1000 rpm, isn't one it has"
                 + " had: another joint's or another robot's; give roller's own");
     Joint.Revolute practice = PIVOT.replaced(PIVOT_OUT, Degrees.of(125));
@@ -401,11 +411,9 @@ class PlacesTest {
     assertThat(practice.replaced(PIVOT_OUT, Degrees.of(120)).position("out"))
         .as("re-placed again, by the competition robot's constant")
         .isEqualTo(Position.of("out", Degrees.of(120)));
-    assertThatIllegalArgumentException()
-        .isThrownBy(() -> practice.atLeast(armOut))
-        .withMessage(
-            "pivot's out is at 125°, and this out, at 60°, isn't one it has had: another joint's"
-                + " or another robot's; give pivot's own");
+    assertThat(practice.atLeast(armOut).position())
+        .as("kept as the code says, for what uses it to refuse")
+        .isCloseTo(Math.toRadians(60), within(1e-12));
   }
 
   /**

@@ -51,7 +51,8 @@ Pitwall's **Pit** view has a **venue** card.
 - **Download venue file:** gives the file to commit.
 
 The robot keeps uploaded venues outside the deploy folder, so a deploy can't wipe them: on
-Systemcore in `/home/systemcore/venues/`, and in the simulator in `build/venues/`.
+Systemcore in `/home/systemcore/venues/`, and in the simulator in `build/venues/`. It keeps up to
+32; past that, an upload is refused until you delete ones you don't need from that folder.
 
 ## What the robot does with it
 

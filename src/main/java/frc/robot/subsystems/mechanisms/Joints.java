@@ -417,11 +417,7 @@ public final class Joints implements AutoCloseable {
    */
   public Move goTo(Configuration configuration) {
     return Move.configuration(
-        configuration,
-        mechanisms(configuration),
-        true,
-        undriven(definition, configuration),
-        scheduler);
+        configuration, mechanisms(configuration), true, refused(configuration), scheduler);
   }
 
   /**
@@ -431,11 +427,22 @@ public final class Joints implements AutoCloseable {
    */
   public Move run(Configuration configuration) {
     return Move.configuration(
-        configuration,
-        mechanisms(configuration),
-        false,
-        undriven(definition, configuration),
-        scheduler);
+        configuration, mechanisms(configuration), false, refused(configuration), scheduler);
+  }
+
+  /**
+   * Why a configuration's move can't run, or null when it can: a place not its joint's own, refused
+   * as a move there is ({@link Refusals}, thrown as the robot starts), or the joints it names that
+   * the template doesn't drive.
+   */
+  private @Nullable String refused(Configuration configuration) {
+    for (Condition.At target : configuration.targets()) {
+      String notOwn = Refusals.asBuilt(scheduler, definition.whyNotOwn(target));
+      if (notOwn != null) {
+        return notOwn;
+      }
+    }
+    return undriven(definition, configuration);
   }
 
   /**
@@ -449,8 +456,8 @@ public final class Joints implements AutoCloseable {
       terms.add(
           mechanism != null
               ? target.isOutput()
-                  ? mechanism.isAt(mechanism.joint().output(target.name()))
-                  : mechanism.isAt(mechanism.joint().position(target.name()))
+                  ? mechanism.isAt(target.output().orElseThrow())
+                  : mechanism.isAt(target.position().orElseThrow())
               : Gate.of(scheduler, target.joint().label() + " driven", () -> false));
     }
     return Gate.all("at " + configuration.name(), terms.toArray(Gate[]::new));
@@ -479,14 +486,19 @@ public final class Joints implements AutoCloseable {
    *
    * <p>A condition on what isn't known holds false, saying why: a joint that doesn't know where it
    * is (unhomed, faulted, silent), one whose motor controllers don't answer, a sensor that's lost
-   * ("claw beam lost"). One on a joint with no mechanism, or a sensor the robot hasn't, is refused
-   * as {@link #of} refuses the joint ({@link Refusals#gate}): thrown as the robot starts, and once
-   * it runs, a gate that holds false saying why.
+   * ("claw beam lost"). One on a joint with no mechanism, a sensor the robot hasn't, or a place not
+   * the joint's own ({@code PIVOT.atLeast(ELEVATOR_CLEAR)}), is refused as {@link #of} refuses the
+   * joint ({@link Refusals#gate}): thrown as the robot starts, and once it runs, a gate that holds
+   * false saying why.
    *
-   * @throws IllegalArgumentException for a joint with no mechanism or a sensor the robot hasn't, as
-   *     the robot starts
+   * @throws IllegalArgumentException for a joint with no mechanism, a sensor the robot hasn't, or a
+   *     place not the joint's own, as the robot starts
    */
   public Gate gate(String name, Condition condition) {
+    String notOwn = definition.whyNotOwn(condition);
+    if (notOwn != null) {
+      return Refusals.gate(scheduler, name, notOwn);
+    }
     return switch (definition.own(condition)) {
       case Condition.OnSensor onSensor -> sensors.gate(name, onSensor);
       case Condition.At at -> {

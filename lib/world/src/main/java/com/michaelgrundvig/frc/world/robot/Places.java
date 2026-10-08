@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import org.jspecify.annotations.Nullable;
@@ -312,6 +313,7 @@ final class Places {
                 .filter(interlock -> notOwn(math, interlock.joint(), "") == null)
                 .filter(
                     interlock -> notOwn(math, Objects.requireNonNull(about(interlock)), "") == null)
+                .filter(interlock -> notOwn(interlock.condition()) == null)
                 .toList());
     for (Configuration configuration : configurations) {
       boolean whole = true;
@@ -319,6 +321,15 @@ final class Places {
         String why = notOwn(math, joint, "configuration " + configuration.name());
         if (why != null) {
           problems.add(Finding.refused(configuration.name(), why));
+          whole = false;
+        }
+      }
+      for (Condition.At target : configuration.targets()) {
+        String why = notOwn(target);
+        if (why != null) {
+          problems.add(
+              Finding.refused(
+                  configuration.name(), "configuration " + configuration.name() + ": " + why));
           whole = false;
         }
       }
@@ -402,6 +413,10 @@ final class Places {
           problems.add(refused(interlock.joint(), why));
         }
       }
+      String place = notOwn(interlock.condition());
+      if (place != null) {
+        problems.add(refused(interlock.joint(), "interlock \"" + interlock + "\": " + place));
+      }
     }
     if (!problems.isEmpty()) {
       return problems;
@@ -426,12 +441,41 @@ final class Places {
     return problems;
   }
 
-  /** The interlocks whose joints are all the robot's own: the others are reported as interlocks. */
+  /**
+   * The interlocks whose joints and places are all the robot's own: the others are reported as
+   * interlocks.
+   */
   private static List<Interlock> known(RobotMath math, List<Interlock> interlocks) {
     return onJoints(interlocks).stream()
         .filter(interlock -> notOwn(math, interlock.joint(), "") == null)
         .filter(interlock -> notOwn(math, on(interlock).joint(), "") == null)
+        .filter(interlock -> notOwn(interlock.condition()) == null)
         .toList();
+  }
+
+  /**
+   * Why a place a condition names isn't its joint's own, or null when each is ({@link
+   * Joint#whyNotOwn(Position)}): another joint's, or another robot's.
+   */
+  static @Nullable String notOwn(Condition condition) {
+    return switch (condition) {
+      case Condition.At at ->
+          at.position().isPresent()
+              ? at.joint().whyNotOwn(at.position().get())
+              : at.joint().whyNotOwn(at.output().orElseThrow());
+      case Condition.AtLeast atLeast -> notOwn(atLeast.joint(), atLeast.place());
+      case Condition.AtMost atMost -> notOwn(atMost.joint(), atMost.place());
+      case Condition.Between between -> {
+        String from = notOwn(between.joint(), between.fromPlace());
+        yield from != null ? from : notOwn(between.joint(), between.toPlace());
+      }
+      case Condition.UpToSpeed upToSpeed -> null;
+      case Condition.OnSensor onSensor -> null;
+    };
+  }
+
+  private static @Nullable String notOwn(Joint joint, Optional<Position> place) {
+    return place.isPresent() ? joint.whyNotOwn(place.get()) : null;
   }
 
   /** The interlocks on another joint's position: what can be checked before the robot runs. */

@@ -448,67 +448,76 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
 
   /**
    * It at one of its positions: what a configuration is made of ({@code Configuration.of("amp",
-   * ELEVATOR.at(ELEVATOR_CLEAR), ARM.at(ARM_LEVEL))}). It's exact, and a measured position never
+   * ELEVATOR.at(ELEVATOR_CLEAR), ARM.at(ARM_SCORING))}). It's exact, and a measured position never
    * is, so an interlock refuses it: its edge is {@code atLeast}, {@code atMost} or {@code between}.
-   *
-   * @throws IllegalArgumentException if the position isn't one of its own
+   * A position not its own is refused where the condition is used ({@link Condition}).
    */
   default Condition.At at(Position position) {
-    return ConditionAtBuilder.builder().joint(this).name(own(position).name()).build();
+    return ConditionAtBuilder.builder().joint(this).position(position).build();
   }
 
   /**
    * It at one of its outputs, or {@link Output#STOPPED}: what a configuration is made of ({@code
-   * Configuration.of("feeding", FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING))}).
-   *
-   * @throws IllegalArgumentException if the output isn't one of its own
+   * Configuration.of("feeding", FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING))}). An
+   * output not its own is refused where the condition is used ({@link Condition}).
    */
   default Condition.At at(Output output) {
-    return ConditionAtBuilder.builder().joint(this).name(own(output).name()).build();
+    return ConditionAtBuilder.builder().joint(this).output(output).build();
   }
 
   /**
    * It at one of its positions or beyond it, toward its range's upper end: {@code
-   * PIVOT.atLeast(PIVOT_RUN)}, from "run" on. An edge that's a clearance rather than a place it
-   * goes is written as a number ({@link Revolute#atLeast(Angle)}).
+   * PIVOT.atLeast(PIVOT_OUT)}, from "out" on. An edge that's a clearance rather than a place it
+   * goes is written as a number ({@link Revolute#atLeast(Angle)}). A position not its own is
+   * refused where the condition is used ({@link Condition}).
    *
-   * @throws IllegalArgumentException if the position isn't one of its own, or its lower end
+   * @throws IllegalArgumentException for its lower end
    */
   default Condition.AtLeast atLeast(Position position) {
     return ConditionAtLeastBuilder.builder()
         .joint(this)
-        .position(own(position).value())
-        .place(position.name())
+        .position(where(position))
+        .place(position)
         .build();
   }
 
   /**
    * It at one of its positions or short of it, toward its range's lower end: {@code
-   * ELEVATOR.atMost(ELEVATOR_CLEAR)}, up to "clear".
+   * ELEVATOR.atMost(ELEVATOR_CLEAR)}, up to "clear". A position not its own is refused where the
+   * condition is used ({@link Condition}).
    *
-   * @throws IllegalArgumentException if the position isn't one of its own, or its upper end
+   * @throws IllegalArgumentException for its upper end
    */
   default Condition.AtMost atMost(Position position) {
     return ConditionAtMostBuilder.builder()
         .joint(this)
-        .position(own(position).value())
-        .place(position.name())
+        .position(where(position))
+        .place(position)
         .build();
   }
 
   /**
-   * It between two of its positions, both included, whichever way round they're given.
+   * It between two of its positions, both included, whichever way round they're given. A position
+   * not its own is refused where the condition is used ({@link Condition}).
    *
-   * @throws IllegalArgumentException if either isn't one of its own, or they're one
+   * @throws IllegalArgumentException if they're one
    */
   default Condition.Between between(Position from, Position to) {
     return ConditionBetweenBuilder.builder()
         .joint(this)
-        .from(own(from).value())
-        .to(own(to).value())
-        .fromPlace(from.name())
-        .toPlace(to.name())
+        .from(where(from))
+        .to(where(to))
+        .fromPlace(from)
+        .toPlace(to)
         .build();
+  }
+
+  /**
+   * Where it puts a position of its own; one not its own, where that says, for what uses the
+   * condition naming it to refuse.
+   */
+  private double where(Position position) {
+    return whyNotOwn(position) == null ? own(position).value() : position.value();
   }
 
   /**
@@ -842,7 +851,7 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
       return with().link(link).build();
     }
 
-    /** Its places by name: {@code .positions(ARM_STOWED, ARM_LEVEL)}. */
+    /** Its places by name: {@code .positions(ARM_STOWED, ARM_SCORING)}. */
     public Revolute positions(Position... positions) {
       oncePositions(this);
       return with().positions(List.of(positions)).build();
@@ -870,8 +879,9 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
 
     /**
      * The same joint, one of its named outputs at another speed, its name kept: {@code
-     * SHOOTER.replaced(SHOOTING, RPM.of(3500))}. Code running it, {@code shooter.run(SHOOTING)} or
-     * a configuration, runs it there on the robot that has this joint.
+     * FEEDER.replaced(FEEDER_FEEDING, RPM.of(1200))}. Code running it, {@code
+     * feeder.run(FEEDER_FEEDING)} or a configuration, runs it there on the robot that has this
+     * joint.
      *
      * @throws IllegalArgumentException if it has no output of the name
      */
@@ -881,7 +891,7 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
 
     /**
      * The same joint, one of its named outputs at another voltage, its name kept: a practice
-     * robot's, {@code ROTOR.replaced(UNJAMMING, Volts.of(-1))}.
+     * robot's, {@code ROLLER.replaced(OUTTAKING, Volts.of(-3))}.
      *
      * @throws IllegalArgumentException if it has no output of the name
      */
@@ -891,7 +901,7 @@ public sealed interface Joint extends Part permits Joint.Revolute, Joint.Prismat
 
     /**
      * The same joint, one of its named outputs at another share of the battery, its name kept:
-     * {@code ROLLER.replaced(SPINNING, Percent.of(60))}.
+     * {@code ROLLER.replaced(OUTTAKING, Percent.of(-30))}.
      *
      * @throws IllegalArgumentException if it has no output of the name
      */

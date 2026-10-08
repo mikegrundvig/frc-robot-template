@@ -186,7 +186,7 @@ public final class RevMechanism {
    * A mechanism on SPARKs, read by its motor's own encoder.
    *
    * @param plan how the program drives its joint, its motors' SPARKs named, the leader first
-   * @throws IllegalArgumentException for controllers that aren't SPARKs, and a control with a kI
+   * @throws IllegalArgumentException for controllers that aren't SPARKs
    */
   public static Settings configure(ControllerPlan plan) {
     return build(plan, null, null, null);

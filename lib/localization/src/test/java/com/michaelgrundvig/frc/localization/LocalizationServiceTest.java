@@ -763,7 +763,9 @@ class LocalizationServiceTest {
     LocalizationOutput backup = drive(localization, robot, 20, turning, false).getLast();
 
     assertThat(localization.yawSource()).isEqualTo(YawSource.BACKUP);
-    assertThat(backup.estimate().mode()).isNotEqualTo(LocalizationEstimate.Mode.IMU_FAULT);
+    assertThat(backup.estimate().mode())
+        .as("no camera has placed it, and the backup is no IMU fault")
+        .isEqualTo(LocalizationEstimate.Mode.INITIALIZING);
     assertThat(headingError(localization, robot)).as("degrees").isLessThan(0.5);
 
     robot.backupLost = true;

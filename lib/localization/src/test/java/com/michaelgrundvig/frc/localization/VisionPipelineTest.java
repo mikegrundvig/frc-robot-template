@@ -24,6 +24,7 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * The vision pipeline, on 2026's field: images made exactly from a known robot pose, so every solve
@@ -457,6 +458,85 @@ class VisionPipelineTest {
 
     assertThat(steady.covariance().hasHeading()).isTrue();
     assertThat(lost.solver()).isEqualTo(VisionMeasurement.Solver.MULTI_TAG);
+  }
+
+  /**
+   * A view or a solve that isn't a number throws the image out with its verdict, rather than hand
+   * the estimator a pose it can't weigh: a tag whose place from the camera isn't a number, a
+   * multi-tag solution whose place or turn isn't, and a single tag whose turn isn't.
+   */
+  @Test
+  void aSolveThatIsntANumberIsThrownOutSayingSo() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    Transform3d solved = Objects.requireNonNull(seen.multiTag()).fieldToCamera();
+    Transform3d tag = seen.tags().get(0).bestCameraToTag();
+    Rotation3d noTurn = new Rotation3d(Double.NaN, 0, 0);
+    CaptureContext lost = new CaptureContext(null, Math.PI, 0, 0, 0, 0);
+
+    VisionResult tagNowhere =
+        process(
+            withTag(seen, new Transform3d(new Translation3d(Double.NaN, 0, 0), tag.getRotation())),
+            steady(ROBOT.getRotation()));
+    VisionResult solvedNowhere =
+        process(
+            withMultiTag(
+                seen, new Transform3d(new Translation3d(Double.NaN, 0, 0), solved.getRotation())),
+            lost);
+    VisionResult solvedUnturned =
+        process(withMultiTag(seen, new Transform3d(solved.getTranslation(), noTurn)), lost);
+    VisionResult singleUnturned =
+        process(
+            withTag(
+                seeing(ROBOT, camera, false, 26), new Transform3d(tag.getTranslation(), noTurn)),
+            lost);
+
+    assertThat(tagNowhere.refused()).isEqualTo(Verdict.TAG_NOT_A_NUMBER);
+    assertThat(solvedNowhere.refused()).isEqualTo(Verdict.SOLVE_NOT_A_NUMBER);
+    assertThat(solvedUnturned.refused()).isEqualTo(Verdict.SOLVE_NOT_A_NUMBER);
+    assertThat(singleUnturned.refused()).isEqualTo(Verdict.SOLVE_NOT_A_NUMBER);
+    assertThat(solvedUnturned.outcome()).isEqualTo("the solve isn't a number");
+  }
+
+  /**
+   * With the gyro's heading, a multi-tag solution whose turn isn't a number can't measure the
+   * heading: the tags still fix the position, and the gyro keeps the heading to itself.
+   */
+  @Test
+  void aMultiTagHeadingThatIsntANumberLeavesTheHeadingToTheGyro() {
+    TagDetections seen = seeing(ROBOT, camera, true, 25, 26);
+    Transform3d solved = Objects.requireNonNull(seen.multiTag()).fieldToCamera();
+
+    VisionMeasurement measured =
+        measured(
+            process(
+                withMultiTag(
+                    seen,
+                    new Transform3d(solved.getTranslation(), new Rotation3d(Double.NaN, 0, 0))),
+                steady(ROBOT.getRotation())));
+
+    assertThat(measured.covariance().hasHeading()).isFalse();
+    assertThat(measured.pose().getRotation()).isEqualTo(ROBOT.getRotation());
+    assertThat(measured.pose().getTranslation().getDistance(ROBOT.getTranslation()))
+        .isLessThan(1e-9);
+  }
+
+  /** The image, its first tag seen this way instead. */
+  private static TagDetections withTag(TagDetections seen, Transform3d view) {
+    List<TagDetections.Tag> tags = new ArrayList<>(seen.tags());
+    TagDetections.Tag first = tags.get(0);
+    tags.set(0, new TagDetections.Tag(first.id(), first.corners(), view, view, first.ambiguity()));
+    return new TagDetections(seen.timestampNanos(), seen.camera(), tags, seen.multiTag());
+  }
+
+  /** The image, its multi-tag solution putting the camera here instead. */
+  private static TagDetections withMultiTag(TagDetections seen, Transform3d fieldToCamera) {
+    TagDetections.MultiTag solved = Objects.requireNonNull(seen.multiTag());
+    return new TagDetections(
+        seen.timestampNanos(),
+        seen.camera(),
+        seen.tags(),
+        new TagDetections.MultiTag(
+            fieldToCamera, solved.reprojectionErrorPixels(), solved.tagIds()));
   }
 
   @Test

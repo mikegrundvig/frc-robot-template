@@ -112,7 +112,9 @@ how to change it: a second `.absoluteEncoder(...)` meant as a pair is "pivot alr
 absolute encoder: to re-wire it, encoderOn(...); to offset it, encoderOffset(...); a decoded pair
 isn't supported yet". What it has several of, servos and interlocks, adds up. Its hard stops and
 where it rests are one verb each, `.range(...)` and `.rest(...)`, which change them when said
-again, as a practice robot does ([A practice robot](#5-a-practice-robot)).
+again, as a practice robot does ([A practice robot](#5-a-practice-robot)). A joint can't tell its
+block from a finished joint, so in a block too, a second `.range(...)` or `.rest(...)` replaces the
+first without a word: say each once.
 
 **Other joints.** `Joint.elevator` starts one that slides straight up ([next](#2-an-elevator-with-an-arm-on-it)),
 `Joint.slide` one that slides along any axis, and `Joint.roller("spindexer", Part.CHASSIS, at,
@@ -338,9 +340,11 @@ and the test that builds every robot fails too:
 
 Built once the robot runs, in a command or anywhere else, the same move ends `REFUSED` as it
 starts, with the same reason: a robot on the field is never stopped by one. A gate that can't be
-holds false, its `Blocking` saying why (`pivot.isAt(ELEVATOR_CLEAR)`, a sensor the robot hasn't),
-and `joints.of(...)` given a joint with no mechanism gives a stand-in, `FAULTED`, whose every move
-is refused and every gate false.
+holds false, its `Blocking` saying why (`pivot.isAt(ELEVATOR_CLEAR)`,
+`joints.gate(PIVOT.atLeast(ELEVATOR_CLEAR))`, a sensor the robot hasn't), and `joints.of(...)`
+given a joint with no mechanism gives a stand-in, `FAULTED`, whose every move is refused and every
+gate false. An interlock or a configuration on another joint's place is refused as the definition
+is built.
 
 ### Gates: wait for things, and know why not
 

@@ -18,6 +18,7 @@ import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Percent;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Driven;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
@@ -42,7 +43,7 @@ import org.wpilib.math.geometry.Translation3d;
  * built as the robot starts, as its bindings and the autos built with them are, it throws, saying
  * why, so the robot doesn't start and the test that builds every robot fails; built once the robot
  * runs, inside a command, it's a stand-in that says the same, a move that ends REFUSED and a gate
- * that holds false, and the robot carries on. Places of another joint's are {@link
+ * that holds false, and the robot carries on. Moves to places of another joint's are {@link
  * JointMovesSimTest}'s.
  */
 @ExtendWith(RobotSim.class)
@@ -99,6 +100,12 @@ class RefusalsSimTest {
         new CantBe(
             "hatch has no mechanism: nothing drives it",
             () -> sim.joints.gate(HATCH.atLeast(PIVOT_OUT))),
+        new CantBe(
+            "pivot has no position clear at 0.4 m: it has in, run, out",
+            () -> sim.joints.gate(PIVOT.between(PIVOT_OUT, ELEVATOR_CLEAR))),
+        new CantBe(
+            "pivot has no position clear at 0.4 m: it has in, run, out",
+            () -> sim.joints.goTo(Configuration.of("wrong", PIVOT.at(ELEVATOR_CLEAR)))),
         new CantBe(
             "roller has no output push: it has intaking, outtaking, ejecting, and stopped",
             () -> roller.isAt(PIVOT_PUSH)),

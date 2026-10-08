@@ -11,6 +11,7 @@ import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import java.util.List;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 
@@ -71,6 +72,40 @@ class DrivetrainControlTest {
         .isEqualTo(
             "5 m/s is faster than the drivetrain's free speed of 4.729 m/s: give maxLinearSpeed at"
                 + " most that");
+  }
+
+  /**
+   * How fast a robot can speed up and spin up, by its own model, worked by hand for the fixture's:
+   * 60 kg, a yaw inertia of 6 kg m², and at each corner, 0.374 m from its center, a Kraken X60
+   * through 6.75:1 on a 2 in wheel whose tread grips at 1.2 of its quarter of the weight, 177 N.
+   *
+   * <ul>
+   *   <li>At 40 A the motors give first: 0.775 N m each, 103 N at the floor. 412 N over 60 kg is
+   *       6.86 m/s²; at 0.374 m, over 6 kg m², 25.7 rad/s².
+   *   <li>At 80 A they'd push 206 N, and the tread gives first: 177 N a wheel, so the robot speeds
+   *       up at 1.2 g, 11.77 m/s², whatever its mass, and spins up at 44.1 rad/s².
+   * </ul>
+   */
+  @Test
+  void aRobotSpeedsUpAsItsMotorsOrItsTreadAllowWhicheverIsLess() {
+    RobotDefinition robot = ConfigFixtures.definition(List.of());
+    double[][] rows = {
+      // stator current (A), linear (m/s²), angular (rad/s²)
+      {40, 6.86, 25.7},
+      {80, 11.77, 44.1},
+    };
+
+    for (double[] row : rows) {
+      DrivetrainControl control =
+          DrivetrainControlBuilder.builder(control())
+              .limits(changeLimits().driveStatorCurrent(Amps.of(row[0])).build())
+              .build();
+
+      DrivetrainControl.Accelerations most = DrivetrainControl.accelerations(robot, control);
+
+      assertThat(most.linear()).as("%s A, linear", row[0]).isCloseTo(row[1], within(0.01));
+      assertThat(most.angular()).as("%s A, angular", row[0]).isCloseTo(row[2], within(0.1));
+    }
   }
 
   @Test

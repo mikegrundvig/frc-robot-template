@@ -312,13 +312,20 @@ public final class JointIOTalon implements JointIO {
   }
 
   /**
-   * A device's restarts from now on: what it reported before, as it and the robot started, isn't
-   * one.
+   * A device's restarts once the robot runs: its first read takes what it reported as it and the
+   * robot started, which isn't one.
    */
   private static BooleanSupplier restarts(ParentDevice device) {
     BooleanSupplier restarted = device.getResetOccurredChecker();
-    boolean startedWithTheRobot = restarted.getAsBoolean(); // read, and so not read again
-    return restarted;
+    boolean[] started = {false};
+    return () -> {
+      boolean reported = restarted.getAsBoolean();
+      if (!started[0]) {
+        started[0] = true;
+        return false;
+      }
+      return reported;
+    };
   }
 
   /**

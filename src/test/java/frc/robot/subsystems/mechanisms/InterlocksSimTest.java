@@ -21,6 +21,7 @@ import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.DegreesPerSecond;
 import static org.wpilib.units.Units.Percent;
 import static org.wpilib.units.Units.RPM;
+import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.world.robot.Configuration;
@@ -43,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Command;
@@ -447,6 +449,33 @@ class InterlocksSimTest {
   }
 
   /**
+   * A light, strong joint chasing a speed from rest just short of the closed region, its motors
+   * reaching the speed within a loop: held at the edge from the start, since from that speed its
+   * profile couldn't stop it short. Until 2026-10-07 the hold waited for the joint to be moving, by
+   * when its profile couldn't stop it at the edge, and the pivot ran 19° into the region, to 59.2°;
+   * the guide's arm, chasing a speed up from its stop below the bumper's band, 12° into it.
+   */
+  @Test
+  void aJointThatReachesItsSpeedWithinALoopIsHeldAtTheEdgeFromRest() {
+    JointsSimHarness strong =
+        new JointsSimHarness(
+            GUARDED.with(
+                PIVOT.retuned(
+                    old ->
+                        JointFixtures.assumed(
+                            control(30, 1, Optional.empty(), profile(8, 30), 120)))));
+    strong.simulation.place(PIVOT, Math.toRadians(35));
+    strong.loop();
+    JointMechanism chasing = strong.joints.of(PIVOT);
+
+    double furthest = furthest(strong, PIVOT, chasing.follow(() -> RadiansPerSecond.of(5)), 1);
+
+    assertThat(furthest).as("at the region's edge").isCloseTo(40, within(0.5));
+    assertThat(chasing.heldBy())
+        .isEqualTo("pivot keeps out of 40° to 80° while elevator at most clear");
+  }
+
+  /**
    * Above the closed region, pushed away from it, the pivot runs on to its stop, held by nothing.
    */
   @Test
@@ -537,6 +566,26 @@ class InterlocksSimTest {
                 .filter(alert -> alert.group.equals("Joints"))
                 .map(alert -> alert.text))
         .containsExactly(rejected);
+  }
+
+  /**
+   * The alert a joint raises as it rejects a target goes with its robot, so the next robot built, a
+   * test's, raises its own. Until 2026-10-07 it outlived its robot, and the next robot's joint of
+   * the same name threw as it rejected a target: "Alert already allocated".
+   */
+  @Test
+  void aRejectedTargetsAlertGoesWithItsRobot() {
+    for (int robot = 0; robot < 2; robot++) {
+      JointsSimHarness built = new JointsSimHarness(GUARDED);
+      JointMechanism chased = built.joints.of(PIVOT);
+      built.scheduler.schedule(chased.follow(() -> Degrees.of(Double.NaN)));
+
+      built.loop();
+
+      assertThat(chased.rejected()).startsWith("pivot follows asked pivot for a position of NaN");
+      built.close();
+      assertThat(AlertSim.getActive()).noneMatch(alert -> alert.group.equals("Joints"));
+    }
   }
 
   /**

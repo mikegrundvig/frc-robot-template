@@ -55,7 +55,8 @@ import org.wpilib.units.measure.Time;
  *
  * <p>{@link #within} sets another deadline, and {@link #passed} waits for a named keyframe.
  * Canceled, it's {@link Outcome#CANCELED}. It stops the drivetrain as it ends; the drive's default
- * command takes over from the next loop.
+ * command takes over from the next loop. Each run takes a loop at least, one that ends as it starts
+ * too, so a command that awaits moves in a loop goes round once a loop.
  */
 public final class DriveMove implements Command {
   /**
@@ -118,7 +119,15 @@ public final class DriveMove implements Command {
   private @Nullable Outcome outcome;
   private String reason = "";
   private boolean running;
+
+  /** Whether its latest run has waited a loop yet. */
+  private boolean yielded;
+
   private long startNanos;
+
+  /** When its latest run's deadline passes, on the robot's clock: none until it's set. */
+  private long deadlineNanos = Long.MAX_VALUE;
+
   private boolean[] passed = new boolean[0];
   private final Map<String, Gate> gates = new HashMap<>();
 
@@ -287,6 +296,15 @@ public final class DriveMove implements Command {
     return reason;
   }
 
+  /**
+   * When its latest run's deadline passes, in nanoseconds on the robot's clock: none ({@link
+   * Long#MAX_VALUE}) before its path is planned and once it has ended. For tests that check every
+   * move ends by its deadline.
+   */
+  long deadlineNanos() {
+    return running ? deadlineNanos : Long.MAX_VALUE;
+  }
+
   @Override
   public String name() {
     return name;
@@ -304,9 +322,16 @@ public final class DriveMove implements Command {
     reason = "";
     passed = new boolean[keyframes.size()];
     startNanos = RobotController.getTime();
+    deadlineNanos = Long.MAX_VALUE;
+    yielded = false;
     switch (kind) {
       case RUN_UNTIL -> runUntil(coroutine);
       case FOLLOW -> follow(coroutine, Objects.requireNonNull(planner));
+    }
+    if (!yielded) {
+      // Ended as it started, refused or there already: it takes its loop all the same, so a loop
+      // of moves goes round once a loop, never without end in one.
+      coroutine.yield();
     }
   }
 
@@ -324,12 +349,14 @@ public final class DriveMove implements Command {
 
   private void runUntil(Coroutine coroutine) {
     BooleanSupplier condition = until;
+    deadlineNanos = startNanos + Math.round(deadlineSeconds * 1e9);
     while (condition != null && !condition.getAsBoolean()) {
-      if (seconds() >= deadlineSeconds) {
+      if (RobotController.getTime() >= deadlineNanos) {
         end(Outcome.TIMED_OUT, condition instanceof Gate gate ? gate.why() : null);
         return;
       }
       drive.runVelocity(velocity);
+      yielded = true;
       coroutine.yield();
     }
     end(Outcome.ARRIVED, null);
@@ -363,6 +390,7 @@ public final class DriveMove implements Command {
     HolonomicSample last = path.end();
     double deadline =
         Double.isNaN(deadlineSeconds) ? Outcome.deadline(path.duration) : deadlineSeconds;
+    deadlineNanos = startNanos + Math.round(deadline * 1e9);
     long arrivedSince = -1;
     while (true) {
       Pose2d pose = drive.getPose();
@@ -391,7 +419,7 @@ public final class DriveMove implements Command {
         end(Outcome.ARRIVED, null);
         return;
       }
-      if (t >= deadline) {
+      if (now >= deadlineNanos) {
         end(Outcome.TIMED_OUT, ", " + where(pose), null);
         return;
       }
@@ -422,6 +450,7 @@ public final class DriveMove implements Command {
                   (due.velocity.vy - was.vy) / RobotLoop.PERIOD_SECONDS,
                   (due.velocity.omega - was.omega) / RobotLoop.PERIOD_SECONDS)
               .toRobotRelative(pose.getRotation()));
+      yielded = true;
       coroutine.yield();
     }
   }

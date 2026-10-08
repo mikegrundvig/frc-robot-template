@@ -2,6 +2,7 @@ package frc.robot.subsystems.mechanisms;
 
 import com.michaelgrundvig.frc.world.robot.Condition;
 import com.michaelgrundvig.frc.world.robot.Interlock;
+import com.michaelgrundvig.frc.world.robot.Motor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalDouble;
@@ -189,12 +190,15 @@ final class Interlocks {
    * position at the region's edge on the side the joint is on, which its profile stops at. A joint
    * inside the region, one that overshot an edge or was there when it closed, may leave it only the
    * way it came, toward a goal outside on the side it was last on (the nearer side, if it was never
-   * outside), and otherwise holds where it would stop as the hold starts: never across. Run at an
-   * output, it's held at the edge, a position its profile brakes it to from where it is, from the
-   * loop before it could no longer stop short of it: once where it would stop, held a loop on,
-   * would reach the region ({@link Travel#stoppingPointLoopOn}). Held then, its profile stops it at
-   * the edge at its acceleration, as every move of its brakes; and it's held there for as long as
-   * the output pushes it toward the region.
+   * outside), and otherwise holds where it would stop as the hold starts, braking at its profile's
+   * acceleration. A joint the region closes on while it's moving too fast to stop inside it carries
+   * on out the far side and is then kept out from there: it never stops inside the region. Run at
+   * an output, it's held at the edge, a position its profile brakes it to from where it is, from
+   * the loop before it could no longer stop short of it: once where it would stop, held a loop on,
+   * would reach the region ({@link Travel#stoppingPointLoopOn}), going on as it goes or at the
+   * speed the output asks for, which a light joint reaches within a loop. Held then, its profile
+   * stops it at the edge at its acceleration, as every move of its brakes; and it's held there for
+   * as long as the output pushes it toward the region.
    *
    * @param restriction the interlock's: the side the joint was last on, and where it's held inside
    * @param accelerating how fast its speed changed over the last loop, a second squared
@@ -230,8 +234,11 @@ final class Interlocks {
       return Double.NaN;
     }
     if (!inside) {
+      // Where it would stop, held a loop on: going on as it goes now, or at the speed the output
+      // asks for, which a light joint's motors reach within the loop, from rest as from moving.
       double stopping = travel.stoppingPointLoopOn(at, velocity, accelerating);
-      boolean reaches = below ? stopping >= from : stopping <= to;
+      double asks = travel.stoppingPointLoopOn(at, speedAsked(asked, target), 0);
+      boolean reaches = below ? Math.max(stopping, asks) >= from : Math.min(stopping, asks) <= to;
       // A speed, volts or a share of the battery pushes it toward the region by its sign.
       boolean toward = below ? target > 0 : target < 0;
       restriction.atEdge = reaches || (restriction.atEdge && toward);
@@ -241,6 +248,19 @@ final class Interlocks {
       return below ? from : to;
     }
     return heldInside(restriction, at, velocity);
+  }
+
+  /**
+   * The speed an output asks for, in the joint's units a second: a speed's own, or what a voltage
+   * or a share of the battery runs the joint at, free; none for anything else.
+   */
+  private double speedAsked(Request asked, double target) {
+    return switch (asked) {
+      case VELOCITY -> target;
+      case VOLTAGE -> target / Motor.NOMINAL_VOLTS * travel.freeSpeed();
+      case DUTY_CYCLE -> target * travel.freeSpeed();
+      default -> 0;
+    };
   }
 
   /**

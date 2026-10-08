@@ -124,6 +124,14 @@ tasks.named("test") {
     def work = layout.buildDirectory.dir("test-work")
     workingDir = work
     systemProperty "frc.projectDir", projectDir.absolutePath
+    // How many seeds MonkeySimTest runs on each robot, or the one seed to run alone, the one a
+    // failure names: -PmonkeySeeds=50, -PmonkeySeed=1234 (docs/testing.md).
+    ["monkeySeeds", "monkeySeed"].each { name ->
+        def value = providers.gradleProperty(name).orNull
+        if (value != null) {
+            systemProperty "frc.$name", value
+        }
+    }
     // Project files the tests check against the code, declared so Gradle knows the tests depend
     // on them: the values register (ValuesRegisterTest), the drive team's dashboard
     // (DashboardLayoutTest), and AdvantageScope's layout (AdvantageScopeLayoutTest). A quick build

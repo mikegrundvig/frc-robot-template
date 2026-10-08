@@ -64,8 +64,10 @@ import org.jspecify.annotations.Nullable;
  * <p>A test can fail it as a robot's fails ({@link JointSimulation}): silent, as one off the CAN
  * bus is, it answers nothing and hears nothing, so it goes neutral; restarted, as one whose breaker
  * reset is, it says so once, goes neutral until it's asked again, and counts from 0, or reads the
- * absolute encoder its block has it read, as a real one is seeded from it again. It keeps its
- * tuning through a restart: a TalonFX's is saved on it, and a SPARK's IO tells it again.
+ * absolute encoder its block has it read, as a real one is seeded from it again; jammed, it stays
+ * where it is whatever its motors do, which stall against what holds it. One of its followers can
+ * go off the bus alone: neutral, drawing nothing, the joint driven by the rest. It keeps its tuning
+ * through a restart: a TalonFX's is saved on it, and a SPARK's IO tells it again.
  *
  * <p>What the robot would refuse of the joint's settings, its configuration refused before the
  * simulator started; what it would doubt, the robot says at startup, in the simulator as on the
@@ -158,6 +160,9 @@ final class JointIOSim implements JointIO {
 
   private final int followers;
 
+  /** Which of its followers are off the CAN bus, neutral, the joint driven without them. */
+  private final boolean[] silentFollowers;
+
   /**
    * @param math what the robot's definition derives: its joint's block sets the gravity on it
    * @param joint the joint as its motor controller runs it: its block's control and wiring
@@ -182,6 +187,7 @@ final class JointIOSim implements JointIO {
     absolute = readsBeside(joint) ? math.absoluteEncoder(joint) : null;
     int controllers = joint.driven().motors().map(motors -> motors.controllers().size()).orElse(0);
     followers = Math.max(0, controllers - 1);
+    silentFollowers = new boolean[followers];
     devices =
         controllers
             + (joint
@@ -258,6 +264,47 @@ final class JointIOSim implements JointIO {
     if (silent) {
       mode = Mode.NEUTRAL;
     }
+  }
+
+  /**
+   * Takes one of its followers off the CAN bus, or brings it back: it answers nothing and hears
+   * nothing, so it goes neutral, drawing nothing from the battery, and its leader drives the joint
+   * without it.
+   *
+   * @param follower which, from 0 for the first after the leader
+   * @throws IllegalArgumentException for a follower it hasn't
+   */
+  void silenceFollower(int follower, boolean silent) {
+    if (follower < 0 || follower >= followers) {
+      throw new IllegalArgumentException(
+          joint.label() + " has " + followers + " followers, not one numbered " + follower);
+    }
+    silentFollowers[follower] = silent;
+    int driving = 1;
+    for (boolean each : silentFollowers) {
+      driving += each ? 0 : 1;
+    }
+    plant.drivenBy(driving);
+  }
+
+  /**
+   * The current one of its motor controllers draws from the battery, in amps: what its PDH channel
+   * reads. Each that drives the joint draws alike; a follower off the bus draws nothing.
+   *
+   * @param controller which, from 0 for the leader
+   */
+  double supplyAmps(int controller) {
+    return controller > 0 && controller <= followers && silentFollowers[controller - 1]
+        ? 0
+        : plant.supplyAmps();
+  }
+
+  /**
+   * Jams it where it is, or frees it: stuck still, as a game piece wedged in it or a bent part
+   * leaves it, whatever its motors do, which stall against it as against a hard stop.
+   */
+  void jam(boolean jammed) {
+    plant.jam(jammed);
   }
 
   /**
@@ -401,7 +448,9 @@ final class JointIOSim implements JointIO {
       inputs.followersConnected = new boolean[followers];
       inputs.followersRestarted = new boolean[followers];
     }
-    Arrays.fill(inputs.followersConnected, true);
+    for (int i = 0; i < followers; i++) {
+      inputs.followersConnected[i] = !silentFollowers[i];
+    }
     inputs.position = controllerReads();
     // A SPARK's loop closed on its data port: its motor's count beside, as its IO reads it.
     inputs.motorPosition =

@@ -14,6 +14,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Simulator;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.dashboard.DashboardStream;
 import frc.robot.game.Rebuilt;
+import frc.robot.hardware.Hardware;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.Scenarios;
@@ -27,6 +28,7 @@ import java.io.File;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
 import org.littletonrobotics.junction.LogFileUtil;
 import org.littletonrobotics.junction.LoggedRobot;
@@ -187,7 +189,8 @@ public class Robot extends LoggedRobot {
             pitwall,
             SensorErrors.TYPICAL,
             loopHealth,
-            venueStore(Constants.currentMode));
+            venueStore(Constants.currentMode),
+            UnaryOperator.identity());
     // The scenario's sensor faults, through the simulator's controls (where the page shows them,
     // and can undo them) before the first loop; its events once the robot is enabled.
     pendingEvents =
@@ -256,6 +259,8 @@ public class Robot extends LoggedRobot {
    *
    * @param simulatedErrors in the simulator, how the robot's wheels and sensors differ from its
    *     configuration
+   * @param watched the hardware, handed through a test's own on its way to the mechanisms, to
+   *     record what they're told; as it is on the robot
    */
   static RobotContainer assemble(
       Constants.Mode mode,
@@ -264,7 +269,8 @@ public class Robot extends LoggedRobot {
       Pitwall pitwall,
       SensorErrors simulatedErrors,
       LoopHealth loopHealth,
-      @Nullable VenueStore venueStore) {
+      @Nullable VenueStore venueStore,
+      UnaryOperator<Hardware> watched) {
     Venues.Game game = Rebuilt.venues(robot.definition().body());
     VenueIODisk disk = venueStore != null ? new VenueIODisk(venueStore) : null;
     Venues venues = new Venues(game, disk != null ? disk : new VenueIO() {});
@@ -276,7 +282,8 @@ public class Robot extends LoggedRobot {
             Rebuilt.field(robot.definition().body()),
             venues,
             simulatedErrors,
-            loopHealth);
+            loopHealth,
+            watched);
     container.addTo(pitwall);
     if (venueStore != null && disk != null) {
       pitwall.devices().add(VenuePit.device(venueStore, disk, venues, game));

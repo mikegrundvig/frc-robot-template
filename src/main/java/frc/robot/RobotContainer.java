@@ -54,6 +54,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
@@ -178,6 +179,8 @@ public final class RobotContainer implements AutoCloseable {
    *     as a real robot's does)
    * @param loopHealth the loop's timing, which the robot starts and finishes and this marks the
    *     sections of; closed with this
+   * @param watched the hardware for the mode, handed through a test's own on its way to the
+   *     mechanisms, to record what they're told ({@code RobotSim}); as it is otherwise
    */
   RobotContainer(
       Constants.Mode mode,
@@ -186,7 +189,8 @@ public final class RobotContainer implements AutoCloseable {
       FieldModel field,
       Venues venues,
       SensorErrors simulatedErrors,
-      LoopHealth loopHealth) {
+      LoopHealth loopHealth,
+      UnaryOperator<Hardware> watched) {
     // What the pit can tune, published where dashboards and the Pitwall page find it; the
     // mechanisms read it every loop.
     Tunings tunings = tunings(robot);
@@ -213,7 +217,7 @@ public final class RobotContainer implements AutoCloseable {
     // reads the log).
     world =
         mode == Constants.Mode.SIM ? new SimulatedWorld(field, definition, simulatedErrors) : null;
-    hardware = hardware(mode, definition, world);
+    hardware = watched.apply(hardware(mode, definition, world));
 
     // Until the robot is placed it could be anywhere: localization starts it in the middle of the
     // field, as unsure as the field is big, so the first camera measurement wins. The simulated
@@ -439,6 +443,14 @@ public final class RobotContainer implements AutoCloseable {
 
   Localization localization() {
     return localization;
+  }
+
+  /**
+   * What became of each camera image this loop, as localization decided it: for tests that check
+   * what it made of them.
+   */
+  List<FrameVerdict> frames() {
+    return frames;
   }
 
   /** The localization estimate, as of the last loop. */

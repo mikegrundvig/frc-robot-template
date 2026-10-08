@@ -214,13 +214,13 @@ class InterlocksTest {
 
   /**
    * Run at an output toward the region, it's held at the edge once where it would stop, held a loop
-   * on, would reach the region; neutral, it's left alone. At 2 rad/s, braking at 30 rad/s², it
-   * stops in 3.8°, and goes 2.3° in a loop.
+   * on, would reach the region; neutral, it's left alone. Chasing 2 rad/s at 2 rad/s, braking at 30
+   * rad/s², it stops in 3.8°, and goes 2.3° in a loop.
    */
   @Test
   void anOutputIsHeldAtTheEdgeOnceItWouldStopInside() {
     Interlocks pivot = keptOut();
-    Demand up = Demand.of(Request.VOLTAGE, 3, 1);
+    Demand up = Demand.of(Request.VELOCITY, 2, 1);
 
     Demand farOff = pivot.apply(up, radians(20), 2, 0, null);
     Demand near = pivot.apply(up, radians(38), 2, 0, null);
@@ -240,7 +240,7 @@ class InterlocksTest {
    */
   @Test
   void anOutputIsHeldALoopBeforeItCouldNoLongerStopShort() {
-    Demand up = Demand.of(Request.VOLTAGE, 3, 1);
+    Demand up = Demand.of(Request.VELOCITY, 2, 1);
 
     Demand aLoopOn = keptOut().apply(up, radians(34.5), 2, 0, null);
     Demand steady = keptOut().apply(up, radians(33), 2, 0, null);
@@ -255,8 +255,31 @@ class InterlocksTest {
   }
 
   /**
+   * At rest, it's held once where it would stop from the speed its output asks for, held a loop on,
+   * would reach the region: a light joint's motors reach it within the loop. Asked for 2 rad/s, at
+   * 33° it's left alone, and at 35° held; at 3 V, which runs it at about 6 rad/s free, it's held
+   * from 20°. Until 2026-10-07 a joint at rest was held only once it was moving, by when a light
+   * one could no longer stop short of the edge.
+   */
+  @Test
+  void anOutputFromRestIsHeldOnceTheSpeedItAsksForWouldReach() {
+    Demand up = Demand.of(Request.VELOCITY, 2, 1);
+    Demand pushed = Demand.of(Request.VOLTAGE, 3, 1);
+
+    Demand short_ = keptOut().apply(up, radians(33), 0, 0, null);
+    Demand near = keptOut().apply(up, radians(35), 0, 0, null);
+    Demand atVolts = keptOut().apply(pushed, radians(20), 0, 0, null);
+
+    assertThat(short_).isSameAs(up);
+    assertThat(near.kind()).isEqualTo(Request.POSITION);
+    assertThat(near.value()).isCloseTo(radians(40), within(1e-12));
+    assertThat(atVolts.kind()).isEqualTo(Request.POSITION);
+  }
+
+  /**
    * Held at the edge, it stays held there while its output pushes it toward the region, though at
-   * rest it could stop short: let go then, pushed on, it would cross. Pushed away, it's let go.
+   * rest it could stop short: let go then, pushed on, it would cross. Pushed away, it's let go;
+   * pushed toward it again from just short, it's held again, at once.
    */
   @Test
   void anOutputHeldAtTheEdgeStaysHeldWhileItPushesToward() {
@@ -272,7 +295,8 @@ class InterlocksTest {
     assertThat(atRest.kind()).isEqualTo(Request.POSITION);
     assertThat(atRest.value()).isCloseTo(radians(40), within(1e-12));
     assertThat(away).isSameAs(down);
-    assertThat(again).as("let go, it's held again only once it would reach").isSameAs(up);
+    assertThat(again.kind()).isEqualTo(Request.POSITION);
+    assertThat(again.value()).isCloseTo(radians(40), within(1e-12));
   }
 
   private static final Sensor.Switch CLAW_BEAM = Sensor.Switch.beam("claw beam", PIVOT);

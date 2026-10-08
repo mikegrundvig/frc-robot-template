@@ -173,6 +173,42 @@ What it offers:
   the robot's clock, so it steps with the loops: send the page's heartbeats every so many loops,
   not on a timer.
 
+### The monkey
+
+`MonkeySimTest` puts a monkey at the controls (`Monkey`): the guide's robot and 2611's 2026 robot,
+each with its own controls, play a 153 s match of random input from a seed. It presses, holds, taps
+and releases every button the robot's bindings record, wanders both gamepads' sticks, schedules
+and cancels each joint's moves and outputs (now and then a target that isn't a number) and the
+drivetrain's moves (to a pose, a heading, along keyframes, at a speed until something holds),
+disables the robot as a match, a brownout and the drive team do, at any moment, and switches it
+between autonomous and teleop.
+
+Its faults come from the robot's definition, so a robot handed to it gets chaos for its own parts
+with no test code: each sensor tripped, blinded, silenced or its wire cut; each joint's motor
+controllers silenced or restarted, its encoder frozen, slipped or unplugged, the joint jammed, each
+follower off the CAN bus alone, and each motor's PDH breaker tripped (its controller off the bus
+without power, a leader's taking its joint with it); and everything the simulator's controls can fail, the drivetrain's modules, the gyro
+and the backup IMU, each camera and every camera at once, the robot shoved. Each is mended later.
+What the simulator can't fail yet, a module's motor off the bus or the battery sagging, it doesn't
+([simulator](simulator.md#what-the-simulator-cant-make-fail-yet)).
+
+After every loop it checks what must always hold, and nothing may escape the robot's loop. Of the
+joints (`JointInvariants`): nothing that isn't a number reaches a joint's IO, a joint that doesn't
+know where it is isn't run to a position, nothing drives a joint on toward a tripped limit switch,
+no joint goes into a closed keep-out region past its band, every move ends by its deadline, a
+jammed joint run at an output is stalled by its gate, and a motor that draws nothing while its
+joint works is flagged, and none that draws. Of the drivetrain (`DriveInvariants`): every drive
+move ends by its deadline. Of where it thinks it is (`LocalizationInvariants`): odometry turns on
+the gyro, the backup IMU while only it reads, or the wheels, and the robot says which; with every
+camera unplugged it's soon not ready to score, nor tracking tags; and the estimate moves in a loop
+no farther than its wheels' travel and what the images it accepted can move it by their gate.
+
+It runs three seeds a robot, about 4 s each for the guide's robot (7 s for the first, as the JVM
+warms) and 1.2 s for 2611's. A failure names its seed, its loop and the monkey's last doings, and
+the seed runs the same every time:
+`./gradlew test --tests frc.robot.MonkeySimTest -PmonkeySeed=17` runs it again, alone, and
+`-PmonkeySeeds=50` runs seeds 1 to 50, for a longer hunt.
+
 ## Rules that keep tests trustworthy
 
 - **The same run every time.** The clock moves only when stepped, and the simulator's IMUs' noise

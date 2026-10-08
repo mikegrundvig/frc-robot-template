@@ -12,6 +12,7 @@ import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import frc.robot.behavior.Bindings;
 import frc.robot.behavior.RecordingGamepad;
 import frc.robot.game.Rebuilt;
+import frc.robot.hardware.Hardware;
 import frc.robot.lib.timing.LoopMonitor;
 import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimulation;
@@ -22,6 +23,7 @@ import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.Joints;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
@@ -100,6 +102,9 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     closeRobot();
     JointsSimHarness.closeAll();
     TelemetryRegistry.reset();
+    // What the robot published, every loop of it, let go: JUnit may hold a finished test's
+    // instance, this with it, until its class is done.
+    telemetry = null;
     TunableRegistry.reset();
     DriverStationSim.resetData();
     DriverStationSim.notifyNewData();
@@ -136,12 +141,29 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
    * @param errors in the simulator, how its wheels and sensors differ from its configuration
    */
   public RobotContainer build(Constants.Mode mode, RobotConfig robot, SensorErrors errors) {
+    return build(mode, robot, errors, UnaryOperator.identity());
+  }
+
+  /**
+   * Builds a robot in the simulator, its hardware handed through a test's own on its way to the
+   * robot's mechanisms: to record what each part is told, as {@code Monkey} does.
+   */
+  public RobotContainer build(
+      RobotConfig robot, SensorErrors errors, UnaryOperator<Hardware> watched) {
+    return build(Constants.Mode.SIM, robot, errors, watched);
+  }
+
+  private RobotContainer build(
+      Constants.Mode mode,
+      RobotConfig robot,
+      SensorErrors errors,
+      UnaryOperator<Hardware> watched) {
     closeRobot();
     LoopHealth health = new LoopHealth();
     Pitwall page = Pitwall.start(robot.name(), 0);
     pitwall = page;
     loopHealth = health;
-    container = Robot.assemble(mode, scheduler(), robot, page, errors, health, null);
+    container = Robot.assemble(mode, scheduler(), robot, page, errors, health, null, watched);
     return container;
   }
 

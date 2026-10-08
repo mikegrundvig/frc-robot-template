@@ -8,6 +8,7 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.Scenario;
 import frc.robot.sim.SimulatedWorld;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.hardware.hal.AllianceStationID;
@@ -60,7 +61,15 @@ public final class SimulatedRobot implements AutoCloseable {
     driver = new GamepadSim(0);
     pitwall = Pitwall.start(robot.name(), 0);
     container =
-        Robot.assemble(Constants.Mode.SIM, scheduler, robot, pitwall, errors, loopHealth, null);
+        Robot.assemble(
+            Constants.Mode.SIM,
+            scheduler,
+            robot,
+            pitwall,
+            errors,
+            loopHealth,
+            null,
+            UnaryOperator.identity());
   }
 
   /** One robot loop: the clock moves a loop's time, the robot runs its loop, tunables update. */

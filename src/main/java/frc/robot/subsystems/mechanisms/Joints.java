@@ -654,9 +654,13 @@ public final class Joints implements AutoCloseable {
             .orElse(List.of()));
   }
 
-  /** Releases its alerts, so a test can build another robot. */
+  /** Releases its alerts, and each joint's, so a test can build another robot. */
   @Override
   public void close() {
+    for (JointMechanism joint : joints) {
+      joint.close();
+    }
+    standIns.values().forEach(JointMechanism::close);
     lost.close();
     doubted.close();
     dead.close();

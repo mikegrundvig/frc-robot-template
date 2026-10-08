@@ -108,6 +108,47 @@ class JointMovesSimTest {
         .isCloseTo(0.147, within(0.06));
   }
 
+  /**
+   * A move that ends as it starts, refused or there already, still takes its loop, so a loop of
+   * moves, as the guide's shooting feeds whenever it's ready, goes round once a loop rather than
+   * spinning in one. Until 2026-10-07 it ended without a loop: with the guide's feed refused as it
+   * started, a feeder's motor controller silent, and the shot still ready, its loop went round
+   * without end, and the robot's loop never finished.
+   */
+  @Test
+  void aMoveThatEndsAsItStartsStillTakesItsLoop() {
+    int[] refused = {0};
+    int[] arrived = {0};
+    sim.scheduler.schedule(
+        Command.noRequirements(
+                co -> {
+                  while (refused[0] < 100) {
+                    refused[0]++;
+                    co.await(pivot.goTo(Degrees.of(140)));
+                  }
+                })
+            .named("Refused, again and again"));
+    sim.scheduler.schedule(
+        Command.noRequirements(
+                co -> {
+                  while (arrived[0] < 100) {
+                    arrived[0]++;
+                    co.await(roller.runUntil(ROLLER_INTAKING, () -> true));
+                  }
+                })
+            .named("There, again and again"));
+
+    sim.loop();
+    int refusedInALoop = refused[0];
+    int arrivedInALoop = arrived[0];
+    sim.loop();
+
+    assertThat(refusedInALoop).isEqualTo(1);
+    assertThat(arrivedInALoop).isEqualTo(1);
+    assertThat(refused[0]).as("again, the next loop").isEqualTo(2);
+    assertThat(arrived[0]).isEqualTo(2);
+  }
+
   @Test
   void aTargetOutsideTheLimitsIsRefusedAndNothingMoves() {
     Move tooFar = pivot.goTo(Degrees.of(140));

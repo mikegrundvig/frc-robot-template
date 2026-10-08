@@ -58,7 +58,9 @@ import org.wpilib.units.measure.Time;
  * {@snippet class=frc.robot.examples.ExampleCommands region=recovery}
  *
  * <p>A move can be bound to a trigger and run again and again: each run starts afresh, and its
- * outcome is its latest run's. Its requirements are exactly the joints it moves.
+ * outcome is its latest run's. Each run takes a loop at least, one that ends as it starts too,
+ * refused or there already, so a command that awaits moves in a loop goes round once a loop. Its
+ * requirements are exactly the joints it moves.
  */
 public final class Move implements Command {
   /** What a move does. */
@@ -458,6 +460,15 @@ public final class Move implements Command {
     return arrivals;
   }
 
+  /**
+   * When its latest run's deadline passes, in nanoseconds on the robot's clock: none ({@link
+   * Long#MAX_VALUE}) while it waits for its joints to home, once it has ended, and for a move that
+   * never ends on its own. For tests that check every move ends by its deadline.
+   */
+  long deadlineNanos() {
+    return running && started ? deadlineNanos : Long.MAX_VALUE;
+  }
+
   // ---- The command ----
 
   @Override
@@ -476,15 +487,22 @@ public final class Move implements Command {
     started = false;
     outcome = null;
     reason = "";
+    boolean yielded = false;
     if (kind != Kind.HOME) {
       while (waitsForHoming()) {
         coroutine.yield();
+        yielded = true;
       }
     }
-    if (!begin()) {
-      return;
+    if (begin()) {
+      while (!step()) {
+        coroutine.yield();
+        yielded = true;
+      }
     }
-    while (!step()) {
+    if (!yielded) {
+      // Ended as it started, refused or there already: it takes its loop all the same, so a loop
+      // of moves goes round once a loop, never without end in one.
       coroutine.yield();
     }
   }

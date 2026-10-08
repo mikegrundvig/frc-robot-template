@@ -1,6 +1,7 @@
 package com.michaelgrundvig.frc.simulation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
@@ -190,6 +191,57 @@ class JointPlantTest {
     assertThat(pushed).isCloseTo(40 * 40 * KRAKEN.R / 12, within(1e-9)).isCloseTo(4.4, within(0.1));
     assertThat(arm.statorAmps()).isCloseTo(0.5 / KRAKEN.R, within(1e-9));
     assertThat(arm.supplyAmps()).isCloseTo(0.5 / KRAKEN.R * 0.5 / 12, within(1e-9));
+  }
+
+  /**
+   * Jammed, it stays where it is, its motors stalled against what holds it either way, as against a
+   * stop, under its weight too; freed, it moves again.
+   */
+  @Test
+  void jammedItsMotorsStallWhereItIs() {
+    JointPlant arm = JointPlant.of(MATH, ARM);
+    arm.place(Math.toRadians(30));
+
+    arm.jam(true);
+    run(arm, 3, 40, 0.5);
+    double up = arm.position();
+    double held = arm.statorAmps();
+    run(arm, -3, 40, 0.5);
+    double down = arm.position();
+    arm.jam(false);
+    run(arm, 3, 40, 0.1);
+
+    assertThat(up).isEqualTo(Math.toRadians(30));
+    assertThat(held).isCloseTo(40, within(1e-9));
+    assertThat(down).isEqualTo(Math.toRadians(30));
+    assertThat(arm.position()).as("freed").isGreaterThan(Math.toRadians(35));
+  }
+
+  /**
+   * Driven by one of its two motors, the other left neutral, the lift speeds up at its limit half
+   * as fast, each motor that drives it held to the limit; driven by both again, as fast as ever. It
+   * has two motors to drive it, no fewer than one.
+   */
+  @Test
+  void drivenByFewerOfItsMotorsItSpeedsUpSlower() {
+    JointPlant both = JointPlant.of(MATH, LIFT);
+    JointPlant one = JointPlant.of(MATH, LIFT);
+    both.place(0.5);
+    one.place(0.5);
+
+    one.drivenBy(1);
+    both.run(12, 20, 0, STEP);
+    one.run(12, 20, 0, STEP);
+    double alone = one.velocity();
+    double held = one.statorAmps();
+    one.drivenBy(2);
+    one.run(12, 20, 0, STEP);
+
+    assertThat(alone).isCloseTo(both.velocity() / 2, within(1e-12));
+    assertThat(held).isCloseTo(20, within(1e-9));
+    assertThat(one.velocity() - alone).isCloseTo(both.velocity(), within(1e-9));
+    assertThatIllegalArgumentException().isThrownBy(() -> one.drivenBy(0));
+    assertThatIllegalArgumentException().isThrownBy(() -> one.drivenBy(3));
   }
 
   /** Stepped the same, it comes out the same, to the bit. */

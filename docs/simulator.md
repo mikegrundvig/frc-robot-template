@@ -280,9 +280,11 @@ and a scenario for it, when the simulator can make it.
   and every wheel carries the same share, so they slip all alike or not at all (maple-sim,
   [stand-ins](stand-ins.md)).
 - A CAN device dropping off the bus, or browning out: the simulated modules have no bus. A joint's
-  motor controllers can be silenced or restarted, and its absolute encoder frozen or slipped on its
-  shaft, but only by a test (`JointSimulation.silence`, `restart`, `freeze`, `slip`), not yet from
-  the page.
+  motor controllers can be silenced or restarted, one of its followers taken off the bus alone
+  (neutral, drawing nothing, its leader driving the joint without it, the drag of one neutral in
+  brake left out), its absolute encoder frozen or slipped on its shaft, and the joint jammed, its
+  motors stalled against what holds it, but only by a test (`JointSimulation.silence`, `restart`,
+  `silenceFollower`, `freeze`, `slip`, `jam`), not yet from the page.
 - The battery sagging: the simulated world models no battery.
 - A camera's axes swapped in the configuration, the wrong field variant, or one camera with the
   wrong tag layout.

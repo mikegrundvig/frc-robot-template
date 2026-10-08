@@ -501,7 +501,7 @@ public final class JointMechanism implements Mechanism {
         standsIn == null
             ? Travel.of(math, joint, control)
             : new Travel(
-                joint, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, false, false, 1, 1);
+                joint, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, false, false, 1, 1, 0);
     freeSpeed = standsIn == null ? math.freeSpeed(joint) : 0;
     if (standsIn == null) {
       // The plan's: tuned, else the definition's seed, as its motor controller has them.
@@ -1026,6 +1026,15 @@ public final class JointMechanism implements Mechanism {
       Alert alert = new Alert("Joints", label + " rejected", rejected, Alert.Level.HIGH);
       alert.set(true);
       rejecting = alert;
+    }
+  }
+
+  /** Releases its alert, so a test can build another robot. */
+  void close() {
+    Alert alert = rejecting;
+    if (alert != null) {
+      alert.close();
+      rejecting = null;
     }
   }
 

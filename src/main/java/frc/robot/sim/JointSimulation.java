@@ -126,6 +126,26 @@ public final class JointSimulation {
   }
 
   /**
+   * Takes one of a joint's followers off the CAN bus, or brings it back, as a loose connector does:
+   * it goes neutral, drawing nothing from the battery, and its leader drives the joint without it.
+   *
+   * @param follower which, from 0 for the first after the leader
+   * @throws IllegalArgumentException for a follower the joint hasn't
+   */
+  public void silenceFollower(Joint joint, int follower, boolean silent) {
+    sim(joint).silenceFollower(follower, silent);
+  }
+
+  /**
+   * Jams a joint where it is, or frees it: it stays still whatever its motors do, as a game piece
+   * wedged in it or a bent part leaves it, its motors stalled against what holds it, drawing their
+   * stall current up to their limit.
+   */
+  public void jam(Joint joint, boolean jammed) {
+    sim(joint).jam(jammed);
+  }
+
+  /**
    * Freezes a joint's absolute encoder, or thaws it: its reading stuck where it was, as a frozen
    * encoder's is, though it answers. The robot's, or one its motor controller reads.
    *
@@ -219,6 +239,16 @@ public final class JointSimulation {
    */
   public double supplyAmps(Joint joint) {
     return sim(joint).supplyAmps();
+  }
+
+  /**
+   * The current one of a joint's motor controllers draws from the battery, in amps: what its PDH
+   * channel reads; nothing for a follower off the bus.
+   *
+   * @param controller which, from 0 for the leader
+   */
+  public double supplyAmps(Joint joint, int controller) {
+    return sim(joint).supplyAmps(controller);
   }
 
   /** How fast a joint really moves, in its units a second. */

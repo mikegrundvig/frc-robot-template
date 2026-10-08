@@ -1,5 +1,6 @@
 package frc.robot.sim;
 
+import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
 import static frc.robot.subsystems.mechanisms.JointFixtures.ELEVATOR;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT;
 import static frc.robot.subsystems.mechanisms.JointFixtures.PIVOT_MOTOR;
@@ -11,6 +12,7 @@ import static frc.robot.subsystems.mechanisms.JointFixtures.soft;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 import static org.wpilib.units.Units.Meters;
@@ -24,6 +26,7 @@ import com.michaelgrundvig.frc.world.robot.MechanismControlBuilder;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Part;
+import com.michaelgrundvig.frc.world.robot.Pdh;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
@@ -31,6 +34,8 @@ import frc.robot.Robots;
 import frc.robot.lib.phoenix.PhoenixMechanism;
 import frc.robot.subsystems.mechanisms.ControllerSettings;
 import frc.robot.subsystems.mechanisms.JointIO;
+import frc.robot.subsystems.mechanisms.JointIO.JointIOInputs;
+import frc.robot.subsystems.mechanisms.PdhIOInputsAutoLogged;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -430,5 +435,99 @@ class JointIOSimTest {
     assertThat(Math.toDegrees(read)).as("its last reading").isCloseTo(60, within(1e-9));
     assertThat(Math.toDegrees(sim.position())).as("not pushed at 4 V").isLessThan(60.01);
     assertThat(inputs.connected).as("back").isTrue();
+  }
+
+  /**
+   * Jammed, it stays where it is whatever its motors do: driven at 3 V, they stall against what
+   * holds it, at their 40 A stator limit, drawing what a stalled motor draws, as at its stop.
+   * Freed, it moves again.
+   */
+  @Test
+  void aJammedJointStaysPutItsMotorsStalled() {
+    JointIOSim sim = joint(PIVOT, pivotControl(Optional.empty()));
+    JointIO.JointIOInputs inputs = new JointIO.JointIOInputs();
+    sim.place(Math.toRadians(60));
+
+    sim.jam(true);
+    sim.setVoltage(3);
+    run(sim, 1);
+    sim.updateInputs(inputs);
+    double jammedAt = sim.position();
+    sim.jam(false);
+    run(sim, 0.2);
+
+    assertThat(Math.toDegrees(jammedAt)).isCloseTo(60, within(1e-9));
+    assertThat(inputs.velocity).isZero();
+    assertThat(inputs.statorCurrentAmps).isCloseTo(40, within(1e-9));
+    assertThat(inputs.supplyCurrentAmps)
+        .isCloseTo(40 * 40 * DCMotor.getKrakenX60(1).R / 12, within(1e-9));
+    assertThat(Math.toDegrees(sim.position())).as("freed").isGreaterThan(65);
+  }
+
+  /** An elevator on two TalonFXs, fed from the PDH's channels 0 and 1, its kG holding it. */
+  private static final Joint.Prismatic WIRED_LIFT =
+      Joint.elevator("wired lift", Part.CHASSIS, new Translation3d(0, 0.2, 0.1))
+          .range(Range.meters(0, 1.2))
+          .rest(Meters.of(0))
+          .motors(
+              Motor.KRAKEN_X60,
+              Gearing.of(5),
+              Inches.of(0.75),
+              TALON_FX.can(20).pdh(0, Amps.of(40)),
+              TALON_FX.can(21).clockwise().pdh(1, Amps.of(40)))
+          .control(
+              MechanismControl.position(30)
+                  .withKg(0.35)
+                  .withHoming(MechanismControl.Homing.assumeAtRest()));
+
+  private static final RobotDefinition WIRED =
+      RobotDefinitionBuilder.builder(Robots.SIM.definition())
+          .name("wired")
+          .joints(List.of(WIRED_LIFT))
+          .pdh(Pdh.can(1))
+          .build();
+
+  /** Runs the wired lift up at 8 V for a time, its follower off the bus or not: where it got. */
+  private static double raised(boolean followerOff, PdhIOInputsAutoLogged pdh, JointIOInputs read) {
+    JointSimulation simulation = new JointSimulation(WIRED);
+    PdhIOSim channels = new PdhIOSim(WIRED, simulation, null);
+    JointIO io = simulation.io(WIRED_LIFT);
+    simulation.silenceFollower(WIRED_LIFT, 0, followerOff);
+    io.setVoltage(8);
+    for (int i = 0; i < 10; i++) {
+      simulation.step(STEP);
+    }
+    io.updateInputs(read);
+    channels.updateInputs(pdh);
+    return simulation.position(WIRED_LIFT);
+  }
+
+  /**
+   * A follower off the CAN bus answers nothing and goes neutral: it reads disconnected, its PDH
+   * channel reads nothing, and its leader lifts the joint alone, slower, drawing what it draws on
+   * its own channel. Back on the bus, it reads connected.
+   */
+  @Test
+  void aFollowerOffTheBusDrawsNothingAndItsLeaderDrivesAlone() {
+    PdhIOInputsAutoLogged pdh = new PdhIOInputsAutoLogged();
+    JointIOInputs read = new JointIOInputs();
+    PdhIOInputsAutoLogged both = new PdhIOInputsAutoLogged();
+    JointIOInputs bothRead = new JointIOInputs();
+
+    double alone = raised(true, pdh, read);
+    double together = raised(false, both, bothRead);
+
+    assertThat(read.connected).isTrue();
+    assertThat(read.followersConnected).containsExactly(false);
+    assertThat(bothRead.followersConnected).containsExactly(true);
+    assertThat(pdh.channelCurrentAmps[1]).as("the follower's channel").isZero();
+    assertThat(pdh.channelCurrentAmps[0])
+        .as("the leader's")
+        .isGreaterThan(1)
+        .isCloseTo(read.supplyCurrentAmps, within(1e-9));
+    assertThat(both.channelCurrentAmps[1]).isCloseTo(both.channelCurrentAmps[0], within(1e-9));
+    assertThat(alone).as("lifted by one motor").isGreaterThan(0).isLessThan(together);
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new JointSimulation(WIRED).silenceFollower(WIRED_LIFT, 1, true));
   }
 }

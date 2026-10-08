@@ -13,6 +13,7 @@ import frc.robot.sim.DriveSimHarness;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.wpilib.command3.Command;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
@@ -126,6 +127,33 @@ class DriveMovesSimTest {
 
     assertThat(around.arrived()).isTrue();
     assertThat(harness.simulation.truePose().getTranslation().getNorm()).isLessThan(0.02);
+  }
+
+  /**
+   * A move that ends as it starts, its condition holding already, still takes its loop, so a loop
+   * of moves goes round once a loop. Until 2026-10-07 it ended without a loop, and such a loop went
+   * round without end in one, the robot's loop never finishing.
+   */
+  @Test
+  void aMoveThatEndsAsItStartsStillTakesItsLoop() {
+    int[] arrived = {0};
+    RobotSim.setEnabled(true);
+    harness.scheduler.schedule(
+        Command.noRequirements(
+                co -> {
+                  while (arrived[0] < 100) {
+                    arrived[0]++;
+                    co.await(drive.runUntil(new ChassisVelocities(1, 0, 0), () -> true));
+                  }
+                })
+            .named("There, again and again"));
+
+    harness.loop();
+    int inALoop = arrived[0];
+    harness.loop();
+
+    assertThat(inALoop).isEqualTo(1);
+    assertThat(arrived[0]).as("again, the next loop").isEqualTo(2);
   }
 
   /** A move that can't get there in time says where it got to. */

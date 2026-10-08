@@ -1,5 +1,6 @@
 package frc.robot.sim;
 
+import com.michaelgrundvig.frc.world.robot.CanDevice;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.Motor;
 import com.michaelgrundvig.frc.world.robot.Pdh;
@@ -37,9 +38,18 @@ public final class PdhIOSim implements PdhIO {
   public PdhIOSim(
       RobotDefinition definition, JointSimulation joints, @Nullable DriveSimulation drivetrain) {
     for (Joint joint : definition.joints()) {
-      joint.devices().stream()
-          .flatMap(device -> device.feed().stream())
-          .forEach(feed -> channels.add(new Channel(feed.channel(), () -> amps(joints, joint))));
+      int controller = 0;
+      for (CanDevice device : joint.devices()) {
+        if (!device.kind().motorController()) {
+          continue;
+        }
+        int which = controller++;
+        device
+            .feed()
+            .ifPresent(
+                feed ->
+                    channels.add(new Channel(feed.channel(), () -> amps(joints, joint, which))));
+      }
     }
     SwerveWiring wiring = definition.drivetrain().wiring().orElse(null);
     if (wiring != null && drivetrain != null) {
@@ -54,9 +64,12 @@ public final class PdhIOSim implements PdhIO {
     }
   }
 
-  /** What one of a joint's motors draws, or nothing for a joint the simulator doesn't run. */
-  private static double amps(JointSimulation joints, Joint joint) {
-    return joints.simulates(joint) ? joints.supplyAmps(joint) : 0;
+  /**
+   * What one of a joint's motor controllers draws, or nothing for a joint the simulator doesn't
+   * run.
+   */
+  private static double amps(JointSimulation joints, Joint joint, int controller) {
+    return joints.simulates(joint) ? joints.supplyAmps(joint, controller) : 0;
   }
 
   /**

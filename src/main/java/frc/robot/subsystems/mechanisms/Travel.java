@@ -11,10 +11,11 @@ import org.wpilib.math.util.MathUtil;
 
 /**
  * Where a joint is driven, and how fast: its limits (its soft limits, else its hard stops, else
- * anywhere), how it takes a goal inside them, and its profile's cruise and acceleration. A turret,
- * whose range spans a whole turn or more, takes a computed angle as a heading, at the turn of it
- * nearest where it is; a joint that turns freely goes the short way round. Worked out once from the
- * joint's block, each answer a pure function of what it's given, in the joint's units.
+ * anywhere), how it takes a goal inside them, its profile's cruise and acceleration, and its free
+ * speed. A turret, whose range spans a whole turn or more, takes a computed angle as a heading, at
+ * the turn of it nearest where it is; a joint that turns freely goes the short way round. Worked
+ * out once from the joint's block, each answer a pure function of what it's given, in the joint's
+ * units.
  *
  * @param joint the joint, which says a position in its units
  * @param lower its lower limit
@@ -24,6 +25,8 @@ import org.wpilib.math.util.MathUtil;
  *     way, at more than one position for some, so a computed angle is a heading ({@link #turnNear})
  * @param cruise its profile's cruise, a second
  * @param acceleration its profile's acceleration, a second squared: what it brakes at, too
+ * @param freeSpeed its motors' free speed through its gearing, a second: what a full battery's
+ *     voltage runs it at
  */
 record Travel(
     Joint joint,
@@ -32,7 +35,8 @@ record Travel(
     boolean wraps,
     boolean choosesTurn,
     double cruise,
-    double acceleration) {
+    double acceleration,
+    double freeSpeed) {
   /**
    * A joint whose control gives no profile cruises at this share of its free speed: slow enough to
    * be safe on a first enable. Give it a profile to go faster.
@@ -80,7 +84,8 @@ record Travel(
         control
             .profile()
             .map(MechanismControl.Profile::acceleration)
-            .orElse(DEFAULT_CRUISE_SHARE * freeSpeed / DEFAULT_RAMP_SECONDS));
+            .orElse(DEFAULT_CRUISE_SHARE * freeSpeed / DEFAULT_RAMP_SECONDS),
+        freeSpeed);
   }
 
   /** A position inside its limits. */

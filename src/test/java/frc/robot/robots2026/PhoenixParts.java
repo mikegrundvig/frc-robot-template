@@ -3,6 +3,7 @@ package frc.robot.robots2026;
 import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Seconds;
 
+import com.michaelgrundvig.frc.runtime.lib.phoenix.PhoenixMechanism;
 import com.michaelgrundvig.frc.world.robot.Actuator;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CanBus;
@@ -15,7 +16,6 @@ import com.michaelgrundvig.frc.world.robot.MechanismRotations;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotMath;
 import com.michaelgrundvig.frc.world.robot.Sensor;
-import frc.robot.lib.phoenix.PhoenixMechanism;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;

@@ -2,6 +2,8 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.runtime.RobotSim;
+import com.michaelgrundvig.frc.runtime.SimulationTest;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import frc.robot.ElasticLayoutCheck.Widget;
 import java.io.IOException;
@@ -17,7 +19,7 @@ import org.wpilib.telemetry.MockTelemetryBackend;
  * The drive team's dashboard layout (`layouts/elastic-layout.json`, edited in Elastic) against the
  * robot code: every widget reads a value the robot publishes, of a kind it can show. When this
  * fails, a widget would sit blank on the Driver Station: point it at a value in {@link
- * frc.robot.dashboard.Dashboard}, or publish the value it needs there.
+ * com.michaelgrundvig.frc.runtime.dashboard.Dashboard}, or publish the value it needs there.
  */
 @SimulationTest
 class DashboardLayoutTest {

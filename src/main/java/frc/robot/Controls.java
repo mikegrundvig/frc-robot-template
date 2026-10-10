@@ -1,10 +1,11 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.runtime.RobotContainer;
+import com.michaelgrundvig.frc.runtime.autos.Autos;
+import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
+import com.michaelgrundvig.frc.runtime.subsystems.drive.Drive;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import frc.robot.autos.Autos;
-import frc.robot.behavior.RecordingGamepad;
-import frc.robot.subsystems.drive.Drive;
-import frc.robot.subsystems.mechanisms.Joints;
 import org.wpilib.command3.Scheduler;
 
 /**
@@ -14,7 +15,7 @@ import org.wpilib.command3.Scheduler;
  * reaches; write each command as a method, and bind it in the constructor, as on any v3 gamepad.
  * docs/mechanisms.md, "Where behavior goes", has a robot's:
  *
- * {@snippet class=frc.robot.examples.Controls region=constructor}
+ * {@snippet class=com.michaelgrundvig.frc.runtime.examples.Controls region=constructor}
  *
  * <p>The robot records each binding as it's made, with its button and its command's name, and says
  * at startup when two commands are bound to one button the same way. The driver's sticks drive the

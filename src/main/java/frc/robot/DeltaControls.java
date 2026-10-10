@@ -3,14 +3,14 @@ package frc.robot;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 
+import com.michaelgrundvig.frc.runtime.autos.Autos;
+import com.michaelgrundvig.frc.runtime.behavior.Gate;
+import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
+import com.michaelgrundvig.frc.runtime.subsystems.drive.Drive;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
 import com.michaelgrundvig.frc.world.field.Heading;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
-import frc.robot.autos.Autos;
-import frc.robot.behavior.Gate;
-import frc.robot.behavior.RecordingGamepad;
-import frc.robot.subsystems.drive.Drive;
-import frc.robot.subsystems.mechanisms.JointMechanism;
-import frc.robot.subsystems.mechanisms.Joints;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 

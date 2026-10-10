@@ -2,10 +2,10 @@ package frc.robot.studies;
 
 import static com.michaelgrundvig.frc.world.config.Rules.notBlank;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
-import frc.robot.RobotConfig;
 import java.util.List;
 
 /**

@@ -11,9 +11,10 @@
 def quick = project.hasProperty("quick")
 def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
 
-// NullAway checks the robot program's packages and the template's own libraries' (the world model,
-// localization, the simulation, Pitwall) in every project, so a project that reads another trusts
-// its @Nullable as its own: a library's null can't reach the robot program unchecked.
+// NullAway checks the team's robot program's packages (frc.robot) and the template's own (the
+// runtime, the world model, localization, the simulation, Pitwall) in every project, so a project
+// that reads another trusts its @Nullable as its own: a library's null can't reach the robot
+// program unchecked.
 def nullSafePackages = "frc.robot,com.michaelgrundvig.frc"
 gradle.taskGraph.whenReady { graph ->
     if (quick && graph.allTasks.any { it.name == "ci" }) {
@@ -69,16 +70,19 @@ tasks.withType(JavaCompile).configureEach {
 
 // Javadoc's examples are compiled code: {@snippet class=... region=...} shows a region of a source
 // marked // @start region=... and // @end, found on these paths, and javadoc fails, naming it, on a
-// class or region that isn't there. The guide's examples (the robot program's: its robot,
-// src/main/java/frc/robot/ExampleRobot.java, and the rest in src/test/java/frc/robot/examples)
-// serve every project's Javadoc. ci builds it, so a renamed example fails the build. Its comments
+// class or region that isn't there. The guide's examples (the runtime's: its robot,
+// runtime/src/main/java/com/michaelgrundvig/frc/runtime/ExampleRobot.java, and the rest in
+// runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples) serve every project's Javadoc. ci builds it, so a renamed example fails the build. Its comments
 // are checked as the compiler checks them: references only.
 tasks.named("javadoc", Javadoc) {
     def snippets = [
         file("src/main/java"),
         file("src/test/java"),
         rootProject.file("src/main/java"),
-        rootProject.file("src/test/java")
+        rootProject.file("src/test/java"),
+        rootProject.file("runtime/src/main/java"),
+        rootProject.file("runtime/src/test/java"),
+        rootProject.file("runtime/src/testFixtures/java")
     ]
     .unique().findAll { it.directory }
     inputs.files(snippets).withPropertyName("snippets").withPathSensitivity(PathSensitivity.RELATIVE)
@@ -129,7 +133,7 @@ tasks.named("test") {
 }
 
 // --tests names tests by class or pattern, wherever they are: `./gradlew test --tests '*Arm*'` runs
-// them in whichever project has them (the robot program, a library in lib/, Pitwall). A project
+// them in whichever project has them (the robot program, the runtime, a library in lib/, Pitwall). A project
 // with none of them passes, rather than failing the build as Gradle would; but if no project ran a
 // test at all, the build fails, so a misspelled name can't pass quietly (testsMatched, below).
 if (testsNamed) {

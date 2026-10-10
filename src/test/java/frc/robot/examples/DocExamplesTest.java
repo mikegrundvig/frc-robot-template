@@ -36,11 +36,17 @@ import org.junit.jupiter.api.Test;
 class DocExamplesTest {
   private static final Path PROJECT = Path.of(System.getProperty("frc.projectDir", "."));
 
-  /** The sources an example is looked for in: the robot program's, the libraries' and Pitwall's. */
+  /**
+   * The sources an example is looked for in: the team's robot program's, the runtime's (the guide's
+   * robot and its examples among them), the libraries' and Pitwall's.
+   */
   private static final List<String> SOURCES =
       List.of(
           "src/main/java",
           "src/test/java",
+          "runtime/src/main/java",
+          "runtime/src/test/java",
+          "runtime/src/testFixtures/java",
           "model/src/main/java",
           "model/src/test/java",
           "lib/localization/src/main/java",
@@ -78,7 +84,7 @@ class DocExamplesTest {
     assertThat(missing(guides().stream().flatMap(guide -> blocks(guide).stream()).toList()))
         .as(
             "each guide's block below isn't in a compiled source. Copy it from the code it shows,"
-                + " or put it in an example (src/test/java/frc/robot/examples) as the guide has it,"
+                + " or put it in an example (runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples) as the guide has it,"
                 + " so it compiles")
         .isEmpty();
   }
@@ -89,7 +95,7 @@ class DocExamplesTest {
         .as(
             "each Javadoc snippet below isn't in a compiled source. Show a region of the code it"
                 + " shows instead, {@snippet class=... region=...}, marking it in an example"
-                + " (src/test/java/frc/robot/examples) or the source itself")
+                + " (runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples) or the source itself")
         .isEmpty();
   }
 

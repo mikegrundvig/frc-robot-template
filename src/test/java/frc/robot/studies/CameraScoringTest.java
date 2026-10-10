@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.Robots;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.Test;
@@ -44,7 +44,7 @@ class CameraScoringTest {
   private static List<Score> ranking(
       CameraStudyConfig config, boolean trial, List<Sample> samples, Candidate... candidates) {
     Conditions conditions = trial ? Conditions.trial(config, 0) : Conditions.nominal(config);
-    return new CameraScoring(Robots.SIM, WALL, List.of(candidates), config)
+    return new CameraScoring(ExampleRobot.SIM, WALL, List.of(candidates), config)
         .score(samples, conditions, done -> {})
         .ranking();
   }
@@ -165,10 +165,10 @@ class CameraScoringTest {
     Candidate both = new Candidate("both", List.of(left, right));
     Candidate three = new Candidate("three", List.of(left, right, back));
     List<Sample> samples =
-        new FieldGrid(WALL, Robots.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
+        new FieldGrid(WALL, ExampleRobot.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
     CameraScoring scoring =
         new CameraScoring(
-            Robots.SIM, WALL, List.of(leftAlone, rightAlone, both, three), ONE_THREAD);
+            ExampleRobot.SIM, WALL, List.of(leftAlone, rightAlone, both, three), ONE_THREAD);
 
     CameraScoring.Result result =
         scoring.score(samples, Conditions.nominal(ONE_THREAD), done -> {});
@@ -224,7 +224,7 @@ class CameraScoringTest {
   @Test
   void otherRobotsInTheWayCostTheRobotItsView() {
     List<Sample> samples =
-        new FieldGrid(WALL, Robots.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
+        new FieldGrid(WALL, ExampleRobot.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig crowded =
         CameraStudyConfigBuilder.builder(ONE_THREAD).otherRobotsLeast(5).otherRobotsMost(5).build();
 
@@ -248,7 +248,7 @@ class CameraScoringTest {
         new Candidate("on a pole", List.of(FRONT, StudyFixtures.camera("pole", 1.0, 0)));
 
     assertThatThrownBy(
-            () -> new CameraScoring(Robots.SIM, WALL, List.of(AHEAD, outside), ONE_THREAD))
+            () -> new CameraScoring(ExampleRobot.SIM, WALL, List.of(AHEAD, outside), ONE_THREAD))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("on a pole")
         .hasMessageContaining("camera pole is outside the robot");
@@ -257,7 +257,7 @@ class CameraScoringTest {
   @Test
   void camerasSharedByLayoutsTakeTheirImagesOnce() {
     CameraScoring scoring =
-        new CameraScoring(Robots.SIM, WALL, List.of(AHEAD, AHEAD_AND_BACK), ONE_THREAD);
+        new CameraScoring(ExampleRobot.SIM, WALL, List.of(AHEAD, AHEAD_AND_BACK), ONE_THREAD);
 
     assertThat(scoring.distinctCameras()).isEqualTo(2);
   }
@@ -270,7 +270,7 @@ class CameraScoringTest {
   @CsvSource({"false, 0", "true, 0", "false, 2", "true, 2"})
   void theSameSeedGivesTheSameScoresOnAnyNumberOfThreads(boolean trial, int otherRobots) {
     List<Sample> samples =
-        new FieldGrid(WALL, Robots.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
+        new FieldGrid(WALL, ExampleRobot.SIM.definition().body(), 2, 4, Weights.NONE, 1).samples();
     CameraStudyConfig threes =
         CameraStudyConfigBuilder.builder(ONE_THREAD)
             .threads(3)

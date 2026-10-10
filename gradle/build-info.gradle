@@ -1,5 +1,6 @@
-// Build metadata: generates frc.robot.BuildConstants from the git state, and the robot logs it at
-// startup, so every log says exactly which code produced it. DIRTY counts staged, unstaged, and
+// Build metadata: generates frc.robot.BuildConstants from the git state. The team's Main hands it to
+// the runtime (BuildInfo), which logs it at startup, so every log says exactly which code produced
+// it; Pitwall's status reads it too. DIRTY counts staged, unstaged, and
 // untracked changes anywhere in the repository, so a deploy of uncommitted work is never logged as
 // clean. DIRTY: 0 = clean, 1 = uncommitted changes, -1 = git unavailable.
 //

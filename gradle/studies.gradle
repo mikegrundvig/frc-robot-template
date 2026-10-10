@@ -1,6 +1,8 @@
 // Studies (src/studies/java): simulations that answer a design question, such as where to mount
-// the cameras. Their own source set, so none of their code runs on the robot; they use the robot's
-// code, and the tests check them like it (src/test/java/frc/robot/studies, the coverage floors).
+// the cameras. Their own source set, so none of their code runs on the robot; they use the team's
+// robots and the runtime, and the tests check them like it (src/test/java/frc/robot/studies, the
+// coverage floors). They are the team's tools, not the runtime's: they read Robots.all() and
+// Robots.current() as defaults.
 //
 //   ./gradlew cameraStudy --args="--weights=weights.csv"   see docs/camera-placement.md
 //   ./gradlew consistencyStudy                            see docs/testing.md
@@ -20,6 +22,8 @@ configurations {
     studiesRuntimeOnly.extendsFrom runtimeOnly
 }
 dependencies {
+    // The studies drive the whole simulated robot, as tests do, with the runtime's harness.
+    studiesImplementation testFixtures(project(":runtime"))
     studiesCompileOnly libs.recordbuilder.core
     studiesAnnotationProcessor libs.recordbuilder.processor
 }

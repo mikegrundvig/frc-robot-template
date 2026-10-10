@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
 import frc.robot.Robots;
-import frc.robot.subsystems.vision.VisionSim;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Test;

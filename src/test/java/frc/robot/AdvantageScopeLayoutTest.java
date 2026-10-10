@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  * The AdvantageScope layout (layouts/advantagescope.json, AdvantageScope's File > Export Layout)
  * against the code: its format is the release the template pairs with, and every robot model it
  * names is one the build generates. That every value it reads is logged, of the type it says, is
- * checked against a real run's log ({@link ReplayEndToEndTest}).
+ * checked against a real run's log ({@link AdvantageScopeLayoutEndToEndTest}).
  */
 class AdvantageScopeLayoutTest {
   static final Path LAYOUT =

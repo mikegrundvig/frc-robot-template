@@ -13,12 +13,12 @@ import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Millimeters;
 import static org.wpilib.units.Units.Radians;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigException;
 import com.michaelgrundvig.frc.world.config.Rule;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.RobotConfig;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.text.DecimalFormat;

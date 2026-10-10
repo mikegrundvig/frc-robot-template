@@ -1,9 +1,9 @@
 package frc.robot.studies;
 
 import com.michaelgrundvig.frc.localization.TagDetections;
+import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.subsystems.vision.VisionSim;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;

@@ -5,11 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.RPM;
 
+import com.michaelgrundvig.frc.runtime.RobotSim;
+import com.michaelgrundvig.frc.runtime.sim.JointsSimHarness;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import frc.robot.BetaControls;
 import frc.robot.BetaRobot;
-import frc.robot.RobotSim;
-import frc.robot.sim.JointsSimHarness;
-import frc.robot.subsystems.mechanisms.JointMechanism;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

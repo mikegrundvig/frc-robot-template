@@ -63,25 +63,15 @@ dependencies {
     nativeRelease wpi.java.vendor.jniRelease(wpi.platforms.desktop)
     simulationRelease wpi.sim.enableRelease()
 
-    // AdvantageKit's @AutoLog processor, at the version vendordeps/AdvantageKit.json pins.
-    def akit = new groovy.json.JsonSlurper().parse(file("vendordeps/AdvantageKit.json"))
-    annotationProcessor "org.littletonrobotics.akit:akit-autolog:${akit.version}"
-
     // Null safety: JSpecify's annotations (the cross-industry standard), checked at compile time
     // by NullAway so a null can never reach the robot unannounced.
     implementation libs.jspecify
 
-    // The libraries (lib/, each its own project): the world model (the validation kit, the field,
-    // and the robot's definition), and localization and the simulation, which read it.
-    implementation "com.michaelgrundvig.frc:frc-robot-model"
-    implementation project(":localization")
-    implementation project(":simulation")
-
-    // Pitwall (pitwall/, its own repository): the robot program's own web page.
-    implementation "com.michaelgrundvig.frc:frc-pitwall"
-    // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
-    // can say what each value means. It runs in the compiler only; none of it reaches the robot.
-    annotationProcessor "com.michaelgrundvig.frc:docs-processor"
+    // The runtime (runtime/, its own project, to become a repository of its own): the robot
+    // program every robot shares, which no team writes. It brings the libraries it is made of: the
+    // world model (the validation kit, the field, and the robot's definition), localization, the
+    // simulation, and Pitwall (pitwall/, its own repository), the robot program's own web page.
+    implementation project(":runtime")
 
     compileOnly libs.recordbuilder.core
     compileOnly libs.errorprone.annotations
@@ -100,8 +90,9 @@ dependencies {
     testRuntimeOnly "org.junit.platform:junit-platform-launcher"
     testImplementation libs.assertj.core
     testImplementation libs.archunit
-    // The truth suite's known gaps, which the simulator's tests here share with its library's.
-    testImplementation testFixtures(project(":simulation"))
+    // What a team tests its own robot with, which the runtime ships: the simulator's harness, the
+    // monkey, the invariants and the auto check.
+    testImplementation testFixtures(project(":runtime"))
 }
 
 application.mainClass = "frc.robot.Main"
@@ -149,8 +140,11 @@ tasks.named("test") {
     // read as text.
     inputs.files(fileTree("docs") { include "**/*.md" }, "README.md", "AGENTS.md")
     .withPropertyName("guides").withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.files(fileTree("src") { include "*/java/**/*.java" }, fileTree("lib") { include "*/src/*/java/**/*.java" })
-    .withPropertyName("documentedSources").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(
+            fileTree("src") { include "*/java/**/*.java" },
+            fileTree("lib") { include "*/src/*/java/**/*.java" },
+            fileTree("runtime/src") { include "*/java/**/*.java" })
+            .withPropertyName("documentedSources").withPathSensitivity(PathSensitivity.RELATIVE)
     // The models the layout names are those the build generates, before the tests (when the
     // AdvantageScope plugin is applied).
     inputs.files(fileTree("ascope_assets")).withPropertyName("advantageScopeAssets")
@@ -164,13 +158,6 @@ tasks.named("test") {
     outputs.upToDateWhen { goldenUpdate.get() != "1" }
     outputs.doNotCacheIf("GOLDEN_UPDATE rewrites src/test/resources") { goldenUpdate.get() == "1" }
     doFirst { work.get().asFile.mkdirs() }
-    // ReplayEndToEndTest's robot programs write their coverage beside the tests' own, for the
-    // coverage report to count: the program's startup runs nowhere else.
-    def endToEndCoverage = layout.buildDirectory.file("jacoco/end-to-end.exec")
-    doFirst { endToEndCoverage.get().asFile.delete() }
-}
-tasks.named("jacocoTestReport") {
-    executionData.from(fileTree(layout.buildDirectory.dir("jacoco")) { include "end-to-end.exec" })
 }
 
 // A copy of the source travels with every deploy, so the code on a robot can always be recovered
@@ -183,6 +170,7 @@ tasks.named("jar") {
     [
         "src",
         "vendordeps",
+        "runtime",
         "lib",
         "pitwall",
         "build-logic",
@@ -211,11 +199,6 @@ tasks.named("jar") {
 
 tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add "-XDstringConcat=inline"
-}
-// Pitwall's documentation processor documents only the configuration records, which it knows by
-// their annotation's name.
-tasks.named("compileJava") {
-    options.compilerArgs.add "-Apitwall.docs.records=com.michaelgrundvig.frc.world.config.ConfigRecord"
 }
 
 // Gradle's configuration cache (gradle.properties) can't hold GradleRIO's own tasks yet: the

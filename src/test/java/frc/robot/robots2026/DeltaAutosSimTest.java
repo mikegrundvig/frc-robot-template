@@ -2,10 +2,10 @@ package frc.robot.robots2026;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.AutoCheck;
+import com.michaelgrundvig.frc.runtime.AutoCheck;
+import com.michaelgrundvig.frc.runtime.RobotSim;
 import frc.robot.DeltaControls;
 import frc.robot.DeltaRobot;
-import frc.robot.RobotSim;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 

@@ -60,6 +60,8 @@ jobs:
           path: |
             build/reports/
             build/test-results/
+            runtime/build/reports/
+            runtime/build/test-results/
             pitwall/build/reports/
             pitwall/build/test-results/
             build-logic/build/reports/

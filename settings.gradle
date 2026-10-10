@@ -32,6 +32,11 @@ if (!file("model/settings.gradle").exists()) {
     throw new GradleException("The robot model isn't checked out (model/ is empty). Run: git submodule update --init")
 }
 includeBuild("model")
+// The runtime (runtime/): the robot program every robot shares, which no team writes. The team's
+// robot program, this project's root, hands it which robot this is, this season's field and what
+// the robot does; the runtime reads nothing of it, and Gradle keeps it so. It is to become a
+// repository of its own, as the model and Pitwall are.
+include "runtime"
 // The libraries (lib/), each a project of its own only where that blocks a dependency:
 // localization reads the model, and nothing of the robot program, the simulator, or Pitwall; the
 // simulation reads the model, and nothing of the robot program, localization, or Pitwall.

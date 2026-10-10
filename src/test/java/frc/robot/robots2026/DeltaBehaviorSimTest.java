@@ -5,11 +5,11 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 
+import com.michaelgrundvig.frc.runtime.RobotSim;
+import com.michaelgrundvig.frc.runtime.sim.JointsSimHarness;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import frc.robot.DeltaControls;
 import frc.robot.DeltaRobot;
-import frc.robot.RobotSim;
-import frc.robot.sim.JointsSimHarness;
-import frc.robot.subsystems.mechanisms.JointMechanism;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Trigger;

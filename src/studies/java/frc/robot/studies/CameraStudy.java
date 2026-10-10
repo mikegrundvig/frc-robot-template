@@ -2,10 +2,10 @@ package frc.robot.studies;
 
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.config.ConfigException;
 import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.RobotConfig;
 import frc.robot.Robots;
 import java.io.IOException;
 import java.io.PrintStream;

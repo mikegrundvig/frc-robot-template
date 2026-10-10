@@ -163,7 +163,7 @@ The values that move the robot most, and are least known today:
 
 ### `RobotConfig`
 
-`frc.robot.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
+`com.michaelgrundvig.frc.runtime.RobotConfig`: one robot, in `Robots`. Its values are records with sections of their own:
 what the robot is (its definition, which names it, each joint's block saying its motors, wiring,
 sensors and control), and how this program drives the drivetrain and judges what its sensors say.
 Each joint's block says how it's driven and wired, and each sensor carries its wiring ([a sensor's
@@ -274,7 +274,7 @@ them and WPILib numbers them: 0 to 19 high-current, each taking a breaker up to 
 low-current, and 23 the switchable one, each a fuse or breaker up to 15 A. Each motor controller
 says which channel feeds it where it's wired ([`Pdh.Feed`](#pdhfeed)), and the definition checks
 them against it. Optional: a robot that declares none checks no feed. CTRE's Power Distribution
-Panel isn't supported: its channels' ratings aren't confirmed yet. `Robots.SIM`, the template's
+Panel isn't supported: its channels' ratings aren't confirmed yet. `ExampleRobot.SIM`, the template's
 drivetrain and cameras, has no wiring, so it declares none; the guide's robot it runs declares
 `Pdh.can(1)`.
 
@@ -922,7 +922,7 @@ A mechanism is described once, in the definition above, and how the program driv
 of it (`ControllerPlan`): its ratios, its encoder's discontinuity point, its gravity's kind and
 angle, the feedforward gains it seeds, and the one feedforward law every loop driving it runs. Its
 motor controllers' settings are that plan in their own terms, a TalonFX's and a CANcoder's
-(`frc.robot.lib.phoenix.PhoenixMechanism`) or a SPARK's (`frc.robot.lib.rev.RevMechanism`). Its
+(`com.michaelgrundvig.frc.runtime.lib.phoenix.PhoenixMechanism`) or a SPARK's (`com.michaelgrundvig.frc.runtime.lib.rev.RevMechanism`). Its
 joint's block holds the rest, how the mechanism is wired and how it's driven, and the program reads
 them there. A motor controller's units for each joint, its rotations (a revolute joint's own, a
 prismatic joint's drum's), are fixed in `MechanismRotations`; these records are in the joint's own
@@ -1241,8 +1241,8 @@ switch goes on a CANdi.
 
 ### `SeasonLimits`
 
-`frc.robot.game.SeasonLimits`: what the game manual allows a robot to be. One per season, in its
-game class (`Rebuilt.LIMITS`); every robot's definition is checked against it in the tests
+`com.michaelgrundvig.frc.world.game.SeasonLimits` (in the world model): what the game manual allows a robot to be. One per season, in its
+game class in the model (`Rebuilt.LIMITS`); every robot's definition is checked against it in the tests
 (`SeasonLimitsTest`), with its joints where they rest, and a mechanism's guard can ask how far the
 robot would reach at a set of positions (`whyTooFar`). The next season's manual replaces every number at
 kickoff.
@@ -1414,8 +1414,8 @@ replace them with a real robot's once it's calibrated.
 |---|---|---|---|
 | `wheelRadiusScale` | characterized | guess | The spread of each wheel's radius in [the wheel radius](calibration.md#the-wheel-radius)'s report, partway through a season, over the radius configured. |
 | `steerOffsetDegrees` | characterized | guess | How far modules point off straight after their offsets are set: square the wheels against a straightedge, and read each module's angle (`Drive/Module<name>/SteerAngle`). |
-| `cameraMountErrors` | characterized | guess (calibrated mounts stay put) | How far a mount moves between calibrations: [a camera's mount](calibration.md#a-cameras-mount)'s "before" residual, run again weeks later. Scenarios, and the Pitwall page, knock a mount while the simulator runs (`frc.robot.sim.Faults`). |
-| `tagErrors` | characterized | none (the simulator's field is exactly its layout) | How far a field's tags sit from its layout: a survey of the field (WPIcal). The consistency study draws them within the field's half-inch tolerance; the Pitwall page moves a tag while the simulator runs (`frc.robot.sim.Faults`). |
+| `cameraMountErrors` | characterized | guess (calibrated mounts stay put) | How far a mount moves between calibrations: [a camera's mount](calibration.md#a-cameras-mount)'s "before" residual, run again weeks later. Scenarios, and the Pitwall page, knock a mount while the simulator runs (`com.michaelgrundvig.frc.runtime.sim.Faults`). |
+| `tagErrors` | characterized | none (the simulator's field is exactly its layout) | How far a field's tags sit from its layout: a survey of the field (WPIcal). The consistency study draws them within the field's half-inch tolerance; the Pitwall page moves a tag while the simulator runs (`com.michaelgrundvig.frc.runtime.sim.Faults`). |
 | `seed` | chosen | none | Any number: fixed, so a run repeats exactly. |
 
 ### `SensorErrors.GyroErrors`

@@ -7,8 +7,8 @@ import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.Robots;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -51,14 +51,14 @@ class MountOptionsTest {
     assertThat(places.layouts(1)).isEqualTo(6);
     assertThat(places.layouts(2)).isEqualTo(17);
     assertThat(places.layouts(3)).isEqualTo(23);
-    List<Candidate> layouts = places.candidates(Robots.SIM, SENSOR, 3);
+    List<Candidate> layouts = places.candidates(ExampleRobot.SIM, SENSOR, 3);
     assertThat(layouts).hasSize(23);
     Set<String> names = new HashSet<>();
     for (Candidate layout : layouts) {
       assertThat(names.add(layout.name())).as(layout.name()).isTrue();
-      layout.checkOn(Robots.SIM);
+      layout.checkOn(ExampleRobot.SIM);
     }
-    assertThat(places.candidates(Robots.SIM, SENSOR, 2)).hasSize(17);
+    assertThat(places.candidates(ExampleRobot.SIM, SENSOR, 2)).hasSize(17);
   }
 
   /** Asking for more cameras than there are places gives every layout, one camera to a place. */
@@ -67,13 +67,13 @@ class MountOptionsTest {
     MountOptions places = three();
 
     assertThat(places.layouts(10)).isEqualTo(23);
-    assertThat(places.candidates(Robots.SIM, SENSOR, 10)).hasSize(23);
+    assertThat(places.candidates(ExampleRobot.SIM, SENSOR, 10)).hasSize(23);
   }
 
   @Test
   void aLayoutsCamerasAreItsPlacesFacingTheirWays() throws IOException {
     Candidate layout =
-        three().candidates(Robots.SIM, SENSOR, 2).stream()
+        three().candidates(ExampleRobot.SIM, SENSOR, 2).stream()
             .filter(
                 candidate ->
                     candidate.name().equals("2 cameras: front-left 30°, up 10°; top 0°, up 15°"))
@@ -98,7 +98,7 @@ class MountOptionsTest {
                 "name, forward (mm), left (cm), up (m), yaws (rad), tilts (deg)",
                 "front-left, 304.8, 30.48, 0.508, 0.5235987755982988, 10"));
 
-    CameraConfig camera = metric.candidates(Robots.SIM, SENSOR, 1).get(0).cameras().get(0);
+    CameraConfig camera = metric.candidates(ExampleRobot.SIM, SENSOR, 1).get(0).cameras().get(0);
     assertThat(camera.forward().in(Inches)).isCloseTo(12, within(1e-9));
     assertThat(camera.left().in(Inches)).isCloseTo(12, within(1e-9));
     assertThat(camera.up().in(Inches)).isCloseTo(20, within(1e-9));
@@ -133,7 +133,7 @@ class MountOptionsTest {
   void aPlaceOutsideTheRobotIsNamedInItsUnits() throws IOException {
     MountOptions places = MountOptions.read(file(INCHES, "pole, 40, 0, 20, 0, 10"));
 
-    assertThatThrownBy(() -> places.candidates(Robots.SIM, SENSOR, 1))
+    assertThatThrownBy(() -> places.candidates(ExampleRobot.SIM, SENSOR, 1))
         .hasMessage(
             "the place pole, 40 in ahead, 0 in left, and 20 in up, is outside the robot: within"
                 + " 17.75 in ahead or behind its center, 17.75 in to either side, and up to 30 in");
@@ -153,7 +153,7 @@ class MountOptionsTest {
                 "d, -10, -10, 20, " + ways));
 
     // Two cameras: 4 x 32 + 6 x 32 x 32 = 6,272, too many; one camera: 128.
-    assertThatThrownBy(() -> places.candidates(Robots.SIM, SENSOR, 4))
+    assertThatThrownBy(() -> places.candidates(ExampleRobot.SIM, SENSOR, 4))
         .hasMessageContaining("make 1,185,920 layouts of 1 to 4 cameras")
         .hasMessageContaining("more than the 5,000")
         .hasMessageContaining("or fewer cameras: --cameras=1 makes 128");
@@ -171,7 +171,7 @@ class MountOptionsTest {
     }
     MountOptions places = MountOptions.read(file(lines.toArray(String[]::new)));
 
-    assertThatThrownBy(() -> places.candidates(Robots.SIM, SENSOR, 2))
+    assertThatThrownBy(() -> places.candidates(ExampleRobot.SIM, SENSOR, 2))
         .hasMessageContaining("even one camera at a time makes too many");
   }
 

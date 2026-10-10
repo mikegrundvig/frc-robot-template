@@ -3,6 +3,9 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.TunableTee;
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
+import com.michaelgrundvig.frc.runtime.RobotSim;
+import com.michaelgrundvig.frc.runtime.SimulationTest;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,7 +34,7 @@ class ValuesRegisterSimTest {
     sim.robot();
     sim.loop(); // the tunables update, as on a robot
     List<String> cameras =
-        Robots.SIM.definition().cameras().stream().map(CameraConfig::name).toList();
+        ExampleRobot.SIM.definition().cameras().stream().map(CameraConfig::name).toList();
     Set<String> switches = new TreeSet<>();
     for (TunableTee.Listed listed : sim.pitwall().tunables().view()) {
       switches.add(generic(listed.path(), cameras));

@@ -1,13 +1,13 @@
 package frc.robot.robots2026;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
+import com.michaelgrundvig.frc.runtime.RobotConfigBuilder;
 import com.michaelgrundvig.frc.world.robot.Drive;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
-import frc.robot.RobotConfig;
-import frc.robot.RobotConfigBuilder;
 import java.util.List;
 import org.wpilib.math.geometry.Translation3d;
 

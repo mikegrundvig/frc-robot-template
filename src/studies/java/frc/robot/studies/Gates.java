@@ -2,7 +2,7 @@ package frc.robot.studies;
 
 import com.michaelgrundvig.frc.localization.LocalizationGate;
 import com.michaelgrundvig.frc.localization.VisionConfig;
-import frc.robot.Robots;
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
 
 /**
  * The robot code's tests on the estimate's claimed uncertainty, as the consistency study counts
@@ -19,7 +19,7 @@ final class Gates {
   /** How sure of its heading a robot placed on its start claims to be: RobotContainer's 2°. */
   static final double PLACED_HEADING_RADIANS = Math.toRadians(2);
 
-  private static final VisionConfig VISION = Robots.SIM.vision();
+  private static final VisionConfig VISION = ExampleRobot.SIM.vision();
 
   private Gates() {}
 

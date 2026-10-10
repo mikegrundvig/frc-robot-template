@@ -3,6 +3,7 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
+import com.michaelgrundvig.frc.runtime.RobotChecks;
 import frc.robot.ValuesRegister.CodeRecord;
 import frc.robot.ValuesRegister.Component;
 import java.io.IOException;
@@ -34,7 +35,7 @@ class ValuesRegisterTest {
    */
   private static Map<String, List<String>> tuning() {
     Map<String, List<String>> tuning = new LinkedHashMap<>();
-    for (LiveConfig<?> live : RobotContainer.tunings(Robots.current()).all()) {
+    for (LiveConfig<?> live : RobotChecks.liveConfigs(Robots.current())) {
       tuning.put(live.name(), live.knobs().stream().map(LiveConfig.Knob::path).toList());
     }
     return tuning;
@@ -97,14 +98,16 @@ class ValuesRegisterTest {
       List.of(
           new CodeRecord(
               "Arm",
-              "frc.robot.Arm",
+              "com.michaelgrundvig.frc.runtime.Arm",
               List.of(new Component("length", null), new Component("gains", "Arm.Gains"))),
           new CodeRecord(
               "Arm.Gains",
-              "frc.robot.Arm$Gains",
+              "com.michaelgrundvig.frc.runtime.Arm$Gains",
               List.of(new Component("kP", null), new Component("kD", null))),
           new CodeRecord(
-              "ArmReadings", "frc.robot.ArmReadings", List.of(new Component("angle", null))));
+              "ArmReadings",
+              "com.michaelgrundvig.frc.runtime.ArmReadings",
+              List.of(new Component("angle", null))));
 
   private static final Map<String, List<String>> ARM_TUNING =
       Map.of("arm", List.of("gains.kP", "gains.kD"));
@@ -173,10 +176,10 @@ class ValuesRegisterTest {
         .containsExactly(
             "docs/values.md line 13: remove the section for Arm.Gainz: no configuration record is"
                 + " named Arm.Gainz",
-            "Add a section for Arm (frc.robot.Arm) to docs/values.md: a heading ### `Arm` and a"
+            "Add a section for Arm (com.michaelgrundvig.frc.runtime.Arm) to docs/values.md: a heading ### `Arm` and a"
                 + " table of its values with a row for each: length. Or, if it carries readings"
                 + " rather than configuration, list it with the records that aren't configuration",
-            "Add a section for Arm.Gains (frc.robot.Arm$Gains) to docs/values.md: a heading ###"
+            "Add a section for Arm.Gains (com.michaelgrundvig.frc.runtime.Arm$Gains) to docs/values.md: a heading ###"
                 + " `Arm.Gains` and a table of its values with a row for each: kP, kD. Or, if it"
                 + " carries readings rather than configuration, list it with the records that"
                 + " aren't configuration");
@@ -296,7 +299,9 @@ class ValuesRegisterTest {
     List<CodeRecord> robot =
         List.of(
             new CodeRecord(
-                "RobotConfig", "frc.robot.RobotConfig", List.of(new Component("arm", "Arm"))),
+                "RobotConfig",
+                "com.michaelgrundvig.frc.runtime.RobotConfig",
+                List.of(new Component("arm", "Arm"))),
             ARM.get(0),
             ARM.get(1),
             ARM.get(2));
@@ -319,7 +324,7 @@ class ValuesRegisterTest {
     assertThat(problems(register))
         .singleElement()
         .asString()
-        .startsWith("Add a section for ArmReadings (frc.robot.ArmReadings)");
+        .startsWith("Add a section for ArmReadings (com.michaelgrundvig.frc.runtime.ArmReadings)");
   }
 
   @Test

@@ -3,9 +3,9 @@ package frc.robot.studies;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.Inches;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.RobotConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;

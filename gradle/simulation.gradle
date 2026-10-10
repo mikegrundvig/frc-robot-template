@@ -14,7 +14,7 @@
 // gamepad choices are kept.
 //
 // Start in a scenario, a fault in the robot's sensors or something that happens to it:
-// ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (frc.robot.sim.Scenarios).
+// ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (com.michaelgrundvig.frc.runtime.sim.Scenarios).
 //
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
@@ -46,7 +46,7 @@ def scenarios = tasks.register("scenarios", JavaExec) {
     group = "application" // beside run
     description = "List the simulator's scenarios, for ./gradlew run -Pscenario=<name>."
     classpath = sourceSets.main.runtimeClasspath
-    mainClass = "frc.robot.sim.Scenarios"
+    mainClass = "com.michaelgrundvig.frc.runtime.sim.Scenarios"
     if (scenario != null) {
         args scenario
     }

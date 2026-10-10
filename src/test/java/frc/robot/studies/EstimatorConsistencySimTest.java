@@ -2,7 +2,7 @@ package frc.robot.studies;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import frc.robot.SimulationTest;
+import com.michaelgrundvig.frc.runtime.SimulationTest;
 import org.junit.jupiter.api.Test;
 
 /**

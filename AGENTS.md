@@ -18,6 +18,13 @@ list below before writing anything from memory, and read the code next to what y
 | A mechanism class per arm or roller, CAN IDs in a constants file | Describe each joint in one block in `Robots.java`: its shape, places, motors and their CAN IDs, its own sensors and its control. The template builds its mechanism and its commands ([docs/mechanisms.md](docs/mechanisms.md)) |
 | Constants classes | `@ConfigRecord` records, built by name through their generated builders, each value with a row in [docs/values.md](docs/values.md) |
 
+Two projects hold the code. `frc.robot` (`src/`) is the team's robot program: `Main`, `Robots`,
+`Controls`, and the team's robots. `runtime/` (`com.michaelgrundvig.frc.runtime`)
+is the robot program every robot shares, which no team writes, with the harness a team tests with
+(`runtime/src/testFixtures`). The runtime never names a team class: `Main` hands it which robot
+this is, the season's field (from the model) and the controls (`RobotProgram.start`), and `ArchitectureTest` keeps it so.
+Change a team's behavior in `frc.robot`; a change to the runtime is a change for every robot.
+
 Hardware sits behind AdvantageKit's IO pattern: a `*IO` interface with its `@AutoLog` inputs, one
 implementation per kind of hardware, and one for the simulator.
 
@@ -30,12 +37,13 @@ implementation per kind of hardware, and one for the simulator.
 ./gradlew run                            # the simulator, driven from Pitwall's Sim view
 ```
 
-`ci` runs the formatter, Error Prone and NullAway, the architecture tests (`ArchitectureTest`), the
-coverage floor, the values register's test, which fails until every configuration value has its
-row, and the guides' examples' test (`DocExamplesTest`): every Java block in a guide is code a
-compiled source has. Write an example in `src/test/java/frc/robot/examples` and copy it out; a
-block that needs code around it says `java fragment` on its fence. A Javadoc example is a region
-of compiled code, `{@snippet class=frc.robot.ExampleRobot region=intake}`, marked in the
+`ci` runs the formatter, Error Prone and NullAway, the architecture tests (`ArchitectureTest`, the
+runtime's and the team's), the coverage floor, the values register's test, which fails until every
+configuration value has its row, and the guides' examples' test (`DocExamplesTest`): every Java
+block in a guide is code a compiled source has. Write an example in
+`runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples` and copy it out; a block that
+needs code around it says `java fragment` on its fence. A Javadoc example is a region of compiled
+code, `{@snippet class=com.michaelgrundvig.frc.runtime.ExampleRobot region=intake}`, marked in the
 source with `// @start region=intake` and `// @end`; `ci` builds the Javadoc, which fails on one
 that isn't there. Javadoc's `{@link}`s are checked as the code compiles. When a check fails,
 its message says what to do: do that. Never suppress a warning or delete a test to get green.

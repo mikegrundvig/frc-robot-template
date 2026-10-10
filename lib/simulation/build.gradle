@@ -3,7 +3,7 @@
 // It reads the world model and WPILib's math, and nothing of the robot program, localization, the
 // hardware layer, or Pitwall: the robot runs localization every loop without the simulator, so
 // nothing it runs may reach physics, and the simulator plugs in behind the robot's IO, through its
-// adapters (frc.robot.sim), as hardware would.
+// adapters (com.michaelgrundvig.frc.runtime.sim), as hardware would.
 
 plugins {
     id "java-library"

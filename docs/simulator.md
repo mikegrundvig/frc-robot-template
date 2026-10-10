@@ -2,7 +2,7 @@
 
 `./gradlew run` runs the robot program on your laptop, in WPILib's simulation, with this template's
 simulated world (the simulation library, `lib/simulation`, and its adapters to the robot's IO,
-`frc.robot.sim`: [how it's built](#how-its-built)): a drivetrain that really moves, as heavy as the
+`com.michaelgrundvig.frc.runtime.sim`: [how it's built](#how-its-built)): a drivetrain that really moves, as heavy as the
 robot's configuration says, cameras that render what they'd see, and sensors that err as a
 season-worn robot's do. [The truth suite](#how-far-to-trust-it-the-truth-suite) says how far it
 can be trusted, number by number. AdvantageScope shows the field, the robot, and the truth beside the estimate
@@ -233,7 +233,7 @@ refuses anywhere but WPILib's simulation.
 
 The simulation's catalog says what can go wrong with each part, as data (`FaultCatalog`, in
 `lib/simulation`), and the robot program binds each fault to its part and declares them to Pitwall
-(`frc.robot.sim.Faults`); Pitwall knows nothing of any robot's parts. A fault that lasts says
+(`com.michaelgrundvig.frc.runtime.sim.Faults`); Pitwall knows nothing of any robot's parts. A fault that lasts says
 whether it's on by asking the world, and undoing it puts the part back as the world was built: a
 season-worn robot's sensors (`SensorErrors.TYPICAL`), not perfect ones. An event happens once, and
 nothing undoes it. The robot's code is never told: it finds out from its sensors, as on a robot.
@@ -293,7 +293,7 @@ and a scenario for it, when the simulator can make it.
 
 ## Scenarios
 
-A scenario is a named set of these faults (`frc.robot.sim.Scenarios`). `./gradlew run
+A scenario is a named set of these faults (`com.michaelgrundvig.frc.runtime.sim.Scenarios`). `./gradlew run
 -Pscenario=<name>` applies its sensor faults before the robot's first loop and makes what happens
 in it happen once the robot is enabled; the API applies all of it at once, to a running
 simulation (`POST /api/simulator/scenarios`), and shows its lasting faults as on, each undone on its
@@ -428,7 +428,7 @@ The simulated world is in two places, apart so that nothing the robot runs can r
   the world model and WPILib's math alone: no hardware layer, robot program, localization, or
   Pitwall, and no clock, unseeded randomness, threads, or static state (the robot program's
   `ArchitectureTest`), so worlds run side by side and a run repeats to the bit.
-- **The robot program's adapters** (`frc.robot.sim`) hold what does: the modules' motor controllers
+- **The robot program's adapters** (`com.michaelgrundvig.frc.runtime.sim`) hold what does: the modules' motor controllers
   and encoders (`ModuleIOSim`, a TalonFX's loops and limits and the CANcoder's timing, with the
   steering in closed form), each joint's motor controller (`JointIOSim`, a TalonFX's slot or a
   SPARK's loop as its block wires it, `TalonFxEmulator` and `SparkEmulator`, each running the

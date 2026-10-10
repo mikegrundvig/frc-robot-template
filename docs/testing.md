@@ -10,23 +10,26 @@ it, fool its sensors, and check what it believes against where it really is.
 |---|---|
 | Rerun the fast tests on every save while you work | `./gradlew test -Pquick --continuous` |
 | Rerun only the tests you're working on, on every save | `./gradlew test -Pquick --continuous --tests '*Arm*'` |
-| One test class, whatever its kind | `./gradlew test --tests frc.robot.RobotContainerSimTest` |
-| A package's tests | `./gradlew test --tests 'frc.robot.subsystems.drive.*'` |
-| One project's tests: the robot program's, localization's, the model's | `./gradlew :test`, `:localization:test`, `:model:test` |
+| One test class, whatever its kind | `./gradlew test --tests com.michaelgrundvig.frc.runtime.RobotContainerSimTest` |
+| A package's tests | `./gradlew test --tests 'com.michaelgrundvig.frc.runtime.subsystems.drive.*'` |
+| One project's tests: your robot program's, the runtime's, localization's, the model's | `./gradlew :test`, `:runtime:test`, `:localization:test`, `:model:test` |
 | Pitwall's tests | `./gradlew :pitwall:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
 
-`--tests` finds what it names in whichever project has it: the robot program, a library in `lib/`
-(whose packages are `com.michaelgrundvig.frc.world` and `.localization`), or Pitwall. A project
+`--tests` finds what it names in whichever project has it: your robot program (`frc.robot`), the
+runtime (`com.michaelgrundvig.frc.runtime`), a library in `lib/` (whose packages are
+`com.michaelgrundvig.frc.world` and `.localization`), or Pitwall. `frc.robot.ArchitectureTest` is
+yours, `com.michaelgrundvig.frc.runtime.ArchitectureTest` the runtime's. A project
 with none of it passes; if no project has any, the build fails, naming what you asked for, so a
 misspelled name can't pass unnoticed. A project's name in front (`:localization:test`) runs only its
 tests.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
-analysis and coverage that `ci` runs. Each project has its own coverage report, the robot
-program's at `build/reports/jacoco/test/html/index.html` and each library's under its folder
-(`lib/world/build/reports/...`), and each its own floor: a library's own tests must cover it.
+analysis and coverage that `ci` runs. Each project has its own coverage report, your robot
+program's at `build/reports/jacoco/test/html/index.html`, the runtime's under `runtime/` and each
+library's under its folder (`lib/localization/build/reports/...`), and each its own floor: a
+project's own tests must cover it. The runtime's are on the guide's robot (`ExampleRobot`).
 
 ### The fast loop
 
@@ -91,6 +94,12 @@ their own), or the robot programs `ReplayEndToEndTest` starts, one at a time, be
 
 ## Where a test goes
 
+The runtime ships what a team tests its own robot with, its test fixtures
+(`runtime/src/testFixtures/java`): `RobotSim`, `Monkey`, `AutoCheck`, the joint, drive and
+localization invariants, `GoldenFile` and the rest of the harness. Your tests (`src/test/java`,
+`frc.robot`) use them as any test uses a library; the runtime's own tests
+(`runtime/src/test/java`) are on the guide's robot, and a robot of yours is tested in yours.
+
 Test classes mirror the package of what they test, in the same project: the tests for the world
 model's `com.michaelgrundvig.frc.world.field.Zone` are in
 `model/src/test/java/com/michaelgrundvig/frc/world/field/ZoneTest.java`. Pick the lowest level
@@ -99,11 +108,11 @@ what broke.
 
 | Level | What it runs | Example to copy |
 |---|---|---|
-| A component | Plain JUnit on a class in a library (the model in `model/`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world`; `LocalizationServiceTest`, in `lib/localization`, for localization fed by hand a loop at a time |
+| A component | Plain JUnit on a class in a library (the model in `model/`, `lib/localization`) or the robot's own `com.michaelgrundvig.frc.runtime.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world`; `LocalizationServiceTest`, in `lib/localization`, for localization fed by hand a loop at a time |
 | A mechanism | A subsystem on simulated hardware, stepped loop by loop. The class carries `@ExtendWith(RobotSim.class)`. | `subsystems/drive/DriveBasicsTest`, with `sim/DriveSimHarness` |
 | The whole robot | The robot program as `Robot` builds and runs it, Pitwall and all, driven from a simulated Driver Station and gamepad. | `RobotContainerSimTest` |
 | The program itself | The robot program started as a program, in its own process: a session recorded, then replayed. | `ReplayEndToEndTest` |
-| The structure | The architecture rules (what may depend on what), checked against the compiled code, each for a bug Gradle's boundaries between projects can't see: the robot program's, which hold its components and the libraries to the same answer every run too; the world model's packages; Pitwall's. | `ArchitectureTest` |
+| The structure | The architecture rules (what may depend on what), checked against the compiled code, each for a bug Gradle's boundaries between projects can't see: the runtime's, which hold its components and the libraries to the same answer every run too, and keep it from naming any of your code; yours, the rules that hold for every class of a robot program (`ProductionRules`, one definition for both) and what keeps your code and the runtime apart; the world model's packages; Pitwall's. | `ArchitectureTest`, the runtime's and yours |
 
 Name a test class after what it tests: `ZoneTest`. A test class that runs the simulator for
 seconds of robot time is a `...SimTest` and carries `@SimulationTest`; one that starts the program
@@ -113,7 +122,9 @@ as a process carries `@EndToEndTest`. Quick mode leaves both out.
 
 `RobotSim` gives each test the same start, whatever ran before it: the clock stopped, the Driver
 Station attached and disabled on the blue alliance's station 2, and fresh dashboards. It builds the
-robot exactly as `Robot` does, and `loop()` runs exactly the loop `Robot` runs. Afterwards it
+robot exactly as `Robot` does (with no controls bound, unless the test gives it yours:
+`sim.build(robot, Rebuilt::game, Controls::new, errors)` is your `Main`'s call), and `loop()` runs
+exactly the loop `Robot` runs. Afterwards it
 closes and resets everything, so nothing leaks into the next test.
 
 ```java
@@ -136,10 +147,10 @@ class DrivingSimTest {
 
 What it offers:
 
-- **The robot:** `sim.robot()`, built on first use as the simulator's robot with sensors exactly as
-  configured. To test another, build it first: `sim.build(SensorErrors.TYPICAL)` for a
+- **The robot:** `sim.robot()`, built on first use as the simulator's robot (`ExampleRobot.SIM`,
+  the template's drivetrain and cameras) with sensors exactly as configured. To test another, build it first: `sim.build(SensorErrors.TYPICAL)` for a
   season-worn robot, `sim.build(RobotSim.WITHOUT_CAMERAS, SensorErrors.NONE)` for odometry alone,
-  or `sim.build(Constants.Mode.REAL, robot, SensorErrors.NONE)` for the CTRE code on CTRE's
+  or `sim.build(RunMode.REAL, robot, SensorErrors.NONE)` for the CTRE code on CTRE's
   simulated devices.
 - **Time:** `sim.loop()`, `sim.loops(n)`, and `sim.run(seconds)`. The clock moves only when the test
   steps it, so a test never waits and never depends on how fast the computer is.
@@ -147,19 +158,19 @@ What it offers:
   true)`, `RobotSim.station(AllianceStationID.RED_1)`. Change it through these, or call
   `DriverStationSim.notifyNewData()` after changing it yourself, or the change never arrives.
 - **The drivers:** `sim.driver()` and `sim.operator()`, the gamepads on ports 0 and 1, which the
-  robot's `Controls` is bound to; `sim.bindings()`, every binding it made, by button and command.
-  Another class shaped as `Controls`, a fixture's, is bound to them too by
-  `sim.controls(BetaControls::new)`.
+  robot's controls are bound to; `sim.bindings()`, every binding it made, by button and command.
+  A class shaped as `Controls` (a `ControlsMaker`: yours, or a fixture's) is bound to them by
+  `sim.controls(Controls::new)`.
 - **Autos:** `AutoCheck.check(sim, robot, Controls::new)` runs every auto a robot declares, and "Do
   nothing", on each alliance from its own start for the 15 s of autonomous, and fails, saying where
   and why, if one throws, has a move `REFUSED`, leaves the field, or can't start ([autos](autos.md#test-them)).
 - **The truth:** `sim.simulation()` knows where the robot really is (`truePose()`), and can move
   it, tilt it, or hit it.
 - **Faults and scenarios:** what can fail in the simulated world while it runs (the catalog,
-  `FaultCatalog` in `lib/simulation`, bound to the robot's parts in `frc.robot.sim.Faults`),
+  `FaultCatalog` in `lib/simulation`, bound to the robot's parts in `com.michaelgrundvig.frc.runtime.sim.Faults`),
   applied as the Pitwall page applies them: `sim.components().apply(Setting.of(FaultCatalog.GYRO,
   FaultCatalog.UNPLUGGED))`, and `undo` for one that lasts. A scenario is a named set of them
-  (`frc.robot.sim.Scenarios`), the ones `./gradlew run -Pscenario=<name>` starts.
+  (`com.michaelgrundvig.frc.runtime.sim.Scenarios`), the ones `./gradlew run -Pscenario=<name>` starts.
   `sim.build(Scenarios.named("camera-low"))` builds the robot as `./gradlew run` does, with the
   scenario's sensor faults on a season-worn robot's sensors (`SensorErrors.TYPICAL`, where
   `sim.robot()` starts from `NONE`), and `sim.start(scenario)` makes what happens in it happen (a
@@ -209,7 +220,7 @@ no farther than its wheels' travel and what the images it accepted can move it b
 It runs three seeds a robot, about 4 s each for the guide's robot (7 s for the first, as the JVM
 warms) and 1.2 s for Beta's and for Delta's. A failure names its seed, its loop, the monkey's last
 doings and the test that ran it, and the seed runs the same every time:
-`./gradlew test --tests frc.robot.MonkeySimTest -PmonkeySeed=17` runs it again, alone, and
+`./gradlew test --tests com.michaelgrundvig.frc.runtime.MonkeySimTest -PmonkeySeed=17` runs it again, alone, and
 `-PmonkeySeeds=50` runs seeds 1 to 50, for a longer hunt.
 
 ## Rules that keep tests trustworthy

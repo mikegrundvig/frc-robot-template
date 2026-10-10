@@ -20,7 +20,7 @@ A move that drives a path has a default deadline: twice the path's time, plus ha
 move that times out says where the robot got to: "TIMED_OUT after 0.50 s, at (0.30, 0.00) facing
 0.0°".
 
-`src/test/java/frc/robot/examples/Explorer.java` shows the moves in use. Its robot drives forward
+`runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples/Explorer.java` shows the moves in use. Its robot drives forward
 until its bumper switch trips, then turns a quarter turn either way, and repeats:
 
 ```java
@@ -178,7 +178,7 @@ DriveMove leg = drive.follow(
 
 A named keyframe is something code can wait for. `leg.passed("pickup")` is a
 [gate](mechanisms.md#gates-wait-for-things-and-know-why-not): it opens when the path passes the
-keyframe, and stays open until the move starts again. `src/test/java/frc/robot/examples/PickUp.java`
+keyframe, and stays open until the move starts again. `runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples/PickUp.java`
 has it whole:
 
 ```java fragment

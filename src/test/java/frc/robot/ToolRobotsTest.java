@@ -2,6 +2,7 @@ package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.bridges.RobotDescription;
 import org.junit.jupiter.api.Test;
 

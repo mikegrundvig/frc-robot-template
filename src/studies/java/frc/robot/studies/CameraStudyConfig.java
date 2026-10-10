@@ -6,10 +6,10 @@ import static com.michaelgrundvig.frc.world.config.Rules.positive;
 import static com.michaelgrundvig.frc.world.config.Rules.shown;
 import static org.wpilib.units.Units.Meters;
 
+import com.michaelgrundvig.frc.runtime.subsystems.vision.VisionSim;
 import com.michaelgrundvig.frc.world.config.Checks;
 import com.michaelgrundvig.frc.world.config.ConfigRecord;
 import frc.robot.Robots;
-import frc.robot.subsystems.vision.VisionSim;
 
 /**
  * How the camera placement study samples the field, how the cameras and robot err, and how it

@@ -22,7 +22,7 @@ first used.
 8. [When the template can't drive it](#8-when-the-template-cant-drive-it)
 
 The guide's robot is compiled and tested, and it's the robot the template runs until you write
-yours: `src/main/java/frc/robot/ExampleRobot.java` has it, `src/test/java/frc/robot/examples/` its
+yours: `runtime/src/main/java/com/michaelgrundvig/frc/runtime/ExampleRobot.java` has it, `runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples/` its
 commands (`ExampleCommands`, `Controls`), and a test fails when the guide and the code drift apart.
 
 ## 1. An intake: a pivot and a roller
@@ -1168,7 +1168,7 @@ final class Hood implements Mechanism {
 
 Build it in `Controls`, with the robot's definition `Controls` is given and its servos' ports,
 `new Hood(scheduler, robot, new PWM(0), new PWM(1))`, and bind its commands as any v3
-mechanism's: `operator.faceUp().onTrue(hood.goTo(HOOD_LOB))`. `src/test/java/frc/robot/examples/`
+mechanism's: `operator.faceUp().onTrue(hood.goTo(HOOD_LOB))`. `runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples/`
 has it compiled (`ServoHoodRobot`, `Hood`), and `HoodSimTest` checks the pulses it sends.
 
 ## Not yet

@@ -1,8 +1,8 @@
 package frc.robot.robots2026;
 
+import com.michaelgrundvig.frc.runtime.Monkey;
 import frc.robot.DeltaControls;
 import frc.robot.DeltaRobot;
-import frc.robot.Monkey;
 
 /**
  * A team's 2026 robot, Delta, with its controls, for the monkey to drive ({@code MonkeySimTest}).

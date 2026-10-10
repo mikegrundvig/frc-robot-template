@@ -6,21 +6,21 @@ import com.michaelgrundvig.frc.localization.LocalizationEstimate;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.localization.VisionConfigBuilder;
 import com.michaelgrundvig.frc.pitwall.simulator.Setting;
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
+import com.michaelgrundvig.frc.runtime.RobotConfig;
+import com.michaelgrundvig.frc.runtime.RobotConfigBuilder;
+import com.michaelgrundvig.frc.runtime.SimulatedRobot;
+import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
+import com.michaelgrundvig.frc.runtime.sim.Scenario;
+import com.michaelgrundvig.frc.runtime.sim.Scenarios;
 import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import com.michaelgrundvig.frc.simulation.Seeds;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import com.michaelgrundvig.frc.simulation.SensorErrorsGyroErrorsBuilder;
 import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.game.Rebuilt;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
-import frc.robot.RobotConfig;
-import frc.robot.RobotConfigBuilder;
-import frc.robot.Robots;
-import frc.robot.SimulatedRobot;
-import frc.robot.game.Rebuilt;
-import frc.robot.lib.timing.RobotLoop;
-import frc.robot.sim.Scenario;
-import frc.robot.sim.Scenarios;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -60,7 +60,7 @@ final class ConsistencyRuns {
   };
 
   /** The field the simulator's robot plays on: its tags, which each seed places a little off. */
-  private static final FieldModel FIELD = Rebuilt.field(Robots.SIM.definition().body());
+  private static final FieldModel FIELD = Rebuilt.field(ExampleRobot.SIM.definition().body());
 
   /**
    * How long the gyro-scale procedure's part of its run lasts: the procedure (about 20 s: still,
@@ -368,7 +368,7 @@ final class ConsistencyRuns {
    * there, through the simulator's controls.
    */
   static SensorErrors errors(long seed, Spread spread) {
-    List<CameraConfig> cameras = Robots.SIM.definition().cameras();
+    List<CameraConfig> cameras = ExampleRobot.SIM.definition().cameras();
     SensorErrors typical = SensorErrors.TYPICAL;
     SensorErrors errors =
         SensorErrorsBuilder.builder(typical)
@@ -414,9 +414,9 @@ final class ConsistencyRuns {
      */
     static final Setup MATCHED =
         new Setup(
-            Spread.matched(Robots.SIM.estimator()),
+            Spread.matched(ExampleRobot.SIM.estimator()),
             MATCHED_NOISE_SCALE,
-            Robots.SIM.estimator().headingCorrection());
+            ExampleRobot.SIM.estimator().headingCorrection());
 
     /** The same, with another way to correct the heading. */
     Setup with(EstimatorConfig.HeadingCorrection other) {
@@ -436,15 +436,15 @@ final class ConsistencyRuns {
    * estimator correcting the heading as the setup says.
    */
   static RobotConfig robot(Setup setup) {
-    VisionConfig vision = Robots.SIM.vision();
-    return RobotConfigBuilder.builder(Robots.SIM)
+    VisionConfig vision = ExampleRobot.SIM.vision();
+    return RobotConfigBuilder.builder(ExampleRobot.SIM)
         .vision(
             VisionConfigBuilder.builder(vision)
                 .linearStdDevBaseline(setup.noiseScale() * vision.linearStdDevBaseline())
                 .angularStdDevBaseline(setup.noiseScale() * vision.angularStdDevBaseline())
                 .build())
         .estimator(
-            EstimatorConfigBuilder.builder(Robots.SIM.estimator())
+            EstimatorConfigBuilder.builder(ExampleRobot.SIM.estimator())
                 .headingCorrection(setup.heading())
                 .build())
         .build();
@@ -480,7 +480,7 @@ final class ConsistencyRuns {
       Driver driver = new Driver(robot, scenario);
       run.script().play(driver);
       Map<String, Double> offsets = new LinkedHashMap<>();
-      for (CameraConfig camera : Robots.SIM.definition().cameras()) {
+      for (CameraConfig camera : ExampleRobot.SIM.definition().cameras()) {
         offsets.put(camera.name(), robot.mountOffsetMeters(camera.name()));
       }
       return new Played(driver.samples, Map.copyOf(driver.mostDoubt), offsets);
@@ -565,7 +565,7 @@ final class ConsistencyRuns {
       robot.loop();
       LocalizationEstimate estimate = robot.estimate();
       samples.add(Consistency.Sample.of(estimate, robot.truePose()));
-      for (CameraConfig camera : Robots.SIM.definition().cameras()) {
+      for (CameraConfig camera : ExampleRobot.SIM.definition().cameras()) {
         mostDoubt.merge(camera.name(), robot.mountDoubtMeters(camera.name()), Math::max);
       }
     }

@@ -1,5 +1,6 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.bridges.RobotCatalog;
 import com.michaelgrundvig.frc.world.bridges.RobotDescription;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;

@@ -1,9 +1,9 @@
 package frc.robot.studies;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
+import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
 import com.michaelgrundvig.frc.simulation.Seeds;
-import frc.robot.Robots;
-import frc.robot.lib.timing.RobotLoop;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -194,7 +194,7 @@ public final class ConsistencyStudy {
       ConsistencyRuns.Setup setup,
       PrintStream out) {
     List<Result> results = new ArrayList<>();
-    double tolerance = Robots.SIM.vision().mountToleranceMeters();
+    double tolerance = ExampleRobot.SIM.vision().mountToleranceMeters();
     long fingerprint = 0;
     for (ConsistencyRuns.Run run : runs) {
       Consistency consistency = new Consistency();
@@ -253,7 +253,7 @@ public final class ConsistencyStudy {
   /** How far each of the robot's cameras is turned on its mount for a seed, in degrees. */
   private static String turns(ConsistencyRuns.Spread spread, long seed) {
     List<String> turns = new ArrayList<>();
-    for (int camera = 0; camera < Robots.SIM.definition().cameras().size(); camera++) {
+    for (int camera = 0; camera < ExampleRobot.SIM.definition().cameras().size(); camera++) {
       turns.add(format("%+.2f°", Math.toDegrees(spread.mount(seed, camera).getRotation().getZ())));
     }
     return String.join(" ", turns);
@@ -324,7 +324,7 @@ public final class ConsistencyStudy {
         """);
     md.append("| Run | ");
     List<String> cameras =
-        Robots.SIM.definition().cameras().stream()
+        ExampleRobot.SIM.definition().cameras().stream()
             .map(com.michaelgrundvig.frc.world.robot.CameraConfig::name)
             .toList();
     md.append(String.join(" | ", cameras)).append(" |\n|---|");

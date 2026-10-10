@@ -6,11 +6,11 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.PoseCovariance;
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
+import com.michaelgrundvig.frc.runtime.SimulationTest;
+import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
+import com.michaelgrundvig.frc.runtime.sim.Scenarios;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
-import frc.robot.Robots;
-import frc.robot.SimulationTest;
-import frc.robot.lib.timing.RobotLoop;
-import frc.robot.sim.Scenarios;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -100,7 +100,7 @@ class ConsistencyStudyTest {
     assertThat(ConsistencyStudy.heading("every"))
         .isEqualTo(EstimatorConfig.HeadingCorrection.EVERY_FIX);
     assertThat(ConsistencyStudy.heading(null))
-        .isEqualTo(Robots.SIM.estimator().headingCorrection());
+        .isEqualTo(ExampleRobot.SIM.estimator().headingCorrection());
   }
 
   /** Each gate on the claimed uncertainty, at its edges. */
@@ -162,7 +162,7 @@ class ConsistencyStudyTest {
   /** The matched spread draws at the standard deviations the estimator's configuration claims. */
   @Test
   void theMatchedSpreadDrawsWhatTheConfigurationClaims() {
-    EstimatorConfig config = Robots.SIM.estimator();
+    EstimatorConfig config = ExampleRobot.SIM.estimator();
     ConsistencyRuns.Spread spread = ConsistencyRuns.Setup.MATCHED.spread();
     double yaws = 0;
     double tags = 0;

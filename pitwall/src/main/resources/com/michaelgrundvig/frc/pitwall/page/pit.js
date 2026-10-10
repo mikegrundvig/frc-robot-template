@@ -1,12 +1,14 @@
 // Pit: is the robot ready, and the checks to run before a match. The status items, the actions,
-// and the switches: every other WPILib tunable in the robot program, which acts at once. Below
-// them, a card for each device the robot reports on (devices.js).
+// and the switches: every other WPILib tunable in the robot program, which acts at once. Beside
+// the switches, a card for each device the robot reports on (devices.js). Each card folds away.
 
-import { robot, onChange, onConnection, send, shown, h, say, replace } from "./core.js";
+import { robot, onChange, onConnection, send, shown, h, say } from "./core.js";
 import { tuningOffBanner } from "./bar.js";
 import { mountDevices } from "./devices.js";
+import { folds } from "./fold.js";
 
-let statusList;
+let statusSummary;
+let statusGroups;
 let actionCard;
 let actionList;
 let gate;
@@ -14,30 +16,44 @@ let switchCard;
 let switchList;
 let builtActions = "";
 let builtSwitches = "";
+let builtStatus = "";
+const statusLists = new Map(); // group key ("" for ungrouped) -> its <ul>
 const actions = new Map(); // name -> its row's parts
 const switches = new Map(); // path -> its row's parts
 const started = new Map(); // action -> when this page first saw it running
 
+const cards = folds("pitwall.pit.folded");
+
+/** A card that folds away under its title, kept folded by its title. */
+function fold(title, ...content) {
+  return cards.section(title, title, null, ...content);
+}
+
 function mount(view) {
-  statusList = h("ul", { class: "slist" });
+  statusSummary = h("p", { class: "status-summary" });
+  statusGroups = h("div", { class: "status-groups" });
   gate = h("p", { class: "gate", id: "pit-gate" });
   actionList = h("ul", { class: "alist" });
-  actionCard = h("section", { class: "card", hidden: true }, h("h2", null, "Actions"), gate,
-    actionList);
+  actionCard = fold("Actions", gate, actionList);
+  actionCard.hidden = true;
   switchList = h("ul", { class: "alist" });
-  switchCard = h("section", { class: "card", hidden: true }, h("h2", null, "Switches"),
+  switchCard = fold("Switches",
     h("p", { class: "meta" }, "Every other WPILib tunable in the robot program, as a dashboard "
         + "sees it. They act at once, only while tuning is on, and keep their setting into a "
         + "match."),
     tuningOffBanner("Switches"),
     switchList);
+  switchCard.hidden = true;
+  const side = h("div", { class: "side" }, switchCard);
   view.append(
     h("h1", { class: "view-title" }, "Pit"),
     h("p", { class: "lede" }, "Is the robot ready, and the checks to run before a match."),
     h("div", { class: "pit" },
-      h("section", { class: "card" }, h("h2", null, "Status"), statusList),
-      h("div", null, actionCard, switchCard)));
-  mountDevices(view);
+      h("div", { class: "wide" }, statusSummary),
+      statusGroups,
+      actionCard,
+      side));
+  mountDevices(side);
   onChange(render);
   onConnection(() => {
     if (!robot.doc) return;
@@ -54,14 +70,50 @@ function render(patch, snapshot) {
   if (snapshot || "wpilibTunables" in patch || "tuning" in patch) renderSwitches(snapshot);
 }
 
-/** The status items: true and false as a mark and a word, a number with its unit. */
+/**
+ * A name's group and its own label: "Field/Cameras" is "Cameras" in the Field group; a name with
+ * no "/" stands alone, in no group (see Status's javadoc).
+ */
+function statusParts(name) {
+  const slash = name.indexOf("/");
+  return slash === -1 ? [null, name] : [name.slice(0, slash), name.slice(slash + 1)];
+}
+
+/**
+ * The status items, grouped under the heading each names: true and false as a mark and a word, a
+ * number with its unit, anything else as text. One line above them says how many of the yes-or-no
+ * checks need attention, so the page answers "is the robot ready?" before anyone reads a line.
+ */
 function renderStatus() {
   const doc = robot.doc;
-  const items = Object.entries(doc.status).map(([name, value]) => {
+  const entries = Object.entries(doc.status);
+  const key = entries.map(([name]) => name).join("\n");
+  if (key !== builtStatus) {
+    builtStatus = key;
+    statusLists.clear();
+    const order = [];
+    for (const [name] of entries) {
+      const [group] = statusParts(name);
+      if (!statusLists.has(group)) {
+        const list = h("ul", { class: "slist" });
+        statusLists.set(group, list);
+        order.push(group === null ? h("section", { class: "card" }, list) : fold(group, list));
+      }
+    }
+    statusGroups.replaceChildren(...order);
+  }
+  let passing = 0;
+  let total = 0;
+  const failing = [];
+  const rows = new Map(); // group -> its rows, in order
+  for (const [name, value] of entries) {
+    const [group, label] = statusParts(name);
     const unit = doc.units[name];
     let mark = h("span", { class: "sev none", "aria-hidden": "true" }, "•");
     let text;
     if (typeof value === "boolean") {
+      total++;
+      if (value) passing++; else failing.push(label);
       mark = h("span", { class: "sev " + (value ? "ok" : "bad"), "aria-hidden": "true" },
         value ? "✓" : "✗");
       text = value ? "yes" : "no";
@@ -71,9 +123,34 @@ function renderStatus() {
     } else {
       text = shown(value);
     }
-    return h("li", null, mark, h("span", { class: "k" }, name), h("span", null, text));
-  });
-  replace(statusList, items);
+    const row = h("li", null, mark, h("span", { class: "k" }, label), h("span", null, text));
+    if (!rows.has(group)) rows.set(group, []);
+    rows.get(group).push(row);
+  }
+  // Every row is rebuilt each pass (cheap: a status page has few items), so a list's rows are
+  // always exactly this pass's, never last pass's left over.
+  for (const [group, list] of statusLists) {
+    list.replaceChildren(...rows.get(group));
+  }
+  renderStatusSummary(passing, total, failing);
+}
+
+/** How many of the status page's yes-or-no checks need attention, and which. */
+function renderStatusSummary(passing, total, failing) {
+  if (total === 0) {
+    statusSummary.hidden = true;
+    return;
+  }
+  statusSummary.hidden = false;
+  if (failing.length === 0) {
+    statusSummary.className = "status-summary ok";
+    statusSummary.replaceChildren("✓ All " + total + (total === 1 ? " check" : " checks")
+      + " pass.");
+  } else {
+    statusSummary.className = "status-summary bad";
+    statusSummary.replaceChildren("✗ " + failing.length + " of " + total
+      + " checks need attention: " + failing.join(", ") + ".");
+  }
 }
 
 /** Each action with where it stands, and one large button to run it or stop it. */

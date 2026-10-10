@@ -3,6 +3,7 @@ package frc.robot.examples;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.AutoCheck;
+import frc.robot.ExampleRobot;
 import frc.robot.RobotSim;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;

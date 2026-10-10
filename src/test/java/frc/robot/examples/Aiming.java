@@ -1,9 +1,9 @@
 package frc.robot.examples;
 
-import static frc.robot.examples.ExampleRobot.FEEDER;
-import static frc.robot.examples.ExampleRobot.FEEDING;
-import static frc.robot.examples.ExampleRobot.INDEXER;
-import static frc.robot.examples.ExampleRobot.SHOOTER;
+import static frc.robot.ExampleRobot.FEEDER;
+import static frc.robot.ExampleRobot.FEEDING;
+import static frc.robot.ExampleRobot.INDEXER;
+import static frc.robot.ExampleRobot.SHOOTER;
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 

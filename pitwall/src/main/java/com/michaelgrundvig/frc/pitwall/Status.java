@@ -16,8 +16,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * The robot's status, as the page shows it: named items, each read in the robot loop. It answers
  * "is the robot ready?" at a glance, so keep it to what someone checks before running the robot:
- * which robot and code, the mode, the battery, whether a mechanism is homed or a camera connected.
- * Graphs and logs belong in AdvantageScope and the dashboards.
+ * the code, the battery, whether a mechanism is homed or a camera connected. Which robot it is and
+ * its mode are in the page's bar, so they aren't items. Graphs and logs belong in AdvantageScope
+ * and the dashboards.
  *
  * <p>An item is one line: {@code status.add("Arm homed", arm::isHomed)}. The page shows {@code
  * true} and {@code false} as a check and a cross, anything else as text. A number that wanders (the
@@ -27,6 +28,11 @@ import org.jspecify.annotations.Nullable;
  * reading does; one that still moves faster than anyone reads it (a running count) can say how
  * often it's read: {@code status.add("Loop", loop::describe, Duration.ofSeconds(1))}, which also
  * spares the loop making its text in between.
+ *
+ * <p>A name may say its group, as {@code "Group/Name"}: the page shows every item of a group under
+ * one heading, in the order first added, so a robot program with many items can organize them
+ * ({@code status.add("Mechanisms/Arm homed", arm::isHomed)}). A name with no {@code /} stands
+ * alone, under no heading; that's the common case for a program with few items.
  *
  * <p>Items are read in {@link #periodic}, on the robot loop's thread, so they may read robot state
  * freely; keep each one cheap. They're read only while someone is looking: a page has its event

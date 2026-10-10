@@ -126,13 +126,17 @@ export function valueDocs(path, compact = false) {
     parts.push(h("h3", null, "About " + (about.record || group || value.config)),
       prose(about.doc.text));
   }
+  // Whether an experiment (a rig, in code) runs a test motion with this value as a gain: where to
+  // tune it by comparing runs, or, with none, where its effect shows instead.
   const rigs = Object.entries(doc.rigs || {}).filter(([, rig]) => (rig.gains || []).includes(path));
-  parts.push(h("h3", null, "Tuned by"), rigs.length === 0
-    ? h("p", { class: "muted" }, "No rig tunes it: its effect shows in the logs.")
-    : h("p", null, rigs.map(([rig], index) => [index > 0 ? ", " : "", "the ",
-      h("a", { href: "#experiment/" + rig }, rig), " rig"]), ", with ",
-      rigs.flatMap(([, rig]) => rig.gains).filter((gain) => gain !== path && described(gain))
-        .map((gain) => nameOf(described(gain))).join(", ") || "no other gain", "."));
+  const others = rigs.flatMap(([, rig]) => rig.gains).filter((gain) => gain !== path && described(gain))
+    .map((gain) => nameOf(described(gain)));
+  parts.push(h("h3", null, "Experiment"), rigs.length === 0
+    ? h("p", { class: "muted" }, "No experiment tests this value. Change it, then judge the effect "
+        + "from the robot's logs, in AdvantageScope.")
+    : h("p", null, "Test it in Experiment: ",
+      rigs.map(([rig], index) => [index > 0 ? ", " : "", h("a", { href: "#experiment/" + rig }, rig)]),
+      others.length > 0 ? ", along with " + others.join(", ") : "", "."));
   const change = doc.changes[path];
   if (change) {
     parts.push(h("h3", null, "Commit it"),

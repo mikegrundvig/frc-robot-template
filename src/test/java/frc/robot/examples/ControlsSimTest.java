@@ -1,11 +1,12 @@
 package frc.robot.examples;
 
-import static frc.robot.examples.ExampleRobot.PIVOT;
-import static frc.robot.examples.ExampleRobot.ROLLER;
+import static frc.robot.ExampleRobot.PIVOT;
+import static frc.robot.ExampleRobot.ROLLER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import frc.robot.ExampleRobot;
 import frc.robot.RobotSim;
 import frc.robot.behavior.Binding;
 import frc.robot.sim.JointSimulation;

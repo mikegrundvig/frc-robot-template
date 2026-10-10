@@ -32,7 +32,7 @@
                     "logType": "Pose3d",
                     "visible": true,
                     "options": {
-                      "model": "sim (schematic)"
+                      "model": "example (schematic)"
                     }
                   },
                   {
@@ -128,7 +128,7 @@
                     "logType": "Pose3d",
                     "visible": true,
                     "options": {
-                      "model": "sim (schematic, no cones)",
+                      "model": "example (schematic, no cones)",
                       "color": "#ff00ff"
                     }
                   },

@@ -12,13 +12,18 @@ import { onEdits } from "./edits.js";
 import { makeRow, updateRow, changedElsewhere } from "./rows.js";
 import { onHistory } from "./history.js";
 import { valueDocs, groupDocs, configDocs, groupOf } from "./docs.js";
+import { folds } from "./fold.js";
 
 const rows = new Map(); // path -> its row
 const counts = new Map(); // configuration -> its heading's count
+const marks = new Map(); // configuration -> its jump chip's tuned mark
 const headings = new Map(); // "configuration/record path" -> that heading
+const mechanisms = folds("pitwall.tune.folded");
 const narrow = matchMedia("(max-width: 719px)");
 let list;
 let filter;
+let jump;
+let foldAll;
 let panel;
 let inline = null; // the documentation open under a row or heading, on a phone
 let selected = null; // {path}, {config, group}, or {config}: what the documentation is about
@@ -32,7 +37,16 @@ let refusalsSeen = null; // the dashboard refusals already shown, to tell a new 
 function mount(view) {
   filter = h("input", { type: "search", autocomplete: "off", "aria-label": "Filter values",
     placeholder: "Filter by name or meaning  ( / )", oninput: build });
+  jump = h("nav", { class: "jump", "aria-label": "Go to a mechanism" });
+  // Every mechanism folded while any is open; every one opened once all are folded.
+  foldAll = h("button", { type: "button", class: "small", hidden: true, onclick: () => {
+    const sections = [...list.querySelectorAll("details.mech")];
+    const anyOpen = sections.some((section) => section.open);
+    for (const section of sections) section.open = !anyOpen;
+  } });
   list = h("div");
+  // A toggle doesn't bubble, so the list hears its mechanisms' on the way down.
+  list.addEventListener("toggle", labelFoldAll, true);
   panel = h("aside", { class: "docs", "aria-label": "What it means" });
   notice = h("div", { class: "banner warn", role: "status", hidden: true });
   view.append(
@@ -42,13 +56,7 @@ function mount(view) {
     tuningOffBanner("Values"),
     notice,
     h("div", { class: "tune" },
-      h("div", null,
-        h("div", { class: "toolbar" }, filter,
-          h("div", { class: "legend", "aria-label": "What the marks mean" },
-            h("span", { class: "tag tuned" }, "● tuned"), "not committed yet",
-            h("span", { class: "tag edit" }, "✎ edit"), "staged here, not applied",
-            h("span", { "aria-hidden": "true" }, "◇ committed · ● now · ○ edit, on the limits"))),
-        list),
+      h("div", null, h("div", { class: "toolbar" }, filter, jump, foldAll), list),
       panel));
   onChange(render);
   onEdits(() => {
@@ -103,6 +111,8 @@ function route(rest) {
   }
   const row = rows.get(path);
   if (!row) return;
+  const mechanism = row.el.closest("details");
+  if (mechanism) mechanism.open = true;
   selected = { path };
   showDocs();
   row.el.scrollIntoView({ block: "center" });
@@ -147,7 +157,11 @@ function noteRefusal(snapshot) {
   noticeTimer = setTimeout(() => (notice.hidden = true), 15000);
 }
 
-/** The values, by configuration, then by the record they're in; only those the filter matches. */
+/**
+ * The values, by configuration, then by the record they're in; only those the filter matches. Each
+ * configuration folds away under its heading, and has a chip at the top that goes to it; while a
+ * filter is on, every configuration it matched is held open.
+ */
 function build() {
   const doc = robot.doc;
   if (!doc) return;
@@ -156,6 +170,7 @@ function build() {
   const refocus = focused && focused.dataset ? focused.dataset.path : null;
   rows.clear();
   counts.clear();
+  marks.clear();
   headings.clear();
   inline = null;
   const query = filter.value.trim().toLowerCase();
@@ -169,15 +184,17 @@ function build() {
     groups.get(group).push(path);
   }
   const sections = [];
+  const chips = [];
   for (const [config, groups] of configs) {
     const count = h("span", { class: "meta" });
     counts.set(config, count);
     const docs = doc.configs && doc.configs[config];
-    const configHeading = h("h2", { class: "mech-h" },
-      h("button", { type: "button", class: "link", "aria-label": config + ": what it is",
-                    onclick: () => select({ config }) }, config),
-      docs && docs.record && h("span", { class: "meta mono" }, docs.record), count);
-    headings.set(config + "/", configHeading);
+    // Its name says what it is, without folding it: the triangle and the rest of the line fold.
+    const name = h("button", { type: "button", class: "link", "aria-label": config + ": what it is",
+      onclick: (event) => {
+        event.preventDefault();
+        select({ config });
+      } }, config);
     const parts = [];
     for (const [group, paths] of groups) {
       const rowList = h("div", { class: "rowlist" });
@@ -193,16 +210,27 @@ function build() {
         heading = h("h3", { class: "group-h" },
           h("button", { type: "button", class: "link mono", "aria-label": group + ": what it is",
                         onclick: () => select({ config, group }) }, group),
-          about && about.record && h("span", { class: "meta mono" }, about.record),
           about && about.doc && about.doc.summary && h("span", { class: "gsum" }, about.doc.summary));
         headings.set(config + "/" + group, heading);
       }
       parts.push(h("section", { class: "group", "aria-label": config + (group ? " " + group : "") },
         heading, rowList));
     }
-    sections.push(h("section", { class: "mech", "aria-label": config },
-      configHeading, parts));
+    const section = mechanisms.section(config, [name, count],
+      { className: "mech fold", open: Boolean(query) }, parts);
+    section.setAttribute("aria-label", config);
+    headings.set(config + "/", section.querySelector("summary"));
+    sections.push(section);
+    const mark = h("span", { class: "chip-mark" });
+    marks.set(config, mark);
+    chips.push(h("button", { type: "button", class: "chip", onclick: () => {
+      section.open = true;
+      section.scrollIntoView({ block: "start" });
+    } }, config, mark));
   }
+  // With one mechanism there's nowhere to go.
+  replace(jump, chips.length > 1 && chips);
+  labelFoldAll();
   if (sections.length === 0) {
     sections.push(h("p", { class: "muted" }, query
       ? "Nothing matches “" + filter.value + "”. The filter searches names and what they mean."
@@ -218,6 +246,13 @@ function build() {
     asked = null;
     route(wanted);
   }
+}
+
+/** Fold all while any mechanism is open, Open all once every one is folded; none for just one. */
+function labelFoldAll() {
+  const sections = [...list.querySelectorAll("details.mech")];
+  foldAll.hidden = sections.length < 2;
+  foldAll.textContent = sections.some((section) => section.open) ? "Fold all" : "Open all";
 }
 
 function matches(value, query) {
@@ -265,8 +300,18 @@ function showDocs() {
     if (inline) inline.remove();
     inline = null;
     panel.hidden = false;
-    replace(panel, parts || h("p", { class: "muted" }, "Pick a value, a record, or a mechanism "
-        + "(its name, or focus its value) to see what it means. Press ? in a value for it too."));
+    replace(panel, parts || [
+      h("p", { class: "muted" }, "Pick a value, a record, or a mechanism (its name, or focus its "
+          + "value) to see what it means. Press ? in a value for it too."),
+      h("h3", null, "Reading a row"),
+      h("dl", { class: "facts" },
+        h("dt", null, h("span", { class: "tag tuned" }, "● tuned")),
+        h("dd", null, "differs from the committed value"),
+        h("dt", null, h("span", { class: "tag edit" }, "✎ edit")),
+        h("dd", null, "staged here, not applied yet"),
+        h("dt", { "aria-hidden": "true" }, "◇ ● ○"),
+        h("dd", null, "on its limits: committed, now, your edit")),
+    ]);
     return;
   }
   panel.hidden = true;
@@ -301,6 +346,8 @@ function updateCounts() {
     const tuned = paths.filter((path) => path in doc.changes).length;
     replace(count, paths.length + (paths.length === 1 ? " value" : " values")
         + (tuned ? " · " + tuned + " tuned" : ""));
+    const mark = marks.get(config);
+    if (mark) replace(mark, tuned > 0 && "● " + tuned);
   }
 }
 

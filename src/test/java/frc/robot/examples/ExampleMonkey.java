@@ -1,5 +1,6 @@
 package frc.robot.examples;
 
+import frc.robot.ExampleRobot;
 import frc.robot.Monkey;
 
 /** The guide's robot with the guide's controls, for the monkey to drive ({@code MonkeySimTest}). */

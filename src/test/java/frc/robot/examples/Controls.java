@@ -1,10 +1,10 @@
 package frc.robot.examples;
 
-import static frc.robot.examples.ExampleRobot.INTAKING;
-import static frc.robot.examples.ExampleRobot.PIVOT;
-import static frc.robot.examples.ExampleRobot.PIVOT_IN;
-import static frc.robot.examples.ExampleRobot.PIVOT_OUT;
-import static frc.robot.examples.ExampleRobot.ROLLER;
+import static frc.robot.ExampleRobot.INTAKING;
+import static frc.robot.ExampleRobot.PIVOT;
+import static frc.robot.ExampleRobot.PIVOT_IN;
+import static frc.robot.ExampleRobot.PIVOT_OUT;
+import static frc.robot.ExampleRobot.ROLLER;
 
 import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;

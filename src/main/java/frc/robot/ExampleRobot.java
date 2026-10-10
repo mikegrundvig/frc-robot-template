@@ -1,4 +1,4 @@
-package frc.robot.examples;
+package frc.robot;
 
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.CANCODER;
 import static com.michaelgrundvig.frc.world.robot.MechanismWiring.Controller.TALON_FX;
@@ -28,27 +28,26 @@ import com.michaelgrundvig.frc.world.robot.Position;
 import com.michaelgrundvig.frc.world.robot.Range;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
 import com.michaelgrundvig.frc.world.robot.Sensor;
-import frc.robot.RobotConfig;
-import frc.robot.RobotConfigBuilder;
-import frc.robot.Robots;
 import java.util.List;
 import org.wpilib.math.geometry.Translation3d;
 
 /**
- * The robot docs/mechanisms.md describes, as Robots.java would hold it: an intake (a pivot that
- * swings out, with a roller on its end), a hood, an elevator with an arm on it, and a shooter fed
- * by a feeder and an indexer. The guide's blocks, and Robots.java's example, are this code
- * (DocExamplesTest), and ExampleRobotSimTest builds it as the robot does, so a robot the guide
- * describes is one the robot would start.
+ * The robot docs/mechanisms.md describes, and the one the template runs until a team writes its own
+ * ({@code Robots.current()}): an intake (a pivot that swings out, with a roller on its end), a
+ * hood, an elevator with an arm on it, and a shooter fed by a feeder and an indexer, on the
+ * template's drivetrain and cameras. So the simulator, and Pitwall's status, tuning and
+ * experiments, show real mechanisms from the start. The guide's blocks, and Robots.java's example,
+ * are this code (DocExamplesTest), and ExampleRobotSimTest builds it as the robot does, so a robot
+ * the guide describes is one the robot would start.
  */
-final class ExampleRobot {
+public final class ExampleRobot {
   private ExampleRobot() {}
 
   // @start region=intake
-  static final Position PIVOT_IN = Position.degrees("in", 1.5);
-  static final Position PIVOT_OUT = Position.degrees("out", 130);
+  public static final Position PIVOT_IN = Position.degrees("in", 1.5);
+  public static final Position PIVOT_OUT = Position.degrees("out", 130);
 
-  static final Joint.Revolute PIVOT =
+  public static final Joint.Revolute PIVOT =
       Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
           .range(Range.degrees(0, 135))
           .rest(PIVOT_IN) // its hard stops, and where it rests
@@ -62,10 +61,10 @@ final class ExampleRobot {
               MechanismControl.position(30)
                   .withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700)));
 
-  static final Output INTAKING = Output.rpm("intaking", 2000);
-  static final Output OUTTAKING = Output.volts("outtaking", -4);
+  public static final Output INTAKING = Output.rpm("intaking", 2000);
+  public static final Output OUTTAKING = Output.volts("outtaking", -4);
 
-  static final Joint.Revolute ROLLER =
+  public static final Joint.Revolute ROLLER =
       Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35)) // it rides on the pivot's end
           .outputs(INTAKING, OUTTAKING)
           .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31).pdh(5, Amps.of(40)))
@@ -75,39 +74,42 @@ final class ExampleRobot {
           // @end region=runs-only-when
           .control(MechanismControl.velocity(0.02));
 
-  static final Configuration INTAKE =
+  public static final Configuration INTAKE =
       Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
 
   // @end region=intake
 
   /** The claw's beam break, on the pivot's arm, and a rangefinder looking into the hopper. */
-  static final Sensor.Switch CLAW_BEAM =
+  public static final Sensor.Switch CLAW_BEAM =
       Sensor.Switch.beam("claw beam", PIVOT).on(CANDI.can(30).s1().normallyOpen());
 
-  static final Sensor.Rangefinder HOPPER =
+  public static final Sensor.Rangefinder HOPPER =
       Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))
           .on(CANRANGE.can(31));
 
-  static final Position HOOD_DOWN = Position.degrees("down", 0);
+  public static final Position HOOD_DOWN = Position.degrees("down", 0);
+
+  /** A lob's angle: aimed shots follow a computed angle, and this gives the hood a step to test. */
+  public static final Position HOOD_LOB = Position.degrees("lob", 30);
 
   /** A hood zeroed level, raised as its angle grows: its kG holds it, along one cosine. */
-  static final Joint.Revolute HOOD =
+  public static final Joint.Revolute HOOD =
       Joint.pivot("hood", Part.CHASSIS, new Translation3d(-0.2, 0, 0.55), Joint.PITCH_UP)
           .range(Range.degrees(0, 40))
           .rest(HOOD_DOWN)
-          .positions(HOOD_DOWN)
+          .positions(HOOD_DOWN, HOOD_LOB)
           .motor(Motor.KRAKEN_X44, Gearing.of(50), TALON_FX.can(40).pdh(6, Amps.of(30)))
           .absoluteEncoder(CANCODER.can(41).offset(Rotations.of(-0.3)))
           .control(MechanismControl.position(30).withKg(0.35));
 
-  static final Position ELEVATOR_DOWN = Position.of("down", Inches.of(0));
-  static final Position ELEVATOR_CLEAR = Position.of("clear", Inches.of(32));
+  public static final Position ELEVATOR_DOWN = Position.of("down", Inches.of(0));
+  public static final Position ELEVATOR_CLEAR = Position.of("clear", Inches.of(32));
 
   /**
    * An elevator whose CANcoder is geared to its drum, so it knows where it is at startup: its 1.2 m
    * of travel turn its 0.75 in drum ten times, and the CANcoder less than once.
    */
-  static final Joint.Prismatic ELEVATOR =
+  public static final Joint.Prismatic ELEVATOR =
       Joint.elevator("elevator", Part.CHASSIS, new Translation3d(0, 0, 0.1))
           .range(Range.meters(0, 1.2))
           .rest(ELEVATOR_DOWN)
@@ -123,13 +125,13 @@ final class ExampleRobot {
               AbsoluteEncoder.of().ratio(1.0 / 12).on(CANCODER.can(24).offset(Rotations.of(0.31))))
           .control(MechanismControl.position(30).withKg(0.35));
 
-  static final Position ARM_STOWED = Position.degrees("stowed", -45);
-  static final Position ARM_SCORING = Position.degrees("scoring", 120);
+  public static final Position ARM_STOWED = Position.degrees("stowed", -45);
+  public static final Position ARM_SCORING = Position.degrees("scoring", 120);
 
   /**
    * An arm on the elevator, standing straight up at its zero and swinging back as its angle grows.
    */
-  static final Joint.Revolute ARM =
+  public static final Joint.Revolute ARM =
       Joint.pivot("arm", ELEVATOR, new Translation3d(0.1, 0, 0.3), Joint.PITCH_UP)
           .range(Range.degrees(-60, 150))
           .rest(ARM_STOWED)
@@ -143,24 +145,28 @@ final class ExampleRobot {
           // @end
           .control(MechanismControl.position(30).withKg(0.35, Degrees.of(-90)));
 
-  static final Output FEEDER_FEEDING = Output.rpm("feeding", 1000);
-  static final Output INDEXER_FEEDING = Output.rpm("feeding", 1500);
+  public static final Output FEEDER_FEEDING = Output.rpm("feeding", 1000);
+  public static final Output INDEXER_FEEDING = Output.rpm("feeding", 1500);
 
-  static final Joint.Revolute FEEDER =
+  public static final Joint.Revolute FEEDER =
       Joint.roller("feeder", Part.CHASSIS, new Translation3d(-0.1, 0, 0.35))
           .outputs(FEEDER_FEEDING)
           .motor(Motor.KRAKEN_X60, Gearing.of(4), TALON_FX.can(50).pdh(7, Amps.of(40)))
           .control(MechanismControl.velocity(0.02));
 
-  static final Joint.Revolute INDEXER =
+  public static final Joint.Revolute INDEXER =
       Joint.roller("indexer", Part.CHASSIS, new Translation3d(0.05, 0, 0.15))
           .outputs(INDEXER_FEEDING)
           .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(51).pdh(8, Amps.of(40)))
           .control(MechanismControl.velocity(0.02));
 
+  /** A typical shot's speed: aimed shots follow a computed one, and this gives a step to test. */
+  public static final Output SHOOTING = Output.rpm("shooting", 3000);
+
   /** A flywheel on two motors, the second turned the other way: it coasts when told nothing. */
-  static final Joint.Revolute SHOOTER =
+  public static final Joint.Revolute SHOOTER =
       Joint.roller("shooter", Part.CHASSIS, new Translation3d(-0.2, 0, 0.45))
+          .outputs(SHOOTING)
           .motors(
               Motor.KRAKEN_X60,
               Gearing.of(1),
@@ -169,20 +175,20 @@ final class ExampleRobot {
           .control(MechanismControl.velocity(0.02).coasting());
 
   // @start region=configurations
-  static final Configuration FEEDING =
+  public static final Configuration FEEDING =
       Configuration.of("feeding", FEEDER.at(FEEDER_FEEDING), INDEXER.at(INDEXER_FEEDING));
 
-  static final Configuration STOWED =
+  public static final Configuration STOWED =
       Configuration.of(
           "stowed", PIVOT.at(PIVOT_IN), ELEVATOR.at(ELEVATOR_DOWN), ARM.at(ARM_STOWED));
 
   // @end
 
   /** The template's robot's back-left camera, as Robots.java mounts it, 21 in up. */
-  static final CameraConfig BACK_LEFT = Robots.SIM.definition().cameras().get(2);
+  public static final CameraConfig BACK_LEFT = Robots.SIM.definition().cameras().get(2);
 
   /** The competition robot: the template's, with these mechanisms, each motor fed by the PDH. */
-  static final RobotConfig COMPETITION =
+  public static final RobotConfig COMPETITION =
       RobotConfigBuilder.builder(Robots.SIM)
           .definition(
               RobotDefinitionBuilder.builder(Robots.SIM.definition())
@@ -202,7 +208,7 @@ final class ExampleRobot {
    * sends its pivot to its own out.
    */
   // @start region=practice
-  static final RobotConfig PRACTICE =
+  public static final RobotConfig PRACTICE =
       COMPETITION
           .named("practice")
           .with(
@@ -216,7 +222,7 @@ final class ExampleRobot {
           .with(CameraConfigBuilder.builder(BACK_LEFT).up(Inches.of(20.5)).build()); // lower
 
   /** Every robot of the design, as Robots.all() lists them. */
-  static List<RobotConfig> all() {
+  public static List<RobotConfig> all() {
     return List.of(COMPETITION, PRACTICE);
   }
   // @end

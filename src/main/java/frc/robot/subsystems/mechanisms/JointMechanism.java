@@ -632,6 +632,16 @@ public final class JointMechanism implements Mechanism {
     return inputs.velocity;
   }
 
+  /** The voltage across its motor, as of this loop's logged inputs. */
+  double appliedVolts() {
+    return inputs.appliedVolts;
+  }
+
+  /** The current through its motor's windings, as of this loop's logged inputs. */
+  double statorCurrentAmps() {
+    return inputs.statorCurrentAmps;
+  }
+
   /**
    * Where it's held or headed: the goal of the move driving it, or of its idle, as its interlocks
    * leave it; where it is, while it runs at an output. NaN before it's first read.
@@ -1180,6 +1190,11 @@ public final class JointMechanism implements Mechanism {
   /** How long its profile takes from where it is to a position, at a share of its cruise. */
   double secondsTo(double position, double fraction) {
     return profile.secondsTo(position, fraction, measured, inputs.velocity);
+  }
+
+  /** How long its profile takes from one position to another, from rest, at its full cruise. */
+  double secondsBetween(double from, double to) {
+    return profile.secondsTo(to, 1, from, 0);
   }
 
   /** How long its velocity loop takes to come within its band of a new speed, from the model. */

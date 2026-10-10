@@ -179,7 +179,8 @@ places](#named-places-configurations-and-interlocks)). It checks them against ea
 inside the frame, every camera and IMU inside the robot, every joint a drive, coupling, sensor,
 camera, configuration, group, or interlock names among its joints, what's left of the body once the links
 come off still a body, every interlock obeyed, and each device's feed a channel of the PDH's of its
-own. The template's robot has no mechanisms.
+own. The template runs the guide's robot (`ExampleRobot`), whose mechanisms' numbers illustrate
+the guide: replace them with your robot's.
 
 | Value | Kind | Source | How to measure it, or why |
 |---|---|---|---|
@@ -273,8 +274,9 @@ them and WPILib numbers them: 0 to 19 high-current, each taking a breaker up to 
 low-current, and 23 the switchable one, each a fuse or breaker up to 15 A. Each motor controller
 says which channel feeds it where it's wired ([`Pdh.Feed`](#pdhfeed)), and the definition checks
 them against it. Optional: a robot that declares none checks no feed. CTRE's Power Distribution
-Panel isn't supported: its channels' ratings aren't confirmed yet. The template's robot has no
-wiring, so it declares none.
+Panel isn't supported: its channels' ratings aren't confirmed yet. `Robots.SIM`, the template's
+drivetrain and cameras, has no wiring, so it declares none; the guide's robot it runs declares
+`Pdh.can(1)`.
 
 | Value | Kind | Source | How to measure it, or why |
 |---|---|---|---|
@@ -489,8 +491,8 @@ parts it names by the part itself, never by a label, so a reference can't name s
 there; the definition checks only that every joint referred to is one of its own. Labels are for
 logs, writers, and messages, unique within the robot. What robot code needs from a mechanism
 (Phoenix's ratios, an absolute encoder's discontinuity point, the gravity offset, ideal gains to
-start tuning from) is derived from it (`RobotMath`), not entered. The template's robot has none,
-so nothing here has a source of the template's: a mechanism's numbers come from CAD and its parts'
+start tuning from) is derived from it (`RobotMath`), not entered. The guide's robot the template
+runs has mechanisms only to illustrate the guide, so nothing here has a source of the template's: a mechanism's numbers come from CAD and its parts'
 datasheets as it joins `Robots.java`.
 
 ### `Joint.Revolute`
@@ -787,7 +789,8 @@ within `RobotMath.freeSpeed`, refused above it and doubted above nine tenths of 
 every configuration obeying every interlock with the joints it doesn't name where they rest, the
 robot obeying them as it starts, no joints holding each other there or at a configuration so that
 none can move to free another, and no named place the interlocks leave unreachable; the season's extension limit is checked at each configuration (`SeasonLimits`).
-The template's robot has no mechanisms, so nothing here has a starting value.
+The guide's robot the template runs has mechanisms only to illustrate the guide, so nothing here
+has a starting value of the template's.
 
 ### `Position`
 
@@ -923,8 +926,8 @@ motor controllers' settings are that plan in their own terms, a TalonFX's and a 
 joint's block holds the rest, how the mechanism is wired and how it's driven, and the program reads
 them there. A motor controller's units for each joint, its rotations (a revolute joint's own, a
 prismatic joint's drum's), are fixed in `MechanismRotations`; these records are in the joint's own
-units, radians or meters. The template's robot has no mechanisms, so nothing here has a starting
-value.
+units, radians or meters. The guide's robot the template runs has mechanisms only to illustrate
+the guide, so nothing here has a starting value of the template's.
 
 ### A motor's controller
 
@@ -1461,7 +1464,8 @@ a section of its own. A link's mass is optional, and a rough one does: the simul
 beyond that it only seeds its joint's kG and kA until they're tuned. What nobody has given is none,
 `MassProperties.NONE`: zero mass at the joint, turning freely, never a guess. Its joint's gravity
 is then its kG's alone, and its kA seeds from its motors' rotors alone; the simulator's notes list
-it (`Robot/SimulatorNotes`), never the robot's console. The template's robot has no links.
+it (`Robot/SimulatorNotes`), never the robot's console. The guide's robot the template runs gives
+its intake arm a shape, not a measured mass.
 
 | Value | Kind | Source | How to measure it, or why |
 |---|---|---|---|
@@ -1552,6 +1556,102 @@ committed. Its motor controller takes a change on the next loop. Its feedforward
 | `mountToleranceMeters` | guess | From tighter than a calibrated camera can hold to a camera far off its mount. |
 | `latencyMarginSeconds` | guess | From tighter than a camera's own jitter to a second, still inside the estimator's 1.5 s of history. |
 
+### `pivot` tuning
+
+`JointMechanism.tuning`, from the guide's pivot (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `roller` tuning
+
+`JointMechanism.tuning`, from the guide's roller (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `hood` tuning
+
+`JointMechanism.tuning`, from the guide's hood (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `elevator` tuning
+
+`JointMechanism.tuning`, from the guide's elevator (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `arm` tuning
+
+`JointMechanism.tuning`, from the guide's arm (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `feeder` tuning
+
+`JointMechanism.tuning`, from the guide's feeder (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `indexer` tuning
+
+`JointMechanism.tuning`, from the guide's indexer (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
+### `shooter` tuning
+
+`JointMechanism.tuning`, from the guide's shooter (`ExampleRobot`).
+
+| Knob | Source | Why |
+|---|---|---|
+| `gains.kP` | guess | Up to ten times what's committed, in the joint's own units, which tells its scale: room to find where it buzzes. |
+| `gains.kD` | guess | As `gains.kP`, from at least 1. |
+| `gains.kS` | guess | Up to 2 V, or what's committed if more: static friction takes a few tenths of a volt. |
+| `currentLimits.stator` | datasheet (120 A: Phoenix 6's default stator limit) | From 5 A, where it barely moves, up to Phoenix 6's own default, or what's committed if more. |
+| `currentLimits.supply` | guess | From 5 A up to 80 A, or what's committed if more: past it, a mechanism drags the battery down with the drivetrain. |
+
 ### Experiment rigs
 
 A rig is a mechanism as Pitwall's experiments run it. Its gains are values its mechanism already
@@ -1565,6 +1665,8 @@ test doesn't read them: add a row here when you add a rig or an experiment.
 |---|---|---|---|---|
 | The steering rig (`Drive.steeringRig`): where an experiment may point the wheels | -180° to 180° | chosen | guess | A module turns all the way around, so any angle is safe; the limits keep a test motion within one turn, as the wheel's angle is scored. |
 | The steering's experiment (`RobotContainer`): "Steer to 90° and back" | 0° to 90° and back, 0.8 s at each, after a 0.5 s lead-in | chosen | guess | A quarter turn shows rise, overshoot, and settling; 0.8 s is several times the steering's settling (122 ms in the simulator), so each step settles before the next. |
+| Each joint's rig (`JointExperiments`): where an experiment may send it | its range, else its places' span; a speed's, still to its fastest named speed | chosen | math (the joint's own range, places and speeds, from its definition) | The joint's own bounds, so a test motion never asks it for anything its commands couldn't. |
+| Each joint's experiments (`JointExperiments`): a step between each two of its places, or from still to each of its speeds, and back | held twice the time its profile takes to make the move, or its velocity loop to reach the speed, rounded up to 0.1 s; at least 0.5 s, at most 3.3 s, the lead-in as long | chosen | math (the joint's own profile and model) | Long enough to see it arrive and settle; never past the 10 s a run may take, which Pitwall refuses as the robot starts. |
 
 ## Switches
 

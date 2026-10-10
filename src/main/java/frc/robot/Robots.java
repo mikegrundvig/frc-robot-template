@@ -46,10 +46,11 @@ import org.wpilib.math.geometry.Translation3d;
  * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
  * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
  * its interlocks, which hold beneath every command. The configurations the robot takes name the
- * joints and their places. The template's robot has none; an intake would read (the guide's robot,
- * src/test/java/frc/robot/examples/ExampleRobot.java, has it whole):
+ * joints and their places. The template runs the guide's robot, {@link ExampleRobot}, its joints on
+ * {@link #SIM}'s drivetrain and cameras, until you replace it with your own ({@link #current}); its
+ * intake reads:
  *
- * {@snippet class=frc.robot.examples.ExampleRobot region=intake}
+ * {@snippet class=frc.robot.ExampleRobot region=intake}
  *
  * <p>The definition refuses what can't be: a position outside its joint's range, a speed past what
  * its motors turn it at or a voltage past what they're rated for, a configuration that breaks an
@@ -66,7 +67,7 @@ import org.wpilib.math.geometry.Translation3d;
  * pivot.goTo(PIVOT_OUT)} to each robot's own out, and a revision of the competition robot's blocks
  * reaches it. It's listed beside the competition robot:
  *
- * {@snippet class=frc.robot.examples.ExampleRobot region=practice}
+ * {@snippet class=frc.robot.ExampleRobot region=practice}
  *
  * <p>A team's 2026 robots are whole robots described this way ({@link BetaRobot}, with its behavior
  * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}). docs/mechanisms.md
@@ -264,8 +265,10 @@ public final class Robots {
           .build();
 
   /**
-   * The template's robot. It has no wiring: on real hardware its drivetrain stays still and says
-   * so. Give a real robot its own entry, with its wiring from Phoenix Tuner X's swerve generator.
+   * The template's drivetrain and cameras, with no mechanisms: what the guide's robot builds on
+   * ({@code ExampleRobot}), and a robot of its own for whatever needs no joints. It has no wiring:
+   * on real hardware its drivetrain stays still and says so. Give a real robot its own entry, with
+   * its wiring from Phoenix Tuner X's swerve generator.
    */
   public static final RobotConfig SIM =
       RobotConfig.builder()
@@ -288,17 +291,22 @@ public final class Robots {
           .estimator(EstimatorConfig.DEFAULTS)
           .build();
 
-  /** Every robot the team has. Add each real robot as it is built and measured. */
+  /**
+   * Every robot the team has: the guide's two and a team's 2026 two, until you add your own. Add
+   * each real robot as it is built and measured.
+   */
   public static List<RobotConfig> all() {
-    return List.of(SIM, BetaRobot.CONFIG, DeltaRobot.CONFIG);
+    return List.of(
+        ExampleRobot.COMPETITION, ExampleRobot.PRACTICE, BetaRobot.CONFIG, DeltaRobot.CONFIG);
   }
 
   /**
    * The robot this program is running on: the one place that decides, so a new robot is one line
    * here. With several robots, choose by something the robot itself knows (a device's serial
-   * number, a file on its storage) rather than by editing this before each deploy.
+   * number, a file on its storage) rather than by editing this before each deploy. The guide's
+   * robot until you write yours, so the simulator and Pitwall show mechanisms from the start.
    */
   public static RobotConfig current() {
-    return SIM;
+    return ExampleRobot.COMPETITION;
   }
 }

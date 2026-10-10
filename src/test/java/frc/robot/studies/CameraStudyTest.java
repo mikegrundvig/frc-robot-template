@@ -46,9 +46,9 @@ class CameraStudyTest {
         "--out=" + folder.resolve("report"));
 
     List<String> candidates = Files.readAllLines(folder.resolve("report/candidates.csv"));
-    assertThat(candidates).hasSize(1 + Candidates.of(Robots.SIM).size());
+    assertThat(candidates).hasSize(1 + Candidates.of(Robots.current()).size());
     assertThat(candidates.get(0)).startsWith("rank,layout,cameras,position_p95_m");
-    assertThat(candidates).anyMatch(line -> line.contains("\"The robot's own: sim\""));
+    assertThat(candidates).anyMatch(line -> line.contains("\"The robot's own: example\""));
     String summary = Files.readString(folder.resolve("report/summary.md"));
     assertThat(summary)
         .contains("on 2026 FRC Rebuilt Welded (WPILib's layout): 32 tags, rotated")
@@ -57,7 +57,7 @@ class CameraStudyTest {
         .contains("No other robots in the way.")
         .contains("## The best at each camera count")
         .contains("## The robot's own layout")
-        .contains("### The robot's own: sim");
+        .contains("### The robot's own: example");
     // 6 x 3 positions, at 2 headings, one image each: for the robot's own layout and the best.
     assertThat(Files.readAllLines(folder.resolve("report/poses.csv"))).hasSize(1 + 2 * 36);
     assertThat(printed()).contains("100%").contains("Best: ").contains("summary.md");
@@ -230,7 +230,7 @@ class CameraStudyTest {
         .hasMessageContaining("frames: 0 must be at least 1");
     assertThatThrownBy(() -> run("--robot=comp"))
         .hasMessageContaining("no robot named comp")
-        .hasMessageContaining("sim");
+        .hasMessageContaining("example");
     assertThatThrownBy(() -> run("--field=FRC_2027")).hasMessageContaining("no field named");
     assertThatThrownBy(() -> run("--other-robots=3-5-7"))
         .hasMessageContaining("--other-robots must be a whole number, or two with a dash");

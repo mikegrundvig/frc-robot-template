@@ -54,6 +54,7 @@ public final class Controls {
       RecordingGamepad driver,
       RecordingGamepad operator,
       Autos autos) {
-    // The template's robot has no mechanisms yet: build and bind yours here.
+    // Nothing is bound: the guide's robot's joints idle, held where they rest, its rollers still,
+    // until you bind your robot's commands here. docs/mechanisms.md shows the guide's.
   }
 }

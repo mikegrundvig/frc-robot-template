@@ -18,6 +18,7 @@ import com.michaelgrundvig.frc.pitwall.experiment.Rig;
 import com.michaelgrundvig.frc.pitwall.experiment.Run;
 import com.michaelgrundvig.frc.pitwall.experiment.StepResponse;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
+import io.avaje.jsonb.Jsonb;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
@@ -27,6 +28,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -68,16 +70,18 @@ class PitwallRobotTest {
   }
 
   @Test
-  void theStatusShowsTheRobotItsCodeItsModeAndTheBattery() {
+  void theStatusShowsItsCodeAndTheBatteryAndTheBarItsNameAndMode() throws Exception {
     pitwall.status().requestRead(); // as the page's GET does: nothing is read unless asked
     pitwall.periodic();
 
     assertThat(pitwall.status().view())
         .extracting(Status.Item::name)
-        .containsExactly("Robot", "Code", "Mode", "Battery");
-    assertThat(value("Robot")).isEqualTo("sim");
-    assertThat(value("Code")).contains(" on " + BuildConstants.GIT_BRANCH);
-    assertThat(value("Battery")).matches("\\d+\\.\\d V");
+        .containsExactly("Robot/Code", "Robot/Battery");
+    assertThat(value("Robot/Code")).contains(" on " + BuildConstants.GIT_BRANCH);
+    assertThat(value("Robot/Battery")).matches("\\d+\\.\\d V");
+    assertThat(robotSection())
+        .containsEntry("name", "sim")
+        .containsEntry("mode", "Teleop, disabled");
     assertThat(pitwall.port()).as("the page is served").isPositive();
   }
 
@@ -100,7 +104,7 @@ class PitwallRobotTest {
   }
 
   @Test
-  void theModeSaysWhetherTheRobotIsEnabledAndOnTheField() {
+  void theModeSaysWhetherTheRobotIsEnabledAndOnTheField() throws Exception {
     assertThat(modeAfterALoop()).isEqualTo("Teleop, disabled");
 
     RobotSim.setEnabled(true);
@@ -452,10 +456,21 @@ class PitwallRobotTest {
         .toString();
   }
 
-  private String modeAfterALoop() {
-    pitwall.status().requestRead();
+  /** The mode as the page's bar shows it: the snapshot's robot section, a loop after a change. */
+  private String modeAfterALoop() throws Exception {
     pitwall.periodic();
-    return value("Mode");
+    return (String) Objects.requireNonNull(robotSection().get("mode"));
+  }
+
+  /** The snapshot's robot section: its name, code, and mode, as the page's bar shows them. */
+  @SuppressWarnings("unchecked")
+  private Map<String, Object> robotSection() throws Exception {
+    Map<String, Object> snapshot =
+        (Map<String, Object>)
+            Jsonb.instance().type(Object.class).fromJson(snapshot().substring("data: ".length()));
+    Map<String, Object> document =
+        (Map<String, Object>) Objects.requireNonNull(snapshot.get("document"));
+    return (Map<String, Object>) Objects.requireNonNull(document.get("robot"));
   }
 
   private Actions.Phase phase() {

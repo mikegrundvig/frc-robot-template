@@ -30,10 +30,9 @@ import org.wpilib.util.Alert;
  * }
  *
  * <p>That serves the page (http://robot.local:5820, or localhost in the simulator), shows the
- * standard status (which robot and code, the mode, the battery), tunes, runs actions, and runs
- * experiments. Add status items, actions, experiments, devices, and scenes through {@link
- * #status()}, {@link #actions()}, {@link #experiments()}, {@link #devices()}, and {@link
- * #scenes()}.
+ * standard status (the code running and the battery), tunes, runs actions, and runs experiments.
+ * Add status items, actions, experiments, devices, and scenes through {@link #status()}, {@link
+ * #actions()}, {@link #experiments()}, {@link #devices()}, and {@link #scenes()}.
  *
  * <p>Tuning is WPILib's tunables. Every tunable in the program goes through Pitwall's {@link
  * TunableTee}, around WPILib's own NetworkTables backend: dashboards work as before, while changes
@@ -79,13 +78,15 @@ public final class Pitwall implements AutoCloseable {
 
   private Pitwall(String name, int port, boolean advantageKit) {
     this.advantageKit = advantageKit;
-    // Status items may change at most so often, timed on the robot's clock.
-    status = new Status(RobotController::getTime).add("Robot", () -> name);
+    // Status items may change at most so often, timed on the robot's clock. Named Robot/... so the
+    // page groups them under one heading, with whatever else a robot program adds the same way. The
+    // robot's name and mode aren't among them: the page's bar always shows both.
+    status = new Status(RobotController::getTime);
     Supplier<String> code = code();
     if (code != null) {
-      status.add("Code", code);
+      status.add("Robot/Code", code);
     }
-    status.add("Mode", Pitwall::mode).add("Battery", RobotController::getBatteryVoltage, "V", 0.1);
+    status.add("Robot/Battery", RobotController::getBatteryVoltage, "V", 0.1);
     actions = new Actions(advantageKit ? AdvantageKitLog.actions() : inputs -> {});
     boolean replaying = advantageKit && AdvantageKitLog.replaying();
     // Runs are timed on the robot's clock, which a replay reproduces.

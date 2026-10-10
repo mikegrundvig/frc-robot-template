@@ -35,7 +35,7 @@ coverage floor, the values register's test, which fails until every configuratio
 row, and the guides' examples' test (`DocExamplesTest`): every Java block in a guide is code a
 compiled source has. Write an example in `src/test/java/frc/robot/examples` and copy it out; a
 block that needs code around it says `java fragment` on its fence. A Javadoc example is a region
-of compiled code, `{@snippet class=frc.robot.examples.ExampleRobot region=intake}`, marked in the
+of compiled code, `{@snippet class=frc.robot.ExampleRobot region=intake}`, marked in the
 source with `// @start region=intake` and `// @end`; `ci` builds the Javadoc, which fails on one
 that isn't there. Javadoc's `{@link}`s are checked as the code compiles. When a check fails,
 its message says what to do: do that. Never suppress a warning or delete a test to get green.

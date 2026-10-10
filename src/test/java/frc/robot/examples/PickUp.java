@@ -1,7 +1,7 @@
 package frc.robot.examples;
 
-import static frc.robot.examples.ExampleRobot.PIVOT;
-import static frc.robot.examples.ExampleRobot.PIVOT_OUT;
+import static frc.robot.ExampleRobot.PIVOT;
+import static frc.robot.ExampleRobot.PIVOT_OUT;
 
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveMove;

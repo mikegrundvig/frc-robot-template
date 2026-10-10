@@ -1,5 +1,5 @@
 {
-  "name": "sim (schematic)",
+  "name": "practice (schematic)",
   "isFTC": false,
   "disableSimplification": true,
   "rotations": [
@@ -91,7 +91,7 @@
       "position": [
         -0.2667,
         0.3048,
-        0.5334
+        0.5207
       ],
       "resolution": [
         1280,

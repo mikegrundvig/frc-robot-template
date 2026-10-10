@@ -11,6 +11,7 @@ import { onEdits, stageAll, pending, apply, edited, whyLocked } from "./edits.js
 import { load, trySave, cannotKeep } from "./history.js";
 import { makeRow, updateRow } from "./rows.js";
 import { valueDocs } from "./docs.js";
+import { folds } from "./fold.js";
 
 const KEY = "pitwall.runs";
 // Every run this tab has seen, oldest first: kept through a reload, until the tab closes.
@@ -29,6 +30,12 @@ const TRACES_KEPT = 8;
 const READS = ["run", "rigs", "experiments", "tunables", "values", "changes", "tuning", "robot"];
 
 const rigViews = new Map(); // rig name -> its panel's parts
+// The measurement each rig's plot shows, kept as the page rebuilds (a reconnect, a redeploy).
+const picked = new Map(); // rig name -> measurement
+const sections = folds("pitwall.experiment.folded");
+// A signal's panel: shorter than the measurement's, which is drawn at PLOT_HEIGHT.
+const PLOT_HEIGHT = 280;
+const SIGNAL_HEIGHT = 130;
 let builtFrom = "";
 let chips;
 let panels;
@@ -223,11 +230,11 @@ function render(patch, snapshot) {
 function buildRigs() {
   const doc = robot.doc;
   panels.replaceChildren();
-  for (const built of rigViews.values()) if (built.plot) built.plot.destroy();
+  for (const built of rigViews.values()) destroyPlots(built);
   rigViews.clear();
   for (const [name, rig] of Object.entries(doc.rigs)) {
     const view = { rig, rows: [], plot: null, plotKey: "", scoresKey: "", runsPlotted: "",
-                   expanded: new Set() };
+                   expanded: new Set(), signalPlots: new Map(), signalsKey: "" };
 
     // Its gains, beside its plot: the same values, and the same rows, as Tune's.
     const gains = h("div", { class: "rowlist" });
@@ -258,13 +265,28 @@ function buildRigs() {
       h("p", { class: "meta" }, "To keep the tuned gains, write these into the configuration:"),
       view.calls);
 
-    // Its plot: the chosen signal of its last few runs, the latest in bold, over the setpoint.
-    view.pick = h("select", { "aria-label": name + ": signal to plot",
-                              onchange: () => drawRig(name, view, true) });
-    for (const signal of [...rig.measurements, ...rig.signals.map((s) => s.name)]) {
-      view.pick.append(h("option", { value: signal }, signal));
+    // Its plot: the chosen measurement of its last few runs, the latest in bold, over the
+    // setpoint; under it, each of the measurement's signals in the latest run, on the same time.
+    view.pick = h("select", { "aria-label": name + ": measurement to plot", onchange: () => {
+      picked.set(name, view.pick.value);
+      drawRig(name, view, true);
+    } });
+    for (const measurement of rig.measurements) {
+      view.pick.append(h("option", { value: measurement }, measurement));
     }
+    if (rig.measurements.includes(picked.get(name))) view.pick.value = picked.get(name);
+    // With one measurement there's nothing to choose.
+    view.pickLabel = h("label", { class: "meta", hidden: rig.measurements.length < 2 }, "Plot ",
+      view.pick);
     view.plotElement = h("div", { class: "plot" });
+    view.signalsElement = h("div", { class: "signal-plots" });
+    view.signals = sections.section("signals", "Signals, latest run",
+      { className: "fold signals" }, view.signalsElement);
+    view.signals.hidden = rig.signals.length === 0;
+    // Folded, its plots have no width: drawn again as it opens.
+    view.signals.addEventListener("toggle", () => {
+      if (view.signals.open) drawRig(name, view, true);
+    });
     view.scores = h("table", { class: "scores" });
 
     view.panel = h("div", { class: "exp", hidden: true },
@@ -280,9 +302,9 @@ function buildRigs() {
               + "robot disables. The gains at the start are recorded with the run.")),
         view.commit),
       h("section", { class: "card" },
-        h("div", { class: "plotbar" }, h("h2", null, "Runs"),
-          h("label", { class: "meta" }, "Plot ", view.pick)),
+        h("div", { class: "plotbar" }, h("h2", null, "Runs"), view.pickLabel),
         view.plotElement,
+        view.signals,
         h("div", { class: "scroll" }, view.scores)));
     panels.append(view.panel);
     rigViews.set(name, view);
@@ -484,10 +506,17 @@ function renderScores(name, view) {
     ...units.map((u) => ({ label: "Peak " + u, get: (s) => s.peaks[u],
                            show: (x) => small(x) + " " + u })),
   ];
+  // A gain a column, so each lines up down the runs; a run says its experiment only when the rig
+  // has more than one to tell apart.
+  const gains = view.rig.gains;
+  const several = Object.values(doc.experiments).filter((e) => e.rig === name).length > 1;
   const head = table.createTHead().insertRow();
-  head.append(h("th", { scope: "col" }, "Run"), h("th", { scope: "col" }, "Gains"));
+  head.append(h("th", { scope: "col" }, "Run"),
+    ...gains.map((path) => h("th", { scope: "col", class: "gain", title: fullName(path) },
+      nameOf(path))));
   for (const column of columns) {
-    head.append(h("th", { scope: "col", title: "The worst of every jump of every "
+    head.append(h("th", { scope: "col", class: column === columns[0] ? "first-score" : null,
+      title: "The worst of every jump of every "
         + (view.rig.measurements.length > 1
           ? "measurement (" + view.rig.measurements.join(", ") + "): ▸ shows each" : "jump") },
       column.label));
@@ -516,7 +545,7 @@ function renderScores(name, view) {
           updateRig(name, view);
         } }, open ? "▾" : "▸"), " ");
     }
-    label.append(`#${run.id} ${run.experiment}`);
+    label.append(`#${run.id}` + (several ? " " + run.experiment : ""));
     if (run.gainsChanged) {
       label.append(" ", h("span", { class: "tag refused", title: run.detail }, "gains changed"));
     }
@@ -525,16 +554,19 @@ function renderScores(name, view) {
         title: "Ran on " + run.robot + (run.simulated ? " (simulator)" : "") + ", code " + run.code },
         run.code !== doc.robot.code ? "other code" : "before a restart"));
     }
-    row.insertCell().textContent = Object.entries(run.gains)
-      .map(([path, value]) => path.slice(path.lastIndexOf("/") + 1) + " " + shown(value))
-      .join(", ");
+    for (const path of gains) {
+      const cell = row.insertCell();
+      cell.className = "gain";
+      cell.textContent = path in run.gains ? shown(run.gains[path]) : "—";
+    }
     const s = summaries[index];
     const show = (values, cells) => columns.forEach((column, c) => {
       const value = column.get(values);
       const cell = cells.insertCell();
+      if (c === 0) cell.classList.add("first-score");
       const isBest = cells === row && !run.gainsChanged && Number.isFinite(value) && value === best[c];
       if (isBest) {
-        cell.className = "best";
+        cell.classList.add("best");
         cell.title = "The best of these runs";
       }
       cell.textContent = Number.isFinite(value) ? column.show(value)
@@ -543,21 +575,21 @@ function renderScores(name, view) {
     if (!s) {
       const cell = row.insertCell();
       cell.colSpan = columns.length;
-      cell.className = run.phase === "RUNNING" ? "muted" : "stopped";
+      cell.className = (run.phase === "RUNNING" ? "muted" : "stopped") + " first-score";
       cell.textContent = run.phase === "RUNNING" ? "Running…" : run.detail;
     } else {
       show(s, row);
     }
     // Stages the run's gains, as any other edit: they apply with the rest, or with the next run.
-    row.insertCell().append(h("button", { type: "button", class: "small",
-      title: "Stage this run's gains", disabled: !doc.tuning.enabled || view.busy,
-      onclick: () => stageAll(run.gains) }, "Restore"));
+    row.insertCell().append(h("button", { type: "button", class: "small revert",
+      title: "Stage this run's gains", "aria-label": "Stage run " + run.id + "'s gains",
+      disabled: !doc.tuning.enabled || view.busy, onclick: () => stageAll(run.gains) }, "↺"));
     if (s && view.expanded.has(run.key)) {
       for (const measurement of view.rig.measurements) {
         const wheel = body.insertRow();
         wheel.className = "sub";
-        wheel.insertCell();
         wheel.insertCell().textContent = measurement;
+        for (let g = 0; g < gains.length; g++) wheel.insertCell();
         show(summary(run, measurement), wheel);
         wheel.insertCell();
       }
@@ -581,15 +613,66 @@ function color(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-/** Lines on one time axis, as uPlot takes them: each line's value where it has one, else null. */
-function aligned(lines) {
-  const xs = [...new Set(lines.flatMap((line) => line.t))].sort((a, b) => a - b);
+/**
+ * Lines on one time axis, as uPlot takes them: each line's value where it has one, else null.
+ * {@code until} stretches the axis to that time, so plots of one run share it.
+ */
+function aligned(lines, until) {
+  const times = lines.flatMap((line) => line.t);
+  if (until !== undefined) times.push(0, until);
+  const xs = [...new Set(times)].sort((a, b) => a - b);
   const at = new Map(xs.map((x, i) => [x, i]));
   return [xs, ...lines.map((line) => {
     const ys = new Array(xs.length).fill(null);
     line.t.forEach((t, i) => (ys[at.get(t)] = line.v[i]));
     return ys;
   })];
+}
+
+/**
+ * A measurement's own signals: those named after it ("Front left voltage" for "Front left"), or,
+ * for a rig whose signals name no measurement (a joint's Voltage and Current), every one.
+ */
+function signalsFor(rig, measurement) {
+  const names = rig.signals.map((signal) => signal.name);
+  const own = names.filter((signal) => signal.startsWith(measurement + " "));
+  if (own.length > 0) return own;
+  return names.filter((signal) => !rig.measurements.some((m) => signal.startsWith(m + " ")));
+}
+
+function destroyPlots(view) {
+  if (view.plot) view.plot.destroy();
+  view.plot = null;
+  for (const panel of view.signalPlots.values()) panel.plot.destroy();
+  view.signalPlots.clear();
+  view.signalsKey = "";
+}
+
+/** A plot, styled as the page is: every one of a rig's shares its cursor, and dragging zooms all. */
+function makePlot(name, element, lines, unit, height) {
+  const stepped = uPlot.paths && uPlot.paths.stepped ? uPlot.paths.stepped({ align: 1 }) : undefined;
+  const axis = { stroke: color("--muted"), grid: { stroke: color("--line"), width: 1 },
+                 ticks: { stroke: color("--line"), width: 1 } };
+  return new uPlot({
+    width: Math.max(280, element.clientWidth),
+    height,
+    scales: { x: { time: false } },
+    axes: [{ ...axis, label: "s" }, { ...axis, label: unit }],
+    cursor: { drag: { x: true, y: false }, sync: { key: "exp-" + name, scales: ["x", null] } },
+    series: [{ label: "t" }, ...lines.map((line) => ({
+      label: line.label,
+      stroke: line.setpoint ? color("--text-2") : line.latest ? color("--accent") : color("--run-other"),
+      width: line.latest ? 2.5 : line.setpoint ? 1.5 : 1,
+      dash: line.setpoint ? [6, 4] : undefined,
+      paths: line.setpoint ? stepped : undefined,
+      spanGaps: true,
+      points: { show: false },
+    }))],
+  }, aligned(lines), element);
+}
+
+function unitOf(run, signal) {
+  return (run.signals || []).find((s) => s.name === signal)?.unit || "";
 }
 
 function drawRig(name, view, rebuild) {
@@ -603,48 +686,61 @@ function drawRig(name, view, rebuild) {
     }
     return;
   }
-  const signal = view.pick.value;
-  const overlaid = runs.filter((run) => run.rig === name && run.trace[signal]).slice(-OVERLAID);
+  const measurement = view.pick.value;
+  const overlaid = runs.filter((run) => run.rig === name && run.trace[measurement])
+    .slice(-OVERLAID);
   if (overlaid.length === 0) return;
   const latest = overlaid[overlaid.length - 1];
-  const lines = overlaid.map((run) => ({
-    label: `#${run.id}`, t: run.trace[signal].t, v: run.trace[signal].v, latest: run === latest }));
-  const setpoint = view.rig.measurements.includes(signal) && latest.trace.Setpoint;
+  const lines = overlaid.map((run) => ({ label: `#${run.id}`, t: run.trace[measurement].t,
+    v: run.trace[measurement].v, latest: run === latest }));
+  const setpoint = latest.trace.Setpoint;
   if (setpoint) lines.unshift({ label: "Setpoint", t: setpoint.t, v: setpoint.v, setpoint: true });
-  const data = aligned(lines);
-  const key = signal + "|" + lines.map((line) => line.label).join(",");
+  // Every plot of the rig on one time axis, as long as the longest line on any of them.
+  const signals = signalsFor(view.rig, measurement).filter((signal) => latest.trace[signal]);
+  const until = Math.max(0, ...lines.flatMap((line) => line.t),
+    ...signals.flatMap((signal) => latest.trace[signal].t));
+
+  const key = measurement + "|" + lines.map((line) => line.label).join(",");
   if (view.plot && view.plotKey === key && !rebuild) {
-    view.plot.setData(data);
-    return;
+    view.plot.setData(aligned(lines, until));
+  } else {
+    if (view.plot) view.plot.destroy();
+    view.plotElement.replaceChildren();
+    view.plot = makePlot(name, view.plotElement, lines, unitOf(latest, measurement), PLOT_HEIGHT);
+    view.plot.setData(aligned(lines, until));
+    view.plotKey = key;
   }
-  if (view.plot) view.plot.destroy();
-  view.plotElement.replaceChildren();
-  const unit = (latest.signals || []).find((s) => s.name === signal)?.unit || "";
-  const stepped = uPlot.paths && uPlot.paths.stepped ? uPlot.paths.stepped({ align: 1 }) : undefined;
-  const axis = { stroke: color("--muted"), grid: { stroke: color("--line"), width: 1 },
-                 ticks: { stroke: color("--line"), width: 1 } };
-  view.plot = new uPlot({
-    width: Math.max(280, view.plotElement.clientWidth),
-    height: 280,
-    scales: { x: { time: false } },
-    axes: [{ ...axis, label: "s" }, { ...axis, label: unit }],
-    cursor: { drag: { x: true, y: false } },
-    series: [{ label: "t" }, ...lines.map((line) => ({
-      label: line.label,
-      stroke: line.setpoint ? color("--text-2") : line.latest ? color("--accent") : color("--run-other"),
-      width: line.latest ? 2.5 : line.setpoint ? 1.5 : 1,
-      dash: line.setpoint ? [6, 4] : undefined,
-      paths: line.setpoint ? stepped : undefined,
-      spanGaps: true,
-      points: { show: false },
-    }))],
-  }, data, view.plotElement);
-  view.plotKey = key;
+
+  // Each of the measurement's signals in the latest run: shorter, one a panel, while open.
+  if (!view.signals.open) return;
+  const signalsKey = signals.join(",") + "|" + latest.key;
+  if (rebuild || signalsKey !== view.signalsKey) {
+    for (const panel of view.signalPlots.values()) panel.plot.destroy();
+    view.signalPlots.clear();
+    view.signalsElement.replaceChildren();
+    for (const signal of signals) {
+      const element = h("div", { class: "signal-plot", "aria-label": signal });
+      view.signalsElement.append(h("div", { class: "meta" }, signal), element);
+      const line = { label: `#${latest.id}`, t: [], v: [], latest: true };
+      view.signalPlots.set(signal,
+        { element, plot: makePlot(name, element, [line], unitOf(latest, signal), SIGNAL_HEIGHT) });
+    }
+    view.signalsKey = signalsKey;
+  }
+  for (const [signal, panel] of view.signalPlots) {
+    const trace = latest.trace[signal];
+    panel.plot.setData(aligned([{ t: trace.t, v: trace.v }], until));
+  }
 }
 
 window.addEventListener("resize", () => {
   for (const view of rigViews.values()) {
-    if (view.plot) view.plot.setSize({ width: Math.max(280, view.plotElement.clientWidth), height: 280 });
+    if (view.plot) {
+      view.plot.setSize({ width: Math.max(280, view.plotElement.clientWidth), height: PLOT_HEIGHT });
+    }
+    for (const panel of view.signalPlots.values()) {
+      panel.plot.setSize({ width: Math.max(280, panel.element.clientWidth), height: SIGNAL_HEIGHT });
+    }
   }
 });
 

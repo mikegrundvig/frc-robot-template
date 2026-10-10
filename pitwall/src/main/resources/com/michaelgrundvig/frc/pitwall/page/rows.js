@@ -1,6 +1,7 @@
 // A configuration value's row, the same in Tune and in Experiment: its name and what it means; the
 // value and its unit; its tuning limits, with the committed value, the value now, and any edit
-// marked on them; the committed value; and a note on its state. Every part shows at every width.
+// marked on them; the committed value in its tag, where it differs; and a note on its state. Every
+// part shows at every width.
 // Built once and updated in place, so a row someone is typing in is never rebuilt under them.
 
 import { robot, shown, h, replace, withUnit, running } from "./core.js";
@@ -57,19 +58,17 @@ export function makeRow(path, context, options = {}) {
                          onclick: () => nudge(path, 1) }, "+10%");
   row.range = makeRange();
   row.limits = h("span", { class: "limits-text", id: "limits-" + id });
-  row.committed = h("span");
   // Stages the committed value, as any other edit: nothing changes until it's applied.
-  row.revert = h("button", { type: "button", class: "revert",
+  row.revert = h("button", { type: "button", class: "revert small",
     title: "Stage the committed value", "aria-label": name + ": stage the committed value",
     onclick: () => stageNumber(path, described(path).committed) }, "↺");
   row.note = h("div", { class: "note", id: "note-" + id });
   row.el = h("div", { class: "row", role: "group", "aria-label": value.config + " " + value.field },
-    h("div", { class: "c-name" }, h("div", { class: "nameline" }, row.nameButton, row.tags),
-      row.meaning),
+    h("div", { class: "c-name" },
+      h("div", { class: "nameline" }, row.nameButton, row.tags, row.revert), row.meaning),
     h("div", { class: "c-value" }, row.input, row.unit,
       h("span", { class: "nudges" }, row.down, row.up)),
     h("div", { class: "c-range" }, row.range.el, row.limits),
-    h("div", { class: "c-committed" }, row.committed, row.revert),
     row.note);
   return row;
 }
@@ -107,8 +106,10 @@ export function updateRow(row) {
   row.el.classList.toggle("tuned", tuned);
   row.el.classList.toggle("edited", edited);
   row.el.classList.toggle("refused", bad);
+  // A tuned value says what it was committed as: elsewhere that's the value in the box.
   replace(row.tags,
-    tuned && h("span", { class: "tag tuned" }, "● tuned"),
+    tuned && h("span", { class: "tag tuned" }, "● tuned · committed ",
+      h("b", { class: "mono" }, shown(value.committed))),
     edited && h("span", { class: "tag edit" }, "✎ edit"),
     notNumber && h("span", { class: "tag refused" }, "✗ not a number"),
     outside && h("span", { class: "tag refused" }, "✗ outside limits"),
@@ -138,7 +139,6 @@ export function updateRow(row) {
   row.limits.textContent = value.limits
     ? "limits " + value.limits + (value.unit ? " " + value.unit : "") : "no limits";
   row.limits.classList.toggle("sr", !row.range.el.hidden); // the bar shows them; still read aloud
-  replace(row.committed, "committed ", h("b", null, shown(value.committed)));
   row.revert.hidden = !tuned;
   row.revert.disabled = locked || !robot.connected;
   row.down.disabled = row.up.disabled = locked || !robot.connected;

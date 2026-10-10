@@ -110,7 +110,8 @@ input[readonly] { background: var(--surface-2); }
 @media (pointer: coarse) { button.small { min-height: 44px; } }
 
 /* ---- The shell: the state bar, a band for a lock that covers everything, the tabs, the view,
-   and the apply bar. Tabs across the top on a laptop; along the bottom on a phone. ---- */
+   and the apply bar. Tabs across the top on a laptop, however narrow its window; along the bottom
+   only on a phone's touch screen, where a thumb reaches them. ---- */
 
 .shell { display: grid; height: 100%; background: var(--bg);
          grid-template-rows: auto auto auto minmax(0, 1fr) auto;
@@ -120,7 +121,7 @@ input[readonly] { background: var(--surface-2); }
 .tabs { grid-area: tabs; }
 .views { grid-area: main; overflow: auto; }
 .applybar { grid-area: apply; }
-@media (max-width: 719px) {
+@media (max-width: 719px) and (pointer: coarse) {
   .shell { grid-template-rows: auto auto minmax(0, 1fr) auto auto;
            grid-template-areas: "bar" "band" "main" "apply" "tabs"; }
 }
@@ -186,7 +187,7 @@ input[readonly] { background: var(--surface-2); }
 .tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
 .tab .count { display: inline-block; min-width: 20px; margin-left: 6px; padding: 1px 6px; border-radius: 999px;
               background: var(--tuned-tint); color: var(--tuned); font-size: 12px; text-align: center; }
-@media (max-width: 719px) {
+@media (max-width: 719px) and (pointer: coarse) {
   .tabs { border-bottom: none; border-top: 1px solid var(--line); padding: 0; justify-content: space-around; }
   .tab { flex: 1; justify-content: center; padding: var(--s2) var(--s1) 10px; border-bottom: none;
          border-top: 3px solid transparent; font-size: var(--meta); }
@@ -239,12 +240,38 @@ table { border-collapse: collapse; }
 
 /* ---- Pit ---- */
 
-.pit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
+/* Three columns on a laptop screen (status, actions, switches and devices), so a short card never
+   sits beside empty space while a tall one forces the whole page to scroll past it; two once that's
+   tight, one on a phone. */
+.pit { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 14px; align-items: start; }
 .pit .wide { grid-column: 1 / -1; }
-@media (max-width: 899px) { .pit { grid-template-columns: minmax(0, 1fr); } }
+.pit .side { min-width: 0; }
+/* Two columns: the actions down the right, the switches and devices under the status on the left,
+   so neither column waits for the other's row to end. */
+@media (max-width: 1179px) {
+  .pit { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto auto 1fr; }
+  .pit > .fold { grid-column: 2; grid-row: 2 / span 2; }
+  .pit .side { grid-column: 1; grid-row: 3; }
+}
+@media (max-width: 899px) {
+  .pit { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .pit > .fold, .pit .side { grid-column: auto; grid-row: auto; }
+}
+.status-summary { font-size: var(--value); font-weight: 600; margin: 0 0 14px; display: flex;
+                   align-items: baseline; gap: var(--s2); }
+.status-summary.ok { color: var(--ok); }
+.status-summary.bad { color: var(--bad); }
+/* A card whose body can fold away under its title: the same look as a plain .card > h2, with a
+   pointer and a triangle that says which way it opens. */
+.fold > summary { cursor: pointer; list-style: none; font-size: var(--value); font-weight: 600;
+                  display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s2); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "▾"; color: var(--muted); font-weight: 400; width: 1em; }
+.fold:not([open]) > summary { margin-bottom: 0; }
+.fold:not([open]) > summary::before { content: "▸"; }
 .slist, .alist { list-style: none; margin: 0; padding: 0; }
-.slist li { display: grid; grid-template-columns: 26px minmax(90px, 11em) minmax(0, 1fr); gap: var(--s2);
-            padding: 7px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.slist li { display: grid; grid-template-columns: 18px minmax(80px, 8em) minmax(0, 1fr); gap: var(--s2);
+            padding: 5px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
 .slist li:last-child, .alist li:last-child { border-bottom: none; }
 .slist .k { color: var(--text-2); }
 .sev { font-weight: 700; text-align: center; }
@@ -291,11 +318,17 @@ table { border-collapse: collapse; }
 .tune { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: var(--s4);
         align-items: start; }
 @media (max-width: 719px) { .tune { grid-template-columns: minmax(0, 1fr); } }
-.toolbar { display: flex; flex-wrap: wrap; gap: var(--s2) 14px; align-items: center; margin-bottom: 10px; }
-.toolbar input[type="search"] { flex: 1 1 220px; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px var(--s3); font-size: var(--meta); color: var(--text-2);
-          align-items: center; }
-.mech { margin-bottom: 18px; }
+/* The filter and a chip for each mechanism, held at the top as the values scroll under them. */
+.toolbar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; gap: var(--s2) 14px;
+           align-items: center; padding: var(--s2) 0 10px; background: var(--bg); }
+.toolbar input[type="search"] { flex: 1 1 260px; max-width: 420px; }
+.jump { display: flex; flex-wrap: wrap; gap: 6px; }
+.jump:empty { display: none; }
+.chip-mark { margin-left: 6px; color: var(--tuned); font-weight: 600; }
+.chip-mark:empty { display: none; }
+/* A mechanism a chip goes to lands below the held toolbar, not under it. */
+.mech { margin-bottom: 18px; scroll-margin-top: 64px; }
+.mech.fold > summary .meta { font-weight: 400; }
 .mech-h { font-size: 18px; display: flex; flex-wrap: wrap; gap: var(--s1) 10px; align-items: baseline;
           padding: var(--s1) 2px 6px; }
 .mech-h .meta { font-weight: 400; }
@@ -310,8 +343,8 @@ table { border-collapse: collapse; }
            overflow: hidden; background: var(--surface); }
 .row { position: relative; display: grid; align-items: center; gap: var(--s1) var(--s4);
        padding: var(--s2) var(--s3) var(--s2) var(--s4); min-height: var(--row);
-       grid-template-columns: minmax(150px, 1.25fr) minmax(210px, auto) minmax(130px, 1fr) minmax(112px, auto);
-       grid-template-areas: "name value range committed" "note note note note" "docs docs docs docs";
+       grid-template-columns: minmax(180px, 1.6fr) minmax(210px, auto) minmax(150px, 1fr);
+       grid-template-areas: "name value range" "note note note" "docs docs docs";
        border-bottom: 1px solid var(--line); background: var(--surface); }
 .row:last-child { border-bottom: none; }
 .row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: transparent; }
@@ -335,10 +368,7 @@ table { border-collapse: collapse; }
 .nudges { display: inline-flex; gap: 4px; }
 .nudge { padding: 2px 6px; font-size: 12px; min-height: 28px; color: var(--text-2); }
 .c-range { grid-area: range; min-width: 0; }
-.c-committed { grid-area: committed; display: flex; align-items: center; justify-content: flex-end; gap: 6px;
-               font-size: var(--meta); color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.c-committed b { font-family: var(--mono); font-weight: 600; color: var(--text); }
-.revert { padding: 2px var(--s2); min-height: 28px; }
+.revert { padding: 0 6px; min-height: 22px; font-size: 13px; }
 .note { grid-area: note; font-size: 14px; display: flex; flex-direction: column; gap: 2px; }
 .note:empty { display: none; }
 .note .edit { color: var(--edit); font-weight: 600; }
@@ -347,10 +377,10 @@ table { border-collapse: collapse; }
 .note .else { color: var(--text-2); }
 .note .big { color: var(--warn); font-weight: 600; }
 .row > .docs-inline { grid-area: docs; }
-/* A row stacks once its four parts no longer fit side by side, the value's nudges included. */
-@container rows (max-width: 760px) {
-  .row { grid-template-columns: minmax(0, 1fr) auto;
-         grid-template-areas: "name name" "value value" "range committed" "note note" "docs docs"; gap: 6px var(--s3); }
+/* A row stacks once its three parts no longer fit side by side, the value's nudges included. */
+@container rows (max-width: 640px) {
+  .row { grid-template-columns: minmax(0, 1fr);
+         grid-template-areas: "name" "value" "range" "note" "docs"; gap: 6px var(--s3); }
   .meaning { white-space: normal; }
   .c-value { flex-wrap: wrap; }
   .val { flex: 1 1 7em; }
@@ -420,7 +450,7 @@ table { border-collapse: collapse; }
 
 /* ---- Experiment ---- */
 
-.exp { display: grid; grid-template-columns: minmax(300px, 440px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.exp { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
 @media (max-width: 959px) { .exp { grid-template-columns: minmax(0, 1fr); } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { border-radius: 999px; padding: 3px var(--s3); min-height: 30px; }
@@ -446,11 +476,24 @@ table { border-collapse: collapse; }
                           bottom: calc(64px + env(safe-area-inset-bottom)); box-shadow: var(--shadow); }
 }
 .plot { min-height: 280px; }
+/* The measurement's signals, each a shorter plot under it on the same time axis. */
+.fold.signals { margin: var(--s2) 0 var(--s3); }
+.fold.signals > summary { font-size: var(--body); }
+.signal-plots > .meta { margin: var(--s2) 0 0; }
+.signal-plot { min-height: 130px; }
 .plot .notice { padding: 40px var(--s3); text-align: center; }
 .plotbar { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; justify-content: space-between; }
 .scores { width: 100%; font-size: 14px; min-width: 560px; }
 .scores th, .scores td { padding: 6px var(--s2); border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
-.scores th:first-child, .scores td:first-child, .scores th:nth-child(2), .scores td:nth-child(2) { text-align: left; }
+/* The run stays put while a narrow screen scrolls its scores sideways. */
+.scores th:first-child, .scores td:first-child { text-align: left; position: sticky; left: 0; z-index: 1;
+                                                 background: var(--surface); }
+/* Each gain its own column, in code type as Tune names it; a rule between the gains a run had and
+   how it did. */
+.scores th.gain { font-family: var(--mono); font-weight: 600; }
+.scores td.gain { font-family: var(--mono); }
+.scores .first-score { border-left: 1px solid var(--line-strong); }
+.scores tr.sub td:first-child { padding-left: var(--s5); }
 .scores th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .scores td { font-variant-numeric: tabular-nums; }
 .scores tr.sel td { background: var(--edit-tint); }

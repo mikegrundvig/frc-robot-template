@@ -41,6 +41,7 @@ import frc.robot.sim.SimulatedWorld;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.localization.Localization;
 import frc.robot.subsystems.mechanisms.ControllerSettings;
+import frc.robot.subsystems.mechanisms.JointExperiments;
 import frc.robot.subsystems.mechanisms.JointMechanism;
 import frc.robot.subsystems.mechanisms.Joints;
 import frc.robot.subsystems.vision.CameraIO;
@@ -50,6 +51,7 @@ import frc.robot.views.world.WorldView;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,10 +121,11 @@ public final class RobotContainer implements AutoCloseable {
     for (Joint joint : Joints.driven(robot.definition())) {
       joints.put(joint.label(), JointMechanism.tuning(joint, ControllerSettings.control(joint)));
     }
+    // In the definition's order, which is the order Pitwall's Tune lists them in.
     return new Tunings(
         Drive.tuning(robot.drivetrain(), robot.definition().drivetrain().freeSpeed()),
         Vision.tuning(robot.vision()),
-        Map.copyOf(joints));
+        Collections.unmodifiableMap(joints));
   }
 
   /** What the pit can tune, as published: every one is removed again as the robot closes. */
@@ -506,9 +509,10 @@ public final class RobotContainer implements AutoCloseable {
 
   /**
    * Puts this robot's pit tools on its Pitwall page: the drive check and the calibrations as
-   * actions, the steering's experiment for tuning it, and one status line each for the loop, the
-   * alliance, the placement, localization, scoring, the last calibration, and the cameras. In the
-   * simulator, the simulated world's parts that can fail, and the scenarios, for the page to apply.
+   * actions, experiments for tuning the steering and each joint, and one status line each for the
+   * loop, the alliance, the placement, localization, scoring, the last calibration, and the
+   * cameras. In the simulator, the simulated world's parts that can fail, and the scenarios, for
+   * the page to apply.
    */
   void addTo(Pitwall pitwall) {
     SimulatedWorld sim = world;
@@ -529,6 +533,8 @@ public final class RobotContainer implements AutoCloseable {
         .add(
             new Experiment(
                 STEER_STEP, drive.steeringRig(tunings.drivetrain()), STEER_STEP_PROFILE));
+    // Each joint's, from its places and speeds: nothing to write per joint.
+    JointExperiments.of(joints, tunings.joints()).forEach(pitwall.experiments()::add);
     // The World view: the field, the robot where localization believes it is, its cameras' sight
     // lines with their verdicts, and in the simulator, the truth.
     pitwall
@@ -541,18 +547,22 @@ public final class RobotContainer implements AutoCloseable {
                 sim != null ? () -> sim.drivetrain().truePose3d() : null,
                 camera -> Optional.of(Calibration.cameraMountAction(camera))));
     // Each change goes to every open page: the lines that follow sensors change at most once a
-    // second, and are written to change only when something worth reading does.
+    // second, and are written to change only when something worth reading does. Grouped (see
+    // Status's javadoc) so the page shows the robot, the field, and the joints apart.
     pitwall
         .status()
-        .add("Loop", this::loopStatus, STATUS_INTERVAL)
-        .add("Alliance", matchField::allianceStation)
-        .add("Venue", venues::active)
-        .add("Auto", autos::describe)
-        .add("Placement", () -> matchField.placement().describe(), STATUS_INTERVAL)
-        .add("Localization", this::localizationStatus, STATUS_INTERVAL)
-        .add("Scoring", this::scoring)
-        .add("Calibration", calibration::lastResult)
-        .add("Cameras", this::cameras, STATUS_INTERVAL);
+        .add("Robot/Loop", this::loopStatus, STATUS_INTERVAL)
+        .add("Field/Alliance", matchField::allianceStation)
+        .add("Field/Venue", venues::active)
+        .add("Field/Auto", autos::describe)
+        .add("Field/Placement", () -> matchField.placement().describe(), STATUS_INTERVAL)
+        .add("Field/Localization", this::localizationStatus, STATUS_INTERVAL)
+        .add("Field/Scoring", this::scoring)
+        .add("Field/Calibration", calibration::lastResult)
+        .add("Field/Cameras", this::cameras, STATUS_INTERVAL)
+        // Joints already raise these as alerts; the page shows the same two checks.
+        .add("Mechanisms/Switches trusted", () -> joints.switchDoubts().isEmpty())
+        .add("Mechanisms/Power channels", () -> joints.deadChannels().isEmpty());
   }
 
   Drive drive() {

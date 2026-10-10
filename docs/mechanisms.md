@@ -21,9 +21,9 @@ first used.
 7. [What the definition refuses](#7-what-the-definition-refuses)
 8. [When the template can't drive it](#8-when-the-template-cant-drive-it)
 
-The guide's robot is compiled and tested: `src/test/java/frc/robot/examples/` has it
-(`ExampleRobot`) and its commands (`ExampleCommands`, `Controls`), and a test fails when the guide
-and the code drift apart.
+The guide's robot is compiled and tested, and it's the robot the template runs until you write
+yours: `src/main/java/frc/robot/ExampleRobot.java` has it, `src/test/java/frc/robot/examples/` its
+commands (`ExampleCommands`, `Controls`), and a test fails when the guide and the code drift apart.
 
 ## 1. An intake: a pivot and a roller
 
@@ -33,10 +33,10 @@ and how the program drives it. This intake is a pivot that swings out, with a ro
 The places come first, as constants, so your code names them, and a misspelled one won't compile.
 
 ```java
-static final Position PIVOT_IN = Position.degrees("in", 1.5);
-static final Position PIVOT_OUT = Position.degrees("out", 130);
+public static final Position PIVOT_IN = Position.degrees("in", 1.5);
+public static final Position PIVOT_OUT = Position.degrees("out", 130);
 
-static final Joint.Revolute PIVOT =
+public static final Joint.Revolute PIVOT =
     Joint.pivot("pivot", Part.CHASSIS, new Translation3d(0.25, 0, 0.32), Joint.PITCH_DOWN)
         .range(Range.degrees(0, 135)).rest(PIVOT_IN)          // its hard stops, and where it rests
         .carries(Link.box("intake arm", new Translation3d(0, 0, 0.2),
@@ -47,17 +47,17 @@ static final Joint.Revolute PIVOT =
         .control(MechanismControl.position(30)
             .withProfile(DegreesPerSecond.of(450), DegreesPerSecondPerSecond.of(1700)));
 
-static final Output INTAKING = Output.rpm("intaking", 2000);
-static final Output OUTTAKING = Output.volts("outtaking", -4);
+public static final Output INTAKING = Output.rpm("intaking", 2000);
+public static final Output OUTTAKING = Output.volts("outtaking", -4);
 
-static final Joint.Revolute ROLLER =
+public static final Joint.Revolute ROLLER =
     Joint.roller("roller", PIVOT, new Translation3d(0, 0, 0.35))   // it rides on the pivot's end
         .outputs(INTAKING, OUTTAKING)
         .motor(Motor.KRAKEN_X60, Gearing.of(3), TALON_FX.can(31).pdh(5, Amps.of(40)))
         .runsOnlyWhen(PIVOT.atLeast(Degrees.of(110)))   // only once the pivot is out of the frame
         .control(MechanismControl.velocity(0.02));
 
-static final Configuration INTAKE =
+public static final Configuration INTAKE =
     Configuration.of("intake", PIVOT.at(PIVOT_OUT), ROLLER.at(INTAKING));
 ```
 
@@ -130,10 +130,10 @@ its carriage. Low down, the arm would swing into the bumper, so while the elevat
 clear it, the arm keeps out of that band: an interlock.
 
 ```java
-static final Position ELEVATOR_DOWN = Position.of("down", Inches.of(0));
-static final Position ELEVATOR_CLEAR = Position.of("clear", Inches.of(32));
+public static final Position ELEVATOR_DOWN = Position.of("down", Inches.of(0));
+public static final Position ELEVATOR_CLEAR = Position.of("clear", Inches.of(32));
 
-static final Joint.Prismatic ELEVATOR =
+public static final Joint.Prismatic ELEVATOR =
     Joint.elevator("elevator", Part.CHASSIS, new Translation3d(0, 0, 0.1))
         .range(Range.meters(0, 1.2)).rest(ELEVATOR_DOWN)
         .positions(ELEVATOR_DOWN, ELEVATOR_CLEAR)
@@ -145,10 +145,10 @@ static final Joint.Prismatic ELEVATOR =
             AbsoluteEncoder.of().ratio(1.0 / 12).on(CANCODER.can(24).offset(Rotations.of(0.31))))
         .control(MechanismControl.position(30).withKg(0.35));
 
-static final Position ARM_STOWED = Position.degrees("stowed", -45);
-static final Position ARM_SCORING = Position.degrees("scoring", 120);
+public static final Position ARM_STOWED = Position.degrees("stowed", -45);
+public static final Position ARM_SCORING = Position.degrees("scoring", 120);
 
-static final Joint.Revolute ARM =
+public static final Joint.Revolute ARM =
     Joint.pivot("arm", ELEVATOR, new Translation3d(0.1, 0, 0.3), Joint.PITCH_UP)
         .range(Range.degrees(-60, 150)).rest(ARM_STOWED)
         .positions(ARM_STOWED, ARM_SCORING)
@@ -872,9 +872,9 @@ in place of the pin. Each is named for its joint and end, "pivot lower limit", a
 joint's link (the arm a roller rides on, not the roller, which spins), carrying its wiring:
 
 ```java
-static final Sensor.Switch CLAW_BEAM =
+public static final Sensor.Switch CLAW_BEAM =
     Sensor.Switch.beam("claw beam", PIVOT).on(CANDI.can(30).s1().normallyOpen());
-static final Sensor.Rangefinder HOPPER =
+public static final Sensor.Rangefinder HOPPER =
     Sensor.Rangefinder.of("hopper", Part.CHASSIS, Meters.of(1.3), Degrees.of(27))
         .on(CANRANGE.can(31));
 ```

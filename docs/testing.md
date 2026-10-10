@@ -13,7 +13,7 @@ it, fool its sensors, and check what it believes against where it really is.
 | One test class, whatever its kind | `./gradlew test --tests frc.robot.RobotContainerSimTest` |
 | A package's tests | `./gradlew test --tests 'frc.robot.subsystems.drive.*'` |
 | One project's tests: the robot program's, localization's, the model's | `./gradlew :test`, `:localization:test`, `:model:test` |
-| Pitwall's tests, and its documentation processor's | `./gradlew :pitwall:test`, `:pitwall:docs-processor:test` |
+| Pitwall's tests | `./gradlew :pitwall:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
 

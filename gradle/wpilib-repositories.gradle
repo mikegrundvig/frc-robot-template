@@ -1,4 +1,4 @@
-// Where a project beside the robot program (Pitwall, the libraries in lib/) finds WPILib's libraries:
+// Where a project beside the robot program (the libraries in lib/) finds WPILib's libraries:
 // wherever GradleRIO finds them for the robot program, so both always get the same ones. That's the
 // WPILib installation's own repository when there is one, and WPILib's and the vendors' servers.
 // Those servers may serve only the FRC libraries, as GradleRIO filters them for the robot program;

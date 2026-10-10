@@ -77,8 +77,8 @@ dependencies {
     implementation project(":localization")
     implementation project(":simulation")
 
-    // Pitwall (pitwall/, its own project): the robot program's own web page.
-    implementation project(":pitwall")
+    // Pitwall (pitwall/, its own repository): the robot program's own web page.
+    implementation "com.michaelgrundvig.frc:frc-pitwall"
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
     // can say what each value means. It runs in the compiler only; none of it reaches the robot.
     annotationProcessor "com.michaelgrundvig.frc:docs-processor"
@@ -193,7 +193,7 @@ tasks.named("jar") {
         ".wpilib"
     ].each { dir ->
         from(dir) {
-            exclude "**/build/**", "**/.gradle/**"
+            exclude "**/build/**", "**/.gradle/**", "**/.git"
             into "backup/${dir}"
         }
     }

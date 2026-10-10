@@ -15,9 +15,13 @@ plugins {
 
 rootProject.name = "frc-robot-template"
 
-// Pitwall, the robot program's own web page (status, actions, and live tuning): its own project, free of robot
-// code, so it can become a library teams pull in.
-include "pitwall"
+// Pitwall, the robot program's own web page (status, actions, and live tuning), is a repository of
+// its own too, a git submodule (pitwall/) built from that folder as part of this build: whatever
+// asks for com.michaelgrundvig.frc:frc-pitwall gets what the folder holds. It is free of robot code.
+if (!file("pitwall/settings.gradle").exists()) {
+    throw new GradleException("Pitwall isn't checked out (pitwall/ is empty). Run: git submodule update --init")
+}
+includeBuild("pitwall")
 // The robot model (the validation kit, the field, and the robot's definition) is a repository of
 // its own, here as a git submodule (model/) and built from that folder as part of this build:
 // whatever asks for com.michaelgrundvig.frc:frc-robot-model gets what the folder holds, with no

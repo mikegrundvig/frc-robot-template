@@ -323,9 +323,11 @@ tasks.register("ci") {
     // while the build uses one of them: removing a plugin's line drops its tests too.
     dependsOn project.subprojects.collect { it.path + ":ci" }
     // The plugins build-logic/ holds: add each new tool's as it's added.
-    // And the robot model's own, built from model/ as part of this build (settings.gradle).
+    // And the robot model's and Pitwall's own, built from model/ and pitwall/ as part of this build
+    // (settings.gradle).
     if (project == rootProject) {
         dependsOn gradle.includedBuild("model").task(":ci")
+        dependsOn gradle.includedBuild("pitwall").task(":ci")
     }
     def toolConfigPlugins = ["frc.advantagescope-assets"]
     if (project == rootProject && toolConfigPlugins.any { pluginManager.hasPlugin(it) }) {

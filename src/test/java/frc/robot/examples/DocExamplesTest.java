@@ -41,8 +41,8 @@ class DocExamplesTest {
       List.of(
           "src/main/java",
           "src/test/java",
-          "lib/world/src/main/java",
-          "lib/world/src/test/java",
+          "model/src/main/java",
+          "model/src/test/java",
           "lib/localization/src/main/java",
           "lib/localization/src/test/java",
           "lib/simulation/src/main/java",

@@ -34,8 +34,11 @@ Released, but alpha: each is tied to one WPILib alpha, and moves with it.
 
 Not built here at all. Each waited on a 2027 build of its library; add it when one is out.
 
-- **Autos:** PathPlannerLib. Its build for WPILib alpha 7 is out (2027.0.0-alpha-4.1, in WPILib's
-  vendor-json-repo, `2027_alpha7`), and not added yet. (ChoreoLib has one too, 2027.0.0-alpha-3.)
+- **A path tool's files:** PathPlannerLib (its build for WPILib alpha 7 is out, 2027.0.0-alpha-4.1, in
+  WPILib's vendor-json-repo, `2027_alpha7`) and ChoreoLib (2027.0.0-alpha-3). Autos themselves are the
+  template's now ([autos](autos.md)): declared in `Controls`, chosen in the pit, run fresh when
+  autonomous starts, and checked before a match. What is waited on is reading a path tool's files,
+  which the template doesn't do. A path read from a file could be handed to an auto as a command.
 
 ## The simulator's physics
 

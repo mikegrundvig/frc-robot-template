@@ -14,7 +14,7 @@ Each entry says:
 
 ## The model's allow-list banned avaje-jsonb
 
-- **Rule:** the world model's `theModelSeesOnlyWpilibsMathAndFieldLayouts` (`lib/world`'s
+- **Rule:** the world model's `theModelSeesOnlyWpilibsMathAndFieldLayouts` (`model/`'s
   `ArchitectureTest`), an allow-list.
 - **Blocked:** avaje-jsonb, already the model's `api` dependency, for reading venue files and
   writing AdvantageScope's assets.

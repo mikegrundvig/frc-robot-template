@@ -5,6 +5,7 @@ import static org.wpilib.units.Units.Amps;
 import static org.wpilib.units.Units.Meters;
 import static org.wpilib.units.Units.Radians;
 
+import com.google.errorprone.annotations.CheckReturnValue;
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.world.config.Rules;
@@ -106,6 +107,7 @@ import org.wpilib.util.Alert;
  * JointHoming}; what's doubted of its switches and its PDH channels, {@link SwitchDoubts} and
  * {@link DeadChannels}.
  */
+@CheckReturnValue
 public final class JointMechanism implements Mechanism {
   /** A revolute joint's bands until its control says: 2° to arrive, 4° to stay. */
   static final MechanismControl.Bands ANGLE_BANDS = bands(Math.toRadians(2), Math.toRadians(4));

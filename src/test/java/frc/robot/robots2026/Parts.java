@@ -6,6 +6,8 @@ import com.michaelgrundvig.frc.world.robot.JointRevoluteBuilder;
 import com.michaelgrundvig.frc.world.robot.Output;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import frc.robot.RobotConfig;
+import frc.robot.RobotConfigBuilder;
 import java.util.List;
 import org.wpilib.math.geometry.Translation3d;
 
@@ -26,6 +28,16 @@ final class Parts {
 
   static Translation3d inches(double x, double y, double z) {
     return new Translation3d(x * IN, y * IN, z * IN);
+  }
+
+  /**
+   * A robot without its cameras: odometry and the gyro alone, which the behavior tests don't depend
+   * on, and quicker to run ({@code RobotSim.WITHOUT_CAMERAS} is the template's robot's).
+   */
+  static RobotConfig withoutCameras(RobotConfig robot) {
+    return RobotConfigBuilder.builder(robot)
+        .definition(RobotDefinitionBuilder.builder(robot.definition()).cameras(List.of()).build())
+        .build();
   }
 
   /** A joint's named outputs changed, the rest as it is: a team's value the model refuses. */

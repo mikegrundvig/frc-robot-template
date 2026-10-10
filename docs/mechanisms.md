@@ -425,20 +425,23 @@ intake, its shot, its autos, and the drive team's buttons for them. It's yours: 
 changes it, so the template's updates never collide with your code. The robot builds it once,
 after its mechanisms, and hands it everything behavior reaches: the robot's definition, which says
 which robot it runs on, the joints, with the sensors read beside them, the drivetrain, and two
-gamepads, the driver's on port 0 and the operator's on port 1. Write each command as a method, and
+gamepads, the driver's on port 0 and the operator's on port 1, and the list its autos are declared in.
+Write each command as a method, and
 bind it in the constructor:
 
-```java
+```java fragment
 public final class Controls {
   private final JointMechanism pivot, roller;
 
   Controls(Scheduler scheduler, RobotDefinition robot, Joints joints, Drive drive,
-      RecordingGamepad driver, RecordingGamepad operator) {
+      RecordingGamepad driver, RecordingGamepad operator, Autos autos) {
     pivot = joints.of(PIVOT);
     roller = joints.of(ROLLER);
 
     operator.rightTrigger().whileTrue(intake());
     operator.faceRight().onTrue(pivot.goTo(PIVOT_IN));
+
+    autos.add("Grab one", Rebuilt.starts(robot.body()).center(), this::grabOne);
   }
 
   /** Deploy and roll. The interlock holds the roller until the pivot passes 110°. */
@@ -450,6 +453,10 @@ public final class Controls {
   }
 }
 ```
+
+The last line of the constructor declares an auto: its name, where the robot starts, and a method that
+makes its command. The robot adds "Do nothing" itself, runs the one the pit chooses when autonomous
+starts, and makes a fresh command each time ([autos](autos.md)).
 
 Each driven joint is its own v3 `Mechanism`, so a command requires exactly the joints it moves.
 Deploying while the shooter spins is fine, and one button can't cancel another's unrelated work.
@@ -485,9 +492,12 @@ Behavior can be tested without a robot.
 
 - **The whole robot:** `RobotSim` runs it, drivetrain and gamepads included ([testing](testing.md)).
 
-`src/test/java/frc/robot/robots2026/` has a real 2026 robot described this way. It runs end to end
-in the simulator, gamepads, interlock, gates and auto included (`Team2611Controls` and
-`Team2611RobotSimTest`). The drivetrain has moves too: [driving](driving.md).
+`src/main/java/frc/robot/BetaRobot.java` has a real 2026 robot described this way, and
+`BetaControls.java` its behavior, beside the template's robot and its `Controls`. It runs end to end
+in the simulator, gamepads, interlock, gates and two autos included (`BetaRobotSimTest` and
+`BetaAutosSimTest`, in `src/test/java/frc/robot/robots2026/`). `DeltaRobot.java` and `DeltaControls.java` are the same
+team's second robot, of Beta's design on other hardware: a pivot driven open loop at 5 V and -3 V, a
+two-motor roller and another shooter leader, tested the same way. The drivetrain has moves too: [driving](driving.md).
 
 ## 4. Why won't it move?
 

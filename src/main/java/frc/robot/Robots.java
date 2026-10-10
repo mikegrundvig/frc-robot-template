@@ -68,9 +68,9 @@ import org.wpilib.math.geometry.Translation3d;
  *
  * {@snippet class=frc.robot.examples.ExampleRobot region=practice}
  *
- * <p>2611's 2026 robot is a whole robot described this way
- * (src/test/java/frc/robot/robots2026/Team2611.java). docs/mechanisms.md says how to describe a
- * mechanism and use its commands, and how to write a practice robot.
+ * <p>A team's 2026 robots are whole robots described this way ({@link BetaRobot}, with its behavior
+ * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}). docs/mechanisms.md
+ * says how to describe a mechanism and use its commands, and how to write a practice robot.
  */
 public final class Robots {
   private Robots() {}
@@ -113,7 +113,7 @@ public final class Robots {
    * and the module's defaults stand in: PathPlanner's 1.2 for the grip, which the robot says at
    * startup, and estimates for the inertias, which only the simulator reads, and notes. Measure the
    * grip with a pull test (docs/characterization.md). The coupling, 50/14 drive motor turns per
-   * turn of the module, is Tuner X's for the MK4i, as 2611's 2024 code had it.
+   * turn of the module, is Tuner X's for the MK4i, as a team's 2024 code had it.
    */
   private static final DrivetrainGeometry.ModuleType MODULES =
       DrivetrainGeometry.ModuleType.builder()
@@ -290,7 +290,7 @@ public final class Robots {
 
   /** Every robot the team has. Add each real robot as it is built and measured. */
   public static List<RobotConfig> all() {
-    return List.of(SIM);
+    return List.of(SIM, BetaRobot.CONFIG, DeltaRobot.CONFIG);
   }
 
   /**

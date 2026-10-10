@@ -12,7 +12,7 @@ it, fool its sensors, and check what it believes against where it really is.
 | Rerun only the tests you're working on, on every save | `./gradlew test -Pquick --continuous --tests '*Arm*'` |
 | One test class, whatever its kind | `./gradlew test --tests frc.robot.RobotContainerSimTest` |
 | A package's tests | `./gradlew test --tests 'frc.robot.subsystems.drive.*'` |
-| One project's tests: the robot program's, the world model's, localization's | `./gradlew :test`, `:world:test`, `:localization:test` |
+| One project's tests: the robot program's, localization's, the model's | `./gradlew :test`, `:localization:test`, `:model:test` |
 | Pitwall's tests, and its documentation processor's | `./gradlew :pitwall:test`, `:pitwall:docs-processor:test` |
 | Every test, with the coverage report | `./gradlew test` |
 | Every check CI runs | `./gradlew ci` |
@@ -20,7 +20,7 @@ it, fool its sensors, and check what it believes against where it really is.
 `--tests` finds what it names in whichever project has it: the robot program, a library in `lib/`
 (whose packages are `com.michaelgrundvig.frc.world` and `.localization`), or Pitwall. A project
 with none of it passes; if no project has any, the build fails, naming what you asked for, so a
-misspelled name can't pass unnoticed. A project's name in front (`:world:test`) runs only its
+misspelled name can't pass unnoticed. A project's name in front (`:localization:test`) runs only its
 tests.
 
 `-Pquick` leaves out the slow tests (below) unless `--tests` names what to run, and skips the static
@@ -63,7 +63,7 @@ running on it, so a quiet computer may do better and a laptop worse:
 |---|---|---|
 | A word in a comment, in a robot class, its lines unmoved, with uncommitted changes already | The robot program's compile; no test, since its classes come out the same | 1.5 s |
 | Code in a robot class | The compile, then the tests | 1.8 s |
-| Code in a library (`lib/world`) | The library's compile, then the tests; the robot program compiles again only when the library's public API changed | 1.1 s |
+| Code in a library (`lib/localization`) | The library's compile, then the tests; the robot program compiles again only when the library's public API changed | 1.1 s |
 | Anything, with a one-off `./gradlew test -Pquick --tests ...` instead | Gradle starting and finding its cached configuration, then the above | about 7 s |
 
 About 0.9 s of a robot edit is compiling the whole robot program again. Gradle compiles only the
@@ -93,13 +93,13 @@ their own), or the robot programs `ReplayEndToEndTest` starts, one at a time, be
 
 Test classes mirror the package of what they test, in the same project: the tests for the world
 model's `com.michaelgrundvig.frc.world.field.Zone` are in
-`lib/world/src/test/java/com/michaelgrundvig/frc/world/field/ZoneTest.java`. Pick the lowest level
+`model/src/test/java/com/michaelgrundvig/frc/world/field/ZoneTest.java`. Pick the lowest level
 that can show the bug; the lower the level, the faster the test and the more exactly a failure says
 what broke.
 
 | Level | What it runs | Example to copy |
 |---|---|---|
-| A component | Plain JUnit on a class in a library (`lib/world`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world`; `LocalizationServiceTest`, in `lib/localization`, for localization fed by hand a loop at a time |
+| A component | Plain JUnit on a class in a library (the model in `model/`, `lib/localization`) or the robot's own `frc.robot.lib`. No simulator, no hardware, no clock: these run in milliseconds, and most tests belong here. | `ZoneTest`, in `lib/world`; `LocalizationServiceTest`, in `lib/localization`, for localization fed by hand a loop at a time |
 | A mechanism | A subsystem on simulated hardware, stepped loop by loop. The class carries `@ExtendWith(RobotSim.class)`. | `subsystems/drive/DriveBasicsTest`, with `sim/DriveSimHarness` |
 | The whole robot | The robot program as `Robot` builds and runs it, Pitwall and all, driven from a simulated Driver Station and gamepad. | `RobotContainerSimTest` |
 | The program itself | The robot program started as a program, in its own process: a session recorded, then replayed. | `ReplayEndToEndTest` |
@@ -149,7 +149,10 @@ What it offers:
 - **The drivers:** `sim.driver()` and `sim.operator()`, the gamepads on ports 0 and 1, which the
   robot's `Controls` is bound to; `sim.bindings()`, every binding it made, by button and command.
   Another class shaped as `Controls`, a fixture's, is bound to them too by
-  `sim.controls(Team2611Controls::new)`.
+  `sim.controls(BetaControls::new)`.
+- **Autos:** `AutoCheck.check(sim, robot, Controls::new)` runs every auto a robot declares, and "Do
+  nothing", on each alliance from its own start for the 15 s of autonomous, and fails, saying where
+  and why, if one throws, has a move `REFUSED`, leaves the field, or can't start ([autos](autos.md#test-them)).
 - **The truth:** `sim.simulation()` knows where the robot really is (`truePose()`), and can move
   it, tilt it, or hit it.
 - **Faults and scenarios:** what can fail in the simulated world while it runs (the catalog,
@@ -175,10 +178,10 @@ What it offers:
 
 ### The monkey
 
-`MonkeySimTest` puts a monkey at the controls (`Monkey`): the guide's robot and 2611's 2026 robot,
-each with its own controls, play a 153 s match of random input from a seed. It presses, holds, taps
-and releases every button the robot's bindings record, wanders both gamepads' sticks, schedules
-and cancels each joint's moves and outputs (now and then a target that isn't a number) and the
+`MonkeySimTest` puts a monkey at the controls (`Monkey`): the guide's robot and a team's two 2026
+robots (Beta and Delta), each with its own controls, play a 153 s match of random input from a
+seed. It presses, holds, taps and releases every button the robot's bindings record, wanders both
+gamepads' sticks, schedules and cancels each joint's moves and outputs (now and then a target that isn't a number) and the
 drivetrain's moves (to a pose, a heading, along keyframes, at a speed until something holds),
 disables the robot as a match, a brownout and the drive team do, at any moment, and switches it
 between autonomous and teleop.
@@ -204,8 +207,8 @@ camera unplugged it's soon not ready to score, nor tracking tags; and the estima
 no farther than its wheels' travel and what the images it accepted can move it by their gate.
 
 It runs three seeds a robot, about 4 s each for the guide's robot (7 s for the first, as the JVM
-warms) and 1.2 s for 2611's. A failure names its seed, its loop, the monkey's last doings and the
-test that ran it, and the seed runs the same every time:
+warms) and 1.2 s for Beta's and for Delta's. A failure names its seed, its loop, the monkey's last
+doings and the test that ran it, and the seed runs the same every time:
 `./gradlew test --tests frc.robot.MonkeySimTest -PmonkeySeed=17` runs it again, alone, and
 `-PmonkeySeeds=50` runs seeds 1 to 50, for a longer hunt.
 
@@ -229,9 +232,9 @@ test that ran it, and the seed runs the same every time:
     every image's solve and every measurement's verdict recorded.
   - The joints' recordings guard what each joint's motor controllers are told and what the joint
     does in the simulator (`JointRecordings`): `JointsRecordedSimTest` for the runtime tests'
-    joints, `ExampleRobotRecordedSimTest` for the guide's robot, and `Team2611RecordedSimTest` for
-    2611's 2026 robot each record their joints' doubts and refusals, every setting their TalonFXs,
-    CANcoders and SPARKs are told (wired as their robots have them, and otherwise), and a session
+    joints, `ExampleRobotRecordedSimTest` for the guide's robot, `BetaRecordedSimTest` for the Beta
+    robot and `DeltaRecordedSimTest` for the Delta robot each record their joints' doubts and
+    refusals, every setting their TalonFXs, CANcoders and SPARKs are told (wired as their robots have them, and otherwise), and a session
     in the simulator, every second loop. `SparkRequestsRecordedTest` records what a joint on a
     SPARK asks of it each loop: its setpoint, its slot, and the feedforward the robot sends with it.
     `JointStagesRecordedSimTest` records what holds a joint beneath its commands and how it finds
@@ -252,6 +255,37 @@ test that ran it, and the seed runs the same every time:
 - **Coverage has a floor.** The build fails below the floors in each project's
   `coverage-floor.properties`. They catch code with no tests at all; they are not a target to
   chase.
+
+## Would the tests notice? Mutation testing
+
+Coverage says which lines the tests ran. It doesn't say whether a test would fail if a line were
+wrong. Mutation testing asks that directly: PIT changes the compiled code a little at a time (a `<`
+to a `<=`, a `+` to a `-`, a returned value emptied, a call removed) and runs the tests that cover
+each change. A change the tests catch is killed. One they don't has survived, and marks a line the
+tests run without checking.
+
+It runs on the robot model, in its own build (`model/`), which everything else is built from:
+
+```
+cd model
+./gradlew pitest
+```
+
+It takes about six minutes, so nothing runs it but that task: not `check`, not `ci`. While working
+on one class, name it, and a run is much shorter:
+
+```
+./gradlew pitest -PpitClasses='com.michaelgrundvig.frc.world.robot.Interlock*'
+```
+
+The report is
+`model/build/reports/pitest/index.html`, each class's source with its surviving changes marked
+on their lines. As of this writing: 4,048 changes, 87% killed, on 97% line coverage. Most survivors
+are a boundary (`<` for `<=`) or a sign in geometry, where a test checks a value well inside a
+range and none checks the edge.
+
+Read it for what to test next, not as a number to raise: a survivor in a tolerance or a log message
+is often not worth a test, and one in a limit or a comparison usually is.
 
 ## Is the estimator honest? The consistency study
 

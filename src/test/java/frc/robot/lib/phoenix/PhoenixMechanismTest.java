@@ -1180,11 +1180,6 @@ class PhoenixMechanismTest {
         seeded(), Optional.of(limits), Optional.empty(), MechanismControl.NeutralMode.BRAKE);
   }
 
-  private static MechanismControl control(MechanismControl.Profile profile) {
-    return control(
-        seeded(), Optional.empty(), Optional.of(profile), MechanismControl.NeutralMode.BRAKE);
-  }
-
   private static MechanismControl control(
       MechanismControl.Gains gains,
       Optional<MechanismControl.SoftLimits> limits,

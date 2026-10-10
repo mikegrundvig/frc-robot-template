@@ -37,7 +37,7 @@ dependencies {
 
     // The tests' records are documented as the robot program's are, so ParameterDocs reads what the
     // processor really writes.
-    testAnnotationProcessor project(":pitwall:docs-processor")
+    testAnnotationProcessor "com.michaelgrundvig.frc:docs-processor"
 
     testImplementation platform(libs.junit.bom)
     testImplementation "org.junit.jupiter:junit-jupiter"

@@ -17,7 +17,6 @@ import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.geometry.Translation3d;
 
 /**
  * 2025's field, REEFSCAPE, kept to check that the field model can describe a real field: not to
@@ -125,13 +124,6 @@ final class Reefscape {
               .plus(new Translation2d(circumradius, Rotation2d.fromDegrees(30 + 60 * corner))));
     }
     return new Polygon2d(corners);
-  }
-
-  /** A point on the reef: out from its center the way a face looks, across it, and up. */
-  private static Translation3d at(Rotation2d out, double outward, double across, double up) {
-    Translation2d point =
-        new Translation2d(REEF_X, REEF_Y).plus(new Translation2d(outward, across).rotateBy(out));
-    return new Translation3d(point.getX(), point.getY(), up);
   }
 
   /**

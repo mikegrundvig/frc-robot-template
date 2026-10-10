@@ -3,6 +3,7 @@ package frc.robot.behavior;
 import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 import static org.wpilib.units.Units.Seconds;
 
+import com.google.errorprone.annotations.CheckReturnValue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -27,13 +28,18 @@ import org.wpilib.util.Alert;
  * <p>It's worked out once a loop, before the scheduler's bindings and commands read it, and logged
  * then: {@code Gates/ready to shoot = false}, and {@code Gates/ready to shoot/Blocking = [aimed]},
  * the terms that are false. Terms go one level deep: a gate of gates, each a lambda, never an
- * expression language. A gate made inside a command lives as long as the command does, as v3's
- * triggers do.
+ * expression language.
+ *
+ * <p>A gate made as the robot starts is worked out and logged every loop from then on. One made
+ * once the robot runs (inside a command, or as an auto is built) is worked out and logged when it's
+ * read instead: waited on or bound, that's every loop all the same, and once nothing reads it any
+ * more it costs nothing, so making one per run of a command leaves nothing behind.
  *
  * <p>A gate whose logic throws holds false while it does, its term saying so ({@code aimed threw:
  * ...}), and the rest of the robot runs on. The first time, it reports a Driver Station error with
  * the stack, and an alert stays raised while it throws.
  */
+@CheckReturnValue
 public final class Gate extends Trigger {
   /** What a gate works out each loop. */
   public interface Logic {
@@ -45,8 +51,15 @@ public final class Gate extends Trigger {
   private static final class Value implements BooleanSupplier {
     boolean holds;
 
+    /** The gate to work out as this is read, one made once the robot runs; else null. */
+    @Nullable Gate asked;
+
     @Override
     public boolean getAsBoolean() {
+      Gate gate = asked;
+      if (gate != null) {
+        gate.update();
+      }
       return holds;
     }
   }
@@ -90,7 +103,15 @@ public final class Gate extends Trigger {
     key = "Gates/" + name;
     blockingKey = key + "/Blocking";
     update();
-    scheduler.addPeriodic(this::update);
+    if (Refusals.starting(scheduler)) {
+      scheduler.addPeriodic(this::update);
+    } else {
+      // The scheduler keeps every periodic for good, so one made once the robot runs works itself
+      // out as it's read: its command's run over, nothing of it is left running. A trigger polls
+      // from the moment it's made, too; unbound, it polls again once a command is bound to it.
+      value.asked = this;
+      unbind();
+    }
   }
 
   /** A gate on any condition: {@code Gate.of(scheduler, "in range", () -> distance() <= 5)}. */
@@ -154,7 +175,7 @@ public final class Gate extends Trigger {
         why -> {
           boolean holds = true;
           for (Gate term : all) {
-            if (!term.value.holds) {
+            if (!term.value.getAsBoolean()) {
               why.add(term.name);
               holds = false;
             }
@@ -179,7 +200,7 @@ public final class Gate extends Trigger {
         scheduler,
         name,
         why -> {
-          boolean now = inner.value.holds;
+          boolean now = inner.value.getAsBoolean();
           seen[0] |= now;
           boolean debounced = debouncer.calculate(now); // every loop, so its timer keeps time
           boolean holds = seen[0] && debounced;
@@ -221,16 +242,18 @@ public final class Gate extends Trigger {
   /** Whether it holds this loop. */
   @Override
   public boolean getAsBoolean() {
-    return value.holds;
+    return value.getAsBoolean();
   }
 
   /** The terms that keep it false this loop: empty while it holds, or for a gate without terms. */
   public List<String> blocking() {
+    asked();
     return List.copyOf(blocking);
   }
 
   /** Why it's false, as a reason reads: "ready to shoot is false: aimed"; or "ready to shoot". */
   public String why() {
+    asked();
     return blocking.isEmpty()
         ? name + " is false"
         : name + " is false: " + String.join(", ", blocking);
@@ -239,6 +262,13 @@ public final class Gate extends Trigger {
   @Override
   public String toString() {
     return name;
+  }
+
+  /** Works it out now, if it's one worked out as it's read. */
+  private void asked() {
+    if (value.asked != null) {
+      update();
+    }
   }
 
   /** Works it out for this loop, and logs it. */

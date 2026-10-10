@@ -285,4 +285,57 @@ class GateTest {
     assertThatThrownBy(() -> Gate.all("mixed", Gate.of(scheduler, "here", () -> true), other))
         .hasMessage("mixed's terms run on different schedulers");
   }
+
+  /**
+   * A gate made once the robot runs (in a command, or as an auto is built) is worked out as it's
+   * read, not every loop: a run's gates leave nothing running when the run is over.
+   */
+  @Test
+  void aGateMadeOnceTheRobotRunsIsWorkedOutAsItsRead() {
+    loop(); // the robot runs
+    int[] asked = {0};
+    boolean[] clear = {false};
+    Gate gate =
+        Gate.of(
+            scheduler,
+            "made late",
+            () -> {
+              asked[0]++;
+              return clear[0];
+            });
+    int asMade = asked[0];
+
+    for (int i = 0; i < 5; i++) {
+      loop();
+    }
+    int unread = asked[0];
+    clear[0] = true;
+
+    assertThat(asMade).as("worked out as it's made").isEqualTo(1);
+    assertThat(unread).as("and not again while nothing reads it").isEqualTo(1);
+    assertThat(gate.getAsBoolean()).as("fresh as it's read, with no loop between").isTrue();
+    clear[0] = false;
+    assertThat(gate.why()).isEqualTo("made late is false");
+  }
+
+  /** Terms made late are fresh too when a gate of them is read, and it still drives a binding. */
+  @Test
+  void aLateGateOfLateTermsIsFreshAndStillBinds() {
+    loop();
+    boolean[] fast = {false};
+    Gate atSpeed = Gate.of(scheduler, "at speed", () -> fast[0]);
+    Gate ready = Gate.all("ready", atSpeed);
+    boolean[] ran = {false};
+    ready.onTrue(Command.noRequirements(co -> ran[0] = true).named("Fire"));
+
+    loop();
+    boolean before = ran[0];
+    fast[0] = true;
+    loop();
+    loop();
+
+    assertThat(before).isFalse();
+    assertThat(ready.getAsBoolean()).isTrue();
+    assertThat(ran[0]).as("the binding saw it rise").isTrue();
+  }
 }

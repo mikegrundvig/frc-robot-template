@@ -23,6 +23,8 @@ import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import com.michaelgrundvig.frc.world.robot.MechanismControl;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import frc.robot.autos.AutoPit;
+import frc.robot.autos.Autos;
 import frc.robot.behavior.Bindings;
 import frc.robot.behavior.RecordingGamepad;
 import frc.robot.commands.Calibration;
@@ -69,7 +71,9 @@ import org.wpilib.tunable.TunableRegistry;
 /**
  * The composition root: builds every mechanism on the hardware for the mode the program runs in
  * ({@link Hardware}), runs them each loop, and hands the team's {@link Controls} what behavior
- * reaches: the joints, the drivetrain, the sensors, and the driver's and operator's gamepads. The
+ * reaches: the joints, the drivetrain, the sensors, the driver's and operator's gamepads, and the
+ * list its autos are declared in. It runs the auto the pit chose: when autonomous becomes enabled
+ * it schedules the auto's command, made fresh, and when autonomous ends it cancels it. The
  * template's, so a team's code goes in {@code Controls} and {@code Robots}, and the template's
  * updates here never collide with it. This is the one file that shows how the whole robot fits
  * together, so keep it readable.
@@ -128,6 +132,9 @@ public final class RobotContainer implements AutoCloseable {
   private final MatchField matchField;
 
   private final Venues venues;
+
+  /** The autos the team declares, and the one the pit chose: the template runs it. */
+  private final Autos autos;
 
   /** The simulator's world, which knows where the robot really is. Null unless simulating. */
   private final @Nullable SimulatedWorld world;
@@ -207,7 +214,8 @@ public final class RobotContainer implements AutoCloseable {
     loop = loopHealth.monitor();
     List<CameraConfig> cameras = definition.cameras();
     robotDefinition = definition;
-    matchField = new MatchField(field, mode == Constants.Mode.SIM);
+    autos = new Autos(scheduler);
+    matchField = new MatchField(field, mode == Constants.Mode.SIM, autos);
     this.venues = venues;
     bindings = new Bindings(scheduler);
     driver = bindings.gamepad("driver", DRIVER_PORT);
@@ -233,6 +241,10 @@ public final class RobotContainer implements AutoCloseable {
                 RobotLoop.PERIOD_SECONDS));
     drive =
         new Drive("Drive", hardware.drive(), definition, drivetrain, scheduler, localization::pose);
+    // The driver's sticks and the field, so the drive's own commands (driven, facing) read them:
+    // the team's Controls builds assisted driving without holding them.
+    drive.takeDriver(
+        this::leftStick, () -> -driver.getRightX(), matchField::field, matchField::alliance);
     if (world != null) {
       world.place(middle);
     }
@@ -266,19 +278,20 @@ public final class RobotContainer implements AutoCloseable {
             LocalDate::now);
 
     // Driver: left stick translates (field-relative, from the driver's end of the field), right
-    // stick turns. Back, with the robot facing straight downfield, resets its heading: the fallback
+    // stick turns: the drive's default command, driven(). The team's Controls binds the rest of
+    // driving to the same sticks: drive.facing(...) holds a heading, drive.lockWheels() an X. Back,
+    // with the robot facing straight downfield, resets its heading: the fallback
     // when the heading has gone wrong. Enabled or not. The template's own, so they're there
     // whatever the team's Controls binds, and a second command on back is a doubt at startup.
-    drive.setDefaultCommand(
-        drive.joystickDrive(
-            () -> leftStick().getX(), () -> leftStick().getY(), () -> -driver.getRightX()));
+    drive.setDefaultCommand(drive.driven());
     driver
         .back()
         .onTrue(Command.noRequirements(coroutine -> faceDownfield()).named("Reset heading"));
 
     // What the robot does, and the drive team's buttons for the rest: the team's own class. Its
-    // constructor builds the commands and binds them, so nothing else needs to hold it.
-    new Controls(scheduler, definition, joints, drive, driver, operator);
+    // constructor builds the commands, binds them and declares its autos, so nothing else needs to
+    // hold it.
+    new Controls(scheduler, definition, joints, drive, driver, operator, autos);
 
     // What it doubts or doesn't know, said once its bindings are made: its definition's, and two
     // commands bound to one button the same way.
@@ -314,6 +327,8 @@ public final class RobotContainer implements AutoCloseable {
     // The venue first: a selection the pit made takes effect at the start of a loop, while
     // disabled.
     venues.update(!enabled, RobotState.isFMSAttached()).ifPresent(this::venue);
+    // The auto the pit chose likewise, before the start it names is read.
+    autos.update(!enabled);
     // Where the drive team put the robot, if they did this loop: on the chosen start. With cameras,
     // the tags will say instead.
     Optional<Pose2d> placed = matchField.read(enabled);
@@ -328,6 +343,10 @@ public final class RobotContainer implements AutoCloseable {
     boolean autonomous = RobotState.isAutonomousEnabled();
     if (autonomous && !wasAutonomous) {
       vision.autonomousStarted(RobotController.getTime());
+      // The chosen auto, made fresh, runs from here; the command scheduler runs it this loop.
+      autos.autonomousStarted();
+    } else if (!autonomous && wasAutonomous) {
+      autos.autonomousEnded();
     }
     wasAutonomous = autonomous;
 
@@ -401,6 +420,11 @@ public final class RobotContainer implements AutoCloseable {
   /** The field as this match sets it: the alliance, the start, the placement, the zones. */
   MatchField matchField() {
     return matchField;
+  }
+
+  /** The robot's autos: the team's declared in its {@link Controls}, and the one chosen. */
+  Autos autos() {
+    return autos;
   }
 
   /** The robot's state, as the drive team's dashboard shows it, as of this loop. */
@@ -497,6 +521,7 @@ public final class RobotContainer implements AutoCloseable {
                 Scenarios.addTo(simulator.components(), sim);
               });
     }
+    pitwall.devices().add(AutoPit.device(autos));
     pitwall.actions().add(DRIVE_CHECK, Actions.command(() -> scheduler, this::driveCheck));
     calibration.addTo(pitwall.actions(), scheduler);
     pitwall
@@ -522,6 +547,7 @@ public final class RobotContainer implements AutoCloseable {
         .add("Loop", this::loopStatus, STATUS_INTERVAL)
         .add("Alliance", matchField::allianceStation)
         .add("Venue", venues::active)
+        .add("Auto", autos::describe)
         .add("Placement", () -> matchField.placement().describe(), STATUS_INTERVAL)
         .add("Localization", this::localizationStatus, STATUS_INTERVAL)
         .add("Scoring", this::scoring)
@@ -612,6 +638,7 @@ public final class RobotContainer implements AutoCloseable {
     localization.close();
     joints.close();
     matchField.close();
+    autos.close();
     venues.close();
     loopHealth.close();
     vision.close();

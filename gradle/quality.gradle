@@ -38,6 +38,9 @@ tasks.withType(JavaCompile).configureEach {
     // compile time that nothing can be null unless it is annotated @Nullable (org.jspecify).
     // MutablePublicArray: a public static final array's elements can still be changed by anyone, so
     // what ran before changes what runs next; share a List.of instead.
+    // CheckReturnValue is an error already: the drivetrain's, the joints', the moves' and the gates'
+    // classes are marked @CheckReturnValue, so a move or a gate made and dropped, `pivot.goTo(OUT);`
+    // on a line of its own, never awaited, doesn't compile.
     options.errorprone {
         enabled = !quick
         disableAllWarnings = true
@@ -45,6 +48,18 @@ tasks.withType(JavaCompile).configureEach {
         excludedPaths = ".*/build/.*"
         errorproneArgs.addAll([
             "-Xep:MutablePublicArray:ERROR",
+            // A few of its warnings, each one a real bug nearly every time it fires:
+            // a private field, variable or method nothing uses (what was it meant to do?);
+            "-Xep:UnusedVariable:ERROR",
+            "-Xep:UnusedMethod:ERROR",
+            // a value compared with itself, or subtracted from itself;
+            "-Xep:IdentityBinaryExpression:ERROR",
+            // a switch over an enum that leaves a case out, with no default;
+            "-Xep:MissingCasesInEnumSwitch:ERROR",
+            // int arithmetic that overflows before it's widened, or narrowed without saying so;
+            "-Xep:IntLongMath:ERROR",
+            "-Xep:NarrowingCompoundAssignment:ERROR",
+            "-Xep:EqualsHashCode:ERROR",
             "-Xep:NullAway:ERROR",
             "-XepOpt:NullAway:AnnotatedPackages=" + nullSafePackages,
             "-XepOpt:NullAway:TreatGeneratedAsUnannotated=true",
@@ -306,6 +321,10 @@ tasks.register("ci") {
     // while the build uses one of them: removing a plugin's line drops its tests too.
     dependsOn project.subprojects.collect { it.path + ":ci" }
     // The plugins build-logic/ holds: add each new tool's as it's added.
+    // And the robot model's own, built from model/ as part of this build (settings.gradle).
+    if (project == rootProject) {
+        dependsOn gradle.includedBuild("model").task(":ci")
+    }
     def toolConfigPlugins = ["frc.advantagescope-assets"]
     if (project == rootProject && toolConfigPlugins.any { pluginManager.hasPlugin(it) }) {
         dependsOn gradle.includedBuild("build-logic").task(":ci")

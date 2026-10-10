@@ -14,9 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
-import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.geometry.Translation3d;
 
 /**
  * 2024's field checked against WPILib's tag layout and the game manual: a fixture for the field
@@ -119,18 +117,6 @@ class CrescendoTest {
     assertThat(field.name()).isEqualTo("2024 FRC Crescendo");
   }
 
-  /** Which way a pose's x axis points: an opening's way in. */
-  private static Translation3d axis(Pose3d pose) {
-    return new Translation3d(1, 0, 0).rotateBy(pose.getRotation());
-  }
-
-  /** A point on one half, on the other: reflected across the center line, at the same height. */
-  private Translation3d image(Translation3d point) {
-    Translation2d image =
-        field.symmetry().apply(point.toTranslation2d(), field.length(), field.width());
-    return new Translation3d(image.getX(), image.getY(), point.getZ());
-  }
-
   /** A robot's four bumper corners. */
   private static List<Translation2d> corners(Pose2d pose, double halfLength, double halfWidth) {
     List<Translation2d> corners = new ArrayList<>();
@@ -142,18 +128,5 @@ class CrescendoTest {
                       .rotateBy(pose.getRotation())));
     }
     return corners;
-  }
-
-  /** Points around a center, inside and outside a shape. */
-  private static List<Translation3d> around(Translation3d center) {
-    List<Translation3d> points = new ArrayList<>();
-    for (double dx = -0.3; dx <= 0.3; dx += 0.15) {
-      for (double dy = -0.3; dy <= 0.3; dy += 0.15) {
-        for (double dz = -0.3; dz <= 0.3; dz += 0.15) {
-          points.add(center.plus(new Translation3d(dx, dy, dz)));
-        }
-      }
-    }
-    return points;
   }
 }

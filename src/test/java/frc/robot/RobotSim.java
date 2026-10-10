@@ -7,8 +7,10 @@ import com.michaelgrundvig.frc.pitwall.Pitwall;
 import com.michaelgrundvig.frc.pitwall.simulator.Components;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Placement;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.RobotDefinitionBuilder;
+import frc.robot.autos.Autos;
 import frc.robot.behavior.Bindings;
 import frc.robot.behavior.RecordingGamepad;
 import frc.robot.game.Rebuilt;
@@ -33,6 +35,7 @@ import org.wpilib.driverstation.internal.DriverStationBackend;
 import org.wpilib.hardware.hal.AllianceStationID;
 import org.wpilib.hardware.hal.HAL;
 import org.wpilib.hardware.hal.RobotMode;
+import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.simulation.GamepadSim;
 import org.wpilib.simulation.SimHooks;
@@ -205,6 +208,26 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
     return pitwall().simulator().orElseThrow().components();
   }
 
+  /**
+   * The drive team lifts the robot and sets it down at a pose, and tells it where: the simulated
+   * robot is there, and so is the robot's estimate, as the placement check reads it. Between loops.
+   */
+  public void placeAt(Pose2d pose) {
+    RobotContainer built = robot();
+    world().place(pose);
+    built.localization().place(pose, RobotContainer.PLACED, "test");
+  }
+
+  /** The pre-match placement check, as of the last loop: what the drive team reads. */
+  public Placement placement() {
+    return robot().matchField().placement();
+  }
+
+  /** The robot's autos: the team's, and the one the pit chose. */
+  public Autos autos() {
+    return robot().autos();
+  }
+
   /** The robot's driven joints, for a team's behavior to reach through its parts. */
   public Joints joints() {
     return robot().joints();
@@ -244,13 +267,15 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
         Joints joints,
         Drive drive,
         RecordingGamepad driver,
-        RecordingGamepad operator);
+        RecordingGamepad operator,
+        Autos autos);
   }
 
   /**
    * A team's controls on the robot, made as the robot makes its own {@code Controls}, with its
-   * definition, joints, drivetrain and both gamepads: {@code sim.controls(Team2611Controls::new)}.
-   * Its bindings join the robot's record ({@link #bindings}).
+   * definition, joints, drivetrain, both gamepads and autos: {@code
+   * sim.controls(BetaControls::new)}. Its bindings join the robot's record ({@link #bindings}), and
+   * the autos it declares are the robot's ({@link RobotContainer#autos}).
    */
   public <T> T controls(ControlsMaker<T> controls) {
     RobotContainer robot = robot();
@@ -260,7 +285,8 @@ public final class RobotSim implements BeforeEachCallback, AfterEachCallback {
         robot.joints(),
         robot.drive(),
         robot.driver(),
-        robot.operator());
+        robot.operator(),
+        robot.autos());
   }
 
   /** Every command bound to the robot's gamepads, as the bindings were made. */

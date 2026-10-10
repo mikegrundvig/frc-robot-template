@@ -73,7 +73,7 @@ dependencies {
 
     // The libraries (lib/, each its own project): the world model (the validation kit, the field,
     // and the robot's definition), and localization and the simulation, which read it.
-    implementation project(":world")
+    implementation "com.michaelgrundvig.frc:frc-robot-model"
     implementation project(":localization")
     implementation project(":simulation")
 
@@ -81,9 +81,11 @@ dependencies {
     implementation project(":pitwall")
     // Writes the configuration records' Javadoc into the program as it compiles, so Pitwall's page
     // can say what each value means. It runs in the compiler only; none of it reaches the robot.
-    annotationProcessor project(":pitwall:docs-processor")
+    annotationProcessor "com.michaelgrundvig.frc:docs-processor"
 
     compileOnly libs.recordbuilder.core
+    compileOnly libs.errorprone.annotations
+    testCompileOnly libs.errorprone.annotations
     testCompileOnly libs.recordbuilder.core
     annotationProcessor libs.recordbuilder.processor
     // The 2026 robots' fixtures declare a design's parts record as robot code does, built by name.

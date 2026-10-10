@@ -249,11 +249,32 @@ public final class Rebuilt {
   }
 
   /**
+   * Where a robot of this size starts, left to right as the drivers see them: bumpers on the
+   * starting line and facing the field, before each trench and before the hub. An auto starts on
+   * one ({@code Rebuilt.starts(robot.body()).left()}), and the placement check reads whether the
+   * robot stands on it.
+   */
+  public record Starts(Place left, Place center, Place right) {
+    /** All three, left to right: the order of Driver Station locations 1, 2, and 3. */
+    public List<Place> all() {
+      return List.of(left, center, right);
+    }
+  }
+
+  /** The starts for a robot of this size, written for blue. */
+  public static Starts starts(Body body) {
+    double x = STARTING_LINE_X - body.bumperLength().in(Meters) / 2;
+    return new Starts(
+        Place.at("Left", new Pose2d(x, WIDTH - TRENCH_OPENING / 2, Rotation2d.ZERO)),
+        Place.at("Center", new Pose2d(x, WIDTH / 2, Rotation2d.ZERO)),
+        Place.at("Right", new Pose2d(x, TRENCH_OPENING / 2, Rotation2d.ZERO)));
+  }
+
+  /**
    * The field model for a robot of this size, which sets where it stands on the starting line.
    *
-   * <p>Starts, left to right as the drivers see them, bumpers on the starting line and facing the
-   * field: before each trench, and before the hub. Driver Station locations 1, 2, and 3 choose them
-   * until autos do.
+   * <p>Starts, left to right as the drivers see them ({@link #starts}). Driver Station locations 1,
+   * 2, and 3 choose them when no auto is chosen; a chosen auto names its own.
    */
   public static FieldModel field(Body body) {
     return field(body, LAYOUT);
@@ -288,13 +309,8 @@ public final class Rebuilt {
    * tags as surveyed.
    */
   public static FieldModel field(Body body, TagLayout layout) {
-    double x = STARTING_LINE_X - body.bumperLength().in(Meters) / 2;
     return FieldModel.builder(layout, SYMMETRY)
-        .starts(
-            List.of(
-                Place.at("Left", new Pose2d(x, WIDTH - TRENCH_OPENING / 2, Rotation2d.ZERO)),
-                Place.at("Center", new Pose2d(x, WIDTH / 2, Rotation2d.ZERO)),
-                Place.at("Right", new Pose2d(x, TRENCH_OPENING / 2, Rotation2d.ZERO))))
+        .starts(starts(body).all())
         .places(List.of(HUB, TOWER))
         .zones(List.of(ALLIANCE_ZONE, TRENCH))
         .surfaces(surfaces())

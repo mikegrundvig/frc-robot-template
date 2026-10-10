@@ -1,6 +1,7 @@
 package frc.robot;
 
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
+import frc.robot.autos.Autos;
 import frc.robot.behavior.RecordingGamepad;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.mechanisms.Joints;
@@ -17,8 +18,16 @@ import org.wpilib.command3.Scheduler;
  *
  * <p>The robot records each binding as it's made, with its button and its command's name, and says
  * at startup when two commands are bound to one button the same way. The driver's sticks drive the
- * robot and the driver's back button resets its heading: the template binds those itself ({@link
- * RobotContainer}).
+ * robot ({@code drive.driven()}, the drive's default command) and the driver's back button resets
+ * its heading: the template binds those itself ({@link RobotContainer}). The drive's other commands
+ * use the same sticks, so a button binds them as it binds anything: {@code drive.facing(heading)}
+ * drives with the sticks while the robot holds a heading, and {@code drive.lockWheels()} turns the
+ * wheels into an X (docs/driving.md).
+ *
+ * <p>Autos are declared here too: {@code autos.add("Left Double", start, this::leftDouble)} gives
+ * the pit a choice, and the robot runs the chosen one's command, made fresh, when autonomous
+ * starts. The robot adds "Do nothing" itself and starts with it chosen; a robot that declares
+ * nothing has only that (docs/autos.md).
  */
 public final class Controls {
   /**
@@ -31,9 +40,11 @@ public final class Controls {
    * @param joints every driven joint's mechanism, by its joint, {@code joints.of(PIVOT)}, and a
    *     gate on anything the model says, a sensor's reading included: {@code joints.gate("coral in
    *     claw", CLAW_BEAM.tripped())}
-   * @param drive the drivetrain, with its moves (docs/driving.md)
+   * @param drive the drivetrain, with its moves, assisted driving and wheel lock (docs/driving.md)
    * @param driver the driver's gamepad, port 0
    * @param operator the operator's gamepad, port 1
+   * @param autos the robot's autos: declare each with {@code autos.add(name, start, factory)}, the
+   *     factory making a fresh command every run
    */
   Controls(
       Scheduler scheduler,
@@ -41,7 +52,8 @@ public final class Controls {
       Joints joints,
       Drive drive,
       RecordingGamepad driver,
-      RecordingGamepad operator) {
+      RecordingGamepad operator,
+      Autos autos) {
     // The template's robot has no mechanisms yet: build and bind yours here.
   }
 }

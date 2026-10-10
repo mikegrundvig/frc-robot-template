@@ -11,8 +11,6 @@ import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.field.Symmetry;
 import com.michaelgrundvig.frc.world.field.TagLayout;
 import frc.robot.Robots;
-import java.util.ArrayList;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -20,7 +18,6 @@ import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.geometry.Translation3d;
 
 /**
  * 2025's field checked against WPILib's tag layouts and the game manual: a fixture for the field
@@ -111,25 +108,5 @@ class ReefscapeTest {
 
   private boolean inReefZone(Alliance alliance, Translation2d point) {
     return Reefscape.REEF_ZONE.contains(field, alliance, point);
-  }
-
-  /** A point on one half, on the other: turned half a turn, at the same height. */
-  private Translation3d image(Translation3d point) {
-    Translation2d image =
-        field.symmetry().apply(point.toTranslation2d(), field.length(), field.width());
-    return new Translation3d(image.getX(), image.getY(), point.getZ());
-  }
-
-  /** Points around a center, a few centimeters apart, inside and outside a shape. */
-  private static List<Translation3d> around(Translation3d center) {
-    List<Translation3d> points = new ArrayList<>();
-    for (double dx = -0.3; dx <= 0.3; dx += 0.15) {
-      for (double dy = -0.3; dy <= 0.3; dy += 0.15) {
-        for (double dz = -0.3; dz <= 0.3; dz += 0.15) {
-          points.add(center.plus(new Translation3d(dx, dy, dz)));
-        }
-      }
-    }
-    return points;
   }
 }

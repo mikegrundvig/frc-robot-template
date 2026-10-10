@@ -28,7 +28,7 @@ apply from: rootProject.file("gradle/wpilib-repositories.gradle")
 
 dependencies {
     // The field and the robot's definition appear in its signatures.
-    api project(":world")
+    api "com.michaelgrundvig.frc:frc-robot-model"
 
     // Configuration records are built by name, through builders generated as they compile.
     compileOnly libs.recordbuilder.core
@@ -36,7 +36,7 @@ dependencies {
     annotationProcessor libs.recordbuilder.processor
     // Writes the configuration records' Javadoc into the jar, so Pitwall's page can say what each
     // value means. It runs in the compiler only: the simulation never sees Pitwall.
-    annotationProcessor project(":pitwall:docs-processor")
+    annotationProcessor "com.michaelgrundvig.frc:docs-processor"
 
     errorprone libs.errorprone.core
     errorprone libs.nullaway

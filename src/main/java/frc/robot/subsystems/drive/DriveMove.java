@@ -4,6 +4,8 @@ import static org.wpilib.units.Units.MetersPerSecond;
 import static org.wpilib.units.Units.RadiansPerSecond;
 import static org.wpilib.units.Units.Seconds;
 
+import com.google.errorprone.annotations.CheckReturnValue;
+import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import frc.robot.behavior.Gate;
 import frc.robot.behavior.Outcome;
@@ -58,6 +60,7 @@ import org.wpilib.units.measure.Time;
  * command takes over from the next loop. Each run takes a loop at least, one that ends as it starts
  * too, so a command that awaits moves in a loop goes round once a loop.
  */
+@CheckReturnValue
 public final class DriveMove implements Command {
   /**
    * How near its pose a move must come to arrive, and how still, for the dwell every move arrives
@@ -195,6 +198,36 @@ public final class DriveMove implements Command {
   }
 
   /**
+   * To a place, found for the robot's alliance as the move starts. Built before the drive has the
+   * field to find it on, it is refused as a path to a place is ({@link Refusals}); started with the
+   * alliance unknown, it ends {@link Outcome#REFUSED} as it starts.
+   *
+   * @throws IllegalArgumentException as the robot starts, if the drive has no field to find it on
+   */
+  static DriveMove goTo(Drive drive, Place place) {
+    String refused =
+        Refusals.asBuilt(
+            drive.getRegisteredScheduler(), drive.driver() == null ? Drive.NO_FIELD : null);
+    return new DriveMove(
+        drive,
+        Kind.FOLLOW,
+        "drive → " + place.name(),
+        new ChassisVelocities(),
+        null,
+        (start, moving, limits) -> {
+          if (refused != null) {
+            throw new IllegalArgumentException(refused);
+          }
+          Pose2d pose = drive.found(place);
+          return Trajectories.line(
+              start, moving, pose.getTranslation(), pose.getRotation(), limits);
+        },
+        false,
+        List.of(),
+        Double.NaN);
+  }
+
+  /**
    * A path through keyframes. One with none, or two of one name, can't be, and is refused as a
    * joint's move to a place not its own is ({@link Refusals}): thrown as the robot starts, and once
    * it runs, it ends {@link Outcome#REFUSED} as it starts, saying why.
@@ -206,16 +239,21 @@ public final class DriveMove implements Command {
     List<@Nullable String> names = new ArrayList<>();
     List<String> shown = new ArrayList<>();
     String why = path.isEmpty() ? "a path needs a keyframe: give one, Keyframe.at(pose)" : null;
+    boolean places = false;
     for (Keyframe keyframe : path) {
       if (why == null && keyframe.name() != null && names.contains(keyframe.name())) {
         why = "two keyframes are named " + keyframe.name() + ": name each once";
       }
       names.add(keyframe.name());
       shown.add(keyframe.toString());
+      places |= keyframe.place() != null;
+    }
+    if (why == null && places && drive.driver() == null) {
+      why = Drive.NO_FIELD;
     }
     String refused = Refusals.asBuilt(drive.getRegisteredScheduler(), why);
-    if (!path.isEmpty()) {
-      Pose2d end = path.get(path.size() - 1).pose();
+    if (!path.isEmpty() && path.get(path.size() - 1).pose() != null) {
+      Pose2d end = Objects.requireNonNull(path.get(path.size() - 1).pose());
       shown.set(
           shown.size() - 1,
           shown.get(shown.size() - 1)
@@ -231,7 +269,8 @@ public final class DriveMove implements Command {
             ? (start, moving, limits) -> {
               throw new IllegalArgumentException(refused);
             }
-            : (start, moving, limits) -> Trajectories.through(start, moving, path, limits),
+            : (start, moving, limits) ->
+                Trajectories.through(start, moving, drive.found(path), limits),
         false,
         Collections.unmodifiableList(names),
         Double.NaN);

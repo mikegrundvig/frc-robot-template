@@ -9,6 +9,7 @@ import static org.wpilib.units.Units.Meters;
 import com.michaelgrundvig.frc.localization.BodyMotion;
 import com.michaelgrundvig.frc.localization.OdometrySample;
 import com.michaelgrundvig.frc.localization.SwerveKinematicsModel;
+import com.michaelgrundvig.frc.world.field.Heading;
 import frc.robot.RobotSim;
 import frc.robot.Robots;
 import frc.robot.sim.DriveSimHarness;
@@ -149,6 +150,24 @@ class DriveBasicsTest {
 
       assertTrue(drive.isModuleUnconfiguredAlertActive(0));
       assertFalse(drive.isModuleUnconfiguredAlertActive(1));
+    }
+  }
+
+  /**
+   * A drivetrain the robot hasn't handed the driver's sticks has nothing to drive from: a command
+   * that needs them is refused as the robot starts, saying what to do, as any command that can't
+   * work is ({@code Refusals}).
+   */
+  @Test
+  void commandsOnTheSticksAreRefusedUntilTheRobotHandsThemOver() {
+    try (Drive drive = drive("NoSticks", hardware(new GyroIO() {}, fourModules()))) {
+      IllegalArgumentException driven = assertThrows(IllegalArgumentException.class, drive::driven);
+      IllegalArgumentException facing =
+          assertThrows(
+              IllegalArgumentException.class, () -> drive.facing(Heading.field(Rotation2d.ZERO)));
+
+      assertTrue(String.valueOf(driven.getMessage()).contains("drive.takeDriver"));
+      assertTrue(String.valueOf(facing.getMessage()).contains("drive.takeDriver"));
     }
   }
 

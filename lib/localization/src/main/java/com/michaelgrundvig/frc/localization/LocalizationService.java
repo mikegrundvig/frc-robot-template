@@ -58,9 +58,6 @@ import org.wpilib.math.util.MathUtil;
  * venue's surveyed tags and a camera that rides a joint would change what an image is solved with.
  */
 public final class LocalizationService {
-  /** Below this speed, in m/s, the robot has no direction of travel to measure a slope along. */
-  private static final double MOVING = 0.25;
-
   /**
    * On known raised ground, a tilt up to this much steeper than its slopes is still the ground's:
    * bumpers, suspension, and the IMU's mount.

@@ -12,6 +12,7 @@ import com.michaelgrundvig.frc.localization.TagDetections;
 import com.michaelgrundvig.frc.localization.VisionMeasurement;
 import com.michaelgrundvig.frc.localization.VisionResult;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.field.Terrain;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import frc.robot.RobotConfig;
@@ -22,12 +23,14 @@ import frc.robot.subsystems.drive.DriveHardware;
 import frc.robot.subsystems.localization.Localization;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 import org.jspecify.annotations.Nullable;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.system.RobotController;
 
 /**
@@ -59,6 +62,14 @@ public final class DriveSimHarness implements AutoCloseable {
   private List<FakeTagCamera> tagCameras = List.of();
   private @Nullable TagAllowlist onlyTags;
   private @Nullable Runnable eachLoop;
+
+  /** The driver's sticks, as the robot hands them to the drive: on the field's axes already. */
+  private Translation2d stick = Translation2d.ZERO;
+
+  private double turnStick;
+
+  /** The alliance the drive is told: blue unless a test says another, or none. */
+  private Optional<Alliance> alliance = Optional.of(Alliance.BLUE);
 
   /**
    * An estimator that starts with the robot exactly here, and accepts any point as on the field. It
@@ -133,6 +144,21 @@ public final class DriveSimHarness implements AutoCloseable {
             robot::drivetrain,
             scheduler,
             localization::pose);
+    drive.takeDriver(() -> stick, () -> turnStick, () -> RobotSim.FIELD, () -> alliance);
+  }
+
+  /**
+   * From now on the drive's sticks read as these (the translation stick on the field's axes, as the
+   * robot turns it for the driver, and the turn stick counterclockwise positive).
+   */
+  public void sticks(double x, double y, double turn) {
+    stick = new Translation2d(x, y);
+    turnStick = turn;
+  }
+
+  /** From now on the drive is told this alliance, or none yet. */
+  public void alliance(Optional<Alliance> alliance) {
+    this.alliance = alliance;
   }
 
   /** From now on, a camera's results reach the estimator every loop. */
@@ -194,15 +220,17 @@ public final class DriveSimHarness implements AutoCloseable {
     }
   }
 
-  /** Hold the sticks (as {@link Drive#driveWithSticks} takes them) for {@code seconds}, enabled. */
+  /** Hold the sticks (as {@link #sticks} takes them) for {@code seconds}, enabled. */
   public void drive(double seconds, double x, double y, double omega) {
     RobotSim.setEnabled(true);
-    Command driving = drive.joystickDrive(() -> x, () -> y, () -> omega);
+    sticks(x, y, omega);
+    Command driving = drive.driven();
     scheduler.schedule(driving);
     for (int i = 0; i < RobotLoop.loops(seconds); i++) {
       loop();
     }
     scheduler.cancel(driving);
+    sticks(0, 0, 0);
   }
 
   /** Run a command for {@code seconds}, enabled, the way the robot loop runs it. */

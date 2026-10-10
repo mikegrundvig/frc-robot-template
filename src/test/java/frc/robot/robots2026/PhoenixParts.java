@@ -33,7 +33,7 @@ import java.util.Optional;
 final class PhoenixParts {
   private PhoenixParts() {}
 
-  /** A TalonFX on 2611's CANivore, turning clockwise to move its joint forward, or not. */
+  /** A TalonFX on the robot's CANivore, turning clockwise to move its joint forward, or not. */
   static MechanismWiring.Device motor(int id, boolean clockwise) {
     MechanismWiring.Device talon =
         MechanismWiring.Controller.TALON_FX.can(CanBus.canivore("canivore"), id);

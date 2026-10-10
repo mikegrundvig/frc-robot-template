@@ -9,7 +9,7 @@ import com.michaelgrundvig.frc.world.config.ConfigRecord;
 
 /**
  * How the vision pipeline filters camera results and how much it trusts them. The defaults start
- * from 2611's 2026 code (itself AdvantageKit's template) and what top teams did in 2025 and 2026;
+ * from a team's 2026 code (itself AdvantageKit's template) and what top teams did in 2025 and 2026;
  * fit them from logged residuals, never from one run.
  *
  * @param maxAmbiguity a single tag's result is used only below this ambiguity (2026: 0.2)
@@ -66,7 +66,7 @@ public record VisionConfig(
     double maxReprojectionErrorForHeadingPixels,
     double mountToleranceMeters,
     double latencyMarginSeconds) {
-  /** Starting points: 2611's 2026 values where it had them, top teams' where it didn't. */
+  /** Starting points: a team's 2026 values where it had them, top teams' where it didn't. */
   public static final VisionConfig DEFAULTS =
       builder()
           .maxAmbiguity(0.2)

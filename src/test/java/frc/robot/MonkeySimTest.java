@@ -3,7 +3,8 @@ package frc.robot;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import frc.robot.examples.ExampleMonkey;
-import frc.robot.robots2026.Team2611Monkey;
+import frc.robot.robots2026.BetaMonkey;
+import frc.robot.robots2026.DeltaMonkey;
 import java.util.List;
 import java.util.stream.LongStream;
 import java.util.stream.Stream;
@@ -15,10 +16,11 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The monkey ({@link Monkey}) on the guide's robot and on 2611's 2026 robot, each with its own
- * controls: a match of random presses, sticks, commands and faults for each of a few seeds, every
- * loop checked against what must always hold. {@code -PmonkeySeeds=<count>} runs more seeds, and
- * {@code -PmonkeySeed=<seed>} runs one alone, the one a failure names (docs/testing.md).
+ * The monkey ({@link Monkey}) on the guide's robot and on a team's two 2026 robots, Beta and Delta,
+ * each with its own controls: a match of random presses, sticks, commands and faults for each of a
+ * few seeds, every loop checked against what must always hold. {@code -PmonkeySeeds=<count>} runs
+ * more seeds, and {@code -PmonkeySeed=<seed>} runs one alone, the one a failure names
+ * (docs/testing.md).
  */
 @SimulationTest
 class MonkeySimTest {
@@ -30,7 +32,8 @@ class MonkeySimTest {
 
   @RegisterExtension final RobotSim sim = new RobotSim();
 
-  static final List<Monkey.Robot> ROBOTS = List.of(ExampleMonkey.ROBOT, Team2611Monkey.ROBOT);
+  static final List<Monkey.Robot> ROBOTS =
+      List.of(ExampleMonkey.ROBOT, BetaMonkey.ROBOT, DeltaMonkey.ROBOT);
 
   /** The seeds asked for: {@code -PmonkeySeed} alone, or the first {@code -PmonkeySeeds}. */
   static LongStream seeds() {

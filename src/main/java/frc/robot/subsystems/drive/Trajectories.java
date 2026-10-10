@@ -4,6 +4,7 @@ import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
@@ -110,6 +111,11 @@ final class Trajectories {
     return new Plan(timed(points), new double[0]);
   }
 
+  /** A keyframe's pose: the path's keyframes are at poses, a place's already found. */
+  private static Pose2d fixed(Keyframe keyframe) {
+    return Objects.requireNonNull(keyframe.pose(), "a place's keyframe is found before it is used");
+  }
+
   /**
    * A smooth path through keyframes, stopping at the last: the shape a clamped cubic spline through
    * their places, leaving toward the first and arriving from the one before the last; its timing
@@ -118,6 +124,7 @@ final class Trajectories {
    * the one before, the nearer way round, on a trapezoid profile; if it hasn't faced the last when
    * it gets there, the path waits there while it does.
    *
+   * @param keyframes each at a pose: a keyframe at a place is found for the alliance first
    * @throws IllegalArgumentException if no path goes through them: one too near the one before
    */
   static Plan through(
@@ -125,7 +132,7 @@ final class Trajectories {
     Translation2d before = start.getTranslation();
     List<Translation2d> places = new ArrayList<>();
     for (Keyframe keyframe : keyframes) {
-      Translation2d place = keyframe.pose().getTranslation();
+      Translation2d place = fixed(keyframe).getTranslation();
       if (place.getDistance(before) < APART_METERS) {
         throw new IllegalArgumentException(
             String.format(
@@ -179,7 +186,7 @@ final class Trajectories {
     double[] faced = new double[places.size()];
     double was = start.getRotation().getRadians();
     for (int k = 0; k <= last; k++) {
-      was += keyframes.get(k).pose().getRotation().minus(new Rotation2d(was)).getRadians();
+      was += fixed(keyframes.get(k)).getRotation().minus(new Rotation2d(was)).getRadians();
       faced[k] = was;
     }
     TrapezoidProfile turning =

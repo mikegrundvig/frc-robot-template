@@ -18,16 +18,19 @@ rootProject.name = "frc-robot-template"
 // Pitwall, the robot program's own web page (status, actions, and live tuning): its own project, free of robot
 // code, so it can become a library teams pull in.
 include "pitwall"
-// Pitwall's documentation processor, which reads the configuration records' Javadoc as the robot program
-// compiles, so the page can say what each value means. A compiler plugin, so it's a project of its own.
-include "pitwall:docs-processor"
-// The libraries (lib/), each a project of its own only where that blocks a dependency. The world
-// model (the validation kit, the field, and the robot's definition) reads only WPILib's math, units,
-// and field layouts; localization reads the world model, and nothing of the robot program, the
-// simulator, or Pitwall; the simulation reads the world model, and nothing of the robot program,
-// localization, or Pitwall.
-include "world"
-project(":world").projectDir = file("lib/world")
+// The robot model (the validation kit, the field, and the robot's definition) is a repository of
+// its own, here as a git submodule (model/) and built from that folder as part of this build:
+// whatever asks for com.michaelgrundvig.frc:frc-robot-model gets what the folder holds, with no
+// version to bump. With it comes the documentation processor, which reads the configuration
+// records' Javadoc as each project compiles, so Pitwall's page can say what each value means. A
+// change to the model is made in that folder and committed there, then here.
+if (!file("model/settings.gradle").exists()) {
+    throw new GradleException("The robot model isn't checked out (model/ is empty). Run: git submodule update --init")
+}
+includeBuild("model")
+// The libraries (lib/), each a project of its own only where that blocks a dependency:
+// localization reads the model, and nothing of the robot program, the simulator, or Pitwall; the
+// simulation reads the model, and nothing of the robot program, localization, or Pitwall.
 include "localization"
 project(":localization").projectDir = file("lib/localization")
 include "simulation"

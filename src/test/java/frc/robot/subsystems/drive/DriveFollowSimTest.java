@@ -12,6 +12,7 @@ import frc.robot.lib.timing.RobotLoop;
 import frc.robot.sim.DriveSimHarness;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,11 +57,11 @@ class DriveFollowSimTest {
     for (; loops < RobotLoop.loops(10) && path.outcome().isEmpty(); loops++) {
       harness.loop();
       for (int k = 0; k < 2; k++) {
-        double off = truth().getTranslation().getDistance(keyframes[k].pose().getTranslation());
+        Pose2d keyframe = Objects.requireNonNull(keyframes[k].pose());
+        double off = truth().getTranslation().getDistance(keyframe.getTranslation());
         if (off < nearest[k]) {
           nearest[k] = off;
-          facingThere[k] =
-              truth().getRotation().minus(keyframes[k].pose().getRotation()).getDegrees();
+          facingThere[k] = truth().getRotation().minus(keyframe.getRotation()).getDegrees();
         }
       }
     }

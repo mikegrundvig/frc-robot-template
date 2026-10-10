@@ -17,7 +17,6 @@ import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.geometry.Translation3d;
 
 /**
  * 2024's field, CRESCENDO, kept to check that the field model can describe a real field, a mirrored
@@ -190,10 +189,6 @@ final class Crescendo {
       }
     }
     return corners;
-  }
-
-  private static Translation3d above(Translation2d spot, double height) {
-    return new Translation3d(spot.getX(), spot.getY(), height);
   }
 
   /**

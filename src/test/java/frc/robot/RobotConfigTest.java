@@ -279,7 +279,7 @@ class RobotConfigTest {
 
   /**
    * Treads said to grip harder than the slip check can tell from a collision, as a path planner's
-   * friction often is (2611's PathPlanner gives 2.255), are the robot's doubt, not a refusal: the
+   * friction often is (a team's PathPlanner gives 2.255), are the robot's doubt, not a refusal: the
    * robot starts, and says what the grip costs and what to give.
    */
   @Test

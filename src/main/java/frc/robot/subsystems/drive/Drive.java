@@ -12,21 +12,28 @@ import static org.wpilib.units.Units.RotationsPerSecond;
 import static org.wpilib.units.Units.Seconds;
 import static org.wpilib.units.Units.Volts;
 
+import com.google.errorprone.annotations.CheckReturnValue;
 import com.michaelgrundvig.frc.localization.DrivetrainReadings;
 import com.michaelgrundvig.frc.localization.ImuReadings;
 import com.michaelgrundvig.frc.localization.OdometrySample;
 import com.michaelgrundvig.frc.pitwall.Limits;
 import com.michaelgrundvig.frc.pitwall.LiveConfig;
 import com.michaelgrundvig.frc.pitwall.experiment.Rig;
+import com.michaelgrundvig.frc.world.field.Alliance;
+import com.michaelgrundvig.frc.world.field.FieldModel;
+import com.michaelgrundvig.frc.world.field.Heading;
+import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
 import com.michaelgrundvig.frc.world.robot.MechanismWiring;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import com.michaelgrundvig.frc.world.robot.SwerveWiring;
+import frc.robot.behavior.Refusals;
 import frc.robot.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.locks.Lock;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
@@ -64,8 +71,9 @@ import org.wpilib.util.Alert;
  * CTRE robot, the simulator's in the simulator ({@code frc.robot.sim}), the log in a replay. A
  * stand-in until AdvantageKit's 2027 swerve template ships: see docs/stand-ins.md.
  */
+@CheckReturnValue
 public class Drive implements Mechanism, AutoCloseable {
-  private static final double STICK_DEADBAND = 0.1;
+  static final double STICK_DEADBAND = 0.1;
 
   /**
    * Wheels that report connected but send no readings this long have lost what reads them: on a
@@ -76,6 +84,21 @@ public class Drive implements Mechanism, AutoCloseable {
   /** The wheels by name, as a steering test records them. */
   private static final List<String> WHEELS =
       List.of("Front left", "Front right", "Back left", "Back right");
+
+  /** What a refusal says when the drive hasn't been handed the driver's sticks. */
+  static final String NO_DRIVER =
+      "the drivetrain has no driver's sticks: the robot hands them over as it builds the drive,"
+          + " drive.takeDriver(...)";
+
+  /** What a move to a place says when the drive hasn't been handed the field and the alliance. */
+  static final String NO_FIELD =
+      "the drivetrain has no field or alliance to find a place on: the robot hands them over as it"
+          + " builds the drive, drive.takeDriver(...)";
+
+  /**
+   * Why a move to a place won't start before the Driver Station or the field names the alliance.
+   */
+  static final String ALLIANCE_UNKNOWN = "alliance unknown";
 
   /** No acceleration: plain velocity driving. */
   private static final ChassisAccelerations NO_ACCELERATION = new ChassisAccelerations();
@@ -112,6 +135,24 @@ public class Drive implements Mechanism, AutoCloseable {
 
   private final Supplier<Pose2d> pose;
   private final Lock odometryLock;
+
+  /**
+   * The driver's sticks, and the field and alliance the robot plays on, handed over by the robot
+   * ({@link #takeDriver}): the sticks drive it, and the field and alliance find a place for it.
+   *
+   * @param translation the driver's translation stick, turned to the field's axes
+   * @param turn the driver's turn stick, counterclockwise positive
+   * @param field the field the robot plays on
+   * @param alliance the robot's alliance, once known
+   */
+  record Driver(
+      Supplier<Translation2d> translation,
+      DoubleSupplier turn,
+      Supplier<FieldModel> field,
+      Supplier<Optional<Alliance>> alliance) {}
+
+  /** The driver's sticks and the field, once the robot has handed them over. */
+  private @Nullable Driver driver;
 
   /** The configuration the motor controllers have, and the limits taken from it. */
   private DrivetrainControl applied;
@@ -454,12 +495,28 @@ public class Drive implements Mechanism, AutoCloseable {
   }
 
   /**
+   * As {@link #goTo(Pose2d)}, to a {@link Place} written once for blue: it is found for the robot's
+   * alliance when the move starts, never when it's built, so one move is right on both. Started
+   * with the alliance unknown, it ends REFUSED, saying so.
+   *
+   * @throws IllegalArgumentException as the robot starts, if it has not been handed the field and
+   *     the alliance ({@link #takeDriver}); once it runs, a move that ends REFUSED as it starts
+   */
+  public DriveMove goTo(Place place) {
+    return DriveMove.goTo(this, place);
+  }
+
+  /**
    * Drives a smooth path from where it is through keyframes, stopping at the last, under the
    * robot's own accelerations, turning to each keyframe's heading after it passes the one before:
    * ARRIVED at the last within 2 cm and 2°, nearly still, for 40 ms. {@link DriveMove#passed} opens
    * as it passes a named one.
    *
    * {@snippet class=frc.robot.examples.PickUp region=path}
+   *
+   * <p>A keyframe at a {@link Place} ({@code Keyframe.at(place)}) is found for the robot's alliance
+   * when the path is planned, as the move starts: one path is right on both, and with the alliance
+   * unknown it ends REFUSED.
    *
    * @throws IllegalArgumentException with no keyframes, or two of one name, as the robot starts;
    *     once it runs, such a path ends REFUSED as it starts, saying why
@@ -574,23 +631,156 @@ public class Drive implements Mechanism, AutoCloseable {
   }
 
   /**
-   * Field-relative driving from sticks, for one loop. Inputs are -1..1 along the field's axes (turn
-   * the driver's stick to the field first: a red driver's forward is -x), and +omega
-   * counterclockwise. Deadband, then squared for fine control near center.
+   * Hands the drivetrain the driver's sticks, the field and the alliance, once, as the robot builds
+   * it. Every command that drives with the sticks reads them ({@link #driven}, {@link #facing}), so
+   * a team's {@code Controls} builds assisted driving without holding the sticks itself; a move to
+   * a {@link Place} finds it on the field for the alliance, when the move starts.
+   *
+   * @param translation the translation stick, turned to the field's axes: x along the field, y
+   *     across it, both -1 to 1, and forward for the driver's alliance already the way they face (a
+   *     red driver's forward is the field's -x)
+   * @param turn the turn stick, -1 to 1, counterclockwise positive
+   * @param field the field the robot plays on, read each loop (a venue can replace it)
+   * @param alliance the robot's alliance, read each loop: empty until the Driver Station or the
+   *     field says
    */
-  public void driveWithSticks(double x, double y, double omega) {
-    double linear = MathUtil.applyDeadband(Math.hypot(x, y), STICK_DEADBAND);
-    linear = Math.min(1.0, linear * linear);
-    Rotation2d direction = new Rotation2d(Math.atan2(y, x));
-    double turn = MathUtil.applyDeadband(omega, STICK_DEADBAND);
-    turn = Math.copySign(turn * turn, turn);
+  public void takeDriver(
+      Supplier<Translation2d> translation,
+      DoubleSupplier turn,
+      Supplier<FieldModel> field,
+      Supplier<Optional<Alliance>> alliance) {
+    driver = new Driver(translation, turn, field, alliance);
+  }
 
-    double speed = linear * maxLinearSpeedMps;
+  /**
+   * Drives from the driver's sticks until interrupted: field-relative, the translation stick
+   * squared past a deadband for fine control near center, the turn stick the same. The drive's
+   * default command.
+   *
+   * @throws IllegalArgumentException as the robot starts, if it has not been handed the driver's
+   *     sticks ({@link #takeDriver}); once it runs, a command that ends as it starts
+   */
+  public Command driven() {
+    Driver sticks = driver;
+    String refused = Refusals.asBuilt(scheduler, sticks == null ? NO_DRIVER : null);
+    return run(coroutine -> {
+          if (sticks == null) {
+            Logger.recordOutput("Drive/Outcome", "Drive with the sticks: REFUSED: " + refused);
+            return;
+          }
+          while (true) {
+            driveField(
+                translationFrom(sticks.translation().get()), turnFrom(sticks.turn().getAsDouble()));
+            coroutine.yield();
+          }
+        })
+        .named("Drive with the sticks");
+  }
+
+  /**
+   * Drives from the driver's translation stick as {@link #driven} does, the drivetrain holding the
+   * robot's heading on a target: a field heading, an angle from the drivers' forward, or a place
+   * ({@link Heading}). The driver takes the heading back while the turn stick is past its deadband.
+   * Runs until interrupted; {@link DriveAssist#aimed} says when it's there.
+   *
+   * <p>With the target unknown (the alliance isn't, or the robot is on the place), the robot
+   * doesn't turn, and the translation still drives.
+   *
+   * {@snippet class=frc.robot.examples.Aiming region=facing}
+   */
+  public DriveAssist facing(Heading heading) {
+    return DriveAssist.facing(this, heading);
+  }
+
+  /**
+   * Turns every wheel into an X, each perpendicular to its line to the robot's center, with the
+   * drive motors held at zero speed, until interrupted: the robot resists being pushed. Each wheel
+   * turns whichever end it points the nearer way.
+   */
+  public Command lockWheels() {
+    return run(coroutine -> {
+          while (true) {
+            for (int i = 0; i < 4; i++) {
+              Translation2d at = moduleTranslations[i];
+              double across = Math.atan2(at.getY(), at.getX()) + Math.PI / 2;
+              double turn = MathUtil.angleModulus(across - modules[i].steerAngle().getRadians());
+              modules[i].holdSteer(
+                  new Rotation2d(Math.abs(turn) > Math.PI / 2 ? across + Math.PI : across));
+            }
+            coroutine.yield();
+          }
+        })
+        .named("Lock wheels");
+  }
+
+  /** The driver, once handed over, or null before. */
+  @Nullable Driver driver() {
+    return driver;
+  }
+
+  /**
+   * A place as it is for the robot's alliance, read now: the move that asks is starting.
+   *
+   * @throws IllegalArgumentException saying why when it can't be found: the alliance isn't known,
+   *     or the drive was never handed the field
+   */
+  Pose2d found(Place place) {
+    Driver handed = driver;
+    if (handed == null) {
+      throw new IllegalArgumentException(NO_FIELD);
+    }
+    Alliance ours =
+        handed.alliance().get().orElseThrow(() -> new IllegalArgumentException(ALLIANCE_UNKNOWN));
+    return place.on(handed.field().get(), ours);
+  }
+
+  /**
+   * Each keyframe at a pose: those at a place found for the robot's alliance now (named as they
+   * were, or for the place), the rest as they are.
+   *
+   * @throws IllegalArgumentException as {@link #found(Place)} does
+   */
+  List<Keyframe> found(List<Keyframe> keyframes) {
+    List<Keyframe> fixed = new ArrayList<>();
+    for (Keyframe keyframe : keyframes) {
+      Place place = keyframe.place();
+      if (place == null) {
+        fixed.add(keyframe);
+      } else {
+        String name = keyframe.name() != null ? keyframe.name() : place.name();
+        fixed.add(Keyframe.at(found(place)).named(name));
+      }
+    }
+    return fixed;
+  }
+
+  /**
+   * A translation stick as the field-relative velocity it asks, in meters a second: past a
+   * deadband, squared for fine control near center, and scaled to the top speed.
+   */
+  Translation2d translationFrom(Translation2d stick) {
+    double linear = MathUtil.applyDeadband(stick.getNorm(), STICK_DEADBAND);
+    linear = Math.min(1.0, linear * linear);
+    return new Translation2d(
+        linear * maxLinearSpeedMps, new Rotation2d(Math.atan2(stick.getY(), stick.getX())));
+  }
+
+  /**
+   * A turn stick as the turning rate it asks, in radians a second, counterclockwise: past a
+   * deadband, squared with its sign, and scaled to the top turning rate.
+   */
+  double turnFrom(double stick) {
+    double turn = MathUtil.applyDeadband(stick, STICK_DEADBAND);
+    return Math.copySign(turn * turn, turn) * maxAngularSpeedRadPerSec;
+  }
+
+  /**
+   * Drives field-relative, for one loop, at a velocity and a turning rate already shaped: m/s on
+   * the field's axes, and rad/s counterclockwise.
+   */
+  void driveField(Translation2d velocity, double omega) {
     ChassisVelocities fieldRelative =
-        new ChassisVelocities(
-            speed * direction.getCos(),
-            speed * direction.getSin(),
-            turn * maxAngularSpeedRadPerSec);
+        new ChassisVelocities(velocity.getX(), velocity.getY(), omega);
     // Skew compensation: by the time the wheels reach their new angles the robot has already
     // rotated, so convert using the heading it is about to have.
     Rotation2d futureHeading =
@@ -665,17 +855,6 @@ public class Drive implements Mechanism, AutoCloseable {
       rig.signal(WHEELS.get(i) + " current", Amps, module::steerCurrentAmps);
     }
     return rig.requires(this).build();
-  }
-
-  /** Drive with sticks until interrupted. See {@link #driveWithSticks}. */
-  public Command joystickDrive(DoubleSupplier x, DoubleSupplier y, DoubleSupplier omega) {
-    return run(coroutine -> {
-          while (true) {
-            driveWithSticks(x.getAsDouble(), y.getAsDouble(), omega.getAsDouble());
-            coroutine.yield();
-          }
-        })
-        .named("Drive with joysticks");
   }
 
   /** The gyro's yaw, as of this loop: for calibrating against, and WPILib's odometry. */

@@ -2,6 +2,7 @@ package frc.robot.subsystems.mechanisms;
 
 import static com.michaelgrundvig.frc.world.config.Rules.possessive;
 
+import com.google.errorprone.annotations.CheckReturnValue;
 import com.michaelgrundvig.frc.world.config.Finding;
 import com.michaelgrundvig.frc.world.robot.Condition;
 import com.michaelgrundvig.frc.world.robot.Configuration;
@@ -56,6 +57,7 @@ import org.wpilib.util.Alert;
  * What it reads that's wrong, it says in alerts of its own: the sensors lost, the limit switches
  * doubted, the motor controllers drawing nothing on their channels, and a PDH that doesn't answer.
  */
+@CheckReturnValue
 public final class Joints implements AutoCloseable {
   /**
    * What the joints read and drive, made for the mode the program runs in: on a robot, the devices

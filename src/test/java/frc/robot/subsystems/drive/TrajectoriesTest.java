@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
@@ -58,7 +59,7 @@ class TrajectoriesTest {
 
     for (int k = 0; k < keyframes.size(); k++) {
       Pose2d passes = path.sampleAt(plan.passing()[k]).pose;
-      Pose2d keyframe = keyframes.get(k).pose();
+      Pose2d keyframe = Objects.requireNonNull(keyframes.get(k).pose());
       assertThat(passes.getTranslation().getDistance(keyframe.getTranslation())).isLessThan(0.001);
       assertThat(passes.getRotation().minus(keyframe.getRotation()).getDegrees())
           .as("facing keyframe %d as it passes", k)

@@ -3,6 +3,7 @@ package frc.robot.subsystems.mechanisms;
 import static org.wpilib.units.Units.Seconds;
 import static org.wpilib.units.Units.Value;
 
+import com.google.errorprone.annotations.CheckReturnValue;
 import com.michaelgrundvig.frc.world.config.Rules;
 import com.michaelgrundvig.frc.world.robot.Configuration;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -62,6 +63,7 @@ import org.wpilib.units.measure.Time;
  * refused or there already, so a command that awaits moves in a loop goes round once a loop. Its
  * requirements are exactly the joints it moves.
  */
+@CheckReturnValue
 public final class Move implements Command {
   /** What a move does. */
   private enum Kind {

@@ -6,6 +6,7 @@ import com.michaelgrundvig.frc.world.field.Place;
 import com.michaelgrundvig.frc.world.field.Placement;
 import com.michaelgrundvig.frc.world.field.Zone;
 import com.michaelgrundvig.frc.world.field.ZoneTrigger;
+import frc.robot.autos.Autos;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,9 @@ final class MatchField implements AutoCloseable {
 
   private final Map<Zone, ZoneTrigger> zones = new LinkedHashMap<>();
 
+  /** The autos, whose chosen one names the start. */
+  private final Autos autos;
+
   /** The simulator's field view: the robot, its start, and the field's places. Null in a robot. */
   private final @Nullable Field2d view;
 
@@ -72,9 +76,11 @@ final class MatchField implements AutoCloseable {
   /**
    * @param field the field the robot plays on, with its official layout
    * @param simulated whether it's the simulator, which shows the field view
+   * @param autos the robot's autos, whose chosen one names the start
    */
-  MatchField(FieldModel field, boolean simulated) {
+  MatchField(FieldModel field, boolean simulated, Autos autos) {
     this.field = field;
+    this.autos = autos;
     for (Zone zone : field.zones()) {
       zones.put(zone, new ZoneTrigger(zone, ZONE_LOOKAHEAD_SECONDS, ZONE_EXIT_MARGIN_METERS));
     }
@@ -165,10 +171,15 @@ final class MatchField implements AutoCloseable {
   }
 
   /**
-   * The start chosen for the match. Until autos choose theirs, the Driver Station's location picks
-   * it: stations 1, 2, and 3 choose the field's first, second, and third start.
+   * The start chosen for the match: the chosen auto's own, unless it's "Do nothing", which starts
+   * where the Driver Station's location says: stations 1, 2, and 3 choose the field's first,
+   * second, and third start.
    */
   private Optional<Place> chosenStart() {
+    Place autoStart = autos.chosen().start();
+    if (autoStart != null) {
+      return Optional.of(autoStart);
+    }
     List<Place> starts = field.starts();
     if (location.isEmpty() || location.getAsInt() < 1 || location.getAsInt() > starts.size()) {
       return Optional.empty();

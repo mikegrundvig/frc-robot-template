@@ -63,6 +63,7 @@ version they could have written over the clever one.
   layout
 - [docs/mechanisms.md](docs/mechanisms.md): describe a mechanism in one block, use its commands
 - [docs/driving.md](docs/driving.md): the drivetrain's moves
+- [docs/autos.md](docs/autos.md): declaring, choosing, running and checking autos
 - [docs/values.md](docs/values.md): every configuration value, what it means, and how to find yours
 - [docs/testing.md](docs/testing.md): the tests, and how to write one against the simulator
 - [docs/simulator.md](docs/simulator.md): the simulator, its faults and scenarios

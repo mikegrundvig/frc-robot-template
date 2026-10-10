@@ -16,7 +16,7 @@ import org.junit.jupiter.params.provider.MethodSource;
  * The monkey ({@link Monkey}) on a team's two 2026 robots, Beta and Delta, each with its own
  * controls: a match of random presses, sticks, commands and faults for each of a few seeds, every
  * loop checked against what must always hold. {@code -PmonkeySeeds=<count>} runs more seeds, and
- * {@code -PmonkeySeed=<seed>} runs one alone, the one a failure names (docs/testing.md).
+ * {@code -PmonkeySeed=<seed>} runs one alone, the one a failure names (runtime/docs/testing.md).
  */
 @SimulationTest
 class MonkeySimTest {

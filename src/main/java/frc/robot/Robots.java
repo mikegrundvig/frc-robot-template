@@ -15,10 +15,10 @@ import java.util.List;
  *
  * <p>The guide's robot ({@link ExampleRobot}, in the runtime) is a typical competition build, at
  * the 2026 rule maximums where the rules set one. Describe your robot here as you design and
- * measure it, starting from its blocks: docs/values.md says how to measure each value, and where
- * today's number came from. Note a measured value where it's set, as the calibration procedures do:
- * {@code .weight(Body.Weight.weighed(Pounds.of(131.2))) // measured YYYY-MM-DD: two scales, bumpers
- * and battery on}.
+ * measure it, starting from its blocks: runtime/docs/values.md says how to measure each value, and
+ * where today's number came from. Note a measured value where it's set, as the calibration
+ * procedures do: {@code .weight(Body.Weight.weighed(Pounds.of(131.2))) // measured YYYY-MM-DD: two
+ * scales, bumpers and battery on}.
  *
  * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
  * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
@@ -46,8 +46,9 @@ import java.util.List;
  * {@snippet class=com.michaelgrundvig.frc.runtime.ExampleRobot region=practice}
  *
  * <p>A team's 2026 robots are whole robots described this way ({@link BetaRobot}, with its behavior
- * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}). docs/mechanisms.md
- * says how to describe a mechanism and use its commands, and how to write a practice robot.
+ * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}).
+ * runtime/docs/mechanisms.md says how to describe a mechanism and use its commands, and how to
+ * write a practice robot.
  */
 public final class Robots {
   private Robots() {}

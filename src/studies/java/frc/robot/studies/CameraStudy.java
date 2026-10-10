@@ -25,7 +25,7 @@ import org.wpilib.fields.Fields;
 /**
  * The camera placement study: where to mount the robot's AprilTag cameras, and how many, so it
  * knows where it is anywhere on the field. Every layout is scored all over the field, and the
- * report ranks them (see docs/camera-placement.md).
+ * report ranks them (see runtime/docs/camera-placement.md).
  *
  * <pre>
  *   ./gradlew cameraStudy --args="--weights=weights.csv"
@@ -34,7 +34,7 @@ import org.wpilib.fields.Fields;
 public final class CameraStudy {
   static final String USAGE =
       """
-      Usage: ./gradlew cameraStudy --args="[options]"   (see docs/camera-placement.md)
+      Usage: ./gradlew cameraStudy --args="[options]"   (see runtime/docs/camera-placement.md)
         --robot=NAME              which of Robots.all() (default: Robots.current())
         --field=NAME              one of WPILib's Fields (default: Fields.DEFAULT_FIELD)
         --layout=FILE             a tag layout file (JSON), for a field WPILib doesn't have yet

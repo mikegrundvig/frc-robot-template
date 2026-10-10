@@ -34,11 +34,11 @@ hands the runtime that class (`Rebuilt::game`, the season's field and its venues
 4. **Check the limits.** Point `SeasonLimitsTest` at the new season's limits (`LIMITS` in its
    class), so every robot's definition is checked against the new manual.
 
-5. **Recheck the rules' numbers.** Every row of [docs/values.md](values.md) whose source is
+5. **Recheck the rules' numbers.** Every row of [runtime/docs/values.md](../runtime/docs/values.md) whose source is
    "rules" (the frame, its height, the bumpers, the mass) comes from last season's manual. Check
    each against the new one, and update `Robots.java` and the row.
 
 6. **Run `./gradlew ci`.**
 
 The camera placement study needs only the new field's tag layout, not its class: run it the day the
-field is published, so CAD has camera requirements early ([camera-placement.md](camera-placement.md)).
+field is published, so CAD has camera requirements early ([camera-placement.md](../runtime/docs/camera-placement.md)).

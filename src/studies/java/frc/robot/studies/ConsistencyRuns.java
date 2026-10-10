@@ -403,8 +403,8 @@ final class ConsistencyRuns {
     /**
      * Half the 2026 noise model, a little wider than the simulated cameras' noise: the study reads
      * a position NEES of 1.0 to 2.0 on a calibrated robot at half, and 1.3 to 2.5 at a quarter
-     * (docs/testing.md). Half was the match while the simulator stamped its images up to a loop
-     * late, which added error of its own; it stays, so the studies before and since compare.
+     * (runtime/docs/testing.md). Half was the match while the simulator stamped its images up to a
+     * loop late, which added error of its own; it stays, so the studies before and since compare.
      */
     static final double MATCHED_NOISE_SCALE = 0.5;
 

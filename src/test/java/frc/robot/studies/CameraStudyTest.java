@@ -84,7 +84,7 @@ class CameraStudyTest {
   void helpShowsTheOptions() throws IOException {
     run("--help");
 
-    assertThat(printed()).contains("--grid-meters=M").contains("docs/camera-placement.md");
+    assertThat(printed()).contains("--grid-meters=M").contains("runtime/docs/camera-placement.md");
   }
 
   /** CAD's places: every layout of up to two cameras at them, and the robot's own. */

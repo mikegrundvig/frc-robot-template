@@ -6,15 +6,14 @@
 
 // Quick mode skips the work only CI needs (static analysis, auto-formatting, coverage, and the
 // build's time in BuildConstants), which costs seconds on every save, and the slow tests
-// (@SimulationTest, @EndToEndTest) unless --tests names what to run (docs/testing.md, the fast
+// (@SimulationTest, @EndToEndTest) unless --tests names what to run (runtime/docs/testing.md, the fast
 // loop). `ci` still enforces all of it, and refuses to run in quick mode.
 def quick = project.hasProperty("quick")
 def testsNamed = gradle.startParameter.taskRequests.any { it.args.contains("--tests") }
 
 // NullAway checks the team's robot program's packages (frc.robot) and the template's own (the
-// runtime, the world model, localization, the simulation, Pitwall) in every project, so a project
-// that reads another trusts its @Nullable as its own: a library's null can't reach the robot
-// program unchecked.
+// runtime, the world model, localization, the simulation, Pitwall), so a project that reads another
+// trusts its @Nullable as its own: a library's null can't reach the robot program unchecked.
 def nullSafePackages = "frc.robot,com.michaelgrundvig.frc"
 gradle.taskGraph.whenReady { graph ->
     if (quick && graph.allTasks.any { it.name == "ci" }) {
@@ -106,7 +105,7 @@ tasks.named("javadoc", Javadoc) {
 // At most two test JVMs run at once in a build, however many tasks Gradle runs in parallel: the
 // robot program's simulation tests grow theirs to a few GB, and a test JVM beside it for each
 // project would add up on a laptop. On a computer with 8 GB, make it one: testJvms=1 in the
-// gradle.properties of your Gradle user home, or -PtestJvms=1 (docs/testing.md, memory). Not
+// gradle.properties of your Gradle user home, or -PtestJvms=1 (runtime/docs/testing.md, memory). Not
 // counted: build-logic's TestKit builds, and the robot programs ReplayEndToEndTest starts.
 def testJvmsAsked = (project.findProperty("testJvms") ?: "2").toString()
 if (!(testJvmsAsked.isInteger() && testJvmsAsked.toInteger() >= 1)) {
@@ -133,7 +132,7 @@ tasks.named("test") {
 }
 
 // --tests names tests by class or pattern, wherever they are: `./gradlew test --tests '*Arm*'` runs
-// them in whichever project has them (the robot program, the runtime, a library in lib/, Pitwall). A project
+// them in whichever project of this build has them (the robot program's). A project
 // with none of them passes, rather than failing the build as Gradle would; but if no project ran a
 // test at all, the build fails, so a misspelled name can't pass quietly (testsMatched, below).
 if (testsNamed) {
@@ -297,7 +296,7 @@ if (System.getenv("CI") == null && !quick) {
 spotless {
     lineEndings = "UNIX"
     java {
-        target "src/**/*.java", "build-logic/src/**/*.java"
+        target "src/**/*.java"
         toggleOffOn()
         // It removes unused imports itself: Spotless's removeUnusedImports() step would run its own
         // version of google-java-format, not the catalog's.
@@ -306,7 +305,7 @@ spotless {
         endWithNewline()
     }
     groovyGradle {
-        target "*.gradle", "gradle/*.gradle", "build-logic/*.gradle"
+        target "*.gradle", "gradle/*.gradle"
         greclipse(libs.versions.greclipse.get())
         leadingTabsToSpaces(4)
         trimTrailingWhitespace()
@@ -323,16 +322,19 @@ tasks.register("ci") {
     group = "verification"
     description = "Run every check CI runs: formatting, the gated build and tests, coverage."
     dependsOn "spotlessCheck", "build", "javadoc"
-    // From the top of the build, every project's checks, and the build's own plugins' (build-logic/)
-    // while the build uses one of them: removing a plugin's line drops its tests too.
+    // From the top of the build, every project's checks.
     dependsOn project.subprojects.collect { it.path + ":ci" }
-    // The plugins build-logic/ holds: add each new tool's as it's added.
-    // And the robot model's and Pitwall's own, built from model/ and pitwall/ as part of this build
-    // (settings.gradle).
+    // And the robot model's, Pitwall's and the runtime's own, built from model/, pitwall/ and
+    // runtime/ as part of this build (settings.gradle): the runtime's covers its libraries,
+    // localization and the simulation. The model and Pitwall are this build's, and the runtime
+    // uses them, so each runs once.
     if (project == rootProject) {
         dependsOn gradle.includedBuild("model").task(":ci")
         dependsOn gradle.includedBuild("pitwall").task(":ci")
+        dependsOn gradle.includedBuild("runtime").task(":ci")
     }
+    // The plugins the runtime holds (runtime/build-logic), while the build uses one of them:
+    // removing a plugin's line drops its tests too. Add each new tool's as it's added.
     def toolConfigPlugins = ["frc.advantagescope-assets"]
     if (project == rootProject && toolConfigPlugins.any { pluginManager.hasPlugin(it) }) {
         dependsOn gradle.includedBuild("build-logic").task(":ci")

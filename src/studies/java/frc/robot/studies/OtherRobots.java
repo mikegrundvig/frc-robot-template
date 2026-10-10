@@ -17,7 +17,7 @@ import org.wpilib.math.geometry.Translation3d;
  * outline of the robot being designed (its bumpers'), each placed and turned at random near the
  * robot. Nothing about any game: field elements block views too, but where they are is the game's,
  * so they're left out. A comparison under one crowded case, not a prediction (see
- * docs/camera-placement.md for what it leaves out).
+ * runtime/docs/camera-placement.md for what it leaves out).
  */
 final class OtherRobots {
   /** An FRC field has five other robots on it. */

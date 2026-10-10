@@ -2,9 +2,13 @@ pluginManagement {
     repositories {
         gradlePluginPortal()
     }
-    // The build's own plugins (build-logic/): one per tool whose files the build generates from
-    // the robot's configuration, such as AdvantageScope's robot assets.
-    includeBuild("build-logic")
+    // The runtime's plugins (runtime/build-logic): one per tool whose files the build generates
+    // from the robot's configuration, such as AdvantageScope's robot assets. A plugin that lives in
+    // an included build's own included build is found only by naming its folder here.
+    if (!file("runtime/build-logic/settings.gradle").exists()) {
+        throw new GradleException("The runtime isn't checked out (runtime/ is empty). Run: git submodule update --init")
+    }
+    includeBuild("runtime/build-logic")
 }
 
 plugins {
@@ -32,15 +36,15 @@ if (!file("model/settings.gradle").exists()) {
     throw new GradleException("The robot model isn't checked out (model/ is empty). Run: git submodule update --init")
 }
 includeBuild("model")
-// The runtime (runtime/): the robot program every robot shares, which no team writes. The team's
-// robot program, this project's root, hands it which robot this is, this season's field and what
-// the robot does; the runtime reads nothing of it, and Gradle keeps it so. It is to become a
-// repository of its own, as the model and Pitwall are.
-include "runtime"
-// The libraries (lib/), each a project of its own only where that blocks a dependency:
-// localization reads the model, and nothing of the robot program, the simulator, or Pitwall; the
-// simulation reads the model, and nothing of the robot program, localization, or Pitwall.
-include "localization"
-project(":localization").projectDir = file("lib/localization")
-include "simulation"
-project(":simulation").projectDir = file("lib/simulation")
+// The runtime (runtime/): the robot program every robot shares, which no team writes, with the
+// libraries it is made of (localization and the simulation) and the harness a team tests with. The
+// team's robot program, this project's root, hands it which robot this is, this season's field and
+// what the robot does; the runtime reads nothing of it, and Gradle keeps it so. It is a repository
+// of its own too, a git submodule built from that folder as part of this build: whatever asks for
+// com.michaelgrundvig.frc:frc-robot-runtime gets what the folder holds. It uses this build's
+// model/ and pitwall/ (above), not copies of its own, so a checkout needs no recursive submodule
+// initialization.
+if (!file("runtime/settings.gradle").exists()) {
+    throw new GradleException("The runtime isn't checked out (runtime/ is empty). Run: git submodule update --init")
+}
+includeBuild("runtime")

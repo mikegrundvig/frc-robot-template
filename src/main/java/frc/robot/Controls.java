@@ -13,7 +13,7 @@ import org.wpilib.command3.Scheduler;
  * bindings, in this one class. It's yours: the template never changes it, so its updates never
  * collide with your code. The robot builds it once, after its mechanisms, with everything behavior
  * reaches; write each command as a method, and bind it in the constructor, as on any v3 gamepad.
- * docs/mechanisms.md, "Where behavior goes", has a robot's:
+ * runtime/docs/mechanisms.md, "Where behavior goes", has a robot's:
  *
  * {@snippet class=com.michaelgrundvig.frc.runtime.examples.Controls region=constructor}
  *
@@ -23,12 +23,12 @@ import org.wpilib.command3.Scheduler;
  * its heading: the template binds those itself ({@link RobotContainer}). The drive's other commands
  * use the same sticks, so a button binds them as it binds anything: {@code drive.facing(heading)}
  * drives with the sticks while the robot holds a heading, and {@code drive.lockWheels()} turns the
- * wheels into an X (docs/driving.md).
+ * wheels into an X (runtime/docs/driving.md).
  *
  * <p>Autos are declared here too: {@code autos.add("Left Double", start, this::leftDouble)} gives
  * the pit a choice, and the robot runs the chosen one's command, made fresh, when autonomous
  * starts. The robot adds "Do nothing" itself and starts with it chosen; a robot that declares
- * nothing has only that (docs/autos.md).
+ * nothing has only that (runtime/docs/autos.md).
  */
 public final class Controls {
   /**
@@ -41,7 +41,8 @@ public final class Controls {
    * @param joints every driven joint's mechanism, by its joint, {@code joints.of(PIVOT)}, and a
    *     gate on anything the model says, a sensor's reading included: {@code joints.gate("coral in
    *     claw", CLAW_BEAM.tripped())}
-   * @param drive the drivetrain, with its moves, assisted driving and wheel lock (docs/driving.md)
+   * @param drive the drivetrain, with its moves, assisted driving and wheel lock
+   *     (runtime/docs/driving.md)
    * @param driver the driver's gamepad, port 0
    * @param operator the operator's gamepad, port 1
    * @param autos the robot's autos: declare each with {@code autos.add(name, start, factory)}, the
@@ -56,6 +57,6 @@ public final class Controls {
       RecordingGamepad operator,
       Autos autos) {
     // Nothing is bound: the guide's robot's joints idle, held where they rest, its rollers still,
-    // until you bind your robot's commands here. docs/mechanisms.md shows the guide's.
+    // until you bind your robot's commands here. runtime/docs/mechanisms.md shows the guide's.
   }
 }

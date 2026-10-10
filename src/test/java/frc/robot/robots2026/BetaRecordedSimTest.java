@@ -30,7 +30,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * with the pivot and the shooter on SPARKs; and a session in the simulator, the pivot seeded from
  * its encoder and, again, its loop closed on it. Both must come out as recorded: a change meant to
  * change neither is shown to change nothing. When a change is meant to move them, record them again
- * with {@code GOLDEN_UPDATE=1} and say why they moved (docs/testing.md).
+ * with {@code GOLDEN_UPDATE=1} and say why they moved (runtime/docs/testing.md).
  */
 @SimulationTest
 @ExtendWith(RobotSim.class)

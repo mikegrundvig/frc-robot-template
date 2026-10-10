@@ -15,8 +15,8 @@ import org.wpilib.math.geometry.Transform3d;
  * How the cameras and the robot err in one scoring of the field: what isn't known until the robot
  * is built and its cameras measured. The nominal conditions are the study's settings, which start
  * from the simulator's own. A robustness run also draws many conditions from the plausible ranges
- * below, and ranks layouts by how they do in the worst of them (see docs/camera-placement.md, which
- * gives each range's reason).
+ * below, and ranks layouts by how they do in the worst of them (see
+ * runtime/docs/camera-placement.md, which gives each range's reason).
  *
  * @param seed where this scoring's random draws start
  * @param cornerNoiseMeanPixels how far each tag corner lands from where a perfect camera would put
@@ -51,7 +51,7 @@ public record Conditions(
     }
   }
 
-  // The plausible ranges, each explained in docs/camera-placement.md ("Robustness").
+  // The plausible ranges, each explained in runtime/docs/camera-placement.md ("Robustness").
   static final Range CORNER_NOISE_PIXELS = new Range(0.1, 0.6);
   static final Range SIGHT_METERS = new Range(5, 7);
   static final Range GYRO_ERROR_DEGREES = new Range(0.1, 0.5);

@@ -1,0 +1,59 @@
+// The runtime (runtime/) is built and tested against one GradleRIO (WPILib) version and one set of
+// vendor libraries, in its own build (runtime/gradle/libs.versions.toml, runtime/vendordeps/). The
+// robot program runs the runtime with its own: a robot that mixes versions fails to build or, worse,
+// misbehaves on the robot. So the build compares them, and fails when they differ.
+//
+// Compared: GradleRIO's version, and for each vendor library in runtime/vendordeps/ the file here
+// with the same uuid, which must have the same version. A vendor library only this program uses
+// is left alone.
+
+def runtimeCatalog = file("runtime/gradle/libs.versions.toml")
+def runtimeVendordeps = fileTree("runtime/vendordeps") { include "*.json" }
+def ourVendordeps = fileTree("vendordeps") { include "*.json" }
+def ourGradleRio = libs.versions.gradlerio.get()
+
+def checkRuntimeVersions = tasks.register("checkRuntimeVersions") {
+    group = "verification"
+    description = "Fail if GradleRIO or a vendor library has a different version than in the runtime."
+    inputs.file(runtimeCatalog).withPropertyName("runtimeCatalog")
+    inputs.files(runtimeVendordeps).withPropertyName("runtimeVendordeps")
+    inputs.files(ourVendordeps).withPropertyName("vendordeps")
+    inputs.property("gradlerio", ourGradleRio)
+    // Nothing to keep: the check is the work.
+    outputs.upToDateWhen { false }
+    doLast {
+        def problems = []
+        def runtimeGradleRio = (runtimeCatalog.text =~ /(?m)^\s*gradlerio\s*=\s*"([^"]+)"/).with { it.find() ? it.group(1) : null }
+        if (runtimeGradleRio == null) {
+            throw new GradleException("runtime/gradle/libs.versions.toml has no gradlerio version: the check needs it")
+        }
+        if (runtimeGradleRio != ourGradleRio) {
+            problems << "GradleRIO (WPILib): this build uses ${ourGradleRio} (gradle/libs.versions.toml), the runtime ${runtimeGradleRio} (runtime/gradle/libs.versions.toml)"
+        }
+        def slurper = new groovy.json.JsonSlurper()
+        def ours = [:]
+        ourVendordeps.files.each { File f ->
+            def json = slurper.parse(f)
+            ours[json.uuid] = [name: json.name, version: json.version, file: f.name]
+        }
+        runtimeVendordeps.files.sort { it.name }.each { File f ->
+            def json = slurper.parse(f)
+            def mine = ours[json.uuid]
+            if (mine == null) {
+                problems << "${json.name} ${json.version}: the runtime has it (runtime/vendordeps/${f.name}) and this build doesn't (vendordeps/)"
+            } else if (mine.version != json.version) {
+                problems << "${json.name}: this build uses ${mine.version} (vendordeps/${mine.file}), the runtime ${json.version} (runtime/vendordeps/${f.name})"
+            }
+        }
+        if (problems) {
+            throw new GradleException(
+            "The runtime was built against other versions of WPILib's libraries than this build uses:\n  - "
+            + problems.join("\n  - ")
+            + "\nUpgrade both together: set this build's versions to the runtime's, or move runtime/ to the commit made for"
+            + " these (docs/upgrading.md, The runtime).")
+        }
+    }
+}
+tasks.named("check") {
+    dependsOn checkRuntimeVersions
+}

@@ -21,7 +21,7 @@ import org.jspecify.annotations.Nullable;
  * The estimator consistency study: does the pose estimator's uncertainty tell the truth? The whole
  * simulated robot, cameras and all, goes through each run ({@link ConsistencyRuns}) once per seed,
  * and every loop's estimate is compared with the truth the simulator knows ({@link Consistency}).
- * See docs/testing.md.
+ * See runtime/docs/testing.md.
  *
  * <pre>
  *   ./gradlew consistencyStudy
@@ -31,7 +31,7 @@ import org.jspecify.annotations.Nullable;
 public final class ConsistencyStudy {
   static final String USAGE =
       """
-      Usage: ./gradlew consistencyStudy --args="[options]"   (see docs/testing.md)
+      Usage: ./gradlew consistencyStudy --args="[options]"   (see runtime/docs/testing.md)
         --runs=A,B,...            which runs (default: all of them)
         --seeds=N                 runs of each, each with its own noise and mounts (default 12)
         --seed=N                  the first seed (default 1)
@@ -276,7 +276,7 @@ public final class ConsistencyStudy {
             below the band (%.2f to %.2f for position, %.2f to %.2f for heading, averaged over %d
             runs), and at most 0.1%% of loops outside the claimed covariance's 99.9%% ellipse
             (position NEES past 13.8) or past %s σ along its long axis, give or take what that many
-            loops allow (docs/testing.md).
+            loops allow (runtime/docs/testing.md).
 
             | Run | NEES (2) | Above, below | Heading NEES (1) | Above, below | Outside the ellipse \
             | Past %s σ | Allowed | Worst | Mean error | Worst error | Heading error | Claimed σ |

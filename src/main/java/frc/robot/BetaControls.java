@@ -39,11 +39,11 @@ import org.wpilib.math.geometry.Rotation2d;
  * speed would come from their shot law; here it's one speed.
  *
  * <p>Two of their autos are ported, Left Single and Left Double, declared in the constructor for
- * the pit to choose ({@code docs/autos.md}). Their paths are the drive's, {@code drive.follow}
- * through places written once for blue (the path files' anchor points, in meters; the headings are
- * their rotation targets at each anchor, to the nearest 5°), so each is right on both alliances.
- * Their Right autos are not ported: the files' Right paths are hand-drawn, not mirrors of the Left
- * ones.
+ * the pit to choose ({@code runtime/docs/autos.md}). Their paths are the drive's, {@code
+ * drive.follow} through places written once for blue (the path files' anchor points, in meters; the
+ * headings are their rotation targets at each anchor, to the nearest 5°), so each is right on both
+ * alliances. Their Right autos are not ported: the files' Right paths are hand-drawn, not mirrors
+ * of the Left ones.
  */
 public final class BetaControls {
   /** The shooter's speed for every shot, standing in for their shot law. */

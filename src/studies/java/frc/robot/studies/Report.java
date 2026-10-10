@@ -69,7 +69,7 @@ final class Report {
             + " the robot standing still: smaller is better, errors that round to the same"
             + " millimeter tie, and a tie goes to fewer cameras. *None* means more than 5% of the"
             + " field gets no measurement at all."
-            + " Every score is explained in docs/camera-placement.md.\n");
+            + " Every score is explained in runtime/docs/camera-placement.md.\n");
 
     md.append("\n## The best\n\n").append(HEADER);
     for (int i = 0; i < Math.min(TOP, ranking.size()); i++) {
@@ -112,7 +112,7 @@ final class Report {
     md.append(
         format(
             "%n*Ranked by* the worst of %d trials' 95%% error, each trial's conditions drawn from"
-                + " the plausible ranges in docs/camera-placement.md: smaller is better, errors"
+                + " the plausible ranges in runtime/docs/camera-placement.md: smaller is better, errors"
                 + " that round to the same millimeter tie, and a tie goes to fewer cameras. *None*"
                 + " means more than 5%% of the field went unmeasured in some trial; those rank"
                 + " after the rest, by the least of the field they placed within 5 cm.%n%n",

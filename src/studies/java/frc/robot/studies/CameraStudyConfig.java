@@ -13,7 +13,7 @@ import frc.robot.Robots;
 
 /**
  * How the camera placement study samples the field, how the cameras and robot err, and how it
- * judges what the cameras see (see docs/camera-placement.md).
+ * judges what the cameras see (see runtime/docs/camera-placement.md).
  *
  * @param gridMeters how far apart the robot positions are, both ways
  * @param headings how many headings the robot takes at each position, evenly spaced

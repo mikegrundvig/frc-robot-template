@@ -1,6 +1,6 @@
 // Simulation: ./gradlew run starts the robot program in the simulator, driven from the Pitwall
 // page's Sim view (http://localhost:5820/#sim): the Driver Station, the keyboard and gamepads,
-// pausing and stepping, Stop, and failing the robot's parts (docs/simulator.md). WPILib's
+// pausing and stepping, Stop, and failing the robot's parts (runtime/docs/simulator.md). WPILib's
 // simulator GUI is off unless asked for with -Pgui; while it's open it overwrites the page's
 // joysticks every frame. A real Driver Station can connect to the simulator either way.
 //

@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
  * estimator that's grossly wrong about its own uncertainty, not a verdict on how honest it is. Each
  * seed draws its errors as the estimator's configuration claims them ({@link
  * ConsistencyRuns.Setup#MATCHED}): its cameras off their mounts, its tags off the layout, its
- * gyro's scale off, and the vision noise model as the simulated cameras are. See docs/testing.md.
+ * gyro's scale off, and the vision noise model as the simulated cameras are. See
+ * runtime/docs/testing.md.
  *
  * <p>Those draws are guesses until cameras, IMUs and fields are measured, so this test never pins
  * an exact NEES or an ellipse share: a number that moves when a guess moves would fail every change

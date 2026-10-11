@@ -38,26 +38,30 @@ class BetaRecordedSimTest {
   /** The pivot's loop closed on its duty-cycle encoder, on the robot, each loop. */
   private static RobotDefinition closed() {
     return BetaRobot.ROBOT.with(
-        BetaRobot.PIVOT.encoderOn(
-            MechanismWiring.PortEncoder.dutyCycle(1)
-                .offset(Degrees.of(-296))
-                .inverted()
-                .closesLoop()));
+        BetaRobot.PIVOT.absoluteEncoder(
+            encoder ->
+                encoder.on(
+                    MechanismWiring.PortEncoder.dutyCycle(1)
+                        .offset(Degrees.of(-296))
+                        .inverted()
+                        .closesLoop())));
   }
 
   /** The pivot on a NEO on a SPARK MAX, and the shooter on four Vortexes on SPARK Flexes. */
   private static RobotDefinition sparks() {
     Joint.Revolute pivot =
-        unmotored(BetaRobot.PIVOT).motor(Motor.NEO, Gearing.of(25), SPARK_MAX.can(32).clockwise());
+        unmotored(BetaRobot.PIVOT)
+            .motors(Motor.NEO.through(Gearing.of(25)).on(SPARK_MAX.can(32).clockwise()));
     Joint.Revolute shooter =
         unmotored(BetaRobot.SHOOTER)
             .motors(
-                Motor.NEO_VORTEX,
-                Gearing.of(1),
-                SPARK_FLEX.can(41),
-                SPARK_FLEX.can(42),
-                SPARK_FLEX.can(43).clockwise(),
-                SPARK_FLEX.can(44).clockwise());
+                Motor.NEO_VORTEX
+                    .through(Gearing.of(1))
+                    .on(
+                        SPARK_FLEX.can(41),
+                        SPARK_FLEX.can(42),
+                        SPARK_FLEX.can(43).clockwise(),
+                        SPARK_FLEX.can(44).clockwise()));
     return BetaRobot.ROBOT.with(pivot, shooter);
   }
 

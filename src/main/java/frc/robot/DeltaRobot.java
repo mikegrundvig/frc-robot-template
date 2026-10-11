@@ -336,7 +336,7 @@ public final class DeltaRobot {
           .carries(Link.box("intake arm", point(0, 0, 0.2), point(0.05, 0.55, 0.36)))
           .positions(PIVOT_IN, PIVOT_OUT)
           .outputs(PIVOT_SWINGING_OUT, PIVOT_SWINGING_IN)
-          .motor(Motor.KRAKEN_X60, Gearing.of(25), TALON_FX.can(32).clockwise())
+          .motors(Motor.KRAKEN_X60.through(Gearing.of(25)).on(TALON_FX.can(32).clockwise()))
           .absoluteEncoder(MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(100)))
           .control(
               MechanismControl.position(30)
@@ -366,7 +366,10 @@ public final class DeltaRobot {
       Joint.roller("intake", PIVOT, point(0, 0, 0.35))
           .carries(Link.box("intake roller", point(0, 0, 0), point(0.05, 0.5, 0.05)))
           .outputs(INTAKING, OUTTAKING)
-          .motors(Motor.KRAKEN_X60, Gearing.of(2), TALON_FX.can(31), TALON_FX.can(33).clockwise())
+          .motors(
+              Motor.KRAKEN_X60
+                  .through(Gearing.of(2))
+                  .on(TALON_FX.can(31), TALON_FX.can(33).clockwise()))
           .runsOnlyWhen(PIVOT.atLeast(PIVOT_RUN_ANGLE))
           .control(
               MechanismControl.velocity(0.02)
@@ -385,12 +388,13 @@ public final class DeltaRobot {
       Joint.roller("shooter", Part.CHASSIS, point(-0.2, 0, 18.33 * IN))
           .carries(Link.box("shooter wheels", point(0, 0, 0), point(0.076, 0.5, 0.076)))
           .motors(
-              Motor.KRAKEN_X60,
-              Gearing.of(1),
-              TALON_FX.can(43).clockwise(),
-              TALON_FX.can(44).clockwise(),
-              TALON_FX.can(41),
-              TALON_FX.can(42))
+              Motor.KRAKEN_X60
+                  .through(Gearing.of(1))
+                  .on(
+                      TALON_FX.can(43).clockwise(),
+                      TALON_FX.can(44).clockwise(),
+                      TALON_FX.can(41),
+                      TALON_FX.can(42)))
           .control(
               MechanismControl.velocity(0.02)
                   .withStatorLimit(Amps.of(40))
@@ -414,7 +418,7 @@ public final class DeltaRobot {
       Joint.roller("full send", Part.CHASSIS, point(-0.1, 0, 0.35))
           .carries(Link.box("full send rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)))
           .outputs(FULL_SEND_FEEDING, FULL_SEND_UNJAMMING)
-          .motor(Motor.KRAKEN_X60, Gearing.of(4), TALON_FX.can(60).clockwise())
+          .motors(Motor.KRAKEN_X60.through(Gearing.of(4)).on(TALON_FX.can(60).clockwise()))
           .control(
               MechanismControl.velocity(0.02)
                   .withStatorLimit(Amps.of(50))
@@ -438,7 +442,7 @@ public final class DeltaRobot {
       Joint.roller("transition", Part.CHASSIS, point(0, 0, 0.15))
           .carries(Link.box("transition rollers", point(0, 0, 0), point(0.05, 0.4, 0.05)))
           .outputs(TRANSITION_FEEDING, TRANSITION_UNJAMMING)
-          .motor(Motor.KRAKEN_X60, Gearing.of(2), TALON_FX.can(52).clockwise())
+          .motors(Motor.KRAKEN_X60.through(Gearing.of(2)).on(TALON_FX.can(52).clockwise()))
           .control(
               MechanismControl.velocity(0.02)
                   .withStatorLimit(Amps.of(60))

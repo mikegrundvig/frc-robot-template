@@ -39,23 +39,29 @@ class DeltaRecordedSimTest {
   /** The pivot's loop closed on its duty-cycle encoder, on the robot, each loop. */
   private static RobotDefinition closed() {
     return DeltaRobot.ROBOT.with(
-        DeltaRobot.PIVOT.encoderOn(
-            MechanismWiring.PortEncoder.dutyCycle(1).offset(Degrees.of(100)).closesLoop()));
+        DeltaRobot.PIVOT.absoluteEncoder(
+            encoder ->
+                encoder.on(
+                    MechanismWiring.PortEncoder.dutyCycle(1)
+                        .offset(Degrees.of(100))
+                        .closesLoop())));
   }
 
   /** The pivot on a NEO on a SPARK MAX, and the shooter on four Vortexes on SPARK Flexes. */
   private static RobotDefinition sparks() {
     Joint.Revolute pivot =
-        unmotored(DeltaRobot.PIVOT).motor(Motor.NEO, Gearing.of(25), SPARK_MAX.can(32).clockwise());
+        unmotored(DeltaRobot.PIVOT)
+            .motors(Motor.NEO.through(Gearing.of(25)).on(SPARK_MAX.can(32).clockwise()));
     Joint.Revolute shooter =
         unmotored(DeltaRobot.SHOOTER)
             .motors(
-                Motor.NEO_VORTEX,
-                Gearing.of(1),
-                SPARK_FLEX.can(43).clockwise(),
-                SPARK_FLEX.can(44).clockwise(),
-                SPARK_FLEX.can(41),
-                SPARK_FLEX.can(42));
+                Motor.NEO_VORTEX
+                    .through(Gearing.of(1))
+                    .on(
+                        SPARK_FLEX.can(43).clockwise(),
+                        SPARK_FLEX.can(44).clockwise(),
+                        SPARK_FLEX.can(41),
+                        SPARK_FLEX.can(42)));
     return DeltaRobot.ROBOT.with(pivot, shooter);
   }
 

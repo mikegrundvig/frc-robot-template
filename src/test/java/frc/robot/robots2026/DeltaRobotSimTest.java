@@ -247,8 +247,8 @@ class DeltaRobotSimTest {
           .as("B on " + station)
           .isCloseTo(0, within(2.0));
       for (int i = 0; i < 4; i++) {
-        double across = Math.toDegrees(Math.atan2(wheels[i].getY(), wheels[i].getX())) + 90;
-        assertThat(Math.IEEEremainder(angles[i].angle.getDegrees() - across, 180))
+        double towardCenter = Math.toDegrees(Math.atan2(wheels[i].getY(), wheels[i].getX()));
+        assertThat(Math.IEEEremainder(angles[i].angle.getDegrees() - towardCenter, 180))
             .as("wheel " + i + " on " + station)
             .isCloseTo(0, within(2.0));
       }

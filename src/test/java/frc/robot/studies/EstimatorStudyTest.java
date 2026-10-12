@@ -3,6 +3,7 @@ package frc.robot.studies;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.runtime.SimulationTest;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -12,8 +13,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.wpilib.math.geometry.Pose2d;
+import org.wpilib.math.geometry.Rotation2d;
 
 /**
  * The estimator study runs, and it feeds WPILib's estimator rightly: with wheels and IMUs exactly
@@ -69,6 +73,71 @@ class EstimatorStudyTest {
     }
   }
 
+  /**
+   * The held-out scenarios whose errors are the study's own play through: a range error every
+   * camera shares moves what every estimator is given, and a robot with two cameras unplugged is
+   * handed fewer measurements. The robot's own estimator says how sure it is, so how often its
+   * error was past its claim is a share; WPILib's claims nothing.
+   */
+  @Test
+  void theHeldOutScenariosPlay() {
+    EstimatorRuns.Played clean = EstimatorRuns.play(EstimatorScenarios.named("clean"), 2);
+    for (String name :
+        List.of("held-camera-range-bias", "held-camera-noise-shared", "held-two-cameras")) {
+      EstimatorRuns.Played played = EstimatorRuns.play(EstimatorScenarios.named(name), 2);
+
+      EstimatorScores.Measures ours = of(played, "A");
+      assertThat(ours.rmsMeters()).as(name).isFinite();
+      assertThat(ours.positionBeyondClaim()).as(name).isBetween(0.0, 1.0);
+      assertThat(ours.headingBeyondClaim()).as(name).isBetween(0.0, 1.0);
+      assertThat(of(played, "C").positionBeyondClaim()).as(name).isNaN();
+      // Unfiltered, WPILib's estimator shows what the cameras sent most plainly.
+      assertThat(of(played, "D").rmsMeters())
+          .as(name + ": the cameras' images differ from the clean run's")
+          .isNotEqualTo(of(clean, "D").rmsMeters());
+    }
+    assertThat(EstimatorRuns.play(EstimatorScenarios.named("held-two-cameras"), 2).oursOffered())
+        .as("measurements from two cameras")
+        .isLessThan(clean.oursOffered());
+    assertThat(EstimatorScenarios.HELD_OUT)
+        .allSatisfy(scenario -> assertThat(scenario.name()).startsWith("held-"))
+        .noneMatch(EstimatorScenarios.ALL::contains);
+  }
+
+  private static EstimatorScores.Measures of(EstimatorRuns.Played played, String contender) {
+    return Objects.requireNonNull(played.measures().get(contender), contender);
+  }
+
+  /** An error is past its claim when it lies outside the claimed covariance's 95% ellipse. */
+  @Test
+  void anErrorIsPastItsClaimOutsideTheClaimedEllipse() {
+    EstimatorScores.Track track = new EstimatorScores.Track();
+    Pose2d truth = Pose2d.ZERO;
+    // Claimed: 1 cm along x, 10 cm along y, a degree of heading. The bound is 2.45 of them.
+    PoseCovariance claimed = PoseCovariance.fromStdDevs(0.01, 0.10, Math.toRadians(1));
+    track.add(new Pose2d(0.02, 0.0, Rotation2d.fromDegrees(1.9)), truth, claimed);
+    track.add(new Pose2d(0.03, 0.0, Rotation2d.fromDegrees(2.1)), truth, claimed);
+    track.add(new Pose2d(0.0, 0.20, Rotation2d.fromDegrees(-2.1)), truth, claimed);
+    track.add(new Pose2d(0.0, 0.30, Rotation2d.ZERO), truth, claimed);
+
+    assertThat(track.positionBeyondClaim(0)).isFalse();
+    assertThat(track.positionBeyondClaim(1)).isTrue();
+    assertThat(track.positionBeyondClaim(2)).isFalse();
+    assertThat(track.positionBeyondClaim(3)).isTrue();
+    assertThat(track.headingBeyondClaim(0)).isFalse();
+    assertThat(track.headingBeyondClaim(1)).isTrue();
+    assertThat(track.headingBeyondClaim(2)).isTrue();
+    EstimatorScores.Measures measures = EstimatorScores.measure(track, new EstimatorScores.Marks());
+    assertThat(measures.positionBeyondClaim()).isEqualTo(0.5);
+    assertThat(measures.headingBeyondClaim()).isEqualTo(0.5);
+
+    // An estimator that claims nothing has no share to report.
+    EstimatorScores.Track silent = new EstimatorScores.Track();
+    silent.add(new Pose2d(1, 0, Rotation2d.ZERO), truth);
+    assertThat(EstimatorScores.measure(silent, new EstimatorScores.Marks()).positionBeyondClaim())
+        .isNaN();
+  }
+
   @Test
   void aRunWritesItsResults() throws IOException {
     run("--scenarios=ideal,shove", "--seeds=2", "--seed=3", "--trace", "--cost", "--out=" + folder);
@@ -91,6 +160,7 @@ class EstimatorStudyTest {
         .contains("2 seeds of each scenario, seeds 3 to 4")
         .contains("## Verdicts: A against C")
         .contains("| shove |")
+        .contains("## Whether A's uncertainty tells the truth")
         .contains("## ideal");
     assertThat(printed()).contains("ideal ").contains("cost per loop").contains("summary.md");
 
@@ -107,7 +177,7 @@ class EstimatorStudyTest {
     run("--help");
     assertThat(printed()).startsWith("Usage: ./gradlew estimatorStudy");
     run("--list");
-    assertThat(printed()).contains("clean-match").contains("tag 26 at");
+    assertThat(printed()).contains("clean-match").contains("held-fast").contains("tag 26 at");
 
     assertThatThrownBy(() -> run("--grid=1")).hasMessageContaining("not an option");
     assertThatThrownBy(() -> run("--scenarios=dancing")).hasMessageContaining("The scenarios:");

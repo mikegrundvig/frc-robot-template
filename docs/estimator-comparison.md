@@ -15,6 +15,7 @@ in how WPILib's estimator is fed.
 ./gradlew estimatorStudy --args="--scenarios=clean,shove --seeds=50"
 ./gradlew estimatorStudy --args="--list"                         the scenarios, and the field's tags
 ./gradlew estimatorStudy --args="--trace --cost"                 loop-by-loop traces, and each estimator's cost
+./gradlew estimatorStudy --args="--holdout --seed=101"           the held-out set, on seeds of its own
 ```
 
 Every scenario at 20 seeds is 820 simulated robots, more than one program's memory holds under a
@@ -116,6 +117,24 @@ clean match with each camera a little off its mount and each tag a little off th
 that repeat, and that cameras share), with those doubled, with the tags alone off, with the mounts
 alone off, and with 2% of every camera's images flipped (errors with long tails).
 
+## The held-out set
+
+The scenarios above are the tuning set: the estimator was changed while looking at them. A second
+set, behind `--holdout`, was written before any of those changes and looked at only twice: once
+on the unchanged estimator, and once after the last change, with nothing adjusted afterwards. Its
+19 scenarios are variations the tuning set does not have:
+
+- the gyro's scale off by 1%, by 6%, and low instead of high, and a drift of 30° a minute;
+- a camera turned on its mount by 1.5° and by 6° in yaw, and by 3° in pitch;
+- a camera's clock off by 10 ms and by 40 ms;
+- two faults at once: the gyro's scale with a knocked camera, and a clock off on low grip;
+- cameras that all read their tags' range a little long, and cameras whose noise is shared;
+- two cameras in place of four, a faster route, and a route far from the tags;
+- the clean match with the mounts off, the tags off, and 5% of images flipped.
+
+It runs on seeds 101 to 120, which no tuning run used. A result on the held-out set says more than
+one on the tuning set, and the results below say which is which.
+
 ## The measures
 
 For each estimator in each run, against the true pose, over every loop from the first:
@@ -128,6 +147,11 @@ For each estimator in each run, against the true pose, over every loop from the 
   driver, or an auto-align, feels);
 - the error at rest, over the last half second of each stop near a tag and far from tags.
 
+For A alone, which reports its uncertainty, the study also counts the share of loops where the
+true error was past the estimate's own 95% bound, for position and for heading. An honest estimate
+is past it in about 5% of loops. This is how the study checks that an estimate has not grown surer
+than it is.
+
 The report gives each as its median across the seeds with the interquartile range. A verdict of
 "same" means two medians differ by less than the wider interquartile range. The seeds change only
 the sensors' noise, so that range is narrow: read the size of a difference, not only its verdict.
@@ -135,6 +159,88 @@ the sensors' noise, so that range is narrow: read the size of a difference, not 
 `--cost` plays one run's inputs again into a fresh estimator of each kind, alone on the thread, and
 gives each loop's time and the bytes it allocated. A is timed from its drivetrain readings to its
 update, given its pipeline's measurements; B the same; C and D with solving their images.
+
+## What it found
+
+These are the results of the study as it stands, 20 seeds a scenario. Ours is A. WPILib's is
+`C.003n2`, the tuning of C chosen before the comparison. Five measures are compared in each
+scenario: the position error's RMS, the heading error's RMS, the error at rest near a tag, the
+largest jump, and the time to recover. Two medians count as the same when they are within 1 cm
+and 0.2°, or within the seeds' spread where that is wider.
+
+| | Ours ahead | The same | WPILib's ahead |
+|---|---|---|---|
+| Tuning set, 41 scenarios, 195 comparisons | 50 | 136 | 9 |
+| Held-out set, 19 scenarios, 87 comparisons | 17 | 69 | 1 |
+
+Before the estimator corrected its gyro and watched its cameras, the same counts were 44, 128 and
+23 on the tuning set, and 10, 52 and 25 on the held-out set.
+
+Position error, RMS, on the tuning set:
+
+| Scenario | Ours | WPILib's |
+|---|---|---|
+| Clean driving, short route | 0.5 cm | 0.8 cm |
+| Clean driving, full match | 0.7 cm | 1.4 cm |
+| A camera misreading a tag, repeatedly | 0.6 cm | 2.2 cm |
+| A camera frozen on an old image | 0.5 cm | 13.7 cm |
+| Low grip | 2.0 cm | 6.2 cm |
+| A stale wheel encoder | 1.9 cm | 3.9 cm |
+| Gyro reading 3% high | 0.6 cm | 0.8 cm |
+| A camera knocked on its mount | 1.0 cm | 1.0 cm |
+| A camera's clock 20 ms off | 0.8 cm | 0.8 cm |
+| Carried while disabled | 12.6 cm | 19.0 cm |
+| A match with several faults in a row | 4.3 cm | 4.0 cm |
+
+And on the held-out set:
+
+| Scenario | Ours | WPILib's |
+|---|---|---|
+| Gyro reading 1% high | 0.5 cm | 0.8 cm |
+| Gyro reading 6% high | 0.7 cm | 0.9 cm |
+| Gyro reading low | 0.6 cm | 0.8 cm |
+| Gyro drifting 30° a minute | 0.6 cm | 0.8 cm |
+| A camera turned 1.5° on its mount | 1.7 cm | 0.8 cm |
+| A camera turned 6° on its mount | 0.8 cm | 1.3 cm |
+| A camera pitched 3° on its mount | 0.8 cm | 1.0 cm |
+| A camera's clock 10 ms off | 0.9 cm | 0.7 cm |
+| A camera's clock 40 ms off | 1.0 cm | 0.9 cm |
+| Gyro reading high and a camera knocked | 1.1 cm | 1.1 cm |
+| A clock off, on low grip | 2.6 cm | 6.1 cm |
+| Every camera reading range long | 4.7 cm | 5.2 cm |
+| Cameras whose noise is shared | 3.8 cm | 5.1 cm |
+| Two cameras | 0.8 cm | 0.9 cm |
+| A faster route | 0.5 cm | 0.8 cm |
+| Far from the tags | 0.7 cm | 1.7 cm |
+| Clean match, mounts off | 1.5 cm | 1.7 cm |
+| Clean match, tags off | 1.7 cm | 20.6 cm |
+| Clean match, 5% of images flipped | 0.7 cm | 1.8 cm |
+
+Where WPILib's is still ahead:
+
+- **The largest jump.** Ours moves the estimate in one step when it decides the estimate is wrong:
+  60 cm against 11 cm after a shove, 41 against 11 after a collision, 50 against 41 placed wrong,
+  49 against 19 in the match with several faults, 3 m against 36 cm carried while disabled. After
+  the cameras were blind for 3 s and 10 s, and with both IMUs unplugged, it steps 4 to 6 cm
+  against 2 to 3 cm. This is the design: a recovery is one move, and WPILib's estimator walks
+  there over several images. An auto-align that follows the estimate feels the step.
+- **Recovering after the gyro restarts.** Both take a heading step of about 1.5° at the restart.
+  Ours takes 0.32 s to walk it off and WPILib's 0.12 s, because ours is surer of its heading.
+- **Cameras reading range long** (held out). Ours jumps 6.3 cm against 4.6 cm.
+- **A camera turned 1.5° on its mount** (held out). Ours is 1.7 cm off against 0.8 cm. This counts
+  as the same under the 1 cm rule, and it is twice as far. A turn that small is under what the
+  watch on the cameras acts on, and over what the filter allows a mount.
+
+Whether ours tells the truth about its uncertainty, as the mean share of loops past its 95% bound
+over the tuning set: 0.7% for position and 1.3% for heading, where it was 2.3% and 4.5%. It is
+still surer than it is in some scenarios. With every mount off by twice what the configuration
+allows, its heading is past the bound in 25% of loops, where it was 5%. With a tag moved, its
+position is past it in 14% of loops. On the held-out set, with every camera reading range long,
+its position is past it in 54% of loops, with shared noise 30%, and with a camera turned 1.5° its
+heading is past it in 22%.
+
+Ours costs more to run: a median of 13 µs a loop where it was 9 µs, and 2.9 kB allocated a loop
+as before, against 3.6 µs for WPILib's filter given measurements already solved.
 
 ## What it can't make equal
 
@@ -151,3 +257,13 @@ It is a simulation. Its cameras are PhotonVision's simulated ones: every tag in 
 a quarter pixel of corner noise, no motion blur, no lighting, and a perfect lens model. Its wheel
 slip, shoves, and collisions are the simulator's models of them. A real robot's logs against an
 independent truth are what would settle the question.
+
+Three things flatter the changes that corrected the gyro and the cameras, and all three are the
+simulator's:
+
+- The simulated gyro's fault is a constant scale or a constant drift, which is exactly what the
+  estimator now estimates. A real gyro's errors change with temperature and with how it is shaken.
+- The simulated cameras scatter far less than they claim, so a camera a few centimeters off stands
+  out within a second. A real camera's scatter is closer to its error.
+- The watch on the cameras was developed against the simulator's knocked camera and its late
+  clock. The held-out set varies their sizes, not their kind.

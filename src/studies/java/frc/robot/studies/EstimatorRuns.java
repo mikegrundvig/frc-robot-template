@@ -154,6 +154,16 @@ final class EstimatorRuns {
       marks.faults().add(loop);
     }
 
+    /** Every camera reads every tag this many times as far as it is, from now. */
+    void rangeBias(double scale) {
+      cameras.rangeBias(scale);
+    }
+
+    /** Every camera's ranges share one wandering error of this spread, from now. */
+    void sharedRangeNoise(double stdDev, double seconds) {
+      cameras.sharedRangeNoise(stdDev, seconds);
+    }
+
     /** Disables the robot, or enables it again. */
     void enable(boolean on) {
       enabled = on;
@@ -329,6 +339,7 @@ final class EstimatorRuns {
               });
         }
         steer(robot, scenario.route(), seconds, stage.enabled, marks, loop);
+        cameras.nextLoop(RobotLoop.PERIOD_SECONDS);
         robot.loop();
 
         // Every contender is given the loop as the robot's own localizer was: its readings, then a
@@ -357,7 +368,7 @@ final class EstimatorRuns {
           kept.add(new EstimatorCost.Loop(now, stage.enabled, readings, measurements, images));
         }
         Pose2d truth = robot.truePose();
-        track(tracks, OURS).add(robot.pose(), truth);
+        track(tracks, OURS).add(robot.pose(), truth, robot.estimate().covariance());
         for (WpilibContender contender : contenders) {
           contender.imu(imu.yawRateRadiansPerSecond(), imu.pitchRadians(), imu.rollRadians());
           if (contender.feed() == WpilibContender.Feed.SAME_INPUTS) {

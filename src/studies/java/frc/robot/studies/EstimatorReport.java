@@ -222,6 +222,26 @@ final class EstimatorReport {
               centimeters(spread(rows, scenario, EstimatorRuns.OURS, "jump_m")),
               centimeters(spread(rows, scenario, team, "jump_m"))));
     }
+    md.append(
+        """
+
+        ## Whether A's uncertainty tells the truth
+
+        The share of each run's loops in which A's true error was past the 95% bound A claimed for \
+        it: in position, by the covariance's ellipse, and in heading. An honest estimator is past \
+        it in 5% of loops. WPILib's estimator claims no uncertainty, so it has no row here.
+
+        | Scenario | Position past its 95% bound | Heading past its 95% bound |
+        |---|---|---|
+        """);
+    for (String scenario : scenarios(rows)) {
+      md.append(
+          format(
+              "| %s | %s | %s |%n",
+              scenario,
+              percent(spread(rows, scenario, EstimatorRuns.OURS, "pos_beyond95")),
+              percent(spread(rows, scenario, EstimatorRuns.OURS, "heading_beyond95"))));
+    }
     List<String> shown = new ArrayList<>(List.of(EstimatorRuns.OURS, sameInputs, "C"));
     if (!team.equals("C")) {
       shown.add(team);
@@ -285,6 +305,13 @@ final class EstimatorReport {
       return "";
     }
     return format("%.1f cm [%.1f]", 100 * spread.median(), 100 * spread.iqr());
+  }
+
+  private static String percent(Spread spread) {
+    if (Double.isNaN(spread.median())) {
+      return "";
+    }
+    return format("%.1f%% [%.1f]", 100 * spread.median(), 100 * spread.iqr());
   }
 
   private static String degrees(Spread spread) {

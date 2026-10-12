@@ -9,6 +9,7 @@ import com.michaelgrundvig.frc.pitwall.simulator.Setting;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.simulation.FaultCatalog;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.simulation.SensorErrorsBuilder;
 import frc.robot.studies.EstimatorRig.Cameras.Misread;
 import frc.robot.studies.EstimatorRuns.Rest;
 import frc.robot.studies.EstimatorRuns.Route;
@@ -542,6 +543,270 @@ final class EstimatorScenarios {
     return List.copyOf(all);
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // The held-out set.
+  // ---------------------------------------------------------------------------------------------
+
+  /** About 33 s: the short route's ground at full stick, the robot turning hard on every leg. */
+  static final Route FAST =
+      Route.named("fast")
+          .drive(2.0, 2.2, 2.2, 180, 1.0)
+          .drive(2.0, 2.2, 5.8, 0, 1.0)
+          .drive(2.0, 2.2, 2.2, 180, 1.0)
+          .drive(2.0, NEAR_X, NEAR_Y, 0, 1.0)
+          .stop(1.5, Rest.NEAR_A_TAG)
+          .drive(2.2, 3.0, 0.75, 90, 1.0)
+          .drive(2.6, 8.0, 0.75, -90, 1.0)
+          .drive(1.6, 8.3, 2.8, 90, 1.0)
+          .drive(1.6, 8.3, 5.3, -90, 1.0)
+          .drive(1.6, 8.3, 2.8, 180, 1.0)
+          .stop(1.5, Rest.FAR_FROM_TAGS)
+          .drive(2.0, 8.0, 0.75, 0, 1.0)
+          .drive(2.6, 3.0, 0.75, 180, 1.0)
+          .drive(2.4, NEAR_X, NEAR_Y, 0, 1.0)
+          .stop(2, Rest.NEAR_A_TAG)
+          .build();
+
+  /** A match spent in the middle of the field, three meters and more from the nearest tag. */
+  static final Route FAR = far();
+
+  private static Route far() {
+    Route.Builder route =
+        Route.named("far")
+            .drive(2.5, 2.2, 2.2, 0, 1.0)
+            .drive(2.5, NEAR_X, NEAR_Y, 0, 0.8)
+            .stop(2.0, Rest.NEAR_A_TAG)
+            .drive(3.0, 3.0, 0.75, 0, 1.0)
+            .drive(3.5, 8.0, 0.75, 0, 1.0);
+    for (int lap = 0; lap < 9; lap++) {
+      double turned = lap % 2 == 0 ? 90 : -90;
+      route
+          .drive(2.0, 8.3, 2.8, turned, 0.8)
+          .drive(2.5, 8.3, 5.3, turned, 0.6)
+          .stop(1.5, Rest.FAR_FROM_TAGS)
+          .drive(2.5, 8.3, 4.0, 180, 0.6)
+          .drive(2.0, 8.3, 2.8, 0, 0.8);
+    }
+    return route
+        .drive(2.5, 8.0, 0.75, 180, 1.0)
+        .drive(3.5, 3.0, 0.75, 180, 1.0)
+        .drive(3.0, NEAR_X, NEAR_Y, 0, 0.8)
+        .stop(5, Rest.NEAR_A_TAG)
+        .build();
+  }
+
+  /**
+   * The held-out scenarios, in the report's order: faults shaped or sized another way than {@link
+   * #ALL}'s, written before the estimator was changed and never used to tune it. They are run with
+   * {@code --holdout}, and their names start with {@code held-}.
+   */
+  static final List<Scenario> HELD_OUT = heldOut();
+
+  private static List<Scenario> heldOut() {
+    List<Scenario> held = new ArrayList<>();
+
+    // The gyro, sized and signed other ways than the tuning set's 3% high and 10 degrees a minute.
+    held.add(
+        gyroScale(
+            "held-gyro-scale-1pct", "The gyro reads 1% more turn than the robot makes.", 1.01));
+    held.add(
+        gyroScale(
+            "held-gyro-scale-6pct", "The gyro reads 6% more turn than the robot makes.", 1.06));
+    held.add(
+        gyroScale(
+            "held-gyro-scale-low", "The gyro reads 2% less turn than the robot makes.", 0.98));
+    held.add(
+        new Scenario(
+            "held-gyro-drift-30",
+            "The gyro drifts 30° a minute, from the moment the robot is built.",
+            SHORT,
+            EstimatorScenarios::driftingFast,
+            0,
+            List.of()));
+
+    // One camera turned on its mount, by other angles and about another axis than 3° of yaw.
+    held.add(cameraTurned("held-camera-yawed-1.5", "turned 1.5° about the vertical", 0, 1.5));
+    held.add(cameraTurned("held-camera-yawed-6", "turned 6° about the vertical", 0, 6));
+    held.add(cameraTurned("held-camera-pitched-3", "pitched 3°", 3, 0));
+
+    // One camera's clock off by other amounts than 20 ms.
+    held.add(clockOff("held-clock-10ms", 10));
+    held.add(clockOff("held-clock-40ms", 40));
+
+    // Two faults together that the tuning set never pairs.
+    held.add(
+        scenario(
+            "held-gyro-scale-and-knock",
+            "The gyro reads 3% high, and at 5 s the first camera is knocked on its mount: 1 in"
+                + " forward, 1.5 in down, turned 3° about the vertical and pitched 2°.",
+            SHORT,
+            atTheStart(stage -> stage.fault(gyroReads(1.03))),
+            at(
+                5,
+                stage ->
+                    stage.fault(
+                        Setting.of(
+                            camera(stage, 0),
+                            FaultCatalog.MOVED,
+                            Map.of(
+                                FaultCatalog.FORWARD,
+                                1.0,
+                                FaultCatalog.LEFT,
+                                0.0,
+                                FaultCatalog.UP,
+                                -1.5)),
+                        cameraTurn(stage, 2, 3)))));
+    held.add(
+        scenario(
+            "held-clock-and-low-grip",
+            "The first camera's clock 20 ms off the robot's, and for 5 s from 11 s only 60% of the"
+                + " wheels' rolling moves the robot.",
+            SHORT,
+            atTheStart(stage -> stage.fault(clockOffset(stage, 20))),
+            at(
+                FAULT_SECONDS,
+                stage -> stage.fault(robot(FaultCatalog.SLIPPING, Map.of(FaultCatalog.GRIP, 0.6)))),
+            at(FAULT_SECONDS + 5, stage -> stage.undo(ROBOT, FaultCatalog.SLIPPING))));
+
+    // Camera errors the simulator's own noise does not have: one with a direction, one shared.
+    held.add(
+        scenario(
+            "held-camera-range-bias",
+            "Every camera reads every tag 2% farther than it is: an error with a direction, not"
+                + " noise about zero.",
+            SHORT,
+            atTheStart(stage -> stage.rangeBias(1.02))));
+    held.add(
+        scenario(
+            "held-camera-noise-shared",
+            "Every camera's ranges share one error that wanders, 2% of the range as a standard"
+                + " deviation and a new one about every second: noise the cameras do not average"
+                + " away between them.",
+            SHORT,
+            atTheStart(stage -> stage.sharedRangeNoise(0.02, 1.0))));
+
+    // Another robot, and other driving.
+    held.add(
+        scenario(
+            "held-two-cameras",
+            "A robot with two cameras, the front left and the back right: the other two are"
+                + " unplugged from the start.",
+            SHORT,
+            atTheStart(
+                stage ->
+                    stage.fault(
+                        Setting.of(camera(stage, 1), FaultCatalog.UNPLUGGED),
+                        Setting.of(camera(stage, 2), FaultCatalog.UNPLUGGED)))));
+    held.add(
+        scenario(
+            "held-far-from-tags",
+            "A match spent mostly in the middle of the field, three meters and more from the"
+                + " nearest tag.",
+            FAR));
+    held.add(
+        scenario(
+            "held-fast",
+            "The short route's ground at full stick, the robot turning a half turn on most legs.",
+            FAST));
+
+    // The clean match with errors that repeat, sized other ways than the tuning set's.
+    held.add(
+        new Scenario(
+            "held-match-mounts-off-2x",
+            "The clean match, each camera off its mount twice as far as the estimator allows for"
+                + " (6 mm along and half a degree about each axis), every tag on the layout.",
+            MATCH,
+            seed -> ConsistencyRuns.errors(seed, mounts(2, 0)),
+            0,
+            List.of()));
+    held.add(
+        new Scenario(
+            "held-match-tags-off-2x",
+            "The clean match, each tag off the layout twice as far as the estimator allows for"
+                + " (2 cm along each axis), every camera exactly on its mount.",
+            MATCH,
+            seed -> ConsistencyRuns.errors(seed, mounts(0, 2)),
+            0,
+            List.of()));
+    held.add(
+        new Scenario(
+            "held-match-flips-5pct",
+            "The clean match, 5% of every camera's images with a tag's two poses the wrong way"
+                + " round.",
+            MATCH,
+            EstimatorRuns::typical,
+            0.05,
+            List.of()));
+    return List.copyOf(held);
+  }
+
+  private static Scenario gyroScale(String name, String description, double scale) {
+    return scenario(name, description, SHORT, atTheStart(stage -> stage.fault(gyroReads(scale))));
+  }
+
+  /** The gyro reading this much turn for each turn the robot makes, from now on. */
+  private static Setting gyroReads(double scale) {
+    return Setting.of(GYRO, FaultCatalog.ERRORS, Map.of(FaultCatalog.SCALE, scale));
+  }
+
+  /**
+   * A season-worn robot whose gyro drifts 30° a minute. It is built that way, because the
+   * simulator's fault for a gyro's errors takes a drift only up to 10° a minute.
+   */
+  private static SensorErrors driftingFast(long seed) {
+    SensorErrors typical = EstimatorRuns.typical(seed);
+    SensorErrors.GyroErrors gyro = typical.gyro();
+    return SensorErrorsBuilder.builder(typical)
+        .gyro(
+            SensorErrors.GyroErrors.builder()
+                .scale(gyro.scale())
+                .driftDegreesPerMinute(30)
+                .noiseDegrees(gyro.noiseDegrees())
+                .build())
+        .build();
+  }
+
+  private static Scenario cameraTurned(String name, String how, double pitch, double yaw) {
+    return scenario(
+        name,
+        "At 5 s the first camera is " + how + " on its mount, and not moved.",
+        SHORT,
+        at(5, stage -> stage.fault(cameraTurn(stage, pitch, yaw))));
+  }
+
+  /** The first camera turned this far on its mount, in degrees. */
+  private static Setting cameraTurn(Stage stage, double pitch, double yaw) {
+    return Setting.of(
+        camera(stage, 0),
+        FaultCatalog.TURNED,
+        Map.of(FaultCatalog.ROLL, 0.0, FaultCatalog.PITCH, pitch, FaultCatalog.YAW, yaw));
+  }
+
+  private static Scenario clockOff(String name, double millis) {
+    return scenario(
+        name,
+        String.format("The first camera's clock %.0f ms off the robot's.", millis),
+        SHORT,
+        atTheStart(stage -> stage.fault(clockOffset(stage, millis))));
+  }
+
+  /** The first camera's clock this far off the robot's, in milliseconds. */
+  private static Setting clockOffset(Stage stage, double millis) {
+    return Setting.of(
+        camera(stage, 0), FaultCatalog.CLOCK_OFFSET, Map.of(FaultCatalog.OFFSET, millis));
+  }
+
+  /**
+   * How far each seed's gyro misreads its turns in the scenarios that draw their errors: within a
+   * degree in a full turn, as a standard deviation. It is the study's own number, so that the world
+   * the estimators are compared in stays the same when the estimator's allowance for its gyro is
+   * changed.
+   */
+  private static final double GYRO_SCALE_SPREAD = 1.0 / 360;
+
+  /** The same for the backup IMU: within two degrees in a full turn. */
+  private static final double BACKUP_SCALE_SPREAD = 2.0 / 360;
+
   /**
    * How far off each seed's cameras and tags sit: the estimator's own allowance for each, times
    * these.
@@ -552,8 +817,8 @@ final class EstimatorScenarios {
         mountTimes * claimed.mountMillimeters(),
         mountTimes * claimed.mountDegrees(),
         tagTimes * claimed.tagMillimeters(),
-        claimed.gyroScale(),
-        claimed.backupScale());
+        GYRO_SCALE_SPREAD,
+        BACKUP_SCALE_SPREAD);
   }
 
   private static Timed[] badMatch() {
@@ -668,7 +933,7 @@ final class EstimatorScenarios {
    * @throws IllegalArgumentException naming every scenario there is, when none has this name
    */
   static Scenario named(String name) {
-    for (Scenario scenario : ALL) {
+    for (Scenario scenario : everyScenario()) {
       if (scenario.name().equals(name)) {
         return scenario;
       }
@@ -677,6 +942,13 @@ final class EstimatorScenarios {
         "No estimator scenario is named \""
             + name
             + "\". The scenarios: "
-            + ALL.stream().map(Scenario::name).collect(Collectors.joining(", ")));
+            + everyScenario().stream().map(Scenario::name).collect(Collectors.joining(", ")));
+  }
+
+  /** The tuning set's scenarios, then the held-out set's. */
+  static List<Scenario> everyScenario() {
+    List<Scenario> every = new ArrayList<>(ALL);
+    every.addAll(HELD_OUT);
+    return every;
   }
 }

@@ -34,7 +34,9 @@ public final class EstimatorStudy {
   static final String USAGE =
       """
       Usage: ./gradlew estimatorStudy --args="[options]"   (see docs/estimator-comparison.md)
-        --scenarios=A,B,...   which scenarios (default: all of them); --list names them
+        --scenarios=A,B,...   which scenarios (default: all of the tuning set); --list names them
+        --holdout             the held-out set in place of the tuning set: scenarios written
+                              before the estimator was changed and never used to tune it
         --seeds=N             runs of each, each with its own noise (default 20)
         --seed=N              the first seed (default 1)
         --out=DIR             where the results go (default build/studies/estimators)
@@ -86,7 +88,8 @@ public final class EstimatorStudy {
     List<EstimatorRuns.Scenario> scenarios = new ArrayList<>();
     String named = options.get("scenarios");
     if (named == null) {
-      scenarios.addAll(EstimatorScenarios.ALL);
+      scenarios.addAll(
+          options.containsKey("holdout") ? EstimatorScenarios.HELD_OUT : EstimatorScenarios.ALL);
     } else {
       for (String name : named.split(",")) {
         scenarios.add(EstimatorScenarios.named(name.trim()));
@@ -179,7 +182,7 @@ public final class EstimatorStudy {
         directory.resolve("summary.csv"), EstimatorReport.summary(rows), StandardCharsets.UTF_8);
     Files.writeString(
         directory.resolve("summary.md"),
-        EstimatorReport.markdown(EstimatorScenarios.ALL, rows, seeds, first));
+        EstimatorReport.markdown(EstimatorScenarios.everyScenario(), rows, seeds, first));
   }
 
   /** The runs an earlier study wrote. */
@@ -233,7 +236,7 @@ public final class EstimatorStudy {
   /** The scenarios, then the field's tags: what a route is written against. */
   static String listing() {
     StringBuilder text = new StringBuilder();
-    for (EstimatorRuns.Scenario scenario : EstimatorScenarios.ALL) {
+    for (EstimatorRuns.Scenario scenario : EstimatorScenarios.everyScenario()) {
       text.append(
           format(
               "%-22s %3.0f s  %s%n",
@@ -267,6 +270,7 @@ public final class EstimatorStudy {
       if (arg.equals("--help")
           || arg.equals("--list")
           || arg.equals("--trace")
+          || arg.equals("--holdout")
           || arg.equals("--cost")) {
         options.put(arg.substring(2), "");
         continue;

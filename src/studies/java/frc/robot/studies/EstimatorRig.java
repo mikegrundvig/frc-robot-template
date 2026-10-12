@@ -7,9 +7,12 @@ import com.michaelgrundvig.frc.world.field.FieldModel;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.SplittableRandom;
 import org.jspecify.annotations.Nullable;
+import org.wpilib.math.geometry.Pose3d;
 import org.wpilib.math.geometry.Transform3d;
+import org.wpilib.math.geometry.Translation3d;
 
 /**
  * What the estimator study puts between the simulated robot and WPILib's estimators: a tap on each
@@ -59,10 +62,26 @@ final class EstimatorRig {
     private double flipShare;
     private int misreads;
 
+    /** Every camera reads its tags this many times as far as they are: 1 reads them rightly. */
+    private double rangeBias = 1;
+
+    /** The spread of a range error every camera shares, as a share of the range: 0 for none. */
+    private double sharedRangeStdDev;
+
+    /** How long that shared error keeps its size: it wanders, a new one about this often. */
+    private double sharedRangeSeconds = 1;
+
+    /** The shared range error this loop, as a share of the range. */
+    private double sharedRange;
+
+    /** The shared error's own draws, so that asking for it changes no other draw. */
+    private final SplittableRandom sharedRandom;
+
     Cameras(FieldModel field, List<CameraConfig> configs, long seed) {
       this.field = field;
       this.configs = List.copyOf(configs);
       random = new SplittableRandom(seed ^ 0x6f75746c69657273L);
+      sharedRandom = new SplittableRandom(seed ^ 0x7368617265646572L);
     }
 
     /** One camera's IO, tapped. */
@@ -95,6 +114,44 @@ final class EstimatorRig {
       flipShare = share;
     }
 
+    /**
+     * From now, every camera reads every tag this many times as far as it is, as cameras whose
+     * lenses were all calibrated with the same focal length a little off do: an error with a
+     * direction, not noise about zero. 1 reads them rightly.
+     */
+    void rangeBias(double scale) {
+      rangeBias = scale;
+    }
+
+    /**
+     * From now, every camera's ranges share one error that wanders: at any moment every camera
+     * reads its tags too far, or too near, by the same share. It is noise about zero, but the
+     * cameras do not average it away between them.
+     *
+     * @param stdDev its spread, as a share of the range
+     * @param seconds how long it keeps its size: its correlation time
+     */
+    void sharedRangeNoise(double stdDev, double seconds) {
+      sharedRangeStdDev = stdDev;
+      sharedRangeSeconds = seconds;
+    }
+
+    /**
+     * Steps the shared range error one loop on, before the cameras are read. It is a first-order
+     * Gauss-Markov process: each loop keeps a = exp(-dt / correlation time) of the last value and
+     * adds a fresh draw of spread sqrt(1 - a²) times the whole spread, which holds the spread.
+     */
+    void nextLoop(double loopSeconds) {
+      if (sharedRangeStdDev == 0) {
+        sharedRange = 0;
+        return;
+      }
+      double kept = Math.exp(-loopSeconds / sharedRangeSeconds);
+      sharedRange =
+          kept * sharedRange
+              + Math.sqrt(1 - kept * kept) * sharedRangeStdDev * sharedRandom.nextGaussian();
+    }
+
     /** How many images were misread so far. */
     int misreads() {
       return misreads;
@@ -122,12 +179,76 @@ final class EstimatorRig {
           frame = new CameraIO.Frame(frame.timestampNanos(), 1, false, Transform3d.ZERO, 0);
           misreads++;
         }
+        double rangeScale = rangeBias * (1 + sharedRange);
+        if (rangeScale != 1) {
+          frame = atRange(frame, tags, rangeScale);
+          tags = atRange(tags, rangeScale);
+        }
         frames.add(frame);
         all.addAll(tags);
         seen.add(new WpilibContender.Image(config.name(), config.robotToCamera(), frame, tags));
       }
       inputs.frames = frames.toArray(CameraIO.Frame[]::new);
       inputs.tags = all.toArray(CameraIO.SeenTag[]::new);
+    }
+
+    /** Every tag of an image, read a number of times as far from the camera as it was seen. */
+    private static List<CameraIO.SeenTag> atRange(List<CameraIO.SeenTag> tags, double scale) {
+      List<CameraIO.SeenTag> scaled = new ArrayList<>(tags.size());
+      for (CameraIO.SeenTag tag : tags) {
+        scaled.add(
+            new CameraIO.SeenTag(
+                tag.id(),
+                tag.corner0X(),
+                tag.corner0Y(),
+                tag.corner1X(),
+                tag.corner1Y(),
+                tag.corner2X(),
+                tag.corner2Y(),
+                tag.corner3X(),
+                tag.corner3Y(),
+                atRange(tag.bestCameraToTag(), scale),
+                atRange(tag.altCameraToTag(), scale),
+                tag.ambiguity(),
+                tag.inMultiTag()));
+      }
+      return scaled;
+    }
+
+    private static Transform3d atRange(Transform3d cameraToTag, double scale) {
+      return new Transform3d(cameraToTag.getTranslation().times(scale), cameraToTag.getRotation());
+    }
+
+    /**
+     * An image's multi-tag solution with its tags read a number of times as far: the camera stands
+     * that many times as far from the middle of the tags it solved from, facing as it did.
+     */
+    private CameraIO.Frame atRange(
+        CameraIO.Frame frame, List<CameraIO.SeenTag> tags, double scale) {
+      if (!frame.hasMultiTag()) {
+        return frame;
+      }
+      Translation3d middle = Translation3d.ZERO;
+      int used = 0;
+      for (CameraIO.SeenTag tag : tags) {
+        Optional<Pose3d> onTheField = field.tag(tag.id());
+        if (tag.inMultiTag() && onTheField.isPresent()) {
+          middle = middle.plus(onTheField.get().getTranslation());
+          used++;
+        }
+      }
+      if (used == 0) {
+        return frame;
+      }
+      middle = middle.div(used);
+      Transform3d solved = frame.multiTagFieldToCamera();
+      Translation3d camera = middle.plus(solved.getTranslation().minus(middle).times(scale));
+      return new CameraIO.Frame(
+          frame.timestampNanos(),
+          frame.tagCount(),
+          true,
+          new Transform3d(camera, solved.getRotation()),
+          frame.multiTagReprojectionErrorPixels());
     }
 
     /** How this image is misread, or null when it's read right. */

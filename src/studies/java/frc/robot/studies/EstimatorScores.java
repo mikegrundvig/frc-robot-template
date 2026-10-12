@@ -1,11 +1,13 @@
 package frc.robot.studies;
 
+import com.michaelgrundvig.frc.localization.PoseCovariance;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntPredicate;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Translation2d;
 
@@ -50,14 +52,66 @@ final class EstimatorScores {
     }
   }
 
-  /** One estimator's pose and the truth, loop by loop. */
+  /**
+   * The bound a position error stays within 95% of the time, if the covariance it is measured in is
+   * honest: its squared distance in that covariance (its NEES) is chi-squared with 2 degrees of
+   * freedom, whose 95th percentile is -2 ln 0.05.
+   */
+  static final double POSITION_BOUND_95 = -2 * Math.log(0.05);
+
+  /** The same for a heading error, in its standard deviations: a Gaussian's two-sided 95%. */
+  static final double HEADING_BOUND_95 = 1.959964;
+
+  /** One estimator's pose and the truth, loop by loop, with what it claimed if it says. */
   static final class Track {
     private final List<Pose2d> estimates = new ArrayList<>();
     private final List<Pose2d> truths = new ArrayList<>();
 
+    /** What the estimator claimed of each loop's pose: empty for one that reports none. */
+    private final List<PoseCovariance> claims = new ArrayList<>();
+
     void add(Pose2d estimate, Pose2d truth) {
       estimates.add(estimate);
       truths.add(truth);
+    }
+
+    /** A loop of an estimator that says how sure it is. */
+    void add(Pose2d estimate, Pose2d truth, PoseCovariance claimed) {
+      add(estimate, truth);
+      claims.add(claimed);
+    }
+
+    /** Whether the estimator said how sure it was, every loop. */
+    boolean claims() {
+      return !claims.isEmpty() && claims.size() == estimates.size();
+    }
+
+    /**
+     * Whether a loop's position error is past the 95% bound of the covariance claimed for it. With
+     * the error (ex, ey) and the claimed position block [xx xy; xy yy], the error's squared
+     * distance in that covariance is
+     *
+     * <pre>(yy ex² - 2 xy ex ey + xx ey²) / (xx yy - xy²)</pre>
+     *
+     * <p>A covariance with no spread at all (a determinant of zero) is past its bound whenever
+     * there is any error.
+     */
+    boolean positionBeyondClaim(int loop) {
+      PoseCovariance claimed = claims.get(loop);
+      double ex = estimates.get(loop).getX() - truths.get(loop).getX();
+      double ey = estimates.get(loop).getY() - truths.get(loop).getY();
+      double determinant = claimed.xx() * claimed.yy() - claimed.xy() * claimed.xy();
+      double weighted =
+          claimed.yy() * ex * ex - 2 * claimed.xy() * ex * ey + claimed.xx() * ey * ey;
+      return weighted > POSITION_BOUND_95 * determinant;
+    }
+
+    /** Whether a loop's heading error is past 1.96 of the standard deviations claimed for it. */
+    boolean headingBeyondClaim(int loop) {
+      double radians =
+          Math.abs(
+              estimates.get(loop).getRotation().minus(truths.get(loop).getRotation()).getRadians());
+      return radians > HEADING_BOUND_95 * claims.get(loop).headingStdDev();
     }
 
     int loops() {
@@ -96,7 +150,9 @@ final class EstimatorScores {
   /**
    * One estimator's measures over one run. Positions in meters, headings in degrees, times in
    * seconds. Where a run has no fault or no stop, its measures are NaN; a recovery that never came
-   * within the run is infinite.
+   * within the run is infinite. The last two are the share of the run's loops, from 0 to 1, in
+   * which the true error was past the 95% bound the estimator claimed, in position and in heading:
+   * 0.05 for an honest estimator, and NaN for one that claims nothing.
    */
   record Measures(
       double rmsMeters,
@@ -115,15 +171,17 @@ final class EstimatorScores {
       double jumpMeters,
       double restNearMeters,
       double restNearDegrees,
-      double restFarMeters) {
+      double restFarMeters,
+      double positionBeyondClaim,
+      double headingBeyondClaim) {
     /** The measures from their values in the report's order, as {@link #byName} gives them. */
     static Measures of(double[] v) {
-      if (v.length != 17) {
-        throw new IllegalArgumentException("a run has 17 measures, not " + v.length);
+      if (v.length != 19) {
+        throw new IllegalArgumentException("a run has 19 measures, not " + v.length);
       }
       return new Measures(
           v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], v[10], v[11], v[12], v[13],
-          v[14], v[15], v[16]);
+          v[14], v[15], v[16], v[17], v[18]);
     }
 
     /** Each measure by its column's name, in the report's order. */
@@ -146,6 +204,8 @@ final class EstimatorScores {
       named.put("rest_near_m", restNearMeters);
       named.put("rest_near_deg", restNearDegrees);
       named.put("rest_far_m", restFarMeters);
+      named.put("pos_beyond95", positionBeyondClaim);
+      named.put("heading_beyond95", headingBeyondClaim);
       return named;
     }
   }
@@ -156,7 +216,7 @@ final class EstimatorScores {
     return List.copyOf(
         new Measures(
                 none, none, none, none, none, none, none, none, none, none, none, none, none, none,
-                none, none, none)
+                none, none, none, none, none)
             .byName()
             .keySet());
   }
@@ -203,7 +263,28 @@ final class EstimatorScores {
         jump,
         atRest(meters, marks.restsNear()),
         atRest(degrees, marks.restsNear()),
-        atRest(meters, marks.restsFar()));
+        atRest(meters, marks.restsFar()),
+        shareBeyondClaim(track, track::positionBeyondClaim),
+        shareBeyondClaim(track, track::headingBeyondClaim));
+  }
+
+  /**
+   * The share of a run's loops in which the true error was past the 95% bound the estimator
+   * claimed. NaN for an estimator that claims nothing.
+   *
+   * @param beyond whether a loop's error was past its bound: in position, or in heading
+   */
+  private static double shareBeyondClaim(Track track, IntPredicate beyond) {
+    if (!track.claims()) {
+      return Double.NaN;
+    }
+    int loopsBeyond = 0;
+    for (int loop = 0; loop < track.loops(); loop++) {
+      if (beyond.test(loop)) {
+        loopsBeyond++;
+      }
+    }
+    return (double) loopsBeyond / track.loops();
   }
 
   /**

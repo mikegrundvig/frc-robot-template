@@ -30,8 +30,8 @@ each difference, until they agree. The versions it compares are GradleRIO's (`gr
 
 So an upgrade is made in the runtime first: do steps 2, 6, 7 and 8 below in `runtime/` (its
 `gradle/libs.versions.toml`, `vendordeps/`, and `gradle/verification-metadata.xml`), run `./gradlew
-ci` there (`git -C runtime submodule update --init` fetches the model and Pitwall it is built with
-on its own), and commit it in that folder. Then do the same steps here, and commit the runtime's new
+ci` there (`git -C runtime submodule update --init` fetches the model, localization and Pitwall it
+is built with on its own), and commit it in that folder. Then do the same steps here, and commit the runtime's new
 commit with them (`git add runtime`). Between the two, `ci` here fails with the check's message.
 
 ## The steps

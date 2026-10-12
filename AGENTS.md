@@ -24,8 +24,9 @@ is the robot program every robot shares, which no team writes, with the harness 
 (`runtime/src/testFixtures`). The runtime never names a team class: `Main` hands it which robot
 this is, the season's field (from the model) and the controls (`RobotProgram.start`), and `ArchitectureTest` keeps it so.
 Change a team's behavior in `frc.robot`; a change to the runtime is a change for every robot. The
-runtime is a repository of its own, here as a git submodule (like `model/` and `pitwall/`): change
-it in that folder and commit it there, then commit the new submodule commit here.
+runtime is a repository of its own, here as a git submodule (like `model/`, `localization/` and
+`pitwall/`): change it in that folder and commit it there, then commit the new submodule commit
+here.
 
 Hardware sits behind AdvantageKit's IO pattern: a `*IO` interface with its `@AutoLog` inputs, one
 implementation per kind of hardware, and one for the simulator.
@@ -79,6 +80,8 @@ version they could have written over the clever one.
 - [runtime/docs/values.md](runtime/docs/values.md): every configuration value, what it means, and how to find yours
 - [runtime/docs/testing.md](runtime/docs/testing.md): the tests, and how to write one against the simulator
 - [runtime/docs/simulator.md](runtime/docs/simulator.md): the simulator, its faults and scenarios
+- [runtime/docs/localizers.md](runtime/docs/localizers.md): choosing the pose estimator (the
+  default one, WPILib's, or your own), and the contract a localizer keeps
 - [runtime/docs/calibration.md](runtime/docs/calibration.md), [runtime/docs/characterization.md](runtime/docs/characterization.md):
   measuring the real robot
 - [docs/editors.md](docs/editors.md), [docs/upgrading.md](docs/upgrading.md),

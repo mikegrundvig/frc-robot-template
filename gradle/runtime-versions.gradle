@@ -6,6 +6,9 @@
 // Compared: GradleRIO's version, and for each vendor library in runtime/vendordeps/ the file here
 // with the same uuid, which must have the same version. A vendor library only this program uses
 // is left alone.
+//
+// Localization (localization/) has nothing to compare: it brings no WPILib or vendor library of its
+// own, and takes WPILib's math from the robot model, which this build gives it.
 
 def runtimeCatalog = file("runtime/gradle/libs.versions.toml")
 def runtimeVendordeps = fileTree("runtime/vendordeps") { include "*.json" }

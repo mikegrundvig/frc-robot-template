@@ -324,12 +324,13 @@ tasks.register("ci") {
     dependsOn "spotlessCheck", "build", "javadoc"
     // From the top of the build, every project's checks.
     dependsOn project.subprojects.collect { it.path + ":ci" }
-    // And the robot model's, Pitwall's and the runtime's own, built from model/, pitwall/ and
-    // runtime/ as part of this build (settings.gradle): the runtime's covers its libraries,
-    // localization and the simulation. The model and Pitwall are this build's, and the runtime
+    // And the robot model's, localization's, Pitwall's and the runtime's own, built from model/,
+    // localization/, pitwall/ and runtime/ as part of this build (settings.gradle): the runtime's
+    // covers its simulation. The model, localization and Pitwall are this build's, and the runtime
     // uses them, so each runs once.
     if (project == rootProject) {
         dependsOn gradle.includedBuild("model").task(":ci")
+        dependsOn gradle.includedBuild("localization").task(":ci")
         dependsOn gradle.includedBuild("pitwall").task(":ci")
         dependsOn gradle.includedBuild("runtime").task(":ci")
     }

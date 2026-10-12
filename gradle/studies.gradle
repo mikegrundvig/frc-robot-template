@@ -6,6 +6,7 @@
 //
 //   ./gradlew cameraStudy --args="--weights=weights.csv"   see runtime/docs/camera-placement.md
 //   ./gradlew consistencyStudy                            see runtime/docs/testing.md
+//   ./gradlew estimatorStudy                              see docs/estimator-comparison.md
 
 sourceSets {
     studies {
@@ -55,6 +56,25 @@ tasks.register("consistencyStudy", JavaExec) {
     dependsOn "extractReleaseNative" // WPILib's simulation and PhotonVision's run on native code
     classpath = sourceSets.studies.runtimeClasspath
     mainClass = "frc.robot.studies.ConsistencyStudy"
+    def natives = layout.buildDirectory.dir("jni/release").get().asFile.absolutePath
+    // Where each system looks for native libraries, as GradleRIO sets them for the tests.
+    systemProperty "java.library.path", natives
+    environment "LD_LIBRARY_PATH", natives
+    environment "DYLD_LIBRARY_PATH", natives
+    environment "DYLD_FALLBACK_LIBRARY_PATH", natives
+    environment "PATH", natives + File.pathSeparator + System.getenv("PATH")
+    jvmArgs "--enable-native-access=ALL-UNNAMED"
+    // The study runs the robot's commands, which suspend on the JDK's own continuations, as
+    // GradleRIO opens them for the tests.
+    jvmArgs "--add-opens", "java.base/jdk.internal.vm=ALL-UNNAMED", "--add-opens", "java.base/java.lang=ALL-UNNAMED"
+}
+
+tasks.register("estimatorStudy", JavaExec) {
+    group = "studies"
+    description = "The robot's pose estimator against WPILib's, on the same simulated robot. Results go to build/studies/."
+    dependsOn "extractReleaseNative" // WPILib's simulation and PhotonVision's run on native code
+    classpath = sourceSets.studies.runtimeClasspath
+    mainClass = "frc.robot.studies.EstimatorStudy"
     def natives = layout.buildDirectory.dir("jni/release").get().asFile.absolutePath
     // Where each system looks for native libraries, as GradleRIO sets them for the tests.
     systemProperty "java.library.path", natives

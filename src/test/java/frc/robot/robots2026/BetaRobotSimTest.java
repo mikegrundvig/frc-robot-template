@@ -106,8 +106,8 @@ class BetaRobotSimTest {
             "operator face down: on press: pivot → out",
             "operator face right: on press: pivot → in",
             "driver left bumper: while held: Aim and shoot",
-            "driver right trigger: while held: at feeding",
-            "driver right bumper: while held: at unjamming",
+            "driver right trigger: while held: full send and transition: feeding",
+            "driver right bumper: while held: full send and transition: unjamming",
             "driver face down: while held: Drive facing 20° right of downfield, back first",
             "driver face right: while held: Drive facing 20° left of downfield, back first",
             "driver face left: while held: Lock wheels");
@@ -210,7 +210,7 @@ class BetaRobotSimTest {
     assertThat(aimedAt).as("turned from 0° to face away from the hub").isCloseTo(0, within(2.0));
     assertThat(turnedAway).isCloseTo(0, within(5.0));
     assertThat(why)
-        .startsWith("at feeding: CANCELED after ")
+        .startsWith("full send and transition: feeding: CANCELED after ")
         .endsWith(": ready to shoot is false: aimed at the Hub, back first");
     assertThat(overridden).as("the override feeds unaimed").isCloseTo(1000, within(30.0));
     assertThat(again).as("aimed again, it feeds on").isCloseTo(1000, within(30.0));

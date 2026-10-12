@@ -225,11 +225,12 @@ class BetaPhoenixTest {
    * SensorToMechanismRatio its gearing (subsystems/drive/ModuleIOTalonFX.java:100), with the
    * coupling taken out in code; the steering fused with its CANcoder
    * (generated/TunerConstants.java: 50), its RotorToSensorRatio the steering's gearing
-   * (ModuleIOTalonFX.java:122), wrapping the short way (:126), the front left's CANcoder offset
-   * 0.3779 and counterclockwise (TunerConstants.java:131-133), its discontinuity a fresh
-   * configuration's. Tuner's kV, 0.72373 per wheel rotation per second for the drive and 2.49 per
-   * module rotation per second for the steering (TunerConstants.java:28, 34), are each the ideal's,
-   * near enough.
+   * (ModuleIOTalonFX.java:122), the front left's CANcoder offset 0.3779 and counterclockwise
+   * (TunerConstants.java:131-133), its discontinuity a fresh configuration's. Their steering wraps
+   * the short way (:126), which the helper sets for no joint: the template's module driver sets its
+   * own steering to, and a joint's profile picks its turn. Tuner's kV, 0.72373 per wheel rotation
+   * per second for the drive and 2.49 per module rotation per second for the steering
+   * (TunerConstants.java:28, 34), are each the ideal's, near enough.
    */
   @Test
   void theSwerveModulesAreTunersOwn() {
@@ -278,7 +279,9 @@ class BetaPhoenixTest {
     assertThat(steer.leader().Feedback.FeedbackRemoteSensorID).isEqualTo(3);
     assertThat(steer.leader().Feedback.SensorToMechanismRatio).isEqualTo(1);
     assertThat(steer.leader().Feedback.RotorToSensorRatio).isCloseTo(steerGearing, within(1e-12));
-    assertThat(steer.leader().ClosedLoopGeneral.ContinuousWrap).isTrue();
+    assertThat(steer.leader().ClosedLoopGeneral.ContinuousWrap)
+        .as("the helper never sets a joint's loop to wrap: a module's driver sets its steering's")
+        .isFalse();
     assertThat(steer.leader().Slot0.kP).isCloseTo(100, within(1e-12));
     assertThat(steer.cancoder().orElseThrow().MagnetSensor.MagnetOffset).isEqualTo(0.3779296875);
     assertThat(steer.cancoder().orElseThrow().MagnetSensor.SensorDirection)

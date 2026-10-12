@@ -1,5 +1,6 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.runtime.ExampleControls;
 import com.michaelgrundvig.frc.runtime.RobotContainer;
 import com.michaelgrundvig.frc.runtime.autos.Autos;
 import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
@@ -13,9 +14,14 @@ import org.wpilib.command3.Scheduler;
  * bindings, in this one class. It's yours: the template never changes it, so its updates never
  * collide with your code. The robot builds it once, after its mechanisms, with everything behavior
  * reaches; write each command as a method, and bind it in the constructor, as on any v3 gamepad.
- * runtime/docs/mechanisms.md, "Where behavior goes", has a robot's:
  *
- * {@snippet class=com.michaelgrundvig.frc.runtime.examples.Controls region=constructor}
+ * <p>It starts empty, and it is what every robot you add to {@link Robots} gets ({@link
+ * Robots#controls}). The guide's robot doesn't use it: its buttons and autos come from the
+ * runtime's {@link ExampleControls}, the class runtime/docs/guide.md walks through, so they work in
+ * the simulator before you have written anything. Copy from it as you write yours. Its constructor
+ * reads:
+ *
+ * {@snippet class=com.michaelgrundvig.frc.runtime.ExampleControls region=constructor}
  *
  * <p>The robot records each binding as it's made, with its button and its command's name, and says
  * at startup when two commands are bound to one button the same way. The driver's sticks drive the
@@ -56,7 +62,7 @@ public final class Controls {
       RecordingGamepad driver,
       RecordingGamepad operator,
       Autos autos) {
-    // Nothing is bound: the guide's robot's joints idle, held where they rest, its rollers still,
-    // until you bind your robot's commands here. runtime/docs/mechanisms.md shows the guide's.
+    // Nothing is bound yet. Look up your robot's joints and bind its commands here, as
+    // ExampleControls does for the guide's robot (runtime/docs/guide.md walks through it).
   }
 }

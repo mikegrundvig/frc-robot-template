@@ -130,7 +130,7 @@ class BetaBehaviorSimTest {
     assertThat(blocking).isEmpty();
     assertThat(paused).isCloseTo(0, within(1.0));
     assertThat(why)
-        .startsWith("at feeding: CANCELED after ")
+        .startsWith("full send and transition: feeding: CANCELED after ")
         .endsWith(": ready to shoot is false: aimed");
     assertThat(sim.simulation.velocity(BetaRobot.FULL_SEND))
         .as("aimed again: feeding again")

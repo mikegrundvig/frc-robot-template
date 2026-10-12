@@ -474,8 +474,8 @@ public final class BetaRobot {
   /**
    * The robot as the template's program runs it, its drivetrain driven as the template drives one,
    * wired as the team's Tuner X generated it. The drive's limits and gains are the template's kind,
-   * chosen for the simulator, not their Tuner X values. The program doesn't start on it: {@link
-   * Robots#current} decides that, and still names the template's robot.
+   * chosen for the simulator, not their Tuner X values. The program starts on it when asked by
+   * name, {@code ./gradlew run -Probot=beta}: {@link Robots#current} decides that.
    */
   public static final RobotConfig CONFIG =
       RobotConfig.builder()

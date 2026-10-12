@@ -16,6 +16,10 @@
 // Start in a scenario, a fault in the robot's sensors or something that happens to it:
 // ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (com.michaelgrundvig.frc.runtime.sim.Scenarios).
 //
+// Run another of the team's robots (Robots.all()): ./gradlew run -Probot=beta. Without it the
+// program runs the robot Robots.current() names. A name that is none of them stops the program as
+// it starts, with the list.
+//
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
 //
@@ -35,6 +39,7 @@ wpi.sim.addGui().defaultEnabled = gui && !project.hasProperty("replay")
 wpi.sim.addDriverstation()
 
 def scenario = project.findProperty("scenario")?.toString()
+def robotAsked = project.findProperty("robot")?.toString()
 def pitwallPort = project.findProperty("pitwall.port")?.toString()
 if (pitwallPort != null && !(pitwallPort.isInteger() && pitwallPort.toInteger() in 0..65535)) {
     throw new GradleException("-Ppitwall.port is the port Pitwall's page is served on, 0 to 65535 (0 picks a free one), not ${pitwallPort}")
@@ -66,6 +71,9 @@ tasks.named("run") {
     if (scenario != null) {
         dependsOn scenarios
         systemProperty "frc.sim.scenario", scenario
+    }
+    if (robotAsked != null) {
+        systemProperty "frc.robot", robotAsked
     }
     if (pitwallPort != null) {
         // As a plain decimal: Pitwall.start reads it with Integer.getInteger, which takes a leading

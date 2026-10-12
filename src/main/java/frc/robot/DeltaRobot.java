@@ -486,8 +486,9 @@ public final class DeltaRobot {
    * wired as the team's Tuner X generated it. The drive's limits and gains are the template's kind,
    * chosen for the simulator, not their Tuner X values; the stator limits are theirs: the drive's
    * is the slip current, 60 A (generated/TunerConstants.java:58, subsystems/drive/
-   * ModuleIOTalonFX.java:107-110), the steering's 40 A (TunerConstants.java:70). The program
-   * doesn't start on it: {@link Robots#current} decides that, and still names the template's robot.
+   * ModuleIOTalonFX.java:107-110), the steering's 40 A (TunerConstants.java:70). The program starts
+   * on it when asked by name, {@code ./gradlew run -Probot=delta}: {@link Robots#current} decides
+   * that.
    */
   public static final RobotConfig CONFIG =
       RobotConfig.builder()

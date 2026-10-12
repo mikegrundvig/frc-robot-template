@@ -29,7 +29,7 @@ public final class Main {
     RobotProgram.start(
         Robots::current, // which robot this is
         Rebuilt::game, // this season's field and venues
-        Controls::new, // what it does
+        Robots::controls, // what it does: the controls written for that robot
         build());
   }
 

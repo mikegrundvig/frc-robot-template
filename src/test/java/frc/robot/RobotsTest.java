@@ -1,9 +1,12 @@
 package frc.robot;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.RobotChecks;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /** The team's robots, in Robots: each a valid configuration, and each can be tuned live. */
@@ -18,6 +21,17 @@ class RobotsTest {
   @Test
   void theRobotTheProgramRunsIsOneOfThem() {
     assertThat(Robots.all()).contains(Robots.current());
+  }
+
+  @Test
+  void theRobotAskedForByNameIsTheOneThatRuns() {
+    assertThat(Robots.asked(Optional.empty())).isSameAs(ExampleRobot.COMPETITION);
+    for (RobotConfig robot : Robots.all()) {
+      assertThat(Robots.asked(Optional.of(robot.name()))).isSameAs(robot);
+    }
+    assertThatThrownBy(() -> Robots.asked(Optional.of("gamma")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("No robot is named \"gamma\". The robots are: example, practice, beta, delta");
   }
 
   @Test

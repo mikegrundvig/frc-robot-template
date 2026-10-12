@@ -1,8 +1,16 @@
 package frc.robot;
 
+import com.michaelgrundvig.frc.runtime.ExampleControls;
 import com.michaelgrundvig.frc.runtime.ExampleRobot;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
+import com.michaelgrundvig.frc.runtime.autos.Autos;
+import com.michaelgrundvig.frc.runtime.behavior.RecordingGamepad;
+import com.michaelgrundvig.frc.runtime.subsystems.drive.Drive;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
+import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import java.util.List;
+import java.util.Optional;
+import org.wpilib.command3.Scheduler;
 
 /**
  * The team's robots, one {@link RobotConfig} each. A test builds every one, so an invalid value
@@ -24,7 +32,9 @@ import java.util.List;
  * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
  * its interlocks, which hold beneath every command. The configurations the robot takes name the
  * joints and their places. The template runs the guide's robot, {@link ExampleRobot}, until you
- * replace it with your own ({@link #current}); its intake reads:
+ * replace it with your own ({@link #current}), and with it that robot's buttons and autos, {@link
+ * ExampleControls}; your own behavior goes in {@link Controls} ({@link #controls}). The guide's
+ * robot's intake reads:
  *
  * {@snippet class=com.michaelgrundvig.frc.runtime.ExampleRobot region=intake}
  *
@@ -46,9 +56,9 @@ import java.util.List;
  * {@snippet class=com.michaelgrundvig.frc.runtime.ExampleRobot region=practice}
  *
  * <p>A team's 2026 robots are whole robots described this way ({@link BetaRobot}, with its behavior
- * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}).
- * runtime/docs/mechanisms.md says how to describe a mechanism and use its commands, and how to
- * write a practice robot.
+ * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}). The simulator runs
+ * either when asked: {@code ./gradlew run -Probot=beta}. runtime/docs/mechanisms.md says how to
+ * describe a mechanism and use its commands, and how to write a practice robot.
  */
 public final class Robots {
   private Robots() {}
@@ -63,12 +73,87 @@ public final class Robots {
   }
 
   /**
+   * The system property that names the robot to run. The build sets it from {@code -Probot=NAME}
+   * ({@code ./gradlew run -Probot=beta}), so the simulator can run any of the team's robots without
+   * an edit here. Nothing sets it on a real robot.
+   */
+  static final String ROBOT_PROPERTY = "frc.robot";
+
+  /**
    * The robot this program is running on: the one place that decides, so a new robot is one line
-   * here. With several robots, choose by something the robot itself knows (a device's serial
-   * number, a file on its storage) rather than by editing this before each deploy. The guide's
-   * robot until you write yours, so the simulator and Pitwall show mechanisms from the start.
+   * here. With several real robots, choose by something the robot itself knows (a device's serial
+   * number, a file on its storage) rather than by editing this before each deploy. It is the
+   * guide's robot until you write yours, so the simulator and Pitwall show mechanisms from the
+   * start, unless the simulator was asked for another by name.
    */
   public static RobotConfig current() {
-    return ExampleRobot.COMPETITION;
+    return asked(Optional.ofNullable(System.getProperty(ROBOT_PROPERTY)));
+  }
+
+  /**
+   * The robot that was asked for by name, or the guide's robot when none was.
+   *
+   * @throws IllegalArgumentException for a name that is none of the team's robots, saying which
+   *     names there are
+   */
+  static RobotConfig asked(Optional<String> name) {
+    if (name.isEmpty()) {
+      return ExampleRobot.COMPETITION;
+    }
+    for (RobotConfig robot : all()) {
+      if (robot.name().equals(name.get())) {
+        return robot;
+      }
+    }
+    List<String> names = all().stream().map(RobotConfig::name).toList();
+    throw new IllegalArgumentException(
+        "No robot is named \"" + name.get() + "\". The robots are: " + String.join(", ", names));
+  }
+
+  /**
+   * What the robot does: the controls written for the robot this is.
+   *
+   * <ul>
+   *   <li>The guide's robots ({@link ExampleRobot#all}) get the guide's controls, {@link
+   *       ExampleControls}, from the runtime. That is where the example's buttons come from: the
+   *       operator's right trigger intakes and the driver's right trigger shoots, in the simulator,
+   *       before you have written anything (runtime/docs/guide.md).
+   *   <li>Each of a team's 2026 robots has its own, since they are different designs.
+   *   <li>Every other robot, which is each one you add to {@link #all}, gets {@link Controls}. Put
+   *       your commands, bindings and autos there.
+   * </ul>
+   *
+   * <p>It has the shape of {@code ControlsMaker.make}, so {@code Robots::controls} is what {@code
+   * Main} hands the runtime. A team with one design passes {@code Controls::new} there and needs
+   * none of this.
+   */
+  public static Object controls(
+      Scheduler scheduler,
+      RobotDefinition robot,
+      Joints joints,
+      Drive drive,
+      RecordingGamepad driver,
+      RecordingGamepad operator,
+      Autos autos) {
+    if (isTheGuides(robot)) {
+      return new ExampleControls(scheduler, robot, joints, drive, driver, operator, autos);
+    }
+    if (robot.name().equals(BetaRobot.CONFIG.name())) {
+      return new BetaControls(scheduler, robot, joints, drive, driver, operator, autos);
+    }
+    if (robot.name().equals(DeltaRobot.CONFIG.name())) {
+      return new DeltaControls(scheduler, robot, joints, drive, driver, operator, autos);
+    }
+    return new Controls(scheduler, robot, joints, drive, driver, operator, autos);
+  }
+
+  /** Whether a robot is one of the guide's, by its name: the competition robot or its practice. */
+  private static boolean isTheGuides(RobotDefinition robot) {
+    for (RobotConfig guides : ExampleRobot.all()) {
+      if (guides.name().equals(robot.name())) {
+        return true;
+      }
+    }
+    return false;
   }
 }

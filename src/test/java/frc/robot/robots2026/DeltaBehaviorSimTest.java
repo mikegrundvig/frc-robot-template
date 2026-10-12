@@ -102,7 +102,7 @@ class DeltaBehaviorSimTest {
     assertThat(transition).isCloseTo(2000, within(60.0));
     assertThat(RPM.convertFrom(sim.simulation.velocity(DeltaRobot.FULL_SEND), RadiansPerSecond))
         .isCloseTo(-1000, within(30.0));
-    assertThat(fullSend.lastOutcome()).startsWith("at feeding: CANCELED");
+    assertThat(fullSend.lastOutcome()).startsWith("full send and transition: feeding: CANCELED");
   }
 
   @Test

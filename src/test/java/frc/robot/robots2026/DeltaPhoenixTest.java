@@ -240,11 +240,12 @@ class DeltaPhoenixTest {
    * SensorToMechanismRatio its gearing (subsystems/drive/ModuleIOTalonFX.java:106), with the
    * coupling taken out in code; the steering fused with its CANcoder
    * (generated/TunerConstants.java:54), its RotorToSensorRatio the steering's gearing
-   * (ModuleIOTalonFX.java:131), wrapping the short way (:137), the front left's CANcoder (ID 12)
-   * offset 0.1069 and counterclockwise (TunerConstants.java:139-142), its discontinuity a fresh
-   * configuration's. Tuner's kV, 0.72 per wheel rotation per second for the drive and 2.49 per
-   * module rotation per second for the steering (TunerConstants.java:36, 30), are each the ideal's,
-   * near enough.
+   * (ModuleIOTalonFX.java:131), the front left's CANcoder (ID 12) offset 0.1069 and
+   * counterclockwise (TunerConstants.java:139-142), its discontinuity a fresh configuration's.
+   * Their steering wraps the short way (:137), which the helper sets for no joint: the template's
+   * module driver sets its own steering to, and a joint's profile picks its turn. Tuner's kV, 0.72
+   * per wheel rotation per second for the drive and 2.49 per module rotation per second for the
+   * steering (TunerConstants.java:36, 30), are each the ideal's, near enough.
    */
   @Test
   void theSwerveModulesAreTunersOwn() {
@@ -292,7 +293,9 @@ class DeltaPhoenixTest {
     assertThat(steer.leader().Feedback.FeedbackRemoteSensorID).isEqualTo(12);
     assertThat(steer.leader().Feedback.SensorToMechanismRatio).isEqualTo(1);
     assertThat(steer.leader().Feedback.RotorToSensorRatio).isCloseTo(steerGearing, within(1e-12));
-    assertThat(steer.leader().ClosedLoopGeneral.ContinuousWrap).isTrue();
+    assertThat(steer.leader().ClosedLoopGeneral.ContinuousWrap)
+        .as("the helper never sets a joint's loop to wrap: a module's driver sets its steering's")
+        .isFalse();
     assertThat(steer.leader().Slot0.kP).isCloseTo(100, within(1e-12));
     assertThat(steer.cancoder().orElseThrow().MagnetSensor.MagnetOffset)
         .isCloseTo(0.10693359375, within(1e-12));

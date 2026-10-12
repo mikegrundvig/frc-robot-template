@@ -2,6 +2,7 @@ package frc.robot;
 
 import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
+import static org.wpilib.units.Units.Seconds;
 
 import com.michaelgrundvig.frc.runtime.autos.Autos;
 import com.michaelgrundvig.frc.runtime.behavior.Gate;
@@ -13,6 +14,7 @@ import com.michaelgrundvig.frc.world.field.Heading;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
+import org.wpilib.units.measure.Time;
 
 /**
  * A team's 2026 Delta behavior, in the template's API: what its subsystems, commands and bindings
@@ -33,6 +35,13 @@ public final class DeltaControls {
    * until someone types another (Shooter.java:25), and never above 4500 (Constants.java:68).
    */
   public static final double SHOT_RPM = 2900;
+
+  /**
+   * How long the pivot may be pushed at a fixed voltage, waiting to read out or in: 3 s, several
+   * times what a swing takes. Their code had no limit. A run-until has none of its own either, so
+   * this one is written here.
+   */
+  private static final Time SWING_DEADLINE = Seconds.of(3);
 
   private final Joints joints;
   private final JointMechanism pivot;
@@ -70,10 +79,11 @@ public final class DeltaControls {
 
   /**
    * Swings the pivot out at 5 V until it reads out, then lets go of it (Pivot.java:51-65,
-   * dumbIntakeOut): held on the operator's A button, it ends when it's out, button or not.
+   * dumbIntakeOut): held on the operator's A button, it ends when it's out, button or not. A pivot
+   * that never reads out isn't pushed at 5 V for longer than {@link #SWING_DEADLINE}.
    */
   public Command pivotOut() {
-    return pivot.runUntil(DeltaRobot.PIVOT_SWINGING_OUT, intakeIsOut);
+    return pivot.runUntil(DeltaRobot.PIVOT_SWINGING_OUT, intakeIsOut).within(SWING_DEADLINE);
   }
 
   /**
@@ -81,7 +91,7 @@ public final class DeltaControls {
    * dumbIntakeIn): held on the operator's B button.
    */
   public Command pivotIn() {
-    return pivot.runUntil(DeltaRobot.PIVOT_SWINGING_IN, intakeIsIn);
+    return pivot.runUntil(DeltaRobot.PIVOT_SWINGING_IN, intakeIsIn).within(SWING_DEADLINE);
   }
 
   /** Whether the pivot reads out, as Pivot.intakeIsOut does (Pivot.java:81-83). */

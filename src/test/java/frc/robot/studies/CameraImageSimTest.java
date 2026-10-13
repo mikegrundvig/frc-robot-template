@@ -76,6 +76,8 @@ class CameraImageSimTest {
     try (PhotonCamera camera = new PhotonCamera("camera-study-check")) {
       PhotonCameraSim photonVision =
           new PhotonCameraSim(camera, VisionSim.properties(SENSOR, 0), FIELD.toField());
+      // The streams are switched off below, so nobody could view what the servers would serve.
+      VisionSim.closeVideoServers(camera.getName());
       try {
         photonVision.setMaxSightRange(SENSOR.sightRange().in(Meters));
         photonVision.enableRawStream(false);

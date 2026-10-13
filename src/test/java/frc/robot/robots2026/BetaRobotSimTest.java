@@ -3,9 +3,11 @@ package frc.robot.robots2026;
 import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 
+import com.michaelgrundvig.frc.runtime.Ended;
 import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.behavior.Binding;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
@@ -15,9 +17,12 @@ import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Alliance;
 import com.michaelgrundvig.frc.world.game.Rebuilt;
+import com.michaelgrundvig.frc.world.record.MoveReason;
+import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import frc.robot.BetaControls;
 import frc.robot.BetaRobot;
+import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,13 +128,16 @@ class BetaRobotSimTest {
 
     press(() -> operator.setRightTriggerAxis(1));
     run(0.1);
-    String held = roller.heldBy();
+    List<Interlock> held = Held.interlocksHolding(roller);
     run(1.4);
     double intaking = rpm(BetaRobot.INTAKE);
     press(() -> operator.setRightTriggerAxis(0));
     run(1);
 
-    assertThat(held).isEqualTo("intake runs only when pivot at least 110°");
+    assertThat(held)
+        .containsExactly(
+            Interlock.that(BetaRobot.INTAKE)
+                .runsOnlyWhen(BetaRobot.PIVOT.atLeast(Degrees.of(110))));
     assertThat(intaking).as("near 2000 rpm, its free speed").isGreaterThan(1900);
     assertThat(Math.abs(rpm(BetaRobot.INTAKE))).as("let go: stopped").isLessThan(10);
     assertThat(Math.toDegrees(truth.position(BetaRobot.PIVOT)))
@@ -147,7 +155,10 @@ class BetaRobotSimTest {
     press(() -> operator.setLeftTriggerAxis(1));
     run(1);
 
-    assertThat(Held.interlocksHolding(roller)).hasSize(1).isEqualTo(Held.interlocksOn(roller));
+    assertThat(Held.interlocksHolding(roller))
+        .containsExactly(
+            Interlock.that(BetaRobot.INTAKE)
+                .runsOnlyWhen(BetaRobot.PIVOT.atLeast(Degrees.of(110))));
     assertThat(Math.abs(rpm(BetaRobot.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }
@@ -195,7 +206,7 @@ class BetaRobotSimTest {
     press(() -> sim.driver().setRightX(0.5));
     run(0.4);
     double turnedAway = rpm(BetaRobot.FULL_SEND);
-    String why = fullSend.lastOutcome();
+    Ended feedWhenAimedAway = ended(fullSend);
     press(() -> sim.driver().setRightX(0));
     run(2.0);
     double again = rpm(BetaRobot.FULL_SEND);
@@ -211,9 +222,11 @@ class BetaRobotSimTest {
     assertThat(aimed).isCloseTo(1000, within(30.0));
     assertThat(aimedAt).as("turned from 0° to face away from the hub").isCloseTo(0, within(2.0));
     assertThat(turnedAway).isCloseTo(0, within(5.0));
-    assertThat(why)
-        .startsWith("full send and transition: feeding: CANCELED after ")
-        .endsWith(": ready to shoot is false: aimed at the Hub, back first");
+    feedWhenAimedAway
+        .named("full send and transition: feeding")
+        .canceled()
+        .because(MoveReason.GATE_FELL)
+        .saying("ready to shoot is false: aimed at the Hub, back first");
     assertThat(overridden).as("the override feeds unaimed").isCloseTo(1000, within(30.0));
     assertThat(again).as("aimed again, it feeds on").isCloseTo(1000, within(30.0));
   }

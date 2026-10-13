@@ -113,7 +113,13 @@ Also built in:
     waiting for the pivot to pass 110°, that 110° stands out on the pivot's card. Beside the
     joints: the sensors, the gates with what each waits for, the gamepads, and the bindings that
     just fired. It is drawn from the program's own log, the last five minutes of which Pitwall
-    remembers. See [pitwall/README.md](pitwall/README.md#the-robot-view).
+    remembers, and a time strip along its bottom goes back through them: scrub, or go loop by
+    loop, and the cards show the robot as it was, with what changed in that loop marked. Every
+    loop in which something happened is marked on the strip and listed beside it in order, in
+    words ("roller held: roller runs only when pivot at least 110°", then "roller no longer
+    held"), a move that timed out or was refused standing out as a problem: an ordering mistake
+    in an auto is read there. Scrubbing moves what the page shows, never the robot. See
+    [pitwall/README.md](pitwall/README.md#the-robot-view).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
   - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim, in the

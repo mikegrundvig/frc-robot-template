@@ -4,12 +4,15 @@ import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 
+import com.michaelgrundvig.frc.runtime.Ended;
 import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.sim.JointsSimHarness;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Held;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
+import com.michaelgrundvig.frc.world.record.MoveReason;
 import com.michaelgrundvig.frc.world.robot.Interlock;
 import frc.robot.BetaControls;
 import frc.robot.BetaRobot;
@@ -77,7 +80,10 @@ class BetaBehaviorSimTest {
     assertThat(intaking.spun())
         .as("the roller spun only once the pivot was past it")
         .isGreaterThan(intaking.passedRun());
-    assertThat(intaking.heldBy()).hasSize(1).isEqualTo(Held.interlocksOn(roller));
+    assertThat(intaking.heldBy())
+        .containsExactly(
+            Interlock.that(BetaRobot.INTAKE)
+                .runsOnlyWhen(BetaRobot.PIVOT.atLeast(Degrees.of(110))));
     assertThat(roller.holders()).isEmpty();
     assertThat(Math.toDegrees(sim.simulation.position(BetaRobot.PIVOT)))
         .isCloseTo(130, within(2.0));
@@ -121,7 +127,7 @@ class BetaBehaviorSimTest {
     List<String> blocking = actions.readyToShoot().blocking();
     sim.run(0.5);
     double paused = sim.simulation.velocity(BetaRobot.FULL_SEND);
-    String why = fullSend.lastOutcome();
+    Ended feedWhenAimedAway = ended(fullSend);
 
     headingError[0] = 1;
     sim.run(1);
@@ -132,9 +138,11 @@ class BetaBehaviorSimTest {
     assertThat(ridingOut).as("the debounce rides out 60 ms").isGreaterThan(0.9 * feedSpeed);
     assertThat(blocking).isEmpty();
     assertThat(paused).isCloseTo(0, within(1.0));
-    assertThat(why)
-        .startsWith("full send and transition: feeding: CANCELED after ")
-        .endsWith(": ready to shoot is false: aimed");
+    feedWhenAimedAway
+        .named("full send and transition: feeding")
+        .canceled()
+        .because(MoveReason.GATE_FELL)
+        .saying("ready to shoot is false: aimed");
     assertThat(sim.simulation.velocity(BetaRobot.FULL_SEND))
         .as("aimed again: feeding again")
         .isCloseTo(feedSpeed, within(0.03 * feedSpeed));

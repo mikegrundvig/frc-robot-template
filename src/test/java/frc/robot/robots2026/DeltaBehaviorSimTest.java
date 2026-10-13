@@ -3,14 +3,18 @@ package frc.robot.robots2026;
 import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 
 import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.sim.JointsSimHarness;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Held;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
+import com.michaelgrundvig.frc.world.robot.Interlock;
 import frc.robot.DeltaControls;
 import frc.robot.DeltaRobot;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.wpilib.command3.Trigger;
@@ -75,13 +79,16 @@ class DeltaBehaviorSimTest {
   void theInterlockHoldsTheRollerUntilThePivotIsOut() {
     sim.scheduler.schedule(roller.run(DeltaRobot.INTAKING));
     sim.run(0.2);
-    String held = roller.heldBy();
+    List<Interlock> held = Held.interlocksHolding(roller);
     double stowed = sim.simulation.velocity(DeltaRobot.INTAKE);
 
     holdOut(1.5);
     double out = RPM.convertFrom(sim.simulation.velocity(DeltaRobot.INTAKE), RadiansPerSecond);
 
-    assertThat(held).isEqualTo("intake runs only when pivot at least 130°");
+    assertThat(held)
+        .containsExactly(
+            Interlock.that(DeltaRobot.INTAKE)
+                .runsOnlyWhen(DeltaRobot.PIVOT.atLeast(Degrees.of(130))));
     assertThat(stowed).isCloseTo(0, within(1e-6));
     assertThat(out).as("3000 rpm is the roller's free speed: it closes on it").isGreaterThan(2850);
     assertThat(roller.holders()).isEmpty();

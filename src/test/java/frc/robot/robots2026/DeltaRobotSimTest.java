@@ -3,9 +3,11 @@ package frc.robot.robots2026;
 import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.wpilib.units.Units.Degrees;
 import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 
+import com.michaelgrundvig.frc.runtime.Ended;
 import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.behavior.Binding;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
@@ -13,6 +15,7 @@ import com.michaelgrundvig.frc.runtime.sim.JointSimulation;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Held;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.world.robot.Interlock;
 import com.michaelgrundvig.frc.world.robot.Joint;
 import frc.robot.DeltaControls;
 import frc.robot.DeltaRobot;
@@ -113,7 +116,10 @@ class DeltaRobotSimTest {
     press(() -> operator.setRightTriggerAxis(1));
     run(1);
 
-    assertThat(Held.interlocksHolding(roller)).hasSize(1).isEqualTo(Held.interlocksOn(roller));
+    assertThat(Held.interlocksHolding(roller))
+        .containsExactly(
+            Interlock.that(DeltaRobot.INTAKE)
+                .runsOnlyWhen(DeltaRobot.PIVOT.atLeast(Degrees.of(130))));
     assertThat(Math.abs(rpm(DeltaRobot.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }
@@ -131,7 +137,7 @@ class DeltaRobotSimTest {
     press(() -> operator.setFaceDownButton(true));
     run(1);
     double out = pivotDegrees();
-    String ended = pivot.lastOutcome();
+    Ended ended = ended(pivot);
     press(() -> operator.setRightTriggerAxis(1));
     run(1);
     double intaking = rpm(DeltaRobot.INTAKE);
@@ -140,7 +146,7 @@ class DeltaRobotSimTest {
     run(1);
 
     assertThat(out).as("past 130°, short of its guessed stop").isBetween(130.0, 135.0);
-    assertThat(ended).startsWith("pivot: swinging out until intake is out: ARRIVED in ");
+    ended.named("pivot: swinging out until intake is out").arrived();
     assertThat(intaking).as("near 3000 rpm, its free speed").isGreaterThan(2850);
     assertThat(Math.abs(rpm(DeltaRobot.INTAKE))).as("let go: stopped").isLessThan(10);
     assertThat(pivotDegrees()).as("and held out").isBetween(129.0, 135.0);

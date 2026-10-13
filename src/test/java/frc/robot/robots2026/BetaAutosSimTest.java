@@ -6,6 +6,8 @@ import static org.wpilib.units.Units.RPM;
 import static org.wpilib.units.Units.RadiansPerSecond;
 
 import com.michaelgrundvig.frc.runtime.AutoCheck;
+import com.michaelgrundvig.frc.runtime.Ended;
+import com.michaelgrundvig.frc.runtime.Ran;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.autos.Autos;
@@ -69,7 +71,7 @@ class BetaAutosSimTest {
    * @param shooterAtFirstFeed the shooter's speed as it began, rpm
    * @param unreadyFeeding the longest the robot fed unaimed or short of speed, seconds
    * @param result how the auto ended
-   * @param moves each drive move's outcome line
+   * @param moves how each drive move ended
    */
   record Run(
       Pose2d ended,
@@ -81,7 +83,7 @@ class BetaAutosSimTest {
       double shooterAtFirstFeed,
       double unreadyFeeding,
       Autos.Run result,
-      List<String> moves) {}
+      List<Ended> moves) {}
 
   private double rpm(JointSimulation truth, com.michaelgrundvig.frc.world.robot.Joint joint) {
     return RPM.convertFrom(truth.velocity(joint), RadiansPerSecond);
@@ -117,7 +119,7 @@ class BetaAutosSimTest {
   /** Runs autonomous for its 15 s from where the robot stands, watching the truth each loop. */
   private Run autonomous(Alliance alliance) {
     JointSimulation truth = Objects.requireNonNull(sim.world().joints());
-    List<String> moves = new ArrayList<>();
+    List<Ended> moves = new ArrayList<>();
     double[] pivotAtFirstPath = {Double.NaN};
     double[] pathEnds = {Double.NaN, Double.NaN};
     double[] now = {0};
@@ -131,7 +133,7 @@ class BetaAutosSimTest {
               }
               if (event instanceof SchedulerEvent.Completed done
                   && done.command() instanceof DriveMove move) {
-                moves.add(move.reason());
+                moves.add(Ended.ended(move));
                 if (Double.isNaN(pathEnds[0])) {
                   pathEnds[0] = now[0];
                 }
@@ -192,7 +194,7 @@ class BetaAutosSimTest {
     assertThat(run.pivotAtFirstPath())
         .as(what + ": intake out before the first path")
         .isGreaterThan(125);
-    assertThat(run.moves()).as(what).allMatch(line -> line.contains(": ARRIVED in "));
+    assertThat(run.moves()).as(what).allSatisfy(Ended::arrived);
     assertThat(run.feedStarts()).as(what + ": bursts of feeding").hasSize(bursts);
     assertThat(run.feedStarts().get(0))
         .as(what + ": first fed after the first path")
@@ -251,7 +253,7 @@ class BetaAutosSimTest {
     RobotSim.enable(RobotMode.AUTONOMOUS, false);
     sim.loops(3);
 
-    assertThat(sim.autos().lastRun().orElseThrow().describe()).startsWith("Do nothing: COMPLETED");
+    Ran.lastRunOf(sim.autos()).named("Do nothing").completed();
     assertThat(moves).isEmpty();
     assertThat(sim.simulation().truePose()).isEqualTo(before);
     assertThat(Math.toDegrees(truth.position(BetaRobot.PIVOT)))
@@ -277,7 +279,7 @@ class BetaAutosSimTest {
 
     for (Run run : List.of(first, second)) {
       assertThat(run.result().ending()).isEqualTo(Autos.Ending.CUT_OFF);
-      assertThat(run.moves()).hasSize(3).allMatch(line -> line.contains(": ARRIVED in "));
+      assertThat(run.moves()).hasSize(3).allSatisfy(Ended::arrived);
       assertThat(run.feedStarts()).hasSize(2);
     }
     assertThat(second.ended().getTranslation().getDistance(first.ended().getTranslation()))
@@ -311,9 +313,9 @@ class BetaAutosSimTest {
       assertThat(onStart.status())
           .as(alliance + ": placed for the auto")
           .isEqualTo(Placement.Status.READY);
-      assertThat(onStart.describe()).startsWith("Ready on Left: ");
+      assertThat(onStart.start()).isEqualTo("Left");
       assertThat(onAnother.status()).isEqualTo(Placement.Status.WRONG_START);
-      assertThat(onAnother.describe()).isEqualTo("On Center, not the expected start");
+      assertThat(onAnother.start()).isEqualTo("Center");
       assertThat(setRight.status()).isEqualTo(Placement.Status.READY);
     }
   }

@@ -427,18 +427,19 @@ class DeltaRobotTest {
                     + " for a counterbalanced joint",
                 Scope.ROBOT),
             tuple(
-                "intake roller has no mass: intake roller adds nothing to intake's inertia",
+                "intake roller has no mass: intake roller adds nothing to intake's inertia, so its"
+                    + " rotors alone bring it to intaking, 3000 rpm, in about 11 ms",
                 Scope.SIMULATOR),
             tuple(
                 "shooter wheels has no mass: shooter wheels adds nothing to shooter's inertia",
                 Scope.SIMULATOR),
             tuple(
                 "full send rollers has no mass: full send rollers adds nothing to full send's"
-                    + " inertia",
+                    + " inertia, so its rotors alone bring it to feeding, 1000 rpm, in about 6 ms",
                 Scope.SIMULATOR),
             tuple(
                 "transition rollers has no mass: transition rollers adds nothing to transition's"
-                    + " inertia",
+                    + " inertia, so its rotors alone bring it to feeding, 2000 rpm, in about 5 ms",
                 Scope.SIMULATOR));
     assertThat(notes)
         .extracting(Finding::subject)

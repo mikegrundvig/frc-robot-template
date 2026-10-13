@@ -99,11 +99,12 @@ Also built in:
     cameras as configured (a camera's wedge pointing the wrong way is a typo in `Robots.java`,
     found at a glance), how sure the estimate is, and each camera's sight lines to the tags it
     saw, solid where the estimator accepted the measurement and dashed where it refused it. A
-    click on one says why, and offers the camera's calibration; *Hold* freezes the drawing so a
-    fleeting one can be clicked. In the simulator the truth stands beside the estimate as a
-    dashed ghost. The robot program contributes it as data (`com.michaelgrundvig.frc.runtime.views.world`), Pitwall
-    draws it (three.js, served from the robot), and only a page showing it is sent what moves;
-    a still robot sends nothing. Any robot program can add its own scene:
+    click on one says why, and offers the camera's calibration. In the simulator the truth
+    stands beside the estimate as a dashed ghost. It follows the same time strip as the Robot
+    view, so a line that came and went is found again in the last five minutes, and a legend
+    beside it says what each mark means and switches each layer. Pitwall draws it from the
+    robot's log (three.js, served from the robot), and only a page showing it is sent what
+    moves; a still robot sends nothing. Any robot program can add its own scene:
     [pitwall/README.md](pitwall/README.md).
   - **Robot**: the robot's joints as `Robots.java` describes them, live, one card each, drawn by
     its kind: an arc for a pivot, between its stops, with its named places; a speedometer for a
@@ -251,7 +252,6 @@ Also built in:
 | `com.michaelgrundvig.frc.runtime.behavior` | What behavior is written with beside Commands v3: gates, named conditions that say why they're false (`Gate`), and the drive team's gamepads, which record each binding with its button (`RecordingGamepad`, `Bindings`). |
 | `com.michaelgrundvig.frc.runtime.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `com.michaelgrundvig.frc.runtime.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
-| `com.michaelgrundvig.frc.runtime.views` | What the robot program shows on Pitwall beyond status and actions: `world`, the World view's scene (the field, the robot as localization believes it is, its cameras' sight lines and their verdicts). Data only; Pitwall draws it. |
 | `com.michaelgrundvig.frc.runtime.sim` | The simulated world's adapters to the robot program: the simulated hardware behind its IO (`SimulatedHardware`: the modules' motor controllers and encoders, the IMUs, the joints, sensors and PDH, the cameras), the faults bound to Pitwall's simulator controls (`Faults`), and the named scenarios (`Scenarios`), over the simulation library (`runtime/lib/simulation`). Only the simulator builds it. |
 | `com.michaelgrundvig.frc.runtime.lib` | The robot program's own components, unit-tested and free of robot code (enforced): loop timing (`timing`), Systemcore's CAN ports in WPILib's names (`wiring`), and the Phoenix helper (`phoenix`), which turns a mechanism's definition, wiring and control into its TalonFX and CANcoder settings (ratios, gains, gravity, limits, followers), so nothing is retyped by hand. |
 | `runtime/src/test/java/`, `runtime/src/testFixtures/java/` | The runtime's tests, in the same packages as what they test, from single classes to the whole robot in the simulator, on the guide's robot, plus its architecture rules (`ArchitectureTest`). The fixtures are what you test your own robot with: `RobotSim`, `Monkey`, `AutoCheck`, the invariants. See [runtime/docs/testing.md](runtime/docs/testing.md). |

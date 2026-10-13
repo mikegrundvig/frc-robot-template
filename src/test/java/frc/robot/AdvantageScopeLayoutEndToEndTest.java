@@ -7,7 +7,9 @@ import com.michaelgrundvig.frc.runtime.SessionRecording;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -33,12 +35,48 @@ class AdvantageScopeLayoutEndToEndTest {
 
     List<AdvantageScopeLayoutCheck.Source> sources =
         AdvantageScopeLayoutCheck.sources(readLayout());
+    Map<String, String> logged = AdvantageScopeLayoutCheck.logged(recorded);
     List<String> problems =
-        AdvantageScopeLayoutCheck.problems(
-            sources, AdvantageScopeLayoutCheck.logged(recorded), AdvantageScopeLayoutTest.models());
+        AdvantageScopeLayoutCheck.problems(sources, logged, AdvantageScopeLayoutTest.models());
 
     assertThat(sources).hasSizeGreaterThan(20);
     assertThat(problems).isEmpty();
+    assertThat(factsMissingFrom(logged)).isEmpty();
+  }
+
+  /**
+   * What a joint and the controls did is logged as facts, each a record AdvantageKit writes as a
+   * struct. A record it cannot write is skipped as it is logged, so its key would be missing from
+   * the log, and whatever reads it would sit empty. These are the facts every session logs, each by
+   * the end of its key and the struct it is; the ones that are missing are handed back. The robot
+   * this session runs has no gate, so a gate's terms are checked where they are made (the runtime's
+   * {@code RecordedFactsTest} and its gates' tests).
+   */
+  private static List<String> factsMissingFrom(Map<String, String> logged) {
+    Map<String, String> structByKeysEnd =
+        Map.of(
+            "/State", "JointState",
+            "/At", "JointPlace",
+            "/HeldBy", "Holder[]",
+            "/Controls/Fired", "BindingFired[]");
+    List<String> missing = new ArrayList<>();
+    structByKeysEnd.forEach(
+        (keysEnd, struct) -> {
+          boolean isLogged =
+              logged.entrySet().stream()
+                  .anyMatch(
+                      each ->
+                          each.getKey().startsWith("/RealOutputs/")
+                              && each.getKey().endsWith(keysEnd)
+                              && each.getValue().equals(struct));
+          if (!isLogged) {
+            missing.add(keysEnd + " as " + struct);
+          }
+        });
+    if (!logged.containsKey("/RealOutputs/Robot/Names/Interlocks")) {
+      missing.add("/Robot/Names/Interlocks");
+    }
+    return missing;
   }
 
   private static String readLayout() throws IOException {

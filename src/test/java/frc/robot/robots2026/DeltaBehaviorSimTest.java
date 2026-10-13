@@ -1,5 +1,6 @@
 package frc.robot.robots2026;
 
+import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.RPM;
@@ -50,7 +51,7 @@ class DeltaBehaviorSimTest {
 
     assertThat(pivotDegrees()).as("past 130°, at or short of its stop").isBetween(130.0, 135.0);
     assertThat(sim.simulation.velocity(DeltaRobot.PIVOT)).isCloseTo(0, within(0.05));
-    assertThat(pivot.lastOutcome()).matches("pivot: swinging out until intake is out: ARRIVED .*");
+    ended(pivot).named("pivot: swinging out until intake is out").arrived();
     assertThat(actions.intakeIsOut().getAsBoolean()).isTrue();
   }
 
@@ -65,7 +66,7 @@ class DeltaBehaviorSimTest {
     sim.run(2);
 
     assertThat(pivotDegrees()).as("at or under 3°, short of its stop").isBetween(0.0, 3.0);
-    assertThat(pivot.lastOutcome()).matches("pivot: swinging in until intake is in: ARRIVED .*");
+    ended(pivot).named("pivot: swinging in until intake is in").arrived();
     assertThat(actions.intakeIsIn().getAsBoolean()).isTrue();
   }
 
@@ -83,7 +84,7 @@ class DeltaBehaviorSimTest {
     assertThat(held).isEqualTo("intake runs only when pivot at least 130°");
     assertThat(stowed).isCloseTo(0, within(1e-6));
     assertThat(out).as("3000 rpm is the roller's free speed: it closes on it").isGreaterThan(2850);
-    assertThat(roller.heldBy()).isEmpty();
+    assertThat(roller.holders()).isEmpty();
   }
 
   @Test
@@ -102,7 +103,7 @@ class DeltaBehaviorSimTest {
     assertThat(transition).isCloseTo(2000, within(60.0));
     assertThat(RPM.convertFrom(sim.simulation.velocity(DeltaRobot.FULL_SEND), RadiansPerSecond))
         .isCloseTo(-1000, within(30.0));
-    assertThat(fullSend.lastOutcome()).startsWith("full send and transition: feeding: CANCELED");
+    ended(fullSend).named("full send and transition: feeding").canceled();
   }
 
   @Test

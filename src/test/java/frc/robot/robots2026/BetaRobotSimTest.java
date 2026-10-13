@@ -1,5 +1,6 @@
 package frc.robot.robots2026;
 
+import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.RPM;
@@ -9,6 +10,7 @@ import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.behavior.Binding;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
 import com.michaelgrundvig.frc.runtime.sim.JointSimulation;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Held;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.field.Alliance;
@@ -145,7 +147,7 @@ class BetaRobotSimTest {
     press(() -> operator.setLeftTriggerAxis(1));
     run(1);
 
-    assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot at least 110°");
+    assertThat(Held.interlocksHolding(roller)).hasSize(1).isEqualTo(Held.interlocksOn(roller));
     assertThat(Math.abs(rpm(BetaRobot.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }
@@ -168,7 +170,7 @@ class BetaRobotSimTest {
 
     assertThat(out).isCloseTo(130, within(2.0));
     assertThat(Math.toDegrees(truth.position(BetaRobot.PIVOT))).isCloseTo(1.5, within(2.0));
-    assertThat(pivot.lastOutcome()).startsWith("pivot → in: ARRIVED in ");
+    ended(pivot).named("pivot → in").arrived();
   }
 
   /**

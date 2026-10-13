@@ -1,5 +1,6 @@
 package frc.robot.robots2026;
 
+import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
@@ -7,7 +8,9 @@ import static org.wpilib.units.Units.RPM;
 
 import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.sim.JointsSimHarness;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Held;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
+import com.michaelgrundvig.frc.world.robot.Interlock;
 import frc.robot.BetaControls;
 import frc.robot.BetaRobot;
 import java.util.List;
@@ -39,7 +42,7 @@ class BetaBehaviorSimTest {
   private final boolean[] held = {false};
 
   /** When the pivot first passed 110°, when the roller spun, and what held the roller first. */
-  private record Intaking(double passedRun, double spun, String heldBy) {}
+  private record Intaking(double passedRun, double spun, List<Interlock> heldBy) {}
 
   /** Holds the intake button for a time. */
   private Intaking holdIntake(double seconds) {
@@ -48,12 +51,12 @@ class BetaBehaviorSimTest {
     held[0] = true;
     double passedRun = Double.NaN;
     double spun = Double.NaN;
-    String heldBy = "";
+    List<Interlock> heldBy = List.of();
     for (int i = 1; i <= Math.round(seconds / 0.02); i++) {
       sim.loop();
       double t = i * 0.02;
       if (i == 2) {
-        heldBy = roller.heldBy();
+        heldBy = Held.interlocksHolding(roller);
       }
       if (Double.isNaN(passedRun)
           && Math.toDegrees(sim.simulation.position(BetaRobot.PIVOT)) >= 110) {
@@ -74,11 +77,11 @@ class BetaBehaviorSimTest {
     assertThat(intaking.spun())
         .as("the roller spun only once the pivot was past it")
         .isGreaterThan(intaking.passedRun());
-    assertThat(intaking.heldBy()).isEqualTo("intake runs only when pivot at least 110°");
-    assertThat(roller.heldBy()).isEmpty();
+    assertThat(intaking.heldBy()).hasSize(1).isEqualTo(Held.interlocksOn(roller));
+    assertThat(roller.holders()).isEmpty();
     assertThat(Math.toDegrees(sim.simulation.position(BetaRobot.PIVOT)))
         .isCloseTo(130, within(2.0));
-    assertThat(pivot.lastOutcome()).matches("pivot → out: ARRIVED in 0\\.\\d\\d s");
+    ended(pivot).named("pivot → out").arrived().inBetween(0, 1);
     assertThat(sim.simulation.velocity(BetaRobot.INTAKE))
         .as("2000 rpm is the roller's free speed: it closes on it")
         .isCloseTo(
@@ -93,7 +96,7 @@ class BetaBehaviorSimTest {
     held[0] = false;
     sim.run(1);
 
-    assertThat(roller.lastOutcome()).startsWith("intake: intaking: CANCELED after ");
+    ended(roller).named("intake: intaking").canceled();
     assertThat(sim.simulation.velocity(BetaRobot.INTAKE)).isCloseTo(0, within(1.0));
     assertThat(Math.toDegrees(sim.simulation.position(BetaRobot.PIVOT)))
         .isCloseTo(130, within(2.0));

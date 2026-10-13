@@ -1,5 +1,6 @@
 package frc.robot.robots2026;
 
+import static com.michaelgrundvig.frc.runtime.Ended.ended;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 import static org.wpilib.units.Units.RPM;
@@ -9,6 +10,7 @@ import com.michaelgrundvig.frc.runtime.RobotSim;
 import com.michaelgrundvig.frc.runtime.behavior.Binding;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
 import com.michaelgrundvig.frc.runtime.sim.JointSimulation;
+import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Held;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
 import com.michaelgrundvig.frc.world.robot.Joint;
@@ -111,7 +113,7 @@ class DeltaRobotSimTest {
     press(() -> operator.setRightTriggerAxis(1));
     run(1);
 
-    assertThat(roller.heldBy()).isEqualTo("intake runs only when pivot at least 130°");
+    assertThat(Held.interlocksHolding(roller)).hasSize(1).isEqualTo(Held.interlocksOn(roller));
     assertThat(Math.abs(rpm(DeltaRobot.INTAKE))).isLessThan(10);
     assertThat(ruleBroken).isFalse();
   }
@@ -158,8 +160,7 @@ class DeltaRobotSimTest {
     run(2);
 
     assertThat(pivotDegrees()).as("at or under 3°, short of its stop").isBetween(0.0, 3.0);
-    assertThat(pivot.lastOutcome())
-        .startsWith("pivot: swinging in until intake is in: ARRIVED in ");
+    ended(pivot).named("pivot: swinging in until intake is in").arrived();
   }
 
   /** The driver's right trigger feeds both rollers, the right bumper reverses them. */

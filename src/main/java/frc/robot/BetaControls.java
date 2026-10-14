@@ -42,8 +42,9 @@ import org.wpilib.math.geometry.Rotation2d;
  * the pit to choose ({@code runtime/docs/autos.md}). Their paths are the drive's, {@code
  * drive.follow} through places written once for blue (the path files' anchor points, in meters; the
  * headings are their rotation targets at each anchor, to the nearest 5°), so each is right on both
- * alliances. Their Right autos are not ported: the files' Right paths are hand-drawn, not mirrors
- * of the Left ones.
+ * alliances. A few anchors are moved from the files', where the files' paths ran through the
+ * trench's column or out to the guardrail: each says so where it is written. Their Right autos are
+ * not ported: the files' Right paths are hand-drawn, not mirrors of the Left ones.
  */
 public final class BetaControls {
   /** The shooter's speed for every shot, standing in for their shot law. */
@@ -51,21 +52,34 @@ public final class BetaControls {
 
   // Left Single's anchors (deploy/pathplanner/paths/Left Half 1.path, Left Half 2.path), after the
   // first, which is the robot's start. The Left start is the path's own, to 14 cm.
-  private static final Place HALF_WALL = place("Half wall", 5.5, 7.5, 0);
+  //
+  // The two anchors beyond the trench are moved from the files' (5.5, 7.5), so the robot runs clear
+  // of the trench's column and the guardrail on the real field: 0.4 to 0.6 m farther out, where its
+  // bumpers are past the column, and 0.3 m in from the guardrail, which the curve through them
+  // otherwise swings out to. It goes back through the trench square, where the file turned it a
+  // quarter turn inside: the opening is 1.28 m, and the bumpers are 1.15 m across a corner.
+  private static final Place HALF_WALL = place("Half wall", 5.9, 7.2, 0);
   private static final Place HALF_FAR = place("Half far", 7.6, 4.5, -90);
-  private static final Place HALF_BACK = place("Half back", 5.5, 7.5, -90);
+  private static final Place HALF_BACK = place("Half back", 6.1, 7.2, 0);
 
   // Left Double's (EXP Left 1.path, EXP Left 2.path, EXP Left 3.path). Its first anchor, (4.5,
   // 7.419), is 0.9 m along the wall from the Left start, which the robot starts on: it passes the
   // anchor on its way.
+  //
+  // Moved to run clear on the real field: the anchor past the trench is 12 cm in from the file's
+  // 7.419 and held square (the file turned 30° there, inside the trench); the third path goes back
+  // out through the trench's mouth, squared up before it, where the file cut the corner from the
+  // shot to the wall anchor through the trench's column; and the last anchor before the bump is
+  // 0.5 m nearer it and 8 cm higher, which crosses the bump midway between the hub and the column.
   private static final Place WALL = place("Wall", 4.5, 7.419, 0);
-  private static final Place TRENCH = place("Trench", 6.0, 7.419, -30);
+  private static final Place TRENCH = place("Trench", 6.0, 7.3, 0);
+  private static final Place MOUTH = place("Trench mouth", 3.3, 7.43, 0);
   private static final Place FAR = place("Far", 8.4, 4.869, -90);
   private static final Place BUMP = place("Bump", 4.63045, 5.4372, 140);
   private static final Place SHOT = place("Shot", 3.0, 6.069, 135);
   private static final Place SWEEP_OUT = place("Sweep out", 8.0, 6.269, -75);
   private static final Place SWEEP_IN = place("Sweep in", 6.92, 4.605, 170);
-  private static final Place SWEEP_BACK = place("Sweep back", 5.5, 5.369, 140);
+  private static final Place SWEEP_BACK = place("Sweep back", 5.0, 5.45, 140);
 
   /** A place on the field for blue, in meters and degrees as their path files give them. */
   private static Place place(String name, double x, double y, double degrees) {
@@ -225,7 +239,8 @@ public final class BetaControls {
               co.await(aimAndShoot().withTimeout(Seconds.of(3)));
               co.awaitAny(
                   moves.follow(
-                      Keyframe.at(WALL),
+                      Keyframe.at(MOUTH),
+                      Keyframe.at(TRENCH),
                       Keyframe.at(SWEEP_OUT),
                       Keyframe.at(SWEEP_IN),
                       Keyframe.at(SWEEP_BACK),

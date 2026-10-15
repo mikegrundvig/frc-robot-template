@@ -38,7 +38,7 @@ public final class ConsistencyStudy {
       Each seed draws its errors from Gaussians with these standard deviations; the defaults are
       what the estimator's configuration claims, so an honest estimator reads a NEES near 2.
         --mount-error-mm=M        each camera off its mount along each axis (default 3)
-        --mount-error-degrees=D   and turned about each axis (default: cameraTurnStdDevDegrees)
+        --mount-error-degrees=D   and turned about each axis (default: the mount tolerance's spread, 0.58)
         --tag-error-mm=M          each tag off the field's layout along each axis (default: tagPlacementStdDevMeters)
         --gyro-scale-error=F      the gyro's scale off by this share (default: headingStdDevDegreesPerTurn / 360)
         --backup-scale-error=F    the backup IMU's (default: backupHeadingStdDevDegreesPerTurn / 360)

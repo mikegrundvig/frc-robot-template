@@ -191,8 +191,9 @@ Also built in:
   applied at the moment their image was taken, even when they arrive late (up to 1.5 s, and
   within their camera's usual latency plus a margin, or the clocks are out of step and the image
   is left out); every measurement gated
-  against the estimate, so a misread tag can't move it; and recovery when the cameras agree with
-  each other that odometry is wrong (a collision). A camera knocked off its mount counts for less
+  against the estimate, so a misread tag can't move it; and recovery when independent sources
+  agree that odometry is wrong (two cameras, two tags, or a camera and an IMU that felt a
+  collision). A camera knocked off its mount counts for less
   until it's recalibrated, and says so; a task lining up on a target can trust only that target's
   tags. It reports what it rests on (tracking, dead reckoning, lost, gyro lost) and how sure it
   is, on Pitwall and in the log. The kinematics sit behind one interface. Swerve is the one

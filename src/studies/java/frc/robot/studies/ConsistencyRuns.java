@@ -299,7 +299,8 @@ final class ConsistencyRuns {
 
     /**
      * The errors the estimator's configuration allows for, drawn at the spread it claims: each
-     * camera turned by {@code cameraTurnStdDevDegrees} about each axis, each tag off by {@code
+     * camera turned about each axis by its mount's tolerance's spread ({@link
+     * CameraConfig.MountTolerance#turnStdDevRadians}), each tag off by {@code
      * tagPlacementStdDevMeters} along each, the gyro's scale off by {@code
      * headingStdDevDegreesPerTurn} and the backup IMU's by {@code
      * backupHeadingStdDevDegreesPerTurn}, and a few millimeters of mount ({@link
@@ -309,7 +310,7 @@ final class ConsistencyRuns {
     static Spread matched(EstimatorConfig config) {
       return new Spread(
           MOUNT_MILLIMETERS,
-          config.cameraTurnStdDevDegrees(),
+          Math.toDegrees(CameraConfig.MountTolerance.MEASURED.turnStdDevRadians()),
           1000 * config.tagPlacementStdDevMeters(),
           config.headingStdDevDegreesPerTurn() / 360,
           config.backupHeadingStdDevDegreesPerTurn() / 360);

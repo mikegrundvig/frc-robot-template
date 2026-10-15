@@ -11,6 +11,7 @@ import com.michaelgrundvig.frc.runtime.SimulationTest;
 import com.michaelgrundvig.frc.runtime.lib.timing.RobotLoop;
 import com.michaelgrundvig.frc.runtime.sim.Scenarios;
 import com.michaelgrundvig.frc.simulation.SensorErrors;
+import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -174,7 +175,7 @@ class ConsistencyStudyTest {
       scales += Math.pow(spread.gyroScale(seed) - 1, 2);
     }
 
-    double turn = Math.toRadians(config.cameraTurnStdDevDegrees());
+    double turn = CameraConfig.MountTolerance.MEASURED.turnStdDevRadians();
     assertThat(Math.sqrt(yaws / draws)).isCloseTo(turn, within(0.05 * turn));
     double placement = config.tagPlacementStdDevMeters();
     assertThat(Math.sqrt(tags / draws)).isCloseTo(placement, within(0.05 * placement));

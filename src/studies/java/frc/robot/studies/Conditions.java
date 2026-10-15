@@ -120,12 +120,25 @@ public record Conditions(
    * @param camera a number for the camera, the same whatever else is scored
    */
   Transform3d mountError(long camera) {
-    if (mountErrorMillimeters == 0 && mountErrorDegrees == 0) {
+    return mountError(seed, camera, mountErrorMillimeters, mountErrorDegrees);
+  }
+
+  /**
+   * How one camera is mounted off its configured mount, drawn evenly within these bounds.
+   *
+   * @param seed where the draw starts: a run's, already mixed with something of its own, since
+   *     {@link Seeds#mix} of nearby seeds and camera numbers coincide
+   * @param camera a number for the camera, the same whatever else is scored
+   * @param millimeters the most it sits off along each axis, either way
+   * @param degrees the most it is turned about each axis, either way
+   */
+  static Transform3d mountError(long seed, long camera, double millimeters, double degrees) {
+    if (millimeters == 0 && degrees == 0) {
       return Transform3d.ZERO;
     }
     SplittableRandom random = new SplittableRandom(Seeds.mix(seed, camera));
-    double meters = mountErrorMillimeters / 1000;
-    double radians = Math.toRadians(mountErrorDegrees);
+    double meters = millimeters / 1000;
+    double radians = Math.toRadians(degrees);
     return new Transform3d(
         within(random, meters),
         within(random, meters),

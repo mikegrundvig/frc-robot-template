@@ -291,7 +291,7 @@ final class EstimatorRuns {
 
   /** Plays a scenario with a seed. */
   static Played play(Scenario scenario, long seed) {
-    return play(scenario, seed, false);
+    return play(scenario, seed, false, CameraConditions.NOMINAL);
   }
 
   /**
@@ -300,6 +300,17 @@ final class EstimatorRuns {
    * @param keepLoops whether every loop's inputs are kept, to cost the estimators by
    */
   static Played play(Scenario scenario, long seed, boolean keepLoops) {
+    return play(scenario, seed, keepLoops, CameraConditions.NOMINAL);
+  }
+
+  /**
+   * Plays a scenario with a seed, its cameras erring as these conditions say on top of what the
+   * scenario does.
+   *
+   * @param keepLoops whether every loop's inputs are kept, to cost the estimators by
+   */
+  static Played play(
+      Scenario scenario, long seed, boolean keepLoops, CameraConditions cameraConditions) {
     List<EstimatorCost.Loop> kept = new ArrayList<>();
     Pose2d start = Pose2d.ZERO;
     EstimatorRig.Cameras cameras =
@@ -315,8 +326,9 @@ final class EstimatorRuns {
     int samples = 0;
     int oursOffered = 0;
     int oursAccepted = 0;
+    SensorErrors errors = cameraConditions.on(scenario.errors().apply(seed), seed);
     try (SimulatedRobot robot =
-        new SimulatedRobot(ExampleRobot.SIM, scenario.errors().apply(seed), cameras::watch)) {
+        new SimulatedRobot(cameraConditions.robot(), errors, cameras::watch)) {
       Stage stage = new Stage(robot, cameras, marks, contenders);
       int disabledLoops = RobotLoop.loops(DISABLED_SECONDS);
       int loops = disabledLoops + RobotLoop.loops(scenario.route().seconds());

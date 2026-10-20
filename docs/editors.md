@@ -20,6 +20,7 @@ around a pattern (`gradlew test -Pquick --continuous --tests *Arm*`).
 | Start the simulator, driven from Pitwall's Sim view at http://localhost:5820/#sim ([more](../runtime/docs/simulator.md)) | `./gradlew run` |
 | Start it with WPILib's simulator GUI too, enabled and drivable from its keyboard | `./gradlew run -Pgui` |
 | Start it disabled, like a real robot | `./gradlew run -PstartDisabled` |
+| Drive a robot's real CTRE devices from this laptop, its CANivore plugged in ([more](../runtime/docs/bench.md)) | `./gradlew run -PhwSim -Probot=chassis` |
 | Start it in a scenario: a fault, or something that happens to the robot | `./gradlew run -Pscenario=collision` |
 | List the simulator's scenarios | `./gradlew scenarios` |
 | Start it waiting for a debugger on port 5005 | `./gradlew run --debug-jvm` |

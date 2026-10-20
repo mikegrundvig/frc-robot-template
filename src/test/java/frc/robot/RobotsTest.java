@@ -31,7 +31,8 @@ class RobotsTest {
     }
     assertThatThrownBy(() -> Robots.asked(Optional.of("gamma")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("No robot is named \"gamma\". The robots are: example, practice, beta, delta");
+        .hasMessage(
+            "No robot is named \"gamma\". The robots are: example, practice, beta, delta, chassis");
   }
 
   @Test

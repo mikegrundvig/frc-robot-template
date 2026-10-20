@@ -26,9 +26,36 @@
 // Pitwall's page is on port 5820. A second simulator beside yours (an agent's, a test of another
 // branch) takes another, so pages already open on 5820 don't reconnect to it:
 // ./gradlew run -Ppitwall.port=5920 (0 picks a free one; Pitwall says which it took).
+//
+// Drive a robot's real CTRE devices from this laptop: ./gradlew run -PhwSim -Probot=chassis, with
+// a CANivore plugged into the laptop (runtime/docs/bench.md). That's CTRE's hardware-attached
+// simulation: WPILib's build picks Phoenix's hwsim libraries, which talk to the CANivore, whenever
+// Gradle is given -PhwSim (native-utils' HW_SIM_SWITCH_PROPERTY, 2027.14.3), and the program runs
+// as on a robot (frc.simMode=REAL): real devices, no simulated world, Pitwall's page only showing,
+// tuning off until switched on there. It starts disabled, whatever -Pgui says; enable it from
+// WPILib's simulator GUI, which is on by default here (-Pgui=false for a Driver Station instead).
 
-// The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither.
-def guiByDefault = false
+// Real devices from this laptop: -PhwSim. native-utils takes the property's presence, whatever its
+// value, so -PhwSim=false would still pick the hwsim libraries: it's refused rather than misread.
+def hwSim = project.hasProperty("hwSim")
+def hwSimAsked = project.findProperty("hwSim")?.toString()
+if (hwSim && !(hwSimAsked in ["", "true"])) {
+    throw new GradleException("-PhwSim drives real devices from this laptop; leave it out to simulate. Gradle picks CTRE's hardware libraries whenever it's given, so -PhwSim=${hwSimAsked} isn't taken")
+}
+if (hwSim && System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac")) {
+    throw new GradleException("-PhwSim needs Windows or Linux: Phoenix ships no hardware-attached libraries for macOS")
+}
+if (hwSim && project.hasProperty("replay")) {
+    throw new GradleException("A replay runs what its log recorded: -PhwSim is for driving real devices")
+}
+if (hwSim && project.hasProperty("scenario")) {
+    throw new GradleException("A scenario is the simulator's: -PhwSim drives real devices, which have no scenarios")
+}
+
+// The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither: off
+// in the simulator, where Pitwall's Sim view drives it, and on with -PhwSim, where Pitwall's page
+// never enables real motors and the GUI's Driver Station does.
+def guiByDefault = hwSim
 def guiAsked = project.findProperty("gui")?.toString()
 if (guiAsked != null && !(guiAsked in ["", "true", "false"])) {
     throw new GradleException("-Pgui runs the simulator with WPILib's GUI and -Pgui=false without it, not -Pgui=${guiAsked}")
@@ -64,9 +91,14 @@ tasks.named("run") {
         }
         systemProperty "frc.simMode", "REPLAY"
     }
-    // How the robot starts (Robot.SimStart): enabled only with the GUI on screen to disable it.
+    if (hwSim) {
+        // As on a robot: real devices, and nothing simulated (RunMode.current).
+        systemProperty "frc.simMode", "REAL"
+    }
+    // How the robot starts (Robot.SimStart): enabled only with the GUI on screen to disable it, and
+    // never with real devices, which start disabled as a robot does.
     systemProperty "frc.sim.start",
-            project.hasProperty("startDisabled") || project.hasProperty("replay") ? "disabled"
+            project.hasProperty("startDisabled") || project.hasProperty("replay") || hwSim ? "disabled"
             : gui ? "enabled" : "ready"
     if (scenario != null) {
         dependsOn scenarios

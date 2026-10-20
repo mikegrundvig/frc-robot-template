@@ -59,17 +59,26 @@ import org.wpilib.command3.Scheduler;
  * in {@link BetaControls}, and {@link DeltaRobot}, with {@link DeltaControls}). The simulator runs
  * either when asked: {@code ./gradlew run -Probot=beta}. runtime/docs/mechanisms.md says how to
  * describe a mechanism and use its commands, and how to write a practice robot.
+ *
+ * <p>The swerve test chassis ({@link ChassisRobot}) is the simplest robot here, a drivetrain alone:
+ * start reading there. It's also the one to drive for real from a laptop before the robot has its
+ * Systemcore: {@code ./gradlew run -PhwSim -Probot=chassis} (runtime/docs/bench.md).
  */
 public final class Robots {
   private Robots() {}
 
   /**
-   * Every robot the team has: the guide's two and a team's 2026 two, until you add your own. Add
-   * each real robot as it is built and measured.
+   * Every robot the team has: the guide's two, a team's 2026 two, and the swerve test chassis
+   * ({@link ChassisRobot}), until you add your own. Add each real robot as it is built and
+   * measured.
    */
   public static List<RobotConfig> all() {
     return List.of(
-        ExampleRobot.COMPETITION, ExampleRobot.PRACTICE, BetaRobot.CONFIG, DeltaRobot.CONFIG);
+        ExampleRobot.COMPETITION,
+        ExampleRobot.PRACTICE,
+        BetaRobot.CONFIG,
+        DeltaRobot.CONFIG,
+        ChassisRobot.CONFIG);
   }
 
   /**
@@ -120,7 +129,8 @@ public final class Robots {
    *       before you have written anything (runtime/docs/guide.md).
    *   <li>Each of a team's 2026 robots has its own, since they are different designs.
    *   <li>Every other robot, which is each one you add to {@link #all}, gets {@link Controls}. Put
-   *       your commands, bindings and autos there.
+   *       your commands, bindings and autos there. The test chassis gets it too: it only drives,
+   *       and the driver's sticks drive every robot without a binding.
    * </ul>
    *
    * <p>It has the shape of {@code ControlsMaker.make}, so {@code Robots::controls} is what {@code

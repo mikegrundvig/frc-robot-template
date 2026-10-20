@@ -27,6 +27,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ./gradlew run -Pgui                          # with WPILib's simulator GUI too, enabled and drivable from its keyboard
 ./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 ./gradlew run -Probot=beta                   # the simulator running another of your robots, by name (Robots.all())
+./gradlew run -PhwSim -Probot=chassis        # real CTRE devices driven from this laptop (runtime/docs/bench.md)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
 ./gradlew deploy                             # to the robot, after every check passes

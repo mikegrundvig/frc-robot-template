@@ -68,45 +68,14 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 // Javadoc's examples are compiled code: {@snippet class=... region=...} shows a region of a source
-// marked // @start region=... and // @end, found on these paths, and javadoc fails, naming it, on a
-// class or region that isn't there. The guide's examples (the runtime's: its robot,
-// com/michaelgrundvig/frc/runtime/ExampleRobot.java, and the rest in its tests'
-// com/michaelgrundvig/frc/runtime/examples) serve every project's Javadoc. They're the runtime's
-// published sources and test sources, at the version this build uses, unpacked under
-// build/runtime-sources/ (or the runtime's clone, built from source with -PlocalLibs). ci builds it,
-// so a renamed example fails the build. Its comments are checked as the compiler checks them:
-// references only.
-def runtimeClone = gradle.includedBuilds.find { it.name == "runtime" }?.projectDir
-def runtimeSources = layout.buildDirectory.dir("runtime-sources").get().asFile
-def unpackRuntimeSources = tasks.register("runtimeSources", Sync) {
-    description = "Unpack the runtime's published sources, where the Javadoc's examples are."
-    def coordinates = "com.michaelgrundvig.frc:frc-robot-runtime:${libs.versions.frc.libs.get()}"
-    def sources = configurations.detachedConfiguration(dependencies.create("${coordinates}:sources@jar"))
-    def testSources = configurations.detachedConfiguration(dependencies.create("${coordinates}:test-sources@jar"))
-    from({ zipTree(sources.singleFile) }) {
-        exclude "META-INF/**", "README.md"
-        into "src/main/java"
-    }
-    from({ zipTree(testSources.singleFile) }) {
-        exclude "META-INF/**"
-    }
-    into runtimeSources
-}
+// marked // @start region=... and // @end, found in the program's own sources and tests, and
+// javadoc fails, naming it, on a class or region that isn't there. ci builds it, so a renamed
+// example fails the build. Its comments are checked as the compiler checks them: references only.
 tasks.named("javadoc", Javadoc) {
-    def runtime = runtimeClone ?: runtimeSources
-    if (runtimeClone == null) {
-        dependsOn unpackRuntimeSources
-    }
     def snippets = [
         file("src/main/java"),
-        file("src/test/java"),
-        rootProject.file("src/main/java"),
-        rootProject.file("src/test/java"),
-        new File(runtime, "src/main/java"),
-        new File(runtime, "src/test/java"),
-        new File(runtime, "src/testFixtures/java")
+        file("src/test/java")
     ]
-    .unique()
     inputs.files(snippets).withPropertyName("snippets").withPathSensitivity(PathSensitivity.RELATIVE)
     options.addStringOption("-snippet-path", snippets.join(File.pathSeparator))
     options.addBooleanOption("Xdoclint:reference", true)

@@ -112,7 +112,7 @@ dependencies {
     testImplementation libs.assertj.core
     testImplementation libs.archunit
     // What a team tests its own robot with, which the runtime ships: the simulator's harness, the
-    // monkey, the invariants and the auto check.
+    // invariants and the auto check.
     testImplementation testFixtures(libs.frc.robot.runtime)
 }
 
@@ -151,13 +151,6 @@ tasks.named("test") {
     inputs.files(fileTree("ascope_assets")).withPropertyName("advantageScopeAssets")
             .withPathSensitivity(PathSensitivity.RELATIVE)
     mustRunAfter tasks.matching { it.name == "advantageScopeAssets" }
-    // GOLDEN_UPDATE=1 has EstimatorGoldenSimTest record its recording again, in src/test/resources,
-    // which Gradle doesn't know the tests write: so with it, the tests always run, and never come
-    // from the build cache, whatever ran before.
-    def goldenUpdate = providers.environmentVariable("GOLDEN_UPDATE").orElse("")
-    inputs.property("goldenUpdate", goldenUpdate)
-    outputs.upToDateWhen { goldenUpdate.get() != "1" }
-    outputs.doNotCacheIf("GOLDEN_UPDATE rewrites src/test/resources") { goldenUpdate.get() == "1" }
     doFirst { work.get().asFile.mkdirs() }
 }
 

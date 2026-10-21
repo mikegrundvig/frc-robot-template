@@ -18,7 +18,6 @@ merged when `./gradlew ci` passes and the robot drives.
 | Vendor libraries: AdvantageKit, Commands v3, Phoenix 6, PhotonLib, REVLib | `vendordeps/*.json`, at the versions the runtime was built with |
 | The checksum of every library and plugin the build downloads, the FRC libraries' among them | `gradle/verification-metadata.xml`, written by Gradle ([below](#dependency-checksums)) |
 | What waits on a library's release | the runtime's [docs/stand-ins.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md) |
-| The version the README names | `README.md`, its status note |
 
 ## The libraries
 
@@ -106,8 +105,8 @@ pushed yet (`-PfrcMaven=file:///home/you/src/frc-maven`).
    ([below](#dependency-checksums)).
 9. **Drive it:** `./gradlew run`, open the Pitwall page's Sim view (http://localhost:5820/#sim),
    switch on driving with the keyboard, press Enable (it starts disabled), and drive around.
-10. **Update the docs:** the README's status note (and, in the runtime's repository, its
-   `docs/stand-ins.md`: a stand-in may now have its real library, and a pinned build its release).
+10. **Update the docs:** in the runtime's repository, its `docs/stand-ins.md`: a stand-in may now
+   have its real library, and a pinned build its release.
 11. **On the robot:** image it with the Systemcore image released alongside the new WPILib, and
    update the Driver Station, as WPILib's release notes say. Then deploy and drive.
 

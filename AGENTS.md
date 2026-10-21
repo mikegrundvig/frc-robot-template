@@ -50,8 +50,8 @@ and the guides' examples' test (`DocExamplesTest`): every Java block in a runtim
 compiled source has. Write an example in the runtime's
 `src/test/java/com/michaelgrundvig/frc/runtime/examples` and copy it out; a block that
 needs code around it says `java fragment` on its fence. A Javadoc example is a region of compiled
-code, `{@snippet class=com.michaelgrundvig.frc.runtime.ExampleRobot region=intake}`, marked in the
-source with `// @start region=intake` and `// @end`; `ci` builds the Javadoc, which fails on one
+code in this program's sources or tests, `{@snippet class=frc.robot.ChassisRobot region=name}`, marked
+in the source with `// @start region=name` and `// @end`; `ci` builds the Javadoc, which fails on one
 that isn't there. Javadoc's `{@link}`s are checked as the code compiles. When a check fails,
 its message says what to do: do that. Never suppress a warning or delete a test to get green.
 

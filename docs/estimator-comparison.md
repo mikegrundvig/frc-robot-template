@@ -29,7 +29,7 @@ whether a verdict hangs on that: every scenario's cameras then scatter corners 0
 (the simulator's spread in proportion), detect tags only to 5 m, and each sits off its configured
 mount by a draw, fixed for the run, evenly within 5 mm along and 1° about each axis. These are the
 worst ends of the ranges the camera placement study draws its robustness trials from
-([runtime/docs/camera-placement.md](../runtime/docs/camera-placement.md#robustness)). A seed draws
+([runtime/docs/camera-placement.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/camera-placement.md#robustness)). A seed draws
 the errors once, so every estimator sees the same images, and they are told the configured mounts,
 as on a real robot. The draw adds to a scenario's own mount error (the `-mounts` scenarios'), and a
 camera knocked or turned during a run moves from where it sits. Nothing is re-tuned: every estimator
@@ -48,7 +48,7 @@ All of them see the same robot in the same run. After each robot loop the study 
 estimators what that loop's sensors read.
 
 Every contender is a localizer, and the study reaches it only through the runtime's `Localizer`
-interface ([runtime/docs/localizers.md](../runtime/docs/localizers.md)): A is the robot's own, run
+interface ([runtime/docs/localizers.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/localizers.md)): A is the robot's own, run
 by the robot, and the rest are `WpilibLocalizer`, WPILib's estimator as a robot would choose it.
 Each is given the loop's readings, then a placement if there was one, then its measurements, as
 the contract has it. So the study exercises exactly what a team's own localizer would be given.

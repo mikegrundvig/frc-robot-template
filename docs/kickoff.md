@@ -2,14 +2,15 @@
 
 The robot's code refers to the field by name: its starts, targets, and zones, its AprilTags, and
 its terrain. A season's field is facts about a published game, written once when the game is
-revealed, so it lives in the robot model (`model/`, `com.michaelgrundvig.frc.world.game`), one class
+revealed, so it lives in the robot model (`com.michaelgrundvig.frc.world.game`), one class
 per season (`Rebuilt` for 2026), written for the blue alliance; the field model works out the red
 alliance's. On kickoff day a new version of the model is cut with the new season's field. `Main`
 hands the runtime that class (`Rebuilt::game`, the season's field and its venues).
 
 ## Steps
 
-1. **Update the model.** Move `model/` to the version with the new season's field. Last season's
+1. **Update the model.** Move `frc-libs` in `gradle/libs.versions.toml` to the libraries' release
+   with the new season's field (the model comes with the runtime, [upgrading.md](upgrading.md#the-libraries)). Last season's
    class stays in it, so the 2026 robots and the runtime's tests, which are on 2026's field, keep
    compiling. Many simulation tests check fundamentals (zones that look ahead, the placement check,
    riding over terrain, alliance symmetry) against that field. They stay: those fundamentals don't
@@ -34,11 +35,11 @@ hands the runtime that class (`Rebuilt::game`, the season's field and its venues
 4. **Check the limits.** Point `SeasonLimitsTest` at the new season's limits (`LIMITS` in its
    class), so every robot's definition is checked against the new manual.
 
-5. **Recheck the rules' numbers.** Every row of [runtime/docs/values.md](../runtime/docs/values.md) whose source is
+5. **Recheck the rules' numbers.** Every row of [runtime/docs/values.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/values.md) whose source is
    "rules" (the frame, its height, the bumpers, the mass) comes from last season's manual. Check
    each against the new one, and update `Robots.java` and the row.
 
 6. **Run `./gradlew ci`.**
 
 The camera placement study needs only the new field's tag layout, not its class: run it the day the
-field is published, so CAD has camera requirements early ([camera-placement.md](../runtime/docs/camera-placement.md)).
+field is published, so CAD has camera requirements early ([camera-placement.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/camera-placement.md)).

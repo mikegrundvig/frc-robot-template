@@ -1,37 +1,51 @@
-// The runtime (runtime/) is built and tested against one GradleRIO (WPILib) version and one set of
-// vendor libraries, in its own build (runtime/gradle/libs.versions.toml, runtime/vendordeps/). The
-// robot program runs the runtime with its own: a robot that mixes versions fails to build or, worse,
-// misbehaves on the robot. So the build compares them, and fails when they differ.
+// The runtime is built and tested against one GradleRIO (WPILib) version and one set of vendor
+// libraries. The robot program runs the runtime with its own (gradle/libs.versions.toml and
+// vendordeps/): a robot that mixes versions fails to build or, worse, misbehaves on the robot. So the
+// build compares them, and fails when they differ.
 //
-// Compared: GradleRIO's version, and for each vendor library in runtime/vendordeps/ the file here
-// with the same uuid, which must have the same version. A vendor library only this program uses
-// is left alone.
+// The runtime says what it was built with in its own jar, META-INF/frc-robot-runtime/built-with.json:
+// GradleRIO's version, and each vendor library's name, uuid and version. The check reads that file
+// from the runtime this build resolved, whichever it is (the catalog's frc-libs, or a clone built
+// from source with -PlocalLibs), so it needs nothing of the runtime's repository.
 //
-// Localization (localization/) has nothing to compare: it brings no WPILib or vendor library of its
-// own, and takes WPILib's math from the robot model, which this build gives it.
+// Compared: GradleRIO's version, and for each vendor library the runtime was built with, the file in
+// vendordeps/ with the same uuid, which must have the same version. A vendor library only this
+// program uses is left alone.
+//
+// The model, localization and Pitwall have nothing to compare: they compile against WPILib's
+// libraries and bring none of them, and the runtime was built and tested with them as published.
 
-def runtimeCatalog = file("runtime/gradle/libs.versions.toml")
-def runtimeVendordeps = fileTree("runtime/vendordeps") { include "*.json" }
+def runtimeJar = configurations.runtimeClasspath.incoming.artifactView {
+    componentFilter { id ->
+        (id instanceof ModuleComponentIdentifier && id.group == "com.michaelgrundvig.frc" && id.module == "frc-robot-runtime") || (id instanceof ProjectComponentIdentifier && id.projectName == "frc-robot-runtime")
+    }
+}.files
 def ourVendordeps = fileTree("vendordeps") { include "*.json" }
 def ourGradleRio = libs.versions.gradlerio.get()
 
 def checkRuntimeVersions = tasks.register("checkRuntimeVersions") {
     group = "verification"
-    description = "Fail if GradleRIO or a vendor library has a different version than in the runtime."
-    inputs.file(runtimeCatalog).withPropertyName("runtimeCatalog")
-    inputs.files(runtimeVendordeps).withPropertyName("runtimeVendordeps")
+    description = "Fail if GradleRIO or a vendor library has a different version than the runtime was built with."
+    inputs.files(runtimeJar).withPropertyName("runtime")
     inputs.files(ourVendordeps).withPropertyName("vendordeps")
     inputs.property("gradlerio", ourGradleRio)
     // Nothing to keep: the check is the work.
     outputs.upToDateWhen { false }
     doLast {
-        def problems = []
-        def runtimeGradleRio = (runtimeCatalog.text =~ /(?m)^\s*gradlerio\s*=\s*"([^"]+)"/).with { it.find() ? it.group(1) : null }
-        if (runtimeGradleRio == null) {
-            throw new GradleException("runtime/gradle/libs.versions.toml has no gradlerio version: the check needs it")
+        def jar = runtimeJar.singleFile
+        def builtWith = null
+        new java.util.zip.ZipFile(jar).withCloseable { zip ->
+            def entry = zip.getEntry("META-INF/frc-robot-runtime/built-with.json")
+            if (entry != null) {
+                builtWith = new groovy.json.JsonSlurper().parse(zip.getInputStream(entry))
+            }
         }
-        if (runtimeGradleRio != ourGradleRio) {
-            problems << "GradleRIO (WPILib): this build uses ${ourGradleRio} (gradle/libs.versions.toml), the runtime ${runtimeGradleRio} (runtime/gradle/libs.versions.toml)"
+        if (builtWith == null) {
+            throw new GradleException("${jar.name} doesn't say what it was built with (META-INF/frc-robot-runtime/built-with.json): the check needs it")
+        }
+        def problems = []
+        if (builtWith.gradlerio != ourGradleRio) {
+            problems << "GradleRIO (WPILib): this build uses ${ourGradleRio} (gradle/libs.versions.toml), the runtime ${builtWith.gradlerio}"
         }
         def slurper = new groovy.json.JsonSlurper()
         def ours = [:]
@@ -39,21 +53,20 @@ def checkRuntimeVersions = tasks.register("checkRuntimeVersions") {
             def json = slurper.parse(f)
             ours[json.uuid] = [name: json.name, version: json.version, file: f.name]
         }
-        runtimeVendordeps.files.sort { it.name }.each { File f ->
-            def json = slurper.parse(f)
-            def mine = ours[json.uuid]
+        builtWith.vendordeps.each { library ->
+            def mine = ours[library.uuid]
             if (mine == null) {
-                problems << "${json.name} ${json.version}: the runtime has it (runtime/vendordeps/${f.name}) and this build doesn't (vendordeps/)"
-            } else if (mine.version != json.version) {
-                problems << "${json.name}: this build uses ${mine.version} (vendordeps/${mine.file}), the runtime ${json.version} (runtime/vendordeps/${f.name})"
+                problems << "${library.name} ${library.version}: the runtime was built with it (its vendordeps/${library.file}) and this build doesn't have it (vendordeps/)"
+            } else if (mine.version != library.version) {
+                problems << "${library.name}: this build uses ${mine.version} (vendordeps/${mine.file}), the runtime ${library.version}"
             }
         }
         if (problems) {
             throw new GradleException(
-            "The runtime was built against other versions of WPILib's libraries than this build uses:\n  - "
+            "The runtime (${jar.name}) was built against other versions of WPILib's libraries than this build uses:\n  - "
             + problems.join("\n  - ")
-            + "\nUpgrade both together: set this build's versions to the runtime's, or move runtime/ to the commit made for"
-            + " these (docs/upgrading.md, The runtime).")
+            + "\nUpgrade both together: set this build's versions to the runtime's, or move frc-libs (gradle/libs.versions.toml)"
+            + " to the release made for these (docs/upgrading.md, The libraries).")
         }
     }
 }

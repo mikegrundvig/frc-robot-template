@@ -70,20 +70,43 @@ tasks.withType(JavaCompile).configureEach {
 // Javadoc's examples are compiled code: {@snippet class=... region=...} shows a region of a source
 // marked // @start region=... and // @end, found on these paths, and javadoc fails, naming it, on a
 // class or region that isn't there. The guide's examples (the runtime's: its robot,
-// runtime/src/main/java/com/michaelgrundvig/frc/runtime/ExampleRobot.java, and the rest in
-// runtime/src/test/java/com/michaelgrundvig/frc/runtime/examples) serve every project's Javadoc. ci builds it, so a renamed example fails the build. Its comments
-// are checked as the compiler checks them: references only.
+// com/michaelgrundvig/frc/runtime/ExampleRobot.java, and the rest in its tests'
+// com/michaelgrundvig/frc/runtime/examples) serve every project's Javadoc. They're the runtime's
+// published sources and test sources, at the version this build uses, unpacked under
+// build/runtime-sources/ (or the runtime's clone, built from source with -PlocalLibs). ci builds it,
+// so a renamed example fails the build. Its comments are checked as the compiler checks them:
+// references only.
+def runtimeClone = gradle.includedBuilds.find { it.name == "runtime" }?.projectDir
+def runtimeSources = layout.buildDirectory.dir("runtime-sources").get().asFile
+def unpackRuntimeSources = tasks.register("runtimeSources", Sync) {
+    description = "Unpack the runtime's published sources, where the Javadoc's examples are."
+    def coordinates = "com.michaelgrundvig.frc:frc-robot-runtime:${libs.versions.frc.libs.get()}"
+    def sources = configurations.detachedConfiguration(dependencies.create("${coordinates}:sources@jar"))
+    def testSources = configurations.detachedConfiguration(dependencies.create("${coordinates}:test-sources@jar"))
+    from({ zipTree(sources.singleFile) }) {
+        exclude "META-INF/**", "README.md"
+        into "src/main/java"
+    }
+    from({ zipTree(testSources.singleFile) }) {
+        exclude "META-INF/**"
+    }
+    into runtimeSources
+}
 tasks.named("javadoc", Javadoc) {
+    def runtime = runtimeClone ?: runtimeSources
+    if (runtimeClone == null) {
+        dependsOn unpackRuntimeSources
+    }
     def snippets = [
         file("src/main/java"),
         file("src/test/java"),
         rootProject.file("src/main/java"),
         rootProject.file("src/test/java"),
-        rootProject.file("runtime/src/main/java"),
-        rootProject.file("runtime/src/test/java"),
-        rootProject.file("runtime/src/testFixtures/java")
+        new File(runtime, "src/main/java"),
+        new File(runtime, "src/test/java"),
+        new File(runtime, "src/testFixtures/java")
     ]
-    .unique().findAll { it.directory }
+    .unique()
     inputs.files(snippets).withPropertyName("snippets").withPathSensitivity(PathSensitivity.RELATIVE)
     options.addStringOption("-snippet-path", snippets.join(File.pathSeparator))
     options.addBooleanOption("Xdoclint:reference", true)
@@ -324,21 +347,22 @@ tasks.register("ci") {
     dependsOn "spotlessCheck", "build", "javadoc"
     // From the top of the build, every project's checks.
     dependsOn project.subprojects.collect { it.path + ":ci" }
-    // And the robot model's, localization's, Pitwall's and the runtime's own, built from model/,
-    // localization/, pitwall/ and runtime/ as part of this build (settings.gradle): the runtime's
-    // covers its simulation. The model, localization and Pitwall are this build's, and the runtime
-    // uses them, so each runs once.
+    // And, with -PlocalLibs (settings.gradle), the libraries' own checks, for each this build
+    // builds from its clone: the runtime's covers its simulation, and its plugins' (build-logic)
+    // run while the build uses one of them. Published libraries were checked as they were
+    // published.
     if (project == rootProject) {
-        dependsOn gradle.includedBuild("model").task(":ci")
-        dependsOn gradle.includedBuild("localization").task(":ci")
-        dependsOn gradle.includedBuild("pitwall").task(":ci")
-        dependsOn gradle.includedBuild("runtime").task(":ci")
-    }
-    // The plugins the runtime holds (runtime/build-logic), while the build uses one of them:
-    // removing a plugin's line drops its tests too. Add each new tool's as it's added.
-    def toolConfigPlugins = ["frc.advantagescope-assets"]
-    if (project == rootProject && toolConfigPlugins.any { pluginManager.hasPlugin(it) }) {
-        dependsOn gradle.includedBuild("build-logic").task(":ci")
+        [
+            "model",
+            "localization",
+            "pitwall",
+            "runtime",
+            "build-logic"
+        ].each { name ->
+            if (gradle.includedBuilds.any { it.name == name }) {
+                dependsOn gradle.includedBuild(name).task(":ci")
+            }
+        }
     }
 }
 

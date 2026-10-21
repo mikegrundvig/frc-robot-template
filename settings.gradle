@@ -1,14 +1,34 @@
 pluginManagement {
     repositories {
         gradlePluginPortal()
+        // The FRC libraries' Maven repository (build.gradle says more), for the runtime's plugins:
+        // one per tool whose files the build generates from the robot's configuration, such as
+        // AdvantageScope's robot assets. Only it serves them. -PfrcMaven=<url> reads them from
+        // another copy of the repository.
+        exclusiveContent {
+            forRepository {
+                maven {
+                    name = "frcMaven"
+                    url = providers.gradleProperty("frcMaven").orElse("https://mikegrundvig.github.io/frc-maven/").get()
+                }
+            }
+            filter {
+                includeGroup "com.michaelgrundvig.frc"
+                includeGroup "frc.advantagescope-assets"
+            }
+        }
     }
-    // The runtime's plugins (runtime/build-logic): one per tool whose files the build generates
-    // from the robot's configuration, such as AdvantageScope's robot assets. A plugin that lives in
-    // an included build's own included build is found only by naming its folder here.
-    if (!file("runtime/build-logic/settings.gradle").exists()) {
-        throw new GradleException("The runtime isn't checked out (runtime/ is empty). Run: git submodule update --init")
+    // Developing the libraries (-PlocalLibs, below): with the runtime's clone there, its plugins
+    // are built from it too, in place of the published ones.
+    def localLibs = providers.gradleProperty("localLibs").orNull
+    if (localLibs != null) {
+        def folder = new File(localLibs.startsWith("~") ? System.getProperty("user.home") + localLibs.substring(1) : localLibs)
+        folder = folder.absolute ? folder : new File(settingsDir, localLibs)
+        def plugins = new File(folder, "runtime/build-logic")
+        if (new File(plugins, "settings.gradle").exists()) {
+            includeBuild(plugins)
+        }
     }
-    includeBuild("runtime/build-logic")
 }
 
 plugins {
@@ -19,42 +39,40 @@ plugins {
 
 rootProject.name = "frc-robot-template"
 
-// Pitwall, the robot program's own web page (status, actions, and live tuning), is a repository of
-// its own too, a git submodule (pitwall/) built from that folder as part of this build: whatever
-// asks for com.michaelgrundvig.frc:frc-pitwall gets what the folder holds. It is free of robot code.
-// It reads the robot model, this build's (below), to draw the robot's joints as the model says them.
-if (!file("pitwall/settings.gradle").exists()) {
-    throw new GradleException("Pitwall isn't checked out (pitwall/ is empty). Run: git submodule update --init")
+// The libraries the robot program is built on, each a repository of its own: the runtime (the robot
+// program every robot shares, with the simulation and the harness a team tests with), the robot
+// model, localization and Pitwall. They come from their Maven repository at one version, the
+// catalog's frc-libs (gradle/libs.versions.toml, build.gradle), like any other library.
+//
+// Developing them: -PlocalLibs=<folder> builds those found in that folder's model/, localization/,
+// pitwall/ and runtime/ (each a clone of its repository) from their source, in place of the
+// published versions, so a change to one is seen in this robot program before it's published
+// (docs/upgrading.md, Developing the libraries). Off unless asked for; a team never needs it.
+def localLibs = providers.gradleProperty("localLibs").orNull
+if (localLibs != null) {
+    def folder = new File(localLibs.startsWith("~") ? System.getProperty("user.home") + localLibs.substring(1) : localLibs)
+    folder = folder.absolute ? folder : new File(settingsDir, localLibs)
+    if (!folder.directory) {
+        throw new GradleException("-PlocalLibs=${localLibs} isn't a folder: name the one holding model/, localization/, pitwall/ and runtime/")
+    }
+    [
+        "model",
+        "localization",
+        "pitwall",
+        "runtime"
+    ].each { name ->
+        def library = new File(folder, name)
+        if (new File(library, "settings.gradle").exists()) {
+            logger.lifecycle("Building ${name} from ${library} (-PlocalLibs)")
+            includeBuild(library) {
+                // The model's processor's project is docs-processor; it's published as
+                // frc-docs-processor. Every other project is named as it's published.
+                if (name == "model") {
+                    dependencySubstitution {
+                        substitute module("com.michaelgrundvig.frc:frc-docs-processor") using project(":docs-processor")
+                    }
+                }
+            }
+        }
+    }
 }
-includeBuild("pitwall")
-// The robot model (the validation kit, the field, and the robot's definition) is a repository of
-// its own, here as a git submodule (model/) and built from that folder as part of this build:
-// whatever asks for com.michaelgrundvig.frc:frc-robot-model gets what the folder holds, with no
-// version to bump. With it comes the documentation processor, which reads the configuration
-// records' Javadoc as each project compiles, so Pitwall's page can say what each value means. A
-// change to the model is made in that folder and committed there, then here.
-if (!file("model/settings.gradle").exists()) {
-    throw new GradleException("The robot model isn't checked out (model/ is empty). Run: git submodule update --init")
-}
-includeBuild("model")
-// Localization (localization/): where the robot is, from its wheels, its IMUs and its cameras. The
-// contract a localizer keeps, the default localizer and WPILib's, and the solving of camera images
-// into measurements. A repository of its own too, a git submodule built from that folder as part
-// of this build: whatever asks for com.michaelgrundvig.frc:frc-localization gets what the folder
-// holds. It reads the model, this build's (above), and nothing of the runtime or Pitwall.
-if (!file("localization/settings.gradle").exists()) {
-    throw new GradleException("Localization isn't checked out (localization/ is empty). Run: git submodule update --init")
-}
-includeBuild("localization")
-// The runtime (runtime/): the robot program every robot shares, which no team writes, with the
-// simulation it runs and the harness a team tests with. The
-// team's robot program, this project's root, hands it which robot this is, this season's field and
-// what the robot does; the runtime reads nothing of it, and Gradle keeps it so. It is a repository
-// of its own too, a git submodule built from that folder as part of this build: whatever asks for
-// com.michaelgrundvig.frc:frc-robot-runtime gets what the folder holds. It uses this build's
-// model/, localization/ and pitwall/ (above), not copies of its own, so a checkout needs no
-// recursive submodule initialization.
-if (!file("runtime/settings.gradle").exists()) {
-    throw new GradleException("The runtime isn't checked out (runtime/ is empty). Run: git submodule update --init")
-}
-includeBuild("runtime")

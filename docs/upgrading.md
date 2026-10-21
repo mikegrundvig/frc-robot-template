@@ -10,35 +10,60 @@ merged when `./gradlew ci` passes and the robot drives.
 
 | What | Where |
 |---|---|
-| WPILib itself, through GradleRIO (the HAL, NetworkTables, the simulator, and the rest) | `gradle/libs.versions.toml`: `gradlerio`, and the runtime's own, `runtime/gradle/libs.versions.toml`: the two must agree ([the runtime](#the-runtime)) |
+| WPILib itself, through GradleRIO (the HAL, NetworkTables, the simulator, and the rest) | `gradle/libs.versions.toml`: `gradlerio`, which must be the version the runtime was built with ([the libraries](#the-libraries)) |
+| The FRC libraries: the runtime, with the robot model, localization, the simulation, Pitwall, and the runtime's Gradle plugins | `gradle/libs.versions.toml`: `frc-libs`, one dated version for all of them ([the libraries](#the-libraries)) |
 | Gradle | `gradle/wrapper/gradle-wrapper.properties`: `distributionUrl` and `distributionSha256Sum` |
 | The JDK Gradle runs on, and where a laptop without it downloads it | `gradle/gradle-daemon-jvm.properties`, written by `./gradlew updateDaemonJvm` |
 | The WPILib year that editors' WPILib tools use | `.wpilib/wpilib_preferences.json`: `projectYear` |
-| Vendor libraries: AdvantageKit, Commands v3, Phoenix 6, PhotonLib, REVLib | `vendordeps/*.json`, and the runtime's own, `runtime/vendordeps/*.json`: the same versions |
-| The checksum of every library and plugin the build downloads | `gradle/verification-metadata.xml`, written by Gradle ([below](#dependency-checksums)), and the runtime's own, `runtime/gradle/verification-metadata.xml` |
-| What waits on a library's release | `runtime/docs/stand-ins.md` |
+| Vendor libraries: AdvantageKit, Commands v3, Phoenix 6, PhotonLib, REVLib | `vendordeps/*.json`, at the versions the runtime was built with |
+| The checksum of every library and plugin the build downloads, the FRC libraries' among them | `gradle/verification-metadata.xml`, written by Gradle ([below](#dependency-checksums)) |
+| What waits on a library's release | the runtime's [docs/stand-ins.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md) |
 | The version the README names | `README.md`, its status note |
 
-## The runtime
+## The libraries
 
-The runtime (`runtime/`, a git submodule) is a repository of its own with a build of its own, which
-applies GradleRIO and has the `vendordeps/` it is built and tested with. This build runs the
-runtime with its own GradleRIO and vendor libraries, so the two must be the same versions: the
-build's `checkRuntimeVersions` task (part of `check`, so of `ci`) compares them, and fails, listing
-each difference, until they agree. The versions it compares are GradleRIO's (`gradlerio` in each
-`gradle/libs.versions.toml`) and each vendor library of `runtime/vendordeps/`, by its uuid.
+The runtime, the robot model, localization and Pitwall are repositories of their own, published
+together as one dated release (such as `2026.10.20`) to their Maven repository,
+[mikegrundvig.github.io/frc-maven](https://mikegrundvig.github.io/frc-maven/), which lists every
+release. This build names the release in one line, `frc-libs` in `gradle/libs.versions.toml`;
+the runtime brings the rest, and its Gradle plugins (AdvantageScope's assets) are published with it
+at the same version. Releases are pre-release: anything may change from one to the next, so read
+the libraries' commits before moving.
 
-So an upgrade is made in the runtime first: do steps 2, 6, 7 and 8 below in `runtime/` (its
-`gradle/libs.versions.toml`, `vendordeps/`, and `gradle/verification-metadata.xml`), run `./gradlew
-ci` there (`git -C runtime submodule update --init` fetches the model, localization and Pitwall it
-is built with on its own), and commit it in that folder. Then do the same steps here, and commit the runtime's new
-commit with them (`git add runtime`). Between the two, `ci` here fails with the check's message.
+**To move to a new release,** change `frc-libs` to it, then write the checksums again
+([below](#dependency-checksums)) and run `./gradlew ci`.
+
+The runtime is built and tested against one GradleRIO version and one set of vendor libraries, and
+this build runs it with its own, so the two must be the same versions. The runtime's jar says which
+it was built with (`META-INF/frc-robot-runtime/built-with.json`), and the build's
+`checkRuntimeVersions` task (part of `check`, so of `ci`) compares GradleRIO's version
+(`gradlerio`) and each of those vendor libraries, by its uuid, with `vendordeps/`, and fails, listing
+each difference, until they agree. So a WPILib upgrade waits for a release of the libraries built
+for it: move `frc-libs` to that release along with the steps below, and `ci` passes once both are
+done.
+
+### Developing the libraries
+
+A team never needs this. To change a library and see it in this robot program before it's
+published, clone the libraries' repositories into one folder, as `model/`, `localization/`,
+`pitwall/` and `runtime/` (any of them), and give the build that folder:
+
+```bash
+./gradlew ci -PlocalLibs=../libs        # or put localLibs=/path/to/libs in ~/.gradle/gradle.properties
+```
+
+Each clone found there is built from its source in place of the published version (a Gradle
+composite build), and `ci` runs its checks too; the runtime's plugins come from its clone as well.
+Without `-PlocalLibs`, nothing local is used. Each library's README says how to build, test and
+publish it on its own, and frc-maven's README how a release is made. `-PfrcMaven=<url>` reads the
+published libraries from another copy of their repository, such as a clone holding a release not
+pushed yet (`-PfrcMaven=file:///home/you/src/frc-maven`).
 
 ## The steps
 
 1. **Read the release notes**, WPILib's and each vendor's, for what changed and what broke.
-2. **GradleRIO:** set `gradlerio` in `gradle/libs.versions.toml` to the new version (and in the
-   runtime's, [above](#the-runtime)). WPILib's
+2. **GradleRIO:** set `gradlerio` in `gradle/libs.versions.toml` to the new version, and `frc-libs`
+   to the libraries' release built for it ([above](#the-libraries)). WPILib's
    "check for updates" in VS Code looks for the version in `build.gradle`, so it won't see this
    one: change it by hand.
 3. **Gradle:** use the version the new WPILib installer ships, so a laptop set up with the
@@ -56,7 +81,7 @@ commit with them (`git add runtime`). Between the two, `ci` here fails with the 
    couldn't build.
 5. **`projectYear`** in `.wpilib/wpilib_preferences.json`: the new installer's name for the
    year, the name of the folder it installs into (such as `2027_alpha7`).
-6. **Vendor libraries:** replace each file in `vendordeps/` (and the runtime's) with the one made
+6. **Vendor libraries:** replace each file in `vendordeps/` with the one made
    for the new WPILib.
    - Before the season's release, take them from WPILib's vendor-json-repo
      (github.com/wpilibsuite/vendor-json-repo), from the folder for the new WPILib version. The
@@ -78,11 +103,11 @@ commit with them (`git add runtime`). Between the two, `ci` here fails with the 
      task is in its graph: when it works under the cache, add it to the list; until then `ci`
      works, just without the cache.
 8. **Checksums:** write `gradle/verification-metadata.xml` again, on every platform
-   ([below](#dependency-checksums)), and the runtime's, which is built on Linux only.
+   ([below](#dependency-checksums)).
 9. **Drive it:** `./gradlew run`, open the Pitwall page's Sim view (http://localhost:5820/#sim),
    switch on driving with the keyboard, press Enable (it starts disabled), and drive around.
-10. **Update the docs:** `runtime/docs/stand-ins.md` (a stand-in may now have its real library, and a
-   pinned build its release) and the README's status note.
+10. **Update the docs:** the README's status note (and, in the runtime's repository, its
+   `docs/stand-ins.md`: a stand-in may now have its real library, and a pinned build its release).
 11. **On the robot:** image it with the Systemcore image released alongside the new WPILib, and
    update the Driver Station, as WPILib's release notes say. Then deploy and drive.
 

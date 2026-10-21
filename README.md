@@ -13,7 +13,7 @@ your robot.
 > **Status:** early. It tracks WPILib's 2027 prereleases (currently 2027.0.0-alpha-7). The swerve
 > drivetrain drives in the simulator, and has code for CTRE hardware (TalonFX, CANcoder, Pigeon 2)
 > tested against CTRE's simulated devices, not yet on a robot. Parts that only stand in until a
-> library ships for 2027 are listed in [runtime/docs/stand-ins.md](runtime/docs/stand-ins.md).
+> library ships for 2027 are listed in [runtime/docs/stand-ins.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md).
 
 ## Quick start
 
@@ -27,7 +27,7 @@ JDK the robot code needs; no WPILib installer is required to build, test, or sim
 ./gradlew run -Pgui                          # with WPILib's simulator GUI too, enabled and drivable from its keyboard
 ./gradlew run -Pscenario=collision           # the simulator in a scenario (./gradlew scenarios lists them)
 ./gradlew run -Probot=beta                   # the simulator running another of your robots, by name (Robots.all())
-./gradlew run -PhwSim -Probot=chassis        # real CTRE devices driven from this laptop (runtime/docs/bench.md)
+./gradlew run -PhwSim -Probot=chassis        # real CTRE devices driven from this laptop (the runtime's docs/bench.md)
 AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through the current code
 ./gradlew setTeamNumber -PteamNumber=NNNN    # once, before your first deploy
 ./gradlew deploy                             # to the robot, after every check passes
@@ -36,10 +36,14 @@ AKIT_LOG_PATH=logs/<log>.wpilog ./gradlew run -Preplay   # replay a log through 
 Every job is a Gradle command, so any editor works, or none. [docs/editors.md](docs/editors.md)
 covers IntelliJ IDEA and VS Code, and lists every command.
 
-The runtime, the robot model, localization and Pitwall are git submodules, each a repository of its
-own, built as part of this build. After cloning, `git submodule update --init` fetches them;
-`--recursive` isn't needed, since the runtime's own copies of the model, localization and Pitwall
-(and localization's own copy of the model) are used only when each is built on its own.
+Clone it and build: there are no submodules and nothing else to fetch. The libraries the robot
+program is built on, the [runtime](https://github.com/mikegrundvig/frc-robot-runtime), the
+[robot model](https://github.com/mikegrundvig/frc-robot-model),
+[localization](https://github.com/mikegrundvig/frc-localization) and
+[Pitwall](https://github.com/mikegrundvig/frc-pitwall), are each a repository of their own,
+published to their own Maven repository ([mikegrundvig.github.io/frc-maven](https://mikegrundvig.github.io/frc-maven/)),
+which Gradle downloads them from like any other library, at the one version named in
+`gradle/libs.versions.toml` (`frc-libs`). Their guides, linked below, are in their repositories.
 
 ## The fundamentals, and why
 
@@ -94,7 +98,7 @@ Also built in:
     station, the field system, the match time), driving from the keyboard or a gamepad, pausing
     and stepping, Stop, and failing the simulated robot's parts while it runs, which the GUI can't
     do: a camera unplugged or knocked, the gyro frozen, a module's encoder gone stale, the robot
-    hit. Each is an API too. See [runtime/docs/simulator.md](runtime/docs/simulator.md).
+    hit. Each is an API too. See [runtime/docs/simulator.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/simulator.md).
   - **World**: the robot's world in 3D, from above or around, drawn from the code's own beliefs:
     the field and its tags, the robot where localization believes it is with its wheels and
     cameras as configured (a camera's wedge pointing the wrong way is a typo in `Robots.java`,
@@ -106,7 +110,7 @@ Also built in:
     beside it says what each mark means and switches each layer. Pitwall draws it from the
     robot's log (three.js, served from the robot), and only a page showing it is sent what
     moves; a still robot sends nothing. Any robot program can add its own scene:
-    [pitwall/README.md](pitwall/README.md).
+    [pitwall/README.md](https://github.com/mikegrundvig/frc-pitwall/blob/main/README.md).
   - **Robot**: the robot's joints as `Robots.java` describes them, live, one card each, drawn by
     its kind: an arc for a pivot, between its stops, with its named places; a speedometer for a
     roller, up to its free speed; a bar for an elevator. On each, a solid needle where the joint
@@ -121,7 +125,7 @@ Also built in:
     words ("roller held: roller runs only when pivot at least 110°", then "roller no longer
     held"), a move that timed out or was refused standing out as a problem: an ordering mistake
     in an auto is read there. Scrubbing moves what the page shows, never the robot. See
-    [pitwall/README.md](pitwall/README.md#the-robot-view).
+    [pitwall/README.md](https://github.com/mikegrundvig/frc-pitwall/blob/main/README.md#the-robot-view).
   - **Pushed, not polled:** the page follows the robot through one event stream that carries
     only what changed, so a page left open costs the robot almost nothing.
   - **The page** has a view for each job, Pit, Tune, Experiment, and Changes (and Sim, in the
@@ -130,7 +134,7 @@ Also built in:
     together; a refusal's reasons show beside the values they concern, an edit outside its limits
     is caught before it's sent, and a big step (over a quarter of a value's range) is warned of.
     Nothing is lost silently: the session's changes and runs are kept in the tab, each
-    restorable. Plain JavaScript modules in the jar (`pitwall/src/main/resources/.../page/`),
+    restorable. Plain JavaScript modules in the jar (Pitwall's `src/main/resources/.../page/`),
     with nothing to build.
   - **Live tuning, on WPILib's own tunables.** Every tunable in the program goes through a tee
     around WPILib's NetworkTables backend: dashboards such as Elastic see and change them as always,
@@ -173,13 +177,13 @@ Also built in:
   the program as it compiles (the documentation processor, in the model's `docs-processor`), so
   the robot needs no source to show it.
 
-  With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall lives
-  in `pitwall/`. It has no login: anyone on the robot's network can use it, as they can the Driver
+  With AdvantageKit, every request from the page is logged, so replays reproduce it. Pitwall is a
+  library of its own ([frc-pitwall](https://github.com/mikegrundvig/frc-pitwall)). It has no login: anyone on the robot's network can use it, as they can the Driver
   Station and NetworkTables, so give the robot's Wi-Fi a strong password (or turn it off at events).
   In the simulator it serves only the laptop it runs on (`-Dpitwall.network=true` serves the
   network too, to open it on a phone), and it answers only requests addressed to the robot, so a
   web page open on a connected laptop can't use it.
-- **A field model** (in the robot model, `model/`, with each season's field in its `game` package: 2026's is `Rebuilt`): the field's AprilTags
+- **A field model** (in the robot model, [frc-robot-model](https://github.com/mikegrundvig/frc-robot-model), with each season's field in its `game` package: 2026's is `Rebuilt`): the field's AprilTags
   and symmetry, and the start positions, places, and zones robot code refers to by name. Everything
   is written once, for the blue alliance, and one tested transform gives red's; places near tags
   are derived from each alliance's own tags, so a layout measured at an event corrects both. The
@@ -187,7 +191,7 @@ Also built in:
   field-relative from its own alliance's end, checks its placement before the match, and has zone
   triggers that look ahead along its path. In the simulator, change the alliance station while
   disabled to start somewhere else. At kickoff, write the new game's the same way.
-- **A pose estimator built to be trusted** (`localization/`): 250 Hz odometry, with the gyro
+- **A pose estimator built to be trusted** ([frc-localization](https://github.com/mikegrundvig/frc-localization)): 250 Hz odometry, with the gyro
   owning heading and the wheels' disagreement (slip) lowering their trust; camera measurements
   applied at the moment their image was taken, even when they arrive late (up to 1.5 s, and
   within their camera's usual latency plus a margin, or the clocks are out of step and the image
@@ -217,16 +221,16 @@ Also built in:
   localization are never told: they find out from the sensors, as on a robot, and the log names
   the scenario (`SimScenario`) and the faults on (`Pitwall/Simulator/Faults`). Tests use the same
   catalog (`com.michaelgrundvig.frc.runtime.sim.Scenarios`, and `RobotSim`'s `build` and `start`); what the simulator
-  can't make yet is in [runtime/docs/simulator.md](runtime/docs/simulator.md).
+  can't make yet is in [runtime/docs/simulator.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/simulator.md).
 - **Calibration from the Pitwall page:** the gyro's scale, the wheel radius, whether the IMU reads
   level, and each camera's mount, each measured on the robot and reported as the number to commit
-  and where it goes ([runtime/docs/calibration.md](runtime/docs/calibration.md)).
-- **Where every value comes from** ([runtime/docs/values.md](runtime/docs/values.md)): every configuration value,
+  and where it goes ([runtime/docs/calibration.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/calibration.md)).
+- **Where every value comes from** ([runtime/docs/values.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/values.md)): every configuration value,
   whether it's calibrated, characterized, chosen, or as built, where today's number came from, and
   how to measure it or why it is what it is. A test keeps the register complete: a new value fails
   the build until it has a row. What's measured once per kind of part (a camera's noise and
   latency, a gyro's drift, a tread's grip) has its bench procedure in
-  [runtime/docs/characterization.md](runtime/docs/characterization.md).
+  [runtime/docs/characterization.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/characterization.md).
 - **A drive-team dashboard** (`layouts/elastic-layout.json`, for Elastic): a pre-match tab and a
   match tab, checked against the code on every build, so no widget sits blank on the field.
 - **AdvantageScope, set up** (`layouts/advantagescope.json`, `ascope_assets/`): open the layout and
@@ -234,7 +238,7 @@ Also built in:
   field of view), where it believes it is against where the simulator says it is, each camera's
   accepted and refused tags, and the estimate's ellipse, with nothing to drag in. The build redraws
   the robot whenever `Robots.java` changes
-  ([runtime/docs/simulator.md](runtime/docs/simulator.md#see-it-in-advantagescope)).
+  ([runtime/docs/simulator.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/simulator.md#see-it-in-advantagescope)).
 - **Loop health:** every loop is timed section by section, and alerts say when it overruns (and
   where the time went), when logging falls behind, and when the log drive is missing or filling.
 - **Nothing reaches the robot unchecked:** `deploy` runs every check first, and refuses to run
@@ -246,32 +250,32 @@ Also built in:
 
 | Path | What |
 |---|---|
-| `src/main/java/frc/robot/` | Your robot program, the code you write, and nothing else (`frc.robot`): `Main` (hands the runtime which robot this is, this season's field and what the robot does, `RobotProgram.start`), `Robots` (below), `Controls` (your commands, autos and gamepad bindings: the one file you write behavior in, empty until you do, [runtime/docs/mechanisms.md](runtime/docs/mechanisms.md#where-behavior-goes); the guide's robot's buttons come from the runtime's `ExampleControls`), `ToolRobots` (your robots, for the tools the build writes files for), and a team's 2026 robots, `BetaRobot` and `DeltaRobot` with their controls. The build generates `BuildConstants` (the git state), which `Main` passes on. |
-| `runtime/` | The runtime, a repository of its own here as a git submodule, built as part of this build (`com.michaelgrundvig.frc.runtime`, `com.michaelgrundvig.frc:frc-robot-runtime`; [runtime/README.md](runtime/README.md)): the robot program every robot shares, which no team writes, and everything it needs to be tested. It reads the libraries below and nothing of `frc.robot`: a team's `Main` hands it what it needs (`RobotProgram`), and `ArchitectureTest` and Gradle keep it so. At its top: `Robot` (logging, Pitwall, and the loop), `RobotContainer` (builds every mechanism on the hardware for the mode, real, simulated, or replayed from a log, and hands them to your `Controls`), `RobotConfig`, `RunMode`, and `ExampleRobot`, the guide's robot, which the runtime is tested on and the template runs until you write your own, with `ExampleControls`, that robot's buttons and autos. Its packages follow. |
+| `src/main/java/frc/robot/` | Your robot program, the code you write, and nothing else (`frc.robot`): `Main` (hands the runtime which robot this is, this season's field and what the robot does, `RobotProgram.start`), `Robots` (below), `Controls` (your commands, autos and gamepad bindings: the one file you write behavior in, empty until you do, [runtime/docs/mechanisms.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/mechanisms.md#where-behavior-goes); the guide's robot's buttons come from the runtime's `ExampleControls`), `ToolRobots` (your robots, for the tools the build writes files for), and a team's 2026 robots, `BetaRobot` and `DeltaRobot` with their controls. The build generates `BuildConstants` (the git state), which `Main` passes on. |
+| The runtime | The runtime, a repository of its own ([frc-robot-runtime](https://github.com/mikegrundvig/frc-robot-runtime)), which this build downloads at its version (`com.michaelgrundvig.frc.runtime`, `com.michaelgrundvig.frc:frc-robot-runtime`): the robot program every robot shares, which no team writes, and everything it needs to be tested. It reads the libraries below and nothing of `frc.robot`: a team's `Main` hands it what it needs (`RobotProgram`), and `ArchitectureTest` and Gradle keep it so. At its top: `Robot` (logging, Pitwall, and the loop), `RobotContainer` (builds every mechanism on the hardware for the mode, real, simulated, or replayed from a log, and hands them to your `Controls`), `RobotConfig`, `RunMode`, and `ExampleRobot`, the guide's robot, which the runtime is tested on and the template runs until you write your own, with `ExampleControls`, that robot's buttons and autos. Its packages follow. |
 | `src/main/java/frc/robot/Robots.java` | Your robots (start from `ExampleRobot`'s blocks): size, mass, drivetrain, cameras, and mechanisms, one typed configuration each, every value set by name and checked when built. Each mechanism is one block: where its joint is, its named positions and outputs, its motors and their CAN IDs, its own sensors, and how this program drives it; the drivetrain's block carries its wiring and gains the same way. The configurations the robot takes and the interlocks between joints name the joints and their places, checked against each other when the robot is built. A practice robot is the competition robot under its own name, with its differences: `COMPETITION.named("practice").with(PIVOT.motors(motors -> motors.on(TALON_FX.can(33))))`. |
-| `com.michaelgrundvig.frc.runtime.subsystems` | The mechanisms, in AdvantageKit's IO pattern (the logic, plus one IO class per kind of hardware): `drive`, the swerve drivetrain, simulated and CTRE's (a [stand-in](runtime/docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships); `localization`, where the robot is (it feeds `runtime/lib/localization`'s service, and logs and raises alerts on what it says); `vision`, the cameras; `mechanisms`, every joint the robot's motors drive, each a v3 mechanism built from the robot's definition, with its commands, gates, interlocks and homing ready to use ([runtime/docs/mechanisms.md](runtime/docs/mechanisms.md)). |
+| `com.michaelgrundvig.frc.runtime.subsystems` | The mechanisms, in AdvantageKit's IO pattern (the logic, plus one IO class per kind of hardware): `drive`, the swerve drivetrain, simulated and CTRE's (a [stand-in](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md) until AdvantageKit's 2027 swerve template ships); `localization`, where the robot is (it feeds localization's service, and logs and raises alerts on what it says); `vision`, the cameras; `mechanisms`, every joint the robot's motors drive, each a v3 mechanism built from the robot's definition, with its commands, gates, interlocks and homing ready to use ([runtime/docs/mechanisms.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/mechanisms.md)). |
 | `com.michaelgrundvig.frc.runtime.hardware` | The robot's hardware behind one interface (`Hardware`): the drivetrain's, each joint's, sensor's and camera's IO, and the PDH's, made for the mode the program runs in. On a robot, `RobotHardware`, the devices each block's wiring names; in the simulator, the simulated world's (`com.michaelgrundvig.frc.runtime.sim.SimulatedHardware`); in a replay, nothing, since the log has every reading. |
 | `com.michaelgrundvig.frc.runtime.behavior` | What behavior is written with beside Commands v3: gates, named conditions that say why they're false (`Gate`), and the drive team's gamepads, which record each binding with its button (`RecordingGamepad`, `Bindings`). |
 | `com.michaelgrundvig.frc.runtime.commands` | Commands that aren't one mechanism's: the calibration procedures. |
 | `com.michaelgrundvig.frc.runtime.dashboard` | What the drive team's dashboard shows, and the log stream to it. |
-| `com.michaelgrundvig.frc.runtime.sim` | The simulated world's adapters to the robot program: the simulated hardware behind its IO (`SimulatedHardware`: the modules' motor controllers and encoders, the IMUs, the joints, sensors and PDH, the cameras), the faults bound to Pitwall's simulator controls (`Faults`), and the named scenarios (`Scenarios`), over the simulation library (`runtime/lib/simulation`). Only the simulator builds it. |
+| `com.michaelgrundvig.frc.runtime.sim` | The simulated world's adapters to the robot program: the simulated hardware behind its IO (`SimulatedHardware`: the modules' motor controllers and encoders, the IMUs, the joints, sensors and PDH, the cameras), the faults bound to Pitwall's simulator controls (`Faults`), and the named scenarios (`Scenarios`), over the simulation library (`frc-robot-simulation`). Only the simulator builds it. |
 | `com.michaelgrundvig.frc.runtime.lib` | The robot program's own components, unit-tested and free of robot code (enforced): loop timing (`timing`), Systemcore's CAN ports in WPILib's names (`wiring`), and the Phoenix helper (`phoenix`), which turns a mechanism's definition, wiring and control into its TalonFX and CANcoder settings (ratios, gains, gravity, limits, followers), so nothing is retyped by hand. |
-| `runtime/src/test/java/`, `runtime/src/testFixtures/java/` | The runtime's tests, in the same packages as what they test, from single classes to the whole robot in the simulator, on the guide's robot, plus its architecture rules (`ArchitectureTest`). The fixtures are what you test your own robot with: `RobotSim`, `Monkey`, `AutoCheck`, the invariants. See [runtime/docs/testing.md](runtime/docs/testing.md). |
+| The runtime's tests and test fixtures | The runtime's tests (in its repository), in the same packages as what they test, from single classes to the whole robot in the simulator, on the guide's robot, plus its architecture rules (`ArchitectureTest`). The fixtures, which come with it, are what you test your own robot with: `RobotSim`, `Monkey`, `AutoCheck`, the invariants. See [runtime/docs/testing.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/testing.md). |
 | `src/test/java/` | Your tests: your robots (`robots2026/`), your architecture test (`ArchitectureTest`), and the checks of the dashboard layouts against the code (the guides' and the values register's are the runtime's). |
-| `model/` | The robot model, a repository of its own here as a git submodule (`com.michaelgrundvig.frc.world`), read by everything that needs to know the field or the robot: the validation kit every configuration record is built with (`config`), what the field and the robot are both made of, mass, shapes, and materials (`physical`), the field model and its frames, tags, terrain, and zones (`field`), the robot's definition, its body, drivetrain, cameras, IMUs and joints, each with its wiring and control, and what a joint's definition means for a program, as functions of plain values (`robot`), the timed paths a drivetrain follows (`path`), a season's game, what its manual allows a robot to be and its field, written once when the game is revealed (`game`), and the writers that give other tools what they say, such as AdvantageScope's robot assets (`bridges`). It reads only WPILib's math, units, field layouts and JSON library (avaje-jsonb), so Gradle keeps the robot program, the simulator, and Pitwall out of its reach. |
-| `localization/` | Localization, a repository of its own here as a git submodule, built as part of this build (`com.michaelgrundvig.frc.localization`, `com.michaelgrundvig.frc:frc-localization`; [localization/README.md](localization/README.md)): the contract a localizer keeps (`Localizer`), the default localizer and WPILib's pose estimator behind it, which a robot chooses between in its configuration ([runtime/docs/localizers.md](runtime/docs/localizers.md)), the service the robot runs each loop (`LocalizationService`: readings and images in, the estimate and a verdict on each image out), the pose estimator and everything that feeds it (its package documentation is a reading map), and the calibration math (`calibration`). It reads the world model and nothing else of the robot's, so its tests run in milliseconds without the simulator. |
-| `runtime/lib/simulation/` | The simulation, a project of the runtime's build (`com.michaelgrundvig.frc.simulation`): the physics behind one interface (`Physics`), the IMUs' models, how the simulated robot's sensors err (`SensorErrors`), the catalog of what can fail (`FaultCatalog`), and where each random stream starts (`Seeds`), with the truth suite that checks it against physics ([runtime/docs/simulator.md](runtime/docs/simulator.md#how-far-to-trust-it-the-truth-suite)). It reads the world model and WPILib's math, and nothing of the robot program, localization, or Pitwall; in the robot program only the simulator's adapters (`com.michaelgrundvig.frc.runtime.sim`) and its top level reach it, never the robot's code, which sees its IO alone (the robot program's `ArchitectureTest`). |
-| `src/studies/java/` | Your simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([runtime/docs/camera-placement.md](runtime/docs/camera-placement.md), `./gradlew cameraStudy`); whether the pose estimator's uncertainty tells the truth ([runtime/docs/testing.md](runtime/docs/testing.md#is-the-estimator-honest-the-consistency-study), `./gradlew consistencyStudy`). |
-| `pitwall/` | Pitwall, the robot program's own web page and API: status, actions, live tuning, the Robot view's joints and the World view's scenes ([pitwall/README.md](pitwall/README.md)). A repository of its own, here as a git submodule built as part of this build, with its own package (`com.michaelgrundvig.frc.pitwall`), free of robot code. It reads the robot model (`model/`), this build's. The runtime's `Robot` starts it. The model's `docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
+| The robot model | The robot model, a repository of its own ([frc-robot-model](https://github.com/mikegrundvig/frc-robot-model)) that comes with the runtime (`com.michaelgrundvig.frc.world`, `com.michaelgrundvig.frc:frc-robot-model`), read by everything that needs to know the field or the robot: the validation kit every configuration record is built with (`config`), what the field and the robot are both made of, mass, shapes, and materials (`physical`), the field model and its frames, tags, terrain, and zones (`field`), the robot's definition, its body, drivetrain, cameras, IMUs and joints, each with its wiring and control, and what a joint's definition means for a program, as functions of plain values (`robot`), the timed paths a drivetrain follows (`path`), a season's game, what its manual allows a robot to be and its field, written once when the game is revealed (`game`), and the writers that give other tools what they say, such as AdvantageScope's robot assets (`bridges`). It reads only WPILib's math, units, field layouts and JSON library (avaje-jsonb), so Gradle keeps the robot program, the simulator, and Pitwall out of its reach. |
+| Localization | Localization, a repository of its own ([frc-localization](https://github.com/mikegrundvig/frc-localization)) that comes with the runtime (`com.michaelgrundvig.frc.localization`, `com.michaelgrundvig.frc:frc-localization`): the contract a localizer keeps (`Localizer`), the default localizer and WPILib's pose estimator behind it, which a robot chooses between in its configuration ([runtime/docs/localizers.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/localizers.md)), the service the robot runs each loop (`LocalizationService`: readings and images in, the estimate and a verdict on each image out), the pose estimator and everything that feeds it (its package documentation is a reading map), and the calibration math (`calibration`). It reads the world model and nothing else of the robot's, so its tests run in milliseconds without the simulator. |
+| The simulation | The simulation, a project of the runtime's repository (`lib/simulation/`) that comes with it (`com.michaelgrundvig.frc.simulation`, `com.michaelgrundvig.frc:frc-robot-simulation`): the physics behind one interface (`Physics`), the IMUs' models, how the simulated robot's sensors err (`SensorErrors`), the catalog of what can fail (`FaultCatalog`), and where each random stream starts (`Seeds`), with the truth suite that checks it against physics ([runtime/docs/simulator.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/simulator.md#how-far-to-trust-it-the-truth-suite)). It reads the world model and WPILib's math, and nothing of the robot program, localization, or Pitwall; in the robot program only the simulator's adapters (`com.michaelgrundvig.frc.runtime.sim`) and its top level reach it, never the robot's code, which sees its IO alone (the robot program's `ArchitectureTest`). |
+| `src/studies/java/` | Your simulation studies that answer design questions, in their own source set so none of their code runs on the robot: where to mount the cameras, and how many ([runtime/docs/camera-placement.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/camera-placement.md), `./gradlew cameraStudy`); whether the pose estimator's uncertainty tells the truth ([runtime/docs/testing.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/testing.md#is-the-estimator-honest-the-consistency-study), `./gradlew consistencyStudy`). |
+| Pitwall | Pitwall, the robot program's own web page and API: status, actions, live tuning, the Robot view's joints and the World view's scenes ([pitwall/README.md](https://github.com/mikegrundvig/frc-pitwall/blob/main/README.md)). A repository of its own that comes with the runtime (`com.michaelgrundvig.frc:frc-pitwall`), with its own package (`com.michaelgrundvig.frc.pitwall`), free of robot code. It reads the robot model. The runtime's `Robot` starts it. The model's `docs-processor` copies the configuration records' Javadoc into the program as it compiles, for the page to show. |
 | `layouts/` | Dashboard layouts: the drive team's, for Elastic, and AdvantageScope's, for the simulator and its logs. |
 | `ascope_assets/` | AdvantageScope's robot models, generated from `Robots.java` by the build: point AdvantageScope's *Use Custom Assets Folder* here. Don't edit them. |
-| `runtime/build-logic/` | The runtime's Gradle plugins, one per tool whose files the build generates from the robot's configuration: AdvantageScope's today (`frc.advantagescope-assets`). `settings.gradle` finds them through its `pluginManagement`, and `build.gradle` applies one by its id. |
+| The runtime's Gradle plugins | One per tool whose files the build generates from the robot's configuration: AdvantageScope's today (`frc.advantagescope-assets`), published with the runtime at its version (`com.michaelgrundvig.frc:frc-gradle-plugins`). `settings.gradle` finds them through its `pluginManagement`, and `build.gradle` applies one from the version catalog. |
 | `sim/` | WPILib's simulator GUI's default settings, used on the first `./gradlew run -Pgui`. |
 | `vendordeps/` | Vendor libraries, as in any WPILib project. |
 | `AGENTS.md` | Instructions for coding agents, which `CLAUDE.md` points Claude Code to: what's different from older FRC code, how to check work, and where the guides are. |
 | `docs/` | The template's guides: [editors and commands](docs/editors.md), [kickoff](docs/kickoff.md) and [upgrading WPILib](docs/upgrading.md). |
-| `runtime/docs/` | The runtime's guides, which document its API: [mechanisms](runtime/docs/mechanisms.md), [driving](runtime/docs/driving.md), [autos](runtime/docs/autos.md), [testing](runtime/docs/testing.md), [the simulator](runtime/docs/simulator.md), [calibration](runtime/docs/calibration.md), [where every value comes from](runtime/docs/values.md), [characterization](runtime/docs/characterization.md), [camera placement](runtime/docs/camera-placement.md), [venues](runtime/docs/venues.md), the [stand-ins](runtime/docs/stand-ins.md), and the [rule requests](runtime/docs/rule-requests.md). |
-| `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), `studies.gradle` (the simulation studies), `runtime-versions.gradle` (fails the build when GradleRIO or a vendor library differs from the runtime's), the version catalog, and every downloaded library's checksum (`verification-metadata.xml`, [docs/upgrading.md](docs/upgrading.md#dependency-checksums)). |
+| The runtime's guides | In its repository, and they document its API: [mechanisms](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/mechanisms.md), [driving](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/driving.md), [autos](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/autos.md), [testing](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/testing.md), [the simulator](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/simulator.md), [calibration](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/calibration.md), [where every value comes from](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/values.md), [characterization](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/characterization.md), [camera placement](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/camera-placement.md), [venues](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/venues.md), the [stand-ins](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/stand-ins.md), and the [rule requests](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/rule-requests.md). |
+| `gradle/` | The build's supporting rules: `quality.gradle` (checks), `build-info.gradle` (build metadata), `simulation.gradle` (simulator defaults), `studies.gradle` (the simulation studies), `runtime-versions.gradle` (fails the build when GradleRIO or a vendor library differs from what the runtime was built with), the version catalog, and every downloaded library's checksum (`verification-metadata.xml`, [docs/upgrading.md](docs/upgrading.md#dependency-checksums)). |
 
 ## License
 
@@ -279,11 +283,10 @@ Also built in:
 AdvantageKit's templates (BSD 3-Clause, Littleton Robotics); WPILib is BSD 3-Clause (FIRST and other
 WPILib contributors). Their licenses are in [`licenses/`](licenses/).
 
-The libraries the robot program uses come under their own licenses. Only one is in this
-repository: uPlot, the plotting library Pitwall's page loads from the robot (no internet at an
-event), whose license is in [`licenses/`](licenses/). Gradle downloads the rest, so sharing the
-source shares none of them; three.js, which draws Pitwall's World view, is one, and its license is
-in [`licenses/`](licenses/) too, since its files go into Pitwall's jar for the page to load. A
+The libraries the robot program uses come under their own licenses. None is in this repository:
+Gradle downloads them, so sharing the source shares none of them. Two go into Pitwall's jar for its
+page to load from the robot (no internet at an event): uPlot, the plotting library, and three.js,
+which draws Pitwall's World view; their licenses are in [`licenses/`](licenses/). A
 built robot program (the jar `deploy` sends) contains them all, so share source, never built jars:
 
 | Library | License |
@@ -291,7 +294,7 @@ built robot program (the jar `deploy` sends) contains them all, so share source,
 | WPILib, including Commands v3 | BSD 3-Clause |
 | AdvantageKit | BSD 3-Clause |
 | PhotonLib | MIT |
-| uPlot 1.6.32, in `pitwall/` | MIT |
+| uPlot 1.6.32, in Pitwall's jar | MIT |
 | three.js 0.181.1, three of its files in Pitwall's jar | MIT |
 | PhotonVision's targeting library, which PhotonLib uses | GPL-3.0, whose terms reach a built program you share |
 | CTRE Phoenix 6 | CTRE's own license, which doesn't allow redistributing it |

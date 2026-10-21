@@ -24,7 +24,7 @@ configurations {
 }
 dependencies {
     // The studies drive the whole simulated robot, as tests do, with the runtime's harness.
-    studiesImplementation testFixtures("com.michaelgrundvig.frc:frc-robot-runtime")
+    studiesImplementation testFixtures(libs.frc.robot.runtime)
     studiesCompileOnly libs.recordbuilder.core
     studiesAnnotationProcessor libs.recordbuilder.processor
 }

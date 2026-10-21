@@ -21,7 +21,7 @@ the widget at a value `dashboard/Dashboard.java` publishes, or publish the value
 `advantagescope.json` is AdvantageScope's layout for the simulator and its logs: the robot where
 it believes it is, beside where it really is, in 3D and 2D, with the cameras' tags and the
 estimate's uncertainty; the swerve modules; and graphs of the estimate's error and the slip
-check. [runtime/docs/simulator.md](../runtime/docs/simulator.md#see-it-in-advantagescope) says how to open it and
+check. [runtime/docs/simulator.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/simulator.md#see-it-in-advantagescope) says how to open it and
 what each tab shows.
 
 It's AdvantageScope v27.0.0-alpha-6's format (File > Export Layout...), the release that pairs

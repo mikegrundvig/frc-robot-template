@@ -15,12 +15,6 @@ import org.junit.jupiter.api.Test;
 class ArchitectureTest {
   private static final JavaClasses TEAM_CODE = ProductionCode.TEAM;
 
-  /**
-   * The simulation studies (src/studies): programs that drive the whole simulated robot, as tests
-   * do, and never run on the robot.
-   */
-  private static final String STUDIES = "frc.robot.studies..";
-
   /** The runtime is given what it needs from the team's code and never names any of it. */
   @Test
   void theRuntimeNeverReachesTheTeamsCode() {
@@ -51,9 +45,13 @@ class ArchitectureTest {
     ProductionRules.NO_STATIC_MUTABLE_STATE.check(TEAM_CODE);
   }
 
+  /**
+   * The team has no configuration records of its own until it writes one (the chassis uses only the
+   * libraries'), so this rule may match no class.
+   */
   @Test
   void configurationIsBuiltByName() {
-    ProductionRules.CONFIGURATION_IS_BUILT_BY_NAME.check(TEAM_CODE);
+    ProductionRules.CONFIGURATION_IS_BUILT_BY_NAME.allowEmptyShould(true).check(TEAM_CODE);
   }
 
   /**
@@ -65,8 +63,6 @@ class ArchitectureTest {
     noClasses()
         .that()
         .resideInAPackage("frc.robot.*..")
-        .and()
-        .resideOutsideOfPackages(STUDIES)
         .should()
         .dependOnClassesThat()
         .resideInAnyPackage(
@@ -84,8 +80,6 @@ class ArchitectureTest {
     noClasses()
         .that()
         .resideInAPackage("frc.robot.*..")
-        .and()
-        .resideOutsideOfPackage(STUDIES)
         .should()
         .dependOnClassesThat()
         .resideInAPackage("frc.robot")

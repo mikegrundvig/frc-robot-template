@@ -16,9 +16,9 @@
 // Start in a scenario, a fault in the robot's sensors or something that happens to it:
 // ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (com.michaelgrundvig.frc.runtime.sim.Scenarios).
 //
-// Run another of the team's robots (Robots.all()): ./gradlew run -Probot=beta. Without it the
-// program runs the robot Robots.current() names. A name that is none of them stops the program as
-// it starts, with the list.
+// Run another of the team's robots (Robots.all()) by its name: ./gradlew run -Probot=chassis.
+// Without it the program runs the robot Robots.current() names. A name that is none of them stops
+// the program as it starts, with the list.
 //
 // Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
 // (or the log open in AdvantageScope). Replay runs with every simulation extension off.
@@ -27,7 +27,7 @@
 // branch) takes another, so pages already open on 5820 don't reconnect to it:
 // ./gradlew run -Ppitwall.port=5920 (0 picks a free one; Pitwall says which it took).
 //
-// Drive a robot's real CTRE devices from this laptop: ./gradlew run -PhwSim -Probot=chassis, with
+// Drive a robot's real CTRE devices from this laptop: ./gradlew run -PhwSim, with
 // a CANivore plugged into the laptop (runtime/docs/bench.md). That's CTRE's hardware-attached
 // simulation: WPILib's build picks Phoenix's hwsim libraries, which talk to the CANivore, whenever
 // Gradle is given -PhwSim (native-utils' HW_SIM_SWITCH_PROPERTY, 2027.14.3), and the program runs

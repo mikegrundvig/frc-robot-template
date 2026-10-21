@@ -32,9 +32,9 @@ import org.wpilib.units.measure.Angle;
  * wheel and one steers it. A CANcoder on top of each module reads which way its wheel points. A
  * Pigeon 2 tells the robot which way it faces. All of them are on one CANivore.
  *
- * <p>Run it in the simulator: {@code ./gradlew run -Probot=chassis}. Drive the real chassis from a
- * laptop, with its CANivore plugged into the laptop: {@code ./gradlew run -PhwSim -Probot=chassis}
- * (runtime/docs/bench.md says how, and what to check first).
+ * <p>Run it in the simulator: {@code ./gradlew run}. Drive the real chassis from a laptop, with its
+ * CANivore plugged into the laptop: {@code ./gradlew run -PhwSim} (runtime/docs/bench.md says how,
+ * and what to check first).
  *
  * <p>Read it from the top. First come the values to check on the real chassis, all in one block.
  * Then what the chassis is: its frame and its modules. Last, how the program drives it, with
@@ -273,9 +273,9 @@ public final class ChassisRobot {
           .build();
 
   /**
-   * The chassis as the program runs it: {@code ./gradlew run -Probot=chassis} chooses it by name
-   * ({@link Robots#current}). Its cameras' and pose estimator's settings are the template's own: it
-   * has no cameras.
+   * The chassis as the program runs it, the robot {@link Robots#current} runs unless another is
+   * asked for by name. Its cameras' and pose estimator's settings are the template's own: it has no
+   * cameras.
    */
   public static final RobotConfig CONFIG =
       RobotConfig.builder()

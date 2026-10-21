@@ -74,8 +74,8 @@ version they could have written over the clever one.
 
 ## Where things are
 
-- [README.md](README.md): the quick start, what the template does and why, and the repository's
-  layout
+- [README.md](README.md): this branch (the swerve test chassis alone), how to run it in the
+  simulator and on the bench, and where its files are
 - [runtime/docs/mechanisms.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/mechanisms.md): describe a mechanism in one block, use its commands
 - [runtime/docs/driving.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/driving.md): the drivetrain's moves
 - [runtime/docs/autos.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/autos.md): declaring, choosing, running and checking autos
@@ -86,5 +86,4 @@ version they could have written over the clever one.
   default one, WPILib's, or your own), and the contract a localizer keeps
 - [runtime/docs/calibration.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/calibration.md), [runtime/docs/characterization.md](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/characterization.md):
   measuring the real robot
-- [docs/editors.md](docs/editors.md), [docs/upgrading.md](docs/upgrading.md),
-  [docs/kickoff.md](docs/kickoff.md): editors, WPILib upgrades, a new season's field
+- [docs/editors.md](docs/editors.md), [docs/upgrading.md](docs/upgrading.md): editors, WPILib upgrades

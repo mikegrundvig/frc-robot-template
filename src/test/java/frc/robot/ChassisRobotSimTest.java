@@ -11,9 +11,9 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 import org.wpilib.math.geometry.Pose2d;
 
 /**
- * The swerve test chassis in the simulator, as {@code ./gradlew run -Probot=chassis} runs it: with
- * the team's controls, it drives where the driver's stick points, no faster than its bench limit.
- * It starts on the blue center start, its bumpers against the hub, so it backs away from it.
+ * The swerve test chassis in the simulator, as {@code ./gradlew run} runs it: with the team's
+ * controls, it drives where the driver's stick points, no faster than its bench limit. It starts on
+ * the blue center start, its bumpers against the hub, so it backs away from it.
  */
 @SimulationTest
 class ChassisRobotSimTest {
@@ -21,7 +21,7 @@ class ChassisRobotSimTest {
 
   @Test
   void itDrivesWhereTheStickPointsAtItsBenchSpeed() {
-    sim.build(ChassisRobot.CONFIG, Rebuilt::game, Robots::controls, SensorErrors.NONE);
+    sim.build(ChassisRobot.CONFIG, Rebuilt::game, Controls::new, SensorErrors.NONE);
     sim.run(0.2);
     Pose2d start = sim.simulation().truePose();
 

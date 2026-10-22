@@ -32,6 +32,16 @@ gradlew.bat run
 Open http://localhost:5820/#sim in a browser. That's Pitwall's Sim view: click **Enable**, then
 drive with the keyboard or a gamepad. Stop the program with Ctrl+C in the terminal.
 
+## In IntelliJ IDEA
+
+Open the folder with **File > Open**. Start the program with Gradle's `run` task, not the green
+arrow beside `main`: the green arrow starts plain Java, without WPILib's native libraries, and it
+stops with `wpiutiljni could not be loaded`. In the **Gradle** tool window, double-click **Tasks >
+application > run**. It's then in the run menu at the top, so the play button starts it from then
+on. For the real chassis, edit that run configuration and change `run` to `run -PhwSim`.
+
+The green arrows beside tests work as they are.
+
 ## Drive the real chassis
 
 ```bash

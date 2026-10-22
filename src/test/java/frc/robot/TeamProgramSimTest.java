@@ -32,7 +32,7 @@ class TeamProgramSimTest {
    */
   @Test
   void theTeamsRobotRunsWithItsSeasonAndItsControls() {
-    sim.build(Robots.current(), Rebuilt::game, Controls::new, SensorErrors.TYPICAL);
+    sim.build(Robots.current(), Rebuilt.GAME, Controls::new, SensorErrors.TYPICAL);
     sim.run(1);
 
     assertThat(sim.bindings().all().stream().map(Binding::toString))

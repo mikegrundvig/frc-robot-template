@@ -183,7 +183,7 @@ public final class MountOptions {
           shown(up),
           shown(unit.of(body.bumperLength().div(2).in(unit))),
           shown(unit.of(body.bumperWidth().div(2).in(unit))),
-          shown(unit.of(body.height().in(unit))));
+          shown(unit.of(body.overallHeight().in(unit))));
     }
   }
 

@@ -353,7 +353,7 @@ public final class CameraScoring {
               robot.definition().body(),
               config.otherRobotsHeightMeters() > 0
                   ? config.otherRobotsHeightMeters()
-                  : robot.definition().body().height().in(Meters),
+                  : robot.definition().body().overallHeight().in(Meters),
               others,
               OtherRobots.reachMeters(conditions.sightMeters(), robot.definition().body()),
               spot -> weights.at(field, spot) > 0,

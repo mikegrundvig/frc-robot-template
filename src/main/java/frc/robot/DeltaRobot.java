@@ -20,7 +20,6 @@ import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
 import com.michaelgrundvig.frc.world.robot.Body;
-import com.michaelgrundvig.frc.world.robot.Body.Weight;
 import com.michaelgrundvig.frc.world.robot.CameraConfig;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.Configuration;
@@ -89,12 +88,12 @@ public final class DeltaRobot {
       Body.builder()
           .frameLength(Inches.of(26))
           .frameWidth(Inches.of(26))
-          .height(Inches.of(30))
+          .overallHeight(Inches.of(30))
           .bumperEnds(Inches.of(3))
           .bumperSides(Inches.of(3))
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
-          .weight(Weight.weighed(Pounds.of(137.95)))
+          .weight(Pounds.of(137.95))
           .inertia(Body.Turning.yaw(KilogramSquareMeters.of(5.5)))
           .cg(point(0, 0, 0.2))
           .build();

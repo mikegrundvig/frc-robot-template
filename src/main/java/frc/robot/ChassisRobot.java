@@ -11,7 +11,6 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
-import com.michaelgrundvig.frc.world.game.Rebuilt;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
@@ -108,22 +107,20 @@ public final class ChassisRobot {
    * <p>It has no bumpers on the bench, but the robot's model needs them, so these are the 3 inch
    * bumpers it would wear. Only the simulator uses them, to know how big the robot is.
    *
-   * <p>It hasn't been weighed yet, so the program takes it as heavy as the season allows. Only the
-   * simulator uses its weight. Weigh it with its battery on, and write what the scale says: {@code
-   * .weight(Body.Weight.weighed(Pounds.of(42.5)))}. How hard it is to spin isn't measured either,
-   * so the model works it out as a solid box's of that weight and size.
+   * <p>It hasn't been weighed yet, so the weight is left out and the program takes it as heavy as
+   * the season allows, and says so at startup. Weigh it with its battery on, and add what the scale
+   * says: {@code .weight(Pounds.of(42.5))}. How hard it is to spin isn't measured either, so the
+   * model works it out as a solid box's of that weight and size.
    */
   public static final Body BODY =
       Body.builder()
           .frameLength(Inches.of(26))
           .frameWidth(Inches.of(26))
-          .height(Inches.of(8))
+          .overallHeight(Inches.of(8))
           .bumperEnds(Inches.of(3))
           .bumperSides(Inches.of(3))
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
-          .weight(Rebuilt.LIMITS.unweighed())
-          .inertia(Body.Turning.BOX)
           .build();
 
   /**

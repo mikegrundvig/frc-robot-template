@@ -82,7 +82,7 @@ class CandidatesTest {
                 RobotDefinitionBuilder.builder(ExampleRobot.SIM.definition())
                     .body(
                         BodyBuilder.builder(ExampleRobot.SIM.definition().body())
-                            .height(Inches.of(20))
+                            .overallHeight(Inches.of(20))
                             .build())
                     .cameras(List.of(StudyFixtures.FRONT))
                     .build())

@@ -203,7 +203,7 @@ public final class CameraStudy {
                     : config.otherRobotsLeast() + " to " + config.otherRobotsMost(),
                 config.otherRobotsHeightMeters() > 0
                     ? config.otherRobotsHeightMeters()
-                    : robot.definition().body().height().in(Meters)));
+                    : robot.definition().body().overallHeight().in(Meters)));
     Conditions nominal = Conditions.nominal(config);
     setup.add("Nominal conditions: " + nominal.described() + ".");
     out.println(setup.get(0));

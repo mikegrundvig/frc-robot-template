@@ -122,7 +122,7 @@ public final class Candidates {
         continue;
       }
       for (Distance height : HEIGHTS) {
-        if (height.gt(body.height())) {
+        if (height.gt(body.overallHeight())) {
           continue;
         }
         for (Angle tilt : TILTS) {

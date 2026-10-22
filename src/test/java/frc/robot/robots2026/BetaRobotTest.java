@@ -43,22 +43,27 @@ import com.michaelgrundvig.frc.world.robot.Sensor;
 import frc.robot.BetaRobot;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.wpilib.math.geometry.Rotation3d;
 import org.wpilib.math.geometry.Transform3d;
 import org.wpilib.math.geometry.Translation2d;
+import org.wpilib.units.measure.Mass;
 
 /**
  * A team's 2026 robot, Beta ({@link BetaRobot}), against what its code configures. Citations are to
  * the robot's original code, under {@code src/main/java/frc/robot/}.
  */
 class BetaRobotTest {
+  /** The robot's mass as the program takes it: as weighed. */
+  private static final Mass MASS = Rebuilt.LIMITS.robotMass(BODY);
+
   private final RobotMath math = ROBOT.math();
 
   @Test
   void itFitsTheSeason() {
     assertThat(Rebuilt.LIMITS.problems(ROBOT)).isEmpty();
-    assertThat(BODY.mass().in(Kilograms))
+    assertThat(BODY.weight().orElseThrow().in(Kilograms))
         .as("PathPlanner's mass, settings.json:15")
         .isCloseTo(62.57, within(0.01));
   }
@@ -264,7 +269,7 @@ class BetaRobotTest {
    */
   @Test
   void theIntakesSpeedIsNotedAtItsFreeSpeed() {
-    assertThat(ROBOT.findings())
+    assertThat(ROBOT.findings(MASS))
         .filteredOn(finding -> finding.level() == Finding.Level.DOUBT)
         .extracting(Finding::message)
         .containsExactly(
@@ -387,7 +392,9 @@ class BetaRobotTest {
   @Test
   void theMissingDataReportListsEveryLinksMass() {
     List<Finding> notes =
-        ROBOT.findings().stream().filter(finding -> finding.level() == Finding.Level.NOTE).toList();
+        ROBOT.findings(MASS).stream()
+            .filter(finding -> finding.level() == Finding.Level.NOTE)
+            .toList();
 
     assertThat(notes)
         .extracting(Finding::message, Finding::scope)
@@ -451,9 +458,10 @@ class BetaRobotTest {
             "transition",
             "hood",
             "hood");
-    assertThat(BODY.yawMomentOfInertia().in(KilogramSquareMeters)).isEqualTo(5.5);
-    Body boxed = BodyBuilder.builder(BODY).inertia(Body.Turning.BOX).build();
-    assertThat(boxed.yawMomentOfInertia().in(KilogramSquareMeters)).isCloseTo(6.883, within(0.01));
+    assertThat(BODY.yawMomentOfInertia(MASS).in(KilogramSquareMeters)).isEqualTo(5.5);
+    Body boxed = BodyBuilder.builder(BODY).inertia(Optional.empty()).build();
+    assertThat(boxed.yawMomentOfInertia(MASS).in(KilogramSquareMeters))
+        .isCloseTo(6.883, within(0.01));
   }
 
   /**

@@ -25,8 +25,8 @@ import org.wpilib.command3.Scheduler;
  * the 2026 rule maximums where the rules set one. Describe your robot here as you design and
  * measure it, starting from its blocks: runtime/docs/values.md says how to measure each value, and
  * where today's number came from. Note a measured value where it's set, as the calibration
- * procedures do: {@code .weight(Body.Weight.weighed(Pounds.of(131.2))) // measured YYYY-MM-DD: two
- * scales, bumpers and battery on}.
+ * procedures do: {@code .weight(Pounds.of(131.2)) // measured YYYY-MM-DD: two scales, bumpers and
+ * battery on}.
  *
  * <p>A robot's mechanisms are written here too, each joint in one block: where it is, its named
  * places and outputs, its motors and their wiring, its own sensors, how the program drives it, and
@@ -40,9 +40,9 @@ import org.wpilib.command3.Scheduler;
  *
  * <p>The definition refuses what can't be: a position outside its joint's range, a speed past what
  * its motors turn it at or a voltage past what they're rated for, a configuration that breaks an
- * interlock, interlocks that hold two joints by each other. {@code RobotDefinition.findings()}
- * lists what's doubtful, a speed so near its motors' free speed that its loop can't hold it, and
- * the program says it at startup: in the log ({@code Robot/Doubts}) and, on a robot, on the Driver
+ * interlock, interlocks that hold two joints by each other. {@code RobotDefinition.findings} lists
+ * what's doubtful, a speed so near its motors' free speed that its loop can't hold it, and the
+ * program says it at startup: in the log ({@code Robot/Doubts}) and, on a robot, on the Driver
  * Station's console.
  *
  * <p>Behavior code names the constants themselves: {@code joints.of(PIVOT)}, {@code

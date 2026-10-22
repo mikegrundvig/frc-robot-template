@@ -1,5 +1,5 @@
 // The robot program's build. GradleRIO is WPILib's Gradle plugin: it brings WPILib, the vendor
-// libraries in vendordeps/, the simulator, and deploying to the robot.
+// libraries in vendordeps/, and the simulator.
 plugins {
     id "java"
     id "application"
@@ -12,40 +12,14 @@ java {
     }
 }
 
-// Deploying to the robot's Systemcore (./gradlew deploy -PteamNumber=NNNN).
-deploy {
-    targets {
-        systemcore(getTargetTypeClass("SystemCore")) {
-            team = project.wpilib.getTeamOrDefault(0)
-            useDefaultSystemcoreHostName()
-            debug = project.wpilib.getDebugOrDefault(false)
-            artifacts {
-                wpilibJava(getArtifactTypeClass("WPILibJavaArtifact")) {
-                }
-                wpilibStaticFileDeploy(getArtifactTypeClass("FileTreeArtifact")) {
-                    files = project.fileTree("src/main/deploy")
-                    directory = "/home/systemcore/deploy"
-                }
-            }
-        }
-    }
-}
-
 // The robot program every robot shares comes from its own Maven repository.
 repositories {
     maven { url = "https://mikegrundvig.github.io/frc-maven/" }
 }
 
 dependencies {
-    annotationProcessor wpi.java.deps.wpilibAnnotations()
     implementation wpi.java.deps.wpilib()
     implementation wpi.java.vendor.java()
-
-    systemcoreDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.systemcore)
-    systemcoreDebug wpi.java.vendor.jniDebug(wpi.platforms.systemcore)
-    systemcoreRelease wpi.java.deps.wpilibJniRelease(wpi.platforms.systemcore)
-    systemcoreRelease wpi.java.vendor.jniRelease(wpi.platforms.systemcore)
-
     nativeDebug wpi.java.deps.wpilibJniDebug(wpi.platforms.desktop)
     nativeDebug wpi.java.vendor.jniDebug(wpi.platforms.desktop)
     simulationDebug wpi.sim.enableDebug()
@@ -65,17 +39,22 @@ dependencies {
 }
 
 application.mainClass = "frc.robot.Main"
-deploy.targets.systemcore.artifacts.wpilibJava.configureApplication(application)
 wpi.java.configureApplication(application)
 wpi.java.configureTestTasks(test)
+test.useJUnitPlatform()
 
-tasks.named("test") {
-    useJUnitPlatform()
-    // Tests run in the build folder, so the files simulated devices write stay out of the project.
-    def work = layout.buildDirectory.dir("test-work")
-    workingDir = work
-    doFirst { work.get().asFile.mkdirs() }
+// ./gradlew run          the simulator: drive it at http://localhost:5820/#sim
+// ./gradlew run -PhwSim  the real chassis, through its CANivore plugged into this laptop
+//
+// -PhwSim is CTRE's hardware-attached simulation: with it, WPILib's build picks Phoenix's
+// libraries that talk to a real CANivore instead of simulated devices, and the program runs as on
+// a robot, starting disabled. Enable it from WPILib's simulator window, which opens with -PhwSim.
+def hwSim = project.hasProperty("hwSim")
+wpi.sim.addGui().defaultEnabled = hwSim
+wpi.sim.addDriverstation()
+tasks.named("run") {
+    systemProperty "frc.sim.start", hwSim ? "disabled" : "ready"
+    if (hwSim) {
+        systemProperty "frc.simMode", "REAL"
+    }
 }
-
-// The simulator, and driving the real chassis from a laptop (-PhwSim).
-apply from: "gradle/simulation.gradle"

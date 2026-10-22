@@ -27,18 +27,9 @@ import java.util.List;
 import org.wpilib.units.measure.Angle;
 
 /**
- * The swerve test chassis: a bare square frame on four SDS MK5n swerve modules, with nothing else
- * on it. Each module has two Kraken motors, run by the Talon FX built into each one: one drives the
- * wheel and one steers it. A CANcoder on top of each module reads which way its wheel points. A
- * Pigeon 2 tells the robot which way it faces. All of them are on one CANivore.
- *
- * <p>Run it in the simulator: {@code ./gradlew run}. Drive the real chassis from a laptop, with its
- * CANivore plugged into the laptop: {@code ./gradlew run -PhwSim} (runtime/docs/bench.md says how,
- * and what to check first).
- *
- * <p>Read it from the top. First come the values to check on the real chassis, all in one block.
- * Then what the chassis is: its frame and its modules. Last, how the program drives it, with
- * current limits kept low for the bench.
+ * The swerve test chassis: a square frame on four SDS MK5n swerve modules. Each module has two
+ * Kraken motors, one driving the wheel and one steering it, and a CANcoder that reads which way the
+ * wheel points. A Pigeon 2 tells the robot which way it faces. Everything is on one CANivore.
  */
 public final class ChassisRobot {
   private ChassisRobot() {}
@@ -100,19 +91,7 @@ public final class ChassisRobot {
 
   // ==== END OF THE VALUES TO CHECK ===============================================================
 
-  /**
-   * The frame: about 26 inches square, from where the 2026 robot's code puts its modules, 10.375
-   * inches from the middle each way, with a module's wheel 2.625 inches in from the frame's edge.
-   * Measure it and change it if it's different.
-   *
-   * <p>It has no bumpers on the bench, but the robot's model needs them, so these are the 3 inch
-   * bumpers it would wear. Only the simulator uses them, to know how big the robot is.
-   *
-   * <p>It hasn't been weighed yet, so the program takes it as heavy as the season allows. Only the
-   * simulator uses its weight. Weigh it with its battery on, and write what the scale says: {@code
-   * .weight(Body.Weight.weighed(Pounds.of(42.5)))}. How hard it is to spin isn't measured either,
-   * so the model works it out as a solid box's of that weight and size.
-   */
+  /** The frame, about 26 inches square. The bumpers and weight are only used by the simulator. */
   public static final Body BODY =
       Body.builder()
           .frameLength(Inches.of(26))
@@ -127,18 +106,9 @@ public final class ChassisRobot {
           .build();
 
   /**
-   * One SDS MK5n module, all four the same. A Kraken X60 drives the wheel, without FOC: FOC needs a
-   * Phoenix Pro license on the motor. The steering turns 287/11 (about 26.09) times for one turn of
-   * the module, as SDS says. The wheels are 4 inches across, so 2 inches from the middle to the
-   * tread.
-   *
-   * <p>Turning a module also turns its wheel a little, through the gears inside it: 3.375 turns of
-   * the drive motor for each turn of the module, the 2026 robot's number for its 5.27 to 1 modules.
-   * The program takes that out of the wheel's distance. Change it with the drive gear ratio: it's
-   * the drive gear ratio divided by 1.5625 (25/16), so 3.857 for a 6.03 to 1 module.
-   *
-   * <p>How hard the wheel and the steering are to spin up, 0.01 kg m² each, is Tuner X's guess,
-   * which only the simulator uses.
+   * One SDS MK5n module, all four the same: a Kraken X60 drives a 4 inch wheel, and the steering
+   * turns 287/11 times for one turn of the module. Turning a module also turns its wheel a little
+   * through the gears inside it (the coupling ratio), which the program takes out of the distance.
    */
   public static final DrivetrainGeometry.ModuleType MODULE =
       DrivetrainGeometry.ModuleType.builder()
@@ -155,7 +125,7 @@ public final class ChassisRobot {
   /** The CANivore everything is on. */
   public static final CanBus CANIVORE = CanBus.canivore(CANIVORE_NAME);
 
-  /** The front left module's motors and CANcoder. Its steering motor isn't turned around. */
+  /** The front left module's motors and CANcoder. */
   private static final SwerveWiring.ModuleWiring FRONT_LEFT =
       SwerveWiring.ModuleWiring.builder()
           .driveId(FRONT_LEFT_DRIVE_ID)
@@ -203,12 +173,7 @@ public final class ChassisRobot {
           .encoderId(BACK_RIGHT_CANCODER_ID)
           .build();
 
-  /**
-   * The four modules, 10.375 inches forward or back of the middle and 10.375 inches left or right,
-   * and how they're wired: Talon FXs on the CANivore, the Pigeon 2 among them. The Pigeon reads
-   * turns at their true size (a yaw scale of 1) until it's checked by spinning the chassis ten
-   * times (runtime/docs/calibration.md).
-   */
+  /** The four modules, 10.375 inches from the middle each way, and how they're wired. */
   public static final DrivetrainGeometry DRIVETRAIN =
       DrivetrainGeometry.uniform(MODULE, Inches.of(10.375), Inches.of(10.375))
           .wired(
@@ -221,11 +186,7 @@ public final class ChassisRobot {
                   .modules(List.of(FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT))
                   .build());
 
-  /**
-   * The chassis as a whole: its frame, its drivetrain, and its Pigeon 2, taken as sitting in the
-   * middle, level, until its place is measured. No cameras, joints or PDH: the chassis has none. No
-   * backup IMU either: that's Systemcore's own, and the chassis has no Systemcore yet.
-   */
+  /** The chassis as a whole: its frame, its drivetrain and its Pigeon 2. */
   public static final RobotDefinition ROBOT =
       RobotDefinition.builder()
           .name("chassis")
@@ -235,12 +196,8 @@ public final class ChassisRobot {
           .build();
 
   /**
-   * Current limits for the bench: low on purpose, while the chassis is on blocks. A wheel spinning
-   * in the air needs only a few amps, so these leave plenty, and a jammed wheel or a wrong setting
-   * can't draw much. Raise them on purpose before driving on the floor (the guide's robot uses 30 A
-   * on the drive's stator and 40 A on the steering's: {@code ExampleRobot}).
-   *
-   * <p>The top speeds are low too: 1.5 meters a second, and half a turn a second.
+   * Low current limits and top speeds for the bench, while the chassis is on blocks: a jammed wheel
+   * or a wrong setting can't draw much. Raise them on purpose before driving on the floor.
    */
   public static final DrivetrainControl.Limits BENCH_LIMITS =
       DrivetrainControl.Limits.builder()
@@ -254,11 +211,8 @@ public final class ChassisRobot {
           .build();
 
   /**
-   * How hard the motors work to follow what they're asked. The drive's kV is what the X60 and the
-   * gearing should need, worked out from their numbers. Its kS and kP, and the steering's kP and
-   * kD, are the 2026 robot's Tuner X gains, changed into this program's units (Tuner X's are per
-   * turn; these are per meter and per radian). Tune them on the chassis, live from Pitwall's Tune
-   * view, once tuning is switched on there.
+   * How hard the motors work to follow what they're asked: the 2026 robot's gains, to tune on the
+   * chassis from Pitwall's Tune view.
    */
   public static final DrivetrainControl.Gains GAINS =
       DrivetrainControl.Gains.builder()
@@ -272,10 +226,7 @@ public final class ChassisRobot {
           .translationKp(3.0)
           .build();
 
-  /**
-   * The chassis as the program runs it ({@link Main} starts it). Its cameras' and pose estimator's
-   * settings are the template's own: it has no cameras.
-   */
+  /** The chassis as the program runs it ({@link Main} starts it). It has no cameras. */
   public static final RobotConfig CONFIG =
       RobotConfig.builder()
           .definition(

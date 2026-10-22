@@ -42,7 +42,8 @@ This drives real motors. A mentor runs this, and goes through the runtime's
 [bench guide](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/bench.md) first:
 what the laptop needs, the firmware, the safety checklist (chassis on blocks, a hand on the
 breaker), how to enable from WPILib's simulator GUI, and what to do when something's wrong. The
-chassis starts disabled.
+chassis starts disabled. To drive with the keyboard, drag **Keyboard 0** onto **Joystick 0** in the
+simulator window; a gamepad plugged in shows up there too.
 
 ## Where things are
 

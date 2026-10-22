@@ -15,8 +15,8 @@ import java.util.Optional;
  *
  * <p>Every value is set by name through a builder, which asks in turn for each one the robot can't
  * do without: none can be left out or land in the wrong place. runtime/docs/values.md says how to
- * measure each value. Note a measured value where it's set: {@code
- * .weight(Body.Weight.weighed(Pounds.of(42.5))) // measured YYYY-MM-DD, battery on}.
+ * measure each value. Note a measured value where it's set: {@code .weight(Pounds.of(42.5)) //
+ * measured YYYY-MM-DD, battery on}.
  */
 public final class Robots {
   private Robots() {}

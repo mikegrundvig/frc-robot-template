@@ -273,9 +273,8 @@ public final class ChassisRobot {
           .build();
 
   /**
-   * The chassis as the program runs it, the robot {@link Robots#current} runs unless another is
-   * asked for by name. Its cameras' and pose estimator's settings are the template's own: it has no
-   * cameras.
+   * The chassis as the program runs it ({@link Main} starts it). Its cameras' and pose estimator's
+   * settings are the template's own: it has no cameras.
    */
   public static final RobotConfig CONFIG =
       RobotConfig.builder()

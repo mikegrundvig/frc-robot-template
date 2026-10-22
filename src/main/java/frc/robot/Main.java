@@ -7,40 +7,17 @@
 
 package frc.robot;
 
-import com.michaelgrundvig.frc.runtime.BuildInfo;
-import com.michaelgrundvig.frc.runtime.BuildInfo.Changes;
 import com.michaelgrundvig.frc.runtime.RobotProgram;
 import com.michaelgrundvig.frc.world.game.Rebuilt;
 
-/**
- * The team's robot program starts here, handing the template's robot program what is the team's:
- * which robot this is, this season's field, what the robot does, and which build this is. Do NOT
- * add any static variables to this class, or any initialization at all.
- */
+/** Where the robot program starts. */
 public final class Main {
   private Main() {}
 
-  /**
-   * Main initialization function. Do not perform any initialization here.
-   *
-   * <p>If you change your robot's class, field or controls, change the parameter.
-   */
   public static void main(String... args) {
     RobotProgram.start(
-        Robots::current, // which robot this is
-        Rebuilt::game, // this season's field and venues
-        Controls::new, // what it does: its commands and gamepad bindings
-        build());
-  }
-
-  /** The build's generated constants, as the log records them. */
-  private static BuildInfo build() {
-    return new BuildInfo(
-        BuildConstants.MAVEN_NAME,
-        BuildConstants.BUILD_DATE,
-        BuildConstants.GIT_SHA,
-        BuildConstants.GIT_DATE,
-        BuildConstants.GIT_BRANCH,
-        Changes.fromFlag(BuildConstants.DIRTY));
+        () -> ChassisRobot.CONFIG, // which robot this is
+        Rebuilt::game, // the field it drives on
+        Controls::new); // what the sticks and buttons do
   }
 }

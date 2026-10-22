@@ -15,7 +15,7 @@ You need git and Java (any version; the build downloads the one it needs). No WP
 needed to build, test, or run the simulator.
 
 ```bash
-git clone -b swerve-bench https://github.com/mikegrundvig/frc-robot-template.git
+git clone -b swerve-starter https://github.com/mikegrundvig/frc-robot-template.git
 cd frc-robot-template
 ```
 
@@ -50,23 +50,17 @@ chassis starts disabled.
 |---|---|
 | `src/main/java/frc/robot/ChassisRobot.java` | The chassis's facts: its CAN IDs, module zeros, gear ratios, size, current limits and gains. Read it from the top. The first block holds every value still to check on the real chassis, each marked "Unconfirmed": check it in Phoenix Tuner X, fix it if it's wrong, and mark it "Checked" with the date. |
 | `src/main/java/frc/robot/Controls.java` | What the sticks and buttons do. The driver's sticks already drive the chassis and the back button resets its heading; add your own buttons here. |
-| `src/main/java/frc/robot/Robots.java` | The list of robots. This branch has one, the chassis. |
-| `src/main/java/frc/robot/Main.java` | Where the program starts. You won't need to change it. |
-| `src/test/java/frc/robot/` | The tests. |
+| `src/main/java/frc/robot/Main.java` | Where the program starts: which robot, which field, which controls. |
+| `src/test/java/frc/robot/ChassisRobotSimTest.java` | A test: drives the chassis in the simulator and checks where it went. |
+| `build.gradle` | The build: WPILib, the robot program library, and their versions. |
 
 The program itself (the drivetrain, the simulator, Pitwall) comes from the
 [runtime](https://github.com/mikegrundvig/frc-robot-runtime), a library the build downloads. Its
 [docs](https://github.com/mikegrundvig/frc-robot-runtime/tree/main/docs) explain driving, the
-simulator and testing in more depth. [docs/editors.md](docs/editors.md) sets up IntelliJ IDEA or
-VS Code.
+simulator and testing in more depth.
 
 ## Run the tests
 
 ```bash
-gradlew.bat test -Pquick
-gradlew.bat ci
+gradlew.bat test
 ```
-
-`test -Pquick` runs the fast tests while you work. `ci` runs every check: the formatter, the static
-analysis, every test (the simulator's too) and the coverage floor. Run it before you push. When a
-check fails, its message says what to fix.

@@ -1,128 +1,42 @@
-// Simulation: ./gradlew run starts the robot program in the simulator, driven from the Pitwall
-// page's Sim view (http://localhost:5820/#sim): the Driver Station, the keyboard and gamepads,
-// pausing and stepping, Stop, and failing the robot's parts (runtime/docs/simulator.md). WPILib's
-// simulator GUI is off unless asked for with -Pgui; while it's open it overwrites the page's
-// joysticks every frame. A real Driver Station can connect to the simulator either way.
+// How ./gradlew run starts the robot program on this laptop.
 //
-// The robot starts in teleop on the blue alliance's station 2, the center start, with a Driver
-// Station attached, so it's one press from driving: disabled, for the Sim view's Enable, beside the
-// keyboard driving it switches on (a robot never enables itself before anyone is watching it).
-// With the GUI it starts enabled, since the GUI's keyboard drives it at once and the GUI is on
-// screen to disable it. -PstartDisabled starts it as a real robot starts, disabled with no station.
-// sim/ holds the GUI's default settings, its keyboard as the driver's gamepad and the field view
-// open; they are copied only when the GUI runs and only when missing, so a user's own layout and
-// gamepad choices are kept.
+//   ./gradlew run          the simulator: drive at http://localhost:5820/#sim
+//   ./gradlew run -PhwSim  the real chassis, through its CANivore plugged into this laptop
 //
-// Start in a scenario, a fault in the robot's sensors or something that happens to it:
-// ./gradlew run -Pscenario=collision. ./gradlew scenarios lists them (com.michaelgrundvig.frc.runtime.sim.Scenarios).
-//
-// Run another of the team's robots (Robots.all()) by its name: ./gradlew run -Probot=chassis.
-// Without it the program runs the robot Robots.current() names. A name that is none of them stops
-// the program as it starts, with the list.
-//
-// Replay a log through the current code: ./gradlew run -Preplay, with AKIT_LOG_PATH naming the log
-// (or the log open in AdvantageScope). Replay runs with every simulation extension off.
-//
-// Pitwall's page is on port 5820. A second simulator beside yours (an agent's, a test of another
-// branch) takes another, so pages already open on 5820 don't reconnect to it:
-// ./gradlew run -Ppitwall.port=5920 (0 picks a free one; Pitwall says which it took).
-//
-// Drive a robot's real CTRE devices from this laptop: ./gradlew run -PhwSim, with
-// a CANivore plugged into the laptop (runtime/docs/bench.md). That's CTRE's hardware-attached
-// simulation: WPILib's build picks Phoenix's hwsim libraries, which talk to the CANivore, whenever
-// Gradle is given -PhwSim (native-utils' HW_SIM_SWITCH_PROPERTY, 2027.14.3), and the program runs
-// as on a robot (frc.simMode=REAL): real devices, no simulated world, Pitwall's page only showing,
-// tuning off until switched on there. It starts disabled, whatever -Pgui says; enable it from
-// WPILib's simulator GUI, which is on by default here (-Pgui=false for a Driver Station instead).
+// -PhwSim is CTRE's hardware-attached simulation: with it, WPILib's build picks Phoenix's
+// libraries that talk to a real CANivore instead of simulated devices. The program then runs as it
+// does on a robot: real devices, nothing simulated, starting disabled. Enable it from WPILib's
+// simulator window, which opens with -PhwSim.
 
-// Real devices from this laptop: -PhwSim. native-utils takes the property's presence, whatever its
-// value, so -PhwSim=false would still pick the hwsim libraries: it's refused rather than misread.
 def hwSim = project.hasProperty("hwSim")
-def hwSimAsked = project.findProperty("hwSim")?.toString()
-if (hwSim && !(hwSimAsked in ["", "true"])) {
-    throw new GradleException("-PhwSim drives real devices from this laptop; leave it out to simulate. Gradle picks CTRE's hardware libraries whenever it's given, so -PhwSim=${hwSimAsked} isn't taken")
-}
 if (hwSim && System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac")) {
-    throw new GradleException("-PhwSim needs Windows or Linux: Phoenix ships no hardware-attached libraries for macOS")
-}
-if (hwSim && project.hasProperty("replay")) {
-    throw new GradleException("A replay runs what its log recorded: -PhwSim is for driving real devices")
-}
-if (hwSim && project.hasProperty("scenario")) {
-    throw new GradleException("A scenario is the simulator's: -PhwSim drives real devices, which have no scenarios")
+    throw new GradleException("-PhwSim needs Windows or Linux: CTRE has no hardware libraries for macOS")
 }
 
-// The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither: off
-// in the simulator, where Pitwall's Sim view drives it, and on with -PhwSim, where Pitwall's page
-// never enables real motors and the GUI's Driver Station does.
-def guiByDefault = hwSim
-def guiAsked = project.findProperty("gui")?.toString()
-if (guiAsked != null && !(guiAsked in ["", "true", "false"])) {
-    throw new GradleException("-Pgui runs the simulator with WPILib's GUI and -Pgui=false without it, not -Pgui=${guiAsked}")
-}
-def gui = guiAsked == null ? guiByDefault : guiAsked != "false"
-
-wpi.sim.addGui().defaultEnabled = gui && !project.hasProperty("replay")
+// WPILib's simulator window: on with -PhwSim, where it enables the real robot. In the simulator,
+// Pitwall's web page drives the robot instead.
+wpi.sim.addGui().defaultEnabled = hwSim
 wpi.sim.addDriverstation()
 
-def scenario = project.findProperty("scenario")?.toString()
-def robotAsked = project.findProperty("robot")?.toString()
-def pitwallPort = project.findProperty("pitwall.port")?.toString()
-if (pitwallPort != null && !(pitwallPort.isInteger() && pitwallPort.toInteger() in 0..65535)) {
-    throw new GradleException("-Ppitwall.port is the port Pitwall's page is served on, 0 to 65535 (0 picks a free one), not ${pitwallPort}")
-}
-
-// Lists the scenarios. With -Pscenario it gives that one's line instead, and a misspelled name
-// stops the build, with the list, before the simulator starts.
-def scenarios = tasks.register("scenarios", JavaExec) {
-    group = "application" // beside run
-    description = "List the simulator's scenarios, for ./gradlew run -Pscenario=<name>."
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = "com.michaelgrundvig.frc.runtime.sim.Scenarios"
-    if (scenario != null) {
-        args scenario
-    }
-}
-
 tasks.named("run") {
-    if (project.hasProperty("replay")) {
-        if (scenario != null) {
-            throw new GradleException("A replay runs what its log recorded: -Pscenario is for the simulator")
-        }
-        systemProperty "frc.simMode", "REPLAY"
-    }
     if (hwSim) {
-        // As on a robot: real devices, and nothing simulated (RunMode.current).
-        systemProperty "frc.simMode", "REAL"
+        systemProperty "frc.simMode", "REAL" // real devices, nothing simulated
+        systemProperty "frc.sim.start", "disabled" // as a real robot starts
+    } else {
+        systemProperty "frc.sim.start", "ready" // disabled, one press of Enable from driving
     }
-    // How the robot starts (Robot.SimStart): enabled only with the GUI on screen to disable it, and
-    // never with real devices, which start disabled as a robot does.
-    systemProperty "frc.sim.start",
-            project.hasProperty("startDisabled") || project.hasProperty("replay") || hwSim ? "disabled"
-            : gui ? "enabled" : "ready"
-    if (scenario != null) {
-        dependsOn scenarios
-        systemProperty "frc.sim.scenario", scenario
-    }
-    if (robotAsked != null) {
-        systemProperty "frc.robot", robotAsked
-    }
-    if (pitwallPort != null) {
-        // As a plain decimal: Pitwall.start reads it with Integer.getInteger, which takes a leading
-        // zero for octal, so 05920 would fail on its 9 and quietly serve on 5820 after all.
-        systemProperty "pitwall.port", pitwallPort.toInteger().toString()
-    }
+    // The simulator window's settings: the keyboard as the driver's gamepad. Copied in only when
+    // missing, so your own changes to them are kept.
     def defaults = fileTree("sim") { include "simgui*.json" }
     def target = projectDir
     doFirst {
-        if (!gui) {
-            return // the GUI's settings are the GUI's alone
+        if (!hwSim) {
+            return
         }
         defaults.each { File f ->
             def dest = new File(target, f.name)
             if (!dest.exists()) {
                 dest.text = f.text
-                println "Simulator: using default ${f.name} (delete it to reset)"
             }
         }
     }

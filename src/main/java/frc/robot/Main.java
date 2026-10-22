@@ -10,7 +10,7 @@ public final class Main {
   public static void main(String... args) {
     RobotProgram.start(
         () -> ChassisRobot.CONFIG, // which robot this is
-        Rebuilt::game, // the field it drives on
+        Rebuilt.GAME, // the field it drives on
         Controls::new); // what the sticks and buttons do
   }
 }

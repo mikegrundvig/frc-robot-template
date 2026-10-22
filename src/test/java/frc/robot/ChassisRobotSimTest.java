@@ -21,7 +21,7 @@ class ChassisRobotSimTest {
 
   @Test
   void itDrivesWhereTheStickPointsAtItsBenchSpeed() {
-    sim.build(ChassisRobot.CONFIG, Rebuilt::game, Controls::new, SensorErrors.NONE);
+    sim.build(ChassisRobot.CONFIG, Rebuilt.GAME, Controls::new, SensorErrors.NONE);
     sim.run(0.2);
     Pose2d start = sim.simulation().truePose();
 

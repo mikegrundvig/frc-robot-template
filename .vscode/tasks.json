@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run on chassis",
+      "type": "shell",
+      "command": "./gradlew run -PhwSim",
+      "windows": { "command": ".\\gradlew.bat run -PhwSim" },
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run in simulator",
+      "type": "shell",
+      "command": "./gradlew run",
+      "windows": { "command": ".\\gradlew.bat run" },
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

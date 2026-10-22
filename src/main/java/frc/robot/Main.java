@@ -1,16 +1,11 @@
 package frc.robot;
 
-import com.michaelgrundvig.frc.runtime.RobotProgram;
-import com.michaelgrundvig.frc.world.game.Rebuilt;
+import org.wpilib.framework.RobotBase;
 
-/** Where the robot program starts. */
+/** Where the program starts. */
 public final class Main {
-  private Main() {}
-
   public static void main(String... args) {
-    RobotProgram.start(
-        () -> ChassisRobot.CONFIG, // which robot this is
-        Rebuilt.GAME, // the field it drives on
-        Controls::new); // what the sticks and buttons do
+    // To run another step, change Step1OneMotor to its name, like Step2ReadASensor.
+    RobotBase.startRobot(Step1OneMotor::new);
   }
 }

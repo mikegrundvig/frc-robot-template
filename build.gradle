@@ -1,5 +1,5 @@
 // The robot program's build. GradleRIO is WPILib's Gradle plugin: it brings WPILib, the vendor
-// libraries in vendordeps/, and the simulator.
+// libraries in vendordeps/ (here only CTRE's Phoenix 6), and the simulator.
 plugins {
     id "java"
     id "application"
@@ -12,11 +12,6 @@ java {
     }
 }
 
-// The robot program every robot shares comes from its own Maven repository.
-repositories {
-    maven { url = "https://mikegrundvig.github.io/frc-maven/" }
-}
-
 dependencies {
     implementation wpi.java.deps.wpilib()
     implementation wpi.java.vendor.java()
@@ -26,35 +21,16 @@ dependencies {
     nativeRelease wpi.java.deps.wpilibJniRelease(wpi.platforms.desktop)
     nativeRelease wpi.java.vendor.jniRelease(wpi.platforms.desktop)
     simulationRelease wpi.sim.enableRelease()
-
-    // The robot program: the drivetrain, the simulator and Pitwall, its web page.
-    implementation "com.michaelgrundvig.frc:frc-robot-runtime:2026.10.23"
-
-    testImplementation platform("org.junit:junit-bom:6.1.3")
-    testImplementation "org.junit.jupiter:junit-jupiter"
-    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
-    testImplementation "org.assertj:assertj-core:3.27.7"
-    // The simulator's test harness.
-    testImplementation testFixtures("com.michaelgrundvig.frc:frc-robot-runtime:2026.10.23")
 }
 
 application.mainClass = "frc.robot.Main"
 wpi.java.configureApplication(application)
-wpi.java.configureTestTasks(test)
-test.useJUnitPlatform()
 
-// ./gradlew run          the simulator: drive it at http://localhost:5820/#sim
+// ./gradlew run          the simulator: no robot needed
 // ./gradlew run -PhwSim  the real chassis, through its CANivore plugged into this laptop
 //
 // -PhwSim is CTRE's hardware-attached simulation: with it, WPILib's build picks Phoenix's
-// libraries that talk to a real CANivore instead of simulated devices, and the program runs as on
-// a robot, starting disabled. Enable it from WPILib's simulator window, which opens with -PhwSim.
-def hwSim = project.hasProperty("hwSim")
-wpi.sim.addGui().defaultEnabled = hwSim
+// libraries that talk to a real CANivore instead of simulated devices. Either way the program
+// starts disabled: enable it from WPILib's simulator window.
+wpi.sim.addGui().defaultEnabled = true
 wpi.sim.addDriverstation()
-tasks.named("run") {
-    systemProperty "frc.sim.start", hwSim ? "disabled" : "ready"
-    if (hwSim) {
-        systemProperty "frc.simMode", "REAL"
-    }
-}

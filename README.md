@@ -1,77 +1,67 @@
-# Swerve test chassis
+# A first robot
 
-This branch is the robot program for the swerve test chassis and nothing else: a square frame on
-four swerve modules, with a Pigeon 2, every device on one CANivore. You can drive it two ways:
+Four very short robot programs for the swerve test chassis. Each one adds one idea to the last:
 
-- **In the simulator**, on any laptop, with no robot at all.
-- **For real**, from a laptop, with the chassis's CANivore plugged into the laptop's USB port. The
-  laptop runs the same program the robot will run, and drives the real motors.
+| Step | File | What it does |
+|---|---|---|
+| 1 | `Step1OneMotor.java` | The left stick spins one wheel. |
+| 2 | `Step2ReadASensor.java` | Prints which way that wheel points while you turn it by hand. |
+| 3 | `Step3PointTheWheel.java` | Buttons A and B point the wheel straight ahead or sideways. |
+| 4 | `Step4OneModule.java` | The left stick steers and spins the wheel: one whole swerve module. |
+| 5 | the `swerve-starter` branch | The whole chassis, all four modules, driving for real. |
 
-The code is WPILib 2027 (Java), Commands v3, AdvantageKit and CTRE's Phoenix 6.
+They are in `src/main/java/frc/robot/`. Each starts with a few sentences saying what to try.
 
 ## Get it
 
-You need git and Java (any version; the build downloads the one it needs). No WPILib installer is
-needed to build, test, or run the simulator.
-
 ```bash
-git clone -b swerve-starter https://github.com/mikegrundvig/frc-robot-template.git
-cd frc-robot-template
+git clone -b first-robot https://github.com/mikegrundvig/frc-robot-template.git
 ```
 
-The commands below are for Windows (`gradlew.bat`, in Command Prompt or PowerShell). On macOS or
-Linux, type `./gradlew` instead of `gradlew.bat`. The first build downloads a lot, so give it a few
-minutes.
+## Pick a step
 
-## Drive it in the simulator
+Open `src/main/java/frc/robot/Main.java`. It has one line that names the step to run:
 
-```bash
-gradlew.bat run
+```java
+RobotBase.startRobot(Step1OneMotor::new);
 ```
 
-Open http://localhost:5820/#sim in a browser. That's Pitwall's Sim view: click **Enable**, then
-drive with the keyboard or a gamepad. Stop the program with Ctrl+C in the terminal.
+Change `Step1OneMotor` to another step's name, like `Step2ReadASensor`, and run again.
+
+## In VS Code
+
+Open the folder in WPILib's VS Code (**File > Open Folder**). It needs Microsoft's Java extensions
+and the WPILib extension: if VS Code offers to install the recommended extensions, say yes, then
+close and reopen VS Code once (the WPILib **W** button only shows up after that restart).
+
+To run it, pick **Terminal > Run Task**, then **Run on chassis** or **Run in simulator**. For the
+simulator, WPILib's own command works too: **WPILib: Simulate Robot Code**.
+
+Don't use the **Run** link above `main`: it starts Java without WPILib's libraries, and it stops
+with `wpiutiljni could not be loaded`.
 
 ## In IntelliJ IDEA
 
-Open the folder with **File > Open**. Start the program with Gradle's `run` task, not the green
-arrow beside `main`: the green arrow starts plain Java, without WPILib's native libraries, and it
-stops with `wpiutiljni could not be loaded`. In the **Gradle** tool window, double-click **Tasks >
-application > run**. It's then in the run menu at the top, so the play button starts it from then
-on. For the real chassis, edit that run configuration and change `run` to `run -PhwSim`.
+Open the folder with **File > Open**. **Run on chassis** and **Run in simulator** are in the run
+menu at the top. Don't use the green arrow beside `main`, for the same reason as above.
 
-The green arrows beside tests work as they are.
+## Run it on the chassis
 
-## Drive the real chassis
+This spins real motors, so a mentor sets it up, the first time following the runtime's
+[bench guide](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/bench.md):
 
-```bash
-gradlew.bat run -PhwSim
-```
+1. The chassis is **on blocks**, its wheels clear of everything, a hand near the main breaker.
+2. Every device is on **Phoenix 26.70.x** firmware and has been **factory-defaulted** in Phoenix
+   Tuner X.
+3. The chassis's **CANivore is plugged into the laptop's USB**.
+4. Run **Run on chassis** (or type `gradlew.bat run -PhwSim` in a terminal).
+5. In the simulator window that opens, drag your gamepad onto **Joystick 0**, then click
+   **Teleoperated** to enable. Click **Disabled** to stop.
 
-This drives real motors. A mentor runs this, and goes through the runtime's
-[bench guide](https://github.com/mikegrundvig/frc-robot-runtime/blob/main/docs/bench.md) first:
-what the laptop needs, the firmware, the safety checklist (chassis on blocks, a hand on the
-breaker), how to enable from WPILib's simulator GUI, and what to do when something's wrong. The
-chassis starts disabled. To drive with the keyboard, drag **Keyboard 0** onto **Joystick 0** in the
-simulator window; a gamepad plugged in shows up there too.
+The CAN IDs and other numbers at the top of each step are copied from another robot. If nothing
+moves, check them in Phoenix Tuner X.
 
-## Where things are
+## Run it in the simulator
 
-| File | What's in it |
-|---|---|
-| `src/main/java/frc/robot/ChassisRobot.java` | The chassis's facts: its CAN IDs, module zeros, gear ratios, size, current limits and gains. Read it from the top. The first block holds every value still to check on the real chassis, each marked "Unconfirmed": check it in Phoenix Tuner X, fix it if it's wrong, and mark it "Checked" with the date. |
-| `src/main/java/frc/robot/Controls.java` | What the sticks and buttons do. The driver's sticks already drive the chassis and the back button resets its heading; add your own buttons here. |
-| `src/main/java/frc/robot/Main.java` | Where the program starts: which robot, which field, which controls. |
-| `src/test/java/frc/robot/ChassisRobotSimTest.java` | A test: drives the chassis in the simulator and checks where it went. |
-| `build.gradle` | The build: WPILib, the robot program library, and their versions. |
-
-The program itself (the drivetrain, the simulator, Pitwall) comes from the
-[runtime](https://github.com/mikegrundvig/frc-robot-runtime), a library the build downloads. Its
-[docs](https://github.com/mikegrundvig/frc-robot-runtime/tree/main/docs) explain driving, the
-simulator and testing in more depth.
-
-## Run the tests
-
-```bash
-gradlew.bat test
-```
+**Run in simulator** (or `gradlew.bat run`) runs the same program with pretend motors, no robot
+needed. Nothing moves that you can see, but you can check that a step starts and enables.

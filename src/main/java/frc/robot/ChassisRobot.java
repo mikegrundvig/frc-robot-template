@@ -11,7 +11,6 @@ import static org.wpilib.units.Units.Seconds;
 import com.michaelgrundvig.frc.localization.EstimatorConfig;
 import com.michaelgrundvig.frc.localization.VisionConfig;
 import com.michaelgrundvig.frc.runtime.RobotConfig;
-import com.michaelgrundvig.frc.world.game.Rebuilt;
 import com.michaelgrundvig.frc.world.robot.Body;
 import com.michaelgrundvig.frc.world.robot.CanBus;
 import com.michaelgrundvig.frc.world.robot.DrivetrainControl;
@@ -91,18 +90,16 @@ public final class ChassisRobot {
 
   // ==== END OF THE VALUES TO CHECK ===============================================================
 
-  /** The frame, about 26 inches square. The bumpers and weight are only used by the simulator. */
+  /** The frame, about 26 inches square. Not weighed yet: the program takes the season's most. */
   public static final Body BODY =
       Body.builder()
           .frameLength(Inches.of(26))
           .frameWidth(Inches.of(26))
-          .height(Inches.of(8))
+          .overallHeight(Inches.of(8))
           .bumperEnds(Inches.of(3))
           .bumperSides(Inches.of(3))
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
-          .weight(Rebuilt.LIMITS.unweighed())
-          .inertia(Body.Turning.BOX)
           .build();
 
   /**

@@ -47,7 +47,8 @@ class BetaAutosSimTest {
   private static final RobotConfig BETA = Parts.withoutCameras(BetaRobot.CONFIG);
 
   /** The last waypoint of Left Single's path: back on the start, as Left Half 2.path ends. */
-  private static final Place SINGLE_LAST = Rebuilt.starts(BetaRobot.BODY).left();
+  private static final Place SINGLE_LAST =
+      Place.at("Left", Rebuilt.STARTS.left().poseFor(BetaRobot.BODY.bumpers()));
 
   /** The last waypoint of Left Double's third path (EXP Left 3.path): (3.0, 6.069), facing 136°. */
   private static final Place DOUBLE_LAST =
@@ -300,8 +301,9 @@ class BetaAutosSimTest {
       sim.autos().choose("Left Double");
       sim.loops(5);
       Placement onStart = sim.placement();
-      Pose2d center = Rebuilt.starts(BetaRobot.BODY).center().on(RobotSim.FIELD, alliance);
-      Pose2d left = Rebuilt.starts(BetaRobot.BODY).left().on(RobotSim.FIELD, alliance);
+      Pose2d center =
+          Rebuilt.STARTS.center().on(RobotSim.FIELD, alliance, BetaRobot.BODY.bumpers());
+      Pose2d left = Rebuilt.STARTS.left().on(RobotSim.FIELD, alliance, BetaRobot.BODY.bumpers());
 
       sim.placeAt(center);
       sim.loops(3);

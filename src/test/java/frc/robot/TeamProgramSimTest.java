@@ -29,7 +29,7 @@ class TeamProgramSimTest {
 
   @Test
   void theTeamsRobotRunsWithItsSeasonAndItsControls() {
-    sim.build(Robots.current(), Rebuilt::game, Robots::controls, SensorErrors.TYPICAL);
+    sim.build(Robots.current(), Rebuilt.GAME, Robots::controls, SensorErrors.TYPICAL);
     sim.run(1);
 
     // The robot starts with the choice it always has, plus whatever the team's Controls declares.
@@ -43,7 +43,7 @@ class TeamProgramSimTest {
    */
   @Test
   void theGuidesButtonsWorkInTheProgramATeamStartsWith() {
-    sim.build(Robots.current(), Rebuilt::game, Robots::controls, SensorErrors.TYPICAL);
+    sim.build(Robots.current(), Rebuilt.GAME, Robots::controls, SensorErrors.TYPICAL);
     RobotSim.setEnabled(true);
     sim.run(0.1);
 
@@ -65,7 +65,7 @@ class TeamProgramSimTest {
   /** The practice robot is the same design, so it has the same buttons. */
   @Test
   void theGuidesPracticeRobotHasTheGuidesControlsToo() {
-    sim.build(ExampleRobot.PRACTICE, Rebuilt::game, Robots::controls, SensorErrors.TYPICAL);
+    sim.build(ExampleRobot.PRACTICE, Rebuilt.GAME, Robots::controls, SensorErrors.TYPICAL);
 
     assertThat(sim.bindings().all().stream().map(Binding::toString))
         .contains(
@@ -81,7 +81,7 @@ class TeamProgramSimTest {
   void aRobotTheTeamAddsGetsTheTeamsOwnControls() {
     RobotConfig ours = ExampleRobot.COMPETITION.named("ours");
 
-    sim.build(ours, Rebuilt::game, Robots::controls, SensorErrors.TYPICAL);
+    sim.build(ours, Rebuilt.GAME, Robots::controls, SensorErrors.TYPICAL);
 
     assertThat(sim.bindings().all().stream().map(Binding::toString))
         .as("the runtime's own binding, and none of the guide's")
@@ -97,7 +97,7 @@ class TeamProgramSimTest {
   @ParameterizedTest
   @MethodSource("robotsWithControlsOfTheirOwn")
   void aRobotAskedForByNameRunsWithItsOwnControls(RobotConfig robot, String anAutoOfItsOwn) {
-    sim.build(robot, Rebuilt::game, Robots::controls, SensorErrors.TYPICAL);
+    sim.build(robot, Rebuilt.GAME, Robots::controls, SensorErrors.TYPICAL);
     sim.run(1);
 
     assertThat(sim.autos().names()).contains(Autos.DO_NOTHING, anAutoOfItsOwn);

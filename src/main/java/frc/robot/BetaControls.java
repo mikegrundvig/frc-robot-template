@@ -14,6 +14,7 @@ import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.JointMechanism;
 import com.michaelgrundvig.frc.runtime.subsystems.mechanisms.Joints;
 import com.michaelgrundvig.frc.world.field.Heading;
 import com.michaelgrundvig.frc.world.field.Place;
+import com.michaelgrundvig.frc.world.field.Start;
 import com.michaelgrundvig.frc.world.game.Rebuilt;
 import com.michaelgrundvig.frc.world.path.Keyframe;
 import com.michaelgrundvig.frc.world.robot.RobotDefinition;
@@ -114,8 +115,10 @@ public final class BetaControls {
       Autos autos) {
     this(joints, drive, drive.facing(Heading.toward(Rebuilt.HUB).withBack()));
     bind(drive, driver, operator);
-    Place left = Rebuilt.starts(robot.body()).left();
-    autos.add("Left Single", left, () -> leftSingle(left));
+    Start left = Rebuilt.STARTS.left();
+    // Left Single drives back onto its start: where this robot stands on it.
+    Place backOnLeft = Place.at(left.name(), left.poseFor(robot.body().bumpers()));
+    autos.add("Left Single", left, () -> leftSingle(backOnLeft));
     autos.add("Left Double", left, this::leftDouble);
   }
 

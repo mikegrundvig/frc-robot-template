@@ -44,7 +44,7 @@ final class EstimatorRuns {
   static final double DISABLED_SECONDS = 1.0;
 
   /** The field the simulator's robot plays on. */
-  static final FieldModel FIELD = Rebuilt.field(ExampleRobot.SIM.definition().body());
+  static final FieldModel FIELD = Rebuilt.field();
 
   private EstimatorRuns() {}
 

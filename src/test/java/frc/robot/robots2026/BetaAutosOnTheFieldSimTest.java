@@ -33,7 +33,7 @@ class BetaAutosOnTheFieldSimTest {
   @RegisterExtension final RobotSim sim = new RobotSim();
 
   private static final RobotConfig BETA = Parts.withoutCameras(BetaRobot.CONFIG);
-  private static final FieldModel FIELD = Rebuilt.field(BetaRobot.BODY);
+  private static final FieldModel FIELD = Rebuilt.field();
 
   /** How near its last waypoint an auto ends, in meters: its aiming turns it, not moves it. */
   private static final double ENDS_WITHIN = 0.08;
@@ -46,7 +46,7 @@ class BetaAutosOnTheFieldSimTest {
   private static final double STAYS_CLEAR_BY = 0.05;
 
   static Stream<Arguments> autos() {
-    Place start = Rebuilt.starts(BetaRobot.BODY).left();
+    Place start = Place.at("Left", Rebuilt.STARTS.left().poseFor(BetaRobot.BODY.bumpers()));
     Place shot = Place.at("Shot", new Pose2d(3.0, 6.069, Rotation2d.fromDegrees(136)));
     return Stream.of(
         Arguments.argumentSet("Left Single on blue", "Left Single", Alliance.BLUE, start),
@@ -59,7 +59,7 @@ class BetaAutosOnTheFieldSimTest {
   @MethodSource("autos")
   void theAutoRunsCleanAmongWhatStandsOnTheField(String auto, Alliance alliance, Place last) {
     RobotSim.setEnabled(false);
-    sim.build(BETA, Rebuilt::game, BetaControls::new, SensorErrors.NONE);
+    sim.build(BETA, Rebuilt.GAME, BetaControls::new, SensorErrors.NONE);
     RobotSim.station(alliance == Alliance.RED ? AllianceStationID.RED_2 : AllianceStationID.BLUE_2);
     sim.autos().choose(auto);
     sim.loops(5);

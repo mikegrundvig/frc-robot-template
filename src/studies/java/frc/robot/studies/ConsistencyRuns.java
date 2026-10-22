@@ -60,7 +60,7 @@ final class ConsistencyRuns {
   };
 
   /** The field the simulator's robot plays on: its tags, which each seed places a little off. */
-  private static final FieldModel FIELD = Rebuilt.field(ExampleRobot.SIM.definition().body());
+  private static final FieldModel FIELD = Rebuilt.field();
 
   /**
    * How long the gyro-scale procedure's part of its run lasts: the procedure (about 20 s: still,

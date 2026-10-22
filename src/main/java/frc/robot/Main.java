@@ -28,7 +28,7 @@ public final class Main {
   public static void main(String... args) {
     RobotProgram.start(
         Robots::current, // which robot this is
-        Rebuilt::game, // this season's field and venues
+        Rebuilt.GAME, // this season's field and venues
         Robots::controls, // what it does: the controls written for that robot
         build());
   }

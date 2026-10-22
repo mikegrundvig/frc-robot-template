@@ -96,8 +96,7 @@ public final class ChassisRobot {
           .frameLength(Inches.of(26))
           .frameWidth(Inches.of(26))
           .overallHeight(Inches.of(8))
-          .bumperEnds(Inches.of(3))
-          .bumperSides(Inches.of(3))
+          .bumperThickness(Inches.of(3))
           .bumperBottom(Inches.of(2.5))
           .bumperTop(Inches.of(5.75))
           .build();

@@ -15,7 +15,7 @@ pluginManagement {
             filter {
                 includeGroup "com.michaelgrundvig.frc"
                 includeGroup "frc.advantagescope-assets"
-                includeGroup "frc.visor-deploy"
+                includeGroup "frc.visor"
             }
         }
     }

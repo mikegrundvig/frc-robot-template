@@ -8,7 +8,7 @@ gradlerio = "2027.0.0-alpha-7"
 # localization, the simulation and Pitwall, and the runtime's plugins (AdvantageScope's assets).
 # One dated version for all of them, from their own Maven repository (build.gradle). Moving to a
 # new release is this one line (docs/upgrading.md, The libraries).
-frc-libs = "2026.11.2"
+frc-libs = "2026.11.3"
 spotless = "8.10.4"
 # The formatters Spotless runs (gradle/quality.gradle), pinned rather than left to Spotless's
 # defaults, so a newer Spotless can't reformat the code on its own: a formatter's new version is a
@@ -45,3 +45,4 @@ gradlerio = { id = "org.wpilib.GradleRIO", version.ref = "gradlerio" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 errorprone = { id = "net.ltgt.errorprone", version.ref = "errorprone-plugin" }
 frc-advantagescope-assets = { id = "frc.advantagescope-assets", version.ref = "frc-libs" }
+frc-visor-deploy = { id = "frc.visor-deploy", version.ref = "frc-libs" }

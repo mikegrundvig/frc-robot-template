@@ -9,9 +9,10 @@ import java.util.Optional;
 
 /**
  * The robots in {@link Robots}, as the build's tool-config plugins hand them to the tool writers:
- * the AdvantageScope plugin (build.gradle's {@code advantageScope}) names this class, and its
- * writer builds each robot's configuration from it. Nothing else runs: no robot program, HAL, or
- * NetworkTables, so building a tool's files needs no simulator.
+ * the AdvantageScope plugin (build.gradle's {@code advantageScope}) and the Visor deploy plugin
+ * ({@code visor}) name this class, and their writers build each robot's configuration from it.
+ * Nothing else runs: no robot program, HAL, or NetworkTables, so building a tool's files needs no
+ * simulator.
  */
 public final class ToolRobots implements RobotCatalog {
   /** For the build, which makes one by name. */

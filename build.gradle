@@ -13,6 +13,9 @@ plugins {
     // version (settings.gradle's pluginManagement finds it). A team that doesn't use AdvantageScope
     // removes this line, and nothing of it runs.
     alias(libs.plugins.frc.advantagescope.assets)
+    // Visor, the AprilTag vision program, on the coprocessors of a robot whose cameras run it,
+    // deployed with the robot (the visor block below). Nothing of it runs until a board is named.
+    alias(libs.plugins.frc.visor.deploy)
 }
 
 // Java 25, downloaded automatically when missing (settings.gradle). Nothing to install by hand.
@@ -45,6 +48,19 @@ deploy {
     }
 }
 def deployArtifact = deploy.targets.systemcore.artifacts.wpilibJava
+
+// Visor's coprocessors, which ./gradlew deploy puts Visor on with the robot program: each board by
+// the name its cameras give in Robots.java (Software.visor().coprocessor("vision-a")), and how to
+// reach it. Each gets Visor's program for this build's Visor client and a configuration written
+// from the robot's definition; the new program checks it before it replaces the old. With several
+// robots on Visor, name the one: ./gradlew deploy -Probot=NAME. runtime/docs/visor.md says more.
+visor {
+    team = deploy.targets.systemcore.team
+    coprocessors {
+        // "vision-a" { address = teamAddress(11) }   // 10.TE.AM.11
+        // "vision-b" { address = teamAddress(12) }
+    }
+}
 wpi.java.runSimWithDebugJni = false
 
 // GradleRIO's repositories give WPILib and the vendor libraries. The FRC libraries (the runtime,

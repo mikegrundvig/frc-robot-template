@@ -34,6 +34,10 @@
 // as on a robot (frc.simMode=REAL): real devices, no simulated world, Pitwall's page only showing,
 // tuning off until switched on there. It starts disabled, whatever -Pgui says; enable it from
 // WPILib's simulator GUI, which is on by default here (-Pgui=false for a Driver Station instead).
+// It stands in for the robot with its coprocessors too, as a robot would: it goes by the team
+// number the project deploys with (setTeamNumber, or -PteamNumber), and reads a deploy folder put
+// together as a robot's is, src/main/deploy with Visor's release and Spotter pack beside it
+// (hwSimDeploy), so it installs and configures Visor on the boards its Robots.java entry lists.
 
 // Real devices from this laptop: -PhwSim. native-utils takes the property's presence, whatever its
 // value, so -PhwSim=false would still pick the hwsim libraries: it's refused rather than misread.
@@ -50,6 +54,18 @@ if (hwSim && project.hasProperty("replay")) {
 }
 if (hwSim && project.hasProperty("scenario")) {
     throw new GradleException("A scenario is the simulator's: -PhwSim drives real devices, which have no scenarios")
+}
+
+// The deploy folder a laptop driving real devices reads, as a robot's: what ./gradlew deploy puts
+// there, src/main/deploy and Visor's staged release and pack. A file in both is refused, as it would
+// overwrite the other on a robot.
+def hwSimDeployFolder = layout.buildDirectory.dir("hwsim/deploy")
+def hwSimDeploy = tasks.register("hwSimDeploy", Sync) {
+    description = "Puts together the deploy folder ./gradlew run -PhwSim reads, as a robot's."
+    into hwSimDeployFolder
+    from("src/main/deploy")
+    from(tasks.named("visorStage"))
+    duplicatesStrategy = DuplicatesStrategy.FAIL
 }
 
 // The GUI: -Pgui (or -Pgui=true) for it, -Pgui=false without it, and the default when neither: off
@@ -92,8 +108,12 @@ tasks.named("run") {
         systemProperty "frc.simMode", "REPLAY"
     }
     if (hwSim) {
-        // As on a robot: real devices, and nothing simulated (RunMode.current).
+        // As on a robot: real devices, and nothing simulated (RunMode.current). With the team number
+        // Systemcore would have and the deploy folder a robot reads (HardwareAttached).
         systemProperty "frc.simMode", "REAL"
+        systemProperty "frc.team", project.wpilib.getTeamOrDefault(0).toString()
+        dependsOn hwSimDeploy
+        systemProperty "frc.deploy", hwSimDeployFolder.get().asFile.absolutePath
     }
     // How the robot starts (Robot.SimStart): enabled only with the GUI on screen to disable it, and
     // never with real devices, which start disabled as a robot does.

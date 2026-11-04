@@ -109,7 +109,8 @@ pushed yet (`-PfrcMaven=file:///home/you/src/frc-maven`).
 10. **Update the docs:** the README's status note (and, in the runtime's repository, its
    `docs/stand-ins.md`: a stand-in may now have its real library, and a pinned build its release).
 11. **On the robot:** image it with the Systemcore image released alongside the new WPILib, and
-   update the Driver Station, as WPILib's release notes say. Then deploy and drive.
+   update the Driver Station, as WPILib's release notes say ([first-power-on.md](first-power-on.md)
+   has the steps). Then deploy and drive.
 
 ## Dependency checksums
 
